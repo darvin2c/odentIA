@@ -94,10 +94,12 @@ import {
 import { Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
-import { canAccess, orgContextOf } from "../lib/context.js"
+import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
+import { createImagingStudiesRoute } from "./imaging-studies.js"
+import { createPatientPeriodontalRoute } from "./patient-periodontal.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
 import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
@@ -500,13 +502,22 @@ const CLINICAL_SUBPATHS = [
   "/prescriptions",
   "/follow-ups",
   "/documents",
+  "/imaging/studies",
   "/notes",
   "/health",
   "/anamnesis",
   "/odontogram",
+  "/periodontal",
   "/timeline",
   "/summary",
 ]
+
+/**
+ * Subida de tomografías (ADR 0055): la hace quien escribe en la ficha o quien
+ * recibe el CD sin leerla (`clinical.receive`); solo entrega el avance, así que
+ * no deja traza de lectura clínica. Abrirla es `/imaging/studies`, clínico.
+ */
+const IMAGING_UPLOADS_SUBPATH = "/imaging/uploads"
 
 /** Subrutas de caja: exigen `finance.read`/`.write`. */
 const FINANCE_SUBPATHS = ["/account", "/collect", "/charges", "/tickets", "/refunds", "/receipts"]
@@ -537,6 +548,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/health", "antecedentes"],
   ["/anamnesis", "antecedentes"],
   ["/odontogram", "odontograma"],
+  ["/periodontal", "periodontograma"],
   ["/timeline", "historia"],
   ["/encounters", "atenciones"],
   ["/diagnoses", "diagnosticos"],
@@ -546,6 +558,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/follow-ups", "controles"],
   ["/prescriptions", "recetas"],
   ["/documents", "documentos"],
+  ["/imaging/studies", "documentos"],
 ]
 
 /** Mismo contrato que la reserva clínica del control (`patient-follow-ups.ts`). */
@@ -578,6 +591,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // Documentos financieros: guardas propias en su router (ticket finance.*,
     // presupuesto budgets/finance); el guarda genérico no decide.
     if (FINANCIAL_DOCUMENTS_PREFIXES.some((prefix) => remainder.startsWith(prefix))) {
+      await next()
+      return
+    }
+    if (remainder.startsWith(IMAGING_UPLOADS_SUBPATH)) {
+      const writes = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
+      const allowed = canAccessAny(memberRole, [
+        writes ? "clinical.write" : "clinical.read",
+        "clinical.receive",
+      ])
+      if (!allowed) {
+        return c.json(
+          errorBody(c, "FORBIDDEN", "No tienes permiso para subir tomografías a esta ficha"),
+          403,
+        )
+      }
       await next()
       return
     }
@@ -647,13 +675,11 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
 
   app.post("/", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // Lo mínimo es para reservar: lo pide quien registra y además agenda.
-    if (parsed.data.scope === "essentials" && !canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar este recurso"), 403)
-    }
+    // Lo mínimo (nombres, apellidos y cómo ubicarla) es el alta del equipo:
+    // basta `patients.write`, que ya exige la ruta.
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => {
         const { contextContactId, conversationId, scope, ...input } = parsed.data
@@ -1192,6 +1218,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     }
     if (doc.contentType !== "application/dicom")
       return c.json(errorBody(c, "VALIDATION", "Solo los archivos DICOM se leen por esta vía"), 400)
+    // Una tomografía son muchos archivos: se abre por /imaging/studies.
+    if (doc.imaging)
+      return c.json(errorBody(c, "VALIDATION", "La tomografía se abre en su visor"), 400)
     if (!deps.storage.getAttachment)
       return c.json(errorBody(c, "UNAVAILABLE", "Lectura de archivos no disponible"), 503)
     const bytes = await deps.storage.getAttachment(doc.storageKey)
@@ -1207,8 +1236,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         getPatientDocument(tx, orgId, c.req.param("id"), c.req.param("documentId")),
       )
       // ?variant=thumb: la miniatura si existe; si no, el original.
-      const key =
-        c.req.query("variant") === "thumb" && doc.thumbnailKey ? doc.thumbnailKey : doc.storageKey
+      const thumbnailKey = doc.thumbnailKey ?? doc.imaging?.thumbnailKey ?? null
+      const thumb = c.req.query("variant") === "thumb" && thumbnailKey
+      // Una tomografía no tiene un solo archivo que firmar: solo su miniatura.
+      if (doc.imaging && !thumb)
+        throw new ServiceError("VALIDATION", 400, "La tomografía se abre en su visor o se descarga")
+      const key = thumb ? thumbnailKey : doc.storageKey
       const url = await deps.storage.attachmentUrl(key)
       return { url, thumbnail: key !== doc.storageKey }
     })
@@ -1602,8 +1635,10 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
   app.route("/", createPatientBudgetsRoute(deps))
   app.route("/", createPatientDocumentContextRoute(deps))
+  app.route("/", createImagingStudiesRoute(deps))
   app.route("/", createPatientTreatmentsRoute(deps))
   app.route("/", createPatientFollowUpsRoute(deps))
+  app.route("/", createPatientPeriodontalRoute(deps))
   // El dictado del asistente clínico necesita el proveedor del modelo; sin él no se monta.
   if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))

@@ -122,8 +122,17 @@ export function isAppointmentNotice(kind: string): kind is AppointmentNoticeKey 
  */
 export const APPOINTMENT_DATA_NOTICE_KEY = "aviso_cita_reservada_datos"
 
+/**
+ * El recordatorio de la cita cuando a la persona aún le faltan datos (fase 3
+ * del lienzo «Su enlace y el código QR»): el mismo recordatorio, con el botón
+ * «Completar mis datos» que abre su enlace. Sale en lugar del recordatorio y
+ * solo cuando WhatsApp lo aprobó; mientras tanto sale el de siempre.
+ */
+export const REMINDER_DATA_KEY = "recordatorio_cita_datos"
+
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
+  REMINDER_DATA_KEY,
   // Los avisos de la cita van junto a su línea, «Recordar la cita»; el de
   // reserva con «Su enlace», junto al de reserva.
   "aviso_cita_reservada",
@@ -153,6 +162,21 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
       NO_REMINDERS,
     ],
     subject: "Recordatorio de cita",
+  },
+  recordatorio_cita_datos: {
+    key: "recordatorio_cita_datos",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_recordatorio_cita_datos_v1",
+    body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}. Aún nos faltan algunos datos tuyos: complétalos antes de venir y te atendemos más rápido.",
+    variables: ["persona", "lugar", "citas"],
+    link: { title: "Completar mis datos" },
+    buttons: [
+      { action: "confirmar", title: "Confirmar" },
+      { action: "responder", title: "No podré ir", asks: "cambiar" },
+      NO_REMINDERS,
+    ],
+    subject: "Recordatorio de cita: completa tus datos",
   },
   // «Controles y seguimiento»: se apaga aparte de los recordatorios de la cita.
   recordatorio_control: {

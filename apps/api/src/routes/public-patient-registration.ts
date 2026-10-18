@@ -1,7 +1,7 @@
 import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { findOrgLocale, getPublicPatientRegistration, registerPatient, ServiceError } from "@odentia/services"
+import { findOrgLocale, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -87,8 +87,12 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       await withOrgContext(deps.db, org.id, tx => registerPatient(tx, org.id, { kind: "public", token, entryPoint }, input))
       return c.json({ data: { registered: true } }, 201)
     } catch (error) {
-      // El documento ya era de alguien: queda para recepción y se responde lo mismo que siempre.
-      await keepRegistrationHold(deps.db, org.id, error)
+      // Se parece a alguien que ya está (su documento o su celular): queda para que
+      // recepción decida y se responde igual que un registro recibido, sin decir de quién era.
+      if (error instanceof RegistrationHeld) {
+        await keepRegistrationHold(deps.db, org.id, error)
+        return c.json({ data: { registered: true } }, 201)
+      }
       if (error instanceof ServiceError) {
         if (error.status === 404) return unavailable(c)
         return c.json(errorBody(c, error.code, error.message), error.status)

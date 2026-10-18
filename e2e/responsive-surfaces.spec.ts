@@ -39,7 +39,7 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
     // La página táctil aún está en blanco (sin origen): la API se llama desde la sesión del propietario.
     const person = await call<{ id: string }>(owner.page, "POST", "/api/people", owner.org.slug, {
       givenNames: "Paciente",
-      paternalSurname: "Móvil",
+      familyName: "Móvil",
     }, 201)
     await gotoHydrated(page, tenant(owner.org.slug, `/people/${person.id}`))
 

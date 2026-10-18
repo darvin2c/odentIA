@@ -2,6 +2,7 @@ import {
   clinicalProfileFor,
   DEFAULT_REGISTRATION_CONFIG,
   documentIssuerCountry,
+  documentText,
   isMinor,
   isRealDate,
   kinshipFromWords,
@@ -19,14 +20,15 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  patient,
   patientContact,
   patientDataConsent,
   patientRegistration,
   patientRegistrationLink,
 } from "@odentia/db/schema/clinical"
-import { contact, conversation, contactIdentity, channelConnection, crmTask } from "@odentia/db/schema/crm"
+import { contact, conversation, contactIdentity, channelConnection, crmTask, registrationHold } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
-import { createHash, randomBytes } from "node:crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -36,16 +38,18 @@ import {
   createPatient,
   patientOrganizationToday,
   REGISTRATION_NOT_COMPLETED_TEXT,
+  RegistrationHeld,
   type RegistrationHold,
   requirePatient,
   type PatientRow,
+  updatePatient,
 } from "./patients.js"
-import { initializeDeclaredPatientHealth } from "./clinical.js"
+import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
-import { completeTask, createTask, discardTask } from "./tasks.js"
+import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
 const UUID_RE =
@@ -107,7 +111,8 @@ function rowToConfig(row: typeof patientRegistrationConfig.$inferSelect): Regist
   return {
     version: row.version,
     enabled: row.enabled,
-    fields: row.fields,
+    // Un dato que el catálogo sumó después de guardar la configuración toma su valor por defecto («No se pide»).
+    fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, ...row.fields },
     privacyNotice: row.privacyNotice,
     askReminders: row.askReminders,
     askMessages: row.askMessages,
@@ -474,7 +479,7 @@ export type RegistrationContext =
        * unida a ella como propia) o a alguien nuevo desde la Agenda (sin
        * vínculos ni conversación, con su teléfono). La misma regla que el
        * enlace de reserva: lo que la clínica exige y no se pidió queda anotado
-       * (en el caso o en las notas de su persona) y la identidad, por revisar.
+       * (en el caso o en las notas de su persona).
        * Ningún otro alta interna lo usa.
        */
       scope?: "essentials"
@@ -486,8 +491,8 @@ export type RegistrationContext =
       /**
        * `essentials`: datos esenciales para reservar (identidad y celular). Solo
        * con el enlace de una conversación; lo que la clínica exige y no se pide
-       * queda por completar y la identidad, por revisar. Lo usa el enlace de
-       * reserva; el registro público de la clínica no lo ofrece.
+       * queda por completar. Lo usa el enlace de reserva; el registro público
+       * de la clínica no lo ofrece.
        */
       scope?: "essentials"
     }
@@ -610,18 +615,18 @@ export async function registerPatient(
   const hasToken = publicToken !== undefined
   const essentials = (publicContext ?? internalContext)?.scope === "essentials"
   if (essentials && publicContext && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
-  // El equipo registra con lo mínimo solo al reservar: a la persona de una
-  // conversación, como su propia ficha, o a alguien nuevo desde la Agenda (sin
-  // vínculos: su persona nace con la ficha y el teléfono es como ubicarla).
-  const fromConversation =
+  // El equipo registra con lo mínimo (nombres, apellidos y cómo ubicarla): a
+  // alguien nuevo (sin vínculos: su persona nace con la ficha y el teléfono es
+  // como ubicarla), a una persona que ya existe como su propia ficha o a
+  // alguien a su cargo; desde una conversación, la Agenda o Pacientes.
+  const fromPerson =
     !!internalContext?.contactId &&
-    !!internalContext.conversationId &&
-    !!input.contacts?.some((link) => link.contactId === internalContext.contactId && link.relationship === "self")
+    !!input.contacts?.some((link) => link.contactId === internalContext.contactId)
   const newPerson =
     !!internalContext && !internalContext.contactId && !internalContext.conversationId && !input.contacts?.length
   if (essentials && internalContext) {
-    if (!fromConversation && !newPerson) {
-      throw validation("Lo mínimo solo se acepta al reservar: a la persona de una conversación o a alguien nuevo")
+    if (!fromPerson && !newPerson) {
+      throw validation("Lo mínimo se acepta para alguien nuevo o para una persona que ya existe")
     }
     if (newPerson && !input.answers?.demographics?.phone) throw validation("Indica el teléfono")
   }
@@ -789,6 +794,22 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
+  // El registro en línea sin enlace (el código QR general): si es para sí misma
+  // y escribió el celular de alguien que ya está, no se crea a nadie: queda
+  // para que recepción decida si es la misma persona (nunca por el nombre).
+  if (publicContext && !hasToken && answers.respondent === "patient" && demographics.phone) {
+    const owner = await personByPhone(tx, orgId, normalizePhone(demographics.phone, countryCode) ?? demographics.phone)
+    if (owner) {
+      throw new RegistrationHeld({
+        ownerId: owner.id,
+        ownerName: owner.displayName,
+        ownerPatientId: owner.patientId,
+        declared: { displayName: demographics.displayName, phone: demographics.phone ?? null, email: demographics.email ?? null },
+        match: "celular",
+        answers,
+      })
+    }
+  }
   let created: PatientRow
   try {
     created = await createPatient(
@@ -803,6 +824,8 @@ export async function registerPatient(
       provenance,
     )
   } catch (e) {
+    // Con sus respuestas, para que recepción decida con ellas.
+    if (e instanceof RegistrationHeld && isPublic) e.hold.answers = answers
     if (
       isPublic &&
       e instanceof ServiceError &&
@@ -814,19 +837,14 @@ export async function registerPatient(
   }
 
   let whatsapp: RegistrationWhatsApp | undefined
-  // 5b. Con los datos esenciales los apellidos llegan de un solo campo y se
-  // reparten sin certeza: la ficha queda «identidad por revisar» hasta que
-  // recepción los confirme. Lo que la clínica exige y no se pidió queda
+  // 5b. Con los datos esenciales, lo que la clínica exige y no se pidió queda
   // anotado en el caso de la conversación o, sin conversación (la Agenda), en
-  // las notas de su persona, a nombre de quien la registró.
+  // las notas de su persona, a nombre de quien la registró. Los apellidos llegan
+  // en su único campo: no hay nada que repartir ni que revisar (ADR 0054).
   if (essentials) {
-    await tx
-      .update(contact)
-      .set({ identityNeedsReview: true })
-      .where(and(eq(contact.id, created.personId), eq(contact.organizationId, orgId)))
     const who = publicContext
       ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
-      : "El equipo creó su ficha con lo mínimo al reservar"
+      : "El equipo la registró con lo mínimo"
     const note = pendingRegistrationNote(who, config, answers)
     if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
     else {
@@ -1127,16 +1145,263 @@ export async function confirmPendingRepresentative(
 export async function leaveRegistrationHold(tx: Db, orgId: string, hold: RegistrationHold): Promise<void> {
   const today = await patientOrganizationToday(tx, orgId)
   const wrote = [hold.declared.displayName, hold.declared.phone, hold.declared.email].filter(Boolean).join(", ")
-  await createTask(tx, orgId, {
-    title: `Alguien se registró con el documento de ${hold.ownerName}`,
+  const what = hold.match === "celular" ? "el mismo celular" : "el mismo documento"
+  // Una fila abierta por persona: otro envío la reemplaza. Si recepción ya decidió
+  // la del día, el nuevo envío deja otra (la llave del día ya está usada).
+  const [open] = await tx
+    .select({ id: crmTask.id })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.contactId, hold.ownerId),
+        eq(crmTask.kind, "registro_con_documento"),
+        eq(crmTask.status, "open"),
+      ),
+    )
+    .limit(1)
+  const [usedToday] = open
+    ? []
+    : await tx
+        .select({ id: crmTask.id })
+        .from(crmTask)
+        .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.idempotencyKey, `${REGISTRATION_HOLD_KEY}${hold.ownerId}:${today}`)))
+        .limit(1)
+  const task = open ?? await createTask(tx, orgId, {
+    title: `Se registró por el código QR: ¿es ${hold.ownerName}?`,
     contactId: hold.ownerId,
     patientId: hold.ownerPatientId,
     area: "recepcion",
     createdBy: "sistema",
     kind: "registro_con_documento",
-    reason: `Alguien se registró con el documento de ${hold.ownerName}: revisa si es ella. No se guardó nada en su ficha. Escribió: ${wrote}.`,
-    idempotencyKey: `${REGISTRATION_HOLD_KEY}${hold.ownerId}:${today}`,
+    reason: hold.answers
+      ? `Tiene ${what} que ${hold.ownerName}. No se creó a nadie: elige si es la misma persona.`
+      : `Alguien se registró con el documento de ${hold.ownerName}: revisa si es ella. No se guardó nada en su ficha. Escribió: ${wrote}.`,
+    idempotencyKey: `${REGISTRATION_HOLD_KEY}${hold.ownerId}:${today}${usedToday ? `:${randomUUID()}` : ""}`,
   })
+  if (!hold.answers) return
+  // El mismo día, el último envío reemplaza al anterior: una fila, lo último que escribió.
+  await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.taskId, task.id)))
+  await tx.insert(registrationHold).values({ organizationId: orgId, taskId: task.id, match: hold.match, answers: hold.answers })
+}
+
+/** Quien ya está en la clínica con ese celular (su teléfono o su WhatsApp), o nulo. */
+async function personByPhone(
+  tx: Db,
+  orgId: string,
+  phone: string,
+): Promise<{ id: string; displayName: string; patientId: string | null } | null> {
+  const digits = phone.replace(/\D/g, "")
+  if (digits.length < 6) return null
+  const rows = await tx.execute<{ id: string; displayName: string; patientId: string | null }>(sql`
+    select * from (select c.id, c.display_name as "displayName", c.created_at,
+      (select p.id from patient p where p.organization_id = c.organization_id and p.person_id = c.id) as "patientId"
+    from contact c
+    where c.organization_id = ${orgId} and c.is_active
+      and (regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') = ${digits}
+        or exists (select 1 from contact_identity i where i.organization_id = c.organization_id and i.contact_id = c.id
+          and i.channel = 'whatsapp' and regexp_replace(i.external_user_id, '[^0-9]', '', 'g') = ${digits}))) found
+    order by ("patientId" is null), created_at
+    limit 1`)
+  return rows[0] ?? null
+}
+
+/** Lo que declaró de su salud, en palabras («alergias: Látex; toma: Losartán»); nulo si no dijo nada. */
+function declaredHealthWords(health: NonNullable<RegistrationAnswers["health"]>): string | null {
+  const parts: string[] = []
+  const group = (label: string, value: { state: string; items: Array<{ substance?: string; name?: string }> } | undefined) => {
+    if (value?.state === "recorded") parts.push(`${label}: ${value.items.map((item) => item.substance ?? item.name).filter(Boolean).join(", ") || "sí"}`)
+  }
+  group("alergias", health.allergies)
+  group("enfermedades", health.conditions)
+  group("medicamentos", health.medications)
+  if (health.bloodGroup) parts.push(`grupo sanguíneo ${health.bloodGroup}`)
+  return parts.length ? parts.join("; ") : null
+}
+
+/** Una fila de «¿Es la misma persona?»: lo que escribió hoy al lado de lo que ya estaba. */
+export interface RegistrationHoldRow {
+  key: "givenNames" | "familyName" | "phone" | "birthDate" | "document" | "allergies"
+  label: string
+  /** Lo que escribió (nulo si no lo escribió). */
+  declared: string | null
+  /** Lo que ya estaba (nulo si no lo tiene). */
+  saved: string | null
+  same: boolean
+}
+
+export interface RegistrationHoldView {
+  taskId: string
+  match: "documento" | "celular"
+  ownerId: string
+  ownerName: string
+  ownerPatientId: string | null
+  createdAt: string
+  rows: RegistrationHoldRow[]
+  /** Los apellidos no coinciden: recepción elige cuáles quedan si es la misma persona. */
+  familyNameDiffers: boolean
+}
+
+async function lockedHold(tx: Db, orgId: string, taskId: string) {
+  const [row] = await tx
+    .select({ task: crmTask, hold: registrationHold })
+    .from(crmTask)
+    .innerJoin(registrationHold, and(eq(registrationHold.organizationId, crmTask.organizationId), eq(registrationHold.taskId, crmTask.id)))
+    .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.id, taskId), eq(crmTask.kind, "registro_con_documento")))
+    // Se bloquea la tarea: lo que escribió no se modifica (la aplicación no puede), solo se borra al decidir.
+    .for("update", { of: crmTask })
+  if (!row || !row.task.contactId) throw notFound("Registro por revisar")
+  if (row.task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
+  const shape = registrationAnswersSchema.safeParse(row.hold.answers)
+  if (!shape.success) throw validation("Lo que escribió ya no se puede leer: descártalo")
+  return { task: row.task, hold: row.hold, answers: shape.data, ownerId: row.task.contactId }
+}
+
+/** Lo que ya tiene la persona: su ficha si es paciente, si no su persona. */
+async function ownerNow(tx: Db, orgId: string, ownerId: string): Promise<{ values: Record<string, unknown>; patientId: string | null }> {
+  const [own] = await tx
+    .select({ id: patient.id })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.personId, ownerId)))
+    .limit(1)
+  if (own) return { values: (await requirePatient(tx, orgId, own.id)) as unknown as Record<string, unknown>, patientId: own.id }
+  const [person] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId))).limit(1)
+  if (!person) throw notFound("Persona")
+  return { values: person as unknown as Record<string, unknown>, patientId: null }
+}
+
+const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null)
+const sameText = (a: string | null, b: string | null) => !!a && !!b && a.localeCompare(b, "es", { sensitivity: "base" }) === 0
+
+/** «¿Es la misma persona?»: lo que escribió hoy al lado de lo que ya estaba. */
+export async function getRegistrationHold(tx: Db, orgId: string, taskId: string): Promise<RegistrationHoldView> {
+  const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
+  const owner = await ownerNow(tx, orgId, ownerId)
+  const d = answers.demographics as Record<string, unknown>
+  const docOf = (values: Record<string, unknown>) =>
+    text(values.docNumber) ? documentText(String(values.docType ?? ""), String(values.docNumber)) : null
+  const allergies = answers.health?.allergies
+  const declaredAllergies =
+    allergies?.state === "recorded"
+      ? allergies.items.map((item) => item.substance).join(", ") || "Sí"
+      : allergies?.state === "none"
+        ? "No"
+        : allergies?.state === "unknown"
+          ? "No sabe"
+          : null
+  const savedHealth = owner.patientId && (await getPatientHealth(tx, orgId, owner.patientId)).revision > 0
+  const rows: RegistrationHoldRow[] = [
+    { key: "givenNames", label: "Nombres", declared: text(d.givenNames), saved: text(owner.values.givenNames), same: false },
+    { key: "familyName", label: "Apellidos", declared: text(d.familyName), saved: text(owner.values.familyName), same: false },
+    { key: "phone", label: "Celular", declared: text(d.phone), saved: text(owner.values.phone), same: false },
+    { key: "birthDate", label: "Nacimiento", declared: text(d.birthDate), saved: text(owner.values.birthDate), same: false },
+    { key: "document", label: "Documento", declared: docOf(d), saved: docOf(owner.values), same: false },
+    { key: "allergies", label: "Alergias", declared: declaredAllergies, saved: savedHealth ? "Su salud ya está en su ficha" : null, same: false },
+  ]
+  for (const row of rows) row.same = sameText(row.declared, row.saved)
+  const family = rows[1]!
+  return {
+    taskId: task.id,
+    match: hold.match as RegistrationHoldView["match"],
+    ownerId,
+    ownerName: text(owner.values.displayName) ?? "",
+    ownerPatientId: owner.patientId,
+    createdAt: hold.createdAt.toISOString(),
+    rows,
+    familyNameDiffers: !!family.declared && !!family.saved && !family.same,
+  }
+}
+
+/**
+ * Lo que decide recepción en «¿Es la misma persona?». Si es la misma, su ficha
+ * se completa con lo que faltaba (nada se borra; si los apellidos no
+ * coinciden, quedan los que elige) y queda como paciente; si es otra, se
+ * registra como nueva con lo que escribió (sin el documento, si era el de la
+ * otra persona). Lo que escribió se borra al decidir.
+ */
+export async function resolveRegistrationHold(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  taskId: string,
+  input: { same: boolean; familyName?: "saved" | "declared" },
+): Promise<{ patientId: string; personId: string }> {
+  const { task, hold, answers, ownerId } = await lockedHold(tx, orgId, taskId)
+  const declared = answers.demographics as Record<string, unknown>
+  let patientId: string
+  if (input.same) {
+    const owner = await ownerNow(tx, orgId, ownerId)
+    // Solo lo vacío; los apellidos, los que elige recepción.
+    const fill: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(declared)) {
+      if (key === "displayName" || value === null || value === undefined || value === "") continue
+      // El contacto de emergencia es una persona vinculada: en una ficha que ya existe se revisa en ella, no se declara otro.
+      if (owner.patientId && key.startsWith("emergencyContact")) continue
+      if (text(owner.values[key]) === null && owner.values[key] == null) fill[key] = value
+    }
+    if (input.familyName === "declared" && text(declared.familyName)) fill.familyName = declared.familyName
+    if (owner.patientId) {
+      if (Object.keys(fill).length > 0) await updatePatient(tx, orgId, actorUserId, owner.patientId, fill)
+      patientId = owner.patientId
+    } else {
+      // Aún no era paciente: queda como paciente en su misma persona, con lo que ya tenía más lo que faltaba.
+      const kept = Object.fromEntries(
+        Object.entries(owner.values).filter(([key, value]) => key in declared && value !== null && value !== undefined && value !== ""),
+      )
+      const created = await createPatient(tx, orgId, actorUserId, {
+        ...(declared as unknown as Parameters<typeof createPatient>[3]),
+        ...kept,
+        ...fill,
+        displayName: text(owner.values.displayName) ?? String(declared.displayName ?? ""),
+        contacts: [{ contactId: ownerId, relationship: "self", isPreferred: true }],
+      })
+      patientId = created.id
+    }
+  } else {
+    // Otra persona: se registra con lo que escribió; el documento era de la otra, no se guarda.
+    const own = { ...declared }
+    if (hold.match === "documento") {
+      delete own.docType
+      delete own.docNumber
+      delete own.docCountry
+    }
+    const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3])
+    patientId = created.id
+  }
+  // Su salud entra como declarada, solo si nadie la registró antes; si ya estaba,
+  // lo que declaró queda en una nota de su persona para revisarlo en sus antecedentes.
+  if (answers.health && (await getPatientHealth(tx, orgId, patientId)).revision === 0) {
+    await initializeDeclaredPatientHealth(tx, orgId, patientId, answers.health, actorUserId)
+  } else if (answers.health) {
+    const said = declaredHealthWords(answers.health)
+    const person = (await requirePatient(tx, orgId, patientId)) as unknown as { personId?: string }
+    if (said && person.personId) {
+      await createContactNote(
+        tx,
+        orgId,
+        person.personId,
+        { body: `Declaró por el código QR: ${said}. Su salud ya estaba en su ficha: revísalo en sus antecedentes.` },
+        { userId: actorUserId },
+      )
+    }
+  }
+  const personRow = await requirePatient(tx, orgId, patientId)
+  await tx.delete(registrationHold).where(and(eq(registrationHold.organizationId, orgId), eq(registrationHold.id, hold.id)))
+  await settleTask(
+    tx,
+    orgId,
+    task.id,
+    input.same ? "Era la misma persona: se completó su ficha" : "Era otra persona: se registró como nueva",
+  )
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "registration_hold.resolved",
+    entity: "patient",
+    entityId: patientId,
+    metadata: { same: input.same, match: hold.match },
+  })
+  return { patientId, personId: (personRow as unknown as { personId?: string }).personId ?? ownerId }
 }
 
 /** Motivo con que queda cerrada cada fila del registro en línea al descartarla. */

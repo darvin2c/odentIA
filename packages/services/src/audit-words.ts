@@ -59,6 +59,7 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   "patient-registration": "pacientes",
   health: "pacientes",
   document: "pacientes",
+  imaging_study: "pacientes",
   appointment: "agenda",
   encounter: "atencion",
   odontogram: "atencion",
@@ -120,6 +121,7 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
 const SUBJECT_WORDS: Record<string, string> = {
   patient: "un paciente",
   document: "un archivo de un paciente",
+  imaging_study: "una tomografía de un paciente",
   appointment: "una cita",
   encounter: "una atención",
   odontogram: "un odontograma",
@@ -219,6 +221,9 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "document.retired": say("Retiró un archivo de la ficha de un paciente"),
   "document.context_corrected": say("Corrigió a qué pertenece un archivo de un paciente"),
   "document.report_status": say("Cambió el estado del informe de una imagen"),
+  "imaging_study.started": say("Empezó a subir una tomografía a la ficha de un paciente"),
+  "imaging_study.completed": say("Terminó de subir una tomografía a la ficha de un paciente"),
+  "imaging_study.measured": say("Guardó una medida en la tomografía de un paciente"),
   // Agenda
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),
@@ -323,6 +328,13 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "contact.reactivated": say("Reactivó un contacto"),
   "contact.identity_added": say("Añadió un canal a un contacto"),
   "contact.identity_moved": say("Pasó un canal de un contacto a otro"),
+  // Spam y bloqueados (ADR 0054): sin persona del equipo lo decidió el agente.
+  "contact.spam_marked": say("Mandó a una persona a Spam", "agente"),
+  "contact.not_spam": say("Sacó a una persona de Spam"),
+  "contact.spam_left": say("Una persona salió de Spam al escribir algo para la clínica", "agente"),
+  "contact.spam_left_patient": say("Sacó a una persona de Spam al registrarla como paciente"),
+  "contact.blocked": say("Bloqueó a una persona"),
+  "contact.unblocked": say("Desbloqueó a una persona"),
   "opportunity.created": say("Creó una oportunidad"),
   "opportunity.updated": say("Cambió una oportunidad"),
   "opportunity.moved": say("Movió una oportunidad de etapa"),
@@ -425,6 +437,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "questionnaire.submitted": say("Envió un cuestionario desde el portal", "paciente"),
   // Su enlace (ADR 0037): lo que la persona hizo en su página personal.
   "personal_link.sent": say("Le envió su enlace"),
+  "personal_link.shown": say("Le mostró su enlace en la clínica"),
   "personal_link.revoked": say("Quitó su enlace"),
   "personal_link.data_sent": say("Completó sus datos desde su enlace", "paciente"),
   "personal_link.budget_decided": say("Respondió un presupuesto desde su enlace", "paciente"),

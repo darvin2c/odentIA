@@ -399,6 +399,8 @@ describe("por dónde le llega a cada persona", () => {
     const lines = (sent.body ?? "").split("\n")
     // La primera línea es el asunto.
     expect(lines[0]).toBe("Recordatorio de cita · Clínica Sonríe")
+    // A Jorge le faltan datos: por correo sale el texto de la clínica con una línea más, la de su enlace.
+    expect(sent.body).toMatch(/Completar mis datos: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toContain("Hola, Jorge. Te recordamos la cita en Clínica Sonríe, sede Centro: mañana, miércoles 7 de octubre")
     expect(sent.body).toMatch(/Para confirmar: https:\/\/clinica\.test\/c\/\S+\nSi no podrás ir: https:\/\/clinica\.test\/c\/\S+/)
     // Al pie, su página «Tus mensajes»; la baja de un toque va en la cabecera del correo (ADR 0040).
@@ -838,7 +840,7 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los trece, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los catorce, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
@@ -847,6 +849,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo"],
+      ["odentia_recordatorio_cita_datos_v1", "en_revision", "recordatorio_cita_datos"],
       ["odentia_recordatorio_cita_v2", "en_revision", "recordatorio_cita"],
       ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion"],
@@ -984,6 +987,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo", 2],
+      ["odentia_recordatorio_cita_datos_v1", "en_revision", "recordatorio_cita_datos", 3],
       ["odentia_recordatorio_cita_v2", "rechazada", "recordatorio_cita", 3],
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion", 2],
@@ -998,7 +1002,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(14)
+    expect(rows).toHaveLength(15)
   })
 })
 
@@ -1396,7 +1400,8 @@ describe("el texto de un mensaje es de cada clínica", () => {
 
     const asReply = await sentTo(warm.contactId)
     expect(asReply.job).toMatchObject({ status: "enviado", via: "respuesta" })
-    expect(asReply.sent.body).toMatch(/^Estimada Ana: su cita es .+, en Clínica Sonríe, sede Centro\. Si necesita cambiarla, responda a este mensaje\.$/)
+    // Como respuesta sale el texto de la clínica; a Ana le faltan datos, así que va una línea más con su enlace.
+    expect(asReply.sent.body).toMatch(/^Estimada Ana: su cita es .+, en Clínica Sonríe, sede Centro\. Si necesita cambiarla, responda a este mensaje\.\n\nCompletar mis datos: \S+$/)
 
     const byMail = await sentTo(mail.contactId)
     expect(byMail.job).toMatchObject({ status: "enviado", via: "correo" })

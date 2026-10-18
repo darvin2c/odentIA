@@ -48,7 +48,7 @@ export const REGISTRATION_MODE_LABELS: Record<RegistrationFieldMode, string> = {
 export type RegistrationScope = "full" | "essentials"
 /** Datos de la persona que admite el alcance `essentials`; cualquier otro se rechaza. */
 export const ESSENTIAL_DEMOGRAPHICS = [
-  "displayName", "givenNames", "paternalSurname", "maternalSurname",
+  "displayName", "givenNames", "familyName",
   "docType", "docNumber", "docCountry", "phone", "birthDate",
 ] as const
 export const DOC_TYPES = IDENTITY_DOC_TYPES
@@ -63,7 +63,14 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  *   solo si los marca obligatorios.
  * - `census`: opcionales y nunca obligatorios (nadie los lee: ni reportes,
  *   ni impresos, ni el agente). Nunca cuentan.
- * - `health`: los antecedentes que el registro puede preguntar.
+ * - `health`: los antecedentes que el registro puede preguntar. Los de la
+ *   entrevista (`personal.*` y `dental.*`) llegan a «Entrevista de salud»
+ *   de la ficha con las mismas claves y solo pueden ser opcionales.
+ *
+ * Solo entran aquí datos que el paciente sabe responder solo y que la ficha ya
+ * guarda. Lo que se pregunta junto (la referencia con la dirección, el
+ * parentesco con el contacto de emergencia, la aseguradora con el seguro) sigue
+ * a su dato y nunca es obligatorio.
  */
 export type RegistrationFieldGroup = "always" | "clinic" | "census" | "health"
 
@@ -74,6 +81,8 @@ export const REGISTRATION_FIELDS = [
   { key: "docType", label: "Tipo de documento", step: "datos", group: "clinic" },
   { key: "docNumber", label: "Número de documento", step: "datos", group: "clinic" },
   { key: "sex", label: "Sexo", step: "datos", group: "clinic" },
+  { key: "nationality", label: "Nacionalidad", step: "datos", group: "clinic" },
+  { key: "birthPlace", label: "Lugar de nacimiento", step: "datos", group: "clinic" },
   { key: "email", label: "Correo", step: "contacto", group: "clinic" },
   { key: "address", label: "Dirección", step: "contacto", group: "clinic" },
   { key: "emergencyContactName", label: "Contacto de emergencia", step: "contacto", group: "clinic" },
@@ -89,9 +98,17 @@ export const REGISTRATION_FIELDS = [
   { key: "allergies", label: "Alergias", step: "salud", group: "health" },
   { key: "conditions", label: "Enfermedades", step: "salud", group: "health" },
   { key: "medications", label: "Medicación", step: "salud", group: "health" },
+  { key: "personal.embarazo", label: "Embarazo", step: "personales", group: "health" },
+  { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
+  { key: "personal.hospitalizaciones", label: "Hospitalizaciones", step: "personales", group: "health" },
+  { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
   { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health" },
   { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health" },
   { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health" },
+  { key: "dental.cepilladosAlDia", label: "Cepillado diario", step: "odontologicos", group: "health" },
+  { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health" },
+  { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health" },
+  { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health" },
 ] as const
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
 /** Datos que se piden siempre: el registro los guarda como obligatorios y no se cambian. */
@@ -100,6 +117,13 @@ export const ALWAYS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGIS
 /** Datos censales: solo «Opcional» o «No se pide». */
 export const CENSUS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
   .filter((field) => field.group === "census").map((field) => field.key)
+/**
+ * Solo «Opcional» o «No se pide»: lo censal y la entrevista de salud (embarazo,
+ * operaciones, historia dental), que nunca impiden registrar.
+ */
+export const OPTIONAL_ONLY_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
+  .filter((field) => field.group === "census" || field.step === "personales" || field.step === "odontologicos")
+  .map((field) => field.key)
 
 export interface RegistrationConfig {
   version: number
@@ -124,8 +148,8 @@ const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 
 const codeOrEmpty = <T extends readonly [string, ...string[]]>(values: T) => z.enum([...values, ""]).nullable().optional()
 export const demographicsSchema = z.strictObject({
   displayName: text(200).min(1, "Escribe el nombre de la persona"),
-  /** Nombre separado (ADR 0004); el nombre visible se deriva de él. */
-  givenNames: optionalText(100), paternalSurname: optionalText(100), maternalSurname: optionalText(100),
+  /** «Nombres» y «Apellidos», dos campos (ADR 0058); el nombre visible se deriva de ellos. */
+  givenNames: optionalText(100), familyName: optionalText(200),
   birthDate: optionalText(10), docType: codeOrEmpty(DOC_TYPES),
   docNumber: optionalText(20), docCountry: optionalText(2), nationality: optionalText(2),
   birthCountry: optionalText(2), birthPlace: optionalText(200),
@@ -177,9 +201,16 @@ export const registrationAnswersSchema = z.strictObject({
     allergies: declaration(healthAllergyDeclarationSchema).optional(),
     conditions: declaration(healthConditionDeclarationSchema).optional(),
     medications: declaration(healthMedicationDeclarationSchema).optional(),
+    /** «Entrevista de salud» de la ficha, `antecedentesPersonales`, con sus mismas claves. */
+    personal: z.strictObject({
+      embarazo: z.boolean().optional(), semanasEmbarazo: z.number().int().min(0).max(42).optional(),
+      cirugias: text(500).optional(), hospitalizaciones: text(500).optional(), transfusiones: text(500).optional(),
+    }).optional(),
     dental: z.strictObject({
       ultimaVisita: text(2000).optional(), experienciaPrevia: z.enum(["positiva", "regular", "traumatica"]).optional(),
       ansiedadDental: z.enum(["ninguna", "leve", "moderada", "alta"]).optional(),
+      cepilladosAlDia: z.number().int().min(0).max(10).optional(), hiloDental: z.boolean().optional(),
+      bruxismo: z.boolean().optional(), habitos: z.array(text(100).min(1)).max(10).optional(),
     }).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
@@ -198,7 +229,7 @@ export const registrationConfigSchema = z.strictObject({
   for (const key of ALWAYS_REGISTRATION_FIELDS) {
     if (config.fields[key] !== "required") issue(["fields", key], "Se pide siempre: hace falta para atender")
   }
-  for (const key of CENSUS_REGISTRATION_FIELDS) {
+  for (const key of OPTIONAL_ONLY_REGISTRATION_FIELDS) {
     if (config.fields[key] === "required") issue(["fields", key], "Este dato solo puede ser opcional o no pedirse")
   }
   if (config.fields.docType !== config.fields.docNumber) issue(["fields", "docNumber"], "Configura el documento como pareja")
@@ -322,14 +353,15 @@ export function validateDemographics(
     errors.insuranceType ??= "Elige el tipo de seguro"
   for (const key of ["phone", "emergencyContactPhone"] as const)
     if (data[key] && !normalizePhone(data[key], countryCode)) errors[key] = phoneFormatError(countryCode)
-  if ((data.givenNames || data.maternalSurname) && !data.paternalSurname && !data.maternalSurname) errors.paternalSurname = "Escribe al menos el primer apellido"
-  if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Escribe los nombres"
+  if (data.givenNames && !data.familyName) errors.familyName = "Escribe los apellidos"
+  if (data.familyName && !data.givenNames) errors.givenNames = "Escribe los nombres"
   countryErrors(data, profile, previous, errors)
   return errors
 }
 function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
   const key = field.key
   if (key.startsWith("dental.")) return data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
+  if (key.startsWith("personal.")) return data.health?.personal?.[key.slice(9) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["personal"]>]
   if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
   return data.demographics[key as keyof RegistrationDemographics]
 }
@@ -349,15 +381,16 @@ export function contactCoveredByRepresentative(key: RegistrationFieldKey, repres
 /** Un dato que le falta a la persona para atenderla, con su nombre en pantalla. */
 export interface MissingPersonDatum {
   key:
-    | "givenNames" | "paternalSurname" | "birthDate" | "phone" | "docType" | "docNumber"
-    | "sex" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone" | "insuranceType"
+    | "givenNames" | "familyName" | "birthDate" | "phone" | "docType" | "docNumber"
+    | "sex" | "nationality" | "birthPlace" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone"
+    | "insuranceType"
   label: string
 }
 
 /**
  * «Faltan datos para atenderla»: una sola regla para la página de la persona,
  * la Agenda, la nota del caso y el registro (decisión 10 de la fase 3). Cuentan
- * siempre nombres, primer apellido, fecha de nacimiento y un teléfono o correo
+ * siempre nombres, apellidos, fecha de nacimiento y un teléfono o correo
  * (suyo o de quien habla por ella); además, lo que «Registro de pacientes»
  * marca obligatorio de lo que pide la clínica. Los datos censales nunca
  * cuentan. `representativeContact`: quien habla por ella tiene teléfono o correo.
@@ -370,7 +403,7 @@ export function missingPersonData(
   const missing: MissingPersonDatum[] = []
   const blank = (key: string) => isUnanswered(data[key])
   if (blank("givenNames")) missing.push({ key: "givenNames", label: "Nombres" })
-  if (blank("paternalSurname") && blank("maternalSurname")) missing.push({ key: "paternalSurname", label: "Primer apellido" })
+  if (blank("familyName")) missing.push({ key: "familyName", label: "Apellidos" })
   if (blank("birthDate")) missing.push({ key: "birthDate", label: "Fecha de nacimiento" })
   if (blank("phone") && blank("email") && !options.representativeContact)
     missing.push({ key: "phone", label: "Teléfono o correo" })
@@ -410,7 +443,7 @@ function essentialIdentityErrors(data: RegistrationAnswers, errors: Record<strin
   }
   if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
   if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Escribe los nombres"
-  if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Escribe los apellidos"
+  if (!demographics.familyName) errors["demographics.familyName"] ??= "Escribe los apellidos"
 }
 
 /** El documento del representante, juzgado como el de la persona por el país de la clínica. */
@@ -487,7 +520,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
     // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
     // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
-    // pendiente (`pendingRegistrationFields`) y la identidad, por revisar.
+    // pendiente (`pendingRegistrationFields`).
     essentialIdentityErrors(data, errors)
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es

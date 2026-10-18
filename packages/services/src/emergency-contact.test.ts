@@ -43,7 +43,7 @@ it("lo declarado como contacto de emergencia se vuelve una persona vinculada con
   expect(again.contacts.filter((link) => link.displayName === "Carlos Paredes")).toHaveLength(1)
 
   // La marca se pone y se quita sobre una persona ya vinculada.
-  const hija = await run((tx) => createPerson(tx, ORG, { userId: null }, { givenNames: "Rosa", paternalSurname: "Paredes" }))
+  const hija = await run((tx) => createPerson(tx, ORG, { userId: null }, { givenNames: "Rosa", familyName: "Paredes" }))
   await run((tx) =>
     setPatientContact(tx, ORG, "u-emergencia", created.id, {
       contactId: hija.id, relationship: "family", kinship: "CHILD", isPreferred: false, isEmergency: true,

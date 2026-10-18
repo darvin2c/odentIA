@@ -63,6 +63,20 @@ export interface Storage {
    * (visor DICOM) sin depender del CORS del bucket. Opcional en dobles de prueba.
    */
   getAttachment?(objectKey: string): Promise<Uint8Array>
+  /**
+   * URL firmada para que el navegador suba un objeto con PUT directo al bucket
+   * privado (tomografías, ADR 0055). Exige CORS en el bucket. Opcional en dobles.
+   */
+  uploadUrl?(objectKey: string, contentType: string, ttlSeconds?: number): Promise<string>
+  /**
+   * Tamaño y primeros bytes de un objeto, para comprobar lo que subió el
+   * navegador; null si no existe.
+   */
+  probeAttachment?(objectKey: string, firstBytes: number): Promise<{ size: number; head: Uint8Array } | null>
+  /** Guarda un objeto en una clave ya reservada (la semilla de las tomografías). */
+  putAttachmentAt?(objectKey: string, bytes: Uint8Array, contentType: string): Promise<void>
+  /** Contenido de un objeto como flujo, para descargas largas sin cargarlo en memoria. */
+  streamAttachment?(objectKey: string): Promise<ReadableStream<Uint8Array>>
   putPatientDocument(input: {
     orgId: string
     patientId: string
@@ -143,6 +157,49 @@ export function createStorage(env: StorageEnv): Storage {
       )
       if (!out.Body) throw new Error("Objeto vacío")
       return out.Body.transformToByteArray()
+    },
+    async uploadUrl(objectKey, contentType, ttlSeconds = 900) {
+      return getSignedUrl(
+        client,
+        new PutObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey, ContentType: contentType }),
+        { expiresIn: ttlSeconds },
+      )
+    },
+    async probeAttachment(objectKey, firstBytes) {
+      try {
+        const out = await client.send(
+          new GetObjectCommand({
+            Bucket: env.attachmentsBucket,
+            Key: objectKey,
+            Range: `bytes=0-${Math.max(0, firstBytes - 1)}`,
+          }),
+        )
+        const head = out.Body ? await out.Body.transformToByteArray() : new Uint8Array()
+        // «bytes 0-131/245760»: el total va después de la barra.
+        const total = Number(out.ContentRange?.split("/")[1] ?? out.ContentLength ?? head.byteLength)
+        return { size: Number.isFinite(total) ? total : head.byteLength, head }
+      } catch (error) {
+        const name = (error as { name?: string }).name
+        if (name === "NoSuchKey" || name === "NotFound" || name === "InvalidRange") return null
+        throw error
+      }
+    },
+    async putAttachmentAt(objectKey, bytes, contentType) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          Body: bytes,
+          ContentType: contentType,
+        }),
+      )
+    },
+    async streamAttachment(objectKey) {
+      const out = await client.send(
+        new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }),
+      )
+      if (!out.Body) throw new Error("Objeto vacío")
+      return out.Body.transformToWebStream() as ReadableStream<Uint8Array>
     },
     async deleteAttachment(objectKey) {
       await client.send(new DeleteObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }))

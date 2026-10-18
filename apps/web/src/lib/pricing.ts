@@ -10,6 +10,10 @@ export const PRICING = {
   recoveredAppointmentMicros: 4_000_000,
   trialCreditCents: 10_000,
   trialDays: 30,
+  /** Hasta qué parte de las conversaciones del mes se devuelve el spam sin revisar (ADR 0054). */
+  spamRefundPercent: 10,
+  /** Días hábiles en que odentIA responde una revisión de cobro (ADR 0054). */
+  reviewAnswerDays: 2,
 } as const
 
 export const PLAN = PRICING.planCents / 100

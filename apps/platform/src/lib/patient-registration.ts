@@ -110,10 +110,12 @@ export async function saveRegistrationConfig(
 export async function createPersonalLinkForContact(
   contactId: string,
   conversationId: string,
+  /** Con su ficha: el enlace para completar lo que le falta (y ver su cita). */
+  patientId?: string,
 ): Promise<{ data: { url: string; expiresAt: string } }> {
   return apiFetch<{ data: { url: string; expiresAt: string } }>(
     `/api/contacts/${encodeURIComponent(contactId)}/personal-link`,
-    { method: "POST", body: JSON.stringify({ conversationId }) },
+    { method: "POST", body: JSON.stringify(patientId ? { conversationId, patientId } : { conversationId }) },
   )
 }
 

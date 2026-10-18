@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Dominio clínico puro compartido por navegador, API y servicios.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./samples/dicom/*": "./samples/dicom/*"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

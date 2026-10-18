@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
   Button,
   buttonVariants,
+  cn,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -96,19 +97,29 @@ export function PatientClinicalStrip({
                 ? "outline"
                 : "secondary"
           }
-          className={
-            alert.tone === "warning" ? "border-warning/30 bg-warning-soft text-warning" : undefined
-          }
+          // Una alergia o enfermedad larga corta línea en vez de ensanchar la página en el teléfono.
+          className={cn(
+            "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
+            alert.tone === "warning" && "border-warning/30 bg-warning-soft text-warning",
+          )}
         >
           {alert.label}
         </Badge>
       ))}
       {more && onAntecedentes ? (
-        <Button type="button" size="sm" variant="outline" onClick={onAntecedentes}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-auto min-h-11 max-w-full shrink py-1 text-left whitespace-normal sm:min-h-8"
+          onClick={onAntecedentes}
+        >
           {moreLabel} · ver antecedentes
         </Button>
       ) : more ? (
-        <Badge variant="outline">{moreLabel}</Badge>
+        <Badge variant="outline" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+          {moreLabel}
+        </Badge>
       ) : null}
     </div>
   )
@@ -312,6 +323,7 @@ export function PersonHeader({
               <NewEncounterButton
                 patientId={patient.id}
                 openEncounterId={summary?.openEncounterId}
+                openFromSearch
               />
             ) : null}
             {canEdit ? (

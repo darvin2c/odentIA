@@ -92,7 +92,7 @@ it("el adaptador de OpenAI Decisions envía predicate/choice/score y respeta ref
     expect(provider.seen[0]?.url).toBe("/v1/decisions")
     const sent = provider.seen[0]?.body as { model: string; input: string; questions: Array<{ type: string; name: string; choices?: unknown[]; levels?: unknown[] }> }
     expect(sent.model).toBe("gpt-6-luna")
-    expect(sent.questions.map((q) => q.type)).toEqual(["predicate", "predicate", "score", "choice", "predicate"])
+    expect(sent.questions.map((q) => q.type)).toEqual(["predicate", "predicate", "score", "choice", "predicate", "choice"])
     expect(sent.questions[3]?.choices).toHaveLength(9)
     expect(sent.questions[2]?.levels).toHaveLength(3)
     expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(0.97)
@@ -286,4 +286,34 @@ it("la regla de la ráfaga solo cambia el camino «saludo» y solo con más de u
   expect(guardBurst(route("saludo"), 1).path).toBe("saludo")
   expect(guardBurst(route("saludo"), 2).path).toBe("abierto")
   expect(guardBurst(route("cita"), 4).path).toBe("cita")
+})
+
+it("spam solo con el modelo de decisión muy seguro y nunca si habla de la clínica o pide una persona (ADR 0054)", async () => {
+  const { readRoute, ROUTE_SPAM } = await import("./route.js")
+  const spamOf = (notSpam: number, intent = "other", intentP = 0.7, handoff = 0.05) =>
+    readRoute({
+      answers: [
+        { id: "handoff", kind: "yesno", probability: handoff },
+        { id: "intent", kind: "choice", choice: intent, probabilities: { [intent]: intentP, other: 1 - intentP }, confidence: intentP },
+        {
+          id: "spam",
+          kind: "choice",
+          choice: notSpam >= 0.5 ? "not_spam" : "scam",
+          probabilities: { not_spam: notSpam, scam: (1 - notSpam) * 0.8, advertising: (1 - notSpam) * 0.2 },
+          confidence: 0.9,
+        },
+      ],
+      model: "prueba",
+      usage: null,
+      latencyMs: 1,
+    }).spam
+  expect(spamOf(0.02)).toEqual({ probability: 0.98, reason: "estafa" })
+  expect((spamOf(0.02)?.probability ?? 0) >= ROUTE_SPAM).toBe(true)
+  expect((spamOf(0.3)?.probability ?? 0) >= ROUTE_SPAM).toBe(false)
+  // Hablar de una cita, un precio o reclamar nunca es spam, diga lo que diga la pregunta de spam.
+  expect(spamOf(0.02, "appointment_request")).toBeNull()
+  expect(spamOf(0.02, "complaint")).toBeNull()
+  // Pedir una persona tampoco.
+  expect(spamOf(0.02, "other", 0.7, 0.95)).toBeNull()
+  expect(TRIAGE_QUESTIONS.find((q) => q.id === "spam")).toMatchObject({ kind: "choice", options: expect.arrayContaining([expect.objectContaining({ value: "not_spam" })]) })
 })

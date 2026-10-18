@@ -1,7 +1,9 @@
 import { label } from "../../lib/glossary"
 import { conditionLabel, diagnosisCodeLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
-import { Badge } from "@odentia/ui"
+import { Badge, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { periodontalBlockSummary, useEncounterPeriodontal } from "../periodontal/encounter-periodontal"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
@@ -146,6 +148,7 @@ export function EncounterDetailView({
   const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
   const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
   const activeProcedures = procedures.filter((proc) => !proc.voidedAt)
+  const periodontal = useEncounterPeriodontal(patientId, encounter.id)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -406,6 +409,33 @@ export function EncounterDetailView({
           </ul>
         )}
       </section>
+
+      {periodontal.item ? (
+        <section aria-label="Periodontograma" className="flex flex-col gap-2 rounded-lg border p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-col">
+              <h4 className="text-sm font-medium">Periodontograma</h4>
+              <p className="text-sm text-muted-foreground">
+                {periodontalBlockSummary(periodontal.item)}
+                {encounter.status === "finalizada" ? " · cerrado con la atención" : ""}
+              </p>
+            </div>
+            <Link
+              to="/patients/$patientId"
+              params={{ patientId }}
+              search={{ tab: "periodontograma", periodontograma: periodontal.item.id } as { tab: "periodontograma" }}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Ver
+            </Link>
+          </div>
+          {encounter.status === "finalizada" ? (
+            <p className="text-xs text-muted-foreground">
+              Quedó fijo al firmar. Si hubo un error, explícalo en una adenda: el próximo periodontograma lo reemplaza.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section aria-label="Adendas">
         <h4 className="mb-2 text-sm font-medium">Adendas ({addenda.length})</h4>

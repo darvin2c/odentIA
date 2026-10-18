@@ -70,6 +70,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import {
   AlertCircle,
+  Ban,
   Bot,
   CheckCheck,
   CheckCircle2,
@@ -116,8 +117,18 @@ import { InboxApprovedMessages } from "../../components/integrations/whatsapp/in
 import { ACTION_LABEL, type AgentProposal, permissionForAction, proposalErrorMessage } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { NewConversationDialog } from "../../components/inbox-new-conversation"
+import {
+  BlockPersonDialog,
+  ContactScreenBanner,
+  conversationTarget,
+  type ScreenTarget,
+  UnblockDialog,
+  useContactScreenActions,
+} from "../../components/inbox-contact-screen"
+import { screenReasonWords } from "../../lib/contact-screen"
 import { useOrgEvents } from "../../lib/org-events"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
+import { filiationGapsText } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
 import {
   closeWithoutResolvingWords,
@@ -177,6 +188,14 @@ const VIEW_CHIPS = [
   { value: "closed", label: "Cerradas", total: "closed" },
 ] as const satisfies readonly { value: string; label: string; total: keyof InboxSummary }[]
 const CHIP_VIEWS: readonly string[] = VIEW_CHIPS.map((chip) => chip.value)
+/**
+ * Spam y Bloqueados (ADR 0054): dos listas aparte, junto a las pestañas y sin
+ * contar en sus totales. Spam lleva su número; Bloqueados, no: no es trabajo.
+ */
+const SIDE_VIEWS = ["spam", "blocked"] as const
+type SideView = (typeof SIDE_VIEWS)[number]
+const isSideView = (value: string | null | undefined): value is SideView =>
+  value === "spam" || value === "blocked"
 const DEFAULT_VIEW = "attend"
 const DEFAULT_SUBTITLE = "Todas las conversaciones de la clínica"
 
@@ -263,13 +282,15 @@ function InboxPage() {
     if (search.trim()) params.set("q", search.trim())
     return params.toString()
   }, [channel, mine, search])
-  const activeView = view && CHIP_VIEWS.includes(view) ? view : DEFAULT_VIEW
+  const activeView = view && (CHIP_VIEWS.includes(view) || isSideView(view)) ? view : DEFAULT_VIEW
+  const sideView = isSideView(activeView) ? activeView : null
   // El subtítulo habla de toda la bandeja: con filtros no afirma un total parcial.
   const narrowed = Boolean(channel) || mine || search.trim() !== ""
   const listParams = useMemo(() => {
     const params = new URLSearchParams(filterParams)
     // Cada pestaña es abierta o cerrada: «Cerradas» pide las cerradas; las demás, las abiertas.
-    params.set("status", activeView === "closed" ? "closed" : "open")
+    // Spam y Bloqueados muestran todo lo de esas personas, abierto o cerrado.
+    if (!isSideView(activeView)) params.set("status", activeView === "closed" ? "closed" : "open")
     params.set("view", activeView)
     return params.toString()
   }, [filterParams, activeView])
@@ -292,6 +313,15 @@ function InboxPage() {
     getNextPageParam: (last) => last.nextCursor,
     enabled: canRead,
   })
+
+  // «No es spam» y «Desbloquear» desde la fila de Spam y Bloqueados (ADR 0054).
+  const screenActions = useContactScreenActions()
+  const [unblockTarget, setUnblockTarget] = useState<ScreenTarget | null>(null)
+  const rowScreenAction = (item: ConversationListItem) => {
+    const target = conversationTarget(item.id, item.contact.displayName)
+    if (item.contact.screen === "blocked") setUnblockTarget(target)
+    else screenActions.notSpam.mutate(target)
+  }
 
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selectedId
@@ -511,7 +541,36 @@ function InboxPage() {
               )
             })}
           </fieldset>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          {/* Junto a las pestañas, en gris: no piden nada a nadie (ADR 0054). No se encogen: los filtros bajan de fila. */}
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={sideView === "spam" ? "secondary" : "ghost"}
+              aria-pressed={sideView === "spam"}
+              className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
+              onClick={() => listSearch.setParam("view", sideView === "spam" ? undefined : "spam", { replace: true })}
+              title="Publicidad y envíos automáticos: el agente no los responde y no se cobran"
+            >
+              Spam
+              {summary?.spam ? <span className="tabular-nums opacity-80"> {summary.spam}</span> : null}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={sideView === "blocked" ? "secondary" : "ghost"}
+              aria-pressed={sideView === "blocked"}
+              className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
+              onClick={() => listSearch.setParam("view", sideView === "blocked" ? undefined : "blocked", { replace: true })}
+              title="Personas bloqueadas: nadie les escribe y el agente no les responde"
+            >
+              <Ban className="size-4" aria-hidden />
+              <span className="sr-only sm:not-sr-only">Bloqueados</span>
+            </Button>
+          </div>
+          {/* No se encoge por debajo de su contenido: alineado a la derecha, se desbordaría
+              sobre «Spam» y «Bloqueados»; si no cabe, baja de fila. */}
+          <div className="flex min-w-fit flex-1 flex-wrap items-center justify-end gap-2">
             <Button
               type="button"
               size="sm"
@@ -574,6 +633,9 @@ function InboxPage() {
               onRetry={() => void listQuery.refetch()}
               onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
               searching={search.trim() !== ""}
+              sideView={sideView}
+              onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
+              onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -618,6 +680,9 @@ function InboxPage() {
               onRetry={() => void listQuery.refetch()}
               onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
               searching={search.trim() !== ""}
+              sideView={sideView}
+              onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
+              onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
             />
           ) : showContext ? (
             (workspace ??
@@ -652,6 +717,14 @@ function InboxPage() {
           )}
         </div>
       )}
+      <UnblockDialog
+        target={unblockTarget}
+        pending={screenActions.unblock.isPending}
+        onClose={() => setUnblockTarget(null)}
+        onConfirm={() => {
+          if (unblockTarget) screenActions.unblock.mutate(unblockTarget, { onSettled: () => setUnblockTarget(null) })
+        }}
+      />
       <ConfirmDialog
         open={confirmContextClose}
         title="Ocultar contexto con borrador sin guardar"
@@ -828,6 +901,9 @@ function ConversationList({
   onRetry,
   onNew,
   searching = false,
+  sideView = null,
+  onRowAction,
+  onBackToTabs,
 }: {
   items: ConversationListItem[]
   /** Quien mira: un tema suyo se dice «Lo tienes tú». */
@@ -846,11 +922,27 @@ function ConversationList({
   onNew?: () => void
   /** Hay una búsqueda: el vacío dice que nadie coincide. */
   searching?: boolean
+  /** Spam o Bloqueados (ADR 0054): cada fila dice su motivo y trae su botón. */
+  sideView?: SideView | null
+  /** «No es spam» o «Desbloquear» de la fila; ausente sin permiso. */
+  onRowAction?: (item: ConversationListItem) => void
+  /** El vacío de Spam y Bloqueados lleva de vuelta a las pestañas. */
+  onBackToTabs?: () => void
 }) {
   return (
     // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
     <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
     <div className="flex flex-col divide-y">
+      {sideView ? (
+        <div className="flex flex-col gap-0.5 px-3.5 py-2.5">
+          <span className="text-sm font-semibold">{sideView === "spam" ? "Spam · últimos 30 días" : "Bloqueados"}</span>
+          <span className="text-xs text-muted-foreground">
+            {sideView === "spam"
+              ? "El agente no responde lo que está aquí, y no se cobra."
+              : "Nadie les escribe y el agente no les responde. Para volver a atenderlos, desbloquéalos."}
+          </span>
+        </div>
+      ) : null}
       {items.map((item) => {
         const selected = item.id === selectedId
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
@@ -861,13 +953,14 @@ function ConversationList({
         const preview = topic
           ? `${!topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca: " : ""}«${topicQuote(topic)}»`
           : (item.preview?.body ?? (item.preview ? "Adjunto" : "Sin mensajes todavía"))
-        return (
+        const screen = item.contact.screen ?? null
+        const row = (
         <button
           key={item.id}
           type="button"
           onClick={() => onSelect(item.id)}
           aria-current={selected ? "true" : undefined}
-          className={`relative flex gap-2.5 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+          className={`relative flex min-w-0 flex-1 gap-2.5 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
             selected ? "bg-agent-soft shadow-[inset_3px_0_0_0_var(--color-primary)]" : "hover:bg-muted/70"
           }`}
         >
@@ -892,8 +985,13 @@ function ConversationList({
             <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
               {/* Con el estado a la vista, el canal queda en su icono: el estado no debe recortarse. */}
-              <span className={words ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
-              {words ? <StateLabel words={words} /> : null}
+              <span className={words || screen ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
+              {/* En Spam y Bloqueados la fila dice por qué; el estado de atención no aplica. */}
+              {screen ? (
+                <span className="truncate">{screenReasonWords(screen, item.contact.screenReason)}</span>
+              ) : words ? (
+                <StateLabel words={words} />
+              ) : null}
               {item.unreadCount > 0 && (
                 <span
                   className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
@@ -905,6 +1003,21 @@ function ConversationList({
             </span>
           </span>
         </button>
+        )
+        if (!sideView || !screen || !onRowAction) return row
+        return (
+          <div key={item.id} className="flex items-center gap-2 pr-3">
+            {row}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 shrink-0 rounded-full sm:min-h-8"
+              onClick={() => onRowAction(item)}
+            >
+              {screen === "blocked" ? "Desbloquear" : "No es spam"}
+            </Button>
+          </div>
         )
       })}
       {isRefreshing && hasItems ? (
@@ -925,7 +1038,19 @@ function ConversationList({
           </Button>
         </div>
       )}
-      {!isError && !hasItems && !isLoading && (
+      {!isError && !hasItems && !isLoading && sideView && !searching ? (
+        <EmptyState
+          title={sideView === "spam" ? "Nada en spam" : "Nadie bloqueado"}
+          description={
+            sideView === "spam"
+              ? "Si llega publicidad o un envío automático, el agente no lo responde y aparece aquí."
+              : "Para bloquear a alguien que acosa o amenaza, abre su conversación y elige «Bloquear a esta persona…» en el menú ⋯."
+          }
+          actionLabel={onBackToTabs ? "Ver «Por atender»" : undefined}
+          onAction={onBackToTabs}
+        />
+      ) : null}
+      {!isError && !hasItems && !isLoading && !(sideView && !searching) && (
         <EmptyState
           title={searching ? "Nadie coincide con la búsqueda" : "Sin conversaciones"}
           description={
@@ -1080,6 +1205,9 @@ function ThreadView({
   // más antiguo de quien mira; null = mensaje nuevo, sin tema), si se ve solo el
   // tema y si el último envío lo dejó resuelto.
   const [replyTo, setReplyTo] = useState<string | null | undefined>(undefined)
+  // «Es spam» y «Bloquear a esta persona…» (ADR 0054).
+  const screenActions = useContactScreenActions()
+  const [blocking, setBlocking] = useState(false)
   const [onlyTopic, setOnlyTopic] = useState(startOnTopic)
   const [doneTopic, setDoneTopic] = useState(false)
   const keepPendingRef = useRef(false)
@@ -1099,6 +1227,7 @@ function ThreadView({
     setConfirming(null)
     setReplyTo(undefined)
     setDoneTopic(false)
+    setBlocking(false)
   }, [id])
   // Desde «Por atender» cada hilo abre en «Solo este tema» (ADR 0050).
   useEffect(() => {
@@ -1145,6 +1274,27 @@ function ThreadView({
     },
     onError: (error) => {
       setRegistrationError(error instanceof ApiError ? error.message : "No se pudo crear el enlace")
+    },
+  })
+
+  // A la paciente le faltan datos: su enlace se escribe en el mensaje y quien
+  // atiende lo revisa y lo envía (nunca sale solo). Dentro de la conversación
+  // abierta no hace falta mensaje aprobado.
+  const [linkPasted, setLinkPasted] = useState(false)
+  useEffect(() => {
+    setLinkPasted(false)
+  }, [id])
+  const ownLinkMutation = useMutation({
+    mutationFn: (input: { contactId: string; patientId: string }) =>
+      createPersonalLinkForContact(input.contactId, id, input.patientId),
+    onSuccess: (result) => {
+      const firstName = detail?.contact.displayName.split(" ")[0] ?? ""
+      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos y tu salud aquí (toma 2 minutos): ${result.data.url}`)
+      setLinkPasted(true)
+      setRegistrationError(null)
+    },
+    onError: (error) => {
+      setRegistrationError(error instanceof ApiError ? error.message : "No se pudo preparar su enlace")
     },
   })
 
@@ -1360,6 +1510,9 @@ function ThreadView({
   // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
   const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
   const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId })
+  // Spam o bloqueada (ADR 0054): el aviso, el menú y la caja de texto lo leen de aquí.
+  const screenView = detail.screen
+  const blocked = screenView?.screen === "blocked"
   // Temas del hilo (ADR 0050): primero los de quien mira y los que nadie tomó.
   const topics = threadAttention?.topics ?? []
   const forMe = (topic: InboxTopic) => !topic.assigneeUserId || topic.assigneeUserId === myUserId
@@ -1488,6 +1641,23 @@ function ThreadView({
                         setConfirming("close")
                       },
                     }]),
+              // Spam y Bloquear (ADR 0054): nunca para un paciente; Bloquear va al final y en rojo.
+              ...(canWrite && screenView && screenView.screen === null && !screenView.isPatient
+                ? [{
+                    key: "spam",
+                    label: "Es spam",
+                    disabled: screenActions.spam.isPending,
+                    onSelect: () => screenActions.spam.mutate(conversationTarget(id, name)),
+                  }]
+                : []),
+              ...(canRegister && screenView && screenView.screen !== "blocked" && !screenView.isPatient
+                ? [{
+                    key: "bloquear",
+                    label: "Bloquear a esta persona…",
+                    tone: "danger" as const,
+                    onSelect: () => setBlocking(true),
+                  }]
+                : []),
             ]}
           />
         ) : null}
@@ -1498,6 +1668,16 @@ function ThreadView({
           </p>
         ) : null}
       </div>
+      <ContactScreenBanner
+        target={conversationTarget(id, name)}
+        view={screenView}
+        canWrite={canWrite}
+        canBlock={canRegister}
+      />
+      <BlockPersonDialog
+        target={blocking ? conversationTarget(id, name) : null}
+        onClose={() => setBlocking(false)}
+      />
       <ConfirmDialog
         open={confirming === "close"}
         title="¿Cerrar sin resolver?"
@@ -1548,6 +1728,11 @@ function ThreadView({
           onTake={(topic) => topicMutation.mutate({ topicId: topic.id, path: "take" })}
           onPass={(topic, userId) => topicMutation.mutate({ topicId: topic.id, path: "take", body: { toUserId: userId } })}
           onResolve={(topic) => topicMutation.mutate({ topicId: topic.id, path: "resolve" })}
+          onSpam={
+            screenView && screenView.screen === null && !screenView.isPatient
+              ? () => screenActions.spam.mutate(conversationTarget(id, name))
+              : undefined
+          }
         />
       ) : null}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -1608,6 +1793,13 @@ function ThreadView({
                 ),
               )}
             </MessageScrollerContent>
+            {screenView?.screen === "spam" ? (
+              <div className="mt-3 flex justify-center">
+                <p className="rounded-full border border-dashed bg-card px-3 py-1 text-center text-xs font-medium text-muted-foreground">
+                  El agente no respondió: spam
+                </p>
+              </div>
+            ) : null}
             {closure ? (
               <div className="mt-3 flex justify-center">
                 <p className="rounded-full border bg-card px-3 py-1 text-center text-xs font-medium text-muted-foreground">
@@ -1700,6 +1892,11 @@ function ThreadView({
           <p className="text-sm text-muted-foreground">
             Sin permiso de escritura de conversaciones.
           </p>
+        ) : blocked ? (
+          // A una persona bloqueada no le escribe nadie: se desbloquea desde el aviso de arriba.
+          <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            No puedes escribirle mientras esté bloqueado.
+          </p>
         ) : windowShut ? (
           // Pasaron las 24 horas de WhatsApp: se dice antes de escribir y se ofrecen los mensajes aprobados.
           <InboxApprovedMessages
@@ -1729,6 +1926,25 @@ function ThreadView({
                 <Bot className="size-3.5 shrink-0" aria-hidden />
                 Estás conversando en vivo: el agente espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.
               </p>
+            ) : null}
+            {canRegister && detail.missingData && !linkPasted && detail.whatsappWindow?.open !== false && !windowClosed ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-lg border-l-4 border-primary bg-primary/5 px-3 py-1.5 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  A {detail.contact.displayName.split(" ")[0]} le faltan datos: {filiationGapsText(detail.missingData.missing).toLowerCase()}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto shrink-0 px-2 py-1 text-xs font-semibold text-primary"
+                  disabled={ownLinkMutation.isPending}
+                  onClick={() => {
+                    if (detail.missingData) ownLinkMutation.mutate({ contactId: detail.contact.id, patientId: detail.missingData.patientId })
+                  }}
+                >
+                  Pegar su enlace
+                </Button>
+              </div>
             ) : null}
             {effectiveReplyTo !== null || topics.length > 0 ? (
               <div className="flex min-w-0 items-center gap-2 rounded-lg border-l-4 border-warning bg-warning-soft/60 px-3 py-1.5 text-xs">
@@ -1893,6 +2109,9 @@ function quoteOf(
  * solo botón principal, «Responder». Tomar, pasar a otra persona y marcar
  * resuelto van en «…». Con varios temas, primero los de quien mira.
  */
+/** El tema que deja el límite de respuestas por persona y día (ver `run.ts`). */
+const TOPIC_DAILY_LIMIT = /^escribió más de \d+ veces hoy/i
+
 function TopicBand({
   topics,
   myUserId,
@@ -1907,6 +2126,7 @@ function TopicBand({
   onTake,
   onPass,
   onResolve,
+  onSpam,
 }: {
   topics: InboxTopic[]
   myUserId: string
@@ -1921,6 +2141,8 @@ function TopicBand({
   onTake: (topic: InboxTopic) => void
   onPass: (topic: InboxTopic, userId: string) => void
   onResolve: (topic: InboxTopic) => void
+  /** «Es spam» en el tema del límite diario por persona (ADR 0054); ausente si no se puede. */
+  onSpam?: () => void
 }) {
   const [first, ...rest] = topics
   const [showRest, setShowRest] = useState(false)
@@ -1971,6 +2193,12 @@ function TopicBand({
                     Tomar este tema
                   </Button>
                 )}
+                {/* Pasó el límite del día: suele ser un envío automático, y se resuelve en un toque. */}
+                {onSpam && TOPIC_DAILY_LIMIT.test(topic.reason) ? (
+                  <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={pending} onClick={onSpam}>
+                    Es spam
+                  </Button>
+                ) : null}
                 {topic.source ? (
                   <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => onJump(topic.source?.id ?? "")}>
                     Ver en la conversación
@@ -2151,6 +2379,8 @@ function MessageBubble({
               Mensaje aprobado por WhatsApp{(msg.templateParams ?? []).length > 0 ? `: ${(msg.templateParams ?? []).join(" · ")}` : ""}
             </span>
           )
+        ) : msg.redactedAt ? (
+          <span className="italic text-muted-foreground">Mensaje de spam borrado a los 90 días</span>
         ) : (
           msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
         )}

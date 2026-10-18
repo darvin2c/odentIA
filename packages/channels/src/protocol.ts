@@ -276,6 +276,16 @@ export interface ChannelAdapter {
     template: { name: string },
     deps: ChannelAdapterDeps,
   ): Promise<void>
+  /**
+   * Bloquea o desbloquea números para la cuenta (WhatsApp, Block Users API).
+   * Devuelve los que el proveedor confirmó y los que no: el proveedor decide
+   * por número (Meta solo bloquea a quien escribió en las últimas 24 horas).
+   */
+  setBlocked?(
+    config: Record<string, unknown>,
+    input: { users: string[]; blocked: boolean },
+    deps: ChannelAdapterDeps,
+  ): Promise<{ done: string[]; failed: string[] }>
 }
 
 /**

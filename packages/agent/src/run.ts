@@ -8,6 +8,16 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   AGENT_MODEL_LABEL,
   type AgentConfig,
+  autoSpamAllowed,
+  BLOCKED_RUN_REASON,
+  contactScreenFacts,
+  leaveSpam,
+  markSpamByDecision,
+  SPAM_RUN_REASON,
+  SPAM_STILL_RUN_REASON,
+  SPAM_UNDECIDED_RUN_REASON,
+  contactGotAgentTextToday,
+  contactHadRunToday,
   countAgentModelRunsToday,
   countContactModelRunsToday,
   askGeneralPermissionAfterBooking,
@@ -37,7 +47,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { offTopicReply, readRoute, ROUTE_QUESTIONS, ROUTE_SPAM, routeHandoff } from "./decision/route.js"
 import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
@@ -128,6 +138,12 @@ const TEAM_TOOK_OVER = "team-took-over"
  * cada corrida atiende una ráfaga entera de mensajes.
  */
 export const CONTACT_DAILY_RUN_LIMIT = 40
+/** Motivo de la derivación de quien llegó al tope por persona. */
+const CONTACT_DAILY_LIMIT = "CONTACT_DAILY_LIMIT"
+/** Ya pasó hoy al equipo por el tope por persona: lo que siga escribiendo se guarda sin responder. */
+const CONTACT_LIMIT_SILENCED = "tope-por-persona"
+/** Lo que no es de la clínica ya recibió hoy el texto fijo: no se le repite. */
+const OFF_TOPIC_REPEATED = "fuera-de-tema-repetido"
 /** La corrida se pospuso porque la persona seguía escribiendo; no deja fila en el libro. */
 const BURST_WAITING = "burst-waiting"
 
@@ -293,6 +309,9 @@ async function attendAgentRun(
   // Modelo resuelto, para registrarlo aunque falle antes o después.
   let effectiveModel = llmModelName(runtime.platform)
   let configProblem: ProviderProblem | null = null
+  // Spam (ADR 0054): `recheck` si ya está en Spam y escribió algo nuevo;
+  // `eligible` si puede ir solo a Spam; `none` si nunca va solo.
+  let screenMode = "none" as "recheck" | "eligible" | "none"
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
@@ -318,6 +337,12 @@ async function attendAgentRun(
       if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
       // El agente nunca responde en una conversación cerrada (ADR 0024): un entrante la reabre antes.
       if (conv.status !== "open") return { skip: { reason: "conversation-closed", model: effectiveModel } }
+      // Spam y bloqueados (ADR 0054): a un bloqueado el agente no lo atiende. A
+      // quien está en Spam solo se lo vuelve a mirar (el worker encola la corrida
+      // únicamente si escribió algo nuevo); a quien puede ir solo, Jev lo mira.
+      const facts = await contactScreenFacts(tx, orgId, conv.contactId)
+      if (facts.screen === "blocked") return { skip: { reason: BLOCKED_RUN_REASON, model: effectiveModel } }
+      screenMode = facts.screen === "spam" ? "recheck" : autoSpamAllowed(facts) ? "eligible" : "none"
       if (conv.agentStatus !== "on") {
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }
@@ -365,7 +390,7 @@ async function attendAgentRun(
       if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
       // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
-      if (trigger.replyToMessageId) {
+      if (trigger.replyToMessageId && screenMode !== "recheck") {
         const [quoted] = await tx
           .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
           .from(message)
@@ -439,14 +464,18 @@ async function attendAgentRun(
           return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
         }
       }
-      const burst = pendingTail.some((item) => item.id === trigger.id)
-        ? pendingTail
-        : [...pendingTail, { id: trigger.id, body: trigger.body }]
+      // A quien está en Spam se lo atiende solo por lo nuevo: el spam de antes no es parte de su pedido.
+      const burst = screenMode === "recheck"
+        ? [{ id: trigger.id, body: trigger.body }]
+        : pendingTail.some((item) => item.id === trigger.id)
+          ? pendingTail
+          : [...pendingTail, { id: trigger.id, body: trigger.body }]
       const latestId = burst[0]?.id ?? trigger.id
       inboundMessageId = latestId
       coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
       burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
-      const keyword = burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
+      // A quien está en Spam primero lo mira Jev: una palabra de derivación no la saca sola.
+      const keyword = screenMode === "recheck" ? undefined : burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
       if (keyword) {
         const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
@@ -468,6 +497,23 @@ async function attendAgentRun(
         cfg,
       }
     })
+    // A quien está en Spam no se le avisa ni se le abre un tema antes de que
+    // Jev mire lo nuevo (ADR 0054): pausa, topes o un modelo sin responder lo
+    // dejan en Spam, sin escribirle; su siguiente mensaje se vuelve a mirar.
+    const stayInSpam = async (): Promise<"done"> => {
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "omitida",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: SPAM_UNDECIDED_RUN_REASON,
+      })
+      return "done"
+    }
+    if ("skip" in prepared && configProblem && screenMode === "recheck") return stayInSpam()
     if ("skip" in prepared && configProblem) {
       // Sin modelo utilizable: el interlocutor pasa a una persona y quien
       // administra el agente recibe un único aviso por problema y día.
@@ -511,6 +557,7 @@ async function attendAgentRun(
       if (gate.capReached && !(await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return "TOPE_GASTO" as const
       return null
     }).catch(() => null)
+    if (spend && screenMode === "recheck") return stayInSpam()
     if (spend) {
       await performHandoff(toolCtx, spend === "SALDO_PRUEBA" ? "agentes en pausa: se usó todo el saldo de prueba" : "se alcanzó el tope de gasto del mes")
       await noticeAfterHandoff(toolCtx)
@@ -528,22 +575,30 @@ async function attendAgentRun(
     }
     // Tope por persona: quien escribe sin parar (un bot, una cadena) pasa al
     // equipo antes de agotar el tope diario de la clínica; los demás siguen
-    // atendidos. El agente queda apagado en ese hilo: no hay más corridas.
-    const contactToday = await withOrgContext(db, orgId, (tx) =>
-      countContactModelRunsToday(tx, orgId, toolCtx.contactId),
-    )
-    if (contactToday >= CONTACT_DAILY_RUN_LIMIT) {
+    // atendidos. Derivar no apaga al agente en el hilo (ADR 0050) y cada
+    // mensaje nuevo trae su corrida: el tema y el aviso salen una sola vez por
+    // persona y día, y lo que siga escribiendo ese día queda guardado, sin
+    // respuesta ni tema nuevo. Al día siguiente se la vuelve a atender.
+    const contactLimit = await withOrgContext(db, orgId, async (tx) => {
+      if ((await countContactModelRunsToday(tx, orgId, toolCtx.contactId)) < CONTACT_DAILY_RUN_LIMIT) return null
+      const handedOff = await contactHadRunToday(tx, orgId, toolCtx.contactId, { status: "handoff", error: CONTACT_DAILY_LIMIT })
+      return handedOff ? ("silencio" as const) : ("derivar" as const)
+    })
+    if (contactLimit && screenMode === "recheck") return stayInSpam()
+    if (contactLimit === "derivar") {
       await performHandoff(toolCtx, `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`)
       await noticeAfterHandoff(toolCtx)
+    }
+    if (contactLimit) {
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId: inboundMessageId,
         model: effectiveModel,
-        status: "handoff",
+        status: contactLimit === "derivar" ? "handoff" : "omitida",
         startedAt,
         endedAt: new Date(),
         llmCalls: 0,
-        error: "CONTACT_DAILY_LIMIT",
+        error: contactLimit === "derivar" ? CONTACT_DAILY_LIMIT : CONTACT_LIMIT_SILENCED,
       })
       return "done"
     }
@@ -551,6 +606,7 @@ async function attendAgentRun(
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
     const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
     if (usedToday >= cfg.dailyRunLimit) {
+      if (screenMode === "recheck") return stayInSpam()
       return finishWithProviderProblem({
         code: "DAILY_LIMIT",
         detail: `Se alcanzó el tope diario de ${cfg.dailyRunLimit} corridas del agente`,
@@ -593,7 +649,49 @@ async function attendAgentRun(
       toolCtx.route = { path: reserve ? "cita" : "cambio_cita", intent: reserve ? "appointment_request" : "reschedule_or_cancel", handoff: null, confidence: null, urgency: null }
       toolCtx.routeHint = tapped.hint
     } else if (routing && decision && inboundMessageId !== null) {
-      toolCtx.route = await decideRoute(db, orgId, decision, { conversationId, triggerMessageId: inboundMessageId })
+      toolCtx.route = await decideRoute(db, orgId, decision, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        ...(screenMode === "recheck" ? { alone: true } : {}),
+      })
+    }
+    // Spam (ADR 0054): con Jev muy seguro, a quien puede ir solo a Spam no se le
+    // responde ni se cobra. A quien ya está, se lo saca solo si lo nuevo no es
+    // spam (decisión 9a), aunque lo haya marcado una persona (9b); sin decisión, se queda.
+    const spamVerdict = toolCtx.route?.spam && toolCtx.route.spam.probability >= ROUTE_SPAM ? toolCtx.route.spam : null
+    const spamTrigger = inboundMessageId
+    if (screenMode === "recheck" && spamTrigger !== null) {
+      if (!toolCtx.route || spamVerdict) {
+        await ledger(db, orgId, {
+          conversationId,
+          triggerMessageId: spamTrigger,
+          model: effectiveModel,
+          status: "omitida",
+          startedAt,
+          endedAt: new Date(),
+          llmCalls: 0,
+          error: toolCtx.route ? SPAM_STILL_RUN_REASON : SPAM_UNDECIDED_RUN_REASON,
+        })
+        return "done"
+      }
+      await withOrgContext(db, orgId, (tx) => leaveSpam(tx, orgId, { contactId: toolCtx.contactId, messageId: spamTrigger }))
+    } else if (screenMode === "eligible" && spamVerdict && spamTrigger !== null) {
+      const marked = await withOrgContext(db, orgId, (tx) =>
+        markSpamByDecision(tx, orgId, { contactId: toolCtx.contactId, reason: spamVerdict.reason, messageId: spamTrigger }),
+      )
+      if (marked) {
+        await ledger(db, orgId, {
+          conversationId,
+          triggerMessageId: spamTrigger,
+          model: effectiveModel,
+          status: "omitida",
+          startedAt,
+          endedAt: new Date(),
+          llmCalls: 0,
+          error: SPAM_RUN_REASON,
+        })
+        return "done"
+      }
     }
     const invokeGraph = async () => {
       const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
@@ -602,6 +700,8 @@ async function attendAgentRun(
       const graph = compileAgentGraph(model, toolCtx)
       await graph.invoke({ messages: [], turnCount: 0 }, runtime.callbacks ? { callbacks: runtime.callbacks } : {})
     }
+    // Motivo por el que esta corrida, a propósito, no responde: queda `omitida`.
+    let omitReason: string | null = null
     if (toolCtx.route?.path === "derivar") {
       // Primero el equipo: el caso queda registrado al instante, con su clase,
       // su prioridad y lo que la persona escribió. Después el aviso a la
@@ -619,10 +719,19 @@ async function attendAgentRun(
     } else if (toolCtx.route?.path === "fuera_de_tema") {
       // Nada que ver con la clínica y el modelo de decisión muy seguro: un
       // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
-      // con el mismo formato del canal y la misma comprobación.
+      // con el mismo formato del canal y la misma comprobación. Como no llama
+      // al modelo no cuenta para ningún tope, así que sale como mucho una vez
+      // por persona y día: si no, un bot o la respuesta automática de otro
+      // negocio lo recibirían sin fin, o quedarían en bucle con él. Después,
+      // silencio: lo que escribe queda guardado y la corrida, omitida.
       const clinic = await publicClinicName(db, orgId)
-      const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
-      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")) })
+      const text = offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar"))
+      if (await withOrgContext(db, orgId, (tx) => contactGotAgentTextToday(tx, orgId, toolCtx.contactId, text))) {
+        omitReason = OFF_TOPIC_REPEATED
+      } else {
+        const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
+        await reply?.invoke({ text })
+      }
     } else {
       await invokeGraph()
       // Quien preguntó por un servicio concreto queda anotado como oportunidad
@@ -667,7 +776,7 @@ async function attendAgentRun(
     // la campana. Un fallo al comprobarlo no reintenta la corrida: volvería a
     // llamar al modelo.
     const attendedMessageId = inboundMessageId
-    const silent = attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled
+    const silent = attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled && omitReason === null
     let unanswered =
       silent
         ? await withOrgContext(db, orgId, (tx) =>
@@ -721,9 +830,10 @@ async function attendAgentRun(
       triggerMessageId: inboundMessageId,
       model: effectiveModel,
       // Si el equipo la tomó o cerró mientras el modelo escribía, nada salió:
-      // queda omitida (no es una conversación atendida por el agente).
-      status: toolCtx.handedOff ? "handoff" : toolCtx.takenOver ? "omitida" : unanswered ? "sin_respuesta" : "ok",
-      ...(toolCtx.takenOver ? { error: TEAM_TOOK_OVER } : {}),
+      // queda omitida (no es una conversación atendida por el agente). Lo
+      // mismo cuando la corrida no responde a propósito, con su motivo.
+      status: toolCtx.handedOff ? "handoff" : toolCtx.takenOver || omitReason ? "omitida" : unanswered ? "sin_respuesta" : "ok",
+      ...(toolCtx.takenOver ? { error: TEAM_TOOK_OVER } : omitReason ? { error: omitReason } : {}),
       startedAt,
       endedAt: new Date(),
       latencyMs: Date.now() - startedAt.getTime(),
@@ -734,8 +844,9 @@ async function attendAgentRun(
       llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
-    // Constancia de la ráfaga: solo si la corrida respondió o derivó. Una que
-    // quedó sin respuesta no cubre nada y las corridas del resto se ejecutan.
+    // Constancia de la ráfaga: solo si la corrida respondió, derivó o calló a
+    // propósito (`omitReason`). Una que quedó sin respuesta no cubre nada y
+    // las corridas del resto se ejecutan.
     if (toolCtx.handedOff || !unanswered) {
       for (const coveredId of coveredMessageIds) {
         await ledger(db, orgId, {

@@ -12,7 +12,7 @@ import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
-import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
+import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -25,6 +25,7 @@ import {
   type WaitingStillOpen,
   type WaitingPortalReentry,
   type WaitingPossibleDuplicate,
+  type WaitingRegistrationDone,
   type WaitingTask,
   type WaitingUnconfirmed,
   type WaitingUnsentBudget,
@@ -472,6 +473,7 @@ async function waitingConversations(tx: Db, orgId: string, withoutCases: boolean
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
       select ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
+        and not ${screenedSql(conv)}
         ${withoutCases ? sql`and not ${handoffOpenExistsSql(conv)}` : sql``}
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
@@ -508,6 +510,29 @@ async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: W
  * mañana de quien no recibe recordatorios (ADR 0040), con «Recordar la cita»
  * prendida: sin ella nadie los recibe y no hay a quién llamar de más.
  */
+/**
+ * Quien envió hoy sus datos por su enlace («Tus datos y tu salud») y tiene
+ * una cita hoy en pie, sin llegar (el día en la zona de su sede).
+ */
+async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingRegistrationDone[]> {
+  const rows = await tx.execute<{ [K in keyof WaitingRegistrationDone]: WaitingRegistrationDone[K] }>(sql`
+    select a.id as "appointmentId", a.patient_id as "patientId", pp.display_name as "patientName",
+      ${iso(sql`sent.at`)} as "sentAt", ${iso(sql`a.starts_at`)} as "startsAt", u.name as "dentistName"
+    from appointment a
+    join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    left join "user" u on u.id = a.dentist_user_id
+    cross join lateral (select max(e.created_at) as at from audit_event e
+      where e.organization_id = a.organization_id and e.action = 'personal_link.data_sent' and e.entity_id = a.patient_id::text
+        and (e.created_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date) sent
+    where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and a.arrived_at is null
+      and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date
+      and sent.at is not null
+    order by sent.at desc, a.id limit ${WAITING_LIMITS.otherCases}`)
+  return [...rows]
+}
+
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
   const appt = sql.raw("a")
   const rows = await tx.execute<{ [K in keyof WaitingUnconfirmed]: WaitingUnconfirmed[K] } & { total: number }>(sql`
@@ -597,11 +622,13 @@ async function waitingSystemTasks(
     reason: string | null
     createdAt: string
     grantId: string | null
+    held: boolean
   }>(sql`
     select t.id, t.kind, t.patient_id as "patientId", pp.display_name as "patientName",
       t.contact_id as "contactId", ct.display_name as "contactName", t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
-        and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
+        and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId",
+      exists (select 1 from registration_hold h where h.organization_id = t.organization_id and h.task_id = t.id) as held
     from task t
     left join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
     left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
@@ -633,6 +660,7 @@ async function waitingSystemTasks(
             personName: source === "representante" ? row.contactName : null,
             detail: row.reason ?? "",
             createdAt: row.createdAt,
+            ...(source === "registro" ? { held: row.held } : {}),
           },
         ]
       }),
@@ -743,6 +771,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
+    // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.
+    registrationsDone: access.appointments && !access.ownAppointments ? await waitingRegistrationsDone(tx, orgId) : [],
     // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).
     unsentBudgets: access.sendsBudgets ? await waitingUnsentBudgets(tx, orgId, dayStart) : null,
     possibleDuplicates: system.duplicates,

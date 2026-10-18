@@ -121,13 +121,13 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
 
   const summary = (input: Parameters<typeof summarizeInbox>[2]) =>
     withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, input))
-  const totals = { open: 6, attend: 1, agent: 3, awaitingPatient: 2, closed: 2 }
+  const totals = { open: 6, attend: 1, agent: 3, awaitingPatient: 2, closed: 2, spam: 0 }
   // El estado no cambia los totales: cada chip ya dice si cuenta abiertas o cerradas.
   expect(await summary({})).toEqual(totals)
   expect(await summary({ status: "open" })).toEqual(totals)
-  expect(await summary({ q: "Deriv" })).toEqual({ open: 1, attend: 1, agent: 0, awaitingPatient: 0, closed: 0 })
+  expect(await summary({ q: "Deriv" })).toEqual({ open: 1, attend: 1, agent: 0, awaitingPatient: 0, closed: 0, spam: 0 })
   // Desde el contexto de otra organización, ni pidiendo esta se ve o se cuenta nada.
-  expect(await withOrgContext(appDb, "org_b", (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 0, attend: 0, agent: 0, awaitingPatient: 0, closed: 0 })
+  expect(await withOrgContext(appDb, "org_b", (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 0, attend: 0, agent: 0, awaitingPatient: 0, closed: 0, spam: 0 })
   expect((await withOrgContext(appDb, "org_b", (tx) => listInboxConversations(tx, orgId, {}))).items).toEqual([])
 
   // «Te espera» de Inicio cuenta las conversaciones sin responder como la bandeja.

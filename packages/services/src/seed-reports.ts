@@ -240,8 +240,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         batch.map((person) => ({
           organizationId: input.orgId,
           givenNames: person.given,
-          paternalSurname: person.paternal,
-          maternalSurname: person.maternal,
+          // Los apellidos van juntos en un campo (ADR 0058).
+          familyName: `${person.paternal} ${person.maternal}`,
           displayName: `${person.given} ${person.paternal} ${person.maternal}`,
         })),
       )
@@ -305,7 +305,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           batch.map(() => {
             const given = random.pick(GIVEN)
             const paternal = random.pick(SURNAMES)
-            return { organizationId: input.orgId, givenNames: given, paternalSurname: paternal, displayName: `${given} ${paternal}` }
+            return { organizationId: input.orgId, givenNames: given, familyName: paternal, displayName: `${given} ${paternal}` }
           }),
         )
         .returning({ id: contact.id })),

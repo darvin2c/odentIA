@@ -23,6 +23,16 @@ export interface ClosingCheck {
    * no firma odontogramas.
    */
   odontogram: ClosingOdontogram | null
+  /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */
+  periodontal: ClosingPeriodontal | null
+}
+
+/** El periodontograma en el cierre: cuántas piezas y, a medias, qué falta (se firma como parcial). */
+export interface ClosingPeriodontal {
+  teeth: number
+  implants: number
+  /** «abajo por fuera, de la 43 a la 47»; null si está completo. */
+  pending: string | null
 }
 
 /** El odontograma firmado que deja el cierre (solo en clínicas de Perú, NTS 188). */

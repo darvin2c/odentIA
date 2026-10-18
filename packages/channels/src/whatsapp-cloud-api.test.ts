@@ -425,6 +425,30 @@ it("elimina una plantilla por su nombre y dice el motivo si Meta no la elimina",
   ).rejects.toThrow("(#200) Permissions error")
 })
 
+it("bloquea y desbloquea números con la Block Users API y dice cuáles confirmó Meta (ADR 0054)", async () => {
+  const meta = fakeFetch(
+    { json: { messaging_product: "whatsapp", block_users: { added_users: [{ input: "51999000111", wa_id: "51999000111" }] } } },
+    {
+      status: 400,
+      json: {
+        block_users: {
+          failed_users: [{ input: "51999000222", errors: [{ code: 139100, message: "Failed to block user" }] }],
+        },
+        error: { message: "(#139100) Failed to block users" },
+      },
+    },
+    { json: { messaging_product: "whatsapp", block_users: { removed_users: [{ input: "51999000111", wa_id: "51999000111" }] } } },
+  )
+  const set = (users: string[], blocked: boolean) => whatsappCloudApiAdapter.setBlocked!(fx.config, { users, blocked }, { fetch: meta.fetch })
+  expect(await set(["wa:51999000111"], true)).toEqual({ done: ["wa:51999000111"], failed: [] })
+  expect(meta.calls[0]).toMatchObject({ method: "POST", url: "https://graph.facebook.com/v25.0/PNID/block_users" })
+  expect(meta.calls[0]?.body).toEqual({ messaging_product: "whatsapp", block_users: [{ user: "51999000111" }] })
+  // Meta no lo bloqueó (escribió hace más de 24 horas): se dice, no se da por hecho.
+  await expect(set(["wa:51999000222"], true)).rejects.toThrow("(#139100) Failed to block users")
+  expect(await set(["wa:51999000111"], false)).toEqual({ done: ["wa:51999000111"], failed: [] })
+  expect(meta.calls[2]?.method).toBe("DELETE")
+})
+
 // Cargas con la forma oficial de Cloud API (mensajes audio, video y sticker).
 it("la nota de voz, el audio y el video entran como media; el sticker no entra", () => {
   const contacts = [{ profile: { name: "Ana Paz" }, wa_id: "51999000111" }]

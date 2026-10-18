@@ -107,10 +107,9 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
         <Card title="Identidad" onEdit={edit("identidad")}>
           <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
             <Item label="Nombres">
-              {person.givenNames ?? (person.paternalSurname ? null : person.displayName)}
+              {person.givenNames ?? (person.familyName ? null : person.displayName)}
             </Item>
-            <Item label="Primer apellido">{person.paternalSurname}</Item>
-            <Item label="Segundo apellido">{person.maternalSurname}</Item>
+            <Item label="Apellidos">{person.familyName}</Item>
             <Item label="Documento">{documentLine(person.docType, person.docNumber, person.docCountry)}</Item>
             <Item label="Nacimiento">{born}</Item>
             <Item label="Sexo">{person.sex ? sexLabel(person.sex) : null}</Item>

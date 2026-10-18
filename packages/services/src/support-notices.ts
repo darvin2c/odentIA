@@ -148,7 +148,7 @@ export interface ClaimedSupportNotice {
   organizationId: string | null
   clinicName: string | null
   clinicSlug: string | null
-  caseKind: "pregunta" | "problema" | "acceso"
+  caseKind: "pregunta" | "problema" | "acceso" | "cobro"
   /** «Automatizaciones › Recordar la cita», o la ruta si la guía no la conoce. */
   screen: string
   /** El nombre corto de la pantalla: «Pregunta · Automatizaciones». */
@@ -215,7 +215,7 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     to = person.email
   }
   const topic = helpTopicForScreen(kase.screen)
-  const caseKind = kase.kind === "problema" || kase.kind === "acceso" ? kase.kind : "pregunta"
+  const caseKind = kase.kind === "problema" || kase.kind === "acceso" || kase.kind === "cobro" ? kase.kind : "pregunta"
   return {
     id: notice.id,
     kind: notice.kind as SupportNoticeKind,

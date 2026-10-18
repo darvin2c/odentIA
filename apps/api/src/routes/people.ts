@@ -12,6 +12,8 @@ import {
   personOfPatient,
   selfPatientOf,
   setPersonArchived,
+  takeOutOfSpam,
+  unblockPerson,
   updatePersonIdentity,
   usePhoneAsWhatsApp,
 } from "@odentia/services"
@@ -29,11 +31,12 @@ const listQuery = z.object({
 })
 
 const nameText = z.string().max(100).nullable().optional()
+/** Los apellidos juntos: «De la Cruz Ríos» (ADR 0058). */
+const familyText = z.string().max(200).nullable().optional()
 const createInput = z
   .object({
     givenNames: nameText,
-    paternalSurname: nameText,
-    maternalSurname: nameText,
+    familyName: familyText,
     phone: z.string().max(50).nullable().optional(),
     email: z.string().max(200).nullable().optional(),
   })
@@ -43,8 +46,7 @@ const identityInput = z
   .object({
     displayName: z.string().max(200).nullable().optional(),
     givenNames: nameText,
-    paternalSurname: nameText,
-    maternalSurname: nameText,
+    familyName: familyText,
     docType: z.string().max(20).nullable().optional(),
     docNumber: z.string().max(20).nullable().optional(),
     docCountry: z.string().max(2).nullable().optional(),
@@ -210,6 +212,32 @@ export function createPeopleRoute(deps: CrmDeps) {
         await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
         await setPersonArchived(tx, orgId, { userId }, c.req.param("id"), parsed.data.archived)
         return { archived: parsed.data.archived }
+      }),
+    )
+  })
+
+  // Desde su página (ADR 0054): sacarla de Spam y desbloquearla. Lo mismo que en la Bandeja.
+  app.post("/:id/not-spam", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "conversations.write"))
+      return forbidden(c, "No tienes permiso para sacar a una persona de Spam")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
+        return takeOutOfSpam(tx, orgId, { contactId: c.req.param("id"), userId })
+      }),
+    )
+  })
+
+  app.post("/:id/unblock", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.write"))
+      return forbidden(c, "No tienes permiso para desbloquear a una persona")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
+        await unblockPerson(tx, orgId, { contactId: c.req.param("id"), userId })
+        return { ok: true }
       }),
     )
   })

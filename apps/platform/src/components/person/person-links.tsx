@@ -18,7 +18,7 @@ import type { PatientContactLink, PatientFull } from "../../lib/patients"
 import { hcLabel } from "../../lib/patients"
 import { type PersonPage, RELATIONSHIP_WORDS } from "../../lib/people"
 import { mutationErrorMessage } from "../../lib/query-error"
-import { CreatePatientDrawer } from "../patient/create-patient-drawer"
+import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
 import { PersonPicker, type PickedPerson } from "../person-picker"
@@ -156,8 +156,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState({
     givenNames: "",
-    paternalSurname: "",
-    maternalSurname: "",
+    familyName: "",
   })
   const [newPhone, setNewPhone] = useState<string | null>(null)
   const [relationship, setRelationship] = useState<Relationship>("family")
@@ -172,11 +171,12 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
     name: string
   } | null>(null)
   const [registering, setRegistering] = useState(false)
+  const dependentTarget: NewPatientTarget = { kind: "dependent", person }
 
   const resetForm = () => {
     setPicked(null)
     setCreating(false)
-    setNewName({ givenNames: "", paternalSurname: "", maternalSurname: "" })
+    setNewName({ givenNames: "", familyName: "" })
     setNewPhone(null)
     setRelationship(linking === "charge" ? "guardian" : "family")
     setRelationDetail("")
@@ -199,7 +199,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         setCreating(false)
         setPicked({
           id: otherId,
-          name: [newName.givenNames, newName.paternalSurname].join(" ").trim(),
+          name: [newName.givenNames, newName.familyName].join(" ").trim(),
         })
       }
       const targetPatient = linking === "talker" ? patientId : (picked?.patientId ?? null)
@@ -258,8 +258,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
     linking === "talker"
       ? creating
         ? Boolean(
-            newName.givenNames.trim() &&
-              (newName.paternalSurname.trim() || newName.maternalSurname.trim()),
+            newName.givenNames.trim() && newName.familyName.trim(),
           )
         : Boolean(picked)
       : Boolean(picked?.patientId)
@@ -490,28 +489,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
             <div className="flex flex-col gap-3 rounded-md border p-3">
               <p className="text-sm font-medium">Persona nueva</p>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="new-person-paternal">Primer apellido</FieldLabel>
-                  <Input
-                    id="new-person-paternal"
-                    maxLength={100}
-                    value={newName.paternalSurname}
-                    onChange={(event) =>
-                      setNewName((prev) => ({ ...prev, paternalSurname: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="new-person-maternal">Segundo apellido</FieldLabel>
-                  <Input
-                    id="new-person-maternal"
-                    maxLength={100}
-                    value={newName.maternalSurname}
-                    onChange={(event) =>
-                      setNewName((prev) => ({ ...prev, maternalSurname: event.target.value }))
-                    }
-                  />
-                </Field>
+                {/* Primero los nombres y después los apellidos, como en todo el registro. */}
                 <Field className="sm:col-span-2">
                   <FieldLabel htmlFor="new-person-given">Nombres</FieldLabel>
                   <Input
@@ -520,6 +498,17 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                     value={newName.givenNames}
                     onChange={(event) =>
                       setNewName((prev) => ({ ...prev, givenNames: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field className="sm:col-span-2">
+                  <FieldLabel htmlFor="new-person-family">Apellidos</FieldLabel>
+                  <Input
+                    id="new-person-family"
+                    maxLength={200}
+                    value={newName.familyName}
+                    onChange={(event) =>
+                      setNewName((prev) => ({ ...prev, familyName: event.target.value }))
                     }
                   />
                 </Field>
@@ -637,16 +626,13 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         }}
       />
 
-      <CreatePatientDrawer
+      <NewPatientDrawer
         open={registering}
         onClose={() => {
           setRegistering(false)
           refresh()
         }}
-        contactId={person.id}
-        person={person}
-        registerOther
-        stayOnPage
+        target={dependentTarget}
       />
     </div>
   )

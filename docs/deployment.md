@@ -123,6 +123,30 @@ migraciones antes de API/worker; no hay fallback de seguridad para tablas
 administrativas ausentes. El bootstrap nominal y TOTP se describen en
 `development.md`.
 
+### Bucket de adjuntos: CORS para las tomografías
+
+Las tomografías van del navegador directo al bucket de adjuntos
+(`S3_ATTACHMENTS_BUCKET`) con URLs firmadas (ADR 0055), y el visor las lee de la
+misma forma. El bucket sigue privado, pero debe aceptar CORS desde la plataforma.
+Sin CORS, la subida se detiene con un aviso y la tomografía queda a medias. En R2
+(Configuración del bucket › CORS):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://*.<dominio>"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["content-type", "range"],
+    "ExposeHeaders": ["content-length", "content-range", "etag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+MinIO de desarrollo y e2e acepta cualquier origen por defecto. `S3_ENDPOINT`
+debe ser una dirección que el navegador alcance, la misma que ya usan las
+imágenes de la galería.
+
 ### IP de quien pide
 
 `CLIENT_IP_HEADER` es la cabecera de la que la API toma la IP de cada persona

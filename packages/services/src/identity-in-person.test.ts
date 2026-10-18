@@ -25,8 +25,7 @@ it("crear un paciente deja la identidad en su persona y la ficha apunta a ella",
     createPatient(tx, "org_a", f.actor, {
       displayName: "Lucía Paredes Rojas",
       givenNames: "Lucía",
-      paternalSurname: "Paredes",
-      maternalSurname: "Rojas",
+      familyName: "Paredes Rojas",
       docType: "DNI",
       docNumber: "41230001",
       birthDate: "1988-04-12",
@@ -40,8 +39,7 @@ it("crear un paciente deja la identidad en su persona y la ficha apunta a ella",
   expect(person).toMatchObject({
     displayName: "Lucía Paredes Rojas",
     givenNames: "Lucía",
-    paternalSurname: "Paredes",
-    maternalSurname: "Rojas",
+    familyName: "Paredes Rojas",
     docType: "DNI",
     docNumber: "41230001",
     docCountry: "PE",
@@ -126,7 +124,7 @@ it("cambiar el nombre en la ficha se ve en Personas, Bandeja, Agenda y el PDF", 
     .returning({ id: treatmentBudget.id })
 
   await f.run((tx) =>
-    updatePatient(tx, "org_a", f.actor, f.patient.id, { givenNames: "Rosa", paternalSurname: "Quispe", maternalSurname: "Ríos", identityConfirmed: true }),
+    updatePatient(tx, "org_a", f.actor, f.patient.id, { givenNames: "Rosa", familyName: "Quispe Ríos", identityConfirmed: true }),
   )
   const name = "Rosa Quispe Ríos"
   // Un solo lugar: la persona.

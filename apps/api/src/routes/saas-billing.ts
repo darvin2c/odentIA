@@ -22,6 +22,9 @@ import {
   decideSaasAccess,
   checkActionPricing,
   currentSaasPeriod,
+  previousSaasPeriod,
+  requestActionReview,
+  SAAS_REVIEW_REASONS,
   decideSaasNegotiation,
   getSaasAlerts,
   getSaasLowMargin,
@@ -1018,6 +1021,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
         orgId: z.string(),
         kind: z.enum(["conversacion", "consulta", "cita"]).optional(),
         state: z.enum(["esperando"]).optional(),
+        // El mes anterior también se ve, para pedir revisión de lo ya facturado (decisión 7).
+        periodo: z.enum(["actual", "anterior"]).default("actual"),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
       })
@@ -1026,9 +1031,12 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const query = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const period = await currentSaasPeriod(tx, orgId)
-        const pending = await listPendingRecoveries(tx, orgId)
-        // Lo que no se cobra (anulado o dentro de una cita) se dice en su fila, no se esconde.
+        const current = await currentSaasPeriod(tx, orgId)
+        const previous = await previousSaasPeriod(tx, orgId, current)
+        const period =
+          query.periodo === "anterior" ? { ...previous, credit: "mes" as const, creditCents: current.creditCents } : current
+        const pending = query.periodo === "anterior" ? [] : await listPendingRecoveries(tx, orgId)
+        // Lo que no se cobra (anulado, dentro de una cita o devuelto) se dice en su fila, no se esconde.
         const rows =
           query.state === "esperando"
             ? pending
@@ -1037,11 +1045,40 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
               )
         return {
           period: { start: period.start, end: period.end, credit: period.credit },
+          previous: { start: previous.start, end: previous.end },
           total: rows.length,
           pending: pending.length,
           items: rows.slice(query.offset, query.offset + query.limit),
         }
       }),
+    )
+  })
+
+  // «Pedir revisión» de una fila (ADR 0054): solo quien administra, como todo lo del cobro.
+  app.post("/actions/:id/review", async (c) => {
+    const parsed = z
+      .object({
+        orgId: z.string().min(1),
+        reason: z.enum(SAAS_REVIEW_REASONS),
+        note: z.string().max(1000).nullable().optional(),
+        allowRead: z.boolean().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const membership = await accountOwnerOrAdmin(deps, c, parsed.data.orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra pide revisar un cobro"), 403)
+    const roleLabel = membership.role === "owner" ? "Dueño" : "Administración"
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, parsed.data.orgId, (tx) =>
+        requestActionReview(tx, parsed.data.orgId, { userId: membership.userId, roleLabel }, {
+          actionId: c.req.param("id"),
+          reason: parsed.data.reason,
+          note: parsed.data.note ?? null,
+          allowRead: parsed.data.allowRead ?? false,
+        }),
+      ),
     )
   })
 
