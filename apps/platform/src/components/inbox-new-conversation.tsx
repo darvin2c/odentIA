@@ -55,13 +55,12 @@ export function NewConversationDialog({
   const [query, setQuery] = useState(initialQuery)
   const [debounced, setDebounced] = useState(initialQuery)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState({ givenNames: "", paternalSurname: "", maternalSurname: "" })
+  const [name, setName] = useState({ givenNames: "", familyName: "" })
   const [phone, setPhone] = useState<string | null>(null)
   const [needsPhoneFor, setNeedsPhoneFor] = useState<PersonListItem | null>(null)
   const searchId = useId()
   const nameId = useId()
-  const paternalId = useId()
-  const maternalId = useId()
+  const familyId = useId()
   const phoneId = useId()
   const country = normalizeCountry(profile.data?.countryCode)
 
@@ -71,7 +70,7 @@ export function NewConversationDialog({
     setQuery(initialQuery)
     setDebounced(initialQuery)
     setCreating(false)
-    setName({ givenNames: "", paternalSurname: "", maternalSurname: "" })
+    setName({ givenNames: "", familyName: "" })
     setPhone(null)
     setNeedsPhoneFor(null)
     write.reset()
@@ -111,13 +110,12 @@ export function NewConversationDialog({
   const create = useMutation({
     retry: false,
     mutationFn: async () => {
-      // La misma operación que «Nueva persona» (`createPerson`): nombres y apellidos separados.
+      // La misma operación que «Nuevo contacto» (`createPerson`): nombres y apellidos, dos campos.
       const created = await apiFetch<{ data: { id: string } }>("/api/people", {
         method: "POST",
         body: JSON.stringify({
           givenNames: name.givenNames.trim() || null,
-          paternalSurname: name.paternalSurname.trim() || null,
-          maternalSurname: name.maternalSurname.trim() || null,
+          familyName: name.familyName.trim() || null,
           ...(phone ? { phone } : {}),
         }),
       })
@@ -130,10 +128,10 @@ export function NewConversationDialog({
     const text = query.trim()
     if (looksLikePhone(text)) {
       setPhone(toE164(text, country))
-      setName({ givenNames: "", paternalSurname: "", maternalSurname: "" })
+      setName({ givenNames: "", familyName: "" })
     } else {
       // Lo buscado propone los nombres; los apellidos se escriben aparte.
-      setName({ givenNames: text, paternalSurname: "", maternalSurname: "" })
+      setName({ givenNames: text, familyName: "" })
       setPhone(null)
     }
     setCreating(true)
@@ -142,7 +140,7 @@ export function NewConversationDialog({
   const busy = write.isPending || create.isPending
   const writeError = write.error && !(write.error instanceof ApiError && write.error.shape.code === "NO_PHONE") ? write.error : null
   const createLabel = looksLikePhone(query) ? `Crear persona con ${query.trim()}` : `Crear persona «${query.trim()}»`
-  const nameReady = Boolean(name.givenNames.trim() && (name.paternalSurname.trim() || name.maternalSurname.trim()))
+  const nameReady = Boolean(name.givenNames.trim() && name.familyName.trim())
 
   return (
     <Dialog
@@ -207,25 +205,14 @@ export function NewConversationDialog({
                 onChange={(event) => setName({ ...name, givenNames: event.target.value })}
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <FieldLabel htmlFor={paternalId}>Primer apellido</FieldLabel>
-                <Input
-                  id={paternalId}
-                  value={name.paternalSurname}
-                  maxLength={100}
-                  onChange={(event) => setName({ ...name, paternalSurname: event.target.value })}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <FieldLabel htmlFor={maternalId}>Segundo apellido</FieldLabel>
-                <Input
-                  id={maternalId}
-                  value={name.maternalSurname}
-                  maxLength={100}
-                  onChange={(event) => setName({ ...name, maternalSurname: event.target.value })}
-                />
-              </div>
+            <div className="grid gap-1.5">
+              <FieldLabel htmlFor={familyId}>Apellidos</FieldLabel>
+              <Input
+                id={familyId}
+                value={name.familyName}
+                maxLength={200}
+                onChange={(event) => setName({ ...name, familyName: event.target.value })}
+              />
             </div>
             <div className="grid gap-1.5">
               <FieldLabel htmlFor={phoneId}>Teléfono</FieldLabel>

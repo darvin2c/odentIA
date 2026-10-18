@@ -27,8 +27,7 @@ it("el nombre separado deriva el visible, el teléfono queda en E.164 y la perso
   const updated = await f.run((tx) =>
     updatePatient(tx, "org_a", f.actor, f.patient.id, {
       givenNames: "Rosa María",
-      paternalSurname: "Quispe",
-      maternalSurname: "Huamán",
+      familyName: "Quispe Huamán",
       phone: "987 654 321",
       docType: "PASAPORTE",
       docNumber: "AB123456",

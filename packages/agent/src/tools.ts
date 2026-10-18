@@ -19,6 +19,7 @@ import {
   proposalConfirmButtons,
   resendBudgetByContact,
   confirmProposalByContact,
+  bookedDataLink,
   answerGeneralPermission,
   chooseMessagesInConversation,
   confirmAppointmentByContact,
@@ -1647,6 +1648,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (proposal.status === "ejecutada") {
         if (proposal.action === "enviar_mensaje") ctx.replySettled = true
+        // A quien le faltan datos se le da su enlace en la misma confirmación (no hay otro aviso de esta cita).
+        if (proposal.action === "reservar_cita" && typeof proposal.payload.patientId === "string") {
+          const patientId = proposal.payload.patientId
+          const appointmentId = typeof proposal.result?.appointmentId === "string" ? proposal.result.appointmentId : null
+          const data = await inOrg((tx) =>
+            bookedDataLink(tx, ctx.orgId, { contactId: ctx.contactId, patientId, appointmentId }, { secretsKey: ctx.secretsKey }),
+          ).catch(() => null)
+          if (data) {
+            return `Confirmado y ejecutado (propuesta ${proposal.id}). Al paciente le faltan datos para atenderlo (${data.missing.join(", ")}): al confirmar la cita, añade en el mismo mensaje «Antes de venir, completa tus datos y tu salud aquí (toma 2 minutos): ${data.url}». Escribe el enlace tal cual, sin cambiarlo.`
+          }
+        }
         return `Confirmado y ejecutado (propuesta ${proposal.id}).`
       }
       if (proposal.status === "fallida") {

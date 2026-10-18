@@ -484,8 +484,7 @@ export async function createContact(
     displayName: string
     /** Nombre separado (ADR 0004): la base deriva de él el nombre visible. */
     givenNames?: string | null
-    paternalSurname?: string | null
-    maternalSurname?: string | null
+    familyName?: string | null
     phone?: string | null
     email?: string | null
     docType?: string | null
@@ -506,8 +505,7 @@ export async function createContact(
       organizationId: orgId,
       displayName,
       givenNames: input.givenNames ?? null,
-      paternalSurname: input.paternalSurname ?? null,
-      maternalSurname: input.maternalSurname ?? null,
+      familyName: input.familyName ?? null,
       phone: (await cleanContactPhone(tx, orgId, input.phone)) ?? null,
       email: cleanContactEmail(input.email) ?? null,
       docType: input.docType ?? null,
@@ -593,8 +591,7 @@ export async function updateContact(
   input: {
     displayName?: string
     givenNames?: string | null
-    paternalSurname?: string | null
-    maternalSurname?: string | null
+    familyName?: string | null
     phone?: string | null
     email?: string | null
     /** Medio preferido para avisos y documentos; nulo = sin preferencia. */

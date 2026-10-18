@@ -946,8 +946,8 @@ it("persona única: una ficha por persona, su vínculo propio lo cuida la base y
     values ('org_b', 'Otra clínica', 'DNI', '40009901', 'PE')`)
   // El nombre visible se deriva del nombre separado.
   const [nombre] = await ownerDb.execute<{ display_name: string }>(sql`
-    insert into contact (organization_id, display_name, given_names, paternal_surname, maternal_surname)
-    values ('org_a', 'x', 'Rosa María', 'Quispe', 'Huamán') returning display_name`)
+    insert into contact (organization_id, display_name, given_names, family_name)
+    values ('org_a', 'x', 'Rosa María', 'Quispe  Huamán') returning display_name`)
   expect(nombre?.display_name).toBe("Rosa María Quispe Huamán")
 })
 

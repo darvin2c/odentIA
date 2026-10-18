@@ -18,8 +18,7 @@ export interface Patient {
   displayName: string
   /** Nombre separado (ADR 0004); el visible se deriva de él. */
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   identityNeedsReview?: boolean
   bloodGroup?: BloodGroup | null
   docType?: string | null
@@ -293,6 +292,21 @@ export interface PatientDocument {
   tags: string[]
   contextVersion: number
   createdAt: string
+  /** Tomografía de muchos archivos (ADR 0055); null en el resto. */
+  imaging?: ImagingSummary | null
+}
+
+/** Lo que la ficha dice de una tomografía: su avance y su forma. */
+export interface ImagingSummary {
+  studyInstanceUid: string
+  fileCount: number
+  uploadedCount: number
+  sliceCount: number
+  voxelMm: number | null
+  totalBytes: number
+  completedAt: string | null
+  thumbnailKey: string | null
+  dicomPatientName: string | null
 }
 
 export interface PatientDocumentContext {
@@ -583,6 +597,8 @@ export interface TimelineItem {
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** El periodontograma de la atención: un hecho de ella. */
+  periodontal?: PeriodontalBrief | null
 }
 
 export interface PlanPendingTotal {
@@ -728,6 +744,21 @@ export interface PatientSummary {
       | "createdAt"
     >
   >
+  /** «Encías»: el último periodontograma firmado y el último diagnóstico confirmado (issue 49). */
+  periodontal?: PeriodontalBrief | null
+}
+
+/** El periodontograma de una atención, para nombrarlo donde aparece. */
+export interface PeriodontalBrief {
+  chartId: string
+  encounterId: string
+  date: string
+  /** «Estadio III · Grado B · Generalizada»; null sin diagnóstico confirmado. */
+  classification: string | null
+  bleedingPercent: number | null
+  partial: boolean
+  /** Fecha de la visita del diagnóstico (solo en el Resumen). */
+  classifiedOn?: string | null
 }
 
 export type PatientContactRelationship = "self" | "guardian" | "family" | "other"

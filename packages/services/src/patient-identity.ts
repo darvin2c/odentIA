@@ -26,8 +26,7 @@ export function patientIdentityColumns(person: PersonTable = contact) {
   return {
     displayName: person.displayName,
     givenNames: person.givenNames,
-    paternalSurname: person.paternalSurname,
-    maternalSurname: person.maternalSurname,
+    familyName: person.familyName,
     identityNeedsReview: person.identityNeedsReview,
     docType: person.docType,
     docNumber: person.docNumber,
@@ -48,8 +47,7 @@ export function patientRowColumns(person: PersonTable = contact) {
 export type PatientIdentity = {
   displayName: string
   givenNames: string | null
-  paternalSurname: string | null
-  maternalSurname: string | null
+  familyName: string | null
   identityNeedsReview: boolean
   docType: string | null
   docNumber: string | null
@@ -67,8 +65,7 @@ export type PatientRow = typeof patient.$inferSelect & PatientIdentity
 export const PATIENT_IDENTITY_KEYS = [
   "displayName",
   "givenNames",
-  "paternalSurname",
-  "maternalSurname",
+  "familyName",
   "identityNeedsReview",
   "docType",
   "docNumber",

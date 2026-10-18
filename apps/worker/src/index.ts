@@ -16,6 +16,7 @@ import { tickMailboxes } from "./mailboxes.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
+import { runContactScreensTick } from "./contact-screens.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -185,6 +186,7 @@ queues.push({
 })
 
 let nextSaasPoll = 0
+let nextScreensPoll = 0
 let nextAccountPoll = 0
 let nextSupportPoll = 0
 let nextLegalPoll = 0
@@ -195,6 +197,17 @@ queues.push({
     nextSaasPoll = Date.now() + 60_000
     await runSaasBillingTick({ ownerDb, mailer })
     return true
+  },
+}, {
+  // Spam y bloqueados (ADR 0054): el bloqueo en WhatsApp y borrar el spam viejo.
+  name: "contact_screens",
+  poll: async () => {
+    if (Date.now() < nextScreensPoll) return false
+    nextScreensPoll = Date.now() + 60_000
+    const result = await runContactScreensTick({
+      appDb: db, ownerDb, storage, fetch, secretsKey, senderMode: env.CHANNEL_SENDER_MODE,
+    })
+    return result.blocks > 0 || result.redacted > 0
   },
 }, {
   // Avisos por correo de los casos de soporte: a soporte y a quien preguntó.

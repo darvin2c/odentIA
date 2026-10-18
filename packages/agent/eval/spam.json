@@ -1,0 +1,31 @@
+{
+  "nota": "Banco propio (nunca de pacientes reales) para medir si el modelo de decisión reconoce el spam (issue 77, ADR 0054). `spam` = true: publicidad, estafa, cadena, respuesta automática o venta a la clínica. Los de `spam` = false son personas que escriben por sí mismas, aunque suenen raro, repitan o traigan un enlace: mandarlas a Spam es el error caro (se quedan sin respuesta). Se suman los 38 ejemplos de decisiones-ejemplos.json, todos de personas. El caso del bot que repite el mismo texto no va aquí: lo decide el código (5 veces en una hora).",
+  "ejemplos": [
+    { "texto": "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya", "spam": true },
+    { "texto": "Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago", "spam": true },
+    { "texto": "Reenvía esto a 10 contactos o tendrás mala suerte 🙏", "spam": true },
+    { "texto": "Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?", "spam": true },
+    { "texto": "Gracias por escribir a Ferretería Lima. Te responderemos pronto.", "spam": true },
+    { "texto": "Préstamos al instante sin revisar centrales de riesgo, respuesta en 5 minutos. Escríbenos al 999 111 222", "spam": true },
+    { "texto": "Felicidades, ganaste un iPhone 17. Reclámalo aquí antes de las 24 horas: premio-ya.net", "spam": true },
+    { "texto": "Tu cuenta de BCP será bloqueada. Ingresa a bcp-seguridad.info para validar tus datos", "spam": true },
+    { "texto": "Somos distribuidores de insumos dentales, tenemos guantes y resinas a precio de fábrica. ¿Le envío el catálogo?", "spam": true },
+    { "texto": "Invierte en criptomonedas con ganancias garantizadas del 30% mensual", "spam": true },
+    { "texto": "Este es un mensaje automático: estoy fuera de la oficina hasta el lunes.", "spam": true },
+    { "texto": "Ofrecemos software de citas y facturación para consultorios. Demo gratis esta semana.", "spam": true },
+    { "texto": "¡¡Llevo 3 días esperando que me respondan!! Pésimo servicio", "spam": false },
+    { "texto": "Hola, soy Rosa Quispe, cambié de número. ¿Sigue mi cita del jueves?", "spam": false },
+    { "texto": "Hola", "spam": false },
+    { "texto": "Vi su anuncio en instagram.com/dentalsmile, ¿cuánto cuesta el blanqueamiento?", "spam": false },
+    { "texto": "¿Venden zapatillas?", "spam": false },
+    { "texto": "Perdón, número equivocado. ¿Atienden el sábado?", "spam": false },
+    { "texto": "Me mandaron este link para pagar mi presupuesto, ¿es de ustedes? pagos.dentalsmile.pe/abc", "spam": false },
+    { "texto": "Les escribo de parte de mi mamá, ella quiere una cita para una limpieza", "spam": false },
+    { "texto": "Quiero darme de baja de las promociones", "spam": false },
+    { "texto": "Gracias por la atención de hoy, muy amables", "spam": false },
+    { "texto": "Soy del laboratorio Dental Arte, ya está lista la corona del paciente Pedro Ríos", "spam": false },
+    { "texto": "???", "spam": false },
+    { "texto": "Me duele mucho la muela desde ayer, ¿me pueden atender hoy?", "spam": false },
+    { "texto": "¿Aceptan Yape o solo efectivo?", "spam": false }
+  ]
+}

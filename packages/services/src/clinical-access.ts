@@ -16,6 +16,7 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "resumen",
   "antecedentes",
   "odontograma",
+  "periodontograma",
   "historia",
   "atenciones",
   "diagnosticos",

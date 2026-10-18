@@ -72,7 +72,8 @@ export interface ConversationListItem {
   unreadCount: number
   assignedUserId: string | null
   lastMessageAt: string | null
-  contact: { id: string; displayName: string }
+  /** `screen`: en Spam o bloqueada, con su motivo (ADR 0054); ausente en respuestas antiguas en caché. */
+  contact: { id: string; displayName: string; screen?: ContactScreen | null; screenReason?: string | null }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: ConversationPreview | null
   /** Ausente en respuestas antiguas en caché: tratar como sin estado. */
@@ -91,6 +92,25 @@ export interface InboxSummary {
   agent: number
   awaitingPatient: number
   closed: number
+  /** En Spam, de los últimos 30 días: el número junto a «Spam» (ADR 0054). */
+  spam?: number
+}
+
+/** Spam o bloqueada (ADR 0054). */
+export type ContactScreen = "spam" | "blocked"
+
+/** Lo que dicen la conversación y la página de la persona sobre Spam y Bloquear. */
+export interface ContactScreenView {
+  screen: ContactScreen | null
+  reason: string | null
+  at: string | null
+  /** Quién lo decidió; nulo = el agente. */
+  byName: string | null
+  /** Lo que pasó, si se bloqueó. */
+  note: string | null
+  isPatient: boolean
+  /** Salió sola de Spam hace poco: con qué mensaje y quién la había marcado. */
+  leftSpam: { at: string; messageId: string; markedByName: string | null; markedAt: string | null } | null
 }
 
 /** Un tema que tiene que contestar una persona del equipo (ADR 0050). */
@@ -132,6 +152,8 @@ export interface ChatMessage {
   automatic?: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado. */
   replyToMessageId?: string | null
+  /** Se borró: era spam y pasaron 90 días. */
+  redactedAt?: string | null
   createdAt: string
 }
 
@@ -170,6 +192,10 @@ export interface ConversationDetail {
    * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
    */
   whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
+  /** Paciente al que le faltan datos: la Bandeja ofrece pegar su enlace. Ausente en respuestas antiguas. */
+  missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
+  /** Spam o bloqueada (ADR 0054); ausente en respuestas antiguas en caché. */
+  screen?: ContactScreenView
   messages: ChatMessage[]
   messagesCursor: string | null
 }

@@ -11,6 +11,7 @@
     "@aws-sdk/client-s3": "3.1131.0",
     "@axe-core/playwright": "4.13.0",
     "@odentia/auth": "workspace:*",
+    "@odentia/clinical": "workspace:*",
     "@odentia/db": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "22.20.2",

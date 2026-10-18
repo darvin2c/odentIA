@@ -18,8 +18,7 @@ export type TestPatientValues = Omit<PatientInsert, "personId"> & {
   personId?: string
   displayName?: string
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   identityNeedsReview?: boolean
   docType?: string | null
   docNumber?: string | null
@@ -40,7 +39,7 @@ export function selectTestPatients(db: Db) {
 export async function setTestPatientIdentity(
   db: Db,
   patientId: string,
-  set: Partial<Pick<ContactInsert, "displayName" | "givenNames" | "paternalSurname" | "maternalSurname" | "identityNeedsReview" | "docType" | "docNumber" | "docCountry" | "birthDate" | "sex" | "phone" | "email" | "isActive">>,
+  set: Partial<Pick<ContactInsert, "displayName" | "givenNames" | "familyName" | "identityNeedsReview" | "docType" | "docNumber" | "docCountry" | "birthDate" | "sex" | "phone" | "email" | "isActive">>,
 ): Promise<void> {
   const [row] = await db.select({ personId: patient.personId }).from(patient).where(eq(patient.id, patientId))
   if (!row) throw new Error("Paciente de prueba inexistente")
@@ -88,8 +87,7 @@ export async function insertTestPatients(
       ...row!,
       displayName: person!.displayName,
       givenNames: person!.givenNames,
-      paternalSurname: person!.paternalSurname,
-      maternalSurname: person!.maternalSurname,
+      familyName: person!.familyName,
       identityNeedsReview: person!.identityNeedsReview,
       docType: person!.docType,
       docNumber: person!.docNumber,

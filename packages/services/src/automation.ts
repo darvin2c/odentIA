@@ -36,6 +36,7 @@ import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-wor
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_DATA_NOTICE_KEY,
+  REMINDER_DATA_KEY,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
   type AutomationMessage,
@@ -1572,9 +1573,9 @@ async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, no
 }
 
 /**
- * El aviso de reserva con «Su enlace» cuando al paciente de la cita le faltan
- * datos para atenderlo: el enlace de quien recibe el aviso, con esa cita. Sin
- * dirección pública configurada sale el aviso de siempre.
+ * El aviso de reserva (o el recordatorio) con «Su enlace» cuando al paciente
+ * de la cita le faltan datos para atenderlo: el enlace de quien recibe el
+ * aviso, con esa cita. Sin dirección pública configurada sale el de siempre.
  */
 async function dataNoticeFor(
   tx: Db,
@@ -1582,6 +1583,7 @@ async function dataNoticeFor(
   job: typeof automationJob.$inferSelect,
   contactId: string,
   deps: DeliverDeps,
+  key: typeof APPOINTMENT_DATA_NOTICE_KEY | typeof REMINDER_DATA_KEY = APPOINTMENT_DATA_NOTICE_KEY,
 ): Promise<{ spec: AutomationMessage; link: { token: string; url: string } } | null> {
   if (!job.appointmentId || !publicLinksConfigured()) return null
   const [row] = await tx
@@ -1601,7 +1603,7 @@ async function dataNoticeFor(
   const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
   if (!url) return null
   return {
-    spec: await currentAutomationMessage(tx, orgId, APPOINTMENT_DATA_NOTICE_KEY),
+    spec: await currentAutomationMessage(tx, orgId, key),
     link: { token: personalLinkRef(issued.linkId), url },
   }
 }
@@ -2261,23 +2263,37 @@ export async function deliverJob(
   let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
   // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
   // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
-  const withData = spec && job.kind === "aviso_cita_reservada" ? await dataNoticeFor(tx, orgId, job, contactId, deps) : null
-  if (withData) spec = withData.spec
+  // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3).
+  const withData =
+    spec && job.kind === "aviso_cita_reservada"
+      ? await dataNoticeFor(tx, orgId, job, contactId, deps)
+      : spec && job.kind === "recordatorio_cita"
+        ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+        : null
+  let link = withData?.link ?? null
+  // El título de la línea con su enlace, cuando el texto es el de siempre (respuesta o correo del recordatorio).
+  let linkTitle: { title: string } | undefined
+  if (spec && withData) {
+    const dataRoute = await routeMessage(tx, orgId, contactId, withData.spec)
+    if ("cause" in dataRoute) {
+      // Mientras WhatsApp no aprueba el mensaje con su enlace, sale el de siempre, sin él.
+      link = null
+    } else if (job.kind === "recordatorio_cita" && dataRoute.via !== "plantilla") {
+      // El botón «Completar mis datos» es de la plantilla: por respuesta o correo sale el
+      // recordatorio con el texto de la clínica y una línea más con su enlace.
+      linkTitle = withData.spec.link
+    } else {
+      spec = withData.spec
+    }
+  }
   const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
   if (!spec || !composed) {
     await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
     return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
   }
-  let route = await routeMessage(tx, orgId, contactId, spec)
-  let link = withData?.link ?? null
-  if ("cause" in route && withData) {
-    // Mientras WhatsApp no aprueba el aviso con su enlace, sale el aviso de siempre.
-    spec = await currentAutomationMessage(tx, orgId, "aviso_cita_reservada")
-    route = await routeMessage(tx, orgId, contactId, spec)
-    link = null
-  }
+  const route = await routeMessage(tx, orgId, contactId, spec)
   if ("cause" in route) return cannot(route.detail, route.cause)
-  const linkedText = link ? withLinkLine(composed.text, spec.link, link.url) : composed.text
+  const linkedText = link ? withLinkLine(composed.text, linkTitle ?? spec.link, link.url) : composed.text
   try {
     let sent: { id: string }
     if (route.via === "plantilla" && route.template) {
@@ -3030,7 +3046,7 @@ async function stopByWord(
   tx: Db,
   orgId: string,
   input: { conversationId: string; contactId: string },
-  deps: { secretsKey?: Buffer },
+  deps: { secretsKey?: Buffer; silent?: boolean },
 ): Promise<void> {
   const [last] = await tx
     .select({ kind: automationJob.kind, patientId: automationJob.patientId })
@@ -3055,6 +3071,8 @@ async function stopByWord(
     purposes,
     conversationId: input.conversationId,
   })
+  // A quien está en Spam o bloqueado no se le responde (ADR 0054): la baja queda igual.
+  if (deps.silent) return
   await sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: "agent",
@@ -3083,8 +3101,12 @@ export async function handleAutomationReply(
   tx: Db,
   orgId: string,
   input: { conversationId: string; replyId: string | null | undefined; text?: string | null },
-  /** `storage`, para «Ver y responder» de «Presupuesto listo»; `secretsKey`, para el enlace de «Tus mensajes». */
-  deps?: { storage: Storage; secretsKey?: Buffer },
+  /**
+   * `storage`, para «Ver y responder» de «Presupuesto listo»; `secretsKey`, para
+   * el enlace de «Tus mensajes»; `silent`, anota la baja sin responder (Spam y
+   * bloqueados, ADR 0054).
+   */
+  deps?: { storage: Storage; secretsKey?: Buffer; silent?: boolean },
 ): Promise<boolean> {
   const reply = parseReplyId(input.replyId)
   if (!reply && isStopWord(input.text)) {
@@ -3098,7 +3120,7 @@ export async function handleAutomationReply(
       tx,
       orgId,
       { conversationId: input.conversationId, contactId: writer.contactId },
-      deps?.secretsKey ? { secretsKey: deps.secretsKey } : {},
+      { ...(deps?.secretsKey ? { secretsKey: deps.secretsKey } : {}), ...(deps?.silent ? { silent: true } : {}) },
     )
     return true
   }

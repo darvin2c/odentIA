@@ -32,7 +32,7 @@ import {
 import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
-import { CreatePatientDrawer } from "../patient/create-patient-drawer"
+import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { NewEncounterButton } from "../patient/new-encounter-button"
 import { useScheduleAccepted } from "../patient/plan/plan-budgets"
 import { PlanNextCard } from "../patient/plan/plan-next"
@@ -46,6 +46,7 @@ import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
+import { PersonTomographies } from "./person-tomographies"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -100,6 +101,8 @@ export function PersonSummary({
   const patientId = person.patient?.id ?? null
   const can = useCan()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
+  // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
+  const receivesTomography = can("clinical.receive") && !can("clinical.read")
   const canAppointments = usePermission("appointments.read")
   const canFinance = usePermission("finance.read")
   const canChats = usePermission("conversations.read")
@@ -110,6 +113,7 @@ export function PersonSummary({
   const profile = useOrgProfile()
   const locale = profile.data?.locale
   const [registering, setRegistering] = useState(false)
+  const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
   const canTaskWrite = usePermission("tasks.write")
   const queryClient = useQueryClient()
@@ -217,6 +221,7 @@ export function PersonSummary({
                     />
                   )
                 }
+                onPeriodontal={() => onSection("periodontograma")}
               />
             ) : summary?.isError ? (
               <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
@@ -234,6 +239,9 @@ export function PersonSummary({
             />
           </div>
         </>
+      ) : null}
+      {patientId && receivesTomography && !person.archived ? (
+        <PersonTomographies patientId={patientId} />
       ) : null}
       {showFacts ? (
       <section aria-label="Resumen" className="elevated rounded-xl border bg-card p-6">
@@ -454,12 +462,10 @@ export function PersonSummary({
         </div>
       </div>
 
-      <CreatePatientDrawer
+      <NewPatientDrawer
         open={registering}
         onClose={() => setRegistering(false)}
-        contactId={person.id}
-        person={person}
-        stayOnPage
+        target={registerTarget}
       />
       {!patientId ? (
         <TaskDrawer

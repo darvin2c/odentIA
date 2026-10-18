@@ -222,7 +222,7 @@ export function invitationTemplate({
 
 /* ---------- Avisos de soporte: solo avisan, nunca llevan el texto del caso ---------- */
 
-const SUPPORT_KIND_LABEL = { pregunta: "Pregunta", problema: "Problema", acceso: "Acceso" } as const
+const SUPPORT_KIND_LABEL = { pregunta: "Pregunta", problema: "Problema", acceso: "Acceso", cobro: "Revisión de cobro" } as const
 export type SupportCaseKindLabel = keyof typeof SUPPORT_KIND_LABEL
 
 /**

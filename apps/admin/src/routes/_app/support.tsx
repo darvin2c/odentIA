@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { z } from "zod"
+import { caseReview, SupportCaseReview } from "../../components/support-review"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 
@@ -38,7 +39,7 @@ const caseItem = z.object({
   id: z.string(),
   organizationId: z.string().nullable(),
   organizationName: z.string().nullable(),
-  kind: z.enum(["pregunta", "problema", "acceso"]),
+  kind: z.enum(["pregunta", "problema", "acceso", "cobro"]),
   question: z.string(),
   status: supportStatus,
   assigneeStaffId: z.string().nullable(),
@@ -72,6 +73,8 @@ const caseDetail = caseItem.extend({
       active: z.boolean(),
     }),
   ),
+  /** Solo en «Revisión de cobro»: la fila que la clínica pidió revisar (ADR 0054). */
+  review: caseReview.nullable().optional(),
 })
 
 const diagnosticPayload = z.object({
@@ -573,6 +576,9 @@ function SupportPage() {
                 {kase.appVersion ?? "—"} · Reaperturas: {kase.reopenedCount} · Responsable:{" "}
                 {assigneeName(kase.assigneeStaffId) ?? "sin asignar"}
               </p>
+              {kase.review ? (
+                <SupportCaseReview caseId={kase.id} review={kase.review} roleLabel={kase.role} isAdmin={isAdmin} />
+              ) : null}
 
               <ol className="flex flex-col gap-2">
                 {kase.messages.map((message) => (
@@ -738,7 +744,8 @@ function SupportPage() {
                     Asignarme
                   </Button>
                 ) : null}
-                {STATUSES.filter((value) => value !== kase.status).map((value) => (
+                {/* Una «Revisión de cobro» se resuelve al decidirla (ADR 0054). */}
+                {STATUSES.filter((value) => value !== kase.status && !(value === "resuelto" && kase.review?.status === "pendiente")).map((value) => (
                   <Button
                     key={value}
                     type="button"

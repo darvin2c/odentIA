@@ -12,12 +12,16 @@
  */
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { encodeDemoDicom } from "@odentia/clinical"
+import { encodeDemoCtSlice, encodeDemoDicom, generateCbctPhantom } from "@odentia/clinical"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
+import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
@@ -48,6 +52,8 @@ import {
   patientRegistration,
   patientRegistrationLink,
   patientResponsibility,
+  periodontalChart,
+  periodontalTooth,
   prescription,
   prescriptionItem,
   serviceCatalog,
@@ -101,6 +107,14 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { blockContact, markSpam } from "./contact-screen.js"
+import { decideActionReview, requestActionReview } from "./saas-action-review.js"
+import {
+  markImagingFilesUploaded,
+  pendingImagingFiles,
+  setImagingThumbnail,
+  startImagingStudyUpload,
+} from "./imaging-studies.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -137,6 +151,7 @@ import { seedAgent } from "./seed-agent.js"
 import { seedAutomation, seedChannelTemplates } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
+import { seedPeriodontalCase } from "./seed-periodontal.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
@@ -158,7 +173,7 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
@@ -359,6 +374,8 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
+    // La revisión de un cobro apunta a su acción y a su caso de Soporte.
+    "saas_action_review",
     "support_access_audit",
     "support_access_grant",
     "support_attachment",
@@ -528,6 +545,9 @@ async function wipeSeed(): Promise<void> {
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
+  // El periodontograma apunta a su atención (ADR 0054): va antes que ella.
+  await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, SEED_ORGS))
+  await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   // La atención referencia su cita (ADR 0002): las citas se borran después.
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
@@ -1301,6 +1321,61 @@ for (const [index, item] of CLOSED_SEED.entries()) {
   })
 }
 
+// --- Spam y bloqueados (issue 77, ADR 0054): una persona por cada forma de
+// llegar a Spam (el mismo texto muchas veces, una venta a la clínica y una
+// estafa) y una bloqueada por recepción. Ninguna es paciente; no se envía nada.
+const SEED_SCREENED = [
+  { name: "+1 202 555 0142", phone: "+12025550142", reason: "repeticion", texts: Array.from({ length: 6 }, () => "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya") },
+  { name: "MarketDent", phone: "+51944100200", reason: "venta", texts: ["Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?"] },
+  { name: "+51 913 004 221", phone: "+51913004221", reason: "estafa", texts: ["Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago"] },
+  { name: "Kevin Ramos", phone: "+51951220418", reason: "amenazas", texts: ["¿Por qué me cobraron la consulta si no me atendieron?", "Esto no se queda así. Voy a ir a la clínica y van a ver."] },
+] as const
+for (const [index, item] of SEED_SCREENED.entries()) {
+  const person = await createContact(db, ORG_A, { displayName: item.name, phone: item.phone }, { userId: ANA_ID })
+  await db.insert(contactIdentity).values({
+    organizationId: ORG_A,
+    contactId: person.id,
+    channel: "whatsapp",
+    externalUserId: `wa:${item.phone.replace(/\D/g, "")}`,
+    displayName: item.name,
+    isPrimary: true,
+  })
+  const last = hoursAgo(5 + index * 7)
+  const conv = await seedConversation({
+    orgId: ORG_A,
+    contactId: person.id,
+    connectionId: connA.id,
+    thread: `seed-thread-screened-${index}`,
+    unreadCount: 0,
+    lastInboundAt: last,
+    lastMessageAt: last,
+  })
+  let firstMessageId = ""
+  for (const [n, text] of item.texts.entries()) {
+    const msg = await seedMessage({
+      orgId: ORG_A,
+      conversationId: conv.id,
+      direction: "in",
+      senderKind: "contact",
+      body: text,
+      externalId: `seed-msg-screened-${index}-${n}`,
+      status: "received",
+      createdAt: new Date(last.getTime() - (item.texts.length - 1 - n) * 6 * 60_000),
+    })
+    firstMessageId ||= msg.id
+  }
+  if (item.reason === "amenazas") {
+    await blockContact(db, ORG_A, {
+      contactId: person.id,
+      userId: ANA_ID,
+      reason: "amenazas",
+      note: "Amenazó a recepción después de que le cobramos la consulta.",
+    })
+  } else {
+    await markSpam(db, ORG_A, { contactId: person.id, reason: item.reason, userId: null, messageId: firstMessageId })
+  }
+}
+
 // --- Tareas A ---
 await createTask(db, ORG_A, {
   title: "Llamar a Rosa para confirmar cita",
@@ -1449,12 +1524,12 @@ const PATIENTS_A: Array<{
 ]
 const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
-  const [given, paternal] = p.name.split(" ")
+  const [given, ...surnames] = p.name.split(" ")
   const rosa = p.name === "Rosa Quispe"
   const row = await createPatient(db, ORG_A, ANA_ID, {
     displayName: p.name,
     givenNames: given,
-    paternalSurname: paternal,
+    familyName: surnames.join(" "),
     contacts: [
       { contactId: contactIdByName.get(p.name)!, relationship: "self", isPreferred: true },
     ],
@@ -2083,6 +2158,109 @@ for (const previa of [
     toothNumbers: [36],
   })
 }
+// La misma periapical en cada compresión que lee el visor DICOM (JPEG, JPEG-LS,
+// JPEG 2000, RLE, Big Endian y varios cuadros); las genera
+// `packages/clinical/samples/dicom/generate.py`. Son muestras, no se informan.
+{
+  const require = createRequire(import.meta.url)
+  for (const sample of DICOM_SAMPLES) {
+    if (sample.transferSyntax === "1.2.840.10008.1.2.1") continue // ya está la del sensor
+    const bytes = new Uint8Array(
+      readFileSync(require.resolve(`@odentia/clinical/samples/dicom/${sample.file}`)),
+    )
+    const ref = await storage.putPatientDocument({
+      orgId: ORG_A,
+      patientId: rosaPatientId,
+      bytes,
+      contentType: "application/dicom",
+      ext: "dcm",
+    })
+    await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+      category: "radiografia",
+      label: `[DEMO] Periapical en ${sample.name} (DICOM)`,
+      storageKey: ref.objectKey,
+      contentType: "application/dicom",
+      sizeBytes: ref.size,
+      imageType: "periapical",
+      capturedAt: new Date(Date.now() - 400 * 86_400_000),
+      source: "Muestra de formatos DICOM",
+      reportStatus: "no_requiere",
+      toothNumbers: [36],
+    })
+  }
+}
+// Tomografía de demostración (un fantoma sintético, no es de un paciente) para
+// el visor de tomografía: la serie CT entra por el mismo camino que la de un CD
+// (ADR 0055). Lleva el nombre de Rosa para que no salte el aviso de nombre.
+{
+  const phantom = generateCbctPhantom()
+  const root = "2.25.3400000000000000000034"
+  const studyUid = `${root}.1`
+  const seriesUid = `${root}.2`
+  const slices = phantom.data.map((pixels, k) =>
+    encodeDemoCtSlice({
+      width: phantom.size,
+      height: phantom.size,
+      pixels,
+      voxelMm: phantom.voxelMm,
+      position: [phantom.origin[0], phantom.origin[1], phantom.sliceZ[k]!],
+      instanceNumber: k + 1,
+      studyUid,
+      seriesUid,
+      frameOfReferenceUid: `${root}.3`,
+      sopUid: `${root}.4.${k + 1}`,
+      patientName: "QUISPE^ROSA",
+    }),
+  )
+  const started = await startImagingStudyUpload(db, ORG_A, ANA_ID, rosaPatientId, {
+    label: "[DEMO] Tomografía (CBCT) · Centro de imágenes de demostración",
+    studyInstanceUid: studyUid,
+    dicomPatientName: "QUISPE^ROSA",
+    modality: "CT",
+    capturedAt: new Date(Date.now() - 20 * 86_400_000),
+    source: "Centro de imágenes de demostración",
+    toothNumbers: [36, 37],
+    sliceCount: slices.length,
+    voxelMm: phantom.voxelMm,
+    files: slices.map((bytes, k) => ({
+      sopInstanceUid: `${root}.4.${k + 1}`,
+      seriesInstanceUid: seriesUid,
+      sizeBytes: bytes.byteLength,
+    })),
+  })
+  const documentId = started.document.id
+  const pending = await pendingImagingFiles(db, ORG_A, rosaPatientId, documentId)
+  for (const file of pending) {
+    await storage.putAttachmentAt?.(file.storageKey, slices[file.index]!, "application/dicom")
+  }
+  await markImagingFilesUploaded(
+    db,
+    ORG_A,
+    ANA_ID,
+    rosaPatientId,
+    documentId,
+    pending.map((file) => file.index),
+  )
+  // Miniatura: el corte a la altura de las raíces inferiores, con ventana de hueso.
+  const k = phantom.sliceZ.findIndex((z) => z >= -18)
+  const gray = Buffer.from(
+    Array.from(phantom.data[k]!, (stored) =>
+      Math.max(0, Math.min(255, Math.round(((stored - 1000 - 699.5) / 2999 + 0.5) * 255))),
+    ),
+  )
+  const thumb = await sharp(gray, { raw: { width: phantom.size, height: phantom.size, channels: 1 } })
+    .resize(320)
+    .webp()
+    .toBuffer()
+  const thumbRef = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: thumb,
+    contentType: "image/webp",
+    ext: "webp",
+  })
+  await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey)
+}
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
 const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
 const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2097,6 +2275,36 @@ const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
 await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
   reason: "Subida al paciente equivocado",
 })
+// Un informe suelto en PDF: no es imagen ni consentimiento, así que Documentos
+// lo muestra en «Otros archivos» y lo abre en el mismo visor (issue 149).
+{
+  const pdf = await PDFDocument.create()
+  const sheet = pdf.addPage([595, 842])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  sheet.drawText("Informe de laboratorio (demostración)", { x: 56, y: 770, size: 16, font })
+  sheet.drawText("Hemograma y coagulación previos a la exodoncia: dentro de rangos.", {
+    x: 56,
+    y: 740,
+    size: 11,
+    font,
+  })
+  const bytes = Buffer.from(await pdf.save())
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "informe",
+    label: "[DEMO] Informe de laboratorio previo a la exodoncia",
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: bytes.byteLength,
+    source: "Laboratorio de demostración",
+  })
+}
 // Cierre con datos útiles: evolución e indicaciones. Lo que sigue lo dice el plan.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
@@ -2387,6 +2595,16 @@ await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
   decisionNote: "Respondió por WhatsApp: la 16 y la 26 ahora, la 36 después.",
 })
 
+// Periodontograma (issue 49): Carlos Paredes, con la visita inicial y la
+// reevaluación tras el raspado, como en el lienzo (tableros 4 y 11).
+await seedPeriodontalCase(db, {
+  orgId: ORG_A,
+  dentistUserId: ANA_ID,
+  patientId: patientIdByName.get("Carlos Paredes")!,
+  branchId: miraflores.id,
+  daysAgo,
+})
+
 // --- Volumen para paginación: 40 contactos+pacientes ---
 for (let i = 1; i <= 40; i++) {
   const n = String(i).padStart(2, "0")
@@ -2429,7 +2647,7 @@ const hijoVargas = (displayName: string, givenNames: string, birthDate: string, 
       {
         submissionId: randomUUID(),
         answers: {
-          demographics: { displayName, givenNames, paternalSurname: "Vargas", birthDate, docType: "DNI", docNumber },
+          demographics: { displayName, givenNames, familyName: "Vargas", birthDate, docType: "DNI", docNumber },
           respondent: "representative",
           representative: {
             displayName: "Gabriela Vargas Soto",
@@ -2453,7 +2671,7 @@ await hijoVargas("Valeria Vargas", "Valeria", "2019-08-22", "78123402")
 const marco = await createPatient(db, ORG_A, ANA_ID, {
   displayName: "Marco Torres",
   givenNames: "Marco",
-  paternalSurname: "Torres",
+  familyName: "Torres",
   birthDate: "1994-02-11",
   phone: "+51987650600",
   registeredBranchId: miraflores.id,
@@ -2576,21 +2794,18 @@ const registrationConfig = await db.transaction((tx) =>
     enabled: true,
     fields: {
       ...DEFAULT_REGISTRATION_CONFIG.fields,
-      // Como en el lienzo (tablero 5): la clínica pide además el documento; a
-      // quien se registró con lo mínimo le sale «Faltan datos para atenderla».
+      // Lo que pide una clínica típica (registro por el código QR): el
+      // documento y el sexo cuentan para «Faltan datos»; se le pregunta su
+      // salud, si está embarazada y si la han operado; nada censal ni de su
+      // historia dental.
       docType: "required",
       docNumber: "required",
-      insuranceType: "optional",
-      emergencyContactName: "optional",
-      emergencyContactPhone: "optional",
-      maritalStatus: "optional",
-      educationLevel: "optional",
-      occupation: "optional",
-      origin: "optional",
-      referralSource: "optional",
-      "dental.ultimaVisita": "optional",
-      "dental.experienciaPrevia": "optional",
-      "dental.ansiedadDental": "optional",
+      sex: "required",
+      email: "hidden",
+      address: "hidden",
+      bloodGroup: "hidden",
+      "personal.embarazo": "optional",
+      "personal.cirugias": "optional",
     },
     privacyNotice:
       "AVISO DE DEMOSTRACIÓN: autorizo el tratamiento de estos datos ficticios para mostrar el registro de pacientes. No utilizar datos reales en esta demostración.",
@@ -2624,7 +2839,7 @@ const pedroRios = await db.transaction((tx) =>
     {
       submissionId: randomUUID(),
       answers: {
-        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", paternalSurname: "Ríos", phone: "+51987111222" },
+        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", familyName: "Ríos", phone: "+51987111222" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -2683,7 +2898,7 @@ const pedro = await db.transaction((tx) =>
         demographics: {
           displayName: "Pedro Quispe",
           givenNames: "Pedro",
-          paternalSurname: "Quispe",
+          familyName: "Quispe",
           birthDate: "2016-05-20",
           // La clínica pide el documento: el DNI del menor.
           docType: "DNI",
@@ -2718,7 +2933,7 @@ const pedro = await db.transaction((tx) =>
 const martin = await createContact(db, ORG_A, {
   displayName: "Martín Salas",
   givenNames: "Martín",
-  paternalSurname: "Salas",
+  familyName: "Salas",
   phone: "+51987650001",
 })
 await db.transaction((tx) =>
@@ -2732,7 +2947,7 @@ await db.transaction((tx) =>
         demographics: {
           displayName: "Sofía Salas",
           givenNames: "Sofía",
-          paternalSurname: "Salas",
+          familyName: "Salas",
           birthDate: "2017-08-12",
           sex: "F",
           docType: "DNI",
@@ -2830,8 +3045,8 @@ await db.transaction((tx) =>
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
 // de «Madre» espera «Confirmar» o «No es ella», tarea `confirmar_representante`)
-// y alguien se registra con el DNI de Valeria (no se completa y queda para
-// revisar o «Descartar», tarea `registro_con_documento`).
+// y alguien se registra con el DNI de Valeria (no se crea a nadie: queda con lo
+// que escribió para «¿Es la misma persona?», tarea `registro_con_documento`).
 await db.transaction((tx) =>
   registerPatient(
     tx,
@@ -2844,7 +3059,7 @@ await db.transaction((tx) =>
         demographics: {
           displayName: "Thiago Quispe · QR demo",
           givenNames: "Thiago",
-          paternalSurname: "Quispe",
+          familyName: "Quispe",
           birthDate: "2019-03-02",
           phone: SHARED_PHONE,
           docType: "DNI",
@@ -2879,10 +3094,18 @@ await db
         submissionId: randomUUID(),
         formVersion: registrationConfig.version,
         answers: {
-          demographics: { displayName: "Alguien Distinto", birthDate: "1990-01-01", phone: "+51987000999", docType: "DNI", docNumber: "45678920" },
+          demographics: {
+            displayName: "Valeria Quispe Rojas",
+            givenNames: "Valeria",
+            familyName: "Quispe Rojas",
+            birthDate: "1990-01-01",
+            phone: "+51987000999",
+            docType: "DNI",
+            docNumber: "45678920",
+          },
           respondent: "patient",
           health: {
-            allergies: { state: "unanswered", items: [] },
+            allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] },
             conditions: { state: "unanswered", items: [] },
             medications: { state: "unanswered", items: [] },
           },
@@ -3429,6 +3652,44 @@ await db.transaction(async (tx) => {
       dedupeKey: "semilla:cita:0",
     },
   ]).onConflictDoNothing()
+  // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos
+  // conversaciones; odentIA mantuvo una con su respuesta y la otra espera en
+  // Soporte. Sus avisos a soporte quedan como enviados: la semilla no envía nada.
+  const reviewed = await db
+    .select({ id: saasAction.id, key: saasAction.dedupeKey })
+    .from(saasAction)
+    .where(and(eq(saasAction.organizationId, ORG_A), inArray(saasAction.dedupeKey, ["semilla:conversacion:2", "semilla:conversacion:4"])))
+  const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
+  const ana = { userId: ANA_ID, roleLabel: "Dueño" }
+  const caseIds: string[] = []
+  const kept = actionOf("semilla:conversacion:2")
+  if (kept) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: kept,
+      reason: "doble",
+      note: "Ejemplo de la semilla: creo que esta conversación ya se contó el día anterior.",
+    })
+    if (asked.caseId) {
+      caseIds.push(asked.caseId)
+      await decideActionReview(db, { userId: SEED_STAFF_ADMIN_ID, role: "admin" }, {
+        caseId: asked.caseId,
+        accept: false,
+        answer: "Ejemplo de la semilla: es una sola conversación ese día; la del día anterior fue con otra persona.",
+      })
+    }
+  }
+  const pending = actionOf("semilla:conversacion:4")
+  if (pending) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: pending,
+      reason: "agente",
+      note: "Ejemplo de la semilla: le dio un horario del sábado que no tenemos.",
+    })
+    if (asked.caseId) caseIds.push(asked.caseId)
+  }
+  if (caseIds.length) {
+    await db.update(supportNotice).set({ emailState: "enviado", emailedAt: new Date() }).where(inArray(supportNotice.caseId, caseIds))
+  }
 }
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no

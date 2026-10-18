@@ -291,14 +291,31 @@ export const pipelineStage = pgTable(
 export const PREFERRED_CHANNELS = ["email", "whatsapp", "telegram", "messenger", "instagram"] as const
 export type PreferredChannel = (typeof PREFERRED_CHANNELS)[number]
 
+/**
+ * Lo que el agente no atiende de una persona (issue 77, ADR 0054): `spam` es
+ * sobre lo que mandó y sale solo si después escribe algo real; `blocked` es
+ * sobre la persona, lo decide solo alguien del equipo y nunca sale solo.
+ */
+export const CONTACT_SCREENS = ["spam", "blocked"] as const
+export type ContactScreen = (typeof CONTACT_SCREENS)[number]
+/** Por qué está en Spam: el código (repetición), el modelo de decisión o el equipo. */
+export const SPAM_REASONS = ["repeticion", "publicidad", "estafa", "cadena", "respuesta_automatica", "venta", "equipo"] as const
+export type SpamReason = (typeof SPAM_REASONS)[number]
+/** Por qué se bloqueó: lo elige la persona del equipo, con lo que pasó escrito. */
+export const BLOCK_REASONS = ["acoso", "amenazas", "estafa", "otro"] as const
+export type BlockReason = (typeof BLOCK_REASONS)[number]
+
 export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
-  /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
+  /**
+   * «Nombres» y «Apellidos», dos campos (ADR 0004 y 0058); display_name se
+   * deriva de ellos en la base. Los apellidos van juntos, como el «family» de
+   * HL7 FHIR HumanName: «Quispe Mamani», «De la Cruz Ríos».
+   */
   givenNames: text("given_names"),
-  paternalSurname: text("paternal_surname"),
-  maternalSurname: text("maternal_surname"),
+  familyName: text("family_name"),
   /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
   identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
   /** País emisor del documento (ISO 3166-1 alfa-2). */
@@ -313,6 +330,20 @@ export const contact = pgTable("contact", {
   sex: text("sex"),
   /** Archivada entera, con su ficha si es paciente (`setPersonArchived`). */
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * Spam o bloqueada (`CONTACT_SCREENS`): el agente no la atiende y no sale
+   * en las pestañas de la Bandeja. Desde cuándo, quién (nulo = el agente; un
+   * bloqueo siempre tiene autor), por qué y, si se bloqueó, qué pasó. Lo
+   * cambian solo `contact-screen.ts`; la historia queda en la auditoría.
+   */
+  screen: text("screen"),
+  screenedAt: timestamp("screened_at", { withTimezone: true }),
+  screenedByUserId: text("screened_by_user_id").references(() => user.id),
+  screenReason: text("screen_reason"),
+  screenNote: text("screen_note"),
+  /** Alguien del equipo dijo «No es spam»: nunca vuelve sola a Spam. */
+  notSpamAt: timestamp("not_spam_at", { withTimezone: true }),
+  notSpamByUserId: text("not_spam_by_user_id").references(() => user.id),
   // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
   // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
   tags: text("tags").array().notNull().default(sql`'{}'`),
@@ -333,6 +364,22 @@ export const contact = pgTable("contact", {
   ),
   // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
   check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
+  // Sin estado, nada de lo demás; en Spam, desde cuándo y un motivo de Spam; bloqueada,
+  // además quién lo hizo y qué pasó (el bloqueo nunca es automático).
+  check(
+    "contact_screen_check",
+    sql`(${table.screen} IS NULL AND ${table.screenedAt} IS NULL AND ${table.screenedByUserId} IS NULL
+        AND ${table.screenReason} IS NULL AND ${table.screenNote} IS NULL)
+      OR (${table.screen} = 'spam' AND ${table.screenedAt} IS NOT NULL
+        AND ${table.screenReason} IN ('repeticion','publicidad','estafa','cadena','respuesta_automatica','venta','equipo'))
+      OR (${table.screen} = 'blocked' AND ${table.screenedAt} IS NOT NULL AND ${table.screenedByUserId} IS NOT NULL
+        AND ${table.screenReason} IN ('acoso','amenazas','estafa','otro') AND length(trim(${table.screenNote})) > 0)`,
+  ),
+  check(
+    "contact_not_spam_check",
+    sql`(${table.notSpamAt} IS NULL) = (${table.notSpamByUserId} IS NULL)`,
+  ),
+  index("contact_org_screen_idx").on(table.organizationId, table.screen).where(sql`"screen" IS NOT NULL`),
 ])
 
 export const contactIdentity = pgTable(
@@ -353,6 +400,12 @@ export const contactIdentity = pgTable(
      * si la persona escribe desde ese número o el equipo lo vuelve a marcar.
      */
     noWhatsappAt: timestamp("no_whatsapp_at", { withTimezone: true }),
+    /**
+     * El proveedor confirmó que bloqueó este número para la clínica (WhatsApp,
+     * Block Users API). Nulo: no está bloqueado ahí, o aún no se pudo (solo se
+     * puede si escribió en las últimas 24 horas).
+     */
+    providerBlockedAt: timestamp("provider_blocked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -461,6 +514,11 @@ export const message = pgTable(
     // WhatsApp (ADR 0050): lo llena el equipo al responder un tema y el
     // adaptador al recibir una respuesta citada. Nulo si no cita nada.
     replyToMessageId: uuid("reply_to_message_id"),
+    /**
+     * Se borró su texto y sus adjuntos: era spam y pasaron 90 días (decisión 16
+     * del issue 77). La fila queda para que el hilo y el libro sigan enteros.
+     */
+    redactedAt: timestamp("redacted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -564,6 +622,32 @@ export const crmTask = pgTable(
     index("task_org_opportunity_idx").on(table.organizationId, table.opportunityId),
     index("task_org_patient_idx").on(table.organizationId, table.patientId),
     index("task_org_status_due_idx").on(table.organizationId, table.status, table.dueAt),
+  ],
+)
+
+/**
+ * Lo que escribió quien se registró por el registro en línea (el código QR
+ * general) y se parece a una persona que ya está en la clínica: el mismo
+ * documento o el mismo celular. No se crea ni se cambia a nadie: queda aquí,
+ * unido a su fila de «Te espera» (`registro_con_documento`), hasta que
+ * recepción decide si es la misma persona. Se borra al decidir.
+ */
+export const registrationHold = pgTable(
+  "registration_hold",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    taskId: uuid("task_id").notNull(),
+    /** Por qué se parece: `documento` o `celular` (nunca solo el nombre). */
+    match: text("match").notNull(),
+    /** Las respuestas del registro tal como llegaron (`RegistrationAnswers`). */
+    answers: jsonb("answers").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("registration_hold_match_check", sql`${table.match} IN ('documento', 'celular')`),
+    foreignKey({ columns: [table.organizationId, table.taskId], foreignColumns: [crmTask.organizationId, crmTask.id] }).onDelete("cascade"),
+    uniqueIndex("registration_hold_task_uidx").on(table.organizationId, table.taskId),
   ],
 )
 

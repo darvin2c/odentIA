@@ -13,6 +13,7 @@ import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { type AdminRecommendation, getAdminRecommendations } from "./agent-admin.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { screenedSql } from "./conversation-state.js"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { validation } from "./errors.js"
 import { getFinanceResultBetween, getFinanceTotalsBetween, requireBranch } from "./finance.js"
@@ -376,6 +377,7 @@ function firstResponseCohort(orgId: string, span: ReportSpan): SQL {
         order by coalesce(m.sent_at, m.created_at), m.id limit 1
       ) r on true
       where i.created_at >= ${at(span.start)} and i.created_at < ${at(span.end)}
+        and not ${screenedSql(sql.raw("c"))}
     )`
 }
 

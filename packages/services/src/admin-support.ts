@@ -13,6 +13,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
+import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -23,7 +24,8 @@ import { enqueueSupportInboxNotice } from "./support-notices.js"
 /* ---------- Tipos ---------- */
 
 export type SupportStatus = "abierto" | "en_atencion" | "esperando_clinica" | "resuelto"
-export type SupportKind = "pregunta" | "problema" | "acceso"
+/** `cobro`: la clínica pidió revisar una fila de lo que se le cobró (ADR 0054). */
+export type SupportKind = "pregunta" | "problema" | "acceso" | "cobro"
 
 export const SUPPORT_STATUSES: SupportStatus[] = [
   "abierto",
@@ -300,7 +302,7 @@ function toListItem(
     id: row.id,
     organizationId: row.organizationId,
     organizationName: null,
-    kind: (["pregunta", "problema", "acceso"] as string[]).includes(row.kind)
+    kind: (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(row.kind)
       ? (row.kind as SupportKind)
       : "pregunta",
     question: row.question,
@@ -995,6 +997,15 @@ export async function setSupportCaseStatus(
   status: SupportStatus,
 ): Promise<void> {
   const kase = await requireStaffCase(db, caseId)
+  // Una «Revisión de cobro» se resuelve al decidirla, con su respuesta (ADR 0054).
+  if (kase.kind === "cobro" && status === "resuelto") {
+    const [pending] = await db
+      .select({ id: saasActionReview.id })
+      .from(saasActionReview)
+      .where(and(eq(saasActionReview.supportCaseId, caseId), eq(saasActionReview.status, "pendiente")))
+      .limit(1)
+    if (pending) throw new ServiceError("REVIEW_PENDING", 409, "Decide la revisión con «Devolver» o «Mantener el cobro» antes de resolver el caso")
+  }
   const leavingResolved = kase.status === "resuelto" && status !== "resuelto"
   // Pasar a «Esperando a la clínica» le pide algo: cuenta como novedad sin
   // leer en su lista y, si no lo ve, le llega «Soporte de odentIA necesita algo de ti».
@@ -1321,7 +1332,7 @@ export async function supportMetrics(db: Db, actor: AdminActor): Promise<Support
     (SUPPORT_STATUSES as string[]).includes(row.status),
   )
   const validKinds = byKind.filter(
-    (row) => row.kind === "pregunta" || row.kind === "problema" || row.kind === "acceso",
+    (row) => row.kind === "pregunta" || row.kind === "problema" || row.kind === "acceso" || row.kind === "cobro",
   )
   return {
     byStatus: validStatuses.map((row) => ({

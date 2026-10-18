@@ -457,7 +457,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const form = await run((tx) => getBookingLinkRegistrationForm(tx, ORG, link.token))
     expect(form).toMatchObject({ phone: null, config: { version: published.version, privacyNotice: "Tus datos se usan solo para tu atención." } })
     const essentials = {
-      demographics: { displayName: "Carla Núñez Prado", givenNames: "Carla", paternalSurname: "Núñez", maternalSurname: "Prado", docType: "DNI" as const, docNumber: "45678912", phone: "+51987654321" },
+      demographics: { displayName: "Carla Núñez Prado", givenNames: "Carla", familyName: "Núñez Prado", docType: "DNI" as const, docNumber: "45678912", phone: "+51987654321" },
       respondent: "patient" as const,
       privacyAccepted: true,
     }
@@ -482,10 +482,10 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect(linked).toHaveLength(1)
     const registered = linked[0]!
     const [ficha] = await selectTestPatients(ownerDb).where(eq(patient.id, registered.id))
-    // Queda con lo esencial; lo demás vacío y la identidad por revisar, que es lo que ve recepción en la ficha.
+    // Queda con lo esencial y lo demás vacío; los apellidos llegan enteros, sin nada que revisar.
     expect(ficha).toMatchObject({
       displayName: "Carla Núñez Prado", docType: "DNI", docNumber: "45678912", phone: "+51987654321",
-      birthDate: null, sex: null, identityNeedsReview: true,
+      birthDate: null, sex: null, identityNeedsReview: false,
     })
     // Mismo consentimiento y misma procedencia que cualquier registro: versión del aviso, enlace consumido y conversación.
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, registered.id))
@@ -528,7 +528,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const madre = await person("madre-enlace")
     const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId }, { secretsKey: KEY }))
     const answers = {
-      demographics: { displayName: "Mateo Rojas Lima", givenNames: "Mateo", paternalSurname: "Rojas", maternalSurname: "Lima", docType: "DNI" as const, docNumber: "78123456", birthDate: "2018-03-10" },
+      demographics: { displayName: "Mateo Rojas Lima", givenNames: "Mateo", familyName: "Rojas Lima", docType: "DNI" as const, docNumber: "78123456", birthDate: "2018-03-10" },
       respondent: "representative" as const,
       representative: { displayName: "Rosa Lima", relationship: "guardian" as const, relationshipDetail: "", phone: "+51955111222", docType: "DNI" as const, docNumber: "41234567" },
       privacyAccepted: true,

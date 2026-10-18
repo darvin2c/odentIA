@@ -22,6 +22,7 @@ import {
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -845,4 +846,19 @@ it("listContactChannelHistory: procedencia, acotación, paginación, identidad y
     listContactChannelHistory(tx, "org_a", { contactId: other.id, limit: 10 }),
   )
   expect(afterDest.items.map((i) => i.conversationId)).toContain(convWa)
+})
+
+it("el detalle dice qué le falta a la paciente para que la Bandeja ofrezca su enlace", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const first = await ingest("org_a", connId, textEvent({ externalEventId: "evt-faltan", externalMessageId: "ext-faltan", externalThreadId: "tg:9101", senderExternalId: "tg:9101", senderDisplayName: "Rosa" }))
+  const before = await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", first.conversationId))
+  // Aún no es paciente: no hay ficha que completar.
+  expect(before.contact.isPatient).toBe(false)
+  expect(before.missingData).toBeNull()
+
+  const [ficha] = await insertTestPatients(ownerDb, { organizationId: "org_a", personId: before.contact.id, displayName: "Rosa", patientNumber: 9101 })
+  const after = await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", first.conversationId))
+  expect(after.contact.isPatient).toBe(true)
+  expect(after.missingData?.patientId).toBe(ficha!.id)
+  expect(after.missingData?.missing.length).toBeGreaterThan(0)
 })

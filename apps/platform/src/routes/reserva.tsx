@@ -236,7 +236,21 @@ function PersonalLinkPage() {
   )
 
   if (screen.kind === "datos") {
-    return one(view.patientFirstName ? `Los datos de ${view.patientFirstName}` : "Tus datos", <PersonalDataForm slug={slug} token={token} clinicName={view.clinicName} onDone={back} />)
+    const withHealth = view.data?.health ? " y su salud" : ""
+    const line = appointment && !appointment.cancelled ? `Te esperamos el ${longDay(appointment.startsAt, appointment.timeZone).toLowerCase()} a las ${timeLabel(appointment.startsAt, appointment.timeZone)}.` : null
+    return one(
+      view.patientFirstName ? `Los datos de ${view.patientFirstName}${withHealth}` : view.data?.health ? "Tus datos y tu salud" : "Tus datos",
+      <PersonalDataForm
+        slug={slug}
+        token={token}
+        clinicName={view.clinicName}
+        appointmentLine={line}
+        onDone={() => {
+          refresh()
+          back()
+        }}
+      />,
+    )
   }
   if (screen.kind === "consentimiento") {
     return one("Tu consentimiento", <LinkConsentStep slug={slug} token={token} consentId={screen.consentId} onBack={back} />)
@@ -311,9 +325,15 @@ function PersonalLinkPage() {
         ) : null}
         {missing.length > 0 ? (
           <Block
-            title={view.patientFirstName ? `Los datos de ${view.patientFirstName}` : "Tus datos"}
+            title={
+              view.patientFirstName
+                ? `Los datos de ${view.patientFirstName}${view.data?.health ? " y su salud" : ""}`
+                : view.data?.health
+                  ? "Tus datos y tu salud"
+                  : "Tus datos"
+            }
             badge={missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`}
-            text={capital(missing.map((item) => item.label.toLowerCase()).join(", "))}
+            text={`${capital(missing.map((item) => item.label.toLowerCase()).join(", "))}${view.data?.health ? "; y si tienes alergias, alguna enfermedad o tomas medicamentos" : ""}.`}
             action="Completar"
             onAction={() => setScreen({ kind: "datos" })}
           />

@@ -1,5 +1,14 @@
 import { documentText } from "@odentia/clinical"
-import { Badge, Button, Spinner } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  ButtonGroup,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Spinner,
+} from "@odentia/ui"
 import {
   DataTable,
   DataTableSkeleton,
@@ -14,8 +23,9 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Plus } from "lucide-react"
+import { ChevronDown, Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { NewPatientDrawer, type NewPatientTarget } from "../../components/patient/new-patient-drawer"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
@@ -30,6 +40,7 @@ import {
 } from "../../lib/people"
 
 const PAGE_LIMIT = 30
+const NEW_PATIENT: NewPatientTarget = { kind: "new" }
 
 /**
  * Una lista y un buscador (ADR 0029): todas las personas de la clínica, con
@@ -70,6 +81,9 @@ function PeoplePage() {
   const canView = usePermission("patients.read")
   const can = useCan()
   const canCreate = can("patients.write") || can("crm.write")
+  // Registrar un paciente es el botón principal; un contacto (aún no es paciente), su menú.
+  const canRegister = can("patients.write")
+  const [registering, setRegistering] = useState(false)
   const listSearch = useListSearch()
   // Quien aún no es paciente solo lo ven recepción y quien dirige; caja y odontología, solo pacientes.
   const seesAll = can("crm.read")
@@ -134,6 +148,9 @@ function PeoplePage() {
               {PERSON_KIND_LABELS[row.original.kind]}
             </Badge>
             {row.original.archived ? <Badge variant="outline">Archivada</Badge> : null}
+            {/* Spam y bloqueados no son contactos nuevos: se encuentran aquí con su estado (ADR 0054). */}
+            {row.original.screen === "spam" ? <Badge variant="outline">Spam</Badge> : null}
+            {row.original.screen === "blocked" ? <Badge variant="destructive">Bloqueado</Badge> : null}
           </span>
         ),
       },
@@ -153,10 +170,34 @@ function PeoplePage() {
             : "Los pacientes de la clínica"
         }
         actions={
-          canCreate ? (
+          canRegister ? (
+            <ButtonGroup>
+              <Button type="button" onClick={() => setRegistering(true)}>
+                <Plus aria-hidden />
+                Nuevo paciente
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button type="button" size="icon" aria-label="Más formas de agregar a alguien" />}
+                >
+                  <ChevronDown aria-hidden />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
+                    <span className="font-medium">Nuevo paciente</span>
+                    <span className="text-xs text-muted-foreground">Para atenderlo: crea su historia.</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setCreating(true)} className="flex-col items-start gap-0.5">
+                    <span className="font-medium">Nuevo contacto</span>
+                    <span className="text-xs text-muted-foreground">Aún no es paciente: alguien que pregunta o un familiar.</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </ButtonGroup>
+          ) : canCreate ? (
             <Button type="button" onClick={() => setCreating(true)}>
               <Plus aria-hidden />
-              Nueva persona
+              Nuevo contacto
             </Button>
           ) : undefined
         }
@@ -217,8 +258,8 @@ function PeoplePage() {
               ? "Prueba con otra parte del nombre, el teléfono o el documento, o mira en «Todos»."
               : "Cuando alguien escriba o lo registres, aparece aquí."
           }
-          actionLabel={canCreate ? "Nueva persona" : undefined}
-          onAction={canCreate ? () => setCreating(true) : undefined}
+          actionLabel={canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
+          onAction={canRegister ? () => setRegistering(true) : canCreate ? () => setCreating(true) : undefined}
         />
       ) : (
         <>
@@ -264,6 +305,7 @@ function PeoplePage() {
           </div>
         </>
       )}
+      <NewPatientDrawer open={registering} onClose={() => setRegistering(false)} target={NEW_PATIENT} />
       <NewPersonDrawer open={creating} onClose={() => setCreating(false)} />
     </PageShell>
   )

@@ -146,6 +146,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       hono:
         specifier: 4.13.7
         version: 4.13.7
@@ -256,6 +259,18 @@ importers:
 
   apps/platform:
     dependencies:
+      '@cornerstonejs/codec-charls':
+        specifier: 1.2.7
+        version: 1.2.7
+      '@cornerstonejs/codec-libjpeg-turbo-12bit':
+        specifier: 0.4.7
+        version: 0.4.7
+      '@cornerstonejs/codec-libjpeg-turbo-8bit':
+        specifier: 1.2.8
+        version: 1.2.8
+      '@cornerstonejs/codec-openjpeg':
+        specifier: 1.3.6
+        version: 1.3.6
       '@dnd-kit/core':
         specifier: 6.3.1
         version: 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -304,6 +319,12 @@ importers:
       dicom-parser:
         specifier: 1.8.21
         version: 1.8.21
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
+      jpeg-lossless-decoder-js:
+        specifier: 2.1.2
+        version: 2.1.2
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.3.0)
@@ -469,6 +490,9 @@ importers:
       '@odentia/auth':
         specifier: workspace:*
         version: link:../packages/auth
+      '@odentia/clinical':
+        specifier: workspace:*
+        version: link:../packages/clinical
       '@odentia/db':
         specifier: workspace:*
         version: link:../packages/db
@@ -1494,6 +1518,22 @@ packages:
   '@clack/prompts@1.8.1':
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
+
+  '@cornerstonejs/codec-charls@1.2.7':
+    resolution: {integrity: sha512-kNfQ7J8LIrfQUbt56fPJ0SEvevLlAAbsLHjqPS4DUDWVSuAHb5Fn0cMIV/U0SYkJRJqKvzyLJYF1hl7/xQGqLQ==}
+    engines: {node: '>=0.14'}
+
+  '@cornerstonejs/codec-libjpeg-turbo-12bit@0.4.7':
+    resolution: {integrity: sha512-0rt1n3yaRrbluUfJwVFzEVbezZsl2GqtJ4fXaDdoBdbxHLYPIBff+d7vSMtloaD4Gi6Agbwd1fqMIjjl/HHxKQ==}
+    engines: {node: '>=0.14'}
+
+  '@cornerstonejs/codec-libjpeg-turbo-8bit@1.2.8':
+    resolution: {integrity: sha512-qggTc0EAso+FAB4aND1wufjY/FnaVXKaJ/PAiabSksaAgf8jhCew+K3R4e3QWJI8SqcYczZFkhpVdFVwXG9ZgQ==}
+    engines: {node: '>=0.14'}
+
+  '@cornerstonejs/codec-openjpeg@1.3.6':
+    resolution: {integrity: sha512-bSdZXF+2GxfBkWHUr7yGLQtIwbAm9wOl3e4ARee/9Z9lfKyVqhUCixI6+ZjIn9YKTIuDcn/NZNK94XEUg1SBtw==}
+    engines: {node: '>=0.14'}
 
   '@csstools/color-helpers@6.1.1':
     resolution: {integrity: sha512-gLNsunvwf3mCi5u5o46/Z/JcJMnhbHSaZ69rkgPzNM3J4s8hWwpPUQB6/tt0EDFyCiWzxANlx+2LJwpYj4zS1w==}
@@ -3243,6 +3283,11 @@ packages:
   '@rollup/rollup-linux-s390x-gnu@4.63.1':
     resolution: {integrity: sha512-q2R38Sn+1J8RxhfJ+T54wSWmyKXWec+9jgDfqO2AtArEqHO5R2aeayp5H5OYLr5UYDVGsVaZPEFUooMhYCdz5A==}
     cpu: [s390x]
+    os: [linux]
+
+  '@rollup/rollup-linux-x64-gnu@4.13.0':
+    resolution: {integrity: sha512-yUD/8wMffnTKuiIsl6xU+4IA8UNhQ/f1sAnQebmE/lyQ8abjsVyDkyRkWop0kdMhKMprpNIhPmYlCxgHrPoXoA==}
+    cpu: [x64]
     os: [linux]
 
   '@rollup/rollup-linux-x64-gnu@4.63.1':
@@ -5333,6 +5378,9 @@ packages:
   fetchdts@0.1.7:
     resolution: {integrity: sha512-YoZjBdafyLIop9lSxXVI33oLD5kN31q4Td+CasofLLYeLXRFeOsuOw0Uo+XNRi9PZlbfdlN2GmRtm4tCEQ9/KA==}
 
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
+
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
     engines: {node: '>=18'}
@@ -5701,6 +5749,9 @@ packages:
 
   jose@6.2.12:
     resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+
+  jpeg-lossless-decoder-js@2.1.2:
+    resolution: {integrity: sha512-fYf/plymnuKwVw+s8gJ8O/BPw8y8OLaN11MBvEcT05kuy3m45o7BEC4J0JbxMNUYyO+MdK/I/jq0q1gkVYZm2Q==}
 
   js-tiktoken@1.0.21:
     resolution: {integrity: sha512-biOj/6M5qdgx5TKjDnFT1ymSpM5tbd3ylwDtrQvFQSu0Z7bBYko2dF+W/aUkXUPuk6IVpRxk/3Q2sHOzGlS36g==}
@@ -8628,6 +8679,14 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
+  '@cornerstonejs/codec-charls@1.2.7': {}
+
+  '@cornerstonejs/codec-libjpeg-turbo-12bit@0.4.7': {}
+
+  '@cornerstonejs/codec-libjpeg-turbo-8bit@1.2.8': {}
+
+  '@cornerstonejs/codec-openjpeg@1.3.6': {}
+
   '@csstools/color-helpers@6.1.1': {}
 
   '@csstools/css-calc@3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
@@ -10008,6 +10067,9 @@ snapshots:
     optional: true
 
   '@rollup/rollup-linux-s390x-gnu@4.63.1':
+    optional: true
+
+  '@rollup/rollup-linux-x64-gnu@4.13.0':
     optional: true
 
   '@rollup/rollup-linux-x64-gnu@4.63.1':
@@ -12336,6 +12398,8 @@ snapshots:
 
   fetchdts@0.1.7: {}
 
+  fflate@0.8.2: {}
+
   figures@6.1.0:
     dependencies:
       is-unicode-supported: 2.1.0
@@ -12652,6 +12716,10 @@ snapshots:
   jiti@2.7.0: {}
 
   jose@6.2.12: {}
+
+  jpeg-lossless-decoder-js@2.1.2:
+    optionalDependencies:
+      '@rollup/rollup-linux-x64-gnu': 4.13.0
 
   js-tiktoken@1.0.21:
     dependencies:

@@ -64,6 +64,16 @@ export const PATIENT_SECTIONS = [
     patient: true,
   },
   {
+    // Debajo de Odontograma, como parte de esa sección (issue 49, decisión 1):
+    // Clínica sigue con cuatro pestañas y las encías están junto a los dientes.
+    id: "periodontograma",
+    area: "clinica",
+    label: "Periodontograma",
+    permission: "clinical.read",
+    patient: true,
+    parent: "odontograma",
+  },
+  {
     id: "historia",
     area: "clinica",
     label: "Historia",
@@ -147,6 +157,8 @@ export const PATIENT_SECTIONS = [
   unless?: string
   /** Necesita la historia clínica: aparece cuando la persona ya es paciente. */
   patient: boolean
+  /** Va debajo de otra sección: no suma una pestaña, se elige dentro de ella. */
+  parent?: string
 }>
 
 export type PatientSection = (typeof PATIENT_SECTIONS)[number]
@@ -187,6 +199,8 @@ export const DOCUMENT_FILTERS = [
   { id: "consentimientos", label: "Consentimientos" },
   { id: "formularios", label: "Formularios" },
   { id: "imagenes", label: "Imágenes" },
+  // Un informe suelto, una carta: lo subido que no es imagen ni consentimiento.
+  { id: "otros", label: "Otros archivos" },
   // Solo en clínicas de Perú, donde el odontograma se firma (ADR 0036).
   { id: "odontogramas", label: "Odontogramas" },
 ] as const
@@ -279,11 +293,30 @@ export interface AreaNavEntry {
   label: string
 }
 
-/** Entradas de segundo nivel de una pestaña: sus secciones visibles. */
+/** La sección de la que cuelga otra (Periodontograma → Odontograma); ella misma si no cuelga de ninguna. */
+export function navSectionOf(id: PatientSectionId): PatientSectionId {
+  const parent = (sectionOf(id) as { parent?: PatientSectionId }).parent
+  return parent ?? id
+}
+
+/** Entradas de segundo nivel de una pestaña: sus secciones visibles, sin las que cuelgan de otra. */
 export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
   return visibleSections(can, isPatient)
-    .filter((section) => section.area === area)
+    .filter((section) => section.area === area && !(section as { parent?: string }).parent)
     .map((section) => ({ value: section.id, label: section.label }))
+}
+
+/**
+ * Lo que se elige dentro de una sección con secciones debajo: ella y las suyas
+ * («Odontograma · Periodontograma»). Vacío si no tiene ninguna visible.
+ */
+export function subsectionNav(id: PatientSectionId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
+  const parent = navSectionOf(id)
+  const visible = visibleSections(can, isPatient)
+  const children = visible.filter((section) => (section as { parent?: string }).parent === parent)
+  if (children.length === 0) return []
+  const own = visible.find((section) => section.id === parent)
+  return [...(own ? [own] : []), ...children].map((section) => ({ value: section.id, label: section.label }))
 }
 
 /** Pestañas con al menos una sección visible y la sección que abre cada una. */

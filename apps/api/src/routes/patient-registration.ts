@@ -12,6 +12,7 @@ import {
   revokePersonalLinks,
   savePatientRegistrationConfig,
   sendPersonalLink,
+  showPersonalLink,
   ServiceError,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
@@ -123,6 +124,20 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
       withOrgContext(deps.db, orgId, tx =>
         sendPersonalLink(tx, orgId, userId, { patientId: params.data.id, requestId: parsed.data.requestId ?? null }, { secretsKey: deps.secretsKey }),
       ),
+    )
+  })
+  // «Su enlace» en un código QR para escanearlo en la clínica: no se envía nada.
+  app.post("/patients/:id/personal-link/show", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Mostrar su enlace es de quien edita sus datos"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    if (!params.success) return validationError(c, params.error.issues)
+    c.header("Cache-Control", "no-store")
+    c.header("Referrer-Policy", "no-referrer")
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, tx => showPersonalLink(tx, orgId, userId, params.data.id, { secretsKey: deps.secretsKey })),
     )
   })
   // «Quitar enlace»: deja sin efecto su enlace, de quien sea; lo que ya hizo con él se conserva.
