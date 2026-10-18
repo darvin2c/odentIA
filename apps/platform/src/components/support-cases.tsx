@@ -21,7 +21,7 @@ const STATUS_LABEL: Record<SupportStatus, string> = {
 
 const supportCaseItem = z.object({
   id: z.string(),
-  kind: z.enum(["pregunta", "problema", "acceso"]),
+  kind: z.enum(["pregunta", "problema", "acceso", "cobro"]),
   question: z.string(),
   status: supportStatus,
   unread: z.boolean(),

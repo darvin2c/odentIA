@@ -12,7 +12,7 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  * probabilidades no hay certeza y el turno sigue por el camino abierto de
  * siempre. Versionado: cambiar preguntas u opciones invalida lo medido.
  */
-export const ROUTE_VERSION = "route.v3"
+export const ROUTE_VERSION = "route.v4"
 export const ROUTE_QUESTIONS: DecisionQuestion[] = TRIAGE_QUESTIONS
 /** Desde aquí se pasa el caso a una persona sin llamar al modelo que escribe. Punto de partida, por medir. */
 export const ROUTE_HANDOFF = 0.85
@@ -25,6 +25,23 @@ export const ROUTE_INTENT = 0.6
  * va al camino abierto.
  */
 export const ROUTE_OFF_TOPIC = 0.9
+/**
+ * Spam (ADR 0054): solo con el modelo de decisión muy seguro, y nunca si el
+ * mensaje habla de la clínica o pide una persona. Por medir con `eval:spam`.
+ */
+export const ROUTE_SPAM = 0.9
+
+/** Por qué es spam, con las claves de la persona (`contact.screen_reason`). */
+export type DecidedSpamReason = "publicidad" | "estafa" | "cadena" | "respuesta_automatica" | "venta"
+const SPAM_REASON_BY_OPTION: Record<string, DecidedSpamReason> = {
+  advertising: "publicidad",
+  scam: "estafa",
+  chain: "cadena",
+  automated_reply: "respuesta_automatica",
+  selling_to_clinic: "venta",
+}
+/** Lo que habla de la clínica nunca es spam, aunque el modelo dude. */
+const CLINIC_INTENTS = new Set(["appointment_request", "reschedule_or_cancel", "price_or_service_info", "clinical_question", "complaint", "unsubscribe"])
 
 export type RoutePath = "derivar" | "informacion" | "saludo" | "cita" | "cambio_cita" | "clinico" | "fuera_de_tema" | "abierto"
 
@@ -37,6 +54,12 @@ export interface AgentRoute {
   confidence: number | null
   /** Urgencia de 0 (sin apuro) a 2 (ahora); nulo si el proveedor no la entrega. */
   urgency: number | null
+  /**
+   * Probabilidad de que sea spam y su motivo (ADR 0054). Nulo si el proveedor
+   * no la entrega, si habla de la clínica o si pide una persona: entonces no
+   * es spam. Lo aplica la corrida, solo a quien puede ir solo a Spam.
+   */
+  spam?: { probability: number; reason: DecidedSpamReason } | null
 }
 
 const PATH_BY_INTENT: Record<string, RoutePath> = {
@@ -55,17 +78,49 @@ export function readRoute(result: DecisionResult): AgentRoute {
   const handoff = handoffAnswer ? handoffAnswer.probability : null
   const intent = intentAnswer?.choice ?? null
   const confidence = intentAnswer?.probabilities ? (intentAnswer.probabilities[intentAnswer.choice] ?? null) : null
-  if (handoff !== null && handoff >= ROUTE_HANDOFF) return { path: "derivar", intent, handoff, confidence, urgency }
+  const spam = readSpam(result, intent, confidence, handoff)
+  if (handoff !== null && handoff >= ROUTE_HANDOFF) return { path: "derivar", intent, handoff, confidence, urgency, spam }
   if (intent === "off_topic") {
-    return { path: confidence !== null && confidence >= ROUTE_OFF_TOPIC ? "fuera_de_tema" : "abierto", intent, handoff, confidence, urgency }
+    return { path: confidence !== null && confidence >= ROUTE_OFF_TOPIC ? "fuera_de_tema" : "abierto", intent, handoff, confidence, urgency, spam }
   }
   const path = intent !== null && confidence !== null && confidence >= ROUTE_INTENT ? (PATH_BY_INTENT[intent] ?? "abierto") : "abierto"
-  return { path, intent, handoff, confidence, urgency }
+  return { path, intent, handoff, confidence, urgency, spam }
+}
+
+/**
+ * La probabilidad de spam es todo lo que no es `not_spam`; el motivo, la
+ * opción de spam más probable. Sin probabilidades no hay certeza: no es spam.
+ * Lo que habla de la clínica o pide una persona tampoco, diga lo que diga.
+ */
+function readSpam(
+  result: DecisionResult,
+  intent: string | null,
+  confidence: number | null,
+  handoff: number | null,
+): AgentRoute["spam"] {
+  const answer = answerOf(result, "spam", "choice")
+  const notSpam = answer?.probabilities?.not_spam
+  if (!answer?.probabilities || notSpam === undefined) return null
+  if (intent !== null && CLINIC_INTENTS.has(intent) && confidence !== null && confidence >= ROUTE_INTENT) return null
+  if (handoff !== null && handoff >= ROUTE_HANDOFF) return null
+  let best: { reason: DecidedSpamReason; p: number } | null = null
+  for (const [option, p] of Object.entries(answer.probabilities)) {
+    const reason = SPAM_REASON_BY_OPTION[option]
+    if (reason && (!best || p > best.p)) best = { reason, p }
+  }
+  return best ? { probability: Math.max(0, Math.min(1, 1 - notSpam)), reason: best.reason } : null
 }
 
 /** Qué se decidió, para el libro de decisiones. Nunca lleva el texto del interlocutor. */
 export function routeOutcome(route: AgentRoute): Record<string, unknown> {
-  return { path: route.path, intent: route.intent, handoff: route.handoff, confidence: route.confidence, urgency: route.urgency }
+  return {
+    path: route.path,
+    intent: route.intent,
+    handoff: route.handoff,
+    confidence: route.confidence,
+    urgency: route.urgency,
+    spam: route.spam ?? null,
+  }
 }
 
 /**

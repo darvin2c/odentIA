@@ -2,6 +2,7 @@ import type { Db } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
 import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
+import { markReviewsCredited, pendingReviewCredits } from "./saas-action-review.js"
 import { listPeriodActions, microsToCents, netMicros, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
 
 /* ---------- Cobrar (ADR 0031, fase 4) ---------- */
@@ -102,6 +103,30 @@ async function issueCycleCharge(
       sortOrder: sort++,
     })
   }
+  // Lo que odentIA devolvió al revisar un cobro ya facturado (ADR 0054): en el
+  // cargo final, de la más antigua a la más nueva, sin dejar el cargo en negativo;
+  // lo que no cabe espera al siguiente.
+  const creditedReviews: string[] = []
+  if (input.final) {
+    const before = lines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
+    let amount = 0
+    for (const item of await pendingReviewCredits(tx, orgId)) {
+      const cents = microsToCents(item.priceMicros)
+      if (amount + cents > before) break
+      amount += cents
+      creditedReviews.push(item.reviewId)
+    }
+    if (creditedReviews.length) {
+      const n = creditedReviews.length
+      lines.push({
+        kind: "revision",
+        description: `Devolución por revisión: ${n} ${n === 1 ? "cobro que odentIA devolvió al revisarlo" : "cobros que odentIA devolvió al revisarlos"}`,
+        quantity: n,
+        amountCents: -amount,
+        sortOrder: sort++,
+      })
+    }
+  }
   if (covered.length) {
     const value = microsToCents(covered.reduce((sum, row) => sum + netMicros(row), 0))
     lines.push({
@@ -145,6 +170,7 @@ async function issueCycleCharge(
     .returning({ id: saasCharge.id })
   if (!charge) return null
   await tx.insert(saasChargeLine).values(lines.map((line) => ({ ...line, organizationId: orgId, chargeId: charge.id })))
+  await markReviewsCredited(tx, orgId, creditedReviews, charge.id)
   const charged = [...over, ...covered].map((row: SaasActionRow) => row.id)
   if (charged.length) {
     await tx.update(saasAction).set({ chargeId: charge.id }).where(and(eq(saasAction.organizationId, orgId), inArray(saasAction.id, charged)))

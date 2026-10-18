@@ -134,6 +134,20 @@
       "when": 1792342179284,
       "tag": "0018_periodontograma_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792353383611,
+      "tag": "0019_spam_y_revision_de_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792353397074,
+      "tag": "0020_revision_de_cobros_reglas",
+      "breakpoints": true
     }
   ]
 }
