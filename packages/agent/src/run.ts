@@ -3,13 +3,19 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
-import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   AGENT_MODEL_LABEL,
   type AgentConfig,
+  autoSpamAllowed,
   BLOCKED_RUN_REASON,
+  contactScreenFacts,
+  leaveSpam,
+  markSpamByDecision,
   SPAM_RUN_REASON,
+  SPAM_STILL_RUN_REASON,
+  SPAM_UNDECIDED_RUN_REASON,
   contactGotAgentTextToday,
   contactHadRunToday,
   countAgentModelRunsToday,
@@ -41,7 +47,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { offTopicReply, readRoute, ROUTE_QUESTIONS, ROUTE_SPAM, routeHandoff } from "./decision/route.js"
 import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
@@ -303,6 +309,9 @@ async function attendAgentRun(
   // Modelo resuelto, para registrarlo aunque falle antes o después.
   let effectiveModel = llmModelName(runtime.platform)
   let configProblem: ProviderProblem | null = null
+  // Spam (ADR 0054): `recheck` si ya está en Spam y escribió algo nuevo;
+  // `eligible` si puede ir solo a Spam; `none` si nunca va solo.
+  let screenMode = "none" as "recheck" | "eligible" | "none"
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
@@ -328,14 +337,12 @@ async function attendAgentRun(
       if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
       // El agente nunca responde en una conversación cerrada (ADR 0024): un entrante la reabre antes.
       if (conv.status !== "open") return { skip: { reason: "conversation-closed", model: effectiveModel } }
-      // Spam y bloqueados (ADR 0054): el agente no los atiende y no se cobra.
-      const [who] = await tx
-        .select({ screen: contact.screen })
-        .from(contact)
-        .where(and(eq(contact.organizationId, orgId), eq(contact.id, conv.contactId)))
-        .limit(1)
-      if (who?.screen === "blocked") return { skip: { reason: BLOCKED_RUN_REASON, model: effectiveModel } }
-      if (who?.screen === "spam") return { skip: { reason: SPAM_RUN_REASON, model: effectiveModel } }
+      // Spam y bloqueados (ADR 0054): a un bloqueado el agente no lo atiende. A
+      // quien está en Spam solo se lo vuelve a mirar (el worker encola la corrida
+      // únicamente si escribió algo nuevo); a quien puede ir solo, Jev lo mira.
+      const facts = await contactScreenFacts(tx, orgId, conv.contactId)
+      if (facts.screen === "blocked") return { skip: { reason: BLOCKED_RUN_REASON, model: effectiveModel } }
+      screenMode = facts.screen === "spam" ? "recheck" : autoSpamAllowed(facts) ? "eligible" : "none"
       if (conv.agentStatus !== "on") {
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }
@@ -457,14 +464,18 @@ async function attendAgentRun(
           return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
         }
       }
-      const burst = pendingTail.some((item) => item.id === trigger.id)
-        ? pendingTail
-        : [...pendingTail, { id: trigger.id, body: trigger.body }]
+      // A quien está en Spam se lo atiende solo por lo nuevo: el spam de antes no es parte de su pedido.
+      const burst = screenMode === "recheck"
+        ? [{ id: trigger.id, body: trigger.body }]
+        : pendingTail.some((item) => item.id === trigger.id)
+          ? pendingTail
+          : [...pendingTail, { id: trigger.id, body: trigger.body }]
       const latestId = burst[0]?.id ?? trigger.id
       inboundMessageId = latestId
       coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
       burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
-      const keyword = burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
+      // A quien está en Spam primero lo mira Jev: una palabra de derivación no la saca sola.
+      const keyword = screenMode === "recheck" ? undefined : burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
       if (keyword) {
         const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
@@ -618,7 +629,49 @@ async function attendAgentRun(
       toolCtx.route = { path: reserve ? "cita" : "cambio_cita", intent: reserve ? "appointment_request" : "reschedule_or_cancel", handoff: null, confidence: null, urgency: null }
       toolCtx.routeHint = tapped.hint
     } else if (routing && decision && inboundMessageId !== null) {
-      toolCtx.route = await decideRoute(db, orgId, decision, { conversationId, triggerMessageId: inboundMessageId })
+      toolCtx.route = await decideRoute(db, orgId, decision, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        ...(screenMode === "recheck" ? { alone: true } : {}),
+      })
+    }
+    // Spam (ADR 0054): con Jev muy seguro, a quien puede ir solo a Spam no se le
+    // responde ni se cobra. A quien ya está, se lo saca solo si lo nuevo no es
+    // spam (decisión 9a), aunque lo haya marcado una persona (9b); sin decisión, se queda.
+    const spamVerdict = toolCtx.route?.spam && toolCtx.route.spam.probability >= ROUTE_SPAM ? toolCtx.route.spam : null
+    const spamTrigger = inboundMessageId
+    if (screenMode === "recheck" && spamTrigger !== null) {
+      if (!toolCtx.route || spamVerdict) {
+        await ledger(db, orgId, {
+          conversationId,
+          triggerMessageId: spamTrigger,
+          model: effectiveModel,
+          status: "omitida",
+          startedAt,
+          endedAt: new Date(),
+          llmCalls: 0,
+          error: toolCtx.route ? SPAM_STILL_RUN_REASON : SPAM_UNDECIDED_RUN_REASON,
+        })
+        return "done"
+      }
+      await withOrgContext(db, orgId, (tx) => leaveSpam(tx, orgId, { contactId: toolCtx.contactId, messageId: spamTrigger }))
+    } else if (screenMode === "eligible" && spamVerdict && spamTrigger !== null) {
+      const marked = await withOrgContext(db, orgId, (tx) =>
+        markSpamByDecision(tx, orgId, { contactId: toolCtx.contactId, reason: spamVerdict.reason, messageId: spamTrigger }),
+      )
+      if (marked) {
+        await ledger(db, orgId, {
+          conversationId,
+          triggerMessageId: spamTrigger,
+          model: effectiveModel,
+          status: "omitida",
+          startedAt,
+          endedAt: new Date(),
+          llmCalls: 0,
+          error: SPAM_RUN_REASON,
+        })
+        return "done"
+      }
     }
     const invokeGraph = async () => {
       const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)

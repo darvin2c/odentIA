@@ -15,7 +15,7 @@ import { type AgentRoute, guardBurst, readRoute, ROUTE_QUESTIONS, ROUTE_VERSION,
 async function decisionState(
   db: Db,
   orgId: string,
-  input: { conversationId: string; triggerMessageId: string },
+  input: { conversationId: string; triggerMessageId: string; alone?: boolean },
 ): Promise<{ text: string; messages: number } | null> {
   return withOrgContext(db, orgId, async (tx) => {
     const [trigger] = await tx
@@ -24,6 +24,9 @@ async function decisionState(
       .where(and(eq(message.id, input.triggerMessageId), eq(message.organizationId, orgId)))
       .limit(1)
     if (!trigger) return null
+    // Solo el mensaje nuevo: a quien está en Spam se lo mira por lo que escribió
+    // ahora (decisión 9a); con el spam de antes al lado, nunca saldría.
+    if (input.alone) return { text: triageState([], trigger.body ?? "[attachment]"), messages: 1 }
     // La ráfaga empieza después de lo último que salió de la clínica y nunca
     // llega más atrás que el horizonte: lo antiguo sin responder es historial.
     const [lastOut] = await tx
@@ -77,7 +80,7 @@ export async function decideRoute(
   db: Db,
   orgId: string,
   decision: DecisionModel,
-  input: { conversationId: string; triggerMessageId: string },
+  input: { conversationId: string; triggerMessageId: string; alone?: boolean },
 ): Promise<AgentRoute | null> {
   const record = (extra: Parameters<typeof recordAgentDecision>[2]) =>
     withOrgContext(db, orgId, (tx) => recordAgentDecision(tx, orgId, extra)).then(
@@ -88,7 +91,14 @@ export async function decideRoute(
     const read = await decisionState(db, orgId, input)
     if (read === null) return null
     const state = read.text
-    const base = { ...input, point: ROUTE_VERSION, mode: "route" as const, provider: decision.provider, state }
+    const base = {
+      conversationId: input.conversationId,
+      triggerMessageId: input.triggerMessageId,
+      point: ROUTE_VERSION,
+      mode: "route" as const,
+      provider: decision.provider,
+      state,
+    }
     let result: DecisionResult
     try {
       result = await decision.decide(state, ROUTE_QUESTIONS)

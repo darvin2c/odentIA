@@ -53,6 +53,8 @@ export const BLOCK_NOTE_MAX = 500
 export const SPAM_RUN_REASON = "spam"
 /** La corrida volvió a mirar a alguien en Spam y sigue siéndolo. */
 export const SPAM_STILL_RUN_REASON = "spam-sigue"
+/** En Spam y sin modelo de decisión que diga si lo nuevo es spam: se queda (decisión 9a). */
+export const SPAM_UNDECIDED_RUN_REASON = "spam-sin-decision"
 /** La corrida no atiende a una persona bloqueada. */
 export const BLOCKED_RUN_REASON = "bloqueado"
 

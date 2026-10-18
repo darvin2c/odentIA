@@ -6,7 +6,7 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  * proveedores) con el estado en español; versionadas para que un cambio
  * de redacción u orden de opciones invalide los umbrales calibrados.
  */
-export const TRIAGE_VERSION = "triage.v3"
+export const TRIAGE_VERSION = "triage.v4"
 
 export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
   {
@@ -56,6 +56,26 @@ export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
     id: "unsubscribe",
     kind: "yesno",
     instructions: "Does the contact ask the clinic to stop sending messages?",
+  },
+  // Spam (issue 77, ADR 0054): solo se aplica con `ROUTE_SPAM` y a quien puede
+  // ir solo a Spam; lo que habla de la clínica nunca lo es (`readRoute`).
+  {
+    id: "spam",
+    kind: "choice",
+    instructions:
+      "Is the latest message from the contact spam: unsolicited advertising, a scam, a chain message, an automatic reply from another business, or a company selling something to the clinic? A person writing for themselves is never spam.",
+    options: [
+      {
+        value: "not_spam",
+        description:
+          "A person writing for themselves: about teeth, the mouth, the clinic, appointments, prices, payments, a complaint, a greeting, a wrong number or anything personal. When in doubt, choose this.",
+      },
+      { value: "advertising", description: "Mass advertising or offers from others: earn money, loans, investments, products or promotions." },
+      { value: "scam", description: "Fraud or phishing: asks to pay or click a link for a package, prize, bank, account or delivery." },
+      { value: "chain", description: "A chain message that asks to forward it to other people." },
+      { value: "automated_reply", description: "An automatic reply or bot of another business: thanks for writing, we will reply soon; away messages; menus." },
+      { value: "selling_to_clinic", description: "A company or agency offering its products or services to the clinic: websites, marketing, software, supplies or laboratories." },
+    ],
   },
 ]
 

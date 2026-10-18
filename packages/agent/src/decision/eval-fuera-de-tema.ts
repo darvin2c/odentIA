@@ -18,7 +18,7 @@ import { triageState } from "./points.js"
 import { answerOf, type DecisionQuestion } from "./port.js"
 import { ROUTE_HANDOFF, ROUTE_QUESTIONS } from "./route.js"
 
-/** La pregunta de intención en producción ya trae la opción `off_topic` (triage.v3). */
+/** La pregunta de intención en producción ya trae la opción `off_topic` (triage.v4). */
 const CANDIDATE_QUESTIONS: DecisionQuestion[] = ROUTE_QUESTIONS
 
 function arg(name: string, fallback: string): string {

@@ -9,6 +9,7 @@ import { contactIdentity, conversation, crmTask, message } from "@odentia/db/sch
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
 import {
+  sendOutbound,
   addContactIdentity,
   createChair,
   createConnection,
@@ -660,7 +661,7 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     )
     // Con LLM_MODEL=fake la línea base es el modelo de decisión falso.
     expect(rows).toEqual([
-      expect.objectContaining({ point: "triage.v3", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
+      expect.objectContaining({ point: "triage.v4", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
     ])
     expect(rows[0]!.stateChars).toBeGreaterThan(0)
     // Las filas no guardan el texto: solo la huella.
@@ -2307,7 +2308,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
     expect(info.system).toContain("Si con eso basta, responde ahora con send_reply, en este mismo paso.")
     expect(info.decisions).toEqual([
-      expect.objectContaining({ point: "route.v3", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
+      expect.objectContaining({ point: "route.v4", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
     ])
     expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
@@ -2416,7 +2417,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const shadow = await turn("tg:camino-apagado", "evt-camino-apagado", "Tengo una queja y quiero hablar con una persona")
     expect(shadow.calls).toBe(1)
     expect(shadow.system).not.toContain("Camino de este turno")
-    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v3", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
+    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v4", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
   }
@@ -2901,28 +2902,104 @@ it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no 
   expect(said).not.toContain("[adjunto]")
 })
 
-it("a quien está en Spam o bloqueado el agente no le responde, no llama al modelo y no se cobra (ADR 0054)", async () => {
-  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
-  for (const [screen, reason, by] of [
-    ["spam", "publicidad", null],
-    ["blocked", "amenazas", "u_agent_test"],
-  ] as const) {
-    const inbound = await ingestText(`tg:pantalla-${screen}`, `evt-pantalla-${screen}`, "GANA DINERO DESDE CASA")
-    const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, inbound.conversationId)))
-    if (by) {
-      await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values (${by}, 'Carla', 'carla@agente.test', true) on conflict (id) do nothing`)
-    }
-    await ownerDb.execute(sql`update contact set screen = ${screen}, screened_at = now(), screened_by_user_id = ${by},
-      screen_reason = ${reason}, screen_note = ${by ? "Amenazó a recepción" : null} where id = ${conv!.contactId}`)
-    expect(await runScripted(model, inbound.conversationId, inbound.messageId)).toBe("done")
-    expect(await agentMessages(inbound.conversationId)).toEqual([])
-    const rows = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error })
-        .from(agentRunLedger).where(eq(agentRunLedger.conversationId, inbound.conversationId)))
-    expect(rows).toEqual([{ status: "omitida", llmCalls: 0, error: screen === "spam" ? "spam" : "bloqueado" }])
-    const charged = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from saas_action where conversation_id = ${inbound.conversationId}`)
-    expect(charged[0]?.n).toBe(0)
-  }
+/** El estado de Spam de la persona de una conversación. */
+async function screenOf(conversationId: string) {
+  const [row] = await ownerDb.execute<{ screen: string | null; reason: string | null; contact_id: string }>(sql`
+    select c.screen, c.screen_reason as reason, c.id as contact_id from contact c
+    join conversation cv on cv.contact_id = c.id where cv.id = ${conversationId}`)
+  return row
+}
+
+async function runWithDecision(model: ScriptedModel, conversationId: string, messageId: string) {
+  // Otras pruebas cambian la configuración: aquí el modelo de decisión elige el camino.
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true, decisionProvider: "jev", decisionRoutingEnabled: true }))
+  return processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => createFakeDecisionModel() }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+  })
+}
+
+async function ledgerErrors(conversationId: string) {
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error })
+      .from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)).orderBy(agentRunLedger.startedAt))
+  return rows
+}
+
+async function chargedConversations(conversationId: string) {
+  const [row] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from saas_action where conversation_id = ${conversationId}`)
+  return row?.n ?? 0
+}
+
+it("Jev muy seguro manda a Spam el primer mensaje de publicidad: sin respuesta, sin modelo y sin cobro (ADR 0054)", async () => {
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, ¿en qué te ayudo?" }, "call-1"))
+  const ad = await ingestText("tg:spam-jev", "evt-spam-jev-1", "GANA DINERO desde casa 💸 entra a bit.ly/gana-ya")
+  expect(await runWithDecision(model, ad.conversationId, ad.messageId)).toBe("done")
   expect(model.seen).toHaveLength(0)
+  expect(await agentMessages(ad.conversationId)).toEqual([])
+  expect(await ledgerErrors(ad.conversationId)).toEqual([{ status: "omitida", llmCalls: 0, error: "spam" }])
+  expect(await chargedConversations(ad.conversationId)).toBe(0)
+  expect(await screenOf(ad.conversationId)).toMatchObject({ screen: "spam", reason: "publicidad" })
+  const decided = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ outcome: agentDecisionLog.outcome }).from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, ad.conversationId)))
+  expect(decided[0]?.outcome).toMatchObject({ spam: { reason: "publicidad" } })
+})
+
+it("en Spam, lo nuevo que también es spam se queda; lo que no, la saca sola y el agente responde (decisión 9a)", async () => {
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Sí, atendemos los sábados de 9 a 13." }, "call-1"))
+  const ad = await ingestText("tg:spam-sale", "evt-spam-sale-1", "Préstamo al instante sin requisitos, escribe ya")
+  expect(await runWithDecision(model, ad.conversationId, ad.messageId)).toBe("done")
+  expect(await screenOf(ad.conversationId)).toMatchObject({ screen: "spam" })
+  // Otra publicidad: se queda en Spam, sin respuesta.
+  const again = await ingestText("tg:spam-sale", "evt-spam-sale-2", "Último día: préstamo con bit.ly/prestamo")
+  expect(await runWithDecision(model, again.conversationId, again.messageId)).toBe("done")
+  expect(await screenOf(again.conversationId)).toMatchObject({ screen: "spam" })
+  expect(model.seen).toHaveLength(0)
+  // Algo real: sale sola de Spam y el agente le responde.
+  const real = await ingestText("tg:spam-sale", "evt-spam-sale-3", "Perdón, número equivocado. ¿Atienden el sábado?")
+  expect(await runWithDecision(model, real.conversationId, real.messageId)).toBe("done")
+  expect((await screenOf(real.conversationId))?.screen).toBeNull()
+  expect(await agentMessages(real.conversationId)).toEqual(["Sí, atendemos los sábados de 9 a 13."])
+  expect((await ledgerErrors(real.conversationId)).map((row) => row.error)).toEqual(["spam", "spam-sigue", null])
+  const left = await ownerDb.execute<{ action: string }>(sql`select action from audit_event
+    where entity = 'contact' and entity_id = ${(await screenOf(real.conversationId))!.contact_id} order by created_at`)
+  expect(left.map((row) => row.action)).toEqual(["contact.spam_marked", "contact.spam_left"])
+})
+
+it("quien no puede ir solo a Spam (el equipo ya le escribió) recibe respuesta aunque mande publicidad", async () => {
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, ¿en qué te ayudo?" }, "call-1"))
+  const first = await ingestText("tg:spam-protegido", "evt-spam-prot-1", "Hola")
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_agent_team', 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: first.conversationId, senderKind: "user", senderUserId: "u_agent_team", content: { type: "text", text: "Hola, soy Carla" } }))
+  // Escribió hace una hora: el agente ya no espera a que el equipo termine de conversar.
+  await ownerDb.execute(sql`update message set created_at = now() - interval '1 hour' where conversation_id = ${first.conversationId}`)
+  const ad = await ingestText("tg:spam-protegido", "evt-spam-prot-2", "GANA DINERO con bit.ly/gana")
+  expect(await runWithDecision(model, ad.conversationId, ad.messageId)).toBe("done")
+  expect((await screenOf(ad.conversationId))?.screen).toBeNull()
+  expect(await agentMessages(ad.conversationId)).toEqual(["Hola, ¿en qué te ayudo?"])
+})
+
+it("a un bloqueado el agente no le responde, no llama al modelo y no se cobra; sin decisión, quien está en Spam se queda (ADR 0054)", async () => {
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_agent_test', 'Carla', 'carla@agente.test', true) on conflict (id) do nothing`)
+  const threat = await ingestText("tg:pantalla-blocked", "evt-pantalla-blocked", "Esto no se queda así")
+  await ownerDb.execute(sql`update contact set screen = 'blocked', screened_at = now(), screened_by_user_id = 'u_agent_test',
+    screen_reason = 'amenazas', screen_note = 'Amenazó a recepción' where id = ${(await screenOf(threat.conversationId))!.contact_id}`)
+  expect(await runWithDecision(model, threat.conversationId, threat.messageId)).toBe("done")
+  expect(await ledgerErrors(threat.conversationId)).toEqual([{ status: "omitida", llmCalls: 0, error: "bloqueado" }])
+
+  const spam = await ingestText("tg:pantalla-spam", "evt-pantalla-spam", "Hola, ¿tienen cita?")
+  await ownerDb.execute(sql`update contact set screen = 'spam', screened_at = now(), screen_reason = 'repeticion'
+    where id = ${(await screenOf(spam.conversationId))!.contact_id}`)
+  // Sin modelo de decisión que lo mire, no sale de Spam.
+  expect(await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => null }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId: spam.conversationId, messageId: spam.messageId },
+  })).toBe("done")
+  expect(await ledgerErrors(spam.conversationId)).toEqual([{ status: "omitida", llmCalls: 0, error: "spam-sin-decision" }])
+  expect(model.seen).toHaveLength(0)
+  expect(await chargedConversations(threat.conversationId) + await chargedConversations(spam.conversationId)).toBe(0)
 })
