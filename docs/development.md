@@ -20,6 +20,8 @@ pnpm db:seed
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
+Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 24 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
+
 ### Migraciones
 
 La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, colas y cron). Las 108 migraciones anteriores están en git hasta el commit `405b732`.

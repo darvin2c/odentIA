@@ -303,6 +303,7 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
       complaintsEmail: deps.complaintsEmail,
+      adminURL: deps.adminURL,
       remoteAddress: deps.registrationRemoteAddress,
     }),
   )

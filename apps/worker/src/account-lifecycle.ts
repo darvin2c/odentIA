@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { accountReminderTemplate, type MailTemplate } from "@odentia/mail"
 import {
   claimLifecycleReminder,
   cleanupUnverifiedAccount,
@@ -10,11 +11,13 @@ import {
 
 /** SMTP real cableado por el integrador (nunca log como fallback). */
 export interface AccountLifecycleMailer {
-  sendReminder(email: string, subject: string, body: string): Promise<void>
+  sendReminder(email: string, mail: MailTemplate): Promise<void>
 }
 
 export interface AccountLifecycleOptions {
   notify: AccountLifecycleMailer
+  /** Dónde se crea la clínica: el botón del aviso a una cuenta verificada sin clínica. */
+  onboardingUrl: string
   now?: Date
   reminderDays?: number
   cleanupDays?: number
@@ -63,16 +66,7 @@ export async function runAccountLifecycleTick(
       )
       if (!claimed) continue
       try {
-        await opts.notify.sendReminder(
-          candidate.email,
-          "Completa tu cuenta de odentIA",
-          [
-            "Hola: creaste una cuenta en odentIA pero aún no la verificaste ni pertenece a ninguna clínica.",
-            "Si quieres usarla, verifica tu correo desde el enlace que te enviamos al registrarte.",
-            "Si no la necesitas, no hagas nada: la cuenta se eliminará automáticamente a los 30 días.",
-            "Este es un aviso informativo, no publicidad.",
-          ].join("\n"),
-        )
+        await opts.notify.sendReminder(candidate.email, accountReminderTemplate({ kind: "sin_verificar" }))
       } catch (error) {
         await ownerDb.transaction((tx) => markLifecycleReminderUncertain(tx, candidate.userId))
         result.errors.push(`Recordatorio ${candidate.email}: ${messageOf(error)}`)
@@ -93,12 +87,7 @@ export async function runAccountLifecycleTick(
       try {
         await opts.notify.sendReminder(
           candidate.email,
-          "Tu cuenta de odentIA está verificada: crea o acepta tu clínica",
-          [
-            "Hola: tu cuenta ya está verificada pero aún no pertenece a ninguna clínica.",
-            "Puedes crear tu clínica desde el panel o aceptar la invitación que te hayan enviado.",
-            "Este es un aviso informativo, no publicidad.",
-          ].join("\n"),
+          accountReminderTemplate({ kind: "sin_clinica", url: opts.onboardingUrl }),
         )
       } catch (error) {
         await ownerDb.transaction((tx) => markLifecycleReminderUncertain(tx, candidate.userId))

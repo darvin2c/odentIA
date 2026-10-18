@@ -2,7 +2,7 @@ import { type AgentRuntime, consumeAgentRun, createAlreadyTold, decisionKeyStart
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
-import { createMailer } from "@odentia/mail"
+import { configureMailLinks, createMailer } from "@odentia/mail"
 import { configurePublicLinks, createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { env } from "./env.js"
@@ -25,6 +25,8 @@ const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 configurePublicLinks({ webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN })
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
+// Términos, Privacidad y Ayuda del pie de cada correo.
+configureMailLinks(env.WEB_URL)
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -195,7 +197,7 @@ queues.push({
   poll: async () => {
     if (Date.now() < nextSaasPoll) return false
     nextSaasPoll = Date.now() + 60_000
-    await runSaasBillingTick({ ownerDb, mailer })
+    await runSaasBillingTick({ ownerDb, mailer, panelUrl: env.WEB_URL })
     return true
   },
 }, {
@@ -230,7 +232,13 @@ queues.push({
   poll: async () => {
     if (Date.now() < nextLegalPoll) return false
     nextLegalPoll = Date.now() + 3_600_000
-    const result = await runLegalNoticesTick({ ownerDb, mailer, webUrl: env.WEB_URL })
+    const result = await runLegalNoticesTick({
+      ownerDb,
+      mailer,
+      webUrl: env.WEB_URL,
+      // Quien no está de acuerdo responde al correo: llega a soporte.
+      replyTo: env.SUPPORT_INBOX_EMAIL || undefined,
+    })
     return result.mailed > 0
   },
 }, {
@@ -239,14 +247,8 @@ queues.push({
     if (Date.now() < nextAccountPoll) return false
     nextAccountPoll = Date.now() + 86_400_000
     const result = await runAccountLifecycleTick(ownerDb, {
-      notify: {
-        sendReminder: async (email, subject, text) => {
-          await mailer.send({
-            to: email, subject, text,
-            html: `<p>${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\n", "<br>")}</p>`,
-          })
-        },
-      },
+      notify: { sendReminder: (email, mail) => mailer.send({ to: email, ...mail }) },
+      onboardingUrl: `${env.WEB_URL.replace(/\/+$/, "")}/onboarding`,
     })
     for (const error of result.errors) console.error(`worker: account_lifecycle ${error}`)
     return result.reminders > 0 || result.cleaned > 0

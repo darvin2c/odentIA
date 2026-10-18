@@ -26,6 +26,8 @@ export interface AdminConsumerComplaintsDeps {
   mailer: Mailer
   /** Buzón de reclamos de odentIA: recibe una copia de cada respuesta. */
   complaintsEmail?: string | undefined
+  /** Origen de la administración: el botón «Abrir en Reclamaciones» de la copia. */
+  adminURL?: string | undefined
 }
 
 const listQuery = z.object({
@@ -60,7 +62,10 @@ export function createAdminConsumerComplaintsRoute(deps: AdminConsumerComplaints
    * sale solo con la primera respuesta.
    */
   async function deliver(sheet: ConsumerComplaintDetail, withCopy: boolean): Promise<boolean> {
-    const { response, copy } = consumerComplaintResponseEmails(sheet)
+    const { response, copy } = consumerComplaintResponseEmails(sheet, {
+      replyTo: deps.complaintsEmail,
+      reviewUrl: deps.adminURL ? `${deps.adminURL.replace(/\/+$/, "")}/complaints` : undefined,
+    })
     let sent = false
     try {
       await deps.mailer.send({ to: sheet.email, ...response })

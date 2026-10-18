@@ -38,6 +38,8 @@ export function createPublicConsumerComplaintsRoute(deps: {
   mailer: Mailer
   /** Correo de odentIA que recibe el aviso de cada hoja; sin él solo sale la copia. */
   complaintsEmail?: string | undefined
+  /** Origen de la administración: el botón «Abrir en Reclamaciones» del aviso a odentIA. */
+  adminURL?: string | undefined
   remoteAddress?: RegistrationRemoteAddress | undefined
 }) {
   const app = new Hono()
@@ -128,7 +130,10 @@ export function createPublicConsumerComplaintsRoute(deps: {
 
     let emailSent = sheet.emailSent
     if (created) {
-      const { copy, notice } = consumerComplaintEmails(sheet)
+      const { copy, notice } = consumerComplaintEmails(sheet, {
+        replyTo: deps.complaintsEmail,
+        reviewUrl: deps.adminURL ? `${deps.adminURL.replace(/\/+$/, "")}/complaints` : undefined,
+      })
       try {
         await deps.mailer.send({ to: sheet.email, ...copy })
         emailSent = true

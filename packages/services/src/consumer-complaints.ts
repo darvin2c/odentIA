@@ -9,7 +9,7 @@ import { isAdminRole } from "@odentia/auth/admin-permissions"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { consumerComplaint, consumerComplaintCounter } from "@odentia/db/schema/consumer-complaints"
-import { escapeHtml, type MailTemplate } from "@odentia/mail"
+import { type MailTemplate, renderEmail } from "@odentia/mail"
 import { and, asc, count, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
@@ -347,72 +347,88 @@ const NOTICES = [
   "La formulación del reclamo no impide acudir a otras vías de solución de controversias ni es requisito previo para interponer una denuncia ante el INDECOPI.",
 ]
 
-function sheetText(sheet: ConsumerComplaintSheet): string {
-  const lines = [
-    `Hoja de Reclamación N.º ${sheet.number}`,
-    `Fecha: ${formatComplaintDate(sheet.createdAt)}`,
-    "",
-  ]
-  for (const section of sheetSections(sheet)) {
-    lines.push(section.title.toUpperCase())
-    for (const [label, value] of section.rows) lines.push(`${label}: ${value}`)
-    lines.push("")
-  }
-  lines.push(...NOTICES)
-  return lines.join("\n")
+/** Lo que acompaña a todo correo del libro: el buzón que recibe respuestas y dónde se atiende. */
+export interface ConsumerComplaintMailOptions {
+  /** Buzón de reclamos: quien reclama responde a él. Sin él, el correo dice que no se responde. */
+  replyTo?: string | undefined
+  /** Reclamaciones en la administración: el botón de los avisos internos. */
+  reviewUrl?: string | undefined
 }
 
-function sheetHtml(sheet: ConsumerComplaintSheet, intro: string, leadHtml = ""): string {
-  const sections = sheetSections(sheet)
-    .map(
-      (section) =>
-        `<h2 style="margin:24px 0 8px;font-size:15px">${escapeHtml(section.title)}</h2>` +
-        `<table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px;line-height:1.5">${section.rows
-          .map(
-            ([label, value]) =>
-              `<tr><th style="text-align:left;vertical-align:top;padding:4px 12px 4px 0;width:38%;color:#475569;font-weight:600">${escapeHtml(label)}</th>` +
-              `<td style="padding:4px 0;white-space:pre-wrap">${escapeHtml(value)}</td></tr>`,
-          )
-          .join("")}</table>`,
-    )
-    .join("")
-  return `<!doctype html>
-<html lang="es">
-  <body style="margin:0;padding:24px;background:#f4f4f5;font-family:system-ui,sans-serif;color:#18181b">
-    <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
-      <h1 style="margin:0 0 4px;font-size:20px">Hoja de Reclamación N.º ${escapeHtml(sheet.number)}</h1>
-      <p style="margin:0 0 16px;font-size:14px;color:#475569">Fecha: ${escapeHtml(formatComplaintDate(sheet.createdAt))}</p>
-      <p style="margin:0;font-size:14px;line-height:1.6">${escapeHtml(intro)}</p>
-      ${leadHtml}
-      ${sections}
-      ${NOTICES.map((n) => `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#475569">${escapeHtml(n)}</p>`).join("")}
-    </div>
-  </body>
-</html>`
+type SheetQuote = { title: string; text: string; caption: string }
+
+/** La copia para quien reclama: la hoja completa, sin botón, con su fecha y los textos de la norma. */
+function sheetEmail(
+  sheet: ConsumerComplaintSheet,
+  input: { subject: string; preview: string; intro: string; quote?: SheetQuote },
+  options: ConsumerComplaintMailOptions,
+): MailTemplate {
+  return renderEmail({
+    subject: input.subject,
+    preview: input.preview,
+    eyebrow: "Libro de Reclamaciones virtual",
+    title: `Hoja de Reclamación N.º ${sheet.number}`,
+    paragraphs: [`Fecha: ${formatComplaintDate(sheet.createdAt)}`, input.intro],
+    ...(input.quote ? { quote: input.quote } : {}),
+    sections: sheetSections(sheet),
+    notices: NOTICES,
+    reason: "Te escribimos porque registraste esta hoja en el Libro de Reclamaciones de odentIA.",
+    ...(options.replyTo
+      ? { replyTo: options.replyTo, replies: "Si respondes este correo, llega a quien atiende los reclamos." }
+      : {}),
+  })
+}
+
+/** El aviso al buzón de reclamos de odentIA: interno, con la hoja debajo y el botón a Reclamaciones. */
+function internalSheetEmail(
+  sheet: ConsumerComplaintSheet,
+  input: { subject: string; title: string; intro: string; quote?: SheetQuote },
+  options: ConsumerComplaintMailOptions,
+): MailTemplate {
+  return renderEmail({
+    subject: input.subject,
+    preview: input.intro,
+    internal: "Reclamos",
+    title: input.title,
+    paragraphs: [input.intro, `Fecha de la hoja: ${formatComplaintDate(sheet.createdAt)}`],
+    ...(input.quote ? { quote: input.quote } : {}),
+    sections: sheetSections(sheet),
+    ...(options.reviewUrl ? { action: { label: "Abrir en Reclamaciones", url: options.reviewUrl } } : {}),
+    reason: "Aviso interno del equipo de odentIA: cada hoja del Libro de Reclamaciones llega a este buzón.",
+  })
 }
 
 /**
  * Copia para el consumidor (obligatoria) y aviso para odentIA. Todo lo escrito
  * por el consumidor va escapado en el HTML.
  */
-export function consumerComplaintEmails(sheet: ConsumerComplaintSheet): {
+export function consumerComplaintEmails(
+  sheet: ConsumerComplaintSheet,
+  options: ConsumerComplaintMailOptions = {},
+): {
   copy: MailTemplate
   notice: MailTemplate
 } {
   const kind = KIND_LABELS[sheet.kind as ConsumerComplaintKind] ?? sheet.kind
-  const copyIntro = `Recibimos tu ${kind.toLowerCase()}. Esta es la copia de tu Hoja de Reclamación del Libro de Reclamaciones virtual de odentIA. Guárdala: te responderemos a este correo.`
-  const noticeIntro = `Llegó un ${kind.toLowerCase()} al Libro de Reclamaciones. Hay que responder en un plazo no mayor a ${CONSUMER_COMPLAINT_RESPONSE_DAYS} días hábiles.`
   return {
-    copy: {
-      subject: `Copia de tu Hoja de Reclamación N.º ${sheet.number} — odentIA`,
-      text: `${copyIntro}\n\n${sheetText(sheet)}`,
-      html: sheetHtml(sheet, copyIntro),
-    },
-    notice: {
-      subject: `Libro de Reclamaciones: ${kind} N.º ${sheet.number}`,
-      text: `${noticeIntro}\n\n${sheetText(sheet)}`,
-      html: sheetHtml(sheet, noticeIntro),
-    },
+    copy: sheetEmail(
+      sheet,
+      {
+        subject: `Copia de tu Hoja de Reclamación N.º ${sheet.number}`,
+        preview: `Guárdala: te responderemos en un plazo no mayor a ${CONSUMER_COMPLAINT_RESPONSE_DAYS} días hábiles.`,
+        intro: `Recibimos tu ${kind.toLowerCase()}. Esta es la copia de tu Hoja de Reclamación del Libro de Reclamaciones virtual de odentIA. Guárdala: te responderemos a este correo.`,
+      },
+      options,
+    ),
+    notice: internalSheetEmail(
+      sheet,
+      {
+        subject: `Libro de Reclamaciones: ${kind} N.º ${sheet.number}`,
+        title: `${kind} N.º ${sheet.number}`,
+        intro: `Llegó un ${kind.toLowerCase()} al Libro de Reclamaciones. Hay que responder en un plazo no mayor a ${CONSUMER_COMPLAINT_RESPONSE_DAYS} días hábiles.`,
+      },
+      options,
+    ),
   }
 }
 
@@ -732,7 +748,10 @@ export async function markComplaintResponseEmailSent(tx: Db, id: string): Promis
  * con el bloque 4 lleno) y su copia para el buzón de reclamos de odentIA. Lo
  * escrito por personas va escapado.
  */
-export function consumerComplaintResponseEmails(sheet: ConsumerComplaintSheet): {
+export function consumerComplaintResponseEmails(
+  sheet: ConsumerComplaintSheet,
+  options: ConsumerComplaintMailOptions = {},
+): {
   response: MailTemplate
   copy: MailTemplate
 } {
@@ -740,25 +759,32 @@ export function consumerComplaintResponseEmails(sheet: ConsumerComplaintSheet): 
     throw new Error("La hoja aún no tiene respuesta")
   }
   const kind = (KIND_LABELS[sheet.kind as ConsumerComplaintKind] ?? sheet.kind).toLowerCase()
-  const answeredAt = `Respondida el ${formatComplaintDate(sheet.respondedAt)}.`
-  const intro = `Respondemos tu ${kind}. Abajo está nuestra respuesta y, debajo, tu hoja completa como la enviaste.`
-  const copyIntro = `Copia de la respuesta enviada a ${sheet.email}.`
-  const lead =
-    `<h2 style="margin:24px 0 8px;font-size:15px">Nuestra respuesta</h2>` +
-    `<p style="margin:0;font-size:14px;line-height:1.6;white-space:pre-wrap;background:#f1f5f9;border-radius:8px;padding:12px 14px">${escapeHtml(sheet.providerResponse)}</p>` +
-    `<p style="margin:8px 0 0;font-size:13px;color:#475569">${escapeHtml(answeredAt)}</p>`
-  const text = (head: string) =>
-    `${head}\n\nNUESTRA RESPUESTA\n${sheet.providerResponse}\n${answeredAt}\n\n${sheetText(sheet)}`
+  const quote: SheetQuote = {
+    title: "Nuestra respuesta",
+    text: sheet.providerResponse,
+    // «10:00 a. m.» ya termina en punto: no se dobla.
+    caption: `Respondida el ${formatComplaintDate(sheet.respondedAt)}`.replace(/\.?$/, "."),
+  }
   return {
-    response: {
-      subject: `Respuesta a tu Hoja de Reclamación N.º ${sheet.number} — odentIA`,
-      text: text(intro),
-      html: sheetHtml(sheet, intro, lead),
-    },
-    copy: {
-      subject: `Libro de Reclamaciones: respuesta a la hoja N.º ${sheet.number}`,
-      text: text(copyIntro),
-      html: sheetHtml(sheet, copyIntro, lead),
-    },
+    response: sheetEmail(
+      sheet,
+      {
+        subject: `Respuesta a tu Hoja de Reclamación N.º ${sheet.number}`,
+        preview: `Respondemos tu ${kind}: la respuesta y tu hoja completa.`,
+        intro: `Respondemos tu ${kind}. Abajo está nuestra respuesta y, debajo, tu hoja completa como la enviaste.`,
+        quote,
+      },
+      options,
+    ),
+    copy: internalSheetEmail(
+      sheet,
+      {
+        subject: `Libro de Reclamaciones: respuesta a la hoja N.º ${sheet.number}`,
+        title: `Respuesta a la hoja N.º ${sheet.number}`,
+        intro: `Copia de la respuesta enviada a ${sheet.email}.`,
+        quote,
+      },
+      options,
+    ),
   }
 }

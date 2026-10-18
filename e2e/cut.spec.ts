@@ -82,7 +82,7 @@ test("auth: invitación, permisos y aislamiento", async ({ browser, createOwner 
     await register(memberPage, member)
     await verifyEmail(memberPage, member.email)
     await login(memberPage, member)
-    const invitationLink = await latestLinkFor(member.email, `Invitación a ${owner.org.name}`)
+    const invitationLink = await latestLinkFor(member.email, `Te invitaron a ${owner.org.name}`)
     expect(invitationLink.startsWith(`${PANEL}/accept-invitation/`)).toBe(true)
     await gotoHydrated(memberPage, invitationLink)
     await expect(memberPage).toHaveURL(tenantPattern(owner.org.slug, "/home"))
