@@ -54,7 +54,16 @@ export function formatOrgMoney(
  * instantes y la moneda histórica se conservan tal cual).
  */
 export function formatZoned(date: Date, zone: Pick<OrgLocale, "timezone" | "locale">): string {
-  return date.toLocaleString(zone.locale, { timeZone: zone.timezone })
+  // Sin segundos: lo que se lee en pantalla y en los mensajes es fecha y hora
+  // («17/10/2026, 3:00 p. m.»), nunca «3:00:00 p. m.».
+  return date.toLocaleString(zone.locale, {
+    timeZone: zone.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  })
 }
 
 

@@ -424,3 +424,50 @@ it("elimina una plantilla por su nombre y dice el motivo si Meta no la elimina",
     whatsappCloudApiAdapter.deleteTemplate!(fx.config, { name: "x" }, { fetch: meta.fetch }),
   ).rejects.toThrow("(#200) Permissions error")
 })
+
+// Cargas con la forma oficial de Cloud API (mensajes audio, video y sticker).
+it("la nota de voz, el audio y el video entran como media; el sticker no entra", () => {
+  const contacts = [{ profile: { name: "Ana Paz" }, wa_id: "51999000111" }]
+  const metadata = { display_phone_number: "51992154378", phone_number_id: "123456789" }
+  const base = { from: "51999000111", timestamp: "1760000000" }
+  const got = parse({
+    messaging_product: "whatsapp",
+    metadata,
+    contacts,
+    messages: [
+      {
+        ...base,
+        id: "wamid.voz",
+        type: "audio",
+        audio: { mime_type: "audio/ogg; codecs=opus", sha256: "abc", id: "media-voz", voice: true },
+      },
+      {
+        ...base,
+        id: "wamid.audio",
+        type: "audio",
+        audio: { mime_type: "audio/mpeg", sha256: "def", id: "media-audio", voice: false },
+      },
+      {
+        ...base,
+        id: "wamid.video",
+        type: "video",
+        video: { caption: "Así sangra", mime_type: "video/mp4", sha256: "ghi", id: "media-video" },
+      },
+      {
+        ...base,
+        id: "wamid.sticker",
+        type: "sticker",
+        sticker: { mime_type: "image/webp", sha256: "jkl", id: "media-sticker", animated: false },
+      },
+    ],
+  })
+  expect(got.messages.map((m) => [m.externalMessageId, m.content])).toEqual([
+    ["wamid.voz", { type: "media", mediaExternalId: "media-voz", mimeType: "audio/ogg; codecs=opus" }],
+    ["wamid.audio", { type: "media", mediaExternalId: "media-audio", mimeType: "audio/mpeg" }],
+    [
+      "wamid.video",
+      { type: "media", mediaExternalId: "media-video", mimeType: "video/mp4", caption: "Así sangra" },
+    ],
+  ])
+  expect(got.messages[2]?.senderDisplayName).toBe("Ana Paz")
+})

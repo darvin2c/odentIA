@@ -38,6 +38,8 @@ export interface OrgProfile {
   diagnosisSystem: string | null
   /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
   logo?: string | null
+  /** Teléfono para urgencias (E.164); null si no lo registró. */
+  emergencyPhone?: string | null
 }
 
 /**
@@ -50,6 +52,7 @@ export interface OrgProfileInput {
   fiscalDocType: string | null
   fiscalDocNumber: string | null
   fiscalAddress: string | null
+  emergencyPhone: string | null
   countryCode: string
   currency: string
   timezone: string

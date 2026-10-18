@@ -438,9 +438,18 @@ const WAITING_STALE_ENCOUNTERS = 5
  * corte va después de ordenar, y `total` cuenta todos: los más viejos nunca
  * quedan fuera sin decirlo.
  */
-async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean): Promise<{ items: WaitingCase[]; total: number }> {
+async function waitingCases(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  all: boolean,
+  onlyMine = false,
+): Promise<{ items: WaitingCase[]; total: number }> {
   // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
-  const rows = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
+  // Quien no ve los casos del agente (el odontólogo) recibe solo los temas que
+  // le pasaron, como una duda clínica de su paciente (ADR 0050).
+  const listed = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
+  const rows = onlyMine ? listed.filter((row) => row.assigneeUserId === userId) : listed
   const items = rows
     .map(row => ({
       id: row.id, priority: row.priority, reason: row.reason, contactName: row.contactName,
@@ -448,7 +457,7 @@ async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean)
       unclaimed: row.assigneeUserId === null,
     }))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  const total = rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
+  const total = onlyMine || rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
   return { items, total }
 }
 
@@ -727,7 +736,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
   const waiting = composeWaiting({
-    ...(access.agent ? await waitingCases(tx, orgId, userId, access.allTasks).then(({ items, total }) => ({ cases: items, casesTotal: total })) : { cases: [] }),
+    ...(access.agent || access.conversations
+      ? await waitingCases(tx, orgId, userId, access.agent && access.allTasks, !access.agent).then(({ items, total }) => ({ cases: items, casesTotal: total }))
+      : { cases: [] }),
     // Ningún borrador queda abandonado: la atención de otro día le sale a quien la lleva.
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.

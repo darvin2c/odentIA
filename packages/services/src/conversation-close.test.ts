@@ -9,10 +9,11 @@ import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { addAgentCaseNote, getAgentCaseState, formatAgentCaseForPrompt } from "./agent-case.js"
-import { createHandoff } from "./agent-operations.js"
+import { countContactModelRunsToday, createHandoff } from "./agent-operations.js"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { describeAuditEvent } from "./audit-words.js"
 import {
+  agentReplyBlockedReason,
   closeConversation,
   closeConversationWith,
   closurePendingReason,
@@ -27,6 +28,9 @@ import {
   tickConversationCare,
 } from "./conversation-close.js"
 import { reopenConversation, sendOutbound } from "./conversations.js"
+import { answerToTeamMember, resolveTopic, sendTeamReply, takeTopic } from "./topic-reply.js"
+import { recordTopicAskedAgain } from "./agent-operations.js"
+import { listInboxConversations } from "./inbox.js"
 import { completeTask } from "./tasks.js"
 import { setWritingHours } from "./writing-hours.js"
 import { getWorkspaceHome } from "./workspace.js"
@@ -183,31 +187,33 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     expect(await c.run((tx) => getResolvePreview(tx, c.orgId, late.id))).toMatchObject({ farewell: false, farewellText: null })
   })
 
-  it("completar la tarea del último caso derivado cierra con el equipo; con otro abierto, no", async () => {
+  it("completar la tarea de un tema no cierra la conversación: el agente sigue con lo demás (ADR 0050)", async () => {
     const c = await clinic()
     const conv = await c.thread("Fabio")
     await c.say(conv.id, "in", "Necesito ayuda", new Date())
     const first = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Uno", summary: "Uno", createdBy: "agent" }))
     const second = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Dos", summary: "Dos", createdBy: "agent" }))
+    // Derivar no apaga al agente.
+    expect(await c.row(conv.id)).toMatchObject({ agentStatus: "on" })
     await c.run((tx) => completeTask(tx, c.orgId, first.taskId!, { userId: c.receptionId }))
-    expect((await c.row(conv.id)).status).toBe("open")
     await c.run((tx) => completeTask(tx, c.orgId, second.taskId!, { userId: c.receptionId }))
-    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: c.receptionId })
-    expect((await c.messages(conv.id)).at(-1)?.body).toBe("Fabio, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
+    expect(await c.row(conv.id)).toMatchObject({ status: "open", agentStatus: "on" })
+    expect((await c.messages(conv.id)).filter((item) => item.direction === "out")).toHaveLength(0)
   })
 
-  it("tomar asigna, apaga el agente y toma los casos; devolver exige que no quede un caso abierto", async () => {
+  it("tomar pasa los temas a quien toma sin apagar al agente; volver a encenderlo no exige resolverlos", async () => {
     const c = await clinic()
     const conv = await c.thread("Gina")
     const handoff = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Pide una persona", summary: "Pide una persona", createdBy: "agent" }))
     await c.run((tx) => takeConversation(tx, c.orgId, conv.id, c.receptionId))
-    expect(await c.row(conv.id)).toMatchObject({ assignedUserId: c.receptionId, agentStatus: "off" })
+    expect(await c.row(conv.id)).toMatchObject({ assignedUserId: c.receptionId, agentStatus: "on" })
     const [claimed] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, handoff.id))
     expect(claimed?.assigneeUserId).toBe(c.receptionId)
-    await expect(c.run((tx) => releaseConversation(tx, c.orgId, conv.id, c.receptionId))).rejects.toMatchObject({ code: "HANDOFF_OPEN" })
-    await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, handoff.taskId!))
     await c.run((tx) => releaseConversation(tx, c.orgId, conv.id, c.receptionId))
     expect(await c.row(conv.id)).toMatchObject({ assignedUserId: null, agentStatus: "on" })
+    // El tema sigue con su responsable.
+    const [still] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, handoff.id))
+    expect(still?.assigneeUserId).toBe(c.receptionId)
   })
 
   it("tomar una cerrada la reabre antes: nunca queda una conversación cerrada a cargo de alguien", async () => {
@@ -215,30 +221,17 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     const conv = await c.thread("Hilda")
     await c.run((tx) => closeConversation(tx, c.orgId, conv.id, c.ownerId))
     await c.run((tx) => takeConversation(tx, c.orgId, conv.id, c.receptionId))
-    expect(await c.row(conv.id)).toMatchObject({ status: "open", closedAt: null, closeReason: null, assignedUserId: c.receptionId, agentStatus: "off" })
+    expect(await c.row(conv.id)).toMatchObject({ status: "open", closedAt: null, closeReason: null, assignedUserId: c.receptionId, agentStatus: "on" })
     const [audit] = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.entityId, conv.id), eq(auditEvent.action, "conversation.reopened")))
     expect(audit).toMatchObject({ actorUserId: c.receptionId, metadata: { via: "equipo" } })
   })
 
-  it("completar la tarea de un caso dice antes lo mismo que «Resolver», y solo si cierra la conversación", async () => {
+  it("completar la tarea de un tema no tiene nada que advertir: no cierra la conversación", async () => {
     const c = await clinic({ provider: "whatsapp_cloud_api" })
     const conv = await c.thread("Lucía Paredes", { lastInboundAt: new Date(Date.now() - HOUR) })
     await c.say(conv.id, "in", "¿Me devuelven lo que pagué?", new Date(Date.now() - HOUR))
-    const first = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reembolso", summary: "Reembolso", createdBy: "agent" }))
-    const second = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Factura", summary: "Factura", createdBy: "agent" }))
-    // Con otro caso abierto, completar no toca la conversación: no hay nada que advertir.
-    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, first.taskId!))).toBeNull()
-    await c.run((tx) => completeTask(tx, c.orgId, first.taskId!, { userId: c.receptionId }))
-    const preview = await c.run((tx) => getTaskResolvePreview(tx, c.orgId, second.taskId!))
-    expect(preview).toEqual({
-      conversationId: conv.id,
-      contactName: "Lucía Paredes",
-      preview: await c.run((tx) => getResolvePreview(tx, c.orgId, conv.id)),
-    })
-    expect(preview?.preview).toMatchObject({ farewell: true, handoffs: 1 })
-    // Una tarea que no es de un caso no cierra nada.
-    const [loose] = await ownerDb.insert(crmTask).values({ organizationId: c.orgId, title: "Llamar", contactId: conv.contactId, conversationId: conv.id, createdBy: "user" }).returning()
-    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, loose!.id))).toBeNull()
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reembolso", summary: "Reembolso", createdBy: "agent" }))
+    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, topic.taskId!))).toBeNull()
   })
 })
 
@@ -370,7 +363,8 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
 
   it("con una persona a cargo no se cierra ni avisa en la campana: la muestra «Te espera» a quien la lleva", async () => {
     const c = await clinic()
-    const mine = await c.thread("Nora Paz", { assignedUserId: c.ownerId, lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    // Una persona la lleva entera: apagó al agente en el hilo (ADR 0050; asignar ya no lo hace).
+    const mine = await c.thread("Nora Paz", { assignedUserId: c.ownerId, agentStatus: "off", lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(mine.id, "in", "Hola", IN)
     await c.say(mine.id, "out", "Hola Nora", OUT, "user")
     const off = await c.thread("Omar", { agentStatus: "off", lastInboundAt: IN, lastMessageAt: IN, attentionStartedAt: IN })
@@ -400,5 +394,152 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await ownerDb.update(agentConfig).set({ enabled: true }).where(eq(agentConfig.organizationId, c.orgId))
     await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Caso", summary: "Caso", createdBy: "agent" }))
     expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
+  })
+})
+
+describe("lo que el agente redactó no sale si el equipo apagó al agente, conversa en vivo o la cerró", () => {
+  it("abierta y con el agente: sale; apagado, con una persona escribiendo o cerrada: no sale y se dice por qué", async () => {
+    const c = await clinic()
+    const own = await c.thread("Ana Paredes")
+    const taken = await c.thread("Bruno Díaz", { assignedUserId: c.receptionId, agentStatus: "off" })
+    const closed = await c.thread("Carla Ríos", { status: "closed", closedAt: new Date(), closeReason: "manual" })
+    const live = await c.thread("Dora Vega")
+    await c.say(live.id, "out", "Hola Dora, te escribo yo", new Date(), "user")
+    const earlier = await c.thread("Elsa Mora")
+    await c.say(earlier.id, "out", "Te escribí hace rato", new Date(Date.now() - 20 * 60_000), "user")
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, own.id))).toBeNull()
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, taken.id))).toMatch(/apagó el agente/)
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, closed.id))).toMatch(/cerró la conversación/)
+    // Una persona del equipo escribió hace menos de 15 minutos: el agente espera (ADR 0050).
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, live.id))).toMatch(/conversando/)
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, earlier.id))).toBeNull()
+  })
+})
+
+describe("tope por persona", () => {
+  it("cuenta solo las corridas con modelo de hoy en las conversaciones de esa persona", async () => {
+    const c = await clinic()
+    const bot = await c.thread("Número desconocido")
+    const other = await c.thread("Ana Paredes")
+    const now = new Date()
+    const ledgerRow = (conversationId: string, llmCalls: number, startedAt = now) =>
+      ({ organizationId: c.orgId, conversationId, model: "fake", status: "ok", startedAt, llmCalls }) as const
+    await ownerDb.insert(agentRunLedger).values([
+      ledgerRow(bot.id, 2),
+      ledgerRow(bot.id, 1),
+      ledgerRow(bot.id, 0),
+      ledgerRow(bot.id, 1, new Date(now.getTime() - 3 * 24 * HOUR)),
+      ledgerRow(other.id, 1),
+    ])
+    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, bot.contactId))).toBe(2)
+    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, other.contactId))).toBe(1)
+  })
+})
+
+describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
+  const IN = new Date("2026-10-12T14:00:00Z")
+  const OUT = new Date("2026-10-12T14:01:00Z")
+  const tick = (c: Awaited<ReturnType<typeof clinic>>, now: Date) => c.run((tx) => tickConversationCare(tx, c.orgId, now))
+  it("derivar crea un tema con el mensaje que lo originó y la conversación queda en «Por atender» sin apagar al agente", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Rosa Quispe")
+    const [asked] = await c.say(conv.id, "in", "¿Puedo tomar ibuprofeno con mi pastilla de la presión?", new Date())
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Consulta clínica", summary: "Medicación", createdBy: "agent" }))
+    const [stored] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id))
+    expect(stored?.sourceMessageId).toBe(asked!.id)
+    expect(await c.row(conv.id)).toMatchObject({ agentStatus: "on" })
+    const attend = await c.run((tx) => listInboxConversations(tx, c.orgId, { view: "attend" }))
+    const item = attend.items.find((row) => row.id === conv.id)
+    expect(item?.attention.topics).toEqual([
+      expect.objectContaining({ id: topic.id, reason: "Consulta clínica", source: expect.objectContaining({ id: asked!.id, body: "¿Puedo tomar ibuprofeno con mi pastilla de la presión?" }) }),
+    ])
+  })
+
+  it("responder citando el mensaje del tema lo toma y, con «Enviar y resolver», lo resuelve; «sigue pendiente» lo deja abierto", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Carlos Paredes")
+    const [asked] = await c.say(conv.id, "in", "¿Me hacen descuento si hago las dos extracciones?", new Date(Date.now() - 60_000))
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Descuento", summary: "Descuento", createdBy: "agent" }))
+    const pending = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Lo consulto con la doctora y te confirmo hoy" },
+      replyToMessageId: asked!.id, keepPending: true,
+    }))
+    expect(pending).toMatchObject({ topicId: topic.id, topicResolved: false, replyToMessageId: asked!.id })
+    const [taken] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id))
+    expect(taken?.assigneeUserId).toBe(c.receptionId)
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("open")
+    // Escribir no apaga al agente.
+    expect(await c.row(conv.id)).toMatchObject({ agentStatus: "on" })
+    const done = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Sí: 10 % por las dos" }, replyToMessageId: asked!.id,
+    }))
+    expect(done).toMatchObject({ topicId: topic.id, topicResolved: true })
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("done")
+    // Resolver el tema no cierra la conversación.
+    expect((await c.row(conv.id)).status).toBe("open")
+  })
+
+  it("responder sin tema y «sigue pendiente» abre un tema a nombre de quien escribe", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Lía")
+    const [asked] = await c.say(conv.id, "in", "¿Tienen estacionamiento?", new Date())
+    const sent = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Te averiguo" }, replyToMessageId: asked!.id, keepPending: true,
+    }))
+    expect(sent.topicId).not.toBeNull()
+    const [created] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, sent.topicId!))
+    expect(created).toMatchObject({ createdBy: "user", assigneeUserId: c.receptionId, sourceMessageId: asked!.id, reason: "¿Tienen estacionamiento?" })
+  })
+
+  it("«Tomar este tema» de otra persona no pide confirmación y le avisa; «Pasar este tema a…» avisa a quien lo recibe", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Jorge Mamani")
+    await c.say(conv.id, "in", "Quiero cotizar una endodoncia", new Date())
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Cotización", summary: "Cotización", assigneeUserId: c.receptionId, createdBy: "agent" }))
+    await c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId }))
+    expect((await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id)))[0]?.assigneeUserId).toBe(c.ownerId)
+    const toReception = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))
+    expect(toReception.map((n) => n.title)).toEqual(["Dueña tomó el tema de Jorge Mamani"])
+    await c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId, toUserId: c.receptionId }))
+    const again = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))
+    expect(again.map((n) => n.title)).toContain("Dueña te pasó el tema de Jorge Mamani")
+    // Un tema de otra conversación no se toma por esta.
+    const other = await c.thread("Otro")
+    await expect(c.run((tx) => takeTopic(tx, c.orgId, { conversationId: other.id, topicId: topic.id, userId: c.ownerId }))).rejects.toMatchObject({ status: 404 })
+    await c.run((tx) => resolveTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("done")
+  })
+
+  it("volver a preguntar por el tema se anota y avisa a quien lo tiene; citar a una persona del equipo va a su tema", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Carlos")
+    await c.say(conv.id, "in", "¿Y el descuento?", new Date(Date.now() - 60_000))
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Descuento", summary: "Descuento", assigneeUserId: c.receptionId, createdBy: "agent" }))
+    const [again] = await c.say(conv.id, "in", "¿Ya me pueden decir lo del descuento?", new Date())
+    expect(await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: again!.id }))).toEqual({ assigneeName: "Rita de Recepción", reason: "Descuento" })
+    const [row] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id))
+    expect(row?.askedMessageIds).toEqual([again!.id])
+    expect((await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))).map((n) => n.title))
+      .toEqual(["Carlos volvió a preguntar por su tema"])
+    // Cita lo que escribió la dueña: va a un tema de ella, no del agente.
+    const [fromOwner] = await c.say(conv.id, "out", "Hola Carlos, soy la doctora", new Date(), "user")
+    await ownerDb.update(message).set({ senderUserId: c.ownerId }).where(eq(message.id, fromOwner!.id))
+    const [reply] = await c.say(conv.id, "in", "Gracias doctora", new Date())
+    await c.run((tx) => answerToTeamMember(tx, c.orgId, { conversationId: conv.id, messageId: reply!.id, userId: c.ownerId }))
+    const mine = await ownerDb.select().from(agentHandoff).where(and(eq(agentHandoff.conversationId, conv.id), eq(agentHandoff.assigneeUserId, c.ownerId)))
+    expect(mine).toEqual([expect.objectContaining({ createdBy: "user", sourceMessageId: reply!.id })])
+  })
+
+  it("el ciclo da por resuelto el tema que el equipo ya respondió si la persona no volvió a preguntar", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Nora", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "¿Qué pasta dental me recomiendan?", IN)
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Consulta", summary: "Consulta", createdBy: "agent" }))
+    await ownerDb.update(agentHandoff).set({ createdAt: IN }).where(eq(agentHandoff.id, topic.id))
+    await c.say(conv.id, "out", "Una con flúor, Nora", OUT, "user")
+    // Al día siguiente, pasadas las horas de silencio, el tema se resuelve y la conversación sigue el ciclo de siempre.
+    await tick(c, new Date("2026-10-14T17:00:00Z"))
+    const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!))
+    expect(task).toMatchObject({ status: "done", settledReason: "Respondido por el equipo; la persona no volvió a preguntar" })
   })
 })

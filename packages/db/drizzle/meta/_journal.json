@@ -99,6 +99,13 @@
       "when": 1792266344071,
       "tag": "0013_aceptacion_de_la_clinica_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792304420038,
+      "tag": "0014_temas_para_el_equipo",
+      "breakpoints": true
     }
   ]
 }

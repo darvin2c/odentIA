@@ -13,7 +13,9 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
+  ScrollArea,
   Spinner,
+  toast,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -53,7 +55,9 @@ import {
   ConfirmDialog,
   DataRefreshMarker,
   EmptyState,
+  ErrorState,
   FilterBar,
+  LoadingState,
   PageHeader,
   PageShell,
   RowActions,
@@ -88,6 +92,7 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   type InboxSummary,
+  type InboxTopic,
   type ResolvePreview,
   timeAgo,
   usePermission,
@@ -119,6 +124,10 @@ import {
   closureBand,
   type ConversationWords,
   conversationWords,
+  fullWhenWords,
+  topicQuote,
+  topicWords,
+  messageTimeWords,
   pendingWords,
   resolveWords,
 } from "../../lib/conversation-state"
@@ -131,7 +140,7 @@ export const Route = createFileRoute("/_org/inbox")({
       : {}),
     ...(typeof search.q === "string" ? { q: search.q } : {}),
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
-    ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
+    ...(search.mine === "1" || search.mine === 1 ? { mine: "1" } : {}),
     ...(typeof search.view === "string" ? { view: search.view } : {}),
     ...(search.contexto === true || search.contexto === "true"
       ? { contexto: true as const }
@@ -155,28 +164,28 @@ const CHANNEL_FILTER_OPTIONS = [
 ] as const
 
 /**
- * Vistas de trabajo de la bandeja (filtrado SQL en el servidor, antes de
- * paginar). Solo valen las que tienen chip: una vista sin control visible
- * dejaría la lista filtrada sin forma de verlo ni de salir. «Abiertas» es la
- * bandeja sin vista; «Cerradas» pide además las cerradas.
+ * Las cuatro pestañas de la Bandeja (ADR 0050): no se superponen, así cada
+ * conversación está en una sola y los números suman. Sin vista en la URL se
+ * abre «Por atender», lo único que pide a una persona. Solo valen las que
+ * tienen pestaña: una vista sin control visible dejaría la lista filtrada sin
+ * forma de verlo ni de salir.
  */
 const VIEW_CHIPS = [
-  { value: undefined, label: "Abiertas", total: "open" },
-  { value: "unanswered", label: "Esperan respuesta", total: "unanswered" },
-  { value: "team", label: "Con el equipo", total: "team" },
+  { value: "attend", label: "Por atender", total: "attend" },
+  { value: "agent", label: "Las atiende el agente", total: "agent" },
   { value: "awaiting_patient", label: "Esperan al paciente", total: "awaitingPatient" },
   { value: "closed", label: "Cerradas", total: "closed" },
-] as const satisfies readonly { value?: string; label: string; total: keyof InboxSummary }[]
-const CHIP_VIEWS: readonly (string | undefined)[] = VIEW_CHIPS.map((chip) => chip.value)
+] as const satisfies readonly { value: string; label: string; total: keyof InboxSummary }[]
+const CHIP_VIEWS: readonly string[] = VIEW_CHIPS.map((chip) => chip.value)
+const DEFAULT_VIEW = "attend"
 const DEFAULT_SUBTITLE = "Todas las conversaciones de la clínica"
 
-/** Total de la bandeja entera; con filtros activos la cifra la da el chip, no el subtítulo. */
+/** Lo abierto y lo que pide a una persona; con filtros activos la cifra la da la pestaña, no el subtítulo. */
 function waitingSubtitle(summary: InboxSummary | undefined): string {
   if (!summary) return DEFAULT_SUBTITLE
-  if (summary.unanswered === 0) return "Ninguna conversación espera respuesta"
-  return summary.unanswered === 1
-    ? "1 conversación espera respuesta"
-    : `${summary.unanswered} conversaciones esperan respuesta`
+  const open = summary.open === 1 ? "1 abierta" : `${summary.open} abiertas`
+  if (summary.attend === 0) return `${open} · nada por atender`
+  return `${open} · ${summary.attend} por atender`
 }
 
 function InboxPage() {
@@ -193,7 +202,8 @@ function InboxPage() {
   const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
   const channel = listSearch.get("channel")
-  const assigned = listSearch.get("assigned")
+  // «Solo las mías»: los temas de quien mira y los que nadie tomó (ADR 0050).
+  const mine = listSearch.get("mine") === "1"
   const search = listSearch.get("q") ?? ""
   // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar); el orden es
   // el del servidor, por actividad: reordenar aquí solo movería las páginas ya cargadas.
@@ -249,19 +259,18 @@ function InboxPage() {
   const filterParams = useMemo(() => {
     const params = new URLSearchParams()
     if (channel) params.set("channel", channel)
-    if (assigned === "me") params.set("assigned", myUserId)
-    else if (assigned === "none") params.set("assigned", "none")
+    if (mine) params.set("mine", "1")
     if (search.trim()) params.set("q", search.trim())
     return params.toString()
-  }, [channel, assigned, search, myUserId])
-  const activeView = view && CHIP_VIEWS.includes(view) ? view : undefined
+  }, [channel, mine, search])
+  const activeView = view && CHIP_VIEWS.includes(view) ? view : DEFAULT_VIEW
   // El subtítulo habla de toda la bandeja: con filtros no afirma un total parcial.
-  const narrowed = Boolean(channel) || Boolean(assigned) || search.trim() !== ""
+  const narrowed = Boolean(channel) || mine || search.trim() !== ""
   const listParams = useMemo(() => {
     const params = new URLSearchParams(filterParams)
-    // Cada chip es abierta o cerrada: «Cerradas» pide las cerradas; las demás, las abiertas.
+    // Cada pestaña es abierta o cerrada: «Cerradas» pide las cerradas; las demás, las abiertas.
     params.set("status", activeView === "closed" ? "closed" : "open")
-    if (activeView) params.set("view", activeView)
+    params.set("view", activeView)
     return params.toString()
   }, [filterParams, activeView])
 
@@ -326,6 +335,37 @@ function InboxPage() {
   )
 
   const items = useMemo(() => listQuery.data?.pages.flatMap((page) => page.data) ?? [], [listQuery.data])
+  // «Siguiente tema por atender»: la siguiente fila de «Por atender» que aún tiene un tema.
+  const nextTopicId =
+    activeView === "attend"
+      ? (items.find((item) => item.id !== selectedId && (item.attention?.topics?.length ?? 0) > 0)?.id ?? null)
+      : null
+  // Con el teclado: J y K pasan entre conversaciones, R lleva a la caja de texto (fuera de un campo).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return
+      if (document.querySelector("[role=dialog]")) return
+      const key = event.key.toLowerCase()
+      if (key !== "j" && key !== "k" && key !== "r") return
+      if (key === "r") {
+        const box = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')
+        if (!box) return
+        event.preventDefault()
+        box.focus()
+        return
+      }
+      if (items.length === 0) return
+      event.preventDefault()
+      const at = items.findIndex((item) => item.id === selectedId)
+      const next = key === "j" ? Math.min(items.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1)
+      const target_ = items[next]
+      if (target_) selectConversation(target_.id)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [items, selectedId, selectConversation])
 
   const mode = useDetailMode()
   // La columna del agente ocupa el lugar de «Contexto» mientras no quepan los
@@ -392,6 +432,8 @@ function InboxPage() {
       attention={selectedItem?.attention}
       listClosure={selectedItem?.closure}
       canSeeProposals={canDecideAgent || canReadAgent}
+      startOnTopic={activeView === "attend"}
+      onNextTopic={nextTopicId ? () => selectConversation(nextTopicId) : undefined}
     />
   ) : null
 
@@ -445,53 +487,63 @@ function InboxPage() {
         onClose={() => setNewConversation(false)}
         initialQuery={search.trim()}
       />
-      {/* En angosto, con un hilo abierto, la pantalla es del hilo: vistas y filtros vuelven con la lista. */}
-      <fieldset className={mode !== "panel" && selectedId ? "hidden" : "flex min-w-0 flex-wrap gap-1.5"}>
-        <legend className="sr-only">Vista de la bandeja</legend>
-        {VIEW_CHIPS.map((chip) => {
-          const pressed = activeView === chip.value
-          return (
+      {/* Pestañas a la izquierda y filtros a la derecha, en una sola fila (bajan a otra si no caben).
+          En angosto, con un hilo abierto, la pantalla es del hilo: vuelven con la lista. */}
+      {mode === "panel" || !selectedId ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <fieldset className="flex min-w-0 flex-wrap gap-1.5">
+            <legend className="sr-only">Vista de la bandeja</legend>
+            {VIEW_CHIPS.map((chip) => {
+              const pressed = activeView === chip.value
+              return (
+                <Button
+                  key={chip.value}
+                  type="button"
+                  size="sm"
+                  variant={pressed ? "default" : "outline"}
+                  aria-pressed={pressed}
+                  className="min-h-11 rounded-full sm:min-h-9"
+                  onClick={() => listSearch.setParam("view", chip.value === DEFAULT_VIEW ? undefined : chip.value, { replace: true })}
+                >
+                  {chip.label}
+                  {summary ? <span className="tabular-nums opacity-80"> {summary[chip.total]}</span> : null}
+                </Button>
+              )
+            })}
+          </fieldset>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
             <Button
-              key={chip.label}
               type="button"
               size="sm"
-              variant={pressed ? "default" : "outline"}
-              aria-pressed={pressed}
+              variant={mine ? "secondary" : "outline"}
+              aria-pressed={mine}
               className="min-h-11 rounded-full sm:min-h-9"
-              onClick={() => listSearch.setParam("view", chip.value, { replace: true })}
+              onClick={() => listSearch.setParam("mine", mine ? undefined : "1", { replace: true })}
+              title="Los temas que tienes tú y los que nadie tomó"
             >
-              {chip.label}
-              {summary ? ` · ${summary[chip.total]}` : ""}
+              {mine ? <CheckCircle2 className="size-4" aria-hidden /> : null}
+              Solo las mías
             </Button>
-          )
-        })}
-      </fieldset>
-      {mode === "panel" || !selectedId ? <FilterBar
-        filters={[
-          {
-            key: "channel",
-            label: "Canal",
-            type: "select",
-            options: CHANNEL_FILTER_OPTIONS.map((channel) => ({
-              value: channel,
-              label: channelLabel(channel),
-            })),
-          },
-          {
-            key: "assigned",
-            label: "Asignado",
-            type: "select",
-            options: [
-              { value: "me", label: "Mías" },
-              { value: "none", label: "Sin asignar" },
-            ],
-          },
-        ]}
-        sortOptions={[]}
-        searchPlaceholder="Buscar por nombre o teléfono"
-        searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
-        resetKeys={["channel", "assigned", "q"]}
-      /> : null}
+            <FilterBar
+              filters={[
+                {
+                  key: "channel",
+                  label: "Canal",
+                  type: "select",
+                  options: CHANNEL_FILTER_OPTIONS.map((channel) => ({
+                    value: channel,
+                    label: channelLabel(channel),
+                  })),
+                },
+              ]}
+              sortOptions={[]}
+              searchPlaceholder="Buscar por nombre o teléfono"
+              searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
+              resetKeys={["channel", "mine", "q"]}
+            />
+          </div>
+        </div>
+      ) : null}
       {/* Con el agente apagado en toda la clínica, lo dice junto a la lista; en angosto, con un hilo abierto, la pantalla es del hilo. */}
       {mode === "panel" || !selectedId ? <ReceptionOffNotice className="shrink-0" /> : null}
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
@@ -509,6 +561,7 @@ function InboxPage() {
           >
             <ConversationList
               items={items}
+              myUserId={myUserId}
               selectedId={selectedId}
               isLoading={listQuery.isLoading && items.length === 0}
               isRefreshing={listQuery.isFetching && !listQuery.isLoading && !listQuery.isFetchingNextPage}
@@ -552,6 +605,7 @@ function InboxPage() {
           {!selectedId || (!showContext && !thread) ? (
             <ConversationList
               items={items}
+              myUserId={myUserId}
               selectedId={selectedId}
               isLoading={listQuery.isLoading && items.length === 0}
               isRefreshing={listQuery.isFetching && !listQuery.isLoading && !listQuery.isFetchingNextPage}
@@ -566,9 +620,33 @@ function InboxPage() {
               searching={search.trim() !== ""}
             />
           ) : showContext ? (
-            (workspace ?? (
-              <p className="p-4 text-sm text-muted-foreground">Cargando contexto…</p>
-            ))
+            (workspace ??
+              // Sin «Contexto» que mostrar (sin `crm.read` o sin la persona del hilo) siempre hay salida al hilo.
+              (!canReadCrm ? (
+                <EmptyState
+                  title="Sin acceso al contexto"
+                  description="Tu rol no ve los datos de la persona en el CRM."
+                  actionLabel="Volver a la conversación"
+                  onAction={closeContextMobile}
+                />
+              ) : contactFallbackQuery.isError ? (
+                <div className="flex flex-col gap-2">
+                  <ErrorState
+                    message="No se pudo cargar el contexto de la persona."
+                    onRetry={() => void contactFallbackQuery.refetch()}
+                  />
+                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
+                    Volver a la conversación
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <LoadingState message="Cargando contexto…" />
+                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
+                    Volver a la conversación
+                  </Button>
+                </div>
+              )))
           ) : (
             thread
           )}
@@ -604,24 +682,20 @@ function StateLabel({ words, className = "" }: { words: ConversationWords; class
       </span>
     )
   }
+  // Color con un solo significado (ADR 0050): ámbar lo que pide a una persona,
+  // rojo solo «Ahora», gris esperar o cerrada; siempre con su frase.
   const tone =
     words.tone === "urgent"
       ? "font-semibold text-destructive"
-      : words.tone === "team"
+      : words.tone === "team" || words.tone === "waiting"
         ? "font-semibold text-warning"
-        : words.tone === "waiting"
-          ? "font-semibold text-foreground"
-          : words.tone === "patient"
-            ? "font-semibold"
-            : ""
+        : "text-muted-foreground"
   const mark =
     words.tone === "urgent"
       ? "size-2 shrink-0 rounded-full bg-destructive"
-      : words.tone === "team"
+      : words.tone === "team" || words.tone === "waiting"
         ? "size-2 shrink-0 rounded-[2px] bg-warning"
-        : words.tone === "waiting"
-          ? "size-2 shrink-0 rounded-full bg-primary"
-          : null
+        : null
   return (
     <span className={`flex min-w-0 items-center gap-1.5 ${tone} ${className}`}>
       {mark ? <span aria-hidden className={mark} /> : null}
@@ -741,6 +815,7 @@ function AgentPendingBand({
 /** Listado de conversaciones: filas, vacío y paginación por cursor. */
 function ConversationList({
   items,
+  myUserId,
   selectedId,
   isLoading,
   isRefreshing,
@@ -755,6 +830,8 @@ function ConversationList({
   searching = false,
 }: {
   items: ConversationListItem[]
+  /** Quien mira: un tema suyo se dice «Lo tienes tú». */
+  myUserId: string
   selectedId: string | null
   isLoading: boolean
   isRefreshing: boolean
@@ -771,12 +848,19 @@ function ConversationList({
   searching?: boolean
 }) {
   return (
-    <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
+    // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
+    <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
+    <div className="flex flex-col divide-y">
       {items.map((item) => {
         const selected = item.id === selectedId
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
         const ChannelIcon = channelIcon(item.connection.channel)
-        const words = conversationWords(item)
+        const words = conversationWords({ ...item, myUserId })
+        // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0050).
+        const topic = item.attention?.topics?.[0]
+        const preview = topic
+          ? `${!topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca: " : ""}«${topicQuote(topic)}»`
+          : (item.preview?.body ?? (item.preview ? "Adjunto" : "Sin mensajes todavía"))
         return (
         <button
           key={item.id}
@@ -802,8 +886,8 @@ function ConversationList({
               </span>
               <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
             </span>
-            <span className="truncate text-[13px] text-muted-foreground">
-              {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
+            <span className={`truncate text-[13px] ${topic ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+              {preview}
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
@@ -829,9 +913,7 @@ function ConversationList({
         </div>
       ) : null}
       {isLoading && !hasItems && (
-        <p className="p-4 text-sm text-muted-foreground" role="status">
-          Cargando conversaciones…
-        </p>
+        <LoadingState className="m-3" message="Cargando conversaciones…" />
       )}
       {isError && !hasItems && !isLoading && (
         <div className="flex flex-wrap items-center gap-2 p-4">
@@ -884,6 +966,7 @@ function ConversationList({
         </Button>
       )}
     </div>
+    </ScrollArea>
   )
 }
 
@@ -910,6 +993,8 @@ function ThreadView({
   attention,
   listClosure,
   canSeeProposals,
+  startOnTopic = false,
+  onNextTopic,
 }: {
   id: string
   members: Member[]
@@ -929,6 +1014,10 @@ function ThreadView({
   /** Cierre según la lista, mientras llega el detalle. */
   listClosure?: ConversationClosure | null
   canSeeProposals: boolean
+  /** Desde «Por atender» el hilo abre en «Solo este tema» (ADR 0050). */
+  startOnTopic?: boolean
+  /** Abre el siguiente tema por atender; ausente si no hay otro. */
+  onNextTopic?: () => void
 }) {
   const queryClient = useQueryClient()
   const [composer, setComposer] = useState("")
@@ -987,6 +1076,13 @@ function ThreadView({
   const canOpenPeople = usePermission("patients.read")
   const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
+  // Temas (ADR 0050): a qué mensaje responde la caja (undefined = el tema pendiente
+  // más antiguo de quien mira; null = mensaje nuevo, sin tema), si se ve solo el
+  // tema y si el último envío lo dejó resuelto.
+  const [replyTo, setReplyTo] = useState<string | null | undefined>(undefined)
+  const [onlyTopic, setOnlyTopic] = useState(startOnTopic)
+  const [doneTopic, setDoneTopic] = useState(false)
+  const keepPendingRef = useRef(false)
 
   useEffect(() => {
     setOlder([])
@@ -1001,7 +1097,13 @@ function ThreadView({
     setOpenTrace(null)
     setCorrecting(null)
     setConfirming(null)
+    setReplyTo(undefined)
+    setDoneTopic(false)
   }, [id])
+  // Desde «Por atender» cada hilo abre en «Solo este tema» (ADR 0050).
+  useEffect(() => {
+    setOnlyTopic(startOnTopic)
+  }, [startOnTopic])
 
   useEffect(() => {
     if (detail && detail.conversation.unreadCount > 0 && markedRef !== id) {
@@ -1063,18 +1165,46 @@ function ThreadView({
   }, [prepareRegistration, canRegister, detail])
 
   const sendMutation = useMutation({
-    mutationFn: (text: string) =>
-      apiFetch(`/api/conversations/${id}/messages`, {
+    mutationFn: (input: { text: string; replyToMessageId: string | null; keepPending: boolean }) =>
+      apiFetch<{ data: ChatMessage & { topicId: string | null; topicResolved: boolean } }>(`/api/conversations/${id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text: input.text,
+          ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+          ...(input.keepPending ? { keepPending: true } : {}),
+        }),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       setComposer("")
       setWindowClosed(false)
       setSendError(null)
+      setReplyTo(undefined)
+      if (result.data.topicResolved) setDoneTopic(true)
       invalidate()
+      invalidateAgentPanelQueries(queryClient)
     },
     onError: sendFailed,
+  })
+
+  // «Tomar este tema», «Pasar este tema a…» y «Marcar resuelto» (ADR 0050).
+  const topicMutation = useMutation({
+    retry: false,
+    mutationFn: ({ topicId, path, body }: { topicId: string; path: "take" | "resolve"; body?: unknown }) =>
+      apiFetch(`/api/conversations/${id}/topics/${topicId}/${path}`, {
+        method: "POST",
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      }),
+    onSuccess: (_result, variables) => {
+      if (variables.path === "resolve") setDoneTopic(true)
+      invalidate()
+      invalidateAgentPanelQueries(queryClient)
+      for (const key of ["agent-case-brief", "crm-context", "workspace-home"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError && error.shape.message ? error.shape.message : "No se pudo completar la acción. Inténtalo de nuevo.")
+    },
   })
 
   /**
@@ -1102,7 +1232,9 @@ function ThreadView({
     if (!text && files.length === 0) return
     setUploading(true)
     try {
-      if (text) await sendMutation.mutateAsync(text)
+      if (text) {
+        await sendMutation.mutateAsync({ text, replyToMessageId: effectiveReplyTo, keepPending: keepPendingRef.current })
+      }
       for (const file of files) {
         const blob = await (await fetch(file.url)).blob()
         const form = new FormData()
@@ -1117,6 +1249,7 @@ function ThreadView({
       sendFailed(error)
       throw error
     } finally {
+      keepPendingRef.current = false
       setUploading(false)
     }
   }
@@ -1147,7 +1280,7 @@ function ThreadView({
         ? "No se pudo completar la acción. Inténtalo de nuevo."
         : null
   // Resolver y cerrar sin resolver confirman antes con lo que dice el servidor que pasará.
-  const [confirming, setConfirming] = useState<"resolve" | "close" | null>(null)
+  const [confirming, setConfirming] = useState<"close" | null>(null)
   const previewQuery = useQuery({
     queryKey: ["conversation-resolve-preview", id],
     queryFn: () => apiFetch<{ data: ResolvePreview }>(`/api/conversations/${id}/resolve-preview`),
@@ -1167,6 +1300,13 @@ function ThreadView({
       )
       setOlder((prev) => [...page.data, ...prev])
       setOlderCursor(page.nextCursor)
+    } catch (error) {
+      // Lo ya cargado se conserva; se avisa y el botón queda para volver a intentarlo.
+      toast.error(
+        error instanceof ApiError && error.shape.message
+          ? error.shape.message
+          : "No se pudieron cargar los mensajes anteriores. Vuelve a intentarlo.",
+      )
     } finally {
       setLoadingOlder(false)
     }
@@ -1175,9 +1315,12 @@ function ThreadView({
   // Sin detalle aún no hay estructura que anticipar; con detalle en caché el
   // refetch (automático o manual) nunca lo retira: sigue visible abajo.
   if (detailQuery.isPending && !detail) {
-    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
+    return <LoadingState className="min-h-0 flex-1" message="Cargando la conversación…" />
   }
   if (!detail) {
+    // Solo 404/403 dicen que no está o que no hay acceso; otro fallo (red, servidor) se reintenta.
+    const gone =
+      detailQuery.error instanceof ApiError && (detailQuery.error.status === 404 || detailQuery.error.status === 403)
     return (
       <div className="flex flex-col gap-2 p-4">
         {showBack && (
@@ -1185,17 +1328,24 @@ function ThreadView({
             <ChevronLeft className="size-4" />
           </Button>
         )}
-        <p className="text-sm text-destructive" role="alert">
-          Esta conversación ya no está disponible o no tienes acceso.
-        </p>
-        <span className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => void detailQuery.refetch()}>
-            Reintentar
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            Volver a la bandeja
-          </Button>
-        </span>
+        {gone ? (
+          <EmptyState
+            title="Conversación no disponible"
+            description="Esta conversación ya no está disponible o no tienes acceso."
+            actionLabel="Volver a la bandeja"
+            onAction={onBack}
+          />
+        ) : (
+          <>
+            <ErrorState
+              message="No se pudo cargar la conversación. Revisa la conexión y vuelve a intentarlo."
+              onRetry={() => void detailQuery.refetch()}
+            />
+            <Button variant="ghost" size="sm" className="self-center" onClick={onBack}>
+              Volver a la bandeja
+            </Button>
+          </>
+        )}
       </div>
     )
   }
@@ -1209,16 +1359,38 @@ function ThreadView({
   const threadAttention = detail.attention ?? attention
   // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
   const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
-  const words = conversationWords({ status: conv.status, attention: threadAttention, closure })
-  const assignee = members.find((m) => m.userId === conv.assignedUserId)
-  // «Tomar» mientras no la tenga quien mira con el agente apagado; «Devolver al
-  // agente» mientras la tenga una persona. Cerrada, escribir la reabre.
-  const takenByMe = conv.assignedUserId === myUserId && conv.agentStatus !== "on"
-  const withPerson = conv.agentStatus !== "on" || conv.assignedUserId !== null
+  const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId })
+  // Temas del hilo (ADR 0050): primero los de quien mira y los que nadie tomó.
+  const topics = threadAttention?.topics ?? []
+  const forMe = (topic: InboxTopic) => !topic.assigneeUserId || topic.assigneeUserId === myUserId
+  const orderedTopics = [...topics.filter(forMe), ...topics.filter((topic) => !forMe(topic))]
+  const defaultTopic = [...topics.filter(forMe)].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null
+  // La caja responde por defecto a la pregunta pendiente más antigua de quien mira.
+  const effectiveReplyTo = replyTo === undefined ? (defaultTopic?.source?.id ?? null) : replyTo
+  const replyMessage = effectiveReplyTo ? (messages.find((item) => item.id === effectiveReplyTo) ?? null) : null
+  const replyTopic = effectiveReplyTo
+    ? (topics.find((topic) => topic.source?.id === effectiveReplyTo || topic.askedMessageIds.includes(effectiveReplyTo)) ?? null)
+    : null
+  const replyText = replyMessage?.body ?? (replyTopic ? topicQuote(replyTopic) : null)
+  // Mensajes del tema: los que lo originaron o volvieron a preguntar por él.
+  const topicMessageIds = new Set(topics.flatMap((topic) => [topic.source?.id, ...topic.askedMessageIds].filter((item): item is string => !!item)))
+  const askedIds = new Set(topics.flatMap((topic) => topic.askedMessageIds))
+  const focusTopic = defaultTopic ?? orderedTopics[0] ?? null
+  const showOnlyTopic = onlyTopic && focusTopic !== null
+  const shown = showOnlyTopic && focusTopic ? foldOutsideTopic(messages, focusTopic) : messages.map((msg) => ({ kind: "message" as const, msg }))
+  const jumpTo = (messageId: string) => {
+    if (showOnlyTopic && focusTopic && !foldOutsideTopic(messages, focusTopic).some((item) => item.kind === "message" && item.msg.id === messageId)) {
+      setOnlyTopic(false)
+    }
+    window.setTimeout(() => document.getElementById(`mensaje-${messageId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50)
+  }
+  const focusComposer = () => window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus(), 0)
+  // Promete responder después: se sugiere dejar el tema pendiente.
+  const promises = replyTopic !== null && /\b(te (confirmo|aviso|escribo|respondo|cuento|averiguo)|consult|averigu|lo veo)/i.test(composer)
+  const conversers = members.filter((member) => ["owner", "admin", "reception", "dentist"].includes(member.role))
   const busy = actionMutation.isPending
   const name = detail.contact.displayName
   const preview = previewQuery.data?.data
-  const resolveText = preview ? resolveWords(name, preview) : null
   const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar") : []
   const previewError =
     previewQuery.error instanceof ApiError
@@ -1245,7 +1417,7 @@ function ThreadView({
             <ChevronLeft className="size-4" />
           </Button>
         )}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-1">
           {/* El nombre lleva a la página de la persona (ADR 0029): también para odontología, que la ve sin el CRM si es paciente. */}
           {canOpenPeople && (canSeeNonPatients || detail.contact.isPatient) ? (
             <Link
@@ -1269,52 +1441,12 @@ function ThreadView({
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
           </div>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-2">
-        {threadAttention?.handoffPriority ? (
+        {/* Un botón principal por estado vive en el tema (ADR 0050); aquí solo lo de la conversación. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+        {topics.length > 0 || threadAttention?.handoffPriority ? (
           <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setBriefFor(conv.id)}>
             <ClipboardList className="size-4" />
             Resumen del caso
-          </Button>
-        ) : null}
-        {canWrite && !closed && !takenByMe ? (
-          <SubmitButton
-            variant="outline"
-            size="sm"
-            className="min-h-11 sm:min-h-8"
-            pending={busy && actionMutation.variables?.path === "/take"}
-            disabled={busy}
-            onClick={() => actionMutation.mutate({ path: "/take" })}
-          >
-            <Hand className="size-4" aria-hidden />
-            Tomar
-          </SubmitButton>
-        ) : null}
-        {/* Con un caso del agente abierto no se devuelve: antes se resuelve (el servidor responde HANDOFF_OPEN). */}
-        {canWrite && !closed && withPerson && !threadAttention?.handoffPriority ? (
-          <SubmitButton
-            variant="outline"
-            size="sm"
-            className="min-h-11 sm:min-h-8"
-            pending={busy && actionMutation.variables?.path === "/release"}
-            disabled={busy}
-            onClick={() => actionMutation.mutate({ path: "/release" })}
-          >
-            <Bot className="size-4" aria-hidden />
-            Devolver al agente
-          </SubmitButton>
-        ) : null}
-        {canWrite && !closed ? (
-          <Button
-            size="sm"
-            className="min-h-11 sm:min-h-8"
-            disabled={busy}
-            onClick={() => {
-              actionMutation.reset()
-              setConfirming("resolve")
-            }}
-          >
-            <CheckCircle2 className="size-4" aria-hidden />
-            Resolver
           </Button>
         ) : null}
         {onToggleContext && (
@@ -1330,56 +1462,24 @@ function ThreadView({
             Contexto
           </Button>
         )}
-        {/* Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar. */}
-        {canRegister && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11 sm:min-h-8"
-            disabled={registrationMutation.isPending}
-            onClick={() => registrationMutation.mutate(detail.contact.id)}
-            title="Genera un enlace y prepara el mensaje para revisión; no se envía solo"
-          >
-            {registrationMutation.isPending ? (
-              <Spinner className="size-6" aria-hidden />
-            ) : (
-              <UserPlus className="size-4" />
-            )}
-            {detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviarle su enlace"}
-          </Button>
-        )}
-        {canWrite && (
-          <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex min-h-11 items-center rounded-4xl bg-secondary px-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:min-h-0">
-              {assignee ? assignee.user.name : "Asignar"}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem
-                onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: null } })}
-              >
-                Sin asignar
-              </DropdownMenuItem>
-              {members.map((m) => (
-                <DropdownMenuItem
-                  key={m.userId}
-                  onSelect={() =>
-                    actionMutation.mutate({ path: "/assign", body: { userId: m.userId } })
-                  }
-                >
-                  {m.user.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {canWrite ? (
+        {canWrite || canRegister ? (
           <RowActions
             label="Más acciones de la conversación"
-            items={
-              closed
-                ? [{ key: "reabrir", label: "Reabrir", disabled: busy, onSelect: () => actionMutation.mutate({ path: "/reopen" }) }]
-                : [
-                    {
+            items={[
+              // Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar.
+              ...(canRegister
+                ? [{
+                    key: "enlace",
+                    label: detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviarle su enlace",
+                    disabled: registrationMutation.isPending,
+                    onSelect: () => registrationMutation.mutate(detail.contact.id),
+                  }]
+                : []),
+              ...(!canWrite
+                ? []
+                : closed
+                  ? [{ key: "reabrir", label: "Reabrir", disabled: busy, onSelect: () => actionMutation.mutate({ path: "/reopen" }) }]
+                  : [{
                       key: "cerrar",
                       label: "Cerrar sin resolver",
                       disabled: busy,
@@ -1387,9 +1487,8 @@ function ThreadView({
                         actionMutation.reset()
                         setConfirming("close")
                       },
-                    },
-                  ]
-            }
+                    }]),
+            ]}
           />
         ) : null}
         </div>
@@ -1399,28 +1498,6 @@ function ThreadView({
           </p>
         ) : null}
       </div>
-      <ConfirmDialog
-        open={confirming === "resolve"}
-        title="¿Resolver la conversación?"
-        description={
-          resolveText?.description ??
-          (previewError ? "No se pudo consultar qué pasará al resolverla." : "Consultando qué pasará al resolverla…")
-        }
-        confirmLabel="Resolver"
-        variant="default"
-        pending={busy}
-        confirmDisabled={!preview}
-        onClose={() => setConfirming(null)}
-        onConfirm={() => actionMutation.mutate({ path: "/resolve" })}
-      >
-        {/* La misma pieza que completar la tarea de un caso en Tareas y en «Contexto». */}
-        {preview ? <ResolvePreviewDetails name={name} preview={preview} /> : null}
-        {previewError || (confirming === "resolve" && actionError) ? (
-          <p role="alert" className="text-sm text-destructive">
-            {confirming === "resolve" && actionError ? actionError : previewError}
-          </p>
-        ) : null}
-      </ConfirmDialog>
       <ConfirmDialog
         open={confirming === "close"}
         title="¿Cerrar sin resolver?"
@@ -1452,8 +1529,31 @@ function ThreadView({
         ) : null}
       </ConfirmDialog>
 
+      {orderedTopics.length > 0 && !closed ? (
+        <TopicBand
+          topics={orderedTopics}
+          myUserId={myUserId}
+          messages={messages}
+          members={conversers}
+          canWrite={canWrite}
+          onlyTopic={showOnlyTopic}
+          pending={topicMutation.isPending}
+          onToggleOnlyTopic={() => setOnlyTopic((value) => !value)}
+          onAnswer={(topic) => {
+            setReplyTo(topic.source?.id ?? null)
+            setDoneTopic(false)
+            focusComposer()
+          }}
+          onJump={jumpTo}
+          onTake={(topic) => topicMutation.mutate({ topicId: topic.id, path: "take" })}
+          onPass={(topic, userId) => topicMutation.mutate({ topicId: topic.id, path: "take", body: { toUserId: userId } })}
+          onResolve={(topic) => topicMutation.mutate({ topicId: topic.id, path: "resolve" })}
+        />
+      ) : null}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-        <MessageScroller className="min-h-0 flex-1">
+        {/* El historial conserva siempre un alto útil: la zona de escritura (p. ej. los
+            mensajes aprobados) no puede dejarlo en cero. */}
+        <MessageScroller className="min-h-32 flex-1">
           <MessageScrollerViewport preserveScrollOnPrepend className="bg-canvas/60 p-4">
             {(olderCursor ?? detail.messagesCursor) && (
               <Button
@@ -1474,18 +1574,39 @@ function ThreadView({
               </Button>
             )}
             <MessageScrollerContent className="gap-2">
-              {messages.map((msg) => (
-                <MessageScrollerItem key={msg.id} messageId={msg.id}>
-                  <MessageBubble
-                    msg={msg}
-                    conversationId={id}
-                    orgSlug={orgSlug}
-                    onShowTrace={
-                      traceByMessage.has(msg.id) ? () => setOpenTrace(traceByMessage.get(msg.id) ?? null) : undefined
-                    }
-                  />
-                </MessageScrollerItem>
-              ))}
+              {shown.map((item) =>
+                item.kind === "fold" ? (
+                  <MessageScrollerItem key={`plegado-${item.firstId}`} messageId={`plegado-${item.firstId}`}>
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-11 rounded-full border-dashed text-xs sm:min-h-8"
+                        onClick={() => setOnlyTopic(false)}
+                      >
+                        {item.count === 1 ? "1 mensaje más de la conversación · ver" : `${item.count} mensajes más de la conversación · ver`}
+                      </Button>
+                    </div>
+                  </MessageScrollerItem>
+                ) : (
+                  <MessageScrollerItem key={item.msg.id} messageId={item.msg.id}>
+                    <div id={`mensaje-${item.msg.id}`}>
+                      <MessageBubble
+                        msg={item.msg}
+                        conversationId={id}
+                        orgSlug={orgSlug}
+                        highlight={topicMessageIds.has(item.msg.id) ? (askedIds.has(item.msg.id) ? "asked" : "topic") : undefined}
+                        quote={quoteOf(item.msg, messages, jumpTo)}
+                        senderName={item.msg.senderUserId ? (members.find((member) => member.userId === item.msg.senderUserId)?.user.name ?? null) : null}
+                        onShowTrace={
+                          traceByMessage.has(item.msg.id) ? () => setOpenTrace(traceByMessage.get(item.msg.id) ?? null) : undefined
+                        }
+                      />
+                    </div>
+                  </MessageScrollerItem>
+                ),
+              )}
             </MessageScrollerContent>
             {closure ? (
               <div className="mt-3 flex justify-center">
@@ -1533,7 +1654,10 @@ function ThreadView({
       <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
       <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
       <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
-      <div className="border-t p-3">
+      {/* Como mucho el 60 % del hilo y con su propio desplazamiento: con la ventana de WhatsApp
+          cerrada, el aviso y los mensajes aprobados no se comen el historial (antes quedaba en 0 px). */}
+      <ScrollArea className="flex max-h-[60%] min-h-0 flex-col border-t [&_[data-slot=scroll-area-viewport]]:h-auto [&_[data-slot=scroll-area-viewport]]:min-h-0 [&_[data-slot=scroll-area-viewport]]:flex-1">
+      <div className="flex flex-col p-3">
         {detail.contact.isActive === false && (
           <p className="mb-2 text-xs text-muted-foreground">
             Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para iniciar
@@ -1589,6 +1713,56 @@ function ThreadView({
           />
         ) : (
           <div className="flex flex-col gap-1.5">
+            {doneTopic ? (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
+                <CheckCircle2 className="size-4 text-success" aria-hidden />
+                <span className="min-w-0 flex-1">Tema resuelto. El agente sigue con lo demás.</span>
+                {onNextTopic ? (
+                  <Button size="sm" className="min-h-11 sm:min-h-8" onClick={onNextTopic}>
+                    Siguiente tema por atender
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {threadAttention?.teamLive && threadAttention.agentAttending ? (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+                <Bot className="size-3.5 shrink-0" aria-hidden />
+                Estás conversando en vivo: el agente espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.
+              </p>
+            ) : null}
+            {effectiveReplyTo !== null || topics.length > 0 ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-lg border-l-4 border-warning bg-warning-soft/60 px-3 py-1.5 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  {effectiveReplyTo !== null && replyText ? (
+                    <>
+                      <span className="font-semibold">Respondiendo a: </span>«{replyText}»
+                    </>
+                  ) : (
+                    <span className="font-semibold">Mensaje nuevo, sin tema</span>
+                  )}
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="shrink-0 rounded-md px-2 py-1 font-semibold text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+                    Cambiar
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {orderedTopics.map((topic) =>
+                      topic.source ? (
+                        <DropdownMenuItem key={topic.id} onSelect={() => setReplyTo(topic.source?.id ?? null)}>
+                          «{topicQuote(topic, 60)}»
+                        </DropdownMenuItem>
+                      ) : null,
+                    )}
+                    {[...messages].reverse().filter((item) => item.direction === "in" && !topicMessageIds.has(item.id)).slice(0, 4).map((item) => (
+                      <DropdownMenuItem key={item.id} onSelect={() => setReplyTo(item.id)}>
+                        «{(item.body ?? "Adjunto").slice(0, 60)}»
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuItem onSelect={() => setReplyTo(null)}>Mensaje nuevo, sin tema</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : null}
             <PromptInput
               accept="image/jpeg,image/png,image/webp,application/pdf,audio/ogg,audio/mpeg"
               multiple
@@ -1625,12 +1799,38 @@ function ThreadView({
                     }
                   />
                 </PromptInputTools>
-                <PromptInputSubmit
-                  aria-label="Enviar"
-                  disabled={sendMutation.isPending || uploading}
-                />
+                <div className="flex items-center gap-1.5">
+                  {effectiveReplyTo !== null ? (
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-8"
+                      disabled={sendMutation.isPending || uploading}
+                      onClick={() => {
+                        keepPendingRef.current = true
+                      }}
+                    >
+                      Enviar, sigue pendiente
+                    </Button>
+                  ) : null}
+                  <PromptInputSubmit
+                    aria-label={replyTopic ? "Enviar y resolver" : "Enviar"}
+                    title={replyTopic ? "Enviar y resolver (Enter)" : "Enviar (Enter)"}
+                    disabled={sendMutation.isPending || uploading}
+                  />
+                </div>
               </PromptInputFooter>
             </PromptInput>
+            {promises ? (
+              <p className="text-xs text-warning" role="status">
+                Prometes responder después: usa «Enviar, sigue pendiente» para que el tema no se dé por resuelto.
+              </p>
+            ) : replyTopic ? (
+              <p className="text-xs text-muted-foreground">
+                {name} lo verá como respuesta a su mensaje. Con Enter se envía y el tema queda resuelto.
+              </p>
+            ) : null}
             {sendError && (
               <p className="text-sm text-destructive" role="alert">
                 {sendError}
@@ -1639,7 +1839,172 @@ function ThreadView({
           </div>
         )}
       </div>
+      </ScrollArea>
     </div>
+  )
+}
+
+/** Un mensaje del hilo o una tanda plegada de mensajes ajenos al tema. */
+type ShownItem = { kind: "message"; msg: ChatMessage } | { kind: "fold"; count: number; firstId: string }
+
+/**
+ * «Solo este tema» (ADR 0050): quedan a la vista el mensaje que originó el tema,
+ * las veces que volvió a preguntar, lo que se le respondió citándolos, lo que
+ * escribió el equipo desde que se abrió y la respuesta del agente justo después
+ * de cada pregunta repetida. Lo demás se pliega en una línea.
+ */
+function foldOutsideTopic(messages: ChatMessage[], topic: InboxTopic): ShownItem[] {
+  const keep = new Set([topic.source?.id, ...topic.askedMessageIds].filter((item): item is string => !!item))
+  const since = topic.source?.createdAt ?? topic.createdAt
+  messages.forEach((msg, index) => {
+    if (msg.replyToMessageId && keep.has(msg.replyToMessageId)) keep.add(msg.id)
+    if (msg.senderKind === "user" && msg.createdAt >= since) keep.add(msg.id)
+    const previous = messages[index - 1]
+    if (previous && topic.askedMessageIds.includes(previous.id) && msg.direction === "out") keep.add(msg.id)
+  })
+  const shown: ShownItem[] = []
+  for (const msg of messages) {
+    if (keep.has(msg.id)) {
+      shown.push({ kind: "message", msg })
+      continue
+    }
+    const last = shown[shown.length - 1]
+    if (last?.kind === "fold") last.count += 1
+    else shown.push({ kind: "fold", count: 1, firstId: msg.id })
+  }
+  return shown
+}
+
+/** La cita de un mensaje que responde a otro: su texto y cómo llegar a él, o que ya no está cargado. */
+function quoteOf(
+  msg: ChatMessage,
+  messages: ChatMessage[],
+  onJump: (messageId: string) => void,
+): { text: string; onJump: () => void } | "missing" | undefined {
+  if (!msg.replyToMessageId) return undefined
+  const quoted = messages.find((item) => item.id === msg.replyToMessageId)
+  if (!quoted) return "missing"
+  return { text: (quoted.body ?? "Adjunto").replace(/\s+/g, " ").slice(0, 140), onJump: () => onJump(quoted.id) }
+}
+
+/**
+ * Lo que hay que contestar en este hilo (ADR 0050), arriba del historial: la
+ * pregunta citada, quién la tiene y desde cuándo, lo que ya se le dijo y un
+ * solo botón principal, «Responder». Tomar, pasar a otra persona y marcar
+ * resuelto van en «…». Con varios temas, primero los de quien mira.
+ */
+function TopicBand({
+  topics,
+  myUserId,
+  messages,
+  members,
+  canWrite,
+  onlyTopic,
+  pending,
+  onToggleOnlyTopic,
+  onAnswer,
+  onJump,
+  onTake,
+  onPass,
+  onResolve,
+}: {
+  topics: InboxTopic[]
+  myUserId: string
+  messages: ChatMessage[]
+  members: Member[]
+  canWrite: boolean
+  onlyTopic: boolean
+  pending: boolean
+  onToggleOnlyTopic: () => void
+  onAnswer: (topic: InboxTopic) => void
+  onJump: (messageId: string) => void
+  onTake: (topic: InboxTopic) => void
+  onPass: (topic: InboxTopic, userId: string) => void
+  onResolve: (topic: InboxTopic) => void
+}) {
+  const [first, ...rest] = topics
+  const [showRest, setShowRest] = useState(false)
+  if (!first) return null
+  const visible = showRest ? topics : [first]
+  return (
+    <section aria-label="Lo que te toca contestar" className="flex flex-col gap-2 border-b bg-warning-soft/50 px-3.5 py-2.5">
+      {visible.map((topic) => {
+        const mine = topic.assigneeUserId === myUserId
+        const free = !topic.assigneeUserId
+        // Quien lo tiene escribió hace poco: tomarlo no se bloquea, pero se dice.
+        const lastByOwner = topic.assigneeUserId
+          ? [...messages].reverse().find((item) => item.senderKind === "user" && item.senderUserId === topic.assigneeUserId)
+          : undefined
+        const ownerLive = lastByOwner ? Date.now() - Date.parse(lastByOwner.createdAt) < 15 * 60_000 : false
+        const told = topic.source
+          ? messages.filter((item) => item.direction === "out" && Date.parse(item.createdAt) > Date.parse(topic.source?.createdAt ?? "")).slice(-2)
+          : []
+        return (
+          <div key={topic.id} className="flex flex-col gap-1.5 text-[13px]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={`font-semibold ${topic.urgent ? "text-destructive" : "text-warning"}`}>
+                {mine || free ? "Te toca contestar" : topicWords(topic, myUserId)}
+              </span>
+              <span className="text-muted-foreground">
+                {free ? (topic.urgent ? "· Ahora · nadie lo tomó" : "· nadie lo tomó") : mine ? "· lo tienes tú" : ""}
+                {topic.askedAgainAt ? ` · volvió a preguntar ${timeAgo(topic.askedAgainAt)}` : ""}
+              </span>
+            </div>
+            <p className="min-w-0 font-medium">
+              «{topicQuote(topic, 200)}»
+              {topic.source ? <span className="font-normal text-muted-foreground"> · {timeAgo(topic.source.createdAt)}</span> : null}
+            </p>
+            {told.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Ya se le dijo: {told.map((item) => `${item.senderKind === "agent" ? "el agente" : "el equipo"}, «${(item.body ?? "").slice(0, 80)}»`).join(" · ")}
+              </p>
+            ) : null}
+            {canWrite ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {mine || free ? (
+                  <Button size="sm" className="min-h-11 sm:min-h-8" disabled={pending} onClick={() => onAnswer(topic)}>
+                    Responder
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={pending} onClick={() => onTake(topic)}>
+                    <Hand className="size-4" aria-hidden />
+                    Tomar este tema
+                  </Button>
+                )}
+                {topic.source ? (
+                  <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => onJump(topic.source?.id ?? "")}>
+                    Ver en la conversación
+                  </Button>
+                ) : null}
+                <RowActions
+                  label="Más acciones del tema"
+                  items={[
+                    { key: "vista", label: onlyTopic ? "Ver toda la conversación" : "Ver solo este tema", onSelect: onToggleOnlyTopic },
+                    ...members
+                      .filter((member) => member.userId !== topic.assigneeUserId)
+                      .map((member) => ({
+                        key: `pasar-${member.userId}`,
+                        label: member.userId === myUserId ? "Pasármelo" : `Pasar este tema a ${member.user.name}`,
+                        disabled: pending,
+                        onSelect: () => (member.userId === myUserId ? onTake(topic) : onPass(topic, member.userId)),
+                      })),
+                    { key: "resuelto", label: "Marcar resuelto", disabled: pending, onSelect: () => onResolve(topic) },
+                  ]}
+                />
+                {ownerLive && !mine && topic.assigneeName ? (
+                  <span className="text-xs text-muted-foreground">{topic.assigneeName} le escribió {timeAgo(lastByOwner?.createdAt ?? null)}</span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {rest.length > 0 ? (
+        <Button variant="link" size="sm" className="h-auto self-start p-0 text-xs" onClick={() => setShowRest((value) => !value)}>
+          {showRest ? "Mostrar solo el primero" : rest.length === 1 ? "1 tema más en esta conversación" : `${rest.length} temas más en esta conversación`}
+        </Button>
+      ) : null}
+    </section>
   )
 }
 
@@ -1714,12 +2079,21 @@ function MessageBubble({
   conversationId,
   orgSlug,
   onShowTrace,
+  highlight,
+  quote,
+  senderName,
 }: {
   msg: ChatMessage
   conversationId: string
   orgSlug: string
   /** Presente solo si el mensaje tiene traza: abre «En qué se basó». */
   onShowTrace?: () => void
+  /** Es del tema que hay que contestar: lo originó (`topic`) o volvió a preguntar (`asked`). */
+  highlight?: "topic" | "asked"
+  /** El mensaje al que responde, citado como en WhatsApp. */
+  quote?: { text: string; onJump: () => void } | "missing"
+  /** Quién del equipo lo escribió. */
+  senderName?: string | null
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
@@ -1730,7 +2104,7 @@ function MessageBubble({
       <MessageContent
         className={
           !out
-            ? "rounded-2xl rounded-bl-md border bg-card px-4 py-2.5"
+            ? `rounded-2xl rounded-bl-md border bg-card px-4 py-2.5 ${highlight ? "ring-2 ring-warning" : ""}`
             : byAgent
               ? "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-agent-border group-[.is-user]:bg-agent-soft group-[.is-user]:py-2.5"
               : "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:py-2.5"
@@ -1749,6 +2123,23 @@ function MessageBubble({
             ) : null}
           </div>
         )}
+        {highlight ? (
+          <span className="text-xs font-semibold text-warning">{highlight === "asked" ? "Sobre el tema" : "Tema · te toca"}</span>
+        ) : null}
+        {out && !byAgent && senderName ? <span className="text-xs font-semibold text-muted-foreground">{senderName}</span> : null}
+        {quote === "missing" ? (
+          <span className="rounded-md border-l-2 border-muted-foreground/40 bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+            Respondió a un mensaje anterior que no está cargado
+          </span>
+        ) : quote ? (
+          <button
+            type="button"
+            onClick={quote.onJump}
+            className="rounded-md border-l-2 border-primary bg-background/70 px-2 py-1 text-left text-xs text-muted-foreground outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            «{quote.text}»
+          </button>
+        ) : null}
         {/* WhatsApp muestra la media arriba y el texto (caption o transcripción) abajo. */}
         <MessageAttachments msg={msg} conversationId={conversationId} orgSlug={orgSlug} />
         {msg.contentType === "template" ? (
@@ -1766,10 +2157,10 @@ function MessageBubble({
         <div
           className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
         >
-          {new Date(msg.createdAt).toLocaleTimeString(activeOrgLocale(), {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {/* Fecha cuando no es de hoy y siempre en la zona de la clínica; el título la dice completa. */}
+          <time dateTime={msg.createdAt} title={fullWhenWords(msg.createdAt)}>
+            {messageTimeWords(msg.createdAt)}
+          </time>
           {out && statusIcon(msg.status)}
         </div>
         {onShowTrace ? (

@@ -80,7 +80,7 @@ async function openConversation(sender: string): Promise<string> {
 it("un hilo nuevo no tiene estado que contar y no gasta prompt en una sección vacía", async () => {
   const conversationId = await openConversation("vacio")
   const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(state).toEqual({ pending: [], recent: [], notes: [], lookups: [], totalMessages: 1 })
+  expect(state).toEqual({ topics: [], pending: [], recent: [], notes: [], lookups: [], totalMessages: 1 })
   expect(formatAgentCaseForPrompt(state, ZONE, 20)).toBeNull()
 })
 

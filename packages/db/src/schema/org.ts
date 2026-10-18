@@ -48,6 +48,9 @@ export const orgProfile = pgTable("org_profile", {
   sheetSize: text("sheet_size").notNull().default("A4"),
   // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
   ticketFooter: text("ticket_footer").notNull().default("Recibo interno. No es un documento fiscal."),
+  // Teléfono para urgencias de la clínica (fuera de horario también): lo da el
+  // agente ante una urgencia. Nulo: el agente remite a emergencias.
+  emergencyPhone: text("emergency_phone"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
