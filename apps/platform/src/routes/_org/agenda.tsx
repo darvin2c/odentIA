@@ -1128,7 +1128,7 @@ function AgendaPage() {
                   variant="outline"
                   onClick={() => setParams({ view: "lista", status: "programada" })}
                 >
-                  <Clock aria-hidden className="text-warning-foreground" />
+                  <Clock aria-hidden className="text-warning" />
                   {pending} por confirmar
                 </Button>
               ) : null}

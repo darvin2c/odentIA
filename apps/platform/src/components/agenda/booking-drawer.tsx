@@ -470,7 +470,7 @@ export function BookingDrawer({
                   role="status"
                   className="grid gap-1.5 rounded-xl bg-warning-soft p-2.5 text-sm"
                 >
-                  <span className="font-semibold text-warning-foreground">
+                  <span className="font-semibold text-warning">
                     Puede que ya esté registrada:
                   </span>
                   {duplicates.slice(0, 3).map((match) => (
@@ -639,7 +639,7 @@ export function BookingDrawer({
             <span className="flex-1 text-sm text-muted-foreground">¿Es una urgencia?</span>
             <SubmitButton
               variant="ghost"
-              className="text-warning-foreground"
+              className="text-warning"
               disabled={save.isPending}
               pending={save.isPending && save.variables?.outsideSchedule === true}
               onClick={() => shown && save.mutate({ range: shown, outsideSchedule: true })}

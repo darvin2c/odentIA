@@ -302,7 +302,7 @@ export function AbsenceForm({
 
         {firstAffected ? (
           <div role="status" className="grid gap-2.5 rounded-2xl bg-warning-soft p-3.5">
-            <span className="flex items-center gap-1.5 text-sm font-bold text-warning-foreground">
+            <span className="flex items-center gap-1.5 text-sm font-bold text-warning">
               <TriangleAlert aria-hidden className="size-4" />
               {affected.length === 1
                 ? `1 cita queda dentro ${person ? "de la ausencia" : "del cierre"}`
