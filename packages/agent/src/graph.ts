@@ -3,7 +3,6 @@ import type { Runnable } from "@langchain/core/runnables"
 import { tool } from "@langchain/core/tools"
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
-import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { withOrgContext } from "@odentia/db"
 import { DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
 import {
@@ -146,21 +145,12 @@ const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
 
-function isSystemMessage(msg: BaseMessage): boolean {
-  if (msg instanceof SystemMessage) return true
-  // Mensajes rehidratados del checkpointer: misma clase por nombre.
-  return msg.constructor?.name === "SystemMessage"
-}
-
 const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
-    // El contexto vigente reemplaza al anterior entre turnos (con
-    // checkpointer) en vez de copiarse encima: loadContext devuelve el lote
-    // [system, ...historial] y ese lote sustituye el estado guardado, así no
-    // crece por copia ni conserva políticas antiguas. Dentro del turno los
-    // lotes del modelo y las herramientas no empiezan por system y se
-    // concatenan, sin perder mensajes de herramientas.
-    reducer: (left, right) => (right.length > 0 && right[0] && isSystemMessage(right[0]) ? right : left.concat(right)),
+    // Cada corrida empieza vacía (el grafo no guarda su estado, ADR 0051):
+    // loadContext pone [system, ...historial] leídos de la base y el modelo
+    // y las herramientas suman lo suyo, sin perder mensajes de herramientas.
+    reducer: (left, right) => left.concat(right),
     default: () => [],
   }),
   turnCount: Annotation<number>({
@@ -403,19 +393,12 @@ function lookupDetail(tool: string, text: string): string | undefined {
 }
 
 /**
- * Compila el grafo del agente para una corrida. El checkpointer usa conexión
- * de owner (el pool es compartido entre orgs y el GUC RLS no se puede fijar
- * por operación): el aislamiento lo da el thread_id exacto
- * `${orgId}:${conversationId}` más las policies RLS para el rol app.
- * Entre turnos el contexto vigente (sistema e historial desde la base)
- * reemplaza al guardado: no crece por copia ni conserva políticas antiguas.
- * Sin checkpointer (simulación) el grafo corre sin memoria persistente.
+ * Compila el grafo del agente para una corrida. No guarda su estado (ADR
+ * 0051): cada turno lee de la base el sistema, el historial, las propuestas
+ * y las notas del caso, y lo que debe quedar (mensajes, traza, propuestas,
+ * libro) ya tiene su tabla.
  */
-export function compileAgentGraph(
-  model: Runnable<BaseMessage[], AIMessage>,
-  toolCtx: AgentToolCtx,
-  checkpointer?: PostgresSaver,
-) {
+export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, toolCtx: AgentToolCtx) {
   const tools = makeAgentTools(toolCtx)
   const available = new Set(tools.map((item) => item.name))
   // Con camino elegido, al modelo se le enseñan solo las herramientas de ese
@@ -940,7 +923,7 @@ export function compileAgentGraph(
     .addEdge("loadContext", "llm")
     .addConditionalEdges("llm", routeAfterLlm, ["tools", END])
     .addConditionalEdges("tools", routeAfterTools, ["llm", END])
-    .compile(checkpointer ? { checkpointer } : {})
+    .compile()
 
   return graph
 }
