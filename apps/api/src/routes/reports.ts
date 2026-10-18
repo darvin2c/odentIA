@@ -8,6 +8,7 @@
 import { withOrgContext, type Db } from "@odentia/db"
 import {
   getReportAdvice,
+  getReportAgent,
   getReportAgenda,
   getReportList,
   getReportMoney,
@@ -53,6 +54,15 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
   read("/agenda", getReportAgenda)
   read("/sales", getReportSales)
   read("/service", getReportService)
+
+  // Agente: lo pagado a odentIA va solo a quien ve Facturación (propietario o administrador, como su pantalla).
+  app.get("/agent", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const parsed = reportQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const billing = memberRole === "owner" || memberRole === "admin"
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReportAgent(tx, orgId, parsed.data, new Date(), { billing })))
+  })
 
   // Los avisos del Administrador: cada línea exige su permiso, como en Inicio.
   app.get("/advice", async (c) => {

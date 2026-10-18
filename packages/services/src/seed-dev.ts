@@ -155,6 +155,7 @@ import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
 import { seedReports } from "./seed-reports.js"
+import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -3326,6 +3327,8 @@ const reportsHistory = await db.transaction((tx) => {
     patientIds: [...patientIdByName.values()],
   })
 })
+// Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
+await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)

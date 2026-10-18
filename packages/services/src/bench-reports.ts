@@ -9,6 +9,7 @@
 import { createAppDb, type Db, withOrgContext } from "@odentia/db"
 import { getReportAgenda, getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
 import { getReportProfessionals, getReportSummary } from "./report-summary.js"
+import { getAgentReportList, getReportAgent } from "./report-agent.js"
 
 const ORG = process.env.BENCH_ORG ?? "seed-org-dental-smile"
 const url = process.env.APP_DATABASE_URL
@@ -25,6 +26,10 @@ const READS: Record<string, Read> = {
   sales: getReportSales,
   service: getReportService,
   "list:new_patients": (tx, org, query) => getReportList(tx, org, { ...query, list: "new_patients" }),
+  // Agente, con lo pagado a odentIA (lo más pesado: cada tramo de la suscripción entero).
+  agent: (tx, org, query) => getReportAgent(tx, org, query, new Date(), { billing: true }),
+  "list:agent_booked": (tx, org, query) => getAgentReportList(tx, org, { ...query, list: "agent_booked" }),
+  "list:agent_handoffs": (tx, org, query) => getAgentReportList(tx, org, { ...query, list: "agent_handoffs" }),
 }
 
 const rows: Array<{ consulta: string; periodo: string; ms: number }> = []

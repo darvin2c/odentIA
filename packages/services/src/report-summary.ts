@@ -26,7 +26,7 @@ import {
   spansSql,
 } from "./report-scope.js"
 import { appointmentTotalsMany, budgetLinesSql, newPatientsMany } from "./reports.js"
-import { AGENT_SOURCES } from "./saas-actions.js"
+import { agentBookedMany, agentCollectedMany, agentRecoveredMany, collectedIn } from "./report-agent.js"
 
 /** Presupuestos presentados y cuántos de ellos se aceptaron (en todo o en parte), por tramo. */
 export interface Acceptance {
@@ -54,27 +54,13 @@ export async function budgetAcceptanceMany(tx: Db, orgId: string, spans: Span[])
  * Citas que agendó el agente en cada tramo: las que se reservaron en su
  * conversación o desde su enlace (`AGENT_SOURCES`, como el cobro por acción),
  * por el día en que se reservaron. Las recuperadas son las acciones `cita` del
- * cobro por valor (ADR 0031), por el día en que se contaron.
+ * cobro por valor (ADR 0031), por el día en que se contaron, si la cita sigue
+ * atendida. Son las mismas definiciones de Reportes › Agente (`report-agent.ts`).
  */
 export async function agentBookingsMany(tx: Db, orgId: string, branchId: string | undefined, spans: Span[]): Promise<Array<{ booked: number; recovered: number }>> {
-  const sources = sql.join(
-    AGENT_SOURCES.map((source) => sql`${source}`),
-    sql`, `,
-  )
-  const branch = (column: string) => (branchId ? sql`and ${sql.raw(column)} = ${branchId}` : sql``)
-  const booked = await tx.execute<{ idx: number; count: number }>(sql`
-    select b.idx, count(*)::int as count from ${spansSql(spans)}
-    join appointment a on a.organization_id = ${orgId} and a.created_at >= b.start_at and a.created_at < b.end_at
-      and a.source in (${sources}) ${branch("a.branch_id")}
-    group by b.idx`)
-  const recovered = await tx.execute<{ idx: number; count: number }>(sql`
-    select b.idx, count(*)::int as count from ${spansSql(spans)}
-    join saas_action x on x.organization_id = ${orgId} and x.kind = 'cita' and x.occurred_at >= b.start_at and x.occurred_at < b.end_at
-    ${branchId ? sql`join appointment a on a.organization_id = x.organization_id and a.id = x.appointment_id and a.branch_id = ${branchId}` : sql``}
-    group by b.idx`)
-  const bookedBy = bySpan(spans, [...booked], () => 0, (_, row) => row.count)
-  const recoveredBy = bySpan(spans, [...recovered], () => 0, (_, row) => row.count)
-  return spans.map((_, index) => ({ booked: bookedBy[index] ?? 0, recovered: recoveredBy[index] ?? 0 }))
+  const booked = await agentBookedMany(tx, orgId, branchId, spans)
+  const recovered = await agentRecoveredMany(tx, orgId, branchId, spans)
+  return spans.map((_, index) => ({ booked: booked[index]?.booked ?? 0, recovered: recovered[index] ?? 0 }))
 }
 
 /** Lo que debían hace más de `OVERDUE_DAYS` días en cada momento, por moneda, con cuántas personas. */
@@ -117,6 +103,8 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
   const nth = <T>(list: T[], index: number): T => list[index] as T
   const monthsOf = <T, V>(list: T[], pick: (item: T) => V): V[] => list.slice(2).map(pick)
   const cents = (list: Array<{ currency: string; cents: number }> | undefined): number => inCurrency(list, currency)?.cents ?? 0
+  // Lo cobrado en las citas del agente solo se dice del periodo (Reportes › Agente, decisión 5).
+  const [agentCollected] = await agentCollectedMany(tx, orgId, branchId, [window])
 
   // Lo cobrado por tramo del periodo, con el mismo tramo un año antes.
   const buckets = scopeBuckets(scope)
@@ -145,7 +133,8 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
       months: monthsOf(appointments, (item) => ({ noShow: item.noShow, total: item.total })),
     },
     agent: {
-      current: nth(agent, 0),
+      /** `collectedCents`: lo cobrado en esas citas, en la moneda de la clínica. */
+      current: { ...nth(agent, 0), collectedCents: agentCollected ? collectedIn(agentCollected, currency) : 0 },
       previous: nth(agent, 1),
       months: monthsOf(agent, (item) => item.booked),
     },
