@@ -234,7 +234,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .from(conversation)
       .where(eq(conversation.id, conversationId)),
   )
-  expect(conv?.agentStatus).toBe("off")
+  expect(conv?.agentStatus).toBe("on") // derivar no apaga al agente (ADR 0049)
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
   const tasks = await withOrgContext(appDb, "org_a", (tx) =>
     tx
@@ -352,7 +352,7 @@ it("maxTurns deriva cuando el modelo no llega a responder", async () => {
     const { conversationId, messageId } = await ingestText("tg:ag4", "evt-ag4", "Hola")
     const model = new ScriptedModel((_messages, call) => toolCall("listar_tareas", {}, `call-${call}`))
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
   } finally {
@@ -381,7 +381,7 @@ it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con m
   }
 })
 
-it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin aviso en la campana", async () => {
+it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0049)", async () => {
   const stamp = Date.now()
   const receptionId = `agent-reception-${stamp}`
   await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
@@ -391,7 +391,8 @@ it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin 
   const { conversationId, messageId } = await ingestText("tg:ag-mudo", "evt-ag-mudo", "¿Atienden sábados?")
   const model = new ScriptedModel(() => new AIMessage({ content: "Sí, atendemos los sábados." }))
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  expect(await agentMessages(conversationId)).toEqual([])
+  // La persona no queda sin nada: un momento, y la corrida vuelve a la cola.
+  expect(await agentMessages(conversationId)).toEqual(["Dame un momento, te respondo enseguida."])
   expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await ledgerRows(conversationId)).toEqual([{ status: "sin_respuesta", llmCalls: 1, toolsUsed: [] }])
   const notices = await withOrgContext(appDb, "org_a", (tx) =>
@@ -406,6 +407,12 @@ it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin 
   // vuelve a llamar al modelo, y tampoco avisa en la campana.
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen).toHaveLength(2)
+  // La segunda vez con el mismo mensaje pasa a recepción como tema, con el aviso fijo.
+  expect((await ledgerRows(conversationId)).map((row) => row.status)).toEqual(["sin_respuesta", "handoff"])
+  expect(await agentMessages(conversationId)).toEqual([
+    "Dame un momento, te respondo enseguida.",
+    "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí.",
+  ])
   const again = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ id: workspaceNotification.id })
@@ -478,7 +485,7 @@ it("derivar con aviso envía el mensaje y registra la derivación en una sola ll
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen.length).toBe(1)
   expect(await agentMessages(conversationId)).toEqual(["Te paso con una persona del equipo."])
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ priority: agentHandoff.priority })
@@ -519,7 +526,7 @@ it("si odentIA no tiene la cuenta del proveedor del modelo elegido, el caso pasa
     const { conversationId, messageId } = await ingestText("tg:ag-sin-cuenta", "evt-ag-sin-cuenta", "Hola")
     // Solo hay cuenta de OpenAI: la clave de un proveedor nunca sirve para el otro.
     expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave-openai", baseUrl: "http://127.0.0.1:9/v1" } })).toBe("done")
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ error: agentRunLedger.error, model: agentRunLedger.model }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
     )
@@ -543,7 +550,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     const first = await ingestText("tg:ag-401", "evt-ag-401", "Hola")
     expect(await runAgent(first.conversationId, first.messageId, 0, platform)).toBe("done")
     expect(provider.hits()).toBe(1)
-    expect(await agentStatusOf(first.conversationId)).toBe("off")
+    expect(await agentStatusOf(first.conversationId)).toBe("on")
     expect(await agentMessages(first.conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     const rows = await ledgerRows(first.conversationId)
     expect(rows).toHaveLength(1)
@@ -602,7 +609,7 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
     const { conversationId, messageId } = await ingestText("tg:ag-402", "evt-ag-402", "Hola")
     expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave", baseUrl: `http://127.0.0.1:${address.port}/v1` } })).toBe("done")
     expect(hits).toBe(1)
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
     )
@@ -745,7 +752,7 @@ it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", asy
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
     expect(model.seen.length).toBe(0)
     expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx
         .select({ status: agentRunLedger.status, error: agentRunLedger.error })
@@ -1413,7 +1420,7 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   const winner = firstTry.status === "fulfilled" ? ownerId : recepId
   const loser = firstTry.status === "fulfilled" ? secondTry : firstTry
   expect(loser.status).toBe("rejected")
-  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otra persona ya tomó este caso")
+  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otra persona ya tomó este tema")
   // La tarea vinculada pasa al mismo responsable.
   const [claimedTask] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
@@ -1435,12 +1442,11 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   const [resolved] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
   expect(resolved!.status).toBe("done")
-  // Era el único caso del hilo: completarlo resuelve la conversación (ADR 0024),
-  // con el equipo como motivo y el agente encendido para la próxima atención.
+  // Completar el tema no cierra la conversación (ADR 0049): el agente sigue con lo demás.
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ agentStatus: conversation.agentStatus, status: conversation.status, closeReason: conversation.closeReason, closedByUserId: conversation.closedByUserId })
+    tx.select({ agentStatus: conversation.agentStatus, status: conversation.status })
       .from(conversation).where(eq(conversation.id, conversationId)))
-  expect(conv).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: winner, agentStatus: "on" })
+  expect(conv).toMatchObject({ status: "open", agentStatus: "on" })
 })
 
 /** Sede con unidad dental, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
@@ -1604,7 +1610,7 @@ it("una respuesta con un precio que no está en lo consultado no sale y, a la se
   const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
   expect(feedback).toContain("No enviado: precio «S/ 99»")
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
   const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
   expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
@@ -2282,7 +2288,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
         "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
-        "enviar_comprobante", "pedir_volver_al_portal", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
+        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
         "ver_sedes_y_servicios",
       ],
     )
@@ -2325,7 +2331,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(asks.offered).toEqual([["request_human_handoff"]])
     expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
     expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
-    expect(await agentStatusOf(handoff.conversationId)).toBe("off")
+    expect(await agentStatusOf(handoff.conversationId)).toBe("on")
     expect(handoff.handoffs).toHaveLength(1)
     expect(handoff.handoffs[0]).toMatchObject({
       reason: "Pide hablar con una persona",
@@ -2632,7 +2638,7 @@ it("un error que se repite deriva y avisa a la persona con el texto fijo", async
     message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
   })
   expect(await broken).toBe("done")
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
 })
 
@@ -2730,7 +2736,7 @@ it("quien escribe sin parar pasa al equipo sin llamar al modelo, y los demás si
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen).toHaveLength(0)
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(and(eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.status, "handoff"))))
   expect(rows).toEqual([{ error: "CONTACT_DAILY_LIMIT" }])

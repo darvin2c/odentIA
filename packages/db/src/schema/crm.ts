@@ -457,9 +457,19 @@ export const message = pgTable(
     // Enlace de baja de un correo automático (RFC 2369): el adaptador de correo
     // lo envía como cabecera `List-Unsubscribe`. Nulo en lo demás.
     listUnsubscribe: text("list_unsubscribe"),
+    // Mensaje de la misma conversación al que responde este, citado como en
+    // WhatsApp (ADR 0049): lo llena el equipo al responder un tema y el
+    // adaptador al recibir una respuesta citada. Nulo si no cita nada.
+    replyToMessageId: uuid("reply_to_message_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    // Destino de las citas: una cita nunca sale de su conversación.
+    uniqueIndex("message_conversation_id_uidx").on(table.conversationId, table.id),
+    foreignKey({
+      columns: [table.conversationId, table.replyToMessageId],
+      foreignColumns: [table.conversationId, table.id],
+    }),
     uniqueIndex("message_conversation_external_uidx")
       .on(table.conversationId, table.externalId)
       .where(sql`"external_id" is not null`),

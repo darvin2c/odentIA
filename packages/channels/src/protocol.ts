@@ -46,6 +46,8 @@ export interface NormalizedInbound {
    * entra a la bandeja, pero el agente no lo atiende (ADR 0031).
    */
   automated?: boolean
+  /** La persona respondió citando este mensaje (el id del proveedor). */
+  replyToExternalId?: string
 }
 
 /** Remitentes que por convención no leen respuestas. */
@@ -180,6 +182,11 @@ export interface OutboundMessage {
    * cabeceras propias lo ignoran; el pie del correo lleva el enlace igual.
    */
   listUnsubscribe?: string
+  /**
+   * Responde citando este mensaje (el id del proveedor, ADR 0049). Quien no
+   * sabe citar lo ignora: el texto sale igual.
+   */
+  replyToExternalId?: string
   kind:
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.

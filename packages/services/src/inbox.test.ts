@@ -64,7 +64,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   const derived = await thread("Derivada", { agentStatus: "off" })
   await handoff(derived, "baja")
   await handoff(derived, "alta")
-  // Derivación cuya tarea se completó directo en la base: sigue con el equipo porque el agente quedó apagado.
+  // Tema cuya tarea se completó directo en la base: derivar no apagó al agente (ADR 0049), así que vuelve a él.
   const resolved = await thread("Resuelta")
   const done = await handoff(resolved, "media")
   await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, done.taskId as string))
@@ -85,15 +85,24 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, outOfHours: false, assignedName: null }
+  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, outOfHours: false, assignedName: null, teamLive: false, topics: [] }
   expect(of(waiting.id)).toEqual({ ...base, agentAttending: true, unanswered: true })
   expect(of(answered.id)).toEqual({ ...base, agentAttending: true, awaitingPatientSince: outAt.toISOString(), nudgedAt: "2026-10-15T12:00:00.000Z" })
-  expect(of(derived.id)).toEqual({ ...base, agentAttending: false, handoffPriority: "alta" })
-  expect(of(resolved.id)).toEqual({ ...base, agentAttending: false })
+  // Sus dos temas, el urgente primero; sin mensajes no hay mensaje citado.
+  expect(of(derived.id)).toMatchObject({
+    ...base,
+    agentAttending: false,
+    handoffPriority: "alta",
+    topics: [
+      expect.objectContaining({ priority: "alta", urgent: true, createdBy: "agent", source: null }),
+      expect.objectContaining({ priority: "baja", urgent: false }),
+    ],
+  })
+  expect(of(resolved.id)).toEqual({ ...base, agentAttending: true })
   expect(of(approval.id)).toEqual({ ...base, agentAttending: true, pendingContact: 1 })
   expect(of(closed.id)?.agentAttending).toBe(false)
   expect(of(stale.id)).toEqual({ ...base, agentAttending: true })
-  expect(of(closedCase.id)).toEqual({ ...base, agentAttending: false, handoffPriority: "media" })
+  expect(of(closedCase.id)).toMatchObject({ ...base, agentAttending: false, handoffPriority: "media", topics: [expect.objectContaining({ priority: "media" })] })
   // El cierre viaja con la fila: motivo, cuándo y quién (nulo si no fue una persona).
   expect(items.find((item) => item.id === closed.id)?.closure).toEqual({ reason: "manual", at: closedValues.closedAt.toISOString(), byName: null })
   expect(items.find((item) => item.id === waiting.id)?.closure).toBeNull()
@@ -103,29 +112,30 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   expect(detail.closure).toBeNull()
 
   const ids = async (input: Parameters<typeof listInboxConversations>[2]) => (await list(input)).items.map((item) => item.id).sort()
-  expect(await ids({ view: "team" })).toEqual([derived.id, resolved.id].sort())
-  expect(await ids({ view: "agent" })).toEqual([waiting.id, answered.id, approval.id, stale.id].sort())
-  expect(await ids({ view: "unanswered" })).toEqual([waiting.id])
+  // Cuatro vistas que no se superponen (ADR 0049): cada conversación cae en una sola.
+  expect(await ids({ view: "attend" })).toEqual([derived.id])
+  expect(await ids({ view: "agent" })).toEqual([waiting.id, resolved.id, stale.id].sort())
   // «Esperan al paciente» usa la misma vigencia: la vencida sin marcar no cuenta.
   expect(await ids({ view: "awaiting_patient" })).toEqual([answered.id, approval.id].sort())
   expect(await ids({ view: "closed" })).toEqual([closed.id, closedCase.id].sort())
 
   const summary = (input: Parameters<typeof summarizeInbox>[2]) =>
     withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, input))
-  const totals = { open: 6, unanswered: 1, team: 2, awaitingPatient: 2, closed: 2 }
+  const totals = { open: 6, attend: 1, agent: 3, awaitingPatient: 2, closed: 2 }
   // El estado no cambia los totales: cada chip ya dice si cuenta abiertas o cerradas.
   expect(await summary({})).toEqual(totals)
   expect(await summary({ status: "open" })).toEqual(totals)
-  expect(await summary({ q: "Deriv" })).toEqual({ open: 1, unanswered: 0, team: 1, awaitingPatient: 0, closed: 0 })
+  expect(await summary({ q: "Deriv" })).toEqual({ open: 1, attend: 1, agent: 0, awaitingPatient: 0, closed: 0 })
   // Desde el contexto de otra organización, ni pidiendo esta se ve o se cuenta nada.
-  expect(await withOrgContext(appDb, "org_b", (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 0, unanswered: 0, team: 0, awaitingPatient: 0, closed: 0 })
+  expect(await withOrgContext(appDb, "org_b", (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 0, attend: 0, agent: 0, awaitingPatient: 0, closed: 0 })
   expect((await withOrgContext(appDb, "org_b", (tx) => listInboxConversations(tx, orgId, {}))).items).toEqual([])
 
   // «Te espera» de Inicio cuenta las conversaciones sin responder como la bandeja.
   const home = await withOrgContext(appDb, orgId, (tx) =>
     getWorkspaceHome(tx, orgId, "nadie", { patients: false, appointments: false, conversations: true, tasks: false, allTasks: false, finance: false, clinical: false, crm: false, agent: true, configure: false, ownAppointments: false }))
   const waitingRow = home.waiting.find((row) => row.kind === "conversations")
-  expect(waitingRow?.kind === "conversations" ? waitingRow.waiting : 0).toBe((await summary({})).unanswered)
+  // Sin contar las que tienen un tema abierto: esas son su propia fila.
+  expect(waitingRow?.kind === "conversations" ? waitingRow.waiting : 0).toBe(1)
 
   // Fuera del horario del agente lo que espera respuesta queda para cuando abra
   // (de 10:00 a 11:00 en Lima; a las 03:00 está cerrado).

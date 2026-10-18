@@ -31,6 +31,9 @@ import {
   type SearchEmbedder,
   type Storage,
   reportAgentNoReply,
+  sendOutbound,
+  answerToTeamMember,
+  TEAM_LIVE_MINUTES,
   toolsDisabledBy,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
@@ -341,12 +344,46 @@ async function attendAgentRun(
         return { skip: { reason: OUT_OF_HOURS, model: effectiveModel, silent: true } }
       }
       if (limit) return { skip: { reason: limit, model: effectiveModel } }
+      // Una persona del equipo conversa en vivo (ADR 0049): el agente espera
+      // hasta 15 minutos después de su último mensaje y entonces vuelve; si
+      // para entonces ella ya respondió, la corrida no tiene nada que hacer.
+      const [team] = await tx
+        .select({ at: sql<Date | null>`max(${message.createdAt})` })
+        .from(message)
+        .where(
+          and(
+            eq(message.organizationId, orgId),
+            eq(message.conversationId, conversationId),
+            eq(message.direction, "out"),
+            eq(message.senderKind, "user"),
+          ),
+        )
+      const teamAt = team?.at ? new Date(team.at) : null
+      const liveUntil = teamAt ? teamAt.getTime() + TEAM_LIVE_MINUTES * 60_000 : 0
+      if (liveUntil > now.getTime()) {
+        const delaySeconds = Math.max(1, Math.ceil((liveUntil - now.getTime()) / 1000))
+        await sendAgentRun(tx, { ...inboundJob, deferred: true }, { delaySeconds })
+        return { skip: { reason: "team-live", model: effectiveModel, silent: true } }
+      }
       const [trigger] = await tx
         .select()
         .from(message)
         .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
         .limit(1)
       if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
+      // Responde citando un mensaje de una persona del equipo (ADR 0049): es
+      // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
+      if (trigger.replyToMessageId) {
+        const [quoted] = await tx
+          .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
+          .from(message)
+          .where(and(eq(message.id, trigger.replyToMessageId), eq(message.conversationId, conversationId)))
+          .limit(1)
+        if (quoted?.senderKind === "user" && quoted.senderUserId) {
+          await answerToTeamMember(tx, orgId, { conversationId, messageId: trigger.id, userId: quoted.senderUserId })
+          return { skip: { reason: "reply-to-team", model: effectiveModel, silent: true } }
+        }
+      }
       // ¿Este mensaje ya quedó atendido? Lo está si una corrida respondió o
       // derivó con él como disparador, o si lo dejó anotado entre los que
       // leyó (resto de una ráfaga). También cubre la reentrega de la cola.
@@ -586,7 +623,7 @@ async function attendAgentRun(
       // o no lo deja, sale un aviso fijo: nunca queda sin respuesta.
       const { reason, priority } = routeHandoff(toolCtx.route)
       const said = burstTexts.slice(-8).map((text) => `«${text.slice(0, 300)}»`).join(" · ")
-      await performHandoff(toolCtx, reason, said ? `Escribió: ${said}` : reason, priority)
+      await performHandoff(toolCtx, reason, said ? `Escribió: ${said}` : reason, priority, toolCtx.route.intent === "clinical_question")
       try {
         await invokeGraph()
       } catch (error) {
@@ -644,12 +681,55 @@ async function attendAgentRun(
     // la campana. Un fallo al comprobarlo no reintenta la corrida: volvería a
     // llamar al modelo.
     const attendedMessageId = inboundMessageId
-    const unanswered =
-      attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled
+    const silent = attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled
+    let unanswered =
+      silent
         ? await withOrgContext(db, orgId, (tx) =>
             reportAgentNoReply(tx, orgId, { conversationId, triggerMessageId: attendedMessageId }),
           ).catch(() => true)
         : false
+    // El agente nunca se calla (ADR 0049): si nada salió y nadie del equipo la
+    // tomó, la primera vez se le pide un momento y se reintenta; si vuelve a
+    // pasar con el mismo mensaje, queda un tema para recepción con el aviso fijo.
+    // El «momento» que ya salió cuenta como respuesta para `reportAgentNoReply`: por eso se mira `silent`.
+    if (silent && !toolCtx.takenOver && !toolCtx.dryRun && attendedMessageId !== null) {
+      try {
+        const [before] = await withOrgContext(db, orgId, (tx) =>
+          tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(agentRunLedger)
+            .where(
+              and(
+                eq(agentRunLedger.organizationId, orgId),
+                eq(agentRunLedger.triggerMessageId, attendedMessageId),
+                eq(agentRunLedger.status, "sin_respuesta"),
+              ),
+            ),
+        )
+        if ((before?.n ?? 0) === 0) {
+          // Una reentrega con el hilo ya respondido no tiene nada que pedir.
+          if (!unanswered) throw new SkipMoment()
+          const usted = toolCtx.treatment === "usted"
+          await withOrgContext(db, orgId, async (tx) => {
+            await sendOutbound(tx, orgId, {
+              conversationId,
+              senderKind: "agent",
+              content: { type: "text", text: usted ? "Deme un momento, le respondo enseguida." : "Dame un momento, te respondo enseguida." },
+            })
+            await sendAgentRun(tx, { ...msg.message, messageId: attendedMessageId, deferred: true }, { delaySeconds: 30 })
+          })
+          unanswered = true
+        } else {
+          await performHandoff(toolCtx, "El agente no pudo responder este mensaje", "El agente no logró responder: revisa qué preguntó y respóndele.", "media")
+          await noticeAfterHandoff(toolCtx)
+          unanswered = false
+        }
+      } catch (error) {
+        if (!(error instanceof SkipMoment)) {
+          console.error(`agent: no se pudo atender un mensaje sin respuesta (${error instanceof Error ? error.message : String(error)})`)
+        }
+      }
+    }
     await ledger(db, orgId, {
       conversationId,
       triggerMessageId: inboundMessageId,
@@ -1135,3 +1215,6 @@ export async function previewLesson(
   }
   return { cases, total: impact.total, touched: impact.touched.length, model }
 }
+
+/** La corrida no dejó respuesta pero el hilo ya la tenía (reentrega): no se pide un momento. */
+class SkipMoment extends Error {}

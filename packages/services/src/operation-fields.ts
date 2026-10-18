@@ -259,7 +259,8 @@ export const OPERATIONS = {
       priority: { kind: "enum", values: ["alta", "media", "baja"], default: "media", label: "Prioridad", description: "Alta si hay dolor, urgencia o una queja.", body: "optional", agent: "fills" },
       // El agente no conoce los ids del equipo: lo deja en la cola y quien lo toma se lo asigna.
       assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "person" },
-      message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de que una persona continuará: después el agente ya no puede escribirle.", body: "none", agent: "fills" },
+      message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de quién verá su consulta y cuándo le responde (por ejemplo, «la Dra. lo verá mañana desde las 9:00»). El agente sigue atendiendo lo demás.", body: "none", agent: "fills" },
+      clinical: { kind: "flag", label: "Duda clínica", description: "Sí si es una duda sobre su salud, un síntoma, un medicamento o un tratamiento: el tema va al profesional que atiende al paciente.", body: "optional", agent: "fills" },
       asks: { kind: "text", min: 1, max: 400, label: "Qué pide", description: "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.", body: "none", agent: "fills" },
       pending: { kind: "text", min: 1, max: 400, label: "Lo que falta", description: "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.", body: "none", agent: "fills" },
     },
@@ -490,6 +491,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
+  recordar_tema: "Solo lleva el id del tema: anota que la persona volvió a preguntar y avisa a quien lo tiene (ADR 0049).",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
   update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca nombre y campos personalizados.",

@@ -64,6 +64,13 @@
       "when": 1792253454401,
       "tag": "0008_jev_por_defecto_clinicas",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792301496135,
+      "tag": "0009_temas_para_el_equipo",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { contact, conversation, orgFk } from "./crm.js"
+import { contact, conversation, message, orgFk } from "./crm.js"
 import { branch } from "./org.js"
 
 /** Tipos de conocimiento que el agente puede citar (FAQs versionadas e info de sede/política). */
@@ -230,8 +230,10 @@ export const HANDOFF_PRIORITIES = ["alta", "media", "baja"] as const
 export type HandoffPriority = (typeof HANDOFF_PRIORITIES)[number]
 
 /**
- * Derivaciones a humano con resumen factual, motivo, prioridad, responsable y
- * tarea de seguimiento (la tarea vive en `task`).
+ * Temas para el equipo (ADR 0049): lo que el agente no puede responder, o lo
+ * que una persona del equipo atiende, con resumen factual, motivo, prioridad,
+ * responsable y tarea de seguimiento (la tarea vive en `task` y da el estado y
+ * el plazo). Un tema abierto no apaga al agente: el agente sigue con lo demás.
  */
 export const agentHandoff = pgTable(
   "agent_handoff",
@@ -252,9 +254,19 @@ export const agentHandoff = pgTable(
     assigneeUserId: text("assignee_user_id"),
     taskId: uuid("task_id"),
     createdBy: text("created_by").notNull().default("agent"),
+    /** El mensaje de la persona que originó el tema: se cita al responder. */
+    sourceMessageId: uuid("source_message_id"),
+    /** Mensajes en que la persona volvió a preguntar por el tema. */
+    askedMessageIds: jsonb("asked_message_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Última vez que la persona volvió a preguntar por el tema. */
+    askedAgainAt: timestamp("asked_again_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    foreignKey({
+      columns: [table.conversationId, table.sourceMessageId],
+      foreignColumns: [message.conversationId, message.id],
+    }),
     index("agent_handoff_org_idx").on(table.organizationId, table.createdAt),
     index("agent_handoff_conversation_idx").on(table.conversationId),
     check("agent_handoff_priority_check", sql`${table.priority} in ('alta','media','baja')`),

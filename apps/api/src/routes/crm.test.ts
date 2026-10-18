@@ -1081,13 +1081,13 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
     values ('m-u-1', 'org_a', 'u-1', 'owner', now()) on conflict do nothing`)
   const app = buildApp("owner")
   const json = { "content-type": "application/json" }
-  for (const view of ["human", "approval", "handoff"]) {
+  for (const view of ["human", "approval", "handoff", "unanswered", "team"]) {
     expect((await app.request(`/conversations?view=${view}`)).status).toBe(400)
   }
   expect((await app.request("/conversations?status=archivada")).status).toBe(400)
   expect((await app.request("/conversations?view=awaiting_patient")).status).toBe(200)
   const summary = (await (await app.request("/conversations/summary")).json()) as { data: Record<string, number> }
-  expect(Object.keys(summary.data).sort()).toEqual(["awaitingPatient", "closed", "open", "team", "unanswered"])
+  expect(Object.keys(summary.data).sort()).toEqual(["agent", "attend", "awaitingPatient", "closed", "open"])
 
   const ingested = await withOrgContext(appDb, "org_a", (tx) =>
     ingestInbound(
@@ -1112,7 +1112,8 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   const id = ingested.conversationId
   expect((await app.request(`/conversations/${id}/take`, { method: "POST" })).status).toBe(200)
   const taken = (await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { agentStatus: string }; attention: { assignedName: string | null; unanswered: boolean }; closure: unknown } }
-  expect(taken.data.conversation.agentStatus).toBe("off")
+  // Tomar no apaga al agente (ADR 0049): sigue con lo que no sea del equipo.
+  expect(taken.data.conversation.agentStatus).toBe("on")
   expect(taken.data.attention).toMatchObject({ assignedName: "Dueña", unanswered: true })
   expect(taken.data.closure).toBeNull()
   expect((await app.request(`/conversations/${id}/release`, { method: "POST" })).status).toBe(200)

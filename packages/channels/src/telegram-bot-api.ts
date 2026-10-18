@@ -46,6 +46,8 @@ interface TelegramMessage {
   video?: TelegramFile
   /** Video redondo: Telegram no dice su tipo; siempre es MPEG-4. */
   video_note?: TelegramFile
+  /** Mensaje que la persona citó al responder. */
+  reply_to_message?: { message_id: number }
 }
 
 /** Archivo de Bot API (Document, Voice, Audio, Video, VideoNote). */
@@ -106,7 +108,10 @@ function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound
     sentAt: new Date(msg.date * 1000).toISOString(),
   }
   const name = displayNameOf(sender)
-  const withName = name ? { senderDisplayName: name } : {}
+  const withName = {
+    ...(name ? { senderDisplayName: name } : {}),
+    ...(msg.reply_to_message ? { replyToExternalId: `tg:${threadId}:${msg.reply_to_message.message_id}` } : {}),
+  }
   if (typeof msg.text === "string" && msg.text) {
     return { ...base, ...withName, content: { type: "text", text: msg.text } }
   }
@@ -261,11 +266,14 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     }
     // `to` es el externalThreadId del parse (`tg:<chatId>`).
     const chatId = msg.to.startsWith("tg:") ? msg.to.slice("tg:".length) : msg.to
+    // Respuesta citada (ADR 0049): el id propio es `tg:<chat>:<message_id>`.
+    const quoted = msg.replyToExternalId?.startsWith(`tg:${chatId}:`) ? Number(msg.replyToExternalId.split(":")[2]) : NaN
+    const reply = Number.isInteger(quoted) ? { reply_parameters: { message_id: quoted, allow_sending_without_reply: true } } : {}
     if (msg.kind.type === "text") {
       const result = await telegramCall(
         cfg,
         "sendMessage",
-        { chat_id: chatId, text: msg.kind.text },
+        { chat_id: chatId, text: msg.kind.text, ...reply },
         deps,
       )
       return { externalId: `tg:${chatId}:${resultMessageId(result)}` }

@@ -12,7 +12,8 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, gte, inArray } from "drizzle-orm"
+import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
+import { handoffOpenSql } from "./handoff-state.js"
 import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { notFound, validation } from "./errors.js"
@@ -43,7 +44,21 @@ export interface AgentCaseProposal {
   expiresAt: string | null
 }
 
+/** Un tema que tiene el equipo (ADR 0049): el agente nunca lo responde. */
+export interface AgentCaseTopic {
+  id: string
+  reason: string
+  /** Quién lo tiene; nulo si nadie lo tomó todavía. */
+  assigneeName: string | null
+  /** Hasta cuándo tiene para responder (el plazo de su tarea). */
+  dueAt: string | null
+  /** Lo que escribió la persona al originarlo. */
+  asked: string | null
+}
+
 export interface AgentCaseState {
+  /** Temas que tiene el equipo en este hilo. */
+  topics?: AgentCaseTopic[]
   pending: AgentCaseProposal[]
   recent: AgentCaseProposal[]
   notes: AgentCaseNote[]
@@ -118,7 +133,29 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     .select({ total: count() })
     .from(message)
     .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
+  const topicRows = await tx.execute<{
+    id: string
+    reason: string
+    assignee_name: string | null
+    due_at: Date | string | null
+    asked: string | null
+  }>(sql`
+    select h.id, h.reason, u.name as assignee_name, t.due_at, ms.body as asked
+    from agent_handoff h
+    left join "user" u on u.id = h.assignee_user_id
+    left join task t on t.id = h.task_id and t.organization_id = h.organization_id
+    left join message ms on ms.id = h.source_message_id and ms.conversation_id = h.conversation_id
+    where h.organization_id = ${orgId} and h.conversation_id = ${conversationId} and ${handoffOpenSql(sql.raw("h"))}
+    order by h.created_at`)
+  const topics: AgentCaseTopic[] = topicRows.map((row) => ({
+    id: row.id,
+    reason: row.reason,
+    assigneeName: row.assignee_name,
+    dueAt: row.due_at ? new Date(row.due_at).toISOString() : null,
+    asked: row.asked ? row.asked.slice(0, 300) : null,
+  }))
   return {
+    topics,
     pending,
     recent,
     notes: memory?.notes ?? [],
@@ -139,6 +176,17 @@ export function formatAgentCaseForPrompt(
   const when = (iso: string) => formatZoned(new Date(iso), zone)
   const sections: string[] = []
   const facts: string[] = []
+  if (state.topics?.length) {
+    sections.push(
+      `Temas con el equipo (ADR 0049; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene y cuándo le responde; responde con normalidad todo lo demás:
+${state.topics
+        .map(
+          (t) =>
+            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}${t.dueAt ? `; responde antes de ${when(t.dueAt)}` : ""}.`,
+        )
+        .join("\n")}`,
+    )
+  }
   // Lo único que queda pendiente en un hilo es lo que confirma el interlocutor (ADR 0023).
   for (const p of state.pending) {
     facts.push(

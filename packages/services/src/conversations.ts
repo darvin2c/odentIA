@@ -31,7 +31,7 @@ import {
 } from "./contacts.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
+import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
 import { windowOpen } from "./message-window.js"
@@ -126,6 +126,8 @@ export interface MessageItem {
    * conversación: cuál fue. Nulo en cualquier otro mensaje.
    */
   automatic: { key: string; name: string } | null
+  /** Mensaje de la misma conversación al que responde, citado (ADR 0049). */
+  replyToMessageId: string | null
   createdAt: string
 }
 function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
@@ -150,6 +152,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
       row.templateParams.every((p): p is string => typeof p === "string")
         ? row.templateParams
         : null,
+    replyToMessageId: row.replyToMessageId ?? null,
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -392,6 +395,17 @@ export async function ingestInbound(
     }
   }
 
+  // La persona respondió citando un mensaje de esta conversación (ADR 0049).
+  let replyToMessageId: string | null = null
+  if (event.replyToExternalId) {
+    const [quoted] = await tx
+      .select({ id: message.id })
+      .from(message)
+      .where(and(eq(message.conversationId, conversationId), eq(message.externalId, event.replyToExternalId)))
+      .limit(1)
+    replyToMessageId = quoted?.id ?? null
+  }
+
   // Dedupe: ON CONFLICT DO NOTHING sin arbiter (el índice es parcial y el
   // especificador de columnas no lo satisface; el único unique en juego es
   // el de (conversation_id, external_id)).
@@ -408,6 +422,7 @@ export async function ingestInbound(
       externalId: event.externalMessageId,
       status: "received",
       error: mediaError,
+      replyToMessageId,
     })
     .onConflictDoNothing()
     .returning({ id: message.id })
@@ -664,9 +679,19 @@ export async function sendOutbound(
     senderKind: "user" | "agent"
     senderUserId?: string | null
     content: OutboundContent
+    /** Responde citando este mensaje de la misma conversación (ADR 0049). */
+    replyToMessageId?: string | null
   },
 ): Promise<MessageItem> {
   const row = await requireWritableConversation(tx, orgId, input.conversationId, { userId: input.senderUserId ?? null })
+  if (input.replyToMessageId) {
+    const [quoted] = await tx
+      .select({ id: message.id })
+      .from(message)
+      .where(and(eq(message.id, input.replyToMessageId), eq(message.organizationId, orgId), eq(message.conversationId, input.conversationId)))
+      .limit(1)
+    if (!quoted) throw validation("El mensaje citado no es de esta conversación")
+  }
   if (row.connection.provider === "whatsapp_cloud_api") {
     assertWindowAllows(row, input.content)
   } else if (META_OUTBOUND_PROVIDERS.includes(row.connection.provider)) {
@@ -681,10 +706,9 @@ export async function sendOutbound(
     lastMessageAt: now,
     updatedAt: now,
   }
-  if (input.senderKind === "user") {
-    patch.agentStatus = "off"
-    patch.unreadCount = 0
-  }
+  // Escribir no apaga al agente (ADR 0049): mientras la persona del equipo
+  // conversa en vivo, el agente espera (`teamLiveSql`) y luego vuelve solo.
+  if (input.senderKind === "user") patch.unreadCount = 0
   await tx.update(conversation).set(patch).where(eq(conversation.id, input.conversationId))
   const content = input.content
   const contentType =
@@ -717,6 +741,7 @@ export async function sendOutbound(
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
       listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
       attachments: content.type === "media" ? [content.attachment] : [],
+      replyToMessageId: input.replyToMessageId ?? null,
       status: "queued",
     })
     .returning()
@@ -820,6 +845,8 @@ export interface ConversationFilters {
   status?: string
   channel?: string
   assigned?: string
+  /** «Solo las mías»: los temas de esta persona y los que nadie tomó. */
+  mineOf?: string
   q?: string
 }
 
@@ -838,6 +865,7 @@ function conversationFilterConditions(orgId: string, input: ConversationFilters)
   } else if (input.assigned) {
     conditions.push(eq(conversation.assignedUserId, input.assigned))
   }
+  if (input.mineOf) conditions.push(mineOrUnclaimedSql(sql.raw('"conversation"'), input.mineOf))
   const q = input.q?.trim()
   if (q) {
     const byName = ilike(contact.displayName, `%${q}%`)

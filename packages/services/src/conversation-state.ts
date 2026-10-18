@@ -55,9 +55,24 @@ export function proposalPendingExistsSql(conv: SQL): SQL {
     where p_wait.organization_id = ${conv}.organization_id and p_wait.conversation_id = ${conv}.id and ${proposalPendingSql(sql.raw("p_wait"))})`
 }
 
-/** Una persona del equipo la lleva: alguien la tiene asignada o apagó el agente en el hilo. */
+/**
+ * Una persona del equipo la lleva entera: alguien apagó el agente en el hilo
+ * con el interruptor manual. Un tema abierto no cuenta: el agente sigue con lo
+ * demás (ADR 0049).
+ */
 export function personInChargeSql(conv: SQL): SQL {
-  return sql`(${conv}.assigned_user_id is not null or ${conv}.agent_status = 'off')`
+  return sql`(${conv}.agent_status = 'off')`
+}
+
+/** Minutos que el agente espera después del último mensaje de una persona del equipo (ADR 0049). */
+export const TEAM_LIVE_MINUTES = 15
+
+/** Una persona del equipo escribió en el hilo hace menos de `TEAM_LIVE_MINUTES`: conversa en vivo. */
+export function teamLiveSql(conv: SQL): SQL {
+  return sql`exists (select 1 from message m_live
+    where m_live.organization_id = ${conv}.organization_id and m_live.conversation_id = ${conv}.id
+      and m_live.direction = 'out' and m_live.sender_kind = 'user'
+      and m_live.created_at > now() - make_interval(mins => ${TEAM_LIVE_MINUTES}))`
 }
 
 /**
@@ -71,7 +86,7 @@ export function agentAttendingSql(conv: SQL): SQL {
       and (ac_on.channels is null or cc_on.channel = any(ac_on.channels))))`
 }
 
-/** Con el equipo: derivación sin resolver o una persona a cargo. */
+/** Con el equipo: un tema sin resolver o una persona a cargo. */
 export function withTeamSql(conv: SQL): SQL {
   return sql`(${conv}.status = 'open' and (${handoffOpenExistsSql(conv)} or ${personInChargeSql(conv)}))`
 }
@@ -103,6 +118,16 @@ export function awaitingPatientSql(conv: SQL): SQL {
 }
 
 /**
+ * «Por atender» (ADR 0049): abierta y con un tema sin resolver, o una que el
+ * agente no atiende (apagado en el hilo, en la clínica o en ese canal) y no
+ * espera al paciente. Es lo único que pide a una persona.
+ */
+export function needsPersonSql(conv: SQL): SQL {
+  return sql`(${conv}.status = 'open' and (${handoffOpenExistsSql(conv)}
+    or (not ${agentAttendingSql(conv)} and not ${awaitingPatientSql(conv)})))`
+}
+
+/**
  * Sigue abierta con una persona a cargo (ADR 0024): con Recepción encendida,
  * una persona la lleva (o el agente no atiende su canal), no espera respuesta ni tiene un caso abierto y nadie
  * escribe desde hace las horas que la clínica eligió para cerrar
@@ -115,21 +140,37 @@ export function stillOpenWithPersonSql(conv: SQL): SQL {
         <= now() - make_interval(hours => ac_q.close_after_hours)))`
 }
 
-/** Vistas de la Bandeja, cada una con su regla. */
-export const CONVERSATION_VIEWS = ["unanswered", "team", "awaiting_patient", "agent", "closed"] as const
+/**
+ * Vistas de la Bandeja (ADR 0049): cuatro que no se superponen, así cada
+ * conversación cae en una sola y los totales suman.
+ * - `attend`, «Por atender»: pide a una persona (`needsPersonSql`).
+ * - `awaiting_patient`: no tiene temas y espera al paciente.
+ * - `agent`: la atiende el agente, sin temas y sin esperar al paciente.
+ * - `closed`.
+ */
+export const CONVERSATION_VIEWS = ["attend", "agent", "awaiting_patient", "closed"] as const
 export type ConversationView = (typeof CONVERSATION_VIEWS)[number]
 
 export function conversationViewSql(conv: SQL, view: ConversationView): SQL {
   switch (view) {
-    case "unanswered":
-      return unansweredSql(conv)
-    case "team":
-      return withTeamSql(conv)
+    case "attend":
+      return needsPersonSql(conv)
     case "awaiting_patient":
-      return awaitingPatientSql(conv)
+      return sql`(${awaitingPatientSql(conv)} and not ${needsPersonSql(conv)})`
     case "agent":
-      return agentAttendingSql(conv)
+      return sql`(${agentAttendingSql(conv)} and not ${needsPersonSql(conv)} and not ${awaitingPatientSql(conv)})`
     case "closed":
       return sql`(${conv}.status = 'closed')`
   }
+}
+
+/**
+ * «Solo las mías» en «Por atender»: los temas que tiene la persona o que nadie
+ * tomó; sin tema, lo que nadie tiene asignado o tiene ella.
+ */
+export function mineOrUnclaimedSql(conv: SQL, userId: string): SQL {
+  return sql`(case when ${handoffOpenExistsSql(conv)} then exists (select 1 from agent_handoff h_mine
+      where h_mine.organization_id = ${conv}.organization_id and h_mine.conversation_id = ${conv}.id
+        and ${handoffOpenSql(sql.raw("h_mine"))} and (h_mine.assignee_user_id is null or h_mine.assignee_user_id = ${userId}))
+    else (${conv}.assigned_user_id is null or ${conv}.assigned_user_id = ${userId}) end)`
 }

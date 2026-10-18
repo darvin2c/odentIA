@@ -279,7 +279,8 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts):
     on("seguimiento")
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
-    "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
+    "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá y cuándo le responde; no uses send_reply para ese aviso. No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo»).",
+    "Ante una urgencia (sangrado, dolor fuerte, fiebre, hinchazón), además de pasar el tema con prioridad alta, da el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; si no figura, dile que acuda al servicio de emergencias más cercano.",
     "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
     ...notes,
     // Con Agendar apagado no hay huecos ni propuestas de cita: la cita la elige la persona en su enlace.

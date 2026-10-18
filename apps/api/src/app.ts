@@ -125,6 +125,8 @@ const orgProfileInput = z.object({
   fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).nullish(),
   fiscalAddress: z.string().max(300).nullish(),
+  // Teléfono para urgencias (ADR 0049), en E.164 como lo entrega el campo de teléfono.
+  emergencyPhone: z.string().regex(/^\+[1-9]\d{7,14}$/, "Ingresa el teléfono con su código de país, empezando por «+»").nullish(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
