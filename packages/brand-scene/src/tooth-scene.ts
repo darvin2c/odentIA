@@ -2,7 +2,7 @@
 // de ejemplo enciende una pieza con el color del agente que lo hizo; el mensaje viaja del canal
 // a la pieza (o de la pieza al canal si escribe el Administrador) y una línea la une con el registro.
 // Geometría y shaders portados tal cual del tablero aprobado (portada «D3»).
-import { AGENTS, DAY } from "./heroData"
+import { AGENTS, DAY } from "./hero-data.js"
 
 export interface SceneHost {
   /** Estado actual: trabajos hechos, pieza señalada y si la escena está quieta (pausa o menos movimiento). */

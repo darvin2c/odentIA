@@ -32,7 +32,12 @@ export {
   type FlowDiagramStep,
 } from "./flow-diagram.js"
 export { AuthCard } from "./auth-card.js"
-export { AuthSplit } from "./auth-split.js"
+export { AuthAside, AuthSplit } from "./auth-split.js"
+export { AccessLinkPasswordGate, type AuthFetch } from "./access-link-gate.js"
+export { type ClinicAgreementStatus, LegalGate, type LegalLinks } from "./legal-gate.js"
+export { NewPasswordDialog } from "./new-password-dialog.js"
+export { PasswordInput, type PasswordRequirement } from "./password-input.js"
+export { isPasswordBreachedOnline, PASSWORD_MIN_LENGTH, usePasswordRequirements } from "./password-requirements.js"
 export { Brand } from "./brand.js"
 export {
   BarChart,

@@ -1,83 +1,132 @@
-import { CalendarCheck, MessagesSquare, ShieldCheck } from "lucide-react"
-import type { ReactNode } from "react"
+import { CalmToothScene, type DayEvent } from "@odentia/brand-scene"
+import type { CSSProperties, ReactNode } from "react"
 import { Brand } from "./brand.js"
 
-const HIGHLIGHTS = [
-  { icon: CalendarCheck, text: "Agenda por profesional, recurso y horario" },
-  { icon: MessagesSquare, text: "Bandeja omnicanal con estados por proveedor" },
-  { icon: ShieldCheck, text: "Aislamiento total por organización" },
-] as const
+/** La noche de la portada de la web: el lado de la marca se ve igual en tema claro y oscuro. */
+const NIGHT: CSSProperties = {
+  background: "radial-gradient(90% 75% at 50% 0%, #0f3340 0%, #0a2129 50%, #061318 100%)",
+  color: "#f1f5f9",
+  // El logo sobre la noche, con los colores de la marca en oscuro.
+  ["--identity-ink" as string]: "#f1f5f9",
+  ["--identity-accent" as string]: "#4fc3d7",
+}
+
+/** Etiqueta y titular del lado de la marca, con la voz de la web («[ Tu clínica ]», «Omnicanal y agéntica.»). */
+export function AuthAside({
+  tag,
+  title,
+  accent,
+  children,
+}: {
+  tag: string
+  title: ReactNode
+  accent?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <span className="font-mono text-xs uppercase tracking-[0.08em] text-[#4fc3d7]">
+        [ {tag} ]
+      </span>
+      <h2 className="max-w-md text-3xl leading-[1.05] font-extrabold tracking-[-0.03em] text-balance text-[#f1f5f9] lg:text-[2.6rem]">
+        {title}
+        {accent ? (
+          <>
+            <br />
+            <span className="text-[#4fc3d7]">{accent}</span>
+          </>
+        ) : null}
+      </h2>
+      {children ? (
+        <div className="flex flex-col gap-3 text-sm text-[#b9cfd5] lg:text-base">{children}</div>
+      ) : null}
+    </div>
+  )
+}
 
 /**
- * Layout de autenticación a página completa: branding odentia32 ocupa toda la
- * columna izquierda (solo `md:` en adelante; en móvil se oculta y el
- * formulario ocupa todo) con fondo animado por dos blobs que derivan
- * lentamente (CSS puro, sin JS). Columna derecha: formulario centrado.
+ * Layout de entrar, crear cuenta y recuperar el acceso (lienzos de acceso,
+ * aprobados el 2026-10-17): a la izquierda la marca sobre la noche de la web,
+ * con las 32 piezas de su portada (`CalmToothScene`); a la derecha el
+ * formulario sobre fondo claro. En el celular la marca es una franja arriba y
+ * la tarjeta del formulario sube sobre ella, para que esté a la vista desde la
+ * primera pantalla.
+ *
+ * - `aside`: lo que dice la marca (`AuthAside`); cada pantalla elige el suyo.
+ * - `mobileAside`: lo que la franja del celular muestra además del logo; sin
+ *   él solo van el logo y las piezas (entrar no vende).
+ * - `below`: lo que va bajo el titular en computadora, abajo del lado de la
+ *   marca (la acción de un agente en crear cuenta).
+ * - `onWork`: avisa cada trabajo nuevo de la escena.
  */
 export function AuthSplit({
   title,
   description,
   children,
   footer,
+  aside,
+  mobileAside,
+  below,
+  legal,
+  onWork,
 }: {
-  title: string
-  description?: string
+  title: ReactNode
+  description?: ReactNode
   children: ReactNode
   footer?: ReactNode
+  aside?: ReactNode
+  mobileAside?: ReactNode
+  below?: ReactNode
+  legal?: ReactNode
+  onWork?: (event: DayEvent) => void
 }) {
   return (
-    <div className="grid min-h-screen bg-surface-muted md:grid-cols-2">
-      <aside className="relative hidden overflow-hidden bg-brand-50 md:block">
-        <span
-          aria-hidden="true"
-          className="absolute -left-16 -top-16 size-[28rem] animate-[drift-a_18s_ease-in-out_infinite] motion-reduce:animate-none"
-        >
-          <span className="block size-full -translate-x-1/4 rounded-full bg-gradient-to-br from-brand-250 via-brand-450 to-primary opacity-40 blur-3xl animate-pulse [animation-duration:6s] motion-reduce:animate-none" />
-        </span>
-        <span
-          aria-hidden="true"
-          className="absolute -bottom-20 -right-10 size-[30rem] animate-[drift-b_22s_ease-in-out_infinite] motion-reduce:animate-none"
-        >
-          <span className="block size-full translate-x-1/4 rounded-full bg-gradient-to-br from-info via-brand-350 to-brand-650 opacity-30 blur-3xl animate-pulse [animation-duration:8s] motion-reduce:animate-none" />
-        </span>
-        {/* El plano de lectura limita el fondo en cualquier fotograma del degradado. */}
-        <div className="relative flex h-full flex-col gap-10 bg-card/95 p-12">
-          <Brand className="w-52" />
-          <div className="flex flex-col gap-3">
-            <h2 className="max-w-md text-3xl font-semibold tracking-tight text-foreground">
-              La operación de tu clínica, en un solo lugar
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Agenda, pacientes y mensajes aislados por organización.
-            </p>
-          </div>
-          <ul className="mt-auto flex flex-col gap-5">
-            {HIGHLIGHTS.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3 text-sm text-foreground">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-background/70">
-                  <Icon className="size-5 text-primary" aria-hidden />
-                </span>
-                {text}
-              </li>
-            ))}
-          </ul>
+    <div className="grid min-h-dvh bg-surface-muted md:grid-cols-2">
+      <aside className="relative hidden overflow-hidden md:flex md:flex-col" style={NIGHT}>
+        <div className="relative z-10 flex flex-col gap-10 p-10 lg:p-12">
+          <Brand className="w-44" />
+          {aside}
         </div>
+        <CalmToothScene className="absolute inset-x-0 bottom-0 h-[62%] w-full" onWork={onWork} />
+        {below ? <div className="relative z-10 mt-auto p-10 lg:p-12">{below}</div> : null}
       </aside>
-      <main className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
-          <div className="mb-6 md:hidden"><Brand /></div>
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-base leading-snug font-medium">{title}</h1>
-            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+
+      <div className="flex min-w-0 flex-col">
+        <header className="relative overflow-hidden md:hidden" style={NIGHT}>
+          <div className="relative z-10 flex flex-col items-center gap-4 px-5 pt-8 pb-2">
+            <Brand className="w-36" />
+            {mobileAside ? <div className="w-full">{mobileAside}</div> : null}
           </div>
-          <div className="mt-6 flex flex-col gap-4">
-            {children}
-            {footer ? (
-              <div className="text-center text-sm text-muted-foreground">{footer}</div>
-            ) : null}
+          <CalmToothScene
+            className="relative block h-44 w-full"
+            onWork={mobileAside ? undefined : onWork}
+          />
+        </header>
+
+        <main className="relative z-10 -mt-10 flex flex-1 items-start justify-center px-4 pb-6 md:mt-0 md:items-center md:p-10">
+          <div className="flex w-full max-w-sm flex-col gap-5 rounded-2xl bg-card p-6 shadow-lg md:max-w-md md:bg-transparent md:p-0 md:shadow-none lg:max-w-[26rem]">
+            <div className="flex flex-col gap-1.5">
+              <h1 className="text-2xl leading-tight font-extrabold tracking-[-0.02em] text-balance">
+                {title}
+              </h1>
+              {description ? (
+                <div className="text-sm text-muted-foreground">{description}</div>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-4">
+              {children}
+              {footer ? (
+                <div className="text-center text-sm text-muted-foreground">{footer}</div>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+        {legal ? (
+          <footer className="flex justify-center gap-5 px-4 pb-5 text-xs text-muted-foreground">
+            {legal}
+          </footer>
+        ) : null}
+      </div>
     </div>
   )
 }

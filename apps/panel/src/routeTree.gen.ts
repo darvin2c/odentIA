@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as TerminosRouteImport } from './routes/terminos'
 import { Route as TwoFactorRouteImport } from './routes/two-factor'
 import { Route as VerifyEmailSentRouteImport } from './routes/verify-email-sent'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
@@ -51,6 +52,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TerminosRoute = TerminosRouteImport.update({
+  id: '/terminos',
+  path: '/terminos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TwoFactorRoute = TwoFactorRouteImport.update({
@@ -104,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terminos': typeof TerminosRoute
   '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/profile': typeof AppProfileRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terminos': typeof TerminosRoute
   '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/profile': typeof AppProfileRoute
@@ -135,6 +143,7 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terminos': typeof TerminosRoute
   '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/_app/profile': typeof AppProfileRoute
@@ -153,6 +162,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/terminos'
     | '/two-factor'
     | '/verify-email-sent'
     | '/profile'
@@ -167,6 +177,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/terminos'
     | '/two-factor'
     | '/verify-email-sent'
     | '/profile'
@@ -183,6 +194,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/terminos'
     | '/two-factor'
     | '/verify-email-sent'
     | '/_app/profile'
@@ -200,6 +212,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TerminosRoute: typeof TerminosRoute
   TwoFactorRoute: typeof TwoFactorRoute
   VerifyEmailSentRoute: typeof VerifyEmailSentRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terminos': {
+      id: '/terminos'
+      path: '/terminos'
+      fullPath: '/terminos'
+      preLoaderRoute: typeof TerminosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/two-factor': {
@@ -333,6 +353,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TerminosRoute: TerminosRoute,
   TwoFactorRoute: TwoFactorRoute,
   VerifyEmailSentRoute: VerifyEmailSentRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,

@@ -9,6 +9,7 @@ import { invalidateAgentPanelQueries, takeCase } from "../../components/agent-pa
 import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
+import { AwayLine } from "../../components/home/away-line"
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
@@ -147,6 +148,7 @@ function HomePage() {
   const choice = { branches: sede.branches, onChange: (id: string) => sede.choose(id) }
   return <PageShell className="flex flex-col gap-4">
     <PageHeader title="Inicio" subtitle={data ? longDay(data.date, data.locale) : "Lo que te toca hoy"} />
+    <AwayLine canSeeCases={data?.access.agent ?? false} canSeeAgenda={data?.access.appointments ?? false} />
     {query.isError && !data ? (
       <ErrorState title="No pudimos cargar tu jornada" message="Revisa tu conexión." retryLabel="Reintentar" onRetry={() => void query.refetch()} />
     ) : !data || !context ? (

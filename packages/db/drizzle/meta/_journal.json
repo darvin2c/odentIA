@@ -64,6 +64,41 @@
       "when": 1792253454401,
       "tag": "0008_jev_por_defecto_clinicas",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792259688563,
+      "tag": "0009_aceptacion_de_terminos",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792265372471,
+      "tag": "0010_ultima_visita_a_inicio",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792265374209,
+      "tag": "0011_ultima_visita_a_inicio_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792266342011,
+      "tag": "0012_aceptacion_de_la_clinica",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792266344071,
+      "tag": "0013_aceptacion_de_la_clinica_reglas",
+      "breakpoints": true
     }
   ]
 }

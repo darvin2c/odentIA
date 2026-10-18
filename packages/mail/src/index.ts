@@ -52,7 +52,7 @@ export function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;")
 }
 
-function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: string): string {
+function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: string, noteHtml?: string): string {
   return `<!doctype html>
 <html lang="es">
   <body style="margin:0;padding:24px;background:#f4f4f5;font-family:system-ui,sans-serif;color:#18181b">
@@ -60,6 +60,7 @@ function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: strin
       <h1 style="margin:0 0 16px;font-size:20px">${title}</h1>
       <p style="margin:0 0 24px;font-size:14px;line-height:1.6">${bodyHtml}</p>
       <a href="${ctaUrl}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:14px">${ctaLabel}</a>
+      ${noteHtml ? `<p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#52525b">${noteHtml}</p>` : ""}
       <p style="margin:24px 0 0;font-size:12px;color:#71717a">Si el botón no funciona, copia este enlace:<br>${ctaUrl}</p>
     </div>
   </body>
@@ -111,16 +112,90 @@ export function changeEmailConfirmationTemplate({
   }
 }
 
-export function resetPasswordTemplate({ url }: { url: string }): MailTemplate {
+/**
+ * Enlace para entrar sin la contraseña («¿Olvidaste tu contraseña?»): deja a la
+ * persona dentro de su clínica, donde elige una nueva. `expiresText` es la hora
+ * a la que vence en la zona de quien lo pidió («9:20 (hora de Lima)»); sin ella
+ * se dice el plazo.
+ */
+export function accessLinkTemplate({
+  firstName,
+  url,
+  expiresText,
+}: {
+  firstName?: string | undefined
+  url: string
+  expiresText?: string | undefined
+}): MailTemplate {
+  const greeting = firstName ? `Hola, ${escapeHtml(firstName)}` : "Hola"
+  const expires = expiresText ? `vence a las ${escapeHtml(expiresText)}` : "vence en 30 minutos"
   return {
-    subject: "Restablece tu contraseña — odentIA",
+    subject: "Tu enlace para entrar a odentIA",
     html: layout(
-      "Restablece tu contraseña",
-      "Recibimos una solicitud para restablecer tu contraseña. Si no fuiste tú, ignora este mensaje.",
+      greeting,
+      "Pediste entrar sin tu contraseña. Con este botón entras a tu clínica y eliges una nueva.",
       url,
-      "Restablecer contraseña",
+      "Entrar a odentIA",
+      `Sirve una sola vez y ${expires}. Si no lo pediste, ignora este correo: tu contraseña sigue igual.`,
     ),
-    text: `Restablece tu contraseña en odentIA: ${url}`,
+    text: `${firstName ? `Hola, ${firstName}. ` : ""}Entra a odentIA con este enlace y elige una nueva contraseña: ${url}
+Sirve una sola vez y ${expiresText ? `vence a las ${expiresText}` : "vence en 30 minutos"}. Si no lo pediste, ignora este correo.`,
+  }
+}
+
+/** Aviso de que la contraseña cambió, con cuándo y desde dónde, y cómo recuperarla si no fue la persona. */
+export function passwordChangedTemplate({
+  firstName,
+  whenText,
+  deviceText,
+  url,
+}: {
+  firstName?: string | undefined
+  whenText: string
+  deviceText?: string | undefined
+  url: string
+}): MailTemplate {
+  const from = deviceText ? ` desde ${escapeHtml(deviceText)}` : ""
+  return {
+    subject: "Tu contraseña de odentIA cambió",
+    html: layout(
+      firstName ? `Hola, ${escapeHtml(firstName)}` : "Tu contraseña cambió",
+      `Hoy, ${escapeHtml(whenText)}, se cambió la contraseña de tu cuenta${from}. Cerramos tu sesión en los demás equipos.`,
+      url,
+      "Recuperar mi contraseña",
+      "Si no fuiste tú, recupérala ahora y escríbenos.",
+    ),
+    text: `Tu contraseña de odentIA cambió (${whenText}${deviceText ? `, desde ${deviceText}` : ""}). Si no fuiste tú, recupérala ahora: ${url}`,
+  }
+}
+
+/**
+ * Aviso de una versión nueva de los Términos del servicio y el Aviso de
+ * privacidad, un mes antes de que rija: qué cambió en pocas líneas y que se
+ * aceptan al entrar.
+ */
+export function legalUpdateTemplate({
+  firstName,
+  effectiveText,
+  changes,
+  url,
+}: {
+  firstName?: string | undefined
+  effectiveText: string
+  changes: readonly string[]
+  url: string
+}): MailTemplate {
+  const list = changes.map((c) => `<li>${escapeHtml(c)}</li>`).join("")
+  return {
+    subject: "Actualizamos los términos de odentIA",
+    html: layout(
+      firstName ? `Hola, ${escapeHtml(firstName)}` : "Actualizamos los términos",
+      `Los Términos del servicio y el Aviso de privacidad cambian y rigen desde el ${escapeHtml(effectiveText)}. Lo que cambió:<ul style="margin:12px 0 0;padding-left:18px">${list}</ul>`,
+      url,
+      "Leer y aceptar",
+      "La próxima vez que entres te pediremos aceptarlos. Si no estás de acuerdo, responde este correo antes de esa fecha.",
+    ),
+    text: `Actualizamos los términos de odentIA. Rigen desde el ${effectiveText}. Lo que cambió: ${changes.join(" ")} Léelos y acéptalos al entrar: ${url}`,
   }
 }
 
