@@ -43,6 +43,7 @@ import {
   type OrgLocale,
   recordAgentCaseLookup,
   recordAgentDecision,
+  reportAgentNoReply,
 } from "@odentia/services"
 import {
   KNOWLEDGE_SELECT_VERSION,
@@ -144,6 +145,28 @@ const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
 
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
+
+/**
+ * El modelo escribió texto sin herramienta: ese texto no llega a nadie. Se le
+ * dice una sola vez por corrida para que lo envíe; si vuelve a escribir sin
+ * enviar, sigue lo de ADR 0050 en `run.ts` («Dame un momento» y otra corrida,
+ * y a la segunda un tema para recepción). Medido el 2026-10-17:
+ * con Claude 5.5 pasaba en 9 de 39 mensajes. Va como mensaje del usuario
+ * porque LangChain no envía a Anthropic un mensaje de sistema a mitad de la
+ * conversación. No se fuerza la herramienta (`tool_choice`): Haiku 5.5 lo
+ * admite pero entonces no piensa, y Sonnet y Opus 5.5 lo rechazan. Tampoco se
+ * envía el texto tal cual: la persona solo recibe lo que el modelo envía.
+ */
+export const UNSENT_TEXT =
+  "Aviso del sistema, no lo escribió el interlocutor: tu último texto no le llegó a nadie, porque solo recibe lo que envías con send_reply. Si era tu respuesta, envíala ahora con send_reply; si antes necesitas consultar algo, usa la herramienta que corresponda."
+
+/** Lo que el modelo escribió como texto, sin bloques de pensamiento ni llamadas. */
+function writtenText(msg: AIMessage): string {
+  if (typeof msg.content === "string") return msg.content
+  return msg.content
+    .map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
+    .join("")
+}
 
 const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -831,10 +854,35 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     return { messages: [reply] }
   }
 
-  function routeAfterLlm(state: typeof AgentState.State): string {
+  async function routeAfterLlm(state: typeof AgentState.State): Promise<string> {
     const last = state.messages[state.messages.length - 1]
     if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) return "tools"
-    return END
+    // Texto sin enviar: el aviso, una vez por corrida (los mensajes del
+    // estado son solo los de esta corrida). Con el caso ya derivado o la
+    // respuesta ya enviada no hay nada que reclamar; sin texto, tampoco.
+    const unsent =
+      last instanceof AIMessage &&
+      !toolCtx.handedOff &&
+      !toolCtx.replySettled &&
+      available.has("send_reply") &&
+      writtenText(last).trim() !== "" &&
+      !state.messages.some((item) => item.getType() === "human" && item.content === UNSENT_TEXT)
+    if (!unsent) return END
+    // Una reentrega con el hilo ya respondido no queda sin respuesta: el aviso
+    // solo empujaría a repetir lo que la persona ya recibió. El «momento» de
+    // ADR 0050 cuenta como respuesta: la corrida que lo reintenta no se avisa.
+    const trigger = toolCtx.triggerId
+    if (!toolCtx.dryRun && trigger) {
+      const waiting = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+        reportAgentNoReply(tx, toolCtx.orgId, { conversationId: toolCtx.conversationId, triggerMessageId: trigger }),
+      ).catch(() => false)
+      if (!waiting) return END
+    }
+    return "unsent"
+  }
+
+  function remindUnsent() {
+    return { messages: [new HumanMessage({ content: UNSENT_TEXT })] }
   }
 
   /**
@@ -919,9 +967,11 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     .addNode("loadContext", loadContext)
     .addNode("llm", llm)
     .addNode("tools", runTools)
+    .addNode("unsent", remindUnsent)
     .addEdge(START, "loadContext")
     .addEdge("loadContext", "llm")
-    .addConditionalEdges("llm", routeAfterLlm, ["tools", END])
+    .addConditionalEdges("llm", routeAfterLlm, ["tools", "unsent", END])
+    .addEdge("unsent", "llm")
     .addConditionalEdges("tools", routeAfterTools, ["llm", END])
     .compile()
 

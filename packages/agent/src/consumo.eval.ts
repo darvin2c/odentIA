@@ -63,6 +63,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, it } from "vitest"
 import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState } from "./admin.js"
 import { createJevDecisionModel, type DecisionModel } from "./decision/index.js"
+import { UNSENT_TEXT } from "./graph.js"
 import { LLM_CATALOG, platformLlmFromEnv } from "./llm.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 import { insertTestPatients } from "@odentia/services/test-patient"
@@ -209,6 +210,11 @@ interface ModelCall {
 const modelCalls: ModelCall[] = []
 const started = new Map<string, ModelCall>()
 const textOf = (item: BaseMessage) => (typeof item.content === "string" ? item.content : JSON.stringify(item.content))
+/** Lo que el modelo escribió como texto, sin pensamiento ni llamadas. */
+const writtenOf = (item: BaseMessage) =>
+  typeof item.content === "string"
+    ? item.content
+    : item.content.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : "")).join("")
 /** Registra cada llamada sin tocarla: solo lee lo que el grafo ya envía. */
 const recorder = BaseCallbackHandler.fromMethods({
   handleChatModelStart(_llm, batches, runId, _parent, extra) {
@@ -217,9 +223,11 @@ const recorder = BaseCallbackHandler.fromMethods({
     const toolsJson = JSON.stringify(tools)
     const system = list[0] ? textOf(list[0]) : ""
     const rest = list.slice(1).map((item) => `${item.getType()}:${textOf(item)}${JSON.stringify((item as AIMessage).tool_calls ?? "")}`).join("\n")
+    // La llamada que sigue al aviso de texto sin enviar lo dice en el paso a paso.
+    const reminded = list.at(-1)?.content === UNSENT_TEXT
     started.set(runId, {
       tools: tools.map((item) => item.function?.name ?? "?"), toolsChars: toolsJson.length, system, messages: list.length,
-      prompt: `${toolsJson}\n${system}\n${rest}`, input: 0, cached: 0, output: 0, did: "",
+      prompt: `${toolsJson}\n${system}\n${rest}`, input: 0, cached: 0, output: 0, did: reminded ? "tras el aviso: " : "",
     })
   },
   handleLLMEnd(output, runId) {
@@ -231,7 +239,9 @@ const recorder = BaseCallbackHandler.fromMethods({
     call.input = usage?.input_tokens ?? 0
     call.output = usage?.output_tokens ?? 0
     call.cached = usage?.input_token_details?.cache_read ?? 0
-    call.did = reply?.tool_calls?.length ? reply.tool_calls.map((item) => item.name).join(" + ") : "texto, sin herramienta"
+    call.did += reply?.tool_calls?.length
+      ? reply.tool_calls.map((item) => item.name).join(" + ")
+      : `texto, sin herramienta: «${(reply ? writtenOf(reply) : "").replace(/\s+/g, " ").trim().slice(0, 160)}»`
     modelCalls.push(call)
   },
 })

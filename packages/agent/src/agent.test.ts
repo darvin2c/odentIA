@@ -60,7 +60,7 @@ import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./de
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { type AgentRuntime, CONTACT_DAILY_RUN_LIMIT, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
-import { compileAgentGraph } from "./graph.js"
+import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { extractDictation } from "./dictation.js"
 import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
@@ -376,7 +376,7 @@ it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con m
   }
 })
 
-it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0050)", async () => {
+it("texto sin herramienta de envío: un aviso; si vuelve a escribir sin enviar, pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0050)", async () => {
   const stamp = Date.now()
   const receptionId = `agent-reception-${stamp}`
   await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
@@ -386,10 +386,16 @@ it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pa
   const { conversationId, messageId } = await ingestText("tg:ag-mudo", "evt-ag-mudo", "¿Atienden sábados?")
   const model = new ScriptedModel(() => new AIMessage({ content: "Sí, atendemos los sábados." }))
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  // La persona no queda sin nada: un momento, y la corrida vuelve a la cola.
+  // El texto no salió: el modelo recibe una sola vez el aviso, tras su texto, y vuelve a escribir.
+  expect(model.seen).toHaveLength(2)
+  const reminded = model.seen[1] ?? []
+  expect(reminded.at(-2)?.getType()).toBe("ai")
+  expect(reminded.at(-1)?.getType()).toBe("human")
+  expect(String(reminded.at(-1)?.content)).toBe(UNSENT_TEXT)
+  // Tampoco tras el aviso: la persona no queda sin nada, un momento, y la corrida vuelve a la cola.
   expect(await agentMessages(conversationId)).toEqual(["Dame un momento, te respondo enseguida."])
   expect(await agentStatusOf(conversationId)).toBe("on")
-  expect(await ledgerRows(conversationId)).toEqual([{ status: "sin_respuesta", llmCalls: 1, toolsUsed: [] }])
+  expect(await ledgerRows(conversationId)).toEqual([{ status: "sin_respuesta", llmCalls: 2, toolsUsed: [] }])
   const notices = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ title: workspaceNotification.title, href: workspaceNotification.href })
@@ -401,7 +407,8 @@ it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pa
   // Una corrida sin respuesta no da el mensaje por atendido: reprocesarlo
   // vuelve a llamar al modelo, y tampoco avisa en la campana.
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  expect(model.seen).toHaveLength(2)
+  // Esta vez sin aviso: el «momento» ya salió y cuenta como respuesta.
+  expect(model.seen).toHaveLength(3)
   // La segunda vez con el mismo mensaje pasa a recepción como tema, con el aviso fijo.
   expect((await ledgerRows(conversationId)).map((row) => row.status)).toEqual(["sin_respuesta", "handoff"])
   // Sin orden en la consulta: se comparan los dos mensajes, no su posición.
@@ -416,6 +423,22 @@ it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pa
       .where(eq(workspaceNotification.userId, receptionId)),
   )
   expect(again.length).toBe(0)
+})
+
+it("texto sin enviar: tras el aviso, el modelo lo envía y la persona lo recibe", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-aviso", "evt-ag-aviso", "Hola")
+  // Como Claude 5.5 en la medición del 2026-10-17: escribe la respuesta como texto y no la envía.
+  const model = new ScriptedModel((messages, call) =>
+    call === 1
+      ? new AIMessage({ content: "Hola, ¿en qué te ayudo?" })
+      : String(messages.at(-1)?.content) === UNSENT_TEXT
+        ? toolCall("send_reply", { text: "Hola, ¿en qué te ayudo?" }, "call-aviso")
+        : new AIMessage({ content: "sin aviso" }),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(2)
+  expect(await agentMessages(conversationId)).toEqual(["Hola, ¿en qué te ayudo?"])
+  expect(await ledgerRows(conversationId)).toEqual([{ status: "ok", llmCalls: 2, toolsUsed: ["send_reply"] }])
 })
 
 it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no reintenta la corrida", async () => {
@@ -779,7 +802,8 @@ it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", as
   expect(await agentMessages(conversationId)).toEqual(["Sí, abrimos mañana."])
   expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["ok"])
   // Si la corrida cayó antes de anotarse en el libro, la reentrega sí se
-  // ejecuta; como el hilo ya tiene la respuesta, no avisa ni queda sin_respuesta.
+  // ejecuta; como el hilo ya tiene la respuesta, no avisa ni queda sin_respuesta,
+  // y su texto sin enviar no recibe el aviso: la persona no recibiría dos veces lo mismo.
   await ownerDb.delete(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId))
   expect(await runScripted(silent, conversationId, messageId)).toBe("done")
   expect(silent.seen).toHaveLength(1)
@@ -824,7 +848,10 @@ it("simulación consulta seguimientos reales sin generar respuesta ni cambiar pe
   expect(await agentMessages(conversationId)).toEqual([])
 })
 
-/** Modelo que responde texto fijo y registra los mensajes vistos por turno. */
+/**
+ * Modelo que no responde nada y registra los mensajes vistos por turno. Sin
+ * texto no hay aviso de texto sin enviar: una sola llamada por turno.
+ */
 class RecordingModel extends BaseChatModel {
   seen: BaseMessage[][] = []
   _llmType(): string {
@@ -835,8 +862,8 @@ class RecordingModel extends BaseChatModel {
   }
   async _generate(messages: BaseMessage[]): Promise<ChatResult> {
     this.seen.push(messages)
-    const message = new AIMessage({ content: "anotado" })
-    return { generations: [{ text: "anotado", message }] }
+    const message = new AIMessage({ content: "" })
+    return { generations: [{ text: "", message }] }
   }
 }
 
