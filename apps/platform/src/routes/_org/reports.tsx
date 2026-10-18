@@ -15,9 +15,9 @@ import { AdminRecommendationDrawer } from "../../components/agent/admin-recommen
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { MoneyTab } from "../../components/reports/money-tab"
+import { PatientsTab } from "../../components/reports/patients-tab"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { ReportPeriodPicker } from "../../components/reports/report-period"
-import { SalesTab } from "../../components/reports/sales-tab"
 import { ServiceTab } from "../../components/reports/service-tab"
 import { AdminWatch, SummaryTab } from "../../components/reports/summary-tab"
 import { ChoiceSelect } from "../../components/ui/choice-select"
@@ -48,7 +48,7 @@ const LEGACY_TABS: Record<string, ReportTab> = { dinero: "finanzas", ventas: "pa
 const TAB_COPY: Record<ReportTab, { title: string; question: string }> = {
   resumen: { title: "Resumen", question: "Cómo va el negocio" },
   finanzas: { title: "Finanzas", question: "Cuánto entró, cuánto se gastó y cuánto falta cobrar" },
-  pacientes: { title: "Pacientes", question: "El trabajo nuevo que entró y el que se hizo" },
+  pacientes: { title: "Pacientes", question: "Quiénes nos buscaron, hasta dónde llegaron y si vuelven" },
   agenda: { title: "Agenda", question: "Si los pacientes vinieron y quién los atendió" },
   agente: { title: "Agente", question: "Cómo respondimos a quien escribió" },
 }
@@ -229,7 +229,7 @@ function ReportsPage() {
               ) : tab === "agenda" ? (
                 <AgendaTab query={query} onOpenList={openList} advice={adviceNote("agenda")} />
               ) : tab === "pacientes" ? (
-                <SalesTab query={query} onOpenList={openList} advice={adviceNote("pacientes")} />
+                <PatientsTab query={query} onOpenList={openList} advice={adviceNote("pacientes")} />
               ) : (
                 <ServiceTab query={query} />
               )}

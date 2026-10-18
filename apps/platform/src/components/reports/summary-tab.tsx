@@ -33,6 +33,7 @@ import {
   type ReportSummary,
   spanLabel,
 } from "../../lib/reports"
+import { FunnelCard } from "./patients-tab"
 import { type Better, ChangeLine, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
 
 /** Lo que se aparta de la clínica más de estos puntos lleva su marca en la tabla por profesional. */
@@ -231,7 +232,13 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
 
       <CollectedChart data={data} />
 
-      {advice}
+      {/* Dónde se caen los pacientes, al lado de lo que vio el Administrador (tablero 1); si no caben, una debajo de la otra. */}
+      <div className="flex min-w-0 flex-wrap gap-4">
+        <div className="flex min-w-0 flex-[1.5_1_30rem] flex-col *:flex-1">
+          <FunnelCard query={query} onOpenList={onOpenList} />
+        </div>
+        <div className="flex min-w-0 flex-[1_1_22.5rem] flex-col *:flex-1">{advice}</div>
+      </div>
 
       <Professionals query={query} />
     </div>

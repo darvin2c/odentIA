@@ -129,7 +129,7 @@ for (const width of [1440, 390]) {
 
       // Pacientes y Agente (por ahora, quién respondió).
       await tabs.getByRole("link", { name: "Pacientes" }).click()
-      await expect(page.getByRole("button", { name: "Ver los 2 pacientes nuevos" })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Dónde se caen los pacientes" })).toBeVisible()
       await observe(page, info, "pacientes")
       await tabs.getByRole("link", { name: "Agente" }).click()
       await expect(page.getByRole("heading", { name: "Quién respondió primero" })).toBeVisible()

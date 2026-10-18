@@ -4,6 +4,7 @@
  * respuestas del servidor; él decide el tramo, la moneda y los permisos.
  */
 import { apiFetch } from "./api"
+import { channelLabel } from "./channels"
 import { monthLabel, monthName, type YearMonth } from "./commissions"
 
 // --- Periodo ------------------------------------------------------------------------
@@ -332,6 +333,21 @@ export const REPORT_LISTS = [
   "budgets_waiting",
   "new_patients",
   "debts_overdue",
+  // Pacientes: las personas de cada paso del embudo, las que se cayeron en él y las de «Si vuelven».
+  "funnel_sought",
+  "funnel_booked",
+  "funnel_came",
+  "funnel_budget",
+  "funnel_accepted",
+  "funnel_paid",
+  "funnel_lost_booked",
+  "funnel_lost_came",
+  "funnel_lost_budget",
+  "funnel_lost_accepted",
+  "funnel_lost_paid",
+  "funnel_stopped",
+  "controls_missed",
+  "lapsed",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -342,7 +358,11 @@ export function isReportList(value: unknown): value is ReportListKey {
 export interface ReportListRow {
   id: string
   at: string
-  patientId: string
+  /** Nulo en las listas de Pacientes cuando la persona aún no es paciente: la fila abre su página (`personId`). */
+  patientId: string | null
+  personId?: string
+  /** Canal por el que nos buscó, en las listas del embudo. */
+  channel?: string | null
   personName: string
   title: string | null
   professionalName: string | null
@@ -385,7 +405,7 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
   return apiFetch(`/api/reports/advice?${params(query)}`)
 }
 
-export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service"
+export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service" | "patients" | "funnel"
 
 // --- Resumen ------------------------------------------------------------------------
 
@@ -447,6 +467,57 @@ export interface ReportProfessionals extends ReportHead {
     accepted: number
     collectedCents: number
   }>
+}
+
+// --- Pacientes ----------------------------------------------------------------------
+
+/** Los pasos del embudo, en orden: cada uno cuenta a quien dio también los anteriores. */
+export const FUNNEL_STEPS = ["sought", "booked", "came", "budget", "accepted", "paid"] as const
+export type FunnelStep = (typeof FUNNEL_STEPS)[number]
+export type FunnelCounts = Record<FunnelStep, number>
+
+/** Por dónde nos buscó: el canal de su primera conversación, «Recepción» si lo registró el equipo. */
+export function firstContactChannel(channel: string | null): string {
+  if (channel === "recepcion") return "Recepción"
+  if (channel === "registro_en_linea") return "Registro en línea"
+  return channel ? channelLabel(channel) : "Canal retirado"
+}
+
+/** Resumen › «Dónde se caen los pacientes»: el embudo del periodo y del anterior. */
+export interface ReportFunnel extends ReportHead {
+  funnel: {
+    current: FunnelCounts
+    previous: FunnelCounts
+    /** El periodo terminó hace menos de `openDays` días: sus personas aún pueden agendar. */
+    open: boolean
+    openDays: number
+  }
+  wholeClinic: string[]
+}
+
+export interface ReportPatients extends ReportHead {
+  /** Los 12 meses de la línea de «Volvieron en el año». */
+  months: ReportBucket[]
+  funnel: ReportFunnel["funnel"] & {
+    /** De las que no agendaron, cuántas preguntaron algo y dejaron de escribir hace más de `stoppedDays` días. */
+    stopped: number
+    stoppedDays: number
+  }
+  /** Canal de la primera conversación (`recepcion` y `registro_en_linea` sin conversación; nulo si el canal ya no existe). */
+  channels: Array<{ channel: string | null; sought: number; came: number }>
+  newPatients: { current: number; previous: number }
+  acceptance: { current: { presented: number; accepted: number }; previous: { presented: number; accepted: number } }
+  active: { current: number; previous: number; months: number }
+  /** Cómo nos conocieron los pacientes nuevos; `kind` nulo: no lo dijeron. */
+  referral: Array<{ kind: string | null; count: number }>
+  controls: { current: ControlTotals; previous: ControlTotals }
+  returned: {
+    current: { cohort: number; returned: number }
+    previous: { cohort: number; returned: number }
+    months: Array<{ cohort: number; returned: number }>
+  }
+  lapsed: { count: number; months: number }
+  wholeClinic: string[]
 }
 
 /** Rótulo corto de un tramo bajo su columna: «sep», «14 sep», «14». */

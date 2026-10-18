@@ -88,7 +88,7 @@ const PAYMENT_METHODS = [
 ]
 
 /** Generador determinista (mulberry32): la misma semilla da la misma historia. */
-function generator(seed: number) {
+export function generator(seed: number) {
   let state = seed >>> 0
   const next = (): number => {
     state = (state + 0x6d2b79f5) >>> 0
@@ -114,7 +114,7 @@ function generator(seed: number) {
   }
 }
 
-function chunks<T>(items: T[], size = 500): T[][] {
+export function chunks<T>(items: T[], size = 500): T[][] {
   const out: T[][] = []
   for (let index = 0; index < items.length; index += size) out.push(items.slice(index, index + size))
   return out

@@ -41,6 +41,9 @@ export { isPasswordBreachedOnline, PASSWORD_MIN_LENGTH, usePasswordRequirements 
 export { Brand } from "./brand.js"
 export {
   BarChart,
+  BarList,
+  type BarListProps,
+  type BarListRow,
   type ChartCategory,
   type ChartPoint,
   ColumnChart,

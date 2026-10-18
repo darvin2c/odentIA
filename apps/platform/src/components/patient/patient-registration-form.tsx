@@ -26,6 +26,8 @@ import {
   isRealDate,
   MARITAL_STATUS_LABELS,
   MARITAL_STATUSES,
+  REFERRAL_KIND_LABELS,
+  REFERRAL_KINDS,
   type RegistrationAnswers,
   type RegistrationConfig,
   type RegistrationContactInput,
@@ -70,6 +72,7 @@ import {
   insuranceFromChoice,
   insuranceText,
   maritalChoices,
+  referralText,
 } from "../../lib/person-data"
 import { SearchSelect } from "../settings/search-select"
 import {
@@ -205,6 +208,9 @@ const EDUCATION_OPTIONS = [
   ...EDUCATION_LEVELS.map((value) => ({ value, label: EDUCATION_LEVEL_LABELS[value] })),
 ]
 
+/** «Cómo nos conoció»: la misma lista en todas las clínicas (decisión 3 de Reportes v2). */
+const REFERRAL_OPTIONS = [{ value: "", label: "—" }, ...REFERRAL_KINDS.map((value) => ({ value, label: REFERRAL_KIND_LABELS[value] }))]
+
 function emptyGroup<T>(): { state: DeclarationState; items: T[] } {
   return { state: "unanswered", items: [] }
 }
@@ -272,6 +278,7 @@ function buildDefaults(
         emergencyContactPhone: "",
         insuranceType: "",
         insuranceScheme: "",
+        referralKind: "",
         referralSource: "",
         ...initialDemographics,
       } as RegistrationDemographics,
@@ -342,6 +349,7 @@ function buildAnswers(
     addressCountry: "address",
     addressReference: "address",
     insuranceScheme: "insuranceType",
+    referralKind: "referralSource",
   }
   for (const [key, raw] of Object.entries(demographics)) {
     const field = (owner[key] ?? key) as RegistrationFieldKey
@@ -1515,21 +1523,47 @@ export function PatientRegistrationForm({
                 ) : null}
                 {visible("referralSource") ? (
                   <div data-reg-field="demographics.referralSource" className="min-w-0">
-                    <form.Field name="answers.demographics.referralSource">
+                    <form.Field name="answers.demographics.referralKind">
                       {(field) => (
-                        <TextRow
+                        <SelectRow
                           label={label("Cómo nos conoció", "referralSource")}
                           value={field.state.value ?? ""}
-                          error={errors["demographics.referralSource"]}
-                          inputProps={{ "aria-label": "Cómo nos conoció" }}
+                          error={errors["demographics.referralKind"]}
+                          options={REFERRAL_OPTIONS}
                           onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.referralSource")
+                            field.handleChange(next as never)
+                            // Solo «Otro» lleva su texto.
+                            if (next !== "otro") form.setFieldValue("answers.demographics.referralSource", "")
+                            clearError("demographics.referralKind")
                           }}
                         />
                       )}
                     </form.Field>
                   </div>
+                ) : null}
+                {visible("referralSource") ? (
+                  <form.Subscribe selector={(state) => state.values.answers.demographics.referralKind}>
+                    {(kind) =>
+                      kind === "otro" ? (
+                        <div data-reg-field="demographics.referralSourceText" className="min-w-0">
+                          <form.Field name="answers.demographics.referralSource">
+                            {(field) => (
+                              <TextRow
+                                label="¿Cuál?"
+                                value={field.state.value ?? ""}
+                                error={errors["demographics.referralSource"]}
+                                inputProps={{ "aria-label": "Cómo nos conoció: ¿cuál?" }}
+                                onChange={(next) => {
+                                  field.handleChange(next)
+                                  clearError("demographics.referralSource")
+                                }}
+                              />
+                            )}
+                          </form.Field>
+                        </div>
+                      ) : null
+                    }
+                  </form.Subscribe>
                 ) : null}
                 {mode === "internal" && branches !== undefined ? (
                   <div data-reg-field="registeredBranchId" className="min-w-0">
@@ -1854,7 +1888,7 @@ function ReviewSummary({
         .join(" · ") || "—",
     ],
     ["Seguro", insuranceText(profile, demographics.insuranceType, demographics.insuranceScheme) ?? "—"],
-    ["Cómo nos conoció", trim(demographics.referralSource) || "—"],
+    ["Cómo nos conoció", referralText(demographics.referralKind, demographics.referralSource) ?? "—"],
   ]
   if (answers.representative) {
     rows.push(

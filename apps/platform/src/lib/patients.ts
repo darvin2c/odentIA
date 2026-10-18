@@ -52,6 +52,7 @@ export interface Patient {
   /** Tipo general del seguro y, si lo tiene, su régimen con nombre propio del país. */
   insuranceType?: string | null
   insuranceScheme?: string | null
+  referralKind?: string | null
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive: boolean

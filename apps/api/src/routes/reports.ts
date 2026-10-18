@@ -7,14 +7,19 @@
  */
 import { withOrgContext, type Db } from "@odentia/db"
 import {
+  getPatientReportList,
   getReportAdvice,
   getReportAgenda,
+  getReportFunnel,
   getReportList,
   getReportMoney,
+  getReportPatients,
   getReportSales,
   getReportService,
   getReportProfessionals,
   getReportSummary,
+  isPatientReportList,
+  PATIENT_REPORT_LISTS,
   REPORT_LISTS,
   REPORT_PERIOD_PATTERN,
   type ReportQuery,
@@ -53,6 +58,8 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
   read("/agenda", getReportAgenda)
   read("/sales", getReportSales)
   read("/service", getReportService)
+  read("/patients", getReportPatients)
+  read("/funnel", getReportFunnel)
 
   // Los avisos del Administrador: cada línea exige su permiso, como en Inicio.
   app.get("/advice", async (c) => {
@@ -65,9 +72,15 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
 
   app.get("/list/:list", async (c) => {
     const { orgId } = orgContextOf(c)
-    const parsed = reportQuery.extend({ list: z.enum(REPORT_LISTS) }).safeParse({ ...c.req.query(), list: c.req.param("list") })
+    const parsed = reportQuery.extend({ list: z.enum([...REPORT_LISTS, ...PATIENT_REPORT_LISTS]) }).safeParse({ ...c.req.query(), list: c.req.param("list") })
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReportList(tx, orgId, parsed.data)))
+    const { list, ...query } = parsed.data
+    // Las listas de Pacientes son de personas (algunas aún no son pacientes): las arma su propio servicio.
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
+        isPatientReportList(list) ? getPatientReportList(tx, orgId, { ...query, list }) : getReportList(tx, orgId, { ...query, list }),
+      ),
+    )
   })
 
   return app

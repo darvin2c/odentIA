@@ -120,6 +120,13 @@
       "when": 1792306402641,
       "tag": "0016_el_agente_usa_un_solo_modelo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792354861597,
+      "tag": "0017_como_nos_conocio_en_lista",
+      "breakpoints": true
     }
   ]
 }
