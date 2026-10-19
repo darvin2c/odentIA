@@ -155,6 +155,7 @@ import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
 import { seedReports } from "./seed-reports.js"
+import { seedReportsFinance } from "./seed-reports-finance.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -421,6 +422,8 @@ async function wipeSeed(): Promise<void> {
     "commission_rule",
     "cash_closure",
     "cash_movement",
+    "supplier_credit_use",
+    "expense_gap_dismissal",
     "expense",
     "cash_shift",
     "stock_movement",
@@ -3326,6 +3329,8 @@ const reportsHistory = await db.transaction((tx) => {
     patientIds: [...patientIdByName.values()],
   })
 })
+// Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
+const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3470,7 +3475,10 @@ console.log("seed-dev ok")
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
 console.log(
-  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones`,
+  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones, ${reportsHistory.budgets} presupuestos`,
+)
+console.log(
+  `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)

@@ -19,9 +19,9 @@ interface ListCopy {
   noun: { one: string; many: string }
   /** Cómo se calcula, en una línea; recibe el periodo ya escrito. */
   how: (period: string) => string
-  where: { to: "/agenda" | "/people"; label: string }
+  where: { to: "/agenda" | "/people" | "/finance"; label: string }
   /** La fila lleva a la sección del paciente donde se resuelve. */
-  patientTab?: "plan"
+  patientTab?: "plan" | "cobros"
   /** «Ya tiene otra cita» solo importa donde alguien va a llamar. */
   showNext: boolean
 }
@@ -70,12 +70,50 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
+  debts_overdue: {
+    title: "Te deben hace más de 30 días",
+    noun: { one: "persona", many: "personas" },
+    how: (period) =>
+      `Quién debía al cerrar ${period}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  },
+  ...agingLists(),
+  upcoming_unbooked: {
+    title: "Aceptaron y no tienen cita",
+    noun: { one: "persona", many: "personas" },
+    how: () =>
+      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y sin ninguna cita por venir. El importe es lo aceptado por hacer, a su precio acordado.",
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    patientTab: "plan",
+    showNext: false,
+  },
+}
+
+/** «Te deben» por antigüedad: la misma regla del saldo vencido, cada persona en el tramo de su concepto más antiguo. */
+function agingLists(): Record<"debts_age_0_30" | "debts_age_31_60" | "debts_age_61_90" | "debts_age_90_plus", ListCopy> {
+  const copy = (title: string, range: string): ListCopy => ({
+    title: `Te deben: ${title}`,
+    noun: { one: "persona", many: "personas" },
+    how: (period) =>
+      `Quién debía al cerrar ${period} y cuyo concepto sin pagar más antiguo se anotó ${range}. Lo que debe es lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, como en «Saldo vencido».`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  })
+  return {
+    debts_age_0_30: copy("hasta 30 días", "hace 30 días o menos"),
+    debts_age_31_60: copy("de 31 a 60 días", "hace 31 a 60 días"),
+    debts_age_61_90: copy("de 61 a 90 días", "hace 61 a 90 días"),
+    debts_age_90_plus: copy("más de 90 días", "hace más de 90 días"),
+  }
 }
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {
   const date = new Date(row.at)
   const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date).replace(/\./g, "")
-  // Un control o un presupuesto tienen día, no hora.
+  // Un control, un presupuesto o una deuda tienen día, no hora.
   const timed = list === "no_show" || list === "cancelled" || list === "unmarked" || list === "new_patients"
   return { day, hour: timed ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date) : null }
 }

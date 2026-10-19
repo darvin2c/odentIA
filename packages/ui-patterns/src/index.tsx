@@ -58,6 +58,9 @@ export {
   type SharePart,
   Sparkline,
   TrendChart,
+  WaterfallChart,
+  type WaterfallChartProps,
+  type WaterfallStep,
 } from "./charts/index.js"
 export { common } from "./common.js"
 export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"

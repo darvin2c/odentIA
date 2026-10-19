@@ -14,74 +14,24 @@ import { sql, type SQL } from "drizzle-orm"
 import { type AdminRecommendation, getAdminRecommendations } from "./agent-admin.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
-import { validation } from "./errors.js"
-import { getFinanceResultBetween, getFinanceTotalsBetween, requireBranch } from "./finance.js"
-import { getOrgLocale } from "./locale.js"
+import { getFinanceResultBetween, getFinanceTotalsBetween } from "./finance.js"
+import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
+import { FINANCE_LISTS, financeListRows, isFinanceList } from "./report-finance.js"
+import { addMonths, reportDayOf, monthStart, monthsOf, type ReportBucket, type ReportSpan, type YearMonth } from "./report-periods.js"
 import {
-  addMonths,
-  monthsOf,
-  monthStart,
-  resolveReportWindow,
-  type ReportSpan,
-  type ReportWindow,
-  type YearMonth,
-} from "./report-periods.js"
-
-export interface ReportQuery {
-  /** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano` o `YYYY-MM`. */
-  period: string
-  branchId?: string
-}
-
-interface ReportScope {
-  window: ReportWindow
-  timezone: string
-  locale: string
-  /** Moneda de la clínica: va primero cuando hay más de una. */
-  currency: string
-  branch: { id: string; name: string } | null
-  now: Date
-}
-
-async function reportScope(tx: Db, orgId: string, query: ReportQuery, now: Date): Promise<ReportScope> {
-  const { timezone, locale, currency } = await getOrgLocale(tx, orgId)
-  const window = resolveReportWindow(timezone, query.period, now)
-  const branch = query.branchId ? await requireBranch(tx, orgId, query.branchId) : null
-  return { window, timezone, locale, currency, branch: branch ? { id: branch.id, name: branch.name } : null, now }
-}
-
-function serializeSpan(span: ReportSpan) {
-  return {
-    from: span.from,
-    to: span.to,
-    partial: span.partial,
-    start: span.start.toISOString(),
-    end: span.end.toISOString(),
-  }
-}
-
-/** Lo que toda respuesta de Reportes dice de sí misma: periodo, comparación, región y sede. */
-function reportHead(scope: ReportScope) {
-  return {
-    period: { key: scope.window.key, ...serializeSpan(scope.window) },
-    previous: serializeSpan(scope.window.previous),
-    timezone: scope.timezone,
-    locale: scope.locale,
-    currency: scope.currency,
-    branch: scope.branch,
-  }
-}
-
-/** Instante como parámetro: el controlador de Postgres entrega y recibe las fechas como texto. */
-function at(date: Date): SQL {
-  return sql`${date.toISOString()}::timestamptz`
-}
-
-function safeCents(value: string | number | null | undefined): number {
-  const cents = Number(value ?? 0)
-  if (!Number.isSafeInteger(cents)) throw validation("El total excede el rango exacto admitido")
-  return cents
-}
+  at,
+  bySpan,
+  type ReportQuery,
+  type ReportScope,
+  reportHead,
+  reportScope,
+  safeCents,
+  scopeBuckets,
+  serializeBucket,
+  hullOf,
+  type Span,
+  spansSql,
+} from "./report-scope.js"
 
 // --- Agenda ---------------------------------------------------------------------------------
 
@@ -99,18 +49,29 @@ function settledAppointment(now: Date): SQL {
   return sql`(a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))`
 }
 
-async function appointmentTotals(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<AppointmentTotals> {
-  const [row] = await tx.execute<Omit<AppointmentTotals, "total">>(sql`
-    select count(*) filter (where a.status='atendida')::int as attended,
+/** Las citas de cada tramo por grupo, en una sola consulta (`spansSql`). */
+export async function appointmentTotalsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch" | "now">, spans: Span[]): Promise<AppointmentTotals[]> {
+  const rows = await tx.execute<{ idx: number } & Omit<AppointmentTotals, "total">>(sql`
+    select b.idx, count(*) filter (where a.status='atendida')::int as attended,
       count(*) filter (where a.status='no_asistio')::int as "noShow",
       count(*) filter (where a.status='cancelada')::int as cancelled,
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
-    from appointment a
-    where a.organization_id=${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
+    from ${spansSql(spans)}
+    join appointment a on a.organization_id=${orgId} and a.starts_at >= b.start_at and a.starts_at < b.end_at
       and ${settledAppointment(scope.now)}
-      ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}`)
-  const totals = row ?? { attended: 0, noShow: 0, cancelled: 0, unmarked: 0 }
-  return { ...totals, total: totals.attended + totals.noShow + totals.cancelled + totals.unmarked }
+      ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
+    group by b.idx`)
+  return bySpan(
+    spans,
+    [...rows],
+    () => ({ total: 0, attended: 0, noShow: 0, cancelled: 0, unmarked: 0 }),
+    (_, row) => ({ attended: row.attended, noShow: row.noShow, cancelled: row.cancelled, unmarked: row.unmarked, total: row.attended + row.noShow + row.cancelled + row.unmarked }),
+  )
+}
+
+async function appointmentTotals(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<AppointmentTotals> {
+  const [totals] = await appointmentTotalsMany(tx, orgId, scope, [span])
+  return totals as AppointmentTotals
 }
 
 export type ControlTotals = {
@@ -156,7 +117,7 @@ export type WaitInRoom = {
   byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }>
 }
 
-async function waitInRoom(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<WaitInRoom> {
+export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, span: Span): Promise<WaitInRoom> {
   const rows = await tx.execute<{ userId: string | null; name: string | null; median: number | string | null; measured: number }>(sql`
     select e.dentist_user_id as "userId", u.name,
       percentile_cont(0.5) within group (order by extract(epoch from (e.started_at - a.arrived_at)) / 60) as median,
@@ -214,17 +175,23 @@ export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery,
 
 // --- Pacientes y ventas ---------------------------------------------------------------------
 
-/** Personas atendidas por primera vez en el tramo (su primera cita atendida cae dentro). */
-async function newPatients(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<number> {
-  const [row] = await tx.execute<{ count: number }>(sql`
+/** Personas atendidas por primera vez en cada tramo (su primera cita atendida cae dentro). */
+export async function newPatientsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, spans: Span[]): Promise<number[]> {
+  const rows = await tx.execute<{ idx: number; count: number }>(sql`
     with first_visit as (
       select distinct on (patient_id) patient_id, starts_at, branch_id
       from appointment where organization_id=${orgId} and status='atendida'
       order by patient_id, starts_at, id
-    ) select count(*)::int as count from first_visit
-    where starts_at >= ${at(span.start)} and starts_at < ${at(span.end)}
-      ${scope.branch ? sql`and branch_id=${scope.branch.id}` : sql``}`)
-  return row?.count ?? 0
+    ) select b.idx, count(*)::int as count from ${spansSql(spans)}
+    join first_visit f on f.starts_at >= b.start_at and f.starts_at < b.end_at
+      ${scope.branch ? sql`and f.branch_id=${scope.branch.id}` : sql``}
+    group by b.idx`)
+  return bySpan(spans, [...rows], () => 0, (_, row) => row.count)
+}
+
+async function newPatients(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<number> {
+  const [count] = await newPatientsMany(tx, orgId, scope, [span])
+  return count ?? 0
 }
 
 export type BudgetGroup = "accepted" | "waiting" | "rejected"
@@ -244,17 +211,17 @@ export interface BudgetTotals {
  * `budgetAwaitsAnswerSql`. Uno aceptado en parte cuenta por lo aceptado, y lo
  * que dejó para después, como en espera. Las revisiones sustituidas no cuentan.
  */
-function budgetLinesSql(orgId: string, where: SQL): SQL {
+export function budgetLinesSql(orgId: string, where: SQL): SQL {
   const budget = { id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` }
   return sql`with valued as (
-      select b.id, b.patient_id, b.presented_at, b.title, b.currency, b.status,
+      select b.id, b.patient_id, b.presented_at, b.title, b.currency, b.status, b.created_by,
         ${budgetAwaitsAnswerSql(budget)} as awaits,
         ${budgetValueOptionSql(budget)} as option_id
       from treatment_budget b
       where b.organization_id=${orgId} and b.status in ('aceptado','parcial','presentado','pospuesto','rechazado')
         and ${where}
     ), budget_line as (
-      select v.id, v.patient_id, v.presented_at, v.title, v.currency,
+      select v.id, v.patient_id, v.presented_at, v.title, v.currency, v.created_by,
         case
           when v.status in ('aceptado','parcial') and i.decision = 'aceptado' then 'accepted'
           when v.awaits and (v.status <> 'parcial' or i.decision = 'pospuesto') then 'waiting'
@@ -267,24 +234,34 @@ function budgetLinesSql(orgId: string, where: SQL): SQL {
     )`
 }
 
+/** Presupuestos presentados en cada tramo, según su respuesta a hoy (`budgetLinesSql`). */
+export async function budgetTotalsMany(tx: Db, orgId: string, spans: Span[]): Promise<BudgetTotals[][]> {
+  const hull = hullOf(spans)
+  const rows = await tx.execute<{ idx: number; currency: string; grp: BudgetGroup; count: number; cents: string }>(sql`
+    ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(hull.start)} and b.presented_at < ${at(hull.end)}`)}
+    select s.idx, bl.currency, bl.grp, count(distinct bl.id)::int as count, coalesce(sum(bl.cents), 0)::text as cents
+    from budget_line bl join ${spansSql(spans, "s")} on bl.presented_at >= s.start_at and bl.presented_at < s.end_at
+    where bl.grp is not null group by s.idx, bl.currency, bl.grp order by bl.currency`)
+  return bySpan(
+    spans,
+    [...rows],
+    (): BudgetTotals[] => [],
+    (list, row) => {
+      let entry = list.find((item) => item.currency === row.currency)
+      if (!entry) {
+        entry = { currency: row.currency, accepted: { count: 0, cents: 0 }, waiting: { count: 0, cents: 0 }, rejected: { count: 0, cents: 0 } }
+        list.push(entry)
+      }
+      entry[row.grp] = { count: row.count, cents: safeCents(row.cents) }
+      return list
+    },
+  )
+}
+
 /** Presupuestos presentados en el tramo, según su respuesta a hoy (`budgetLinesSql`). */
 async function budgetTotals(tx: Db, orgId: string, span: ReportSpan): Promise<BudgetTotals[]> {
-  const rows = await tx.execute<{ currency: string; grp: BudgetGroup; count: number; cents: string }>(sql`
-    ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(span.start)} and b.presented_at < ${at(span.end)}`)}
-    select currency, grp, count(distinct id)::int as count, coalesce(sum(cents), 0)::text as cents
-    from budget_line where grp is not null group by currency, grp order by currency`)
-  const byCurrency = new Map<string, BudgetTotals>()
-  for (const row of rows) {
-    const entry = byCurrency.get(row.currency) ?? {
-      currency: row.currency,
-      accepted: { count: 0, cents: 0 },
-      waiting: { count: 0, cents: 0 },
-      rejected: { count: 0, cents: 0 },
-    }
-    entry[row.grp] = { count: row.count, cents: safeCents(row.cents) }
-    byCurrency.set(row.currency, entry)
-  }
-  return [...byCurrency.values()]
+  const [totals] = await budgetTotalsMany(tx, orgId, [span])
+  return totals ?? []
 }
 
 /**
@@ -447,42 +424,6 @@ export async function getReportMoney(tx: Db, orgId: string, query: ReportQuery, 
   }
 }
 
-// --- Las cuatro cifras de arriba ------------------------------------------------------------
-
-export async function getReportOverview(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
-  const scope = await reportScope(tx, orgId, query, now)
-  const { window } = scope
-  const branchId = scope.branch?.id
-  const money = await getFinanceTotalsBetween(tx, orgId, { start: window.start, end: window.end, branchId })
-  const previousMoney = await getFinanceTotalsBetween(tx, orgId, {
-    start: window.previous.start,
-    end: window.previous.end,
-    branchId,
-  })
-  const appointments = await appointmentTotals(tx, orgId, scope, window)
-  const previousAppointments = await appointmentTotals(tx, orgId, scope, window.previous)
-  const responses = await responseTotals(tx, orgId, window)
-  const previousResponses = await responseTotals(tx, orgId, window.previous)
-  const currencies = [...new Set([...money, ...previousMoney].map((row) => row.currency))]
-  return {
-    ...reportHead(scope),
-    money: currencies.map((currency) => ({
-      currency,
-      quedaCents: money.find((row) => row.currency === currency)?.quedaCents ?? 0,
-      previousQuedaCents: previousMoney.find((row) => row.currency === currency)?.quedaCents ?? null,
-    })),
-    agenda: { attended: appointments.attended, previousAttended: previousAppointments.attended },
-    sales: {
-      newPatients: await newPatients(tx, orgId, scope, window),
-      previousNewPatients: await newPatients(tx, orgId, scope, window.previous),
-    },
-    service: {
-      avgFirstResponseSeconds: responses.avgFirstResponseSeconds,
-      previousAvgFirstResponseSeconds: previousResponses.avgFirstResponseSeconds,
-    },
-  }
-}
-
 // --- El Administrador junto a la cifra ------------------------------------------------------
 
 /** La inasistencia merece aviso si llega a este porcentaje… */
@@ -557,20 +498,34 @@ export async function getReportAdvice(
   return { enabled: true, notices }
 }
 
-// --- Barras por mes -------------------------------------------------------------------------
+// --- Barras por tramo -----------------------------------------------------------------------
 
-/** Con más de un mes, la misma cifra mes a mes; con uno solo no hay serie. */
-async function monthlySeries<T>(scope: ReportScope, read: (span: ReportSpan) => Promise<T>) {
-  const months = monthsOf(scope.window)
-  if (months.length < 2) return []
-  const series: Array<YearMonth & { partial: boolean } & T> = []
-  for (const month of months) {
+/**
+ * Los tramos de la serie de una pregunta: por mes en un periodo de meses, o
+ * por día, semana o mes en un rango (`reportBuckets`), siempre recortados al
+ * periodo. Con un solo tramo no hay serie.
+ */
+export function seriesBuckets(scope: ReportScope): ReportBucket[] {
+  if (scope.window.kind === "range") return scopeBuckets(scope)
+  return monthsOf(scope.window).map((month) => {
     const start = monthStart(scope.timezone, month.year, month.month)
     const next = addMonths(month, 1)
-    const monthEnd = monthStart(scope.timezone, next.year, next.month)
-    const end = monthEnd.getTime() > scope.window.end.getTime() ? scope.window.end : monthEnd
-    const span: ReportSpan = { from: month, to: month, start, end, partial: end.getTime() < monthEnd.getTime() }
-    series.push({ ...month, partial: span.partial, ...(await read(span)) })
+    const naturalEnd = monthStart(scope.timezone, next.year, next.month)
+    const end = naturalEnd.getTime() > scope.window.end.getTime() ? scope.window.end : naturalEnd
+    const firstDay = `${month.year}-${String(month.month).padStart(2, "0")}-01`
+    return { key: firstDay.slice(0, 7), start, end, partial: end.getTime() < naturalEnd.getTime(), firstDay, lastDay: reportDayOf(scope.timezone, new Date(end.getTime() - 1)) }
+  })
+}
+
+/** La misma cifra tramo a tramo; `year` y `month` son los del primer día de cada tramo. */
+async function monthlySeries<T>(scope: ReportScope, read: (span: ReportSpan) => Promise<T>) {
+  const buckets = seriesBuckets(scope)
+  if (buckets.length < 2) return []
+  const series: Array<ReturnType<typeof serializeBucket> & YearMonth & T> = []
+  for (const bucket of buckets) {
+    const month = { year: Number(bucket.firstDay.slice(0, 4)), month: Number(bucket.firstDay.slice(5, 7)) }
+    const span: ReportSpan = { from: month, to: month, start: bucket.start, end: bucket.end, partial: bucket.partial }
+    series.push({ ...serializeBucket(bucket), ...month, ...(await read(span)) })
   }
   return series
 }
@@ -584,6 +539,8 @@ export const REPORT_LISTS = [
   "controls_pending",
   "budgets_waiting",
   "new_patients",
+  "debts_overdue",
+  ...FINANCE_LISTS,
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -670,6 +627,22 @@ export async function getReportList(
         from waiting w
         join patient p on p.id=w.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         order by w.presented_at, w.id limit ${REPORT_LIST_LIMIT}`)),
+    ]
+  } else if (isFinanceList(query.list)) {
+    // Las listas de Reportes › Finanzas: «Te deben» por antigüedad y lo aceptado sin cita.
+    rows = (await financeListRows(tx, orgId, scope, query.list, REPORT_LIST_LIMIT, now)).map((row) => ({ ...row, at: new Date(row.at).toISOString() }))
+  } else if (query.list === "debts_overdue") {
+    // Quién debía hace más de 30 días al cerrar el periodo: la misma consulta de la cifra.
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        ${overdueDebtSql(orgId, [window.end], OVERDUE_DAYS, scope.branch?.id)}
+        select o.patient_id::text || ':' || o.currency as id, o.since as at, o.patient_id as "patientId", pp.display_name as "personName",
+          null::text as title, null::text as "professionalName", null::text as "branchName",
+          ${nextAppointment(sql`o.patient_id`)} as "hasNextAppointment",
+          o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
+        from overdue o
+        join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        order by o.since, o.patient_id limit ${REPORT_LIST_LIMIT}`)),
     ]
   } else {
     rows = [

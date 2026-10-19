@@ -61,3 +61,32 @@ export function sparkPoints(values: Array<number | null>, width: number, height:
         },
   )
 }
+
+/** Un paso de la cascada: el total con que empieza, lo que resta y lo que queda al final. */
+export type WaterfallKind = "total" | "less" | "result"
+
+/**
+ * Dónde empieza y termina cada barra de una cascada: el total sube desde cero,
+ * cada resta baja desde donde quedó la anterior y el resultado vuelve a salir
+ * de cero. Devuelve también lo más bajo y lo más alto, para el eje: si se gastó
+ * más de lo cobrado, la cascada baja de cero.
+ */
+export function waterfallBars(steps: Array<{ kind: WaterfallKind; value: number }>): {
+  bars: Array<{ from: number; to: number }>
+  low: number
+  high: number
+} {
+  let running = 0
+  const bars = steps.map((step) => {
+    if (step.kind === "total") {
+      running = step.value
+      return { from: 0, to: step.value }
+    }
+    if (step.kind === "result") return { from: 0, to: step.value }
+    const from = running
+    running -= step.value
+    return { from, to: running }
+  })
+  const edges = bars.flatMap((bar) => [bar.from, bar.to])
+  return { bars, low: Math.min(0, ...edges), high: Math.max(0, ...edges) }
+}

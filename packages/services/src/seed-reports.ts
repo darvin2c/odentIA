@@ -13,7 +13,20 @@ import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { scheduleBlock } from "@odentia/db/schema/availability"
-import { encounter, encounterProcedure, orgCounter, patient, patientPayment } from "@odentia/db/schema/clinical"
+import {
+  encounter,
+  encounterProcedure,
+  orgCounter,
+  patient,
+  patientCharge,
+  patientPayment,
+  patientPaymentApplication,
+  treatmentBudget,
+  treatmentBudgetItem,
+  treatmentBudgetOption,
+  treatmentPlan,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { expense } from "@odentia/db/schema/finance"
 import { and, eq, sql } from "drizzle-orm"
@@ -128,7 +141,7 @@ interface PlannedVisit {
   quantity: number
 }
 
-export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ patients: number; appointments: number; conversations: number }> {
+export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ patients: number; appointments: number; conversations: number; budgets: number }> {
   const { timezone, currency } = await getOrgLocale(tx, input.orgId)
   const random = generator(20_261_018)
   const current = currentMonthIn(timezone)
@@ -402,13 +415,15 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     list.push(visit)
     rounds[round] = list
   }
+  const done: Array<{ visit: PlannedVisit; encounterId: string; procedureId: string; endedAt: Date }> = []
   for (const round of rounds) {
     for (const batch of chunks(round)) {
       const rows = batch.map((visit) => {
         // La llegada es anterior al inicio: la espera en sala queda medida.
         const startedAt = new Date(visit.startsAt.getTime() + Math.max(1, visit.waitMinutes - 5) * 60_000)
-        return { visit, id: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
+        return { visit, id: randomUUID(), procedureId: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
       })
+      for (const row of rows) done.push({ visit: row.visit, encounterId: row.id, procedureId: row.procedureId, endedAt: row.endedAt })
       await tx.insert(encounter).values(
         rows.map((row) => ({
           id: row.id,
@@ -427,6 +442,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       )
       await tx.insert(encounterProcedure).values(
         rows.map((row) => ({
+          id: row.procedureId,
           organizationId: input.orgId,
           encounterId: row.id,
           serviceId: row.visit.service.id,
@@ -449,28 +465,74 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     }
   }
 
-  // --- Cobros: casi todo se paga el día de la atención --------------------------------------
-  const payments = attended
-    .filter(() => random.chance(0.93))
-    .map((visit) => {
-      const method = random.weighted(PAYMENT_METHODS)
-      const cents = visit.service.priceCents * visit.quantity
-      // Un tratamiento caro a veces se paga en partes: aquí entra la primera.
-      const paid = cents >= 90_000 && random.chance(0.4) ? Math.round(cents / 2 / 100) * 100 : cents
-      return {
-        organizationId: input.orgId,
-        patientId: patientOf(visit.patientIndex),
-        branchId: visit.branchId,
-        amountCents: paid,
-        currency,
-        paidAt: new Date(visit.startsAt.getTime() + (visit.service.durationMin + 5) * 60_000),
-        method: method.method,
-        methodName: method.name,
-        methodTypeCode: method.typeCode,
-        createdBy: input.ownerUserId,
-      }
+  // --- Cargos y cobros ------------------------------------------------------------------------
+  // Cada tratamiento atendido deja su cargo. Casi todo se paga ese día; algunos
+  // pagan después, otros en dos partes y unos pocos siguen debiendo: de ahí
+  // salen «Te deben hace más de 30 días» y lo cobrado por profesional.
+  const charges: Array<typeof patientCharge.$inferInsert> = []
+  const payments: Array<typeof patientPayment.$inferInsert & { id: string; paidAt: Date; branchId: string }> = []
+  const applications: Array<typeof patientPaymentApplication.$inferInsert> = []
+  const pay = (visit: PlannedVisit, chargeId: string, cents: number, paidAt: Date): void => {
+    if (paidAt.getTime() > historyEnd || cents <= 0) return
+    const method = random.weighted(PAYMENT_METHODS)
+    const id = randomUUID()
+    payments.push({
+      id,
+      organizationId: input.orgId,
+      patientId: patientOf(visit.patientIndex),
+      branchId: visit.branchId,
+      amountCents: cents,
+      currency,
+      paidAt,
+      methodName: method.name,
+      methodTypeCode: method.typeCode,
+      createdBy: input.ownerUserId,
     })
+    applications.push({ organizationId: input.orgId, patientId: patientOf(visit.patientIndex), paymentId: id, chargeId, amountCents: cents, createdBy: input.ownerUserId, createdAt: paidAt })
+  }
+  for (const item of done) {
+    const { visit } = item
+    const cents = visit.service.priceCents * visit.quantity
+    const chargeId = randomUUID()
+    charges.push({
+      id: chargeId,
+      organizationId: input.orgId,
+      patientId: patientOf(visit.patientIndex),
+      encounterProcedureId: item.procedureId,
+      branchId: visit.branchId,
+      description: visit.service.name,
+      amountCents: cents,
+      currency,
+      createdBy: visit.dentist.userId,
+      createdAt: item.endedAt,
+    })
+    const sameDay = new Date(item.endedAt.getTime() + 5 * 60_000)
+    const later = (min: number, max: number): Date => new Date(item.endedAt.getTime() + random.int(min, max) * 86_400_000)
+    const roll = random.next()
+    if (roll < 0.86) pay(visit, chargeId, cents, sameDay)
+    else if (roll < 0.92) pay(visit, chargeId, cents, later(10, 70))
+    else if (roll < 0.97) {
+      const half = Math.round(cents / 2 / 100) * 100
+      pay(visit, chargeId, half, sameDay)
+      pay(visit, chargeId, cents - half, later(15, 60))
+    }
+    // El resto sigue debiéndose.
+  }
+  for (const batch of chunks(charges)) await tx.insert(patientCharge).values(batch)
   for (const batch of chunks(payments)) await tx.insert(patientPayment).values(batch)
+  for (const batch of chunks(applications)) await tx.insert(patientPaymentApplication).values(batch)
+
+  // --- Presupuestos: tres de cada cuatro evaluaciones de personas nuevas terminan en uno -----
+  const budgets = await seedBudgets(tx, {
+    orgId: input.orgId,
+    currency,
+    random,
+    historyEnd,
+    services: input.services.filter((service) => !service.firstVisit),
+    evaluations: done
+      .filter((item) => item.visit.service.firstVisit && item.visit.patientIndex >= input.patientIds.length)
+      .map((item) => ({ patientId: patientOf(item.visit.patientIndex), dentistUserId: item.visit.dentist.userId, encounterId: item.encounterId, endedAt: item.endedAt })),
+  })
 
   // --- Gastos del mes, por sede -------------------------------------------------------------
   const income = new Map<string, number>()
@@ -527,5 +589,176 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     )
   }
 
-  return { patients: fresh.length, appointments: visits.length, conversations: connections.length > 0 ? allThreads.length : 0 }
+  return { patients: fresh.length, appointments: visits.length, conversations: connections.length > 0 ? allThreads.length : 0, budgets }
+}
+
+type Random = ReturnType<typeof generator>
+
+/**
+ * Presupuestos presentados tras una evaluación, con su respuesta: aceptados,
+ * aceptados en parte, rechazados o esperando. Se insertan en borrador (la base
+ * solo deja agregar líneas así) y se entregan con su fecha. Uno de cada ocho
+ * lleva un descuento sobre la tarifa. Solo personas nuevas: ninguna tiene otro
+ * borrador.
+ */
+async function seedBudgets(
+  tx: Db,
+  input: {
+    orgId: string
+    currency: string
+    random: Random
+    historyEnd: number
+    services: ReportsSeedInput["services"]
+    evaluations: Array<{ patientId: string; dentistUserId: string; encounterId: string; endedAt: Date }>
+  },
+): Promise<number> {
+  const { random } = input
+  const chosen = input.evaluations.filter(() => random.chance(0.75))
+  if (chosen.length === 0) return 0
+  const [counter] = await tx
+    .insert(orgCounter)
+    .values({ organizationId: input.orgId, key: "budget", value: chosen.length })
+    .onConflictDoUpdate({ target: [orgCounter.organizationId, orgCounter.key], set: { value: sql`"org_counter"."value" + ${chosen.length}` } })
+    .returning({ value: orgCounter.value })
+  const firstNumber = (counter?.value ?? chosen.length) - chosen.length + 1
+  type Outcome = "aceptado" | "parcial" | "rechazado" | "presentado" | "pospuesto"
+  const plans = chosen.map((evaluation, index) => {
+    const presentedAt = new Date(evaluation.endedAt.getTime() + random.int(0, 2) * 86_400_000 + 3_600_000)
+    const lineCount = random.int(1, 3)
+    const services: ReportsSeedInput["services"] = []
+    for (let tries = 0; services.length < lineCount && tries < 20; tries += 1) {
+      const service = random.weighted(input.services)
+      if (!services.some((item) => item.id === service.id)) services.push(service)
+    }
+    const discount = random.chance(0.125)
+    const roll = random.next()
+    let outcome: Outcome = roll < 0.55 ? "aceptado" : roll < 0.63 ? "parcial" : roll < 0.78 ? "rechazado" : roll < 0.9 ? "presentado" : "pospuesto"
+    let decidedAt: Date | null =
+      outcome === "presentado" ? null : new Date(presentedAt.getTime() + random.int(0, 14) * 86_400_000 + random.int(1, 8) * 3_600_000)
+    // Lo que todavía no se decidió a hoy sigue esperando respuesta.
+    if (decidedAt && decidedAt.getTime() > input.historyEnd) {
+      outcome = "presentado"
+      decidedAt = null
+    }
+    if (outcome === "parcial" && services.length < 2) outcome = "aceptado"
+    const decisionOf = (position: number): string =>
+      outcome === "aceptado"
+        ? "aceptado"
+        : outcome === "parcial"
+          ? position === 0
+            ? "aceptado"
+            : "pospuesto"
+          : outcome === "rechazado"
+            ? "rechazado"
+            : outcome === "pospuesto"
+              ? "pospuesto"
+              : "pendiente"
+    return {
+      evaluation,
+      planId: randomUUID(),
+      budgetId: randomUUID(),
+      optionId: randomUUID(),
+      number: firstNumber + index,
+      presentedAt,
+      outcome,
+      decidedAt,
+      lines: services.map((service, position) => ({
+        planItemId: randomUUID(),
+        itemId: randomUUID(),
+        service,
+        priceCents: discount ? Math.round((service.priceCents * 0.9) / 100) * 100 : service.priceCents,
+        decision: decisionOf(position),
+      })),
+    }
+  })
+  const planItems = plans.flatMap((plan) => plan.lines.map((line) => ({ plan, line })))
+  for (const batch of chunks(plans))
+    await tx.insert(treatmentPlan).values(
+      batch.map((plan) => ({
+        id: plan.planId,
+        organizationId: input.orgId,
+        patientId: plan.evaluation.patientId,
+        title: "Plan de tratamiento",
+        originEncounterId: plan.evaluation.encounterId,
+        createdBy: plan.evaluation.dentistUserId,
+        createdAt: plan.evaluation.endedAt,
+      })),
+    )
+  for (const batch of chunks(planItems))
+    await tx.insert(treatmentPlanItem).values(
+      batch.map(({ plan, line }) => ({
+        id: line.planItemId,
+        organizationId: input.orgId,
+        patientId: plan.evaluation.patientId,
+        planId: plan.planId,
+        serviceId: line.service.id,
+        title: line.service.name,
+        priceCents: line.priceCents,
+        currency: input.currency,
+        decisionStatus: line.decision,
+        sourceEncounterId: plan.evaluation.encounterId,
+        createdBy: plan.evaluation.dentistUserId,
+        createdAt: plan.evaluation.endedAt,
+      })),
+    )
+  for (const batch of chunks(plans))
+    await tx.insert(treatmentBudget).values(
+      batch.map((plan) => ({
+        id: plan.budgetId,
+        organizationId: input.orgId,
+        patientId: plan.evaluation.patientId,
+        planId: plan.planId,
+        budgetNumber: plan.number,
+        title: "Plan de tratamiento",
+        currency: input.currency,
+        createdBy: plan.evaluation.dentistUserId,
+        createdAt: plan.evaluation.endedAt,
+      })),
+    )
+  for (const batch of chunks(plans))
+    await tx.insert(treatmentBudgetOption).values(
+      batch.map((plan) => ({
+        id: plan.optionId,
+        organizationId: input.orgId,
+        patientId: plan.evaluation.patientId,
+        budgetId: plan.budgetId,
+        position: 1,
+        isRecommended: true,
+        decision: plan.outcome === "aceptado" || plan.outcome === "parcial" ? "elegida" : "pendiente",
+        createdBy: plan.evaluation.dentistUserId,
+      })),
+    )
+  for (const batch of chunks(planItems))
+    await tx.insert(treatmentBudgetItem).values(
+      batch.map(({ plan, line }) => ({
+        id: line.itemId,
+        organizationId: input.orgId,
+        patientId: plan.evaluation.patientId,
+        planId: plan.planId,
+        budgetId: plan.budgetId,
+        optionId: plan.optionId,
+        planItemId: line.planItemId,
+        serviceId: line.service.id,
+        title: line.service.name,
+        priceCents: line.priceCents,
+        tariffPriceCents: line.service.priceCents,
+        currency: input.currency,
+        decision: line.decision,
+        createdBy: plan.evaluation.dentistUserId,
+      })),
+    )
+  // Entregados con su fecha y su respuesta: desde aquí la base ya no deja tocar las líneas.
+  for (const batch of chunks(plans))
+    await tx.execute(sql`
+      update treatment_budget t set status = v.status, presented_at = v.presented_at, decided_at = v.decided_at,
+        decided_by = case when v.decided_at is null then null else t.created_by end
+      from (values ${sql.join(
+        batch.map(
+          (plan) =>
+            sql`(${plan.budgetId}::uuid, ${plan.outcome}::text, ${plan.presentedAt.toISOString()}::timestamptz, ${plan.decidedAt?.toISOString() ?? null}::timestamptz)`,
+        ),
+        sql`, `,
+      )}) as v(id, status, presented_at, decided_at)
+      where t.organization_id = ${input.orgId} and t.id = v.id`)
+  return plans.length
 }

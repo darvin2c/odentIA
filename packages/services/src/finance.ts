@@ -34,10 +34,12 @@ import {
   commissionSettlement,
   commissionSettlementLine,
   expense,
+  expenseGapDismissal,
 } from "@odentia/db/schema/finance"
+import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { promotionServicePrice } from "@odentia/db/schema/promotions"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -46,7 +48,9 @@ import {
   validation,
 } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
+import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
@@ -897,12 +901,16 @@ export async function createExpense(
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput,
+  /** Solo `payPurchaseOrder`: el gasto es el pago de esa compra. */
+  link: { purchaseOrderId?: string } = {},
 ) {
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw validation("Tipo de gasto inválido")
+  if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
+    throw validation("El pago de una compra es un gasto de Materiales")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
   const shift = input.fromCash
@@ -922,6 +930,7 @@ export async function createExpense(
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
+      purchaseOrderId: link.purchaseOrderId ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -981,6 +990,24 @@ export async function getMonthExpenses(
   const live = rows.filter((row) => !row.voidedAt && row.currency === unit)
   const byCategory = new Map<string, number>()
   for (const row of live) byCategory.set(row.category, addCents(byCategory.get(row.category) ?? 0, row.amountCents))
+  // El pago de una compra lleva su orden y el de una comisión lo dice: la lista los enlaza (ADR 0061).
+  const orderIds = [...new Set(rows.map((row) => row.purchaseOrderId).filter((id): id is string => id !== null))]
+  const orders = orderIds.length
+    ? await tx
+        .select({ id: purchaseOrder.id, orderNumber: purchaseOrder.orderNumber })
+        .from(purchaseOrder)
+        .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
+    : []
+  const commissionExpenses = rows.length
+    ? new Set(
+        (
+          await tx
+            .select({ expenseId: commissionSettlement.expenseId })
+            .from(commissionSettlement)
+            .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
+        ).map((row) => row.expenseId),
+      )
+    : new Set<string | null>()
   return {
     year: query.year,
     month: query.month,
@@ -990,7 +1017,12 @@ export async function getMonthExpenses(
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
-    expenses: rows.map((row) => ({ ...row, fromCash: row.shiftId !== null })),
+    expenses: rows.map((row) => ({
+      ...row,
+      fromCash: row.shiftId !== null,
+      purchaseOrderNumber: orders.find((order) => order.id === row.purchaseOrderId)?.orderNumber ?? null,
+      commission: commissionExpenses.has(row.id),
+    })),
   }
 }
 
@@ -1066,9 +1098,234 @@ export async function voidExpense(
       }
     }
   }
+  // El pago de una compra cerrada puede ser lo que se tiene a favor con el
+  // proveedor: si ya se usó para pagar otra compra, anularlo dejaría usado lo
+  // que ya no existe.
+  if (current.purchaseOrderId) await assertSupplierCreditCovered(tx, orgId, current.purchaseOrderId)
   await audit(tx, orgId, actorUserId, "expense", expenseId, "finance.expense_voided")
   await notifyCash(tx, orgId)
   return row
+}
+
+// --- Pago de compras de Inventario (ADR 0061) -----------------------------------------
+//
+// Pagar una compra es registrar un gasto de Materiales enlazado a su orden, en
+// la sede de su almacén: en partes, por adelantado o con lo que se tiene a favor
+// con el proveedor. La misma operación desde Inventario y desde Finanzas › Gastos.
+
+/** Tipo de gasto del pago de una compra. */
+export const PURCHASE_EXPENSE_CATEGORY = "Materiales"
+
+/** «OC-0012»: el número de la orden como lo dicen la pantalla y el gasto. */
+export function purchaseOrderLabel(orderNumber: number): string {
+  return `OC-${String(orderNumber).padStart(4, "0")}`
+}
+
+async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
+  const [row] = await tx
+    .select()
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+    .for("update")
+  if (!row) throw notFound("Orden de compra")
+  return row
+}
+
+/** Lo que se tiene a favor con un proveedor cambia de a uno: se bloquea el proveedor. */
+async function lockSupplier(tx: Db, orgId: string, supplierId: string): Promise<void> {
+  await tx
+    .select({ id: supplier.id })
+    .from(supplier)
+    .where(and(eq(supplier.organizationId, orgId), eq(supplier.id, supplierId)))
+    .for("update")
+}
+
+/** Lo que se tiene a favor con el proveedor, en una moneda. */
+async function creditWith(tx: Db, orgId: string, supplierId: string, unit: string): Promise<number> {
+  const credits = await supplierCredits(tx, orgId, { supplierId })
+  return credits.find((credit) => credit.currency === unit)?.cents ?? 0
+}
+
+/**
+ * Nunca queda usado más de lo que se tenía a favor con el proveedor de la
+ * orden. Se llama después del cambio, dentro de la misma transacción: si no
+ * alcanza, el error deshace todo.
+ */
+export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId: string): Promise<void> {
+  const [order] = await tx
+    .select({ supplierId: purchaseOrder.supplierId, currency: purchaseOrder.currency })
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+  if (!order) return
+  await lockSupplier(tx, orgId, order.supplierId)
+  if ((await creditWith(tx, orgId, order.supplierId, order.currency)) < 0)
+    throw conflict(
+      "SUPPLIER_CREDIT_USED",
+      "Lo pagado de más en esta compra ya se usó para pagar otra: anula antes ese uso del saldo a favor",
+    )
+}
+
+export interface PayPurchaseOrderInput {
+  orderId: string
+  /** Lo que se paga con dinero (gasto de Materiales). Cero si todo va con lo que se tenía a favor. */
+  amountCents: number
+  /** Lo que se usa de lo que se tiene a favor con el proveedor. */
+  creditCents?: number
+  spentAt?: string | null
+  fromCash?: boolean
+  receiptKind?: string
+  receiptNumber?: string | null
+  notes?: string | null
+  /** Lo que la pantalla mostró por pagar: si cambió mientras tanto, no se paga sobre otra cifra. */
+  expectedDueCents?: number
+}
+
+/**
+ * Registra el pago de una compra (o una parte, o un adelanto): un gasto de
+ * Materiales en la sede de su almacén, enlazado a la orden, y si se pide, lo
+ * que se usa de lo que se tiene a favor con el proveedor. Pagar de más deja
+ * saldo a favor cuando la compra cierra. No se paga una orden en borrador ni
+ * una cancelada.
+ */
+export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: string, input: PayPurchaseOrderInput) {
+  const order = await lockPurchaseOrder(tx, orgId, input.orderId)
+  if (order.status === "borrador") throw conflict("PURCHASE_NOT_CONFIRMED", "Confirma la orden antes de pagarla")
+  if (order.status === "cancelada") throw conflict("PURCHASE_CANCELLED", "La orden está cancelada: ya no se paga")
+  await lockSupplier(tx, orgId, order.supplierId)
+  const amountCents = input.amountCents ?? 0
+  const creditCents = input.creditCents ?? 0
+  if (!Number.isSafeInteger(amountCents) || amountCents < 0 || amountCents > 2147483647)
+    throw validation("El pago debe ser un importe entero")
+  if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
+    throw validation("Lo que se usa a favor debe ser un importe entero")
+  if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
+  const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  if (!before) throw notFound("Orden de compra")
+  if (input.expectedDueCents !== undefined && input.expectedDueCents !== before.dueCents)
+    throw conflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
+  if (creditCents > 0) {
+    if (creditCents > (await creditWith(tx, orgId, order.supplierId, order.currency)))
+      throw conflict("SUPPLIER_CREDIT_SHORT", "No tienes tanto a favor con este proveedor")
+    if (creditCents > Math.max(0, before.orderedCents - before.paidCents))
+      throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
+  }
+  const label = purchaseOrderLabel(before.orderNumber)
+  const kind = before.receivedCents === 0 ? "Adelanto de compra" : "Pago de compra"
+  const part = before.dueCents > 0 && amountCents + creditCents < before.dueCents ? " (una parte)" : ""
+  let paid: typeof expense.$inferSelect | null = null
+  if (amountCents > 0) {
+    paid = await createExpense(
+      tx,
+      orgId,
+      actorUserId,
+      {
+        branchId: before.branchId,
+        category: PURCHASE_EXPENSE_CATEGORY,
+        concept: `${kind} ${label} · ${before.supplierName}${part}`,
+        amountCents,
+        currency: order.currency,
+        spentAt: input.spentAt ?? null,
+        receiptKind: input.receiptKind,
+        receiptNumber: input.receiptNumber,
+        notes: input.notes,
+        fromCash: input.fromCash ?? false,
+      },
+      { purchaseOrderId: order.id },
+    )
+  }
+  let used: typeof supplierCreditUse.$inferSelect | null = null
+  if (creditCents > 0) {
+    const [row] = await tx
+      .insert(supplierCreditUse)
+      .values({
+        organizationId: orgId,
+        supplierId: order.supplierId,
+        orderId: order.id,
+        amountCents: creditCents,
+        currency: order.currency,
+        createdBy: actorUserId,
+      })
+      .returning()
+    used = row ?? null
+    if (used) await audit(tx, orgId, actorUserId, "supplier_credit_use", used.id, "purchase_order.credit_used")
+  }
+  await audit(tx, orgId, actorUserId, "purchase_order", order.id, "purchase_order.paid")
+  const [after] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  return { expense: paid, creditUse: used, balance: after as PurchaseBalance }
+}
+
+/** Deshace un uso de lo que se tenía a favor: vuelve a estar a favor y la compra vuelve a deberlo. */
+export async function voidSupplierCreditUse(tx: Db, orgId: string, actorUserId: string, id: string, input: { reason: string }) {
+  const [current] = await tx
+    .select()
+    .from(supplierCreditUse)
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .for("update")
+  if (!current) throw notFound("Uso del saldo a favor")
+  if (current.voidedAt) throw conflict("CREDIT_USE_VOIDED", "Ese uso del saldo a favor ya está anulado")
+  const [row] = await tx
+    .update(supplierCreditUse)
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "supplier_credit_use", id, "purchase_order.credit_use_voided")
+  return row
+}
+
+/**
+ * Lo que hay que pagar de las compras: las recibidas sin pagar (el aviso de
+ * Finanzas › Gastos) y las que aún no llegan (se pueden adelantar), con lo que
+ * se tiene a favor con cada proveedor. De la clínica o de una sede.
+ */
+export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId?: string } = {}) {
+  const { currency: unit } = await getOrgLocale(tx, orgId)
+  const open = (await purchaseBalances(tx, orgId, { openOnly: true })).filter(
+    (order) => (!query.branchId || order.branchId === query.branchId) && (order.dueCents > 0 || order.receivedCents === 0),
+  )
+  const unpaid = open.filter((order) => order.dueCents > 0)
+  const oldest = unpaid.reduce<PurchaseBalance | null>(
+    (first, order) =>
+      order.firstReceivedAt && (!first?.firstReceivedAt || order.firstReceivedAt < first.firstReceivedAt) ? order : first,
+    null,
+  )
+  return {
+    currency: unit,
+    /** «3 compras recibidas sin pagar: S/ 2 300. La más antigua llegó hace 34 días.» */
+    unpaid: {
+      orders: unpaid.length,
+      cents: unpaid.filter((order) => order.currency === unit).reduce((total, order) => total + order.dueCents, 0),
+      oldest,
+    },
+    /** Lo que se puede pagar ahora: primero lo que más tiempo lleva recibido sin pagar, después lo que aún no llega. */
+    orders: [...open].sort(
+      (a, b) =>
+        Number(b.dueCents > 0) - Number(a.dueCents > 0) ||
+        (a.firstReceivedAt?.getTime() ?? a.createdAt.getTime()) - (b.firstReceivedAt?.getTime() ?? b.createdAt.getTime()),
+    ),
+    credits: (await supplierCredits(tx, orgId)).filter((credit) => credit.cents > 0),
+  }
+}
+
+/**
+ * «No hubo ese gasto»: la clínica dice que ese mes no tuvo gastos de ese tipo y
+ * Reportes deja de avisarlo. Repetirlo no hace nada.
+ */
+export async function dismissExpenseGap(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { category: string; month: string; branchId?: string | null },
+) {
+  if (!(EXPENSE_CATEGORIES as readonly string[]).includes(input.category)) throw validation("Tipo de gasto inválido")
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) throw validation("El mes debe tener formato AAAA-MM")
+  const branchId = input.branchId ? (await requireBranch(tx, orgId, input.branchId)).id : null
+  const [row] = await tx
+    .insert(expenseGapDismissal)
+    .values({ organizationId: orgId, category: input.category, month: input.month, branchId, createdBy: actorUserId })
+    .onConflictDoNothing()
+    .returning()
+  if (row) await audit(tx, orgId, actorUserId, "expense_gap_dismissal", row.id, "finance.expense_gap_dismissed")
+  return { category: input.category, month: input.month, branchId, dismissed: true }
 }
 
 // --- Cuentas por cobrar ------------------------------------------------------------
@@ -2298,6 +2555,77 @@ async function financeBuckets(
 }
 
 /**
+ * Lo cobrado por profesional en un tramo: solo lo atendido, la misma base de
+ * las comisiones (aplicaciones del tramo, netas de devoluciones con la regla
+ * de las comisiones). Lo usan Finanzas y el Resumen de Reportes.
+ */
+export async function collectedByProfessional(
+  tx: Db,
+  orgId: string,
+  range: { start: Date; end: Date; branchId?: string },
+  curr: string,
+): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
+  const apps = await collectedApplications(tx, orgId, range.start, range.end, curr, { branchId: range.branchId })
+  const totals = await paymentTotalsOf(
+    tx,
+    orgId,
+    apps.map((a) => a.paymentId),
+  )
+  for (const app of apps) if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
+  const refundByApp = await allocateRefunds(tx, orgId, apps, totals, range.start, range.end)
+  const profSums = new Map<string, number>()
+  for (const a of apps) {
+    const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
+    profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
+  }
+  const names = await userNames(tx, [...profSums.keys()])
+  return [...profSums].map(([professionalUserId, cobradoCents]) => ({
+    professionalUserId,
+    name: names.get(professionalUserId) ?? null,
+    currency: curr,
+    cobradoCents,
+  }))
+}
+
+/**
+ * Lo cobrado neto de varios tramos en una sola consulta, por moneda: la misma
+ * regla de `netoCents` de `financeBuckets` (cobros del tramo que siguen en pie
+ * al cerrarlo, menos las anulaciones del tramo de cobros anteriores y las
+ * devoluciones del tramo). Así el Resumen dibuja sus 12 meses sin 12 idas.
+ */
+export async function collectedNetMany(
+  tx: Db,
+  orgId: string,
+  spans: Span[],
+  options: { branchId?: string } = {},
+): Promise<Array<Array<{ currency: string; cents: number }>>> {
+  const branchOf = (column: SQL): SQL => (options.branchId ? sql`and ${column} = ${options.branchId}` : sql``)
+  const rows = await tx.execute<{ idx: number; currency: string; cents: string }>(sql`
+    select b.idx, x.currency, sum(x.cents)::text as cents
+    from ${spansSql(spans)}
+    join lateral (
+      select p.currency, p.amount_cents::bigint as cents from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
+        and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -p.amount_cents::bigint from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at < b.start_at
+        and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -r.amount_cents::bigint from patient_payment_refund r
+      join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
+      where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
+    ) x on true
+    group by b.idx, x.currency`)
+  return bySpan(
+    spans,
+    [...rows],
+    (): Array<{ currency: string; cents: number }> => [],
+    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents) }],
+  )
+}
+
+/**
  * Solo los totales por moneda de un tramo: con ellos se compara un periodo con
  * el anterior y se dibujan las barras por mes, sin recalcular los desgloses.
  */
@@ -2345,31 +2673,7 @@ export async function getFinanceResultBetween(tx: Db, orgId: string, range: Fina
     averageCents: number | null
   }> = []
   for (const curr of currencies) {
-    // Por profesional: solo lo atendido (misma base de las comisiones).
-    const apps = await collectedApplications(tx, orgId, start, end, curr, {
-      branchId: branch?.id,
-    })
-    const totals = await paymentTotalsOf(
-      tx,
-      orgId,
-      apps.map((a) => a.paymentId),
-    )
-    for (const app of apps)
-      if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
-    const refundByApp = await allocateRefunds(tx, orgId, apps, totals, start, end)
-    const profSums = new Map<string, number>()
-    for (const a of apps) {
-      const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-      profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
-    }
-    const names = await userNames(tx, [...profSums.keys()])
-    for (const [professionalUserId, cobradoCents] of profSums)
-      byProfessional.push({
-        professionalUserId,
-        name: names.get(professionalUserId) ?? null,
-        currency: curr,
-        cobradoCents,
-      })
+    byProfessional.push(...(await collectedByProfessional(tx, orgId, { start, end, branchId: branch?.id }, curr)))
     // Por promoción: todos los cargos cobrados con snapshot (con o sin
     // atención). veces = cargos distintos cobrados en el mes (sin doble
     // conteo por pagos parciales); importe = neto cobrado en el mes. El uso

@@ -9,7 +9,9 @@
  * nunca se edita ni borra: los errores se corrigen con un ajuste inverso.
  * Compras ≠ pagos: la orden registra compromiso comercial referencial y no
  * toca el ledger financiero (contrato coordinado con Finanzas, que reutiliza
- * el catálogo `supplier` de este dominio en vez de duplicarlo).
+ * el catálogo `supplier` de este dominio en vez de duplicarlo). Su pago es un
+ * gasto de Materiales enlazado a la orden (`payPurchaseOrder` de Finanzas;
+ * ADR 0061) y lo que se debe de cada una sale de `purchase-balance.ts`.
  */
 import type { Db } from "@odentia/db"
 import {
@@ -23,9 +25,12 @@ import {
   type StockMovementKind,
   stockMovement,
   supplier,
+  supplierCreditUse,
   warehouse,
 } from "@odentia/db/schema/inventory"
-import { patient } from "@odentia/db/schema/clinical"
+import { orgCounter, patient } from "@odentia/db/schema/clinical"
+import { expense } from "@odentia/db/schema/finance"
+import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql } from "drizzle-orm"
 import {
@@ -35,7 +40,9 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import { assertSupplierCreditCovered, voidExpense, voidSupplierCreditUse } from "./finance.js"
 import { requireOrgCurrency } from "./locale.js"
+import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { createWorkspaceNotification, settleWorkspaceNotifications } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
@@ -626,10 +633,18 @@ export async function createPurchaseOrder(
     quantity(line.quantity)
     cents(line.unitCostCents ?? 0)
   }
+  // Número sin saltos por clínica: el contador se bloquea al sumarle uno.
+  const [counter] = await tx
+    .insert(orgCounter)
+    .values({ organizationId: orgId, key: "purchase_order", value: 1 })
+    .onConflictDoUpdate({ target: [orgCounter.organizationId, orgCounter.key], set: { value: sql`"org_counter"."value" + 1` } })
+    .returning({ value: orgCounter.value })
+  if (!counter) throw new ServiceError("INTERNAL", 500, "No se pudo numerar la orden")
   const [order] = await tx
     .insert(purchaseOrder)
     .values({
       organizationId: orgId,
+      orderNumber: Number(counter.value),
       supplierId: input.supplierId,
       warehouseId: input.warehouseId,
       currency: currency(input.currency ?? (await requireOrgCurrency(tx, orgId))),
@@ -677,13 +692,63 @@ export async function getPurchaseOrder(tx: Db, orgId: string, id: string) {
     .where(and(eq(supplier.organizationId, orgId), eq(supplier.id, order.supplierId)))
     .limit(1)
   const totalCents = lines.reduce((sum, line) => sum + line.quantity * line.unitCostCents, 0)
-  return { ...order, supplierName: sup?.name ?? null, lines, totalCents }
+  const [balance] = await purchaseBalances(tx, orgId, { orderIds: [id] })
+  return {
+    ...order,
+    supplierName: sup?.name ?? null,
+    lines,
+    totalCents,
+    /** Recibido, pagado y por pagar (ADR 0061). */
+    balance: balance ?? null,
+    payments: await purchasePayments(tx, orgId, id),
+    /** Lo que se tiene a favor con este proveedor, en la moneda de la orden. */
+    supplierCreditCents: (await supplierCredits(tx, orgId, { supplierId: order.supplierId })).find((item) => item.currency === order.currency)?.cents ?? 0,
+  }
 }
+
+/** Los pagos de una compra: sus gastos y lo usado a favor, con quién y cuándo; los anulados al final. */
+export async function purchasePayments(tx: Db, orgId: string, orderId: string) {
+  const expenses = await tx
+    .select({
+      id: expense.id,
+      amountCents: expense.amountCents,
+      paidAt: expense.spentAt,
+      concept: expense.concept,
+      fromCash: sql<boolean>`${expense.shiftId} is not null`,
+      receiptKind: expense.receiptKind,
+      receiptNumber: expense.receiptNumber,
+      byName: user.name,
+      voidedAt: expense.voidedAt,
+      voidReason: expense.voidReason,
+    })
+    .from(expense)
+    .leftJoin(user, eq(user.id, expense.createdBy))
+    .where(and(eq(expense.organizationId, orgId), eq(expense.purchaseOrderId, orderId)))
+  const credits = await tx
+    .select({
+      id: supplierCreditUse.id,
+      amountCents: supplierCreditUse.amountCents,
+      paidAt: supplierCreditUse.createdAt,
+      byName: user.name,
+      voidedAt: supplierCreditUse.voidedAt,
+      voidReason: supplierCreditUse.voidReason,
+    })
+    .from(supplierCreditUse)
+    .leftJoin(user, eq(user.id, supplierCreditUse.createdBy))
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.orderId, orderId)))
+  return [
+    ...expenses.map((row) => ({ ...row, kind: "pago" as const })),
+    ...credits.map((row) => ({ ...row, kind: "a_favor" as const, concept: null, fromCash: false, receiptKind: null, receiptNumber: null })),
+  ].sort((a, b) => Number(a.voidedAt !== null) - Number(b.voidedAt !== null) || b.paidAt.getTime() - a.paidAt.getTime())
+}
+
+/** «Por pagar»: recibidas con algo sin pagar. */
+export const PURCHASE_PAYMENT_FILTERS = ["por_pagar"] as const
 
 export async function listPurchaseOrders(
   tx: Db,
   orgId: string,
-  options?: { status?: string; supplierId?: string },
+  options?: { status?: string; supplierId?: string; payment?: (typeof PURCHASE_PAYMENT_FILTERS)[number] },
 ) {
   const conditions = [eq(purchaseOrder.organizationId, orgId)]
   if (options?.status) {
@@ -692,9 +757,10 @@ export async function listPurchaseOrders(
     conditions.push(eq(purchaseOrder.status, options.status))
   }
   if (options?.supplierId) conditions.push(eq(purchaseOrder.supplierId, options.supplierId))
-  return tx
+  const rows = await tx
     .select({
       id: purchaseOrder.id,
+      orderNumber: purchaseOrder.orderNumber,
       status: purchaseOrder.status,
       currency: purchaseOrder.currency,
       notes: purchaseOrder.notes,
@@ -716,6 +782,11 @@ export async function listPurchaseOrders(
     .where(and(...conditions))
     .orderBy(desc(purchaseOrder.createdAt))
     .limit(200)
+  const balances = new Map(
+    (await purchaseBalances(tx, orgId, { orderIds: rows.map((row) => row.id) })).map((balance) => [balance.orderId, balance]),
+  )
+  const withBalance = rows.map((row) => ({ ...row, balance: balances.get(row.id) ?? null }))
+  return options?.payment === "por_pagar" ? withBalance.filter((row) => (row.balance?.dueCents ?? 0) > 0) : withBalance
 }
 
 function requireEditableStatus(order: { status: string }, action: string) {
@@ -735,20 +806,60 @@ export async function confirmPurchaseOrder(tx: Db, orgId: string, actorUserId: s
   return row
 }
 
-export async function cancelPurchaseOrder(tx: Db, orgId: string, actorUserId: string, id: string) {
+/**
+ * Cancela una orden sin recepciones. Si ya tiene pagos (adelantos), hay que
+ * decir qué pasa con ellos: anularlos (el proveedor devolvió el dinero) o
+ * dejarlos a favor con el proveedor para la próxima compra; nunca quedan
+ * sueltos (ADR 0061).
+ */
+export async function cancelPurchaseOrder(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  input: { payments?: "anular" | "a_favor"; reason?: string } = {},
+) {
   const order = await requireOrder(tx, orgId, id)
   requireEditableStatus(order, "cancelación")
   const lines = await orderLines(tx, orgId, id)
   if (lines.some((line) => line.receivedQuantity > 0))
     throw conflict("La orden ya tiene recepciones y no puede cancelarse")
+  const [balance] = await purchaseBalances(tx, orgId, { orderIds: [id] })
+  if (balance && balance.paidCents > 0) {
+    if (!input.payments)
+      throw new ServiceError(
+        "PURCHASE_HAS_PAYMENTS",
+        409,
+        "La orden ya tiene pagos: elige si se anulan o quedan a favor con el proveedor",
+      )
+    if (input.payments === "anular") {
+      const voidReason = input.reason?.trim() || "Se canceló la compra"
+      const live = (await purchasePayments(tx, orgId, id)).filter((payment) => payment.voidedAt === null)
+      for (const payment of live) {
+        if (payment.kind === "pago") await voidExpense(tx, orgId, actorUserId, payment.id, { reason: voidReason })
+        else await voidSupplierCreditUse(tx, orgId, actorUserId, payment.id, { reason: voidReason })
+      }
+    }
+  }
   const [row] = await tx
     .update(purchaseOrder)
     .set({ status: "cancelada", updatedAt: new Date() })
     .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, id)))
     .returning()
-  await audit(tx, orgId, actorUserId, "purchase_order", id, "purchase_order.cancelled")
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "purchase_order",
+    id,
+    balance && balance.paidCents > 0 && input.payments === "a_favor" ? "purchase_order.cancelled_to_credit" : "purchase_order.cancelled",
+  )
+  // Lo dejado a favor ya cuenta; si se anularon pagos, lo usado a favor debe seguir cubierto.
+  if (balance && balance.paidCents > 0) await assertSupplierCreditCovered(tx, orgId, id)
   return row
 }
+
+export type { PurchaseBalance }
 
 export interface ReceptionLineInput {
   productId: string

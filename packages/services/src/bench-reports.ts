@@ -7,7 +7,10 @@
  *   pnpm --filter @odentia/services bench:reports
  */
 import { createAppDb, type Db, withOrgContext } from "@odentia/db"
-import { getReportAgenda, getReportList, getReportMoney, getReportOverview, getReportSales, getReportService } from "./reports.js"
+import { getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
+import { getReportProfessionals, getReportSummary } from "./report-summary.js"
+import { getAgendaReport } from "./report-agenda.js"
+import { getReportCommissions, getReportFinance, getReportOutlook, getReportPromotions } from "./report-finance.js"
 
 const ORG = process.env.BENCH_ORG ?? "seed-org-dental-smile"
 const url = process.env.APP_DATABASE_URL
@@ -17,17 +20,25 @@ const db = createAppDb(url)
 const PERIODS = ["este_mes", "mes_pasado", "ultimos_3_meses", "este_ano"]
 type Read = (tx: Db, org: string, query: { period: string }) => Promise<unknown>
 const READS: Record<string, Read> = {
-  overview: getReportOverview,
+  summary: getReportSummary,
+  professionals: getReportProfessionals,
   money: getReportMoney,
-  agenda: getReportAgenda,
+  agenda: getAgendaReport,
   sales: getReportSales,
   service: getReportService,
   "list:new_patients": (tx, org, query) => getReportList(tx, org, { ...query, list: "new_patients" }),
+  finance: getReportFinance,
+  commissions: getReportCommissions,
+  outlook: getReportOutlook,
+  promotions: getReportPromotions,
 }
+// `BENCH_ONLY=agenda,money` mide solo esas consultas.
+const only = process.env.BENCH_ONLY?.split(",").map((name) => name.trim()).filter(Boolean)
 
 const rows: Array<{ consulta: string; periodo: string; ms: number }> = []
 for (const period of PERIODS) {
   for (const [name, read] of Object.entries(READS)) {
+    if (only && !only.includes(name)) continue
     // Una vuelta para calentar y tres medidas: se informa la mediana.
     await withOrgContext(db, ORG, (tx) => read(tx, ORG, { period }))
     const times: number[] = []
