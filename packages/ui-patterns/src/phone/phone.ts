@@ -34,6 +34,16 @@ function regionOfLocale(tag: string | undefined): CountryCode | undefined {
   }
 }
 
+/** Región escrita en la etiqueta (`es-PE` → `PE`); `es` a secas no dice ninguna. */
+function explicitRegionOfLocale(tag: string | undefined): CountryCode | undefined {
+  if (!tag || typeof Intl.Locale !== "function") return undefined
+  try {
+    return normalizeCountry(new Intl.Locale(tag).region)
+  } catch {
+    return undefined
+  }
+}
+
 let zoneCountries: Map<string, CountryCode> | null = null
 /** País al que el runtime atribuye una zona (`America/Lima` → `PE`), si es uno solo. */
 function countryOfTimeZone(zone: string | undefined): CountryCode | undefined {
@@ -57,14 +67,18 @@ function countryOfTimeZone(zone: string | undefined): CountryCode | undefined {
  * País de partida del teléfono y de los selectores de país: el de la clínica
  * cuando la app lo fijó (`setFormatRegion({ country })`); si no, el de su
  * formato regional (`es-PE`); y sin clínica (alta de una organización, página
- * pública sin región), el del entorno: el de su zona horaria y, al final, el de
- * su idioma según CLDR. Nunca un país escrito en el código.
+ * pública sin región), el del entorno: el de su zona horaria y, al final, el
+ * de su idioma según CLDR. Nunca un país escrito en el código.
+ *
+ * Un idioma sin región (`es`) se completa con CLDR como España: solo cuenta
+ * después de la zona horaria, que con `America/Lima` sí dice Perú (issue 107).
  */
 export function regionCountry(): CountryCode {
   return (
     normalizeCountry(formatCountry()) ??
-    regionOfLocale(formatLocale()) ??
+    explicitRegionOfLocale(formatLocale()) ??
     countryOfTimeZone(detectedTimeZone()) ??
+    regionOfLocale(formatLocale()) ??
     regionOfLocale(Intl.DateTimeFormat().resolvedOptions().locale) ??
     // «und» (idioma sin determinar) también tiene región probable en CLDR.
     regionOfLocale("und") ??

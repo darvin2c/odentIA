@@ -6,6 +6,10 @@ import {
   FieldGroup,
   FieldLabel,
   Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
   Select,
   SelectContent,
   SelectItem,
@@ -29,12 +33,13 @@ import {
   zonesForCountry,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
 import { API_URL, authClient } from "../lib/auth-client"
+import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "../lib/clinic-address"
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
@@ -70,8 +75,6 @@ const STEP_FIELDS = [
   ["branchName", "branchAddress", "branchPhone", "branchTimezone"],
 ] as const
 
-const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-
 // Subdominios reservados (misma lista que el servidor).
 const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
 
@@ -81,11 +84,15 @@ const personaSchema = z.object({
 })
 
 const onboardingSchema = personaSchema.extend({
-  orgName: z.string().min(2, "Escribe el nombre comercial"),
+  orgName: z.string().min(2, "Escribe el nombre de tu clínica"),
   slug: z
     .string()
-    .regex(slugPattern, "Slug inválido (minúsculas, números y guiones)")
-    .refine((slug) => !RESERVED_SLUGS[slug], "Ese subdominio está reservado"),
+    .min(1, "Escribe la dirección de tu clínica")
+    .regex(CLINIC_ADDRESS_PATTERN, "Usa solo letras sin tilde, números y guiones")
+    .refine(
+      (slug) => !RESERVED_SLUGS[slug],
+      "Esa dirección está reservada para odentIA. Elige otra.",
+    ),
   legalName: z.string().min(2, "Razón social"),
   fiscalDocNumber: z.string().max(20),
   // El país define la máscara de los teléfonos y las zonas horarias sugeridas.
@@ -137,14 +144,23 @@ const FIELD_STEP: Record<keyof typeof FIELD_SCHEMAS, number> = {
   branchTimezone: 3,
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
+/** Si la dirección está libre: `false` solo cuando el servidor dice que está en uso. */
+async function addressIsFree(slug: string): Promise<boolean> {
+  const { data, error } = await authClient.organization.checkSlug({ slug })
+  if (data?.status) return true
+  if (error?.code === "ORGANIZATION_SLUG_ALREADY_TAKEN") return false
+  throw new Error(error?.message ?? "No se pudo comprobar la dirección")
+}
+
+type AddressCheck = { free: true } | { free: false; suggestion: string | null }
+
+/** Comprueba la dirección y, si está en uso, busca la primera alternativa libre. */
+async function checkAddress(slug: string): Promise<AddressCheck> {
+  if (await addressIsFree(slug)) return { free: true }
+  for (const option of addressAlternatives(slug)) {
+    if (await addressIsFree(option)) return { free: false, suggestion: option }
+  }
+  return { free: false, suggestion: null }
 }
 
 /** "María José Ruiz Vega" → { firstName: "María", lastName: "José Ruiz Vega" }. */
@@ -158,6 +174,7 @@ function splitName(full: string): { firstName: string; lastName: string } {
 function OnboardingPage() {
   const sessionUser = authClient.useSession().data?.user
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { continue: continueOrgId, invitacion } = useSearch({ from: "/onboarding" })
   // La invitación llega en la dirección (correo de verificación, Google) o quedó guardada al crear la cuenta.
   const [founderToken] = useState(() => invitacion ?? (typeof window === "undefined" ? null : storedInvitation()))
@@ -188,6 +205,11 @@ function OnboardingPage() {
   const offset = hasStoredName ? 1 : 0
   const [step, setStep] = useState(0)
   const [visited, setVisited] = useState<number[]>([0])
+  // La dirección sigue al nombre hasta que la persona la escribe a mano; si la
+  // borra entera, vuelve a seguirlo (issue 106).
+  const [addressEdited, setAddressEdited] = useState(false)
+  // Direcciones que el servidor dijo que están en uso: no dejan avanzar.
+  const takenAddresses = useRef(new Set<string>())
   // La organización activa apunta a la clínica invitada para que el perfil y
   // la sede se guarden en ella (el contexto la deduce de la sesión).
   useEffect(() => {
@@ -250,7 +272,17 @@ function OnboardingPage() {
             return
           }
           goTo(1)
-          toast.error(orgError.message ?? "No se pudo crear la organización (¿slug en uso?).")
+          if (
+            code === "ORGANIZATION_ALREADY_EXISTS" ||
+            code === "ORGANIZATION_SLUG_ALREADY_TAKEN"
+          ) {
+            // Alguien la tomó entre la comprobación y el envío: se dice junto al campo.
+            takenAddresses.current.add(value.slug)
+            void form.validateField("slug", "submit")
+            void queryClient.invalidateQueries({ queryKey: ["onboarding", "address", value.slug] })
+            return
+          }
+          toast.error(orgError.message ?? "No se pudo crear tu clínica.")
           return
         }
         forgetInvitation()
@@ -339,6 +371,27 @@ function OnboardingPage() {
       cancelled = true
     }
   }, [country, form])
+  // Se comprueba si la dirección está libre mientras se escribe, sin esperar al final.
+  const address = useStore(form.store, (state) => state.values.slug)
+  const [checkedAddress, setCheckedAddress] = useState("")
+  useEffect(() => {
+    const timer = setTimeout(() => setCheckedAddress(address), 400)
+    return () => clearTimeout(timer)
+  }, [address])
+  const addressCheckable =
+    !skipOrg && CLINIC_ADDRESS_PATTERN.test(checkedAddress) && !RESERVED_SLUGS[checkedAddress]
+  const availability = useQuery({
+    queryKey: ["onboarding", "address", checkedAddress],
+    queryFn: () => checkAddress(checkedAddress),
+    enabled: addressCheckable,
+    staleTime: 30_000,
+    retry: false,
+  })
+  useEffect(() => {
+    if (availability.data && !availability.data.free) takenAddresses.current.add(checkedAddress)
+    if (availability.data?.free) takenAddresses.current.delete(checkedAddress)
+  }, [availability.data, checkedAddress])
+
   const currencies = useMemo(() => {
     const names = new Intl.DisplayNames(["es"], { type: "currency" })
     return Intl.supportedValuesOf("currency").map((code) => ({
@@ -374,7 +427,10 @@ function OnboardingPage() {
         if (skipOrg && (key === "orgName" || key === "slug")) return undefined
         if (step < FIELD_STEP[key]) return undefined
         const parsed = FIELD_SCHEMAS[key].safeParse(value)
-        return parsed.success ? undefined : (parsed.error.issues[0]?.message ?? undefined)
+        if (!parsed.success) return parsed.error.issues[0]?.message ?? undefined
+        if (key === "slug" && takenAddresses.current.has(value))
+          return "Esa dirección ya está en uso. Elige otra."
+        return undefined
       },
     }
   }
@@ -467,20 +523,25 @@ function OnboardingPage() {
               <form.Field name="orgName" validators={stepValidator("orgName")}>
                 {(field) => (
                   <Field>
-                    <FieldLabel htmlFor="orgName">Nombre comercial</FieldLabel>
+                    <FieldLabel htmlFor="orgName">Nombre de tu clínica</FieldLabel>
                     <Input
                       id="orgName"
                       aria-invalid={field.state.meta.errors.length > 0 || undefined}
                       aria-describedby={
-                        field.state.meta.errors.length ? "orgName-error" : undefined
+                        field.state.meta.errors.length
+                          ? "orgName-help orgName-error"
+                          : "orgName-help"
                       }
                       value={field.state.value}
                       onChange={(event) => {
                         field.handleChange(event.target.value)
-                        const slugField = form.getFieldValue("slug")
-                        if (!slugField) form.setFieldValue("slug", slugify(event.target.value))
+                        if (!addressEdited)
+                          form.setFieldValue("slug", addressFromName(event.target.value))
                       }}
                     />
+                    <FieldDescription id="orgName-help">
+                      El que verán tus pacientes.
+                    </FieldDescription>
                     <FieldError id="orgName-error">
                       {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
                     </FieldError>
@@ -488,26 +549,57 @@ function OnboardingPage() {
                 )}
               </form.Field>
               <form.Field name="slug" validators={stepValidator("slug")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="slug">Slug (subdominio)</FieldLabel>
-                    <Input
-                      id="slug"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length ? "slug-help slug-error" : "slug-help"
-                      }
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <FieldDescription id="slug-help">
-                      {field.state.value || "tu-clinica"}.{BASE_DOMAIN}
-                    </FieldDescription>
-                    <FieldError id="slug-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
+                {(field) => {
+                  const errors = fieldErrorMessages(field.state.meta.errors)
+                  return (
+                    <Field>
+                      <FieldLabel htmlFor="slug">Dirección de tu clínica en odentIA</FieldLabel>
+                      <InputGroup>
+                        <InputGroupInput
+                          id="slug"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          aria-invalid={errors.length > 0 || undefined}
+                          aria-describedby={
+                            errors.length
+                              ? "slug-status slug-help slug-error"
+                              : "slug-status slug-help"
+                          }
+                          value={field.state.value}
+                          onChange={(event) => {
+                            const next = event.target.value.toLowerCase()
+                            // Borrarla entera devuelve la dirección al nombre.
+                            setAddressEdited(next !== "")
+                            field.handleChange(next)
+                          }}
+                        />
+                        <InputGroupAddon align="inline-end">
+                          <InputGroupText>.{BASE_DOMAIN}</InputGroupText>
+                        </InputGroupAddon>
+                      </InputGroup>
+                      <AddressStatus
+                        id="slug-status"
+                        address={field.state.value}
+                        checking={field.state.value !== checkedAddress || availability.isFetching}
+                        result={
+                          addressCheckable && checkedAddress === field.state.value
+                            ? availability.data
+                            : undefined
+                        }
+                        failed={addressCheckable && availability.isError}
+                        onUse={(suggestion) => {
+                          setAddressEdited(true)
+                          field.handleChange(suggestion)
+                        }}
+                      />
+                      <FieldDescription id="slug-help">
+                        Es la dirección de tu enlace de reservas. No se cambia después.
+                      </FieldDescription>
+                      <FieldError id="slug-error">{errors[0] ?? null}</FieldError>
+                    </Field>
+                  )
+                }}
               </form.Field>
             </div>
 
@@ -704,5 +796,74 @@ function OnboardingPage() {
         </form>
       </PageShell>
     </main>
+  )
+}
+
+/**
+ * Lo que se sabe de la dirección mientras se escribe: formato, reservada, si
+ * está libre y, si no, una alternativa libre para usar con un clic.
+ */
+function AddressStatus({
+  id,
+  address,
+  checking,
+  result,
+  failed,
+  onUse,
+}: {
+  id: string
+  address: string
+  checking: boolean
+  result: AddressCheck | undefined
+  failed: boolean
+  onUse: (suggestion: string) => void
+}) {
+  let content: ReactNode = null
+  if (!address) content = null
+  else if (!CLINIC_ADDRESS_PATTERN.test(address))
+    content = (
+      <span className="text-destructive">Usa solo letras sin tilde, números y guiones.</span>
+    )
+  else if (RESERVED_SLUGS[address])
+    content = (
+      <span className="text-destructive">«{address}» está reservada para odentIA. Elige otra.</span>
+    )
+  else if (checking)
+    content = <span className="text-muted-foreground">Comprobando si está libre…</span>
+  else if (failed)
+    content = (
+      <span className="text-muted-foreground">
+        No pudimos comprobarla ahora. La comprobamos al crear tu clínica.
+      </span>
+    )
+  else if (result?.free)
+    content = (
+      <span className="text-success">
+        ✓ {address}.{BASE_DOMAIN} está libre.
+      </span>
+    )
+  else if (result)
+    content = (
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-destructive">✕ Ya está en uso.</span>
+        {result.suggestion ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={() => onUse(result.suggestion as string)}
+          >
+            Usar {result.suggestion}
+          </Button>
+        ) : (
+          <span className="text-muted-foreground">Prueba con otra.</span>
+        )}
+      </span>
+    )
+  return (
+    <p id={id} aria-live="polite" className="min-h-5 text-sm">
+      {content}
+    </p>
   )
 }

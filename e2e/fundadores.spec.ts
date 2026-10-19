@@ -123,8 +123,8 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
     await visitor.goto(await latestLinkFor(email, "Verifica tu correo"))
     await expect(visitor).toHaveURL(/onboarding\?invitacion=/)
     const slug = `fundadora-${tag}`
-    await visitor.getByLabel("Nombre comercial").fill(`Clínica Sonrisa ${tag}`)
-    await visitor.getByLabel("Slug (subdominio)").fill(slug)
+    await visitor.getByLabel("Nombre de tu clínica").fill(`Clínica Sonrisa ${tag}`)
+    await visitor.getByLabel("Dirección de tu clínica en odentIA").fill(slug)
     await visitor.getByRole("button", { name: "Continuar" }).click()
     await visitor.getByLabel("Razón social").fill(`Clínica Sonrisa ${tag} S.A.C.`)
     await visitor.getByRole("button", { name: "Continuar" }).click()

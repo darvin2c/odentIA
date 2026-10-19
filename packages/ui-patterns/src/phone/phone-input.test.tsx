@@ -207,6 +207,59 @@ describe("PhoneInput", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it("sigue al país por defecto que cambia mientras el campo está vacío", () => {
+    const tree = (country: "ES" | "PE") => (
+      <Field>
+        <FieldLabel htmlFor="telefono">Teléfono</FieldLabel>
+        <Harness defaultCountry={country} />
+      </Field>
+    )
+    const { rerender } = render(tree("ES"))
+    const input = screen.getByLabelText("Teléfono") as HTMLInputElement
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("ES +34")
+
+    // El alta elige Perú en otro paso, con el campo ya montado (issue 107).
+    rerender(tree("PE"))
+
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("PE +51")
+    expect(input.placeholder).toBe(phonePlaceholder("PE"))
+  })
+
+  it("no cambia de país si ya hay un número escrito", async () => {
+    const user = userEvent.setup()
+    const tree = (country: "PE" | "MX") => (
+      <Field>
+        <FieldLabel htmlFor="telefono">Teléfono</FieldLabel>
+        <Harness defaultCountry={country} />
+      </Field>
+    )
+    const { rerender } = render(tree("PE"))
+    const input = screen.getByLabelText("Teléfono") as HTMLInputElement
+    await user.type(input, "987654321")
+
+    rerender(tree("MX"))
+
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("PE +51")
+    expect(input.value).toBe("987 654 321")
+  })
+
+  it("no cambia de país si la persona eligió otro a mano", async () => {
+    const user = userEvent.setup()
+    const tree = (country: "PE" | "MX") => (
+      <Field>
+        <FieldLabel htmlFor="telefono">Teléfono</FieldLabel>
+        <Harness defaultCountry={country} countries={["PE", "CL", "MX"]} />
+      </Field>
+    )
+    const { rerender } = render(tree("PE"))
+    await user.click(screen.getByLabelText(common.phone.country))
+    await user.click(await screen.findByRole("option", { name: "Chile (+56)" }))
+
+    rerender(tree("MX"))
+
+    expect(screen.getByLabelText(common.phone.country).textContent).toBe("CL +56")
+  })
+
   it("arranca en el país del número guardado", () => {
     renderField({ initialValue: "+5491123456789" })
 

@@ -1,5 +1,5 @@
 import { maskitoTransform } from "@maskito/core"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { setFormatRegion } from "../locale.js"
 import {
   type CountryCode,
@@ -162,6 +162,23 @@ describe("máscara de teléfono", () => {
   })
 })
 
+/**
+ * Simula el navegador: cambia solo la zona y el idioma por defecto. Un
+ * formateador con zona explícita (el que canonicaliza zonas) sigue igual.
+ */
+function environment(locale: string, timeZone: string) {
+  const real = Intl.DateTimeFormat.prototype.resolvedOptions
+  const system = new Intl.DateTimeFormat().resolvedOptions()
+  return vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (
+    this: Intl.DateTimeFormat,
+  ) {
+    const resolved = real.call(this)
+    return resolved.timeZone === system.timeZone && resolved.locale === system.locale
+      ? { ...resolved, locale, timeZone }
+      : resolved
+  })
+}
+
 describe("regionCountry", () => {
   afterEach(() => setFormatRegion({ locale: "es-PE", timeZone: "America/Lima" }))
 
@@ -173,6 +190,31 @@ describe("regionCountry", () => {
   it("sin país fijado, usa la región del formato de la clínica", () => {
     setFormatRegion({ locale: "es-CL", timeZone: "America/Santiago" })
     expect(regionCountry()).toBe("CL")
+  })
+
+  it("un idioma sin país no le gana a la zona horaria", () => {
+    // «es» se completa con CLDR como España; en Lima la zona dice Perú (issue 107).
+    const spy = environment("es", "America/Lima")
+    try {
+      setFormatRegion({ locale: "es" })
+      expect(regionCountry()).toBe("PE")
+      setFormatRegion({})
+      expect(regionCountry()).toBe("PE")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("sin zona que diga el país, el idioma decide: «es-MX» es México y «es» es España", () => {
+    const spy = environment("es", "UTC")
+    try {
+      setFormatRegion({ locale: "es-MX" })
+      expect(regionCountry()).toBe("MX")
+      setFormatRegion({})
+      expect(regionCountry()).toBe("ES")
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it("sin clínica, sale del entorno y nunca de un país escrito en el código", () => {

@@ -27,7 +27,8 @@ export interface PhoneInputProps {
   onChange: (value: string | null, meta: PhoneMeta) => void
   /**
    * País del selector y del formato nacional. Por defecto, el de la clínica
-   * (`regionCountry`): el núcleo no supone ninguno.
+   * (`regionCountry`): el núcleo no supone ninguno. Si cambia con el campo
+   * vacío y sin país elegido a mano, el selector lo sigue.
    */
   defaultCountry?: CountryCode
   /** Acota el selector cuando la organización atiende unos pocos países. */
@@ -92,6 +93,8 @@ export function PhoneInput({
   )
   const [display, setDisplay] = React.useState(() => (value ? fieldText(value) : ""))
   const [touched, setTouched] = React.useState(false)
+  // La persona eligió el país a mano (selector o pegando un número de otro país).
+  const countryChosen = React.useRef(false)
   // Último E.164 emitido: evita repintar lo tecleado cuando el formulario
   // devuelve ese mismo valor (o `null` mientras el número está incompleto).
   const emitted = React.useRef<string | null>(value)
@@ -116,6 +119,18 @@ export function PhoneInput({
     if (nextCountry && nextCountry !== country) setCountry(nextCountry)
   }, [country, value])
 
+  /*
+   * El país por defecto puede llegar después de montar el campo (el alta lo
+   * elige en otro paso, un perfil que carga tarde). Mientras el campo esté
+   * vacío y nadie haya elegido otro país, el selector lo sigue; lo escrito o
+   * elegido a mano se respeta (issue 107).
+   */
+  React.useEffect(() => {
+    const next = normalizeCountry(defaultCountry)
+    if (!next || countryChosen.current || value || phoneDigits(display)) return
+    setCountry((current) => (current === next ? current : next))
+  }, [defaultCountry, display, value])
+
   function emit(nextDisplay: string, nextCountry: CountryCode) {
     const meta = phoneMeta(nextDisplay, nextCountry)
     emitted.current = meta.e164
@@ -130,6 +145,7 @@ export function PhoneInput({
 
   function handleCountryChange(next: CountryCode) {
     if (next === country) return
+    countryChosen.current = true
     setCountry(next)
     const digits = phoneDigits(display)
     if (!digits) return
@@ -144,6 +160,7 @@ export function PhoneInput({
     if (!pasted || pasted.country === country) return
     event.preventDefault()
     const nextDisplay = maskNationalDigits(phoneDigits(nationalText(pasted.e164)), pasted.country)
+    countryChosen.current = true
     setCountry(pasted.country)
     setDisplay(nextDisplay)
     emit(nextDisplay, pasted.country)
