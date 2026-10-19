@@ -22,7 +22,7 @@ La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
-Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 24 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
+Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 29 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
 
 El correo de liquidación incluye una fila por clínica y otra por ajuste antes
 del total. `mail:preview --html <carpeta>` permite revisar ese detalle sin

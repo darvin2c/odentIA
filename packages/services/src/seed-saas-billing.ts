@@ -11,9 +11,11 @@
  * activa automatizaciones.
  */
 import type { Db } from "@odentia/db"
-import { organization, user } from "@odentia/db/schema/auth"
-import { saasPayment, saasPaymentMethod, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
-import { and, eq } from "drizzle-orm"
+import { member, organization, user } from "@odentia/db/schema/auth"
+import { branch, orgProfile } from "@odentia/db/schema/org"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
+import { saasAction, saasCharge, saasPayment, saasPaymentMethod, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import { and, eq, inArray } from "drizzle-orm"
 import {
   confirmSaasPayment,
   createSaasCharge,
@@ -362,4 +364,76 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
     .update(saasSubscription)
     .set({ discountBps: 1000, discountEndsAt: new Date(now.getTime() + 6 * 86_400_000), updatedAt: now })
     .where(and(eq(saasSubscription.organizationId, "seed-saas-deuda"), eq(saasSubscription.discountBps, 0)))
+}
+
+/**
+ * Clínicas de Ana con los avisos de cobro de la franja (ADR 0065), para ver el
+ * selector «Elige tu clínica», el menú de la clínica y la franja con datos:
+ * un cargo que vence pasado mañana, una clínica en solo lectura y otra en su
+ * tope de gasto. Luis entra como odontólogo a la de solo lectura y a la del
+ * tope, para ver el texto del resto del equipo. Sin correos. Idempotente: si
+ * la clínica ya existe, solo vuelve a poner las fechas relativas a hoy.
+ */
+export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string; dentistUserId: string; acceptedVersion: string }): Promise<void> {
+  const now = new Date()
+  const day = 86_400_000
+  const clinics = [
+    { id: "seed-aviso-por-vencer", name: "Ortodoncia Lima (demo)", slug: "orto-lima-demo", branches: ["Sede Centro", "Sede Jesús María"], dentist: false },
+    { id: "seed-aviso-solo-lectura", name: "Bocas Felices (demo)", slug: "bocas-felices-demo", branches: ["Sede Única"], dentist: true },
+    { id: "seed-aviso-tope", name: "Sonrisa Miraflores (demo)", slug: "sonrisa-miraflores-demo", branches: ["Sede Miraflores"], dentist: true },
+  ] as const
+  for (const clinic of clinics) {
+    const [exists] = await db.select({ id: organization.id }).from(organization).where(eq(organization.id, clinic.id)).limit(1)
+    if (!exists) {
+      await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
+      await db.insert(member).values([
+        { id: `${clinic.id}-ana`, organizationId: clinic.id, userId: input.ownerUserId, role: "owner", createdAt: now },
+        ...(clinic.dentist ? [{ id: `${clinic.id}-luis`, organizationId: clinic.id, userId: input.dentistUserId, role: "dentist", createdAt: now }] : []),
+      ])
+      await db.insert(orgProfile).values({
+        organizationId: clinic.id,
+        legalName: `${clinic.name} S.A.C.`,
+        tradeName: clinic.name,
+        countryCode: "PE",
+        currency: "PEN",
+        locale: "es-PE",
+        timezone: "America/Lima",
+        diagnosisSystem: "ICD-10",
+      })
+      await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
+      await db.insert(processingAgreementAcceptance).values({ organizationId: clinic.id, version: input.acceptedVersion, acceptedBy: input.ownerUserId })
+      await startSaasTrial(db, clinic.id, { planCode: "odentia-ficticio", billingStart: "now" }, now)
+    }
+  }
+
+  // Un cargo que vence pasado mañana: franja ámbar para Ana, «Pagar» en el selector.
+  const [porVencer] = await db.select({ id: saasCharge.id }).from(saasCharge).where(eq(saasCharge.organizationId, "seed-aviso-por-vencer")).limit(1)
+  const chargeA = porVencer ?? (await createSaasCharge(db, "seed-aviso-por-vencer", DEMO_ACTOR, { planCode: "odentia-ficticio", periodStart: monthStartUTC(now), periodEnd: monthEndUTC(now) }))
+  await db.update(saasCharge).set({ dueAt: new Date(now.getTime() + 2 * day - 3_600_000) }).where(eq(saasCharge.id, chargeA.id))
+
+  // Solo lectura por falta de pago: venció hace 10 días y pasó la gracia.
+  const [vencido] = await db.select({ id: saasCharge.id }).from(saasCharge).where(eq(saasCharge.organizationId, "seed-aviso-solo-lectura")).limit(1)
+  const chargeB = vencido ?? (await createSaasCharge(db, "seed-aviso-solo-lectura", DEMO_ACTOR, { planCode: "odentia-ficticio", periodStart: monthStartUTC(now), periodEnd: monthEndUTC(now) }))
+  await db.update(saasCharge).set({ dueAt: new Date(now.getTime() - 10 * day) }).where(eq(saasCharge.id, chargeB.id))
+  await db
+    .update(saasSubscription)
+    .set({ status: "restringida", restrictReason: "gracia_vencida", graceEndsAt: new Date(now.getTime() - 3 * day), updatedAt: now })
+    .where(eq(saasSubscription.organizationId, "seed-aviso-solo-lectura"))
+
+  // En el tope: 120 conversaciones de USD 0,50 este mes, por encima del crédito, con un tope de USD 5.
+  await db.update(saasSubscription).set({ spendCapCents: 500, updatedAt: now }).where(eq(saasSubscription.organizationId, "seed-aviso-tope"))
+  await db.delete(saasAction).where(and(eq(saasAction.organizationId, "seed-aviso-tope"), inArray(saasAction.kind, ["conversacion"])))
+  await db.insert(saasAction).values(
+    Array.from({ length: 120 }, (_, index) => ({
+      organizationId: "seed-aviso-tope",
+      kind: "conversacion",
+      occurredAt: new Date(now.getTime() - (index + 1) * 1_800_000),
+      detail: "Atendió una conversación por WhatsApp (demo)",
+      channel: "whatsapp",
+      currency: "USD",
+      basePriceMicros: 500_000,
+      priceMicros: 500_000,
+      dedupeKey: `semilla:tope:${index}`,
+    })),
+  )
 }
