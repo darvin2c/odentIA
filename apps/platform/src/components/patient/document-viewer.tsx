@@ -197,7 +197,9 @@ export function DocumentViewerHost({
       >
         <DialogContent
           // En el teléfono ocupa toda la pantalla (tablero 5 del lienzo).
-          className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)] max-md:top-0 max-md:left-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-0"
+          scrollable
+          contentClassName="max-md:pb-0"
+          className="max-h-[92dvh] sm:max-w-[min(90vw,80rem)] max-md:top-0 max-md:left-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none"
           onKeyDown={(event) => {
             if (arrowsBelongToControl(event.target)) return
             if (event.key === "ArrowLeft" && previous) {

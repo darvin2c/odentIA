@@ -1,4 +1,4 @@
-import { Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import { Button, Field, FieldLabel, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { EmptyState, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight } from "lucide-react"
@@ -300,31 +300,33 @@ export function WeekSlotsGrid({
 
           {/* Teléfono: un día a la vez, con los días en una sola fila. */}
           <div className="flex flex-col gap-4 lg:hidden">
-            <fieldset className="m-0 flex min-w-0 gap-2 overflow-x-auto border-0 p-0 pb-1" aria-label="Día">
-              {days.map((item) => {
-                const parts = dayParts(item.instant, timeZone)
-                const empty = item.slots.length === 0
-                const active = activeDay.key === item.key
-                return (
-                  <Button
-                    key={item.key}
-                    type="button"
-                    variant={active ? "default" : "outline"}
-                    className="flex h-16 min-w-14 max-w-24 flex-1 flex-col gap-0.5 px-1"
-                    disabled={empty}
-                    aria-pressed={active}
-                    aria-label={`${longDay(item.instant, timeZone)}${empty ? ", no quedan horarios" : ""}`}
-                    onClick={() => {
-                      state.setDay(item.key)
-                      onChoose(null)
-                    }}
-                  >
-                    <span className="text-xs">{parts.weekday.slice(0, 3)}</span>
-                    <span className="text-lg font-semibold">{parts.number}</span>
-                  </Button>
-                )
-              })}
-            </fieldset>
+            <ScrollArea horizontal className="min-w-0">
+              <fieldset className="m-0 flex min-w-0 gap-2 border-0 p-0 pb-2" aria-label="Día">
+                {days.map((item) => {
+                  const parts = dayParts(item.instant, timeZone)
+                  const empty = item.slots.length === 0
+                  const active = activeDay.key === item.key
+                  return (
+                    <Button
+                      key={item.key}
+                      type="button"
+                      variant={active ? "default" : "outline"}
+                      className="flex h-16 min-w-14 max-w-24 flex-1 flex-col gap-0.5 px-1"
+                      disabled={empty}
+                      aria-pressed={active}
+                      aria-label={`${longDay(item.instant, timeZone)}${empty ? ", no quedan horarios" : ""}`}
+                      onClick={() => {
+                        state.setDay(item.key)
+                        onChoose(null)
+                      }}
+                    >
+                      <span className="text-xs">{parts.weekday.slice(0, 3)}</span>
+                      <span className="text-lg font-semibold">{parts.number}</span>
+                    </Button>
+                  )
+                })}
+              </fieldset>
+            </ScrollArea>
             {emptyDays.length > 0 ? (
               <p className="text-sm text-muted-foreground">
                 {emptyDays.length === 1

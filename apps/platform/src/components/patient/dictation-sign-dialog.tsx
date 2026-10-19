@@ -7,6 +7,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  ScrollArea,
 } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { CircleAlert } from "lucide-react"
@@ -55,19 +56,21 @@ export function DictationSignDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex flex-col gap-3">
-          <ul aria-label="Sugerencias sin revisar" className="flex max-h-48 flex-col gap-2 overflow-y-auto">
-            {session.suggestions.map((item) => (
-              <li key={item.id} className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning-soft p-3 text-sm">
-                <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
-                <span className="min-w-0">
-                  <span className="block font-medium">{suggestionText(item).title}</span>
-                  <span className="block">
-                    {DICTATION_KIND_LABEL[item.kind]} · {suggestionMissing(item)}
+          <ScrollArea className="flex max-h-48 flex-col">
+            <ul aria-label="Sugerencias sin revisar" className="flex flex-col gap-2">
+              {session.suggestions.map((item) => (
+                <li key={item.id} className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning-soft p-3 text-sm">
+                  <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{suggestionText(item).title}</span>
+                    <span className="block">
+                      {DICTATION_KIND_LABEL[item.kind]} · {suggestionMissing(item)}
+                    </span>
                   </span>
-                </span>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
           {done > 0 ? (
             <p className="text-sm text-muted-foreground">
               {done === 1 ? "La otra ya está confirmada y se firma con la atención." : `Las otras ${done} ya están confirmadas y se firman con la atención.`}

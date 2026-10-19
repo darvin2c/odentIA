@@ -359,6 +359,8 @@ export function PanoramicView({
   const noArch = !control || control.length < 5
   return (
     // En pantallas angostas la vista se desplaza; en anchas, todo cabe sin desplazar.
+    // scroll-nativo: visor sobre fondo oscuro que deja de desplazarse en ancho (`lg:overflow-hidden`);
+    // ScrollArea no se apaga por ancho y encerraría los cortes, que miden su propio alto.
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
       <div className="flex min-w-0 flex-col gap-px bg-slate-800 lg:min-h-0 lg:flex-1">
         {pano ? (

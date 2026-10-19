@@ -1,4 +1,4 @@
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { Badge, Button, Field, FieldLabel, Input, ScrollArea, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
@@ -291,13 +291,17 @@ function WebchatSettingsPage() {
             orígenes permitidos pueden iniciar sesiones.
           </p>
           <h3 className="text-sm font-medium">Flotante</h3>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
-            {floatingSnippet(widgetUrl, snippetTitle, snippetColor)}
-          </pre>
+          <ScrollArea className="flex max-h-64 flex-col rounded bg-muted">
+            <pre className="whitespace-pre-wrap break-all p-3 text-xs">
+              {floatingSnippet(widgetUrl, snippetTitle, snippetColor)}
+            </pre>
+          </ScrollArea>
           <h3 className="text-sm font-medium">Iframe</h3>
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
-            {iframeSnippet(widgetUrl, snippetTitle)}
-          </pre>
+          <ScrollArea className="flex max-h-32 flex-col rounded bg-muted">
+            <pre className="whitespace-pre-wrap break-all p-3 text-xs">
+              {iframeSnippet(widgetUrl, snippetTitle)}
+            </pre>
+          </ScrollArea>
           <div>
             <Button
               variant="outline"

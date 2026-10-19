@@ -90,7 +90,7 @@ export function AppointmentSearch({
         </Button>
       )}
       <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
-        <DialogContent className="top-[12vh] max-h-[76vh] translate-y-0 gap-3 overflow-y-auto sm:max-w-lg">
+        <DialogContent scrollable contentClassName="gap-3" className="top-[12vh] max-h-[76vh] translate-y-0 sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Buscar una cita</DialogTitle>
             <DialogDescription>Por nombre, documento o teléfono del paciente.</DialogDescription>

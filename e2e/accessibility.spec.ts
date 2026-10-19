@@ -152,13 +152,19 @@ for (const viewport of [
       await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
       await theme(page, dark)
       await audit(page, info, "inicio")
-      // Avisos: la equis del diálogo compartido tiene nombre en español.
-      await page.getByRole("button", { name: /^Avisos/ }).click()
-      const notices = page.getByRole("dialog", { name: "Avisos" })
-      await expect(notices.getByRole("button", { name: "Cerrar", exact: true })).toBeVisible()
+      // Avisos: se abre en la columna del Agente o, si no cabe, en su cajón (issue 93);
+      // la equis tiene nombre en español y el foco vuelve a la campana.
+      const bell = page.getByRole("button", { name: /^Avisos/ })
+      await bell.click()
+      const notices = page
+        .getByRole("dialog", { name: "Avisos" })
+        .or(page.getByRole("complementary", { name: "Avisos" }))
+      await expect(notices.getByRole("button", { name: "Cerrar los avisos", exact: true })).toBeVisible()
       await expect(notices.getByRole("button", { name: "Close" })).toHaveCount(0)
-      await notices.getByRole("button", { name: "Cerrar", exact: true }).click()
+      await audit(page, info, "inicio-avisos")
+      await notices.getByRole("button", { name: "Cerrar los avisos", exact: true }).click()
       await expect(notices).toBeHidden()
+      await expect(bell).toBeFocused()
       if (viewport.width < 768) {
         const menu = page.getByRole("button", { name: /Abrir.*menú|Alternar menú lateral/ })
         await menu.focus()

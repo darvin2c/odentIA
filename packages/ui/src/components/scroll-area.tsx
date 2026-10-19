@@ -8,8 +8,11 @@ function ScrollArea({
   className,
   children,
   horizontal = false,
+  viewportRef,
   ...props
 }: ScrollAreaPrimitive.Root.Props & {
+  /** El elemento que se desplaza, para quien necesita medirlo o moverlo (`scrollLeft`). */
+  viewportRef?: React.Ref<HTMLDivElement>
   /**
    * Suma la barra horizontal, para contenido ancho que no se apila (tablas).
    * Desviación del registry: la barra vertical ya viene siempre y el consumidor
@@ -24,6 +27,7 @@ function ScrollArea({
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
+        ref={viewportRef}
         data-slot="scroll-area-viewport"
         className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
       >

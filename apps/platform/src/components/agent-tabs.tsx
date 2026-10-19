@@ -1,4 +1,4 @@
-import { cn } from "@odentia/ui"
+import { cn, ScrollArea } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import type { AgentOverview, AgentPanelSummary } from "../lib/agent"
@@ -68,40 +68,42 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   )
   if (visible.length < 2) return null
   return (
-    <nav aria-label="Secciones del agente" className="relative -mt-2 flex gap-1.5 overflow-x-auto max-sm:pb-1 sm:gap-1 sm:border-b">
-      {visible.map((tab) => {
-        const active = pathname === tab.to
-        const count = pending[tab.to] ?? 0
-        return (
-          <Link
-            key={tab.to}
-            to={tab.to}
-            activeOptions={{ exact: true }}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "inline-flex min-h-11 shrink-0 items-center gap-1.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "max-sm:rounded-full max-sm:border max-sm:px-3.5 sm:-mb-px sm:border-b-2 sm:px-3 sm:focus-visible:ring-inset",
-              "phoneLast" in tab && "max-sm:order-1",
-              active
-                ? "border-primary font-semibold text-primary-soft-foreground max-sm:border-2 max-sm:bg-primary-soft"
-                : "font-medium text-muted-foreground hover:text-foreground max-sm:border-border max-sm:bg-card sm:border-transparent",
-            )}
-          >
-            {tab.label}
-            {count > 0 ? (
-              <span
-                className={cn(
-                  "font-bold tabular-nums sm:inline-flex sm:h-5 sm:min-w-5 sm:items-center sm:justify-center sm:rounded-full sm:px-1.5 sm:text-xs",
-                  active ? "sm:bg-primary-soft" : "text-foreground sm:bg-muted",
-                )}
-              >
-                {count}
-                <span className="sr-only"> {count === 1 ? "pendiente" : "pendientes"}</span>
-              </span>
-            ) : null}
-          </Link>
-        )
-      })}
-    </nav>
+    <ScrollArea horizontal className="-mt-2 min-w-0">
+      <nav aria-label="Secciones del agente" className="relative flex gap-1.5 max-sm:pb-2 sm:gap-1 sm:border-b">
+        {visible.map((tab) => {
+          const active = pathname === tab.to
+          const count = pending[tab.to] ?? 0
+          return (
+            <Link
+              key={tab.to}
+              to={tab.to}
+              activeOptions={{ exact: true }}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "inline-flex min-h-11 shrink-0 items-center gap-1.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "max-sm:rounded-full max-sm:border max-sm:px-3.5 sm:-mb-px sm:border-b-2 sm:px-3 sm:focus-visible:ring-inset",
+                "phoneLast" in tab && "max-sm:order-1",
+                active
+                  ? "border-primary font-semibold text-primary-soft-foreground max-sm:border-2 max-sm:bg-primary-soft"
+                  : "font-medium text-muted-foreground hover:text-foreground max-sm:border-border max-sm:bg-card sm:border-transparent",
+              )}
+            >
+              {tab.label}
+              {count > 0 ? (
+                <span
+                  className={cn(
+                    "font-bold tabular-nums sm:inline-flex sm:h-5 sm:min-w-5 sm:items-center sm:justify-center sm:rounded-full sm:px-1.5 sm:text-xs",
+                    active ? "sm:bg-primary-soft" : "text-foreground sm:bg-muted",
+                  )}
+                >
+                  {count}
+                  <span className="sr-only"> {count === 1 ? "pendiente" : "pendientes"}</span>
+                </span>
+              ) : null}
+            </Link>
+          )
+        })}
+      </nav>
+    </ScrollArea>
   )
 }

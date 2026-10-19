@@ -44,6 +44,7 @@ import {
   QuestionnaireSkip,
   QuestionnaireSubmit,
   QuestionnaireTitle,
+  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -1711,9 +1712,11 @@ export function RegistrationQuestionnaire({
           sending={sending}
         >
           {config.privacyNotice.trim() ? (
-            <QuestionnaireDescription className="max-h-48 overflow-y-auto rounded-2xl bg-muted/60 p-4 whitespace-pre-wrap">
-              {config.privacyNotice}
-            </QuestionnaireDescription>
+            <ScrollArea className="flex max-h-48 flex-col rounded-2xl bg-muted/60">
+              <QuestionnaireDescription className="p-4 whitespace-pre-wrap">
+                {config.privacyNotice}
+              </QuestionnaireDescription>
+            </ScrollArea>
           ) : null}
           <QuestionnaireChoices>
             <QuestionnaireChoice

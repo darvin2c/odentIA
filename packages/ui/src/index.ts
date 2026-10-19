@@ -187,6 +187,7 @@ export {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "./components/questionnaire.js";
+export { Kbd, KbdGroup } from "./components/kbd.js";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip.js";
 export {
   ResizableHandle,

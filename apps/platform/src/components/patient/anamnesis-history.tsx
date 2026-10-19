@@ -84,7 +84,7 @@ export function AnamnesisVersionDialog({
         if (!open) onClose()
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent scrollable className="max-h-[85vh] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Anamnesis {version.data ? `v${version.data.data.version}` : ""}</DialogTitle>
           <DialogDescription>

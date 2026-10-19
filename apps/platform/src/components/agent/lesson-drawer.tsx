@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, cn, Field, FieldLabel, Input, Textarea, useIsMobile } from "@odentia/ui"
+import { Badge, Button, Checkbox, cn, Field, FieldLabel, Input, ScrollArea, Textarea, useIsMobile } from "@odentia/ui"
 import { AgentMark, ConfirmDialog, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, Undo2 } from "lucide-react"
@@ -315,44 +315,46 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
       onClose={close}
     >
       {lesson ? (
-        <div className="-mx-1 flex max-h-[50dvh] flex-col gap-3 overflow-y-auto px-1 text-left text-sm">
-          <p className="flex flex-wrap items-center justify-center gap-1.5">
-            <Chips lesson={lesson} />
-          </p>
-          <LessonTest
-            lessonId={lesson.id}
-            impact={impact}
-            title="Qué pasa si la retiras"
-            summary={impact?.total === 0 ? "No tienes otros casos de prueba: ninguno cambia al retirarla." : undefined}
-            runLabel="Ver cómo respondería sin ella"
-            beforeLabel="Hoy"
-            afterLabel={WITHOUT_LABEL[lesson.kind]}
-            canRun={lesson.status === "activa"}
-          />
-          {hasCase ? (
-            <label htmlFor="leccion-retirar-caso" className="flex min-h-11 cursor-pointer items-start gap-2.5">
-              <Checkbox
-                id="leccion-retirar-caso"
-                className="mt-0.5"
-                checked={withdrawCase}
-                onCheckedChange={(value) => setWithdrawCase(value === true)}
-              />
-              <span>
-                <span className="font-semibold">Retirar también su caso de prueba</span>
-                <span className="block text-muted-foreground">Si lo dejas, seguirá esperando la respuesta de hoy.</span>
-              </span>
-            </label>
-          ) : null}
-          <p className="flex items-start gap-2.5 rounded-xl bg-muted px-3.5 py-3">
-            <Undo2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span>Deja de usarla al instante. Queda en Retiradas con su historia y la puedes restaurar cuando quieras.</span>
-          </p>
-          {error ? (
-            <p role="alert" className="text-destructive">
-              {error}
+        <ScrollArea className="-mx-1 flex max-h-[50dvh] flex-col">
+          <div className="flex flex-col gap-3 px-1 text-left text-sm">
+            <p className="flex flex-wrap items-center justify-center gap-1.5">
+              <Chips lesson={lesson} />
             </p>
-          ) : null}
-        </div>
+            <LessonTest
+              lessonId={lesson.id}
+              impact={impact}
+              title="Qué pasa si la retiras"
+              summary={impact?.total === 0 ? "No tienes otros casos de prueba: ninguno cambia al retirarla." : undefined}
+              runLabel="Ver cómo respondería sin ella"
+              beforeLabel="Hoy"
+              afterLabel={WITHOUT_LABEL[lesson.kind]}
+              canRun={lesson.status === "activa"}
+            />
+            {hasCase ? (
+              <label htmlFor="leccion-retirar-caso" className="flex min-h-11 cursor-pointer items-start gap-2.5">
+                <Checkbox
+                  id="leccion-retirar-caso"
+                  className="mt-0.5"
+                  checked={withdrawCase}
+                  onCheckedChange={(value) => setWithdrawCase(value === true)}
+                />
+                <span>
+                  <span className="font-semibold">Retirar también su caso de prueba</span>
+                  <span className="block text-muted-foreground">Si lo dejas, seguirá esperando la respuesta de hoy.</span>
+                </span>
+              </label>
+            ) : null}
+            <p className="flex items-start gap-2.5 rounded-xl bg-muted px-3.5 py-3">
+              <Undo2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span>Deja de usarla al instante. Queda en Retiradas con su historia y la puedes restaurar cuando quieras.</span>
+            </p>
+            {error ? (
+              <p role="alert" className="text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+        </ScrollArea>
       ) : null}
     </ConfirmDialog>
   )

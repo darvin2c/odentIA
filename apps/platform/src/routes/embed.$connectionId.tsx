@@ -1,3 +1,4 @@
+import { ScrollArea } from "@odentia/ui"
 import { Message, MessageContent } from "@odentia/ui/components/ai-elements/message"
 import {
   PromptInput,
@@ -249,24 +250,26 @@ function WebchatWidget() {
         </div>
       ) : (
         <>
-          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3" aria-live="polite">
-            {messages.map((msg) => {
-              const mine = msg.direction === "in"
-              return (
-                <Message key={msg.id} from={mine ? "user" : "assistant"}>
-                  <MessageContent
-                    className={mine ? undefined : "rounded-lg bg-muted px-4 py-3"}
-                  >
-                    {msg.senderKind === "agent" && !mine ? (
-                      <span className="text-xs font-medium text-muted-foreground">Agente</span>
-                    ) : null}
-                    <span className="whitespace-pre-wrap break-words">{msg.body ?? ""}</span>
-                  </MessageContent>
-                </Message>
-              )
-            })}
-            <div ref={bottomRef} />
-          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex flex-col gap-2 p-3" aria-live="polite">
+              {messages.map((msg) => {
+                const mine = msg.direction === "in"
+                return (
+                  <Message key={msg.id} from={mine ? "user" : "assistant"}>
+                    <MessageContent
+                      className={mine ? undefined : "rounded-lg bg-muted px-4 py-3"}
+                    >
+                      {msg.senderKind === "agent" && !mine ? (
+                        <span className="text-xs font-medium text-muted-foreground">Agente</span>
+                      ) : null}
+                      <span className="whitespace-pre-wrap break-words">{msg.body ?? ""}</span>
+                    </MessageContent>
+                  </Message>
+                )
+              })}
+              <div ref={bottomRef} />
+            </div>
+          </ScrollArea>
           <div className="flex flex-col gap-1.5 border-t p-2">
             <PromptInput onSubmit={send} className="h-auto min-h-10 items-end bg-background">
               <PromptInputTextarea

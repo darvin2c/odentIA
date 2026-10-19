@@ -82,7 +82,10 @@ export function HandoffNotice({
     <div className="flex min-w-0 flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <HandoffUrgency priority={handoff.priority} />
-        <Badge variant="secondary">{handoff.reason}</Badge>
+        {/* El motivo se parte en líneas en vez de cortarse en la columna angosta. */}
+        <Badge variant="secondary" className="h-auto max-w-full whitespace-normal text-left">
+          {handoff.reason}
+        </Badge>
       </div>
       <div className="flex flex-col">
         <span className="font-semibold">{handoff.contactName ?? "Interlocutor no disponible"}</span>

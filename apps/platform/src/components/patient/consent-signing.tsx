@@ -233,7 +233,9 @@ function SigningFlow({
       <DialogContent
         showCloseButton={!saving}
         aria-describedby={`${ids}-desc`}
-        className="top-0 left-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-y-auto rounded-none p-0 sm:max-w-none"
+        scrollable
+        contentClassName="flex min-h-full flex-col gap-0 p-0"
+        className="top-0 left-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none"
       >
         <header className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4 pr-16">
           <DialogTitle className="text-lg">

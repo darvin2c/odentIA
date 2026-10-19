@@ -6,6 +6,7 @@ import {
   DrawerFooter,
   DrawerHeader,
   DrawerTitle,
+  ScrollArea,
   useIsMobile,
 } from "@odentia/ui"
 import { X } from "lucide-react"
@@ -44,13 +45,13 @@ export function FilterDrawer({
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{title}</DrawerDescription>
         </DrawerHeader>
-        <div className="flex-1 overflow-y-auto">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-5 px-6 py-4">
             {filters.map((filter) => (
               <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="inline" />
             ))}
           </div>
-        </div>
+        </ScrollArea>
         <DrawerFooter className="flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4 pt-4">
           <Button
             type="button"

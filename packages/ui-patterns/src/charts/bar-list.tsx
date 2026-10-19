@@ -11,7 +11,7 @@
  * escritos. La parte (`part`) se pinta más oscura dentro de su barra; el
  * color nunca es la única señal: el valor y la nota van escritos.
  */
-import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
+import { Button, cn, ScrollArea, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react"
 
 export interface BarListRow {
@@ -104,7 +104,7 @@ export function BarList({ title, rows, max, legend, onSelect, selectLabel, betwe
         {title}
       </figcaption>
       {asTable ? (
-        <div className="min-w-0 overflow-x-auto">
+        <ScrollArea horizontal className="min-w-0 [&_[data-slot=table-container]]:overflow-visible">
           <Table>
             <TableHeader>
               <TableRow>
@@ -129,7 +129,7 @@ export function BarList({ title, rows, max, legend, onSelect, selectLabel, betwe
               ))}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       ) : (
         <ul className="flex min-w-0 flex-col" onMouseLeave={() => setActive(null)}>
           {rows.map((row, index) => {

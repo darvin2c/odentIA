@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  ScrollArea,
   Skeleton,
   toast,
 } from "@odentia/ui"
@@ -905,7 +906,9 @@ function AgendaPage() {
     null
   // Los estados traen su propio marco: aquí solo ocupan el alto de la agenda.
   const framed = (content: React.ReactNode) => (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [&>*]:flex-1">{content}</div>
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="flex min-h-full flex-col [&>*]:flex-1">{content}</div>
+    </ScrollArea>
   )
   const setupState = noChairs ? (
     <EmptyState
@@ -1202,42 +1205,46 @@ function AgendaPage() {
       ) : setupMissing ? (
         framed(setupState)
       ) : view === "lista" ? (
-        <div className="-mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2">
-          <ScheduleStatusSummary
-            counts={counts}
-            value={statusFilter}
-            onChange={(next) => setParam("status", next ?? undefined)}
-          />
-          {listItems.length === 0 ? (
-            framed(emptyList)
-          ) : (
-          <ScheduleAgendaList
-            items={listItems}
-            timeZone={TZ}
-            now={day === today ? now : undefined}
-            onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
-            primaryAction={({ entry }) => {
-              const item = byId.get(entry.id)
-              return item ? primaryFor(item) : null
-            }}
-            menuItems={({ entry }) => menuFor(entry)}
-          />
-          )}
-        </div>
-      ) : small && view === "semana" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
-          <div className="flex items-center gap-2">
-            <ScheduleOccupancyLegend className="flex-1" />
-            <span className="text-xs font-semibold text-muted-foreground tabular-nums">
-              {hourLabel(weekWindow.startMinutes)} a {hourLabel(weekWindow.endMinutes)}
-            </span>
+        <ScrollArea className="-mr-2 min-h-0 flex-1">
+          <div className="flex flex-col gap-3 pr-2">
+            <ScheduleStatusSummary
+              counts={counts}
+              value={statusFilter}
+              onChange={(next) => setParam("status", next ?? undefined)}
+            />
+            {listItems.length === 0 ? (
+              framed(emptyList)
+            ) : (
+            <ScheduleAgendaList
+              items={listItems}
+              timeZone={TZ}
+              now={day === today ? now : undefined}
+              onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
+              primaryAction={({ entry }) => {
+                const item = byId.get(entry.id)
+                return item ? primaryFor(item) : null
+              }}
+              menuItems={({ entry }) => menuFor(entry)}
+            />
+            )}
           </div>
-          <ScheduleWeekOverview
-            days={weekModel}
-            today={today}
-            onSelect={(date) => setParams({ date: date === today ? undefined : date, view: undefined })}
-          />
-        </div>
+        </ScrollArea>
+      ) : small && view === "semana" ? (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center gap-2">
+              <ScheduleOccupancyLegend className="flex-1" />
+              <span className="text-xs font-semibold text-muted-foreground tabular-nums">
+                {hourLabel(weekWindow.startMinutes)} a {hourLabel(weekWindow.endMinutes)}
+              </span>
+            </div>
+            <ScheduleWeekOverview
+              days={weekModel}
+              today={today}
+              onSelect={(date) => setParams({ date: date === today ? undefined : date, view: undefined })}
+            />
+          </div>
+        </ScrollArea>
       ) : view === "dia" && dayLanes.length === 0 ? (
         framed(emptyDay)
       ) : (
