@@ -225,7 +225,7 @@ function ProductsSection({ search, lowStock, kind }: { search: string; lowStock:
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
   return (
     <div className="flex flex-col gap-3">
-      <FilterBar filters={filters} sortOptions={[]} searchPlaceholder="Buscar por nombre o SKU…" resetKeys={["kind", "lowStock"]} />
+      <FilterBar filters={filters} sortOptions={[]} searchPlaceholder="Buscar por nombre o SKU…" searchLabel="Buscar en productos" resetKeys={["kind", "lowStock"]} />
       {query.isPending ? (
         <LoadingState message="Cargando productos…" />
       ) : query.isError ? (

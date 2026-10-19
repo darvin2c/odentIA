@@ -56,7 +56,8 @@ import { SendPersonalLinkButton } from "./send-personal-link"
  * una persona que ya existe como su propia ficha, o alguien a su cargo.
  */
 export type NewPatientTarget =
-  | { kind: "new" }
+  /** `name`: lo que se buscó y no estaba («Crear paciente «Zoila Torres»» del buscador rápido). */
+  | { kind: "new"; name?: string }
   | { kind: "person"; person: PersonPage }
   | { kind: "dependent"; person: PersonPage }
 
@@ -137,6 +138,16 @@ function draftFromPerson(person: PersonPage): Draft {
   }
 }
 
+/** El borrador con que abre: lo que ya se sabe de la persona, o el nombre que se buscó. */
+function initialDraft(target: NewPatientTarget): Draft {
+  if (target.kind === "person") return draftFromPerson(target.person)
+  if (target.kind === "new" && target.name?.trim()) {
+    const [givenNames = "", ...rest] = target.name.trim().split(/\s+/)
+    return { ...EMPTY, givenNames, surnames: rest.join(" ") }
+  }
+  return EMPTY
+}
+
 function initials(name: string): string {
   const words = name.split(/\s+/).filter((word) => word && !/^(de|del|la|las|los|y)$/i.test(word))
   return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "·"
@@ -182,7 +193,7 @@ export function NewPatientDrawer({
 
   const [stage, setStage] = useState<Stage>("form")
   const [picked, setPicked] = useState<PersonPage | null>(fromPerson)
-  const [draft, setDraft] = useState<Draft>(fromPerson ? draftFromPerson(fromPerson) : EMPTY)
+  const [draft, setDraft] = useState<Draft>(initialDraft(target))
   const [who, setWho] = useState<WhoCompletes>("paciente")
   const [relation, setRelation] = useState<Relation | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -198,7 +209,7 @@ export function NewPatientDrawer({
     if (!open) return
     setStage("form")
     setPicked(target.kind === "person" ? target.person : null)
-    setDraft(target.kind === "person" ? draftFromPerson(target.person) : EMPTY)
+    setDraft(initialDraft(target))
     setWho("paciente")
     setRelation(null)
     setErrors({})

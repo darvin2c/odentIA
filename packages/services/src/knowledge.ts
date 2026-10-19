@@ -12,7 +12,8 @@ import {
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, inArray, ne, or, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { branchNotFound, notFound, validation } from "./errors.js"
 import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -415,8 +416,7 @@ function knowledgeConditions(orgId: string, input: ListKnowledgeInput) {
   if (input.branchId) conditions.push(eq(agentKnowledgeEntry.branchId, input.branchId))
   const q = input.q?.trim()
   if (q) {
-    const like = `%${q}%`
-    conditions.push(or(ilike(agentKnowledgeEntry.title, like), ilike(agentKnowledgeEntry.body, like))!)
+    conditions.push(foldedWordsMatch([agentKnowledgeEntry.title, agentKnowledgeEntry.body], q))
   }
   return conditions
 }

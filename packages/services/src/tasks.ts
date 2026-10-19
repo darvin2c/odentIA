@@ -4,7 +4,8 @@ import { patient, patientContact } from "@odentia/db/schema/clinical"
 import { contact, conversation, crmTask, TASK_AREAS, type TaskArea, type TaskKind } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { resolveAfterHandoffTask } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -357,8 +358,7 @@ export async function pageTasks(
   else conditions.push(eq(crmTask.status, "open"))
   if (view === "vencidas") conditions.push(sql`${crmTask.dueAt} is not null and ${crmTask.dueAt} <= now()`)
   if (q) {
-    const like = `%${q}%`
-    conditions.push(or(ilike(crmTask.title, like), ilike(contact.displayName, like), ilike(patientPerson.displayName, like), ilike(opportunity.title, like))!)
+    conditions.push(foldedWordsMatch([crmTask.title, contact.displayName, patientPerson.displayName, opportunity.title], q))
   }
   const fingerprint = JSON.stringify({ view, sort, q, all: input.viewer.all })
   const total = await countTasks(tx, orgId, conditions)

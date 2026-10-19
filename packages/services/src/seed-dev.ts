@@ -2669,6 +2669,36 @@ const hijoVargas = (displayName: string, givenNames: string, birthDate: string, 
   )
 await hijoVargas("Thiago Vargas", "Thiago", "2015-03-10", "78123401")
 await hijoVargas("Valeria Vargas", "Valeria", "2019-08-22", "78123402")
+// Buscador rápido (ADR 0066): «maria» trae a varias Marías, cada una con lo
+// suyo; madre e hija comparten el 987 111 222 y aparecen las dos; «bruxismo»
+// encuentra la atención de una de ellas (solo para quien ve la historia).
+const mariaPaz = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "María Luisa Paz",
+  givenNames: "María Luisa",
+  familyName: "Paz",
+  birthDate: "1991-05-14",
+  phone: "+51987111222",
+  registeredBranchId: miraflores.id,
+})
+await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Lucía Paz",
+  givenNames: "Lucía",
+  familyName: "Paz",
+  birthDate: "2016-09-02",
+  phone: "+51987111222",
+  registeredBranchId: miraflores.id,
+})
+await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "María Quispe Huamán",
+  givenNames: "María",
+  familyName: "Quispe Huamán",
+  birthDate: "1964-01-20",
+  registeredBranchId: miraflores.id,
+})
+await createEncounter(db, ORG_A, ANA_ID, mariaPaz.id, {
+  reason: "Bruxismo nocturno: se indica placa de descarga",
+  branchId: miraflores.id,
+})
 // Una ortodoncia que se cobra por sesión (12 controles de S/ 100), aceptada, con
 // un adelanto de S/ 500 y una devolución de S/ 100: el portal dice los mismos
 // montos que Caja (tratamiento aceptado S/ 1 200, pagado S/ 400). Su número no
