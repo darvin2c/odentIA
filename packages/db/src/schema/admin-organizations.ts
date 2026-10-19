@@ -5,12 +5,12 @@ import {
   index,
   integer,
   jsonb,
-  pgTable,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
+import { adminSchema } from "./schemas.js"
 
 /**
  * Administración de organizaciones y cuentas.
@@ -34,7 +34,7 @@ import { user } from "./auth.js"
  */
 // Las claves foráneas llevan el nombre que les dio PostgreSQL al crear estas
 // tablas a mano (`<tabla>_<columna>_fkey`).
-export const userGlobalBlock = pgTable("user_global_block", {
+export const userGlobalBlock = adminSchema.table("user_global_block", {
   userId: text("user_id").primaryKey(),
   reason: text("reason").notNull(),
   blockedBy: text("blocked_by"),
@@ -54,7 +54,7 @@ export const userGlobalBlock = pgTable("user_global_block", {
   }),
 ])
 
-export const accountRecoveryCase = pgTable(
+export const accountRecoveryCase = adminSchema.table(
   "account_recovery_case",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -92,7 +92,7 @@ export const accountRecoveryCase = pgTable(
   ],
 )
 
-export const accountLifecycleNotice = pgTable("account_lifecycle_notice", {
+export const accountLifecycleNotice = adminSchema.table("account_lifecycle_notice", {
   userId: text("user_id").primaryKey(),
   kind: text("kind").notNull().default("recordatorio_3d"),
   status: text("status").notNull().default("claimed"),

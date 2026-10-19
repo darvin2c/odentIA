@@ -4,12 +4,12 @@ import {
   boolean,
   index,
   integer,
-  pgTable,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
+import { adminSchema } from "./schemas.js"
 
 /**
  * Libro de Reclamaciones virtual de odentIA (Perú: Ley 29571 y D.S.
@@ -27,7 +27,7 @@ import { user } from "./auth.js"
  * - `consumerComplaintCounter`: el último correlativo de cada año. Se
  *   incrementa con un upsert atómico en la misma transacción que la hoja.
  */
-export const consumerComplaint = pgTable(
+export const consumerComplaint = adminSchema.table(
   "consumer_complaint",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -72,7 +72,7 @@ export const consumerComplaint = pgTable(
   (table) => [index("consumer_complaint_status_idx").on(table.status, table.createdAt)],
 )
 
-export const consumerComplaintCounter = pgTable("consumer_complaint_counter", {
+export const consumerComplaintCounter = adminSchema.table("consumer_complaint_counter", {
   year: integer("year").primaryKey(),
   value: bigint("value", { mode: "number" }).notNull().default(0),
 })

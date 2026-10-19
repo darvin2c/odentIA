@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import { boolean, date, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk } from "./crm.js"
+import { adminSchema } from "./schemas.js"
 
 /** Avisos personales: el ámbito de organización no sustituye al destinatario. */
 export const workspaceNotification = pgTable("workspace_notification", {
@@ -82,7 +83,7 @@ export const processingAgreementAcceptance = pgTable("processing_agreement_accep
  * rija: una vez por persona y versión. Global, sin clínica; solo lo escribe el
  * envío de la plataforma.
  */
-export const legalNotice = pgTable("legal_notice", {
+export const legalNotice = adminSchema.table("legal_notice", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   version: text("version").notNull(),
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),

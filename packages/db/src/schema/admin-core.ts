@@ -5,13 +5,13 @@ import {
   index,
   integer,
   jsonb,
-  pgTable,
   text,
   timestamp,
   unique,
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
+import { adminSchema, authSchema } from "./schemas.js"
 
 /**
  * Personal interno de odentIA (administración global). Separado de
@@ -20,7 +20,7 @@ import { user } from "./auth.js"
  */
 // Las claves foráneas de las tablas de administración llevan el nombre que les
 // dio PostgreSQL al crearlas a mano (`<tabla>_<columna>_fkey`).
-export const adminStaff = pgTable("admin_staff", {
+export const adminStaff = adminSchema.table("admin_staff", {
   userId: text("user_id").primaryKey(),
   role: text("role").notNull(),
   active: boolean("active").notNull().default(true),
@@ -38,7 +38,7 @@ export const adminStaff = pgTable("admin_staff", {
  * Auditoría administrativa append-only: solo INSERT/SELECT. Sin UPDATE ni
  * DELETE (reforzado con REVOKE en `0001_base_reglas.sql`).
  */
-export const adminAudit = pgTable(
+export const adminAudit = adminSchema.table(
   "admin_audit",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -61,7 +61,7 @@ export const adminAudit = pgTable(
  * sesión con identidad verificada (mismo correo, email verificado) y no crea
  * cuenta: el usuario ya debe existir.
  */
-export const adminInvitation = pgTable(
+export const adminInvitation = adminSchema.table(
   "admin_invitation",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -95,7 +95,7 @@ export const adminInvitation = pgTable(
  * El guard exige una fila viva (sin revocar, sin expirar) por sesión:
  * la sesión sola nunca basta cuando el usuario ya tiene factor.
  */
-export const adminSessionVerification = pgTable(
+export const adminSessionVerification = adminSchema.table(
   "admin_session_verification",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -125,7 +125,7 @@ export const adminSessionVerification = pgTable(
  * La clave del export (`twoFactor`) es el nombre de modelo que el
  * drizzleAdapter resuelve en `db._.fullSchema`; el nombre SQL es libre.
  */
-export const twoFactor = pgTable(
+export const twoFactor = authSchema.table(
   "two_factor",
   {
     id: text("id").primaryKey(),

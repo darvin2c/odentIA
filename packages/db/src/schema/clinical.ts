@@ -33,13 +33,14 @@ import { appointment } from "./agenda.js"
 import { organization, user } from "./auth.js"
 import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
+import { catalogSchema } from "./schemas.js"
 
 /**
  * Listas de diagnósticos (ADR 0041): CIE-10 y CIE-11 de la OMS y, preparadas
  * sin cargar, las nacionales. Globales, SIN org_id, SIN RLS y de solo lectura
  * para la aplicación; las carga `seed:diagnoses` con el rol owner.
  */
-export const diagnosisCodeSystem = pgTable("diagnosis_code_system", {
+export const diagnosisCodeSystem = catalogSchema.table("diagnosis_code_system", {
   key: text("key").primaryKey(),
   title: text("title").notNull(),
   publisher: text("publisher").notNull(),
@@ -52,7 +53,7 @@ export const diagnosisCodeSystem = pgTable("diagnosis_code_system", {
  * su licencia. `official` es falso en las semillas de desarrollo, que no son
  * la lista oficial.
  */
-export const diagnosisCodeRelease = pgTable(
+export const diagnosisCodeRelease = catalogSchema.table(
   "diagnosis_code_release",
   {
     systemKey: text("system_key")
@@ -80,7 +81,7 @@ export const diagnosisCodeRelease = pgTable(
  * registran como diagnóstico. Nunca se borra un código: los diagnósticos lo
  * referencian.
  */
-export const diagnosisCatalog = pgTable(
+export const diagnosisCatalog = catalogSchema.table(
   "diagnosis_code",
   {
     systemKey: text("system_key")
@@ -1079,7 +1080,7 @@ export const periodontalTooth = pgTable(
 )
 
 /** Sistemas de codificación de procedimientos (catálogo global, SIN org_id, SIN RLS). */
-export const procedureCodeSystem = pgTable("procedure_code_system", {
+export const procedureCodeSystem = catalogSchema.table("procedure_code_system", {
   key: text("key").primaryKey(),
   title: text("title").notNull(),
   publisher: text("publisher").notNull(),
@@ -1093,7 +1094,7 @@ export const procedureCodeSystem = pgTable("procedure_code_system", {
  * solo lectura en runtime como diagnosis_code). La versión es la del publicador
  * (p. ej. RM-550-2023-MINSA para CPMS), nunca un correlativo interno.
  */
-export const procedureCode = pgTable(
+export const procedureCode = catalogSchema.table(
   "procedure_code",
   {
     systemKey: text("system_key")
@@ -1120,7 +1121,7 @@ export const procedureCode = pgTable(
  * estructura oficial (p. ej. secciones 1.3+2.7) y `expectedCount` las filas
  * oficiales del ámbito para conciliar cobertura en el seed.
  */
-export const procedureCatalogRelease = pgTable(
+export const procedureCatalogRelease = catalogSchema.table(
   "procedure_catalog_release",
   {
     systemKey: text("system_key")
@@ -1142,7 +1143,7 @@ export const procedureCatalogRelease = pgTable(
 )
 
 /** Biblioteca global de prestaciones (solo lectura para el rol app, como diagnosis_code). */
-export const treatmentTemplate = pgTable(
+export const treatmentTemplate = catalogSchema.table(
   "treatment_template",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1167,7 +1168,7 @@ export const treatmentTemplate = pgTable(
  * el nombre de la plantilla es la denominación oficial íntegra.
  * El precio nunca vive aquí: solo en `service_catalog`/presupuestos.
  */
-export const treatmentTemplateCode = pgTable(
+export const treatmentTemplateCode = catalogSchema.table(
   "treatment_template_code",
   {
     templateId: uuid("template_id")
