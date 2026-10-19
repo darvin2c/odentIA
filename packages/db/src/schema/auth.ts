@@ -1,6 +1,7 @@
 import { boolean, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { authSchema } from "./schemas.js"
 
-export const user = pgTable("user", {
+export const user = authSchema.table("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   firstName: text("first_name").notNull().default(""),
@@ -31,7 +32,7 @@ export const user = pgTable("user", {
     .notNull(),
 })
 
-export const session = pgTable(
+export const session = authSchema.table(
   "session",
   {
     id: text("id").primaryKey(),
@@ -51,7 +52,7 @@ export const session = pgTable(
   (table) => [index("session_userId_idx").on(table.userId)],
 )
 
-export const account = pgTable(
+export const account = authSchema.table(
   "account",
   {
     id: text("id").primaryKey(),
@@ -75,7 +76,7 @@ export const account = pgTable(
   (table) => [index("account_userId_idx").on(table.userId)],
 )
 
-export const verification = pgTable(
+export const verification = authSchema.table(
   "verification",
   {
     id: text("id").primaryKey(),

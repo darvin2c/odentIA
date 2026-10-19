@@ -676,7 +676,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   )
   expect(said.find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
   const rosaFicha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${people[0]!.id}`, owner.org.slug)
-  expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
 
   // Urgencia: fuera del horario no se reserva sin más; se pregunta y queda dicho.
   await openBooking(page)

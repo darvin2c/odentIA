@@ -267,7 +267,8 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("borrador-linea-nueva", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
-  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  // Recién cambiado el ancho, la página aún se reacomoda: se mide cuando termina.
+  await expect.poll(() => overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("borrador-linea-nueva-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
 
@@ -336,9 +337,9 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(13)
+  await expect(approved.getByRole("listitem")).toHaveCount(14)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 12 en revisión")
+  await expect(approved).toContainText("1 aprobado · 13 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v2")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

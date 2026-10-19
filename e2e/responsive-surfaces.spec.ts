@@ -44,18 +44,16 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
     await gotoHydrated(page, tenant(owner.org.slug, `/people/${person.id}`))
 
     await page.getByRole("button", { name: "Registrar", exact: true }).tap()
-    const dialog = surface(page, { name: "Nuevo paciente" })
+    // Registrar es una sola ventana (sin pasos) que trae lo que ya se sabe.
+    const dialog = surface(page, { name: "Registrar a Paciente Móvil" })
     await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel("Apellidos")).toHaveValue("Móvil")
 
-    const next = dialog.getByRole("button", { name: "Siguiente", exact: true })
-    await expect(next).toBeInViewport()
-    await next.tap()
-    await expect(dialog.getByRole("button", { name: "Anterior", exact: true })).toBeVisible()
-
-    await dialog.getByRole("button", { name: "Anterior", exact: true }).tap()
-    await next.focus()
-    await next.press("Enter")
-    await expect(dialog.getByRole("button", { name: "Anterior", exact: true })).toBeVisible()
+    // Elegir quién completa sus datos se toca con el dedo; el botón de registrar sigue a la vista.
+    await dialog.getByRole("button", { name: "Yo, ahora", exact: true }).tap()
+    await expect(dialog.getByRole("button", { name: "Yo, ahora", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await expect(dialog.getByRole("button", { name: "Registrar", exact: true })).toBeInViewport()
+    await expect(dialog.getByRole("button", { name: "Cancelar", exact: true })).toBeInViewport()
 
     const overflow = await page.evaluate(() => ({
       document: document.documentElement.scrollWidth - document.documentElement.clientWidth,

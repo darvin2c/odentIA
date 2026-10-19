@@ -804,7 +804,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
 
   // El cajón trae lo que ya se sabe de ella.
   await page.getByRole("button", { name: "Registrar", exact: true }).click()
-  const form = surface(page, { name: "Nuevo paciente" })
+  const form = surface(page, { name: "Registrar a Rosa Quispe" })
   await expect(form.getByLabel("Apellidos")).toHaveValue("Quispe")
   await expect(form.getByLabel("Nombres")).toHaveValue("Rosa")
   await page.screenshot({ path: test.info().outputPath("registrar-precargado.png"), fullPage: true })

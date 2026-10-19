@@ -132,6 +132,8 @@ export class ToothScene {
   private dead = false
   private pr: WebGLProgram | null = null
   private onLost: (() => void) | null = null
+  /** Lo que muestra el último cuadro de la escena quieta; null mientras se mueve. */
+  private shown: string | null = null
 
   constructor(host: SceneHost) {
     this.host = host
@@ -295,7 +297,16 @@ export class ToothScene {
     this.raf = null
     if (this.dead || !this.gl) return
     if (this.vis) {
-      this.draw()
+      // Quieta (movimiento reducido), cada cuadro es igual al anterior hasta que
+      // cambie lo que se ve: se dibuja solo entonces. Sin GPU (WebGL por
+      // software) redibujar el mismo cuadro sin parar ocupa la CPU entera.
+      const st = this.host.state()
+      const cv = this.cv!
+      const shown = `${st.step}|${st.hover}|${cv.clientWidth}x${cv.clientHeight}|${window.devicePixelRatio}`
+      if (!st.still || shown !== this.shown) {
+        this.draw()
+        this.shown = st.still ? shown : null
+      }
       this.raf = requestAnimationFrame(() => this.loop())
     }
   }

@@ -17,6 +17,7 @@ import {
 import { supportCase } from "./admin-support.js"
 import { organization, user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
+import { adminSchema } from "./schemas.js"
 
 // Las tablas de cobro se crearon a mano: sus claves foráneas llevan el nombre
 // que les dio PostgreSQL (`<tabla>_<columna>_fkey`), las de organización de
@@ -63,7 +64,7 @@ export const SAAS_PAYMENT_STATUSES = ["pendiente", "confirmado", "reversado", "d
 export type SaasPaymentStatus = (typeof SAAS_PAYMENT_STATUSES)[number]
 
 /** Plan comercial por moneda. Lo configura admin; sin valores productivos en código. */
-export const saasPlan = pgTable(
+export const saasPlan = adminSchema.table(
   "saas_plan",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -137,7 +138,7 @@ export const saasPlan = pgTable(
 )
 
 /** Medio de pago SaaS (transferencia, billetera, etc.). Instrucciones las escribe admin. */
-export const saasPaymentMethod = pgTable(
+export const saasPaymentMethod = adminSchema.table(
   "saas_payment_method",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -157,7 +158,7 @@ export const saasPaymentMethod = pgTable(
 )
 
 /** Vendedor con su porcentaje y ventana congelables por cobro. */
-export const saasSeller = pgTable(
+export const saasSeller = adminSchema.table(
   "saas_seller",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -355,7 +356,7 @@ export const saasPayment = pgTable(
  * Comisión de vendedor por cobro CONFIRMADO (no demo). Congela porcentaje
  * (`rateBps`) y ventana (`windowDays`); inmutable salvo liquidación.
  */
-export const saasSellerCommission = pgTable(
+export const saasSellerCommission = adminSchema.table(
   "saas_seller_commission",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -394,7 +395,7 @@ export const saasSellerCommission = pgTable(
  * Ajuste por reverso/devolución tras liquidación: fila nueva trazable, jamás
  * muta la liquidación original. Se descuenta en la siguiente liquidación.
  */
-export const saasCommissionAdjustment = pgTable(
+export const saasCommissionAdjustment = adminSchema.table(
   "saas_commission_adjustment",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -419,7 +420,7 @@ export const saasCommissionAdjustment = pgTable(
 )
 
 /** Liquidación mensual por vendedor (global; solo owner la escribe). */
-export const saasCommissionSettlement = pgTable(
+export const saasCommissionSettlement = adminSchema.table(
   "saas_commission_settlement",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -454,7 +455,7 @@ export const saasCommissionSettlement = pgTable(
 )
 
 /** Línea congelada de una liquidación (cobro o ajuste). Inmutable. */
-export const saasCommissionSettlementLine = pgTable(
+export const saasCommissionSettlementLine = adminSchema.table(
   "saas_commission_settlement_line",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -514,7 +515,7 @@ export const saasNotice = pgTable(
  * la del plan. La pide soporte o el vendedor; la decide la administración.
  * Solo owner (rutas admin) la escribe.
  */
-export const saasNegotiation = pgTable(
+export const saasNegotiation = adminSchema.table(
   "saas_negotiation",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -545,7 +546,7 @@ export const saasNegotiation = pgTable(
  * estimación que ve la clínica. La carga la administración desde la tabla de
  * Meta: odentIA no cobra WhatsApp ni recibe ese pago.
  */
-export const saasWhatsappRate = pgTable(
+export const saasWhatsappRate = adminSchema.table(
   "saas_whatsapp_rate",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -735,7 +736,7 @@ export type SaasSignupMode = (typeof SAAS_SIGNUP_MODES)[number]
  * fila (`id = 1`) que escribe la administración; la lee el guard de
  * `organization/create`. Global, sin `organization_id`: solo `ownerDb`.
  */
-export const saasSignupPolicy = pgTable(
+export const saasSignupPolicy = adminSchema.table(
   "saas_signup_policy",
   {
     id: integer("id").primaryKey().default(1),
@@ -761,7 +762,7 @@ export const SAAS_WAITLIST_TOOLS = ["nada", "cuaderno_excel", "otro_software"] a
  * crea la clínica y `organization_id` queda al entrar. Global y solo de
  * `ownerDb` (la web la escribe por su ruta pública).
  */
-export const saasWaitlistRequest = pgTable(
+export const saasWaitlistRequest = adminSchema.table(
   "saas_waitlist_request",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

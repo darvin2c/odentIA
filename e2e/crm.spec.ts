@@ -144,7 +144,8 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   ).toBe(200)
   await waitForInboundText(page, org.slug, conversationId, "¿Cuánto cuesta la limpieza?")
 
-  await gotoHydrated(page, tenant(org.slug, "/inbox"))
+  // La Bandeja abre en «Por atender»; la que atiende el agente está en su pestaña.
+  await gotoHydrated(page, tenant(org.slug, "/inbox?view=agent"))
   await expect(page.getByText(FAKE_REPLY).first()).toBeVisible({ timeout: 30_000 })
 
   await page.getByText("E2E Paciente").first().click()
@@ -196,7 +197,7 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
     org.slug,
   )
   expect(decisions).toEqual([
-    expect.objectContaining({ point: "route.v3", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
+    expect.objectContaining({ point: "route.v4", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
   ])
   const shadow = page.getByRole("region", { name: "Decisiones del modelo de decisión" })
   await expect(shadow).toBeVisible()
