@@ -284,6 +284,8 @@ export interface MyOrganization {
   organizationId: string
   organizationName: string
   slug: string
+  /** Dirección pública del logo de la clínica, si subió uno en «Datos de la clínica». */
+  logo: string | null
   role: string
   roleLabel: string
   /** false cuando es la única propietaria (el servidor también lo rechaza). */
@@ -1353,6 +1355,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       organizationId: member.organizationId,
       organizationName: organization.name,
       slug: organization.slug,
+      logo: organization.logo,
       role: member.role,
     })
     .from(member)
@@ -1375,6 +1378,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       organizationId: row.organizationId,
       organizationName: row.organizationName,
       slug: row.slug,
+      logo: row.logo ?? null,
       role: row.role,
       roleLabel: roleLabelOf(row.role),
       canLeave: await canLeaveOrganization(tx, userId, row.organizationId, row.role),

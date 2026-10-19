@@ -115,7 +115,7 @@ export const Route = createFileRoute("/_org")({
     })
     if (!data) {
       const { data: orgs } = await authClient.organization.list({ fetchOptions })
-      throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/" : "/onboarding") })
+      throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })
     }
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
@@ -219,8 +219,9 @@ function OrgSwitcher() {
             {item.name}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuItem onClick={() => window.location.assign(panelUrl("/"))}>
-          Todas las organizaciones
+        {/* Vuelve al selector sin autoentrar (issue 114). */}
+        <DropdownMenuItem onClick={() => window.location.assign(panelUrl("/?cambiar=1"))}>
+          Cambiar de clínica
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

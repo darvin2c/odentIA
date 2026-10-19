@@ -5,6 +5,7 @@ import { apiFetch } from "./api"
 const provisioningSchema = z.object({ hasProfile: z.boolean(), hasBranch: z.boolean() })
 const organizationSchema = z.object({
   organizationId: z.string(), organizationName: z.string(), slug: z.string(),
+  logo: z.string().nullable(),
   role: z.string(), roleLabel: z.string(), canLeave: z.boolean(), provisioning: provisioningSchema,
 })
 const invitationSchema = z.object({
