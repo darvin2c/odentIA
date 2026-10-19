@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, ExpandableText, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useRef, useState } from "react"
@@ -451,7 +451,7 @@ function SupportPage() {
                 {items.map((item) => (
                   <li
                     key={item.id}
-                    className="flex items-start gap-2 rounded-xl border px-3 py-2.5"
+                    className="flex min-w-0 items-start gap-2 rounded-xl border px-3 py-2.5"
                   >
                     {isAdmin ? (
                       <input
@@ -459,25 +459,35 @@ function SupportPage() {
                         aria-label={`Elegir caso: ${item.question}`}
                         checked={checked.includes(item.id)}
                         onChange={() => toggleCheck(item.id)}
-                        className="mt-1.5 size-5"
+                        className="mt-1.5 size-5 shrink-0"
                       />
                     ) : null}
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => setSelectedId(item.id)}
-                      aria-expanded={selectedId === item.id}
-                    >
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <span className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
                           {STATUS_LABEL[item.status]}
                         </span>
-                        <span className="font-semibold">
+                        <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">
                           {item.organizationName ?? "Sin clínica (acceso)"}
                         </span>
                       </span>
-                      <span className="block truncate text-sm">«{item.question}»</span>
-                    </button>
+                      <ExpandableText
+                        text={`«${item.question}»`}
+                        label="Consulta del caso"
+                        className="min-w-0 text-sm [overflow-wrap:anywhere]"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-11 self-start sm:min-h-9"
+                        onClick={() => setSelectedId(item.id)}
+                        aria-expanded={selectedId === item.id}
+                        aria-label={`Abrir caso de ${item.organizationName ?? "sin clínica"}: ${item.question.slice(0, 80)}`}
+                      >
+                        Abrir caso
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -570,7 +580,11 @@ function SupportPage() {
                   {kase.organizationName ?? "Sin clínica (acceso)"}
                 </span>
               </div>
-              <p className="text-sm font-semibold">«{kase.question}»</p>
+              <ExpandableText
+                text={`«${kase.question}»`}
+                label="Consulta inicial del caso"
+                className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
+              />
               <p className="text-sm text-muted-foreground">
                 Pantalla: {kase.screen} · Rol: {kase.role || "—"} · Versión:{" "}
                 {kase.appVersion ?? "—"} · Reaperturas: {kase.reopenedCount} · Responsable:{" "}
@@ -599,7 +613,7 @@ function SupportPage() {
                           ? "Staff → clínica"
                           : "Clínica"}
                     </p>
-                    <p className="whitespace-pre-wrap">{message.body}</p>
+                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
                   </li>
                 ))}
               </ol>

@@ -1,5 +1,5 @@
-import { Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
-import { DueAtField, FormDrawer } from "@odentia/ui-patterns"
+import { Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
+import { DueAtField, ExpandableText, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -205,20 +205,21 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
             {fixedContext.opportunityTitle ? <span className="text-muted-foreground"> · oportunidad «{fixedContext.opportunityTitle}»</span> : null}
           </p>
         ) : null}
-        {editTask?.reason ? <p className="text-sm text-muted-foreground">{editTask.reason}</p> : null}
 
         <Field>
           <FieldLabel htmlFor={`${ids}-titulo`}>Qué hay que hacer</FieldLabel>
-          <Input
+          <Textarea
             id={`${ids}-titulo`}
             value={title}
             maxLength={200}
+            rows={2}
             required
             disabled={readOnly}
             placeholder="Llamar a Jorge para confirmar la evaluación"
             onChange={(event) => setTitle(event.target.value)}
           />
         </Field>
+        {editTask?.reason ? <ExpandableText text={editTask.reason} lines={3} label="contexto de la tarea" className="text-sm text-muted-foreground" /> : null}
 
         <DueAtField value={dueAt} onChange={setDueAt} disabled={readOnly} />
 

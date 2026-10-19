@@ -76,6 +76,10 @@ export {
 export type { ColumnViewMeta, DataTableView } from "./data-table-view.js"
 export * from "./detail/index.js"
 export { EmptyState, type EmptyStateProps } from "./empty-state.js"
+export { ExpandableText, type ExpandableTextProps } from "./expandable-text.js"
+export { ListeningIndicator, type ListeningIndicatorProps, type ListeningState } from "./listening-indicator.js"
+export { useMicLevel, type MicLevel, type MicStreamState } from "./use-mic-level.js"
+export { SpeechInput, type SpeechInputProps } from "./speech-input.js"
 export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
 export * from "./form/index.js"
 export {

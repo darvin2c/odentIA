@@ -10,6 +10,7 @@ import {
   DataTableSkeleton,
   EmptyState,
   ErrorState,
+  ExpandableText,
   FilterBar,
   PageHeader,
   PageShell,
@@ -850,9 +851,10 @@ function PipelineListView({
         header: "Oportunidad",
         meta: { view: { role: "title" } },
         cell: ({ row }) => (
-          <Button type="button" variant="link" className="h-auto min-h-0 whitespace-normal p-0 text-left font-medium" onClick={() => actions.onOpen(row.original)}>
-            {row.original.contactName} · {row.original.title}
-          </Button>
+          <div className="min-w-0 max-w-sm md:min-w-48">
+            <ExpandableText text={`${row.original.contactName} · ${row.original.title}`} label="oportunidad" className="font-medium" />
+            <Button type="button" variant="link" className="min-h-11 px-0" onClick={() => actions.onOpen(row.original)}>Abrir oportunidad</Button>
+          </div>
         ),
       },
       {
@@ -868,7 +870,7 @@ function PipelineListView({
             <Badge variant="secondary">{row.original.stageName}</Badge>
           ),
       },
-      { id: "porque", header: "Por qué está aquí", cell: ({ row }) => row.original.why ?? "—" },
+      { id: "porque", header: "Por qué está aquí", cell: ({ row }) => <ExpandableText text={row.original.why ?? "—"} label="motivo de la etapa" /> },
       {
         id: "tarea",
         header: "Tarea",
@@ -878,14 +880,14 @@ function PipelineListView({
           if (!task) return "—"
           const overdue = isOverdue(task.dueAt)
           return (
-            <span className={overdue ? "font-medium text-destructive" : undefined}>
-              {task.title}
-              {task.dueAt ? ` · ${overdue ? "venció " : ""}${dueWords(task.dueAt)}` : ""}
-            </span>
+            <div className={overdue ? "font-medium text-destructive" : undefined}>
+              <ExpandableText text={task.title} label="próxima tarea" />
+              {task.dueAt ? <span>{overdue ? "Venció " : ""}{dueWords(task.dueAt)}</span> : null}
+            </div>
           )
         },
       },
-      { id: "valor", header: "Valor", cell: ({ row }) => moneyText(row.original.amountCents, row.original.currency, orgLocale) ?? "—" },
+      { id: "valor", header: "Valor", cell: ({ row }) => <span className="whitespace-nowrap">{moneyText(row.original.amountCents, row.original.currency, orgLocale) ?? "—"}</span> },
       { id: "responsable", header: "Quién la lleva", cell: ({ row }) => (row.original.assignedUserId ? memberName(row.original.assignedUserId) : "Recepción") },
       {
         id: "acciones",
@@ -906,7 +908,7 @@ function PipelineListView({
   }
   return (
     <div className="flex flex-col gap-2">
-      <DataTable table={table} isFetching={listQuery.isFetching && !listQuery.isFetchingNextPage} />
+      <DataTable className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]" table={table} isFetching={listQuery.isFetching && !listQuery.isFetchingNextPage} />
       {listQuery.isError ? (
         <p role="alert" className="text-sm text-destructive">
           No se pudo actualizar la lista; se conservan las oportunidades cargadas.{" "}

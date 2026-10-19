@@ -4,6 +4,7 @@ import {
   DataTable,
   DataTableSkeleton,
   EmptyState,
+  ExpandableText,
   ErrorState,
   FilterBar,
   PageHeader,
@@ -133,22 +134,23 @@ function TasksPage() {
         meta: { view: { role: "title" } },
         cell: ({ row }) => {
           const task = row.original
+          // La etiqueta ya explica el origen; el título guardado no se modifica.
+          const prefix = `${AGENT_CASE_ROW}: `
+          const title = task.agentCase && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title
           return (
-            <span className="flex flex-col items-start gap-1">
-              <span className="font-medium">{task.title}</span>
+            <div className="flex min-w-0 max-w-sm flex-col items-start gap-1 whitespace-normal [overflow-wrap:anywhere]">
+              <ExpandableText text={title} label="título de la tarea" className="font-medium" />
               {task.agentCase ? (
-                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <span className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
                   {AGENT_CASE_ROW} <HandoffUrgency priority={task.agentCase.priority} />
                 </span>
               ) : null}
               {task.settledReason ? (
-                <span className="text-sm text-muted-foreground">
-                  {task.status === "cancelled" ? "Descartada" : "Se cerró sola"}: {task.settledReason}
-                </span>
+                <ExpandableText text={`${task.status === "cancelled" ? "Descartada" : "Se cerró sola"}: ${task.settledReason}`} label="motivo del cierre" className="text-sm text-muted-foreground" />
               ) : task.reason ? (
-                <span className="text-sm text-muted-foreground">{task.reason}</span>
+                <ExpandableText text={task.reason} label="contexto de la tarea" className="text-sm text-muted-foreground" />
               ) : null}
-            </span>
+            </div>
           )
         },
       },
@@ -161,7 +163,7 @@ function TasksPage() {
           const name = task.patientName ?? task.contactName
           if (!name && !task.opportunityTitle) return <span className="text-muted-foreground">—</span>
           return (
-            <span className="flex flex-col items-start gap-0.5">
+            <span className="flex min-w-0 max-w-48 flex-col items-start gap-0.5 whitespace-normal [overflow-wrap:anywhere]">
               {name ? (
                 <PersonLink patientId={task.patientId} contactId={task.contactId}>
                   {name}
@@ -339,7 +341,7 @@ function TasksPage() {
         />
       ) : (
         <div className="flex flex-col gap-2">
-          <DataTable table={table} isFetching={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage} onRowClick={(task: TaskItem) => listSearch.setParam("task", task.id)} />
+          <DataTable className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]" table={table} isFetching={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage} onRowClick={(task: TaskItem) => listSearch.setParam("task", task.id)} />
           {tasksQuery.isError ? (
             <p role="alert" className="text-sm text-destructive">
               No se pudo actualizar la lista; se conservan las tareas cargadas.{" "}
