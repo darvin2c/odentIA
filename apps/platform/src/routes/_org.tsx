@@ -59,6 +59,7 @@ import {
   invalidateAgentPanelQueries,
   useAgentPanelSummary,
 } from "../components/agent-panel"
+import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { HelpButton } from "../components/help-panel"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
@@ -321,6 +322,15 @@ function OrgLayout() {
       ? [{ label: "Configuración", to: "/settings/pipelines", icon: Settings }]
       : []
 
+  // El buscador rápido ofrece como «Ir a» las mismas pantallas del menú de esta persona.
+  const searchScreens: GlobalSearchScreen[] = [...navItems, ...footerItems].flatMap((entry) =>
+    "children" in entry && entry.children
+      ? entry.children.map((child) => ({ label: child.label, to: child.to }))
+      : "to" in entry && entry.to
+        ? [{ label: entry.label, to: entry.to }]
+        : [],
+  )
+
   if (!session) {
     return <LoadingState className="m-8" />
   }
@@ -351,9 +361,11 @@ function OrgLayout() {
     >
       <SideDockProvider draftGuard={PageDraftGuard}>
         <AgentPanelProvider notices={(frame) => <NoticesPanel {...frame} />}>
+          <GlobalSearchProvider orgId={org.id} screens={searchScreens}>
           <HeaderUtilitiesProvider
             value={
               <>
+                <GlobalSearchButton />
                 <HelpButton />
                 <WorkspaceNotifications />
                 <AgentPanelButton />
@@ -362,6 +374,7 @@ function OrgLayout() {
           >
             <Outlet />
           </HeaderUtilitiesProvider>
+          </GlobalSearchProvider>
         </AgentPanelProvider>
       </SideDockProvider>
       {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}

@@ -68,6 +68,8 @@ export interface FilterBarProps {
   filters: FilterDef[]
   sortOptions: SortOption[]
   searchPlaceholder?: string
+  /** Texto plegado del buscador de la lista: «Buscar en pacientes». */
+  searchLabel?: string
   showSearch?: boolean
   /**
    * Búsqueda revalidando (p. ej. `isFetching` de React Query): muestra el
@@ -85,6 +87,7 @@ export function FilterBar({
   filters,
   sortOptions,
   searchPlaceholder = common.filters.search,
+  searchLabel,
   showSearch = true,
   searchPending = false,
   className,
@@ -137,7 +140,7 @@ export function FilterBar({
           inlineFrom === "lg" ? "lg:flex justify-end" : "md:flex",
         )}
       >
-        {showSearch && <SearchInput placeholder={searchPlaceholder} expandable isFetching={searchPending} />}
+        {showSearch && <SearchInput placeholder={searchPlaceholder} label={searchLabel} expandable isFetching={searchPending} />}
         {primaryFilters.map((filter) => (
           <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="popover" />
         ))}
@@ -181,7 +184,7 @@ export function FilterBar({
         )}
       >
         {showSearch && (
-          <SearchInput placeholder={searchPlaceholder} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
+          <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
         )}
         <Button
           type="button"

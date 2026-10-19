@@ -19,7 +19,8 @@ import {
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
@@ -342,12 +343,7 @@ export async function listTemplates(
   }
   const q = query.q?.trim()
   const searchCond = q
-    ? or(
-        ilike(treatmentTemplate.name, `%${q}%`),
-        ilike(treatmentTemplate.key, `%${q}%`),
-        ilike(procedureCode.code, `%${q}%`),
-        ilike(procedureCode.display, `%${q}%`),
-      )!
+    ? foldedWordsMatch([treatmentTemplate.name, treatmentTemplate.key, procedureCode.code, procedureCode.display], q)
     : undefined
   const filteredWhere = searchCond ? and(...baseConditions, searchCond) : and(...baseConditions)
   const totalRows = await tx
@@ -523,8 +519,7 @@ export async function listServices(
   }
   const q = query.q?.trim()
   if (q) {
-    const like = `%${q}%`
-    conditions.push(or(ilike(serviceCatalog.name, like), ilike(serviceCatalog.code, like))!)
+    conditions.push(foldedWordsMatch([serviceCatalog.name, serviceCatalog.code], q))
   }
   const [counted] = await tx
     .select({ total: sql<number>`count(*)::int` })

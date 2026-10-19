@@ -25,7 +25,8 @@ import {
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { scheduleBlock } from "@odentia/db/schema/availability"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { and, asc, desc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
 import { validateAvailability } from "./availability.js"
 import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
@@ -563,13 +564,7 @@ export async function listAppointments(
   }
   const query = input.q?.trim()
   if (query) {
-    const like = `%${query}%`
-    const match = or(
-      ilike(patientPerson.displayName, like),
-      ilike(appointment.reason, like),
-      ilike(appointment.serviceName, like),
-    )
-    if (match) conditions.push(match)
+    conditions.push(foldedWordsMatch([patientPerson.displayName, appointment.reason, appointment.serviceName], query))
   }
   const rows = await appointmentRows(tx, orgId)
     .where(and(...conditions))

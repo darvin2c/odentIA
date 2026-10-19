@@ -596,7 +596,7 @@ function InboxPage() {
                 },
               ]}
               sortOptions={[]}
-              searchPlaceholder="Buscar por nombre o teléfono"
+              searchPlaceholder="Buscar por nombre o teléfono" searchLabel="Buscar en la Bandeja"
               searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
               resetKeys={["channel", "mine", "q"]}
             />

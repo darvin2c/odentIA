@@ -8,19 +8,20 @@
  * `people.ts` ya depende de ellos.
  */
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { digitsContain, foldedContains, foldedWordsMatch } from "./search-text.js"
 
+/**
+ * Nombre por palabras y sin tildes («lucia quispe» encuentra «Lucía Quispe
+ * Huamán»), documento y correo por su texto, y el teléfono por sus dígitos.
+ */
 export function personSearchCondition(
   q: string,
   columns: { displayName: SQLWrapper; phone: SQLWrapper; email: SQLWrapper; docNumber?: SQLWrapper },
 ): SQL {
   const text = q.trim()
   if (!text) return sql`true`
-  const like = `%${text}%`
   const digits = /^[\d\s\-()+.]+$/.test(text) ? text.replace(/\D/g, "") : ""
-  const phone =
-    digits.length >= 4
-      ? sql` or regexp_replace(coalesce(${columns.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`
-      : sql``
-  const doc = columns.docNumber ? sql` or ${columns.docNumber} ilike ${like}` : sql``
-  return sql`(${columns.displayName} ilike ${like}${doc} or ${columns.email} ilike ${like} or ${columns.phone} ilike ${like}${phone})`
+  const phone = digits.length >= 4 ? sql` or ${digitsContain(columns.phone, digits)}` : sql``
+  const doc = columns.docNumber ? sql` or ${foldedContains(columns.docNumber, text)}` : sql``
+  return sql`(${foldedWordsMatch([columns.displayName], text)}${doc} or ${foldedContains(columns.email, text)} or ${foldedContains(columns.phone, text)}${phone})`
 }

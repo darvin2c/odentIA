@@ -66,21 +66,31 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  variant = "default",
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  /** `lg`: la caja de una ventana de búsqueda, con el texto al tamaño de lectura. */
+  variant?: "default" | "lg"
+}) {
   return (
-    <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+    <div data-slot="command-input-wrapper" className={cn("p-1 pb-0", variant === "lg" && "min-w-0 flex-1 p-0")}>
+      <InputGroup
+        className={cn(
+          "rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!",
+          variant === "lg" ? "h-11! border-transparent! bg-transparent!" : "h-8!"
+        )}
+      >
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(
-            "w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
+            "w-full outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
+            variant === "lg" ? "text-base" : "text-sm",
             className
           )}
           {...props}
         />
         <InputGroupAddon>
-          <SearchIcon className="size-4 shrink-0 opacity-50" />
+          <SearchIcon className={cn("shrink-0 opacity-50", variant === "lg" ? "size-5" : "size-4")} />
         </InputGroupAddon>
       </InputGroup>
     </div>

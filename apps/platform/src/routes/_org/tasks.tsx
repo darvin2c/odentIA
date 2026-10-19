@@ -317,7 +317,7 @@ function TasksPage() {
             { value: "vence", label: "Vence primero" },
             { value: "recientes", label: "Más recientes" },
           ]}
-          searchPlaceholder="Buscar por tarea, persona u oportunidad"
+          searchPlaceholder="Buscar por tarea, persona u oportunidad" searchLabel="Buscar en tareas"
           searchPending={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage && filtered}
         />
       </div>

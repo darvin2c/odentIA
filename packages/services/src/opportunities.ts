@@ -20,7 +20,8 @@ import {
   type OpportunityStatus,
 } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
 import { requireContact } from "./contacts.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -630,13 +631,15 @@ function filterConditions(orgId: string, input: Omit<OpportunityFilters, "cursor
   const q = input.q?.trim() ?? ""
   if (input.status && !OPPORTUNITY_STATUSES.includes(input.status)) throw validation("Estado de oportunidad inválido")
   if (q) {
-    const like = `%${q}%`
     conditions.push(
-      or(
-        ilike(opportunity.title, like),
-        ilike(opportunity.interestText, like),
-        sql`exists (select 1 from contact c where c.id = ${opportunity.contactId} and c.organization_id = ${orgId} and c.display_name ilike ${like})`,
-      )!,
+      foldedWordsMatch(
+        [
+          opportunity.title,
+          opportunity.interestText,
+          sql`(select c.display_name from contact c where c.id = ${opportunity.contactId} and c.organization_id = ${orgId})`,
+        ],
+        q,
+      ),
     )
   }
   if (input.contactId) conditions.push(eq(opportunity.contactId, input.contactId))

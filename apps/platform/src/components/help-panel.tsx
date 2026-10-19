@@ -6,6 +6,7 @@ import { ArrowRight, CircleHelp } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
+import { ASK_HELP_EVENT } from "../lib/global-search"
 import { mutationErrorMessage } from "../lib/query-error"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
 
@@ -219,6 +220,18 @@ export function HelpButton() {
     setLinkedCase(params.get("caso"))
     setOpen(true)
   }, [searchStr])
+  // El buscador rápido manda aquí lo que no es un nombre ni una pantalla: «¿cuántas citas hay mañana?».
+  const askQuestion = ask.mutate
+  useEffect(() => {
+    function onAsk(event: Event) {
+      const question = (event as CustomEvent<{ question?: string }>).detail?.question?.trim() ?? ""
+      setOpen(true)
+      if (question.length >= 3) askQuestion(question)
+      else setDraft(question)
+    }
+    window.addEventListener(ASK_HELP_EVENT, onAsk)
+    return () => window.removeEventListener(ASK_HELP_EVENT, onAsk)
+  }, [askQuestion])
   // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de pantalla, un mensaje a medio escribir diría otra pantalla de la que se adjunta.
   useEffect(() => {
     setDirect(null)

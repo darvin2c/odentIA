@@ -19,7 +19,8 @@ import {
 import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lt, or, type SQL, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
 import {
@@ -878,7 +879,7 @@ function conversationFilterConditions(orgId: string, input: ConversationFilters)
   if (input.mineOf) conditions.push(mineOrUnclaimedSql(sql.raw('"conversation"'), input.mineOf))
   const q = input.q?.trim()
   if (q) {
-    const byName = ilike(contact.displayName, `%${q}%`)
+    const byName = foldedWordsMatch([contact.displayName], q)
     const digits = phoneDigitsOf(q)
     // Por teléfono: los dígitos del número que la persona dio o del hilo de
     // WhatsApp. Buscar solo filtra la lista; nunca identifica a nadie.
