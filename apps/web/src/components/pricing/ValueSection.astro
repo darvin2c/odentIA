@@ -1,6 +1,9 @@
 ---
 // «Calcula tu mes»: el texto queda en el HTML; la calculadora se hidrata al entrar en pantalla.
+import { shownPlan, valuePricesOf } from "../../lib/pricing"
 import ValueCalculator from "./ValueCalculator"
+
+const prices = valuePricesOf(shownPlan(Astro.locals.pricing))
 ---
 <section id="calcula" class="night sec">
   <div class="grain" aria-hidden="true"></div>
@@ -10,7 +13,7 @@ import ValueCalculator from "./ValueCalculator"
       <h2 class="h2">Lo que pagas y lo que recuperas.</h2>
       <p class="lead lead-d">Pon los números de tu clínica y compara lo que hoy pierdes sin agentes con lo que pagarías con odentIA.</p>
     </div>
-    <ValueCalculator client:visible />
+    {prices ? <ValueCalculator client:visible prices={prices} /> : null}
   </div>
 </section>
 

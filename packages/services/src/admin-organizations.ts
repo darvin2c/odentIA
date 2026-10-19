@@ -11,6 +11,7 @@ import { account, invitation, member, organization, session, user } from "@odent
 import { patient } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { AdminActor } from "./admin-core.js"
@@ -107,6 +108,8 @@ export interface OrganizationListItem {
   hasBranch: boolean
   billingStatus: OrganizationBillingSummary["status"] | null
   restricted: boolean
+  /** Precio negociado vigente (issue 168): para la etiqueta «20 % negociado · vence 30 abr». */
+  negotiated: { discountBps: number; endsAt: Date | null } | null
 }
 
 export interface OrganizationList {
@@ -397,16 +400,20 @@ function auditInput(
 export async function listOrganizations(
   tx: Db,
   actor: AdminActor | null,
-  opts: { q?: string; limit?: number; offset?: number },
+  opts: { q?: string; limit?: number; offset?: number; negotiated?: boolean },
   loaders: OrganizationBillingLoaders = {},
 ): Promise<OrganizationList> {
   requireStaff(actor)
   const q = (opts.q ?? "").trim().slice(0, 120)
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100)
   const offset = Math.max(opts.offset ?? 0, 0)
-  const where = q
-    ? or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))
-    : undefined
+  const negotiatedSql = sql`${organization.id} in (select ${saasSubscription.organizationId} from ${saasSubscription}
+    where ${saasSubscription.discountBps} > 0 and (${saasSubscription.discountEndsAt} is null or ${saasSubscription.discountEndsAt} > now()))`
+  const filters = [
+    ...(q ? [or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))] : []),
+    ...(opts.negotiated ? [negotiatedSql] : []),
+  ]
+  const where = filters.length ? and(...filters) : undefined
 
   const rows = await tx
     .select({
@@ -461,7 +468,16 @@ export async function listOrganizations(
       billingStatus = summary?.status ?? null
       restricted = summary?.restricted ?? false
     }
+    const [deal] = await tx
+      .select({ discountBps: saasSubscription.discountBps, endsAt: saasSubscription.discountEndsAt })
+      .from(saasSubscription)
+      .where(eq(saasSubscription.organizationId, row.id))
+      .limit(1)
+    const now = new Date()
+    const negotiated =
+      deal && deal.discountBps > 0 && (!deal.endsAt || deal.endsAt > now) ? { discountBps: deal.discountBps, endsAt: deal.endsAt } : null
     items.push({
+      negotiated,
       id: row.id,
       name: row.name,
       slug: row.slug,

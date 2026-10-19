@@ -3,13 +3,14 @@ import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageHeader, PageSh
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Building2, ShieldCheck } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
 import { adminAccessQuery } from "../../lib/admin-access"
 import { apiFetch } from "../../lib/api"
-import { authClient } from "../../lib/auth-client"
-import { adminUrl, tenantUrl } from "../../lib/host"
+import { API_URL, authClient } from "../../lib/auth-client"
+import { storedInvitation } from "../../lib/founders"
+import { adminUrl, tenantUrl, webUrl } from "../../lib/host"
 
 export const Route = createFileRoute("/_app/")({ component: OrgsPage })
 
@@ -19,10 +20,28 @@ const statusLabels = {
   sin_suscripcion: "Sin suscripción",
 }
 
+/** Si abrir una clínica pide invitación (Fundadores, issue 165); lo decide el servidor, esto solo lo explica. */
+const signupModeQuery = {
+  queryKey: ["public", "sign-up"],
+  queryFn: async () => {
+    const res = await fetch(`${API_URL}/api/public/sign-up`)
+    if (!res.ok) throw new Error(`Error ${res.status}`)
+    return z.object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta") }).passthrough().parse(await res.json())
+  },
+  staleTime: 60_000,
+}
+
 function OrgsPage() {
   const organizations = useQuery(accountOrganizationsQuery)
   const invitations = useQuery(accountInvitationsQuery)
   const staff = useQuery(adminAccessQuery)
+  const signUp = useQuery(signupModeQuery)
+  const sessionEmail = authClient.useSession().data?.user.email ?? ""
+  // La invitación Fundadores que trajo el enlace del correo, si quedó guardada al crear la cuenta.
+  const [founderToken, setFounderToken] = useState<string | null>(null)
+  useEffect(() => setFounderToken(storedInvitation()), [])
+  const invitationOnly = signUp.data?.signupMode === "invitacion"
+  const canCreate = !invitationOnly || founderToken !== null
   const queryClient = useQueryClient()
   const [leaving, setLeaving] = useState<AccountOrganization | null>(null)
   const leave = useMutation({
@@ -31,13 +50,25 @@ function OrgsPage() {
     onError: (error) => toast.error(error.message),
   })
   return <PageShell className="flex flex-col gap-6">
-    <PageHeader title="Mis organizaciones" subtitle="Elige dónde quieres trabajar" actions={<Button variant="outline" render={<Link to="/onboarding" search={{ continue: undefined }} />}>Crear organización</Button>} />
+    <PageHeader
+      title="Mis organizaciones"
+      subtitle="Elige dónde quieres trabajar"
+      actions={
+        canCreate ? (
+          founderToken ? (
+            <Button render={<Link to="/onboarding" search={{ continue: undefined, invitacion: founderToken }} />}>Abrir mi clínica</Button>
+          ) : (
+            <Button variant="outline" render={<Link to="/onboarding" search={{ continue: undefined }} />}>Crear organización</Button>
+          )
+        ) : undefined
+      }
+    />
     {staff.data?.staff && <a href={adminUrl()} className="flex items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted"><ShieldCheck className="size-5" aria-hidden /><div><p className="font-medium">Administración de odentIA</p><p className="text-sm text-muted-foreground">Organizaciones clientes, cobros y soporte</p></div></a>}
     {invitations.isError && <ErrorState title="No se pudieron cargar tus invitaciones" error={invitations.error} onRetry={() => void invitations.refetch()} />}
     {invitations.data && invitations.data.length > 0 && <section aria-labelledby="invitations-title" className="space-y-3"><h2 id="invitations-title" className="text-sm font-semibold">Invitaciones pendientes</h2><ul className="space-y-3">{invitations.data.map((invitation) => <InvitationItem key={invitation.id} invitation={invitation} />)}</ul></section>}
     <section aria-labelledby="organizations-title" className="space-y-3">
       <h2 id="organizations-title" className="text-sm font-semibold">Donde trabajas</h2>
-      {organizations.isPending ? <LoadingState message="Cargando organizaciones…" /> : organizations.isError ? <ErrorState error={organizations.error} onRetry={() => void organizations.refetch()} /> : organizations.data.length === 0 ? <EmptyState title="Todavía no perteneces a una organización" description="Acepta una invitación o crea la cuenta de tu clínica. Si necesitas ayuda, puedes escribir a soporte." /> : <ul className="space-y-3">{organizations.data.map((org) => <OrganizationItem key={org.organizationId} org={org} onLeave={() => setLeaving(org)} />)}</ul>}
+      {organizations.isPending ? <LoadingState message="Cargando organizaciones…" /> : organizations.isError ? <ErrorState error={organizations.error} onRetry={() => void organizations.refetch()} /> : organizations.data.length === 0 ? (canCreate ? <EmptyState title="Todavía no perteneces a una organización" description="Acepta una invitación o crea la cuenta de tu clínica. Si necesitas ayuda, puedes escribir a soporte." /> : <NoInvitation email={sessionEmail} />) : <ul className="space-y-3">{organizations.data.map((org) => <OrganizationItem key={org.organizationId} org={org} onLeave={() => setLeaving(org)} />)}</ul>}
     </section>
     <ConfirmDialog open={leaving !== null} title={`Salir de ${leaving?.organizationName ?? "la organización"}`} description="Perderás el acceso a esta clínica. Lo que registraste se conserva con tu autoría; para volver necesitarás una invitación." confirmLabel="Salir de la organización" pending={leave.isPending} onClose={() => setLeaving(null)} onConfirm={() => { if (leaving) leave.mutate(leaving) }} />
   </PageShell>
@@ -91,4 +122,33 @@ function InvitationItem({ invitation }: { invitation: AccountInvitation }) {
     <div className="flex gap-2"><Button variant="ghost" disabled={response.isPending} onClick={() => setRejecting(true)}>Rechazar</Button><Button disabled={response.isPending} onClick={() => response.mutate(true)}>{response.isPending ? "Guardando…" : "Aceptar"}</Button></div>
     <ConfirmDialog open={rejecting} title="Rechazar invitación" description={`No entrarás a ${invitation.organizationName}. Si cambias de opinión, tendrán que invitarte de nuevo.`} confirmLabel="Rechazar invitación" pending={response.isPending} onClose={() => setRejecting(false)} onConfirm={() => response.mutate(false)} />
   </li>
+}
+
+/**
+ * Sin clínica y sin invitación mientras se entra por invitación (Fundadores,
+ * tablero 10): dos salidas, pedir la invitación o pedir que la clínica invite.
+ * El servidor tampoco deja abrir una clínica sin invitación.
+ */
+function NoInvitation({ email }: { email: string }) {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border bg-card p-6">
+      <div>
+        <p className="text-lg font-semibold">Todavía no perteneces a una clínica</p>
+        <p className="mt-1 text-sm text-muted-foreground">Por ahora se entra a odentIA con invitación: estamos abriendo con un grupo de clínicas Fundadoras.</p>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+        <div>
+          <p className="font-medium">Quiero usar odentIA en mi clínica</p>
+          <p className="text-sm text-muted-foreground">Pide tu invitación en la web; te respondemos en 2 días hábiles.</p>
+        </div>
+        <Button render={<a href={webUrl("/solicitar-invitacion")} />}>Solicitar invitación</Button>
+      </div>
+      <div className="rounded-lg border p-4">
+        <p className="font-medium">Trabajo en una clínica que ya usa odentIA</p>
+        <p className="text-sm text-muted-foreground">
+          Pide a quien administra tu clínica que te invite{email ? ` a ${email}` : ""}. La invitación aparecerá aquí.
+        </p>
+      </div>
+    </div>
+  )
 }

@@ -2,8 +2,7 @@
 // En pantallas anchas, corchetes metálicos en WebGL (como los del logo); en el teléfono (≤ 720 px),
 // corchetes en 2D con CSS para no cargar una escena 3D.
 import { type PointerEvent, useEffect, useRef, useState } from "react"
-import { CONSULTATION, CONVERSATION, PLAN, RECOVERED, usd } from "../../lib/pricing"
-import { CTA, registerUrl } from "../../lib/site"
+import { usd, type ValuePrices } from "../../lib/pricing"
 import "./pricing-hero.css"
 
 type Pair = [string, string]
@@ -15,7 +14,8 @@ type Task = {
   workM?: Pair
   out: string
   outM?: string
-  price: number
+  /** Qué acción cobra; null = no se cobra. */
+  price: "conversation" | "consultation" | "recovered" | null
 }
 
 /** Ejemplo de un día. Los textos «M» son los del teléfono, más cortos. */
@@ -26,14 +26,14 @@ const TASKS: Task[] = [
     inM: ["WhatsApp · Andrea", "«¿Tienen cita para mañana?»"],
     work: ["Recepción", "Sofi busca un horario y agenda"],
     out: "Conversación atendida",
-    price: CONVERSATION,
+    price: "conversation",
   },
   {
     time: "07:00",
     in: ["Recordatorio · Carlos", "Su cita es hoy a las 9:00."],
     work: ["Administrador", "Le recuerda la cita"],
     out: "Recordatorio enviado",
-    price: 0,
+    price: null,
   },
   {
     time: "09:40",
@@ -43,7 +43,7 @@ const TASKS: Task[] = [
     workM: ["Asistente clínico", "Ordena el dictado"],
     out: "Nota confirmada por la doctora",
     outM: "Nota confirmada",
-    price: CONSULTATION,
+    price: "consultation",
   },
   {
     time: "11:05",
@@ -51,7 +51,7 @@ const TASKS: Task[] = [
     inM: ["Consulta · Miguel", "«Esta nota la escribo yo.»"],
     work: ["Asistente clínico", "Prepara las sugerencias"],
     out: "Borrador descartado",
-    price: 0,
+    price: null,
   },
   {
     time: "16:05",
@@ -59,7 +59,7 @@ const TASKS: Task[] = [
     inM: ["Control vencido · Rosa", "Su limpieza quedó pendiente."],
     work: ["Administrador", "Le escribe con su enlace"],
     out: "Rosa volvió y la atendieron",
-    price: RECOVERED,
+    price: "recovered",
   },
   {
     time: "16:20",
@@ -67,7 +67,7 @@ const TASKS: Task[] = [
     inM: ["Control vencido · Pedro", "Ocho meses sin control."],
     work: ["Administrador", "Le escribe con su enlace"],
     out: "Pedro reservó, pero no vino",
-    price: 0,
+    price: null,
   },
 ]
 const ALL_DONE = [5, 4, 3, 2, 1, 0]
@@ -307,7 +307,19 @@ function startScene(
   }
 }
 
-export default function PricingHero() {
+export default function PricingHero({
+  prices,
+  ctaHref,
+  ctaLabel,
+  lead,
+}: {
+  prices: ValuePrices
+  ctaHref: string
+  ctaLabel: string
+  /** La bajada con las cifras del plan que se muestra (lista o Fundadores). */
+  lead: string
+}) {
+  const cost = (key: Task["price"]) => (key ? prices[key] : 0)
   const [step, setStep] = useState<Step>({ task: 0, phase: 0, done: [] })
   const [paused, setPaused] = useState(false)
   const [reduced, setReduced] = useState(false)
@@ -321,7 +333,7 @@ export default function PricingHero() {
 
   const k = TASKS[step.task]!
   const p = still ? 2 : step.phase
-  const billable = k.price > 0
+  const billable = cost(k.price) > 0
   const live = useRef({ still, phase: p, billable })
   live.current = { still, phase: p, billable }
 
@@ -404,7 +416,7 @@ export default function PricingHero() {
         ? (narrow && k.workM) || k.work
         : [`Resultado · ${k.time}`, (narrow && k.outM) || k.out]
   const done = still ? ALL_DONE : step.done
-  const total = done.reduce((a, i) => a + TASKS[i]!.price, 0)
+  const total = done.reduce((a, i) => a + cost(TASKS[i]!.price), 0)
   const rows = done.slice(0, narrow ? 3 : 4)
   const togglePause = () => setPaused((v) => !v)
 
@@ -421,14 +433,10 @@ export default function PricingHero() {
           <h1 className="pz-h1 rise d1">
             Pagas por el valor que recibes, <span>no por el software.</span>
           </h1>
-          <p className="pz-lead rise d2">
-            Lo que pagas depende de lo que tus agentes logran en tu clínica. Un plan de {usd(PLAN)}{" "}
-            al mes que vuelve completo como crédito. Cada resultado tiene su precio, y lo que no da
-            resultado no se cobra.
-          </p>
+          <p className="pz-lead rise d2">{lead}</p>
           <div className="pz-ctas rise d3">
-            <a className="btn btn-p" href={registerUrl}>
-              {CTA}
+            <a className="btn btn-p" href={ctaHref}>
+              {ctaLabel}
             </a>
             <a className="btn btn-g" href="#calcula">
               Calcula tu mes
@@ -469,7 +477,7 @@ export default function PricingHero() {
             )}
             {p >= 2 && (
               <span className={`pz-chip${billable ? "" : " pz-free"}`}>
-                {billable ? usd(k.price) : "Sin costo"}
+                {billable ? usd(cost(k.price)) : "Sin costo"}
               </span>
             )}
           </div>
@@ -491,7 +499,7 @@ export default function PricingHero() {
                 >
                   <span className="mono pz-time">{t.time}</span>
                   <span>{(narrow && t.outM) || t.out}</span>
-                  <span className={`pz-pr${t.price > 0 ? "" : " pz-free"}`}>{usd(t.price)}</span>
+                  <span className={`pz-pr${cost(t.price) > 0 ? "" : " pz-free"}`}>{usd(cost(t.price))}</span>
                 </div>
               )
             })}

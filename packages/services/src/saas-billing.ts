@@ -44,6 +44,7 @@ import {
   saasSettlementEmail,
   saasTrialEndedEmail,
 } from "./saas-emails.js"
+import { clearExpiredDiscounts, endFounderGuarantees } from "./saas-founders.js"
 import { addMonth, closeSaasPeriods, overdueChargeOrgs } from "./saas-invoicing.js"
 
 /** Lo que se guarda en el aviso: el buzón de respuesta no aplica a Plan y pagos. */
@@ -321,6 +322,12 @@ export interface SaasPlanInput {
   trialMaxCreditCents?: number
   trialMaxDays?: number
   isDefault?: boolean
+  /** La web lo publica (Fundadores, decisión 14). */
+  showOnWeb?: boolean
+  /** Plan por invitación: lugares; null = sin tope. */
+  seatLimit?: number | null
+  /** Meses de condiciones garantizadas desde que la clínica entra. */
+  guaranteeMonths?: number | null
 }
 
 export interface SaasPlanRow {
@@ -346,6 +353,9 @@ export interface SaasPlanRow {
   trialMaxCreditCents: number
   trialMaxDays: number
   isDefault: boolean
+  showOnWeb: boolean
+  seatLimit: number | null
+  guaranteeMonths: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -374,6 +384,9 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     trialMaxCreditCents: row.trialMaxCreditCents,
     trialMaxDays: row.trialMaxDays,
     isDefault: row.isDefault,
+    showOnWeb: row.showOnWeb,
+    seatLimit: row.seatLimit,
+    guaranteeMonths: row.guaranteeMonths,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -404,6 +417,17 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   if (value.trialDays !== undefined) terms.trialDays = value.trialDays
   if (value.trialMaxDays !== undefined) terms.trialMaxDays = value.trialMaxDays
   if (value.isDefault !== undefined) terms.isDefault = value.isDefault
+  if (value.showOnWeb !== undefined) terms.showOnWeb = value.showOnWeb
+  if (value.seatLimit !== undefined) {
+    if (value.seatLimit !== null && (!Number.isInteger(value.seatLimit) || value.seatLimit < 1)) throw validation("Los lugares deben ser un número entero mayor que cero, o vacío")
+    terms.seatLimit = value.seatLimit
+  }
+  if (value.guaranteeMonths !== undefined) {
+    if (value.guaranteeMonths !== null && (!Number.isInteger(value.guaranteeMonths) || value.guaranteeMonths < 1 || value.guaranteeMonths > 120)) {
+      throw validation("Los meses garantizados deben estar entre 1 y 120, o vacío")
+    }
+    terms.guaranteeMonths = value.guaranteeMonths
+  }
   return terms
 }
 
@@ -458,11 +482,13 @@ function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
 /** Planes activos por moneda (lectura segura para panel y admin). */
 export async function listSaasPlans(
   tx: Db,
-  query: { currency?: string; includeInactive?: boolean } = {},
+  query: { currency?: string; includeInactive?: boolean; excludeInvitationOnly?: boolean } = {},
 ): Promise<SaasPlanRow[]> {
   const filters = []
   if (query.currency) filters.push(eq(saasPlan.currency, currency(query.currency)))
   if (!query.includeInactive) filters.push(eq(saasPlan.isActive, true))
+  // Un plan con lugares (Fundadores) solo se entra por invitación: la clínica no lo elige.
+  if (query.excludeInvitationOnly) filters.push(sql`${saasPlan.seatLimit} IS NULL`)
   const rows = await tx
     .select()
     .from(saasPlan)
@@ -653,6 +679,7 @@ export interface SaasSubscriptionRow {
   sellerStartedAt: Date | null
   sellerEndedAt: Date | null
   discountBps: number
+  guaranteedUntil: Date | null
   trialCreditCents: number | null
   trialDays: number | null
   spendCapCents: number | null
@@ -692,6 +719,7 @@ export async function getSaasSubscription(
     sellerStartedAt: row.sellerStartedAt,
     sellerEndedAt: row.sellerEndedAt,
     discountBps: row.discountBps,
+    guaranteedUntil: row.guaranteedUntil,
     trialCreditCents: row.trialCreditCents,
     trialDays: row.trialDays,
     spendCapCents: row.spendCapCents,
@@ -902,6 +930,17 @@ export async function chooseSaasPlan(
 ): Promise<SaasSubscriptionRow> {
   const plan = await planByCode(tx, planCode)
   const current = await getSaasSubscription(tx, orgId)
+  if (plan.seatLimit !== null && current?.planId !== plan.id) {
+    throw new ServiceError("SAAS_PLAN_BY_INVITATION", 409, "Ese plan es solo por invitación")
+  }
+  // Una Fundadora no deja sus condiciones por error: mientras valgan, el plan no se cambia desde el panel.
+  if (current?.guaranteedUntil && current.guaranteedUntil > now && current.planId !== plan.id) {
+    throw new ServiceError(
+      "SAAS_FOUNDER_GUARANTEED",
+      409,
+      "Tus condiciones de Fundador siguen vigentes: si quieres cambiar de plan, escríbenos desde Soporte",
+    )
+  }
   if (!current) return startSaasTrial(tx, orgId, { planCode }, now)
   await assertSaasCurrencyChange(tx, orgId, plan.currency)
   // Fuera de la prueba, elegir el primer plan lo activa: el mes empieza hoy.
@@ -1295,6 +1334,8 @@ export interface OrganizationBillingSummary {
   outstandingByCurrency: SaasMoneyByCurrency[]
   proofExtensionUntil: Date | null
   usage30d: SaasUsageSummary
+  /** Entró por invitación (Fundadores): hasta cuándo valen sus condiciones; null si no aplica o ya terminaron. */
+  guaranteedUntil: Date | null
 }
 
 /** Resumen de suscripción + saldo + uso para ficha de clínica, panel y banner. */
@@ -1335,6 +1376,7 @@ export async function getOrganizationBillingSummary(
     outstandingByCurrency: outstanding,
     proofExtensionUntil: sub?.proofExtensionUntil ?? null,
     usage30d,
+    guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > new Date() ? sub.guaranteedUntil : null,
   }
 }
 
@@ -2796,6 +2838,12 @@ export async function tickSaasBilling(
       )
     }
   }
+
+  // 1b. Lo negociado que venció (issue 168) y las condiciones de Fundador que
+  // terminaron (issue 165): a precio de lista desde el día siguiente. Los
+  // avisos de antes ya salieron en el paso 1 (`precio_especial`, `condiciones`).
+  await clearExpiredDiscounts(tx, now)
+  for (const orgId of await endFounderGuarantees(tx, now)) await notifyOrg(tx, orgId, "saas.subscription.updated")
 
   // 2. Prueba vencida → gracia 7 días.
   const trialsOver = await tx

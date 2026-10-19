@@ -57,6 +57,10 @@ const pageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 })
+const organizationQuery = pageQuery.extend({
+  /** Solo las clínicas con precio negociado vigente (issue 168). */
+  negotiated: z.enum(["1"]).optional(),
+})
 
 const userQuery = pageQuery.extend({
   status: z.enum(["todos", "activos", "bloqueados", "sin_verificar", "sin_clinica"]).optional(),
@@ -155,14 +159,14 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
 
   app.get("/", async (c) => {
     const actor = adminContextOf(c)
-    const parsed = pageQuery.safeParse(c.req.query())
+    const parsed = organizationQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       owner((tx) =>
         listOrganizations(
           tx,
           actor,
-          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset },
+          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset, negotiated: parsed.data.negotiated === "1" },
           loaders,
         ),
       ),
@@ -449,11 +453,19 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
   app.post("/:id/billing/discount", async (c) => {
     const actor = adminContextOf(c)
     const parsed = z
-      .object({ discountBps: z.number().int().min(0).max(9000), note: z.string().max(500).nullish() })
+      .object({
+        discountBps: z.number().int().min(0).max(9000),
+        /** Último instante del descuento (issue 168); null o ausente = no vence. */
+        discountEndsAt: z.iso.datetime({ offset: true }).nullish(),
+        note: z.string().max(500).nullish(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => owner((tx) => setSaasDiscount(tx, actor, c.req.param("id"), parsed.data)))
+    const { discountEndsAt, ...rest } = parsed.data
+    return runService(c, 200, () =>
+      owner((tx) => setSaasDiscount(tx, actor, c.req.param("id"), { ...rest, discountEndsAt: discountEndsAt ? new Date(discountEndsAt) : null })),
+    )
   })
 
   app.post("/:id/billing/trial", async (c) => {

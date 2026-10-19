@@ -1848,7 +1848,7 @@ export const PAGES = {
           },
           {
             title: "Pruébalo tú mismo",
-            text: "Te registras, conectas tus canales y tus agentes trabajan 30 días con el crédito de prueba. Sin tarjeta.",
+            text: "Te registras, conectas tus canales y tus agentes trabajan con el crédito de prueba. Sin tarjeta.",
           },
           {
             title: "Mira cómo cobramos",
@@ -1863,7 +1863,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Necesito hablar con alguien para probarlo?",
-        a: "No. Te registras y tus agentes trabajan 30 días con el crédito de prueba. La prueba no pide tarjeta.",
+        a: "No. Te registras y tus agentes trabajan con el crédito de prueba. La prueba no pide tarjeta.",
       },
       {
         q: "¿Me ayudan a conectar mis canales?",

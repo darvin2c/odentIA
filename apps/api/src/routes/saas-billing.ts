@@ -15,6 +15,10 @@ import {
   assertSaasAllowed,
   assertSaasSeatAvailable,
   chooseSaasPlan,
+  claimFounderInvitation,
+  completeFounderInvitation,
+  getSignupMode,
+  releaseFounderInvitation,
   claimSaasNoticeMail,
   completeSaasNoticeMail,
   confirmSaasPayment,
@@ -137,6 +141,9 @@ const planInput = z
     trialMaxCreditCents: cents.optional(),
     trialMaxDays: z.number().int().min(1).max(365).optional(),
     isDefault: z.boolean().optional(),
+    showOnWeb: z.boolean().optional(),
+    seatLimit: z.number().int().min(1).max(100000).nullish(),
+    guaranteeMonths: z.number().int().min(1).max(120).nullish(),
   })
   .strict()
 
@@ -956,7 +963,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const parsed = z.object({ currency: currency.optional() }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listSaasPlans(tx, { currency: parsed.data.currency })),
+      withOrgContext(deps.db, orgId, (tx) => listSaasPlans(tx, { currency: parsed.data.currency, excludeInvitationOnly: true })),
     )
   })
   // C2: lo que hicieron los agentes en el tramo que corre, con sus precios (ADR 0031).
@@ -1278,6 +1285,9 @@ export async function readSaasSubscription(db: Db, orgId: string) {
  * Recovery (`/reset-password`, `/verify-email`), webhooks e ingesta no se
  * tocan: este middleware no los mira.
  */
+/** Cabecera con que el panel manda la invitación Fundadores al abrir la clínica. */
+export const FOUNDER_INVITATION_HEADER = "x-odentia-invitation"
+
 export interface SaasPreAuthDeps {
   auth: Auth
   ownerDb: Db
@@ -1305,16 +1315,36 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
       return next()
     }
     if (tail !== "create") return next()
-    await next()
+    // Fundadores (issue 165): con «solo con invitación», abrir una clínica pide
+    // la invitación vigente de quien la abre. Crear la cuenta sigue libre.
+    const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
+    if (!session) return next()
+    const token = c.req.header(FOUNDER_INVITATION_HEADER)?.trim() || null
+    let claimed: string | null = null
+    if (token) {
+      claimed = await deps.ownerDb.transaction((tx) => claimFounderInvitation(tx, token, session.user.email))
+    } else if ((await deps.ownerDb.transaction((tx) => getSignupMode(tx))) === "invitacion") {
+      return c.json(
+        errorBody(c, "INVITATION_REQUIRED", "Por ahora se abren clínicas solo con invitación. Pide la tuya desde la web de odentIA."),
+        403,
+      )
+    }
+    try {
+      await next()
+    } catch (error) {
+      if (claimed) await deps.ownerDb.transaction((tx) => releaseFounderInvitation(tx, claimed)).catch(() => undefined)
+      throw error
+    }
     const status = c.res.status
-    if (status < 200 || status >= 300) return
-    const createdId = await readCreatedOrgId(c.res.clone())
+    const createdId = status >= 200 && status < 300 ? await readCreatedOrgId(c.res.clone()) : null
     if (!createdId) {
-      console.error(`saas-billing: create sin id legible; la prueba se asegura al abrir billing`)
+      if (claimed) await deps.ownerDb.transaction((tx) => releaseFounderInvitation(tx, claimed)).catch(() => undefined)
+      if (status >= 200 && status < 300) console.error(`saas-billing: create sin id legible; la prueba se asegura al abrir billing`)
       return
     }
     try {
-      await startSaasTrial(deps.ownerDb, createdId, {})
+      if (claimed) await deps.ownerDb.transaction((tx) => completeFounderInvitation(tx, claimed, createdId))
+      else await startSaasTrial(deps.ownerDb, createdId, {})
     } catch (e) {
       console.error(`saas-billing: no se pudo iniciar la prueba de ${createdId}`, e)
     }

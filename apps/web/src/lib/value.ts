@@ -1,6 +1,6 @@
 // «Lo que pagas y lo que recuperas»: lo que se pierde sin agentes frente a lo que se paga,
 // con los números que pone cada clínica. Es un ejemplo, nunca una promesa de resultados.
-import { CONSULTATION, CONVERSATION, PLAN, RECOVERED } from "./pricing"
+import type { ValuePrices } from "./pricing"
 
 export type ValueInput = {
   /** Personas que escriben al mes; cada una cuenta como conversación atendida. */
@@ -34,19 +34,20 @@ export const DEFAULT_VALUE_INPUT: ValueInput = {
   hourCost: 4,
 }
 
-export function computeValue(i: ValueInput) {
+/** La cuenta con los precios vigentes: la cuota más lo que pasa del crédito. */
+export function computeValue(i: ValueInput, prices: ValuePrices) {
   const lost = Math.round((((i.writers * i.unansweredPct) / 100) * i.leavePct) / 100)
   const recovered = Math.round((i.overdue * i.returnPct) / 100)
   const lostNew = lost * i.appointmentValue
   const lostControls = recovered * i.appointmentValue
   const lostTime = i.teamHours * i.hourCost
   const withoutUs = lostNew + lostControls + lostTime
-  const conversations = i.writers * CONVERSATION
-  const recoveredCost = recovered * RECOVERED
-  const consultations = i.consultations * CONSULTATION
+  const conversations = i.writers * prices.conversation
+  const recoveredCost = recovered * prices.recovered
+  const consultations = i.consultations * prices.consultation
   const usage = conversations + recoveredCost + consultations
-  const coveredByPlan = Math.min(PLAN, usage)
-  const withUs = Math.max(PLAN, usage)
+  const coveredByPlan = Math.min(prices.credit, usage)
+  const withUs = prices.plan + Math.max(0, usage - prices.credit)
   return {
     lost,
     recovered,

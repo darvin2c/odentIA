@@ -98,11 +98,21 @@ export const saasPlan = pgTable(
     trialMaxDays: integer("trial_max_days").notNull().default(60),
     /** El plan con que se cuenta y se prueba si la clínica aún no eligió uno. Uno como mucho. */
     isDefault: boolean("is_default").notNull().default(false),
+    /** La web lo publica (decisión 14 de Fundadores); un plan nuevo nace sin publicar. */
+    showOnWeb: boolean("show_on_web").notNull().default(false),
+    /** Plan por invitación (Fundadores): clínicas como máximo, contando invitaciones vigentes; null = sin tope. */
+    seatLimit: integer("seat_limit"),
+    /** Meses que se mantienen las condiciones desde que la clínica entra; después pasa al plan por defecto. */
+    guaranteeMonths: integer("guarantee_months"),
     ...timestamps,
   },
   (table) => [
     unique("saas_plan_code_uidx").on(table.code),
     uniqueIndex("saas_plan_default_uidx").on(table.isDefault).where(sql`${table.isDefault}`),
+    check(
+      "saas_plan_founders_check",
+      sql`(${table.seatLimit} IS NULL OR ${table.seatLimit} > 0) AND (${table.guaranteeMonths} IS NULL OR ${table.guaranteeMonths} BETWEEN 1 AND 120)`,
+    ),
     check(
       "saas_plan_action_check",
       sql`${table.creditCents} >= 0 AND coalesce(${table.conversationMicros}, 0) >= 0 AND coalesce(${table.consultationMicros}, 0) >= 0 AND coalesce(${table.recoveryMicros}, 0) >= 0`,
@@ -200,6 +210,10 @@ export const saasSubscription = pgTable(
     sellerEndedAt: timestamp("seller_ended_at", { withTimezone: true }),
     /** Descuento negociado sobre el precio base de cada acción (ADR 0031); la cuota no tiene descuento. */
     discountBps: integer("discount_bps").notNull().default(0),
+    /** Último instante del descuento negociado (issue 168); null = no vence. Pasado, se cuenta a precio de lista. */
+    discountEndsAt: timestamp("discount_ends_at", { withTimezone: true }),
+    /** Entró por invitación a un plan con condiciones garantizadas: hasta cuándo valen. */
+    guaranteedUntil: timestamp("guaranteed_until", { withTimezone: true }),
     /** Prueba negociada para esta clínica; null = la del plan. */
     trialCreditCents: integer("trial_credit_cents"),
     trialDays: integer("trial_days"),
@@ -508,6 +522,8 @@ export const saasNegotiation = pgTable(
     kind: text("kind").notNull(),
     /** Descuento en puntos básicos, o saldo (centavos) y días de prueba. */
     discountBps: integer("discount_bps"),
+    /** Hasta cuándo vale el descuento pedido; null = no vence. */
+    discountEndsAt: timestamp("discount_ends_at", { withTimezone: true }),
     trialCreditCents: integer("trial_credit_cents"),
     trialDays: integer("trial_days"),
     note: text("note"),
@@ -706,5 +722,104 @@ export const saasActionReview = pgTable(
           AND ${table.decidedByStaffId} IS NOT NULL AND length(trim(${table.answer})) > 0)`,
     ),
     check("saas_action_review_credit_check", sql`${table.creditChargeId} IS NULL OR ${table.status} = 'devuelta'`),
+  ],
+)
+
+/* ---------- Fundadores: alta por invitación y lista de espera (issue 165) ---------- */
+
+export const SAAS_SIGNUP_MODES = ["invitacion", "abierta"] as const
+export type SaasSignupMode = (typeof SAAS_SIGNUP_MODES)[number]
+
+/**
+ * Cómo se abren clínicas nuevas: «solo con invitación» o «abierta». Una sola
+ * fila (`id = 1`) que escribe la administración; la lee el guard de
+ * `organization/create`. Global, sin `organization_id`: solo `ownerDb`.
+ */
+export const saasSignupPolicy = pgTable(
+  "saas_signup_policy",
+  {
+    id: integer("id").primaryKey().default(1),
+    mode: text("mode").notNull().default("invitacion"),
+    updatedBy: text("updated_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    check("saas_signup_policy_singleton_check", sql`${table.id} = 1`),
+    check("saas_signup_policy_mode_check", sql`${table.mode} IN ('invitacion','abierta')`),
+  ],
+)
+
+export const SAAS_WAITLIST_STATUSES = ["por_revisar", "invitada", "entro", "descartada"] as const
+export type SaasWaitlistStatus = (typeof SAAS_WAITLIST_STATUSES)[number]
+export const SAAS_WAITLIST_DENTISTS = ["1", "2-3", "4-9", "10+"] as const
+export const SAAS_WAITLIST_TOOLS = ["nada", "cuaderno_excel", "otro_software"] as const
+
+/**
+ * Solicitud de la lista de espera y, cuando se invita, su invitación. Una
+ * invitación vale para un solo correo y abre una sola clínica: el token solo
+ * se guarda como huella (`token_hash`), `claimed_at` la reserva mientras se
+ * crea la clínica y `organization_id` queda al entrar. Global y solo de
+ * `ownerDb` (la web la escribe por su ruta pública).
+ */
+export const saasWaitlistRequest = pgTable(
+  "saas_waitlist_request",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull(),
+    clinicName: text("clinic_name").notNull(),
+    /** ISO 3166-1 alfa-2. */
+    countryCode: char("country_code", { length: 2 }).notNull(),
+    city: text("city").notNull(),
+    dentists: text("dentists").notNull(),
+    currentTool: text("current_tool").notNull(),
+    status: text("status").notNull().default("por_revisar"),
+    note: text("note"),
+    discardReason: text("discard_reason"),
+    decidedBy: text("decided_by").references(() => user.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    planId: uuid("plan_id").references(() => saasPlan.id),
+    tokenHash: text("token_hash"),
+    inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
+    invitedAt: timestamp("invited_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "set null" }),
+    enteredAt: timestamp("entered_at", { withTimezone: true }),
+    confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
+    invitationSentAt: timestamp("invitation_sent_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("saas_waitlist_request_token_uidx").on(table.tokenHash),
+    uniqueIndex("saas_waitlist_request_org_uidx").on(table.organizationId),
+    index("saas_waitlist_request_status_idx").on(table.status, table.createdAt),
+    index("saas_waitlist_request_email_idx").on(table.email),
+    check(
+      "saas_waitlist_request_status_check",
+      sql`${table.status} IN ('por_revisar','invitada','entro','descartada')`,
+    ),
+    check("saas_waitlist_request_dentists_check", sql`${table.dentists} IN ('1','2-3','4-9','10+')`),
+    check(
+      "saas_waitlist_request_tool_check",
+      sql`${table.currentTool} IN ('nada','cuaderno_excel','otro_software')`,
+    ),
+    check("saas_waitlist_request_country_check", sql`${table.countryCode} ~ '^[A-Z]{2}$'`),
+    check(
+      "saas_waitlist_request_text_check",
+      sql`length(trim(${table.firstName})) BETWEEN 1 AND 80 AND length(trim(${table.lastName})) BETWEEN 1 AND 80
+        AND length(trim(${table.clinicName})) BETWEEN 1 AND 120 AND length(trim(${table.city})) BETWEEN 1 AND 80
+        AND length(${table.email}) BETWEEN 3 AND 254 AND length(${table.phone}) BETWEEN 6 AND 20
+        AND (${table.note} IS NULL OR length(${table.note}) <= 2000)`,
+    ),
+    // Invitada: plan, huella y vencimiento. Entró: además, su clínica. Descartada: con motivo.
+    check(
+      "saas_waitlist_request_invite_check",
+      sql`(${table.status} = 'por_revisar' AND ${table.tokenHash} IS NULL AND ${table.organizationId} IS NULL)
+        OR (${table.status} = 'invitada' AND ${table.tokenHash} IS NOT NULL AND ${table.planId} IS NOT NULL AND ${table.inviteExpiresAt} IS NOT NULL AND ${table.organizationId} IS NULL)
+        OR (${table.status} = 'entro' AND ${table.planId} IS NOT NULL AND ${table.enteredAt} IS NOT NULL)
+        OR (${table.status} = 'descartada' AND ${table.organizationId} IS NULL AND length(trim(coalesce(${table.discardReason}, ''))) > 0)`,
+    ),
   ],
 )

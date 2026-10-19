@@ -30,12 +30,16 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Cloudflare Tunnel»). API, admin, panel, platform y web además publican en loopback
   (API en el host 3101, panel 3010, platform 3011, admin 3012 y web 3013) solo como
   vuelta atrás por el borde de OpenShip. La web redirige `www.` a la raíz.
-- La web (`apps/web`, ADR 0046) es HTML generado al compilar la imagen y servido por
-  `apps/web/server.mjs`, sin variables de runtime. Su dirección canónica, su mapa del
-  sitio y sus enlaces a `app.` y `api.` salen de `VITE_BASE_DOMAIN`: la canónica es
-  `https://<dominio>`, no `WEB_URL`, que es el panel. El Libro de Reclamaciones envía
-  desde el navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS`
-  y `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
+- La web (`apps/web`, ADR 0046 y 0062) arma cada página al servirla con el servidor de
+  Astro (`node ./dist/server/entry.mjs`, `HOST=0.0.0.0`). Lee los precios de la API por la
+  red del stack (`ODENTIA_API_INTERNAL_URL=http://api:3001`) y los guarda 30 segundos; si
+  la API nunca respondió, la página responde 503 en vez de inventar cifras. Su dirección
+  canónica, su mapa del sitio y sus enlaces a `app.` y `api.` salen de `VITE_BASE_DOMAIN`:
+  la canónica es `https://<dominio>`, no `WEB_URL`, que es el panel. El Libro de
+  Reclamaciones y la solicitud de Fundadores envían desde el navegador a `api.`: el origen
+  raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y `COMPLAINTS_EMAIL` es el correo de
+  odentIA que recibe el aviso de cada hoja. `FOUNDERS_EMAIL` es el buzón que lee las respuestas
+  a los correos de Fundadores; sin él, esos correos no prometen que alguien las lea.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 

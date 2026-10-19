@@ -4,16 +4,19 @@ import { getOrganizationPendingCounts } from "./admin-organizations.js"
 import { getAdminSupportAttention } from "./admin-support.js"
 import { consumerComplaintSummary } from "./consumer-complaints.js"
 import { getSaasAdminAttention } from "./saas-billing.js"
+import { countWaitlistToReview, type ExpiringTermRow, listExpiringTerms } from "./saas-founders.js"
 
 export interface AdminAttentionItem {
   key: string
   label: string
   count: number
   description: string
-  path: "/support" | "/billing" | "/commissions" | "/organizations" | "/users" | "/complaints"
+  path: "/support" | "/billing" | "/commissions" | "/organizations" | "/users" | "/complaints" | "/waitlist"
 }
 export interface AdminOverview {
   items: AdminAttentionItem[]
+  /** Precios negociados y condiciones de Fundador que terminan pronto (issues 165 y 168); solo la administración. */
+  expiring: ExpiringTermRow[]
 }
 
 /** Inicio interno: soporte no recibe ningún importe ni pendiente de cobros. */
@@ -21,7 +24,15 @@ export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<
   const support = await getAdminSupportAttention(tx)
   const organizations = await getOrganizationPendingCounts(tx, actor)
   const complaints = await consumerComplaintSummary(tx, actor)
+  const waitlist = await countWaitlistToReview(tx)
   const items: AdminAttentionItem[] = [
+    {
+      key: "waitlist",
+      label: "Lista de espera por revisar",
+      count: waitlist,
+      description: "Clínicas que pidieron entrar: se responde en 2 días hábiles",
+      path: "/waitlist",
+    },
     {
       key: "complaints",
       label: "Libro de Reclamaciones por responder",
@@ -96,5 +107,5 @@ export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<
       },
     )
   }
-  return { items }
+  return { items, expiring: actor.role === "admin" ? await listExpiringTerms(tx) : [] }
 }

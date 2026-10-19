@@ -12,7 +12,7 @@
  */
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
-import { saasPayment, saasPaymentMethod, saasPlan } from "@odentia/db/schema/saas-billing"
+import { saasPayment, saasPaymentMethod, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import {
   confirmSaasPayment,
@@ -25,6 +25,7 @@ import {
   submitSaasReceipt,
   upsertSaasSeller,
 } from "./saas-billing.js"
+import { invitationTokenHash } from "./saas-founders.js"
 import type { Storage } from "./storage.js"
 
 const FICTIONAL_PLANS = [
@@ -102,11 +103,41 @@ const ACTION_PLAN = {
   trialMaxCreditCents: 13000,
   trialMaxDays: 60,
   isDefault: true,
+  showOnWeb: true,
+} as const
+
+/**
+ * El plan por invitación de Fundadores (issue 165): sin cuota, USD 100 de
+ * regalo hasta 90 días, cada acción con 40 % menos, 20 lugares y 12 meses
+ * garantizados; sin negociación encima. Se publica en la web.
+ */
+const FOUNDERS_PLAN = {
+  code: "fundadores-ficticio",
+  name: "Fundadores (ficticio)",
+  description: "Ejemplo ficticio del plan por invitación; no contratar.",
+  currency: "USD",
+  priceCents: 0,
+  billingPeriod: "mensual",
+  sortOrder: 0,
+  creditCents: 0,
+  conversationMicros: 300_000,
+  consultationMicros: 240_000,
+  recoveryMicros: 2_400_000,
+  maxDiscountBps: 0,
+  sellerDiscountBps: 0,
+  trialCreditCents: 10000,
+  trialDays: 90,
+  trialMaxCreditCents: 10000,
+  trialMaxDays: 90,
+  seatLimit: 20,
+  guaranteeMonths: 12,
+  showOnWeb: true,
 } as const
 
 /** Catálogo ficticio (no pisa lo editado: solo inserta lo ausente). */
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
   await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
+  await db.insert(saasPlan).values(FOUNDERS_PLAN).onConflictDoNothing({ target: saasPlan.code })
   for (const plan of FICTIONAL_PLANS) {
     await db
       .insert(saasPlan)
@@ -134,7 +165,7 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       })
       .onConflictDoNothing({ target: saasPaymentMethod.code })
   }
-  return { plans: FICTIONAL_PLANS.length + 1, methods: FICTIONAL_METHODS.length }
+  return { plans: FICTIONAL_PLANS.length + 2, methods: FICTIONAL_METHODS.length }
 }
 
 const DEMO_ACTOR = "seed-saas-demo"
@@ -278,5 +309,57 @@ export async function seedSaasBillingDemo(
       notes: "Demo (ficticia)",
     })
   }
+  await seedFoundersDemo(db, now)
   return { orgs: ["seed-saas-prueba", "seed-saas-deuda", "seed-saas-cobrada"] }
+}
+
+/**
+ * Enlace de invitación de la semilla: abre `/register?invitacion=fundadores-demo`
+ * en el panel con el correo `fundadora-demo@example.test`. Solo desarrollo.
+ */
+export const DEMO_FOUNDER_TOKEN = "fundadores-demo"
+
+const DEMO_WAITLIST = [
+  { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", dentists: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0 },
+  { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", dentists: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
+  { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", dentists: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
+  { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", dentists: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
+  { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", dentists: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
+] as const
+
+/**
+ * Fundadores en desarrollo: solicitudes de la lista de espera en cada estado
+ * (por revisar, invitada con el enlace de la semilla, descartada) y un precio
+ * negociado que vence en 6 días en «Demo Deuda» (issue 168). Idempotente por
+ * correo; no envía correos.
+ */
+export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> {
+  const [plan] = await db.select({ id: saasPlan.id }).from(saasPlan).where(eq(saasPlan.code, FOUNDERS_PLAN.code)).limit(1)
+  if (!plan) return
+  for (const row of DEMO_WAITLIST) {
+    const [found] = await db.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, row.email)).limit(1)
+    if (found) continue
+    const createdAt = new Date(now.getTime() - row.ageDays * 86_400_000)
+    const { ageDays: _ageDays, status, ...data } = row
+    await db.insert(saasWaitlistRequest).values({
+      ...data,
+      status,
+      createdAt,
+      updatedAt: createdAt,
+      ...(status === "invitada"
+        ? {
+            planId: plan.id,
+            tokenHash: invitationTokenHash(DEMO_FOUNDER_TOKEN),
+            invitedAt: createdAt,
+            inviteExpiresAt: new Date(createdAt.getTime() + 14 * 86_400_000),
+          }
+        : {}),
+      ...(status === "descartada" ? { discardReason: "Vende insumos dentales, no es una clínica (ficticio)." } : {}),
+    })
+  }
+  // Precio negociado que vence pronto: la etiqueta roja de Clínicas y el aviso de Inicio.
+  await db
+    .update(saasSubscription)
+    .set({ discountBps: 1000, discountEndsAt: new Date(now.getTime() + 6 * 86_400_000), updatedAt: now })
+    .where(and(eq(saasSubscription.organizationId, "seed-saas-deuda"), eq(saasSubscription.discountBps, 0)))
 }

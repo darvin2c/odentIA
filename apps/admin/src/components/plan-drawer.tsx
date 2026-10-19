@@ -33,6 +33,11 @@ export interface AdminPlan {
   trialMaxCreditCents: number
   trialMaxDays: number
   isDefault: boolean
+  /** La web lo publica (Fundadores, decisión 14). */
+  showOnWeb: boolean
+  /** Plan por invitación: lugares; null = sin tope. */
+  seatLimit: number | null
+  guaranteeMonths: number | null
 }
 
 interface PriceCheck {
@@ -63,7 +68,30 @@ function money(micros: number, currency: string): string {
   return new Intl.NumberFormat("es-PE", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
 }
 
-export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClose: () => void; onSaved: () => void }) {
+/** «40 % menos que la lista»: compara un precio con el del plan de lista. */
+function againstList(own: number | null, list: number | null | undefined): string | undefined {
+  if (own === null || !list) return undefined
+  const percent = Math.round((1 - own / list) * 100)
+  if (percent > 0) return `${percent} % menos que la lista`
+  if (percent < 0) return `${-percent} % más que la lista`
+  return "Igual que la lista"
+}
+
+/** Un número entero positivo o vacío (null); NaN si no lo es. */
+const optionalInt = (text: string) => (text.trim() ? (Number.isInteger(Number(text.trim())) ? Number(text.trim()) : Number.NaN) : null)
+
+export function PlanDrawer({
+  plan,
+  listPlan,
+  onClose,
+  onSaved,
+}: {
+  plan?: AdminPlan
+  /** El plan por defecto (la lista), para decir cuánto menos cuesta cada acción en este. */
+  listPlan?: AdminPlan
+  onClose: () => void
+  onSaved: () => void
+}) {
   const [code, setCode] = useState(plan?.code ?? "")
   const [name, setName] = useState(plan?.name ?? "")
   const [currency, setCurrency] = useState(plan?.currency ?? "USD")
@@ -79,7 +107,12 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
   const [trialMaxCredit, setTrialMaxCredit] = useState(plan ? centsToMajor(plan.trialMaxCreditCents, plan.currency) : "")
   const [trialMaxDays, setTrialMaxDays] = useState(String(plan?.trialMaxDays ?? 60))
   const [isDefault, setIsDefault] = useState(plan?.isDefault ?? false)
+  // Un plan nuevo nace sin publicar en la web (decisión 14 de Fundadores).
+  const [showOnWeb, setShowOnWeb] = useState(plan?.showOnWeb ?? false)
+  const [seatLimit, setSeatLimit] = useState(plan?.seatLimit ? String(plan.seatLimit) : "")
+  const [guaranteeMonths, setGuaranteeMonths] = useState(plan?.guaranteeMonths ? String(plan.guaranteeMonths) : "")
   const [error, setError] = useState<string | null>(null)
+  const compareTo = listPlan && listPlan.id !== plan?.id && listPlan.currency === currency.trim().toUpperCase() ? listPlan : undefined
 
   const terms = {
     currency: currency.trim().toUpperCase(),
@@ -128,7 +161,11 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
         trialMaxCreditCents: majorToCents(trialMaxCredit || "0", currency) ?? 0,
         trialMaxDays: Number(trialMaxDays),
         isDefault,
+        showOnWeb,
+        seatLimit: optionalInt(seatLimit),
+        guaranteeMonths: optionalInt(guaranteeMonths),
       }
+      if (Number.isNaN(body.seatLimit) || Number.isNaN(body.guaranteeMonths)) throw new Error("Lugares y meses van como números enteros, o vacíos")
       return plan
         ? api(`/api/admin/billing/plans/${plan.id}`, { method: "PATCH", body: JSON.stringify(body) })
         : api("/api/admin/billing/plans", { method: "POST", body: JSON.stringify(body) })
@@ -179,9 +216,9 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
       <fieldset className="flex flex-col gap-2 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">Precio base por acción ({currency})</legend>
         <div className="grid grid-cols-3 gap-3">
-          {field("plan-conversation", "Conversación", conversation, setConversation)}
-          {field("plan-consultation", "Consulta", consultation, setConsultation)}
-          {field("plan-recovery", "Cita recuperada", recovery, setRecovery)}
+          {field("plan-conversation", "Conversación", conversation, setConversation, againstList(toMicros(conversation), compareTo?.conversationMicros))}
+          {field("plan-consultation", "Consulta", consultation, setConsultation, againstList(toMicros(consultation), compareTo?.consultationMicros))}
+          {field("plan-recovery", "Cita recuperada", recovery, setRecovery, againstList(toMicros(recovery), compareTo?.recoveryMicros))}
         </div>
         <p className="text-xs text-muted-foreground">Vacío: el plan no cobra esa acción.</p>
       </fieldset>
@@ -199,6 +236,34 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
         {field("plan-trial-max-credit", "Saldo máximo con aprobación", trialMaxCredit, setTrialMaxCredit)}
         {field("plan-trial-max-days", "Días máximos con aprobación", trialMaxDays, setTrialMaxDays, undefined, "numeric")}
       </fieldset>
+
+      <fieldset className="grid grid-cols-2 gap-3 rounded-lg border p-3">
+        <legend className="px-1 text-sm font-medium">Por invitación (Fundadores)</legend>
+        {field(
+          "plan-seats",
+          "Lugares (clínicas como máximo)",
+          seatLimit,
+          setSeatLimit,
+          "Con lugares, el plan solo se entra con invitación. Vacío: es un plan normal. Bajarlo no saca a nadie.",
+          "numeric",
+        )}
+        {field(
+          "plan-guarantee",
+          "Condiciones garantizadas (meses)",
+          guaranteeMonths,
+          setGuaranteeMonths,
+          "Desde que la clínica entra; después pasa al plan por defecto, con aviso 30 días antes.",
+          "numeric",
+        )}
+      </fieldset>
+
+      <div className="flex items-start gap-2">
+        <Checkbox id="plan-web" checked={showOnWeb} onCheckedChange={(value) => setShowOnWeb(value === true)} />
+        <Label htmlFor="plan-web" className="flex flex-col items-start gap-0.5 font-normal">
+          <span>Mostrar en la web</span>
+          <span className="text-xs text-muted-foreground">Apagado al crear un plan. Al guardar, la web lo muestra en menos de un minuto.</span>
+        </Label>
+      </div>
 
       <div className="flex items-start gap-2">
         <Checkbox id="plan-default" checked={isDefault} onCheckedChange={(value) => setIsDefault(value === true)} />

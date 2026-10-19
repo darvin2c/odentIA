@@ -20,6 +20,7 @@ import { Route as AppOrganizationsRouteImport } from './routes/_app/organization
 import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppWaitlistRouteImport } from './routes/_app/waitlist'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -75,6 +76,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWaitlistRoute = AppWaitlistRouteImport.update({
+  id: '/waitlist',
+  path: '/waitlist',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
+  '/waitlist': typeof AppWaitlistRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -98,6 +105,7 @@ export interface FileRoutesByTo {
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
+  '/waitlist': typeof AppWaitlistRoute
   '/': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -112,6 +120,7 @@ export interface FileRoutesById {
   '/_app/support': typeof AppSupportRoute
   '/_app/team': typeof AppTeamRoute
   '/_app/users': typeof AppUsersRoute
+  '/_app/waitlist': typeof AppWaitlistRoute
   '/_app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -127,6 +136,7 @@ export interface FileRouteTypes {
     | '/support'
     | '/team'
     | '/users'
+    | '/waitlist'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/support'
     | '/team'
     | '/users'
+    | '/waitlist'
     | '/'
   id:
     | '__root__'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/_app/support'
     | '/_app/team'
     | '/_app/users'
+    | '/_app/waitlist'
     | '/_app/'
   fileRoutesById: FileRoutesById
 }
@@ -239,6 +251,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/waitlist': {
+      id: '/_app/waitlist'
+      path: '/waitlist'
+      fullPath: '/waitlist'
+      preLoaderRoute: typeof AppWaitlistRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -250,6 +269,7 @@ interface AppRouteChildren {
   AppSupportRoute: typeof AppSupportRoute
   AppTeamRoute: typeof AppTeamRoute
   AppUsersRoute: typeof AppUsersRoute
+  AppWaitlistRoute: typeof AppWaitlistRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -261,6 +281,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSupportRoute: AppSupportRoute,
   AppTeamRoute: AppTeamRoute,
   AppUsersRoute: AppUsersRoute,
+  AppWaitlistRoute: AppWaitlistRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

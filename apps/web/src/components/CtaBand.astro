@@ -1,14 +1,19 @@
 ---
 // Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
-import { CTA, registerUrl } from "../lib/site"
+import { shownPlan } from "../lib/pricing"
+import { ctaOf } from "../lib/site"
+const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
   title?: string
   text?: string
 }
+const plan = shownPlan(Astro.locals.pricing)
 const {
   title = "Tu equipo, de vuelta con sus pacientes.",
-  text = "Pruébalo 30 días: tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.",
+  text = plan
+    ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.`
+    : "Tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.",
 } = Astro.props
 ---
 <section class="hero band" id="empezar">
@@ -18,7 +23,7 @@ const {
     <h2 class="t">{title}</h2>
     <p class="lead lead-d">{text}</p>
     <div class="ctas">
-      <a class="btn btn-p" href={registerUrl}>{CTA}</a>
+      <a class="btn btn-p" href={cta.href}>{cta.label}</a>
       <a class="btn btn-g" href="/contacto">Habla con nosotros</a>
     </div>
   </div>

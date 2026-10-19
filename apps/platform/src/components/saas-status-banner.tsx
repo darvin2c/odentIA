@@ -34,23 +34,24 @@ function dateLabel(iso: string | null, locale: string | undefined, timeZone: str
 
 /** Aviso de cobro calculado por el servidor (ADR 0031, tablero C4). */
 interface SaasAlert {
-  family: "saldo_prueba" | "dias_prueba" | "credito" | "tope"
+  family: "saldo_prueba" | "dias_prueba" | "credito" | "tope" | "precio_especial" | "condiciones"
   level: "aviso" | "alarma" | "limite"
   periodKey: string
   title: string
   message: string
-  action: "elegir_plan" | "cambiar_tope" | "ver_consumo"
+  action: "elegir_plan" | "cambiar_tope" | "ver_consumo" | "ver_plan"
 }
 
 const ACTION_WORDS: Record<SaasAlert["action"], string> = {
   elegir_plan: "Elegir plan",
   cambiar_tope: "Cambiar tope",
   ver_consumo: "Ver consumo",
+  ver_plan: "Ver mi plan",
 }
 
 const SEVERITY = { limite: 0, alarma: 1, aviso: 2 } as const
 /** A igual nivel, lo que cambia el trabajo del día primero: el tope corta casos nuevos y sin saldo los agentes se pausan. */
-const FAMILY_ORDER = { tope: 0, saldo_prueba: 1, dias_prueba: 2, credito: 3 } as const
+const FAMILY_ORDER = { tope: 0, saldo_prueba: 1, dias_prueba: 2, credito: 3, precio_especial: 4, condiciones: 5 } as const
 
 export function SaasStatusBanner({ organizationId, role }: { organizationId: string; role: string }) {
   const [dismissed, setDismissed] = useState(false)

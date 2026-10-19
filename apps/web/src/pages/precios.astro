@@ -9,18 +9,28 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 // Precios: pagas por el valor que recibes, no por el software. Todas las cifras salen de lib/pricing.
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
-import {
-  CONSULTATION,
-  CONVERSATION,
-  PLAN,
-  PRICING,
-  RECOVERED,
-  TRIAL_CREDIT,
-  usd,
-} from "../lib/pricing"
+import { giftOf, money, REVIEW, shownPlan, valuePricesOf } from "../lib/pricing"
+import { ctaOf } from "../lib/site"
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
+const prices = valuePricesOf(plan)
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
 
 const title = "Precios: pagas por el valor, no por el software"
-const description = `Software para clínicas dentales con un plan de ${usd(PLAN)} al mes que vuelve como crédito. Pagas por conversación atendida, consulta documentada o cita recuperada; sin resultado, no hay cobro. Prueba ${PRICING.trialDays} días sin tarjeta.`
+const description = !plan
+  ? "Software para clínicas dentales: pagas por conversación atendida, consulta documentada o cita recuperada; sin resultado, no hay cobro."
+  : founder
+    ? `Software para clínicas dentales. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo por conversación atendida, consulta documentada o cita recuperada${founder.discountPercent ? `, con ${founder.discountPercent} % menos` : ""}.`
+    : `Software para clínicas dentales con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por conversación atendida, consulta documentada o cita recuperada; sin resultado, no hay cobro. Prueba ${plan.trialDays} días sin tarjeta.`
+const lead = !plan
+  ? "Lo que pagas depende de lo que tus agentes logran en tu clínica. Cada resultado tiene su precio, y lo que no da resultado no se cobra."
+  : founder
+    ? `Lo que pagas depende de lo que tus agentes logran en tu clínica. Como Fundador entras sin cuota y los primeros ${m(plan.trialCredit)} los pagamos nosotros. Lo que no da resultado no se cobra.`
+    : `Lo que pagas depende de lo que tus agentes logran en tu clínica. Un plan de ${m(plan.plan)} al mes que vuelve completo como crédito. Cada resultado tiene su precio, y lo que no da resultado no se cobra.`
 
 const faq: FaqItem[] = [
   {
@@ -35,7 +45,7 @@ const faq: FaqItem[] = [
   {
     // ADR 0054: «Pedir revisión», no «reclamo», que es el del Libro de Reclamaciones.
     q: "¿Y si me cobran algo que no debía?",
-    a: `Pides revisión desde la fila, en tu cuenta, de lo de este mes o del anterior. Si era spam, se devuelve al instante, hasta el ${PRICING.spamRefundPercent} % de tus conversaciones del mes. Lo demás lo revisamos y te respondemos en ${PRICING.reviewAnswerDays} días hábiles. Lo que ya estaba facturado vuelve en tu cargo siguiente.`,
+    a: `Pides revisión desde la fila, en tu cuenta, de lo de este mes o del anterior. Si era spam, se devuelve al instante, hasta el ${REVIEW.spamRefundPercent} % de tus conversaciones del mes. Lo demás lo revisamos y te respondemos en ${REVIEW.answerDays} días hábiles. Lo que ya estaba facturado vuelve en tu cargo siguiente.`,
   },
   {
     q: "¿Y si un mes mis agentes gastan mucho?",
@@ -43,11 +53,15 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Qué pasa si no uso el crédito?",
-    a: `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${usd(PLAN)} del plan. El crédito es el de ese mes.`,
+    a: founder
+      ? "Como Fundador no pagas cuota: si un mes tus agentes no hacen nada, no pagas nada."
+      : `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${m(plan?.plan ?? null)} del plan. El crédito es el de ese mes.`,
   },
   {
     q: "¿La prueba pide tarjeta?",
-    a: `No. Te registras, conectas tus canales y tus agentes trabajan ${PRICING.trialDays} días con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
+    a: founder
+      ? `No. Pides tu invitación, abres tu clínica y tus agentes empiezan con los ${m(plan?.trialCredit ?? null)} de regalo. La tarjeta no se pide.`
+      : `No. Te registras, conectas tus canales y tus agentes trabajan ${plan?.trialDays ?? 30} días con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
   },
   {
     q: "¿Cada cuánto me cobran?",
@@ -64,30 +78,34 @@ const faq: FaqItem[] = [
 ]
 
 const pageUrl = new URL("/precios", Astro.site).toString()
-const product = {
-  "@context": "https://schema.org",
-  "@type": "Product",
-  name: "Plan odentIA",
-  description: `Plataforma omnicanal y agéntica para clínicas dentales. El plan de ${usd(PLAN)} al mes vuelve completo como crédito para los agentes; cada conversación atendida cuesta ${usd(CONVERSATION)}, cada consulta documentada ${usd(CONSULTATION)} y cada cita recuperada ${usd(RECOVERED)}.`,
-  brand: { "@type": "Brand", name: "odentIA" },
-  url: pageUrl,
-  offers: {
-    "@type": "Offer",
-    url: pageUrl,
-    price: PLAN.toFixed(2),
-    priceCurrency: PRICING.currency,
-    availability: "https://schema.org/InStock",
-    priceSpecification: {
-      "@type": "UnitPriceSpecification",
-      price: PLAN.toFixed(2),
-      priceCurrency: PRICING.currency,
-      unitCode: "MON",
-      referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "MON" },
-    },
-  },
-}
+const product = plan
+  ? {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: founder ? "odentIA · Programa Fundadores" : `${plan.name} · odentIA`,
+      description: `Plataforma omnicanal y agéntica para clínicas dentales. ${
+        founder ? "Sin cuota mensual" : `El plan de ${m(plan.plan)} al mes vuelve completo como crédito para los agentes`
+      }; cada conversación atendida cuesta ${m(plan.conversation)}, cada consulta documentada ${m(plan.consultation)} y cada cita recuperada ${m(plan.recovered)}.`,
+      brand: { "@type": "Brand", name: "odentIA" },
+      url: pageUrl,
+      offers: {
+        "@type": "Offer",
+        url: pageUrl,
+        price: plan.plan.toFixed(2),
+        priceCurrency: plan.currency,
+        availability: "https://schema.org/InStock",
+        priceSpecification: {
+          "@type": "UnitPriceSpecification",
+          price: plan.plan.toFixed(2),
+          priceCurrency: plan.currency,
+          unitCode: "MON",
+          referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "MON" },
+        },
+      },
+    }
+  : null
 const jsonLd = [
-  product,
+  ...(product ? [product] : []),
   faqJsonLd(faq),
   breadcrumbJsonLd(Astro.site, [
     ["Inicio", "/"],
@@ -96,14 +114,14 @@ const jsonLd = [
 ]
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
-  <PricingHero client:load />
+  {prices ? <PricingHero client:load prices={prices} ctaHref={cta.href} ctaLabel={cta.label} lead={lead} /> : null}
   <HowWeCharge />
   <PlanPrices />
   <ValueSection />
   <Difference />
   <Faq items={faq} title="Sobre el precio." />
   <CtaBand
-    title={`Obtén ${usd(TRIAL_CREDIT)} de crédito y pruébalo ${PRICING.trialDays} días.`}
-    text="Con ese crédito tus agentes trabajan en tu clínica desde el primer día. Precios en dólares, más los impuestos de tu país."
+    title={gift ? (founder ? `Los primeros ${gift} los pagamos nosotros.` : `Obtén ${gift} de crédito y pruébalo ${plan?.trialDays} días.`) : "Tu equipo, de vuelta con sus pacientes."}
+    text={`Con ese crédito tus agentes trabajan en tu clínica desde el primer día. Precios en ${plan?.currency === "USD" ? "dólares" : (plan?.currency ?? "dólares")}, más los impuestos de tu país.`}
   />
 </Base>

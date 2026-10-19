@@ -218,6 +218,20 @@
       "when": 1792373337342,
       "tag": "0030_cargo_guarda_su_credito",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792375567942,
+      "tag": "0031_fundadores_y_precio_negociado",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792375570004,
+      "tag": "0032_fundadores_y_precio_negociado_reglas",
+      "breakpoints": true
     }
   ]
 }

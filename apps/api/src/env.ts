@@ -39,6 +39,8 @@ const envSchema = z.object({
    * Reclamaciones de la web). Opcional: sin él solo sale la copia al consumidor.
    */
   COMPLAINTS_EMAIL: z.preprocess((value) => (value === "" ? undefined : value), z.string().email().optional()),
+  /** Buzón que lee las respuestas a los correos de Fundadores (solicitud recibida e invitación). */
+  FOUNDERS_EMAIL: z.preprocess((value) => (value === "" ? undefined : value), z.string().email().optional()),
   /**
    * Buzón de soporte de odentIA. Los avisos los envía el worker; aquí se
    * valida igual para que una dirección mal escrita falle al arrancar.

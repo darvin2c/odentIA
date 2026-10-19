@@ -1,0 +1,56 @@
+/* «Pide tus USD 100»: el mismo partido de entrar y crear cuenta (AuthSplit del panel), con la noche de
+   la portada a la izquierda y la solicitud sobre fondo claro a la derecha. */
+.wl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: calc(100vh - 89px); }
+.wl-aside {
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+  background: radial-gradient(90% 75% at 50% 0%, #0f3340 0%, #0a2129 50%, #061318 100%);
+  color: var(--on-night); padding: 56px 48px 40px;
+}
+.wl-aside-copy { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
+.wl-tag { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--sky); }
+.wl-title { margin: 0; font-size: clamp(34px, 3.4vw, 46px); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; text-wrap: balance; }
+.wl-gift { font-size: 1.35em; line-height: 1; white-space: nowrap; }
+.wl-accent { color: var(--sky); }
+.wl-chips { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.wl-chips li { border: 1px solid #23444e; background: rgba(79, 195, 215, .1); border-radius: 999px; padding: 7px 13px; font-size: 14px; font-weight: 700; }
+.wl-chips li::before { content: "✓ "; color: var(--sky); }
+.wl-scene { position: absolute; inset: auto 0 0 0; height: 62%; width: 100%; }
+.wl-work {
+  position: relative; z-index: 1; margin-top: auto; display: flex; align-items: center; gap: 12px;
+  border: 1px solid #23444e; background: rgba(6, 19, 24, .8); border-radius: 16px; padding: 12px 16px; font-size: 14px;
+}
+.wl-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
+.wl-what { flex: 1 1 auto; color: var(--on-night-2); min-width: 0; }
+.wl-time { font-size: 12px; color: var(--on-night-3); }
+.wl-main { background: #f1f5f9; display: flex; justify-content: center; align-items: center; padding: 48px 24px; }
+.wl-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; color: var(--ink); }
+.wl-h { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.wl-note { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
+.wl-center { text-align: center; }
+.wl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wl-wide { grid-column: span 2; }
+.wl-field { display: flex; flex-direction: column; gap: 6px; font-size: 15px; font-weight: 500; }
+.wl-field label { font-weight: 500; }
+.wl-field input, .wl-field select {
+  font: inherit; font-weight: 400; border: 0; border-radius: 14px; padding: 11px 14px; background: #e6ecf2; color: var(--ink); width: 100%; box-sizing: border-box; min-height: 44px;
+}
+.wl-field input:focus-visible, .wl-field select:focus-visible { outline: 3px solid rgba(14, 116, 144, .35); outline-offset: 1px; }
+.wl-phone { display: flex; align-items: center; gap: 6px; background: #e6ecf2; border-radius: 14px; padding-left: 12px; }
+.wl-phone input { background: transparent; padding-left: 4px; }
+.wl-dial { font-size: 14px; color: var(--muted); }
+.wl-legal { margin: 0; font-size: 13px; color: var(--muted); }
+.wl-legal a { color: var(--ink); }
+.wl-error { margin: 0; padding: 10px 12px; border-radius: 12px; background: #fef3f2; color: #b42318; font-size: 14px; }
+.wl-submit { width: 100%; justify-content: center; }
+.wl-submit:disabled { opacity: .6; cursor: progress; }
+.wl-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; font-size: 16px; line-height: 1.5; }
+.wl-back { align-self: flex-start; }
+@media (max-width: 960px) {
+  .wl { grid-template-columns: 1fr; }
+  .wl-aside { padding: 32px 20px 24px; min-height: 0; }
+  .wl-scene { position: relative; inset: auto; height: 200px; margin: 8px -20px 0; width: calc(100% + 40px); }
+  .wl-work { margin-top: 8px; }
+  .wl-main { padding: 32px 16px 48px; align-items: flex-start; }
+  .wl-grid { grid-template-columns: 1fr; }
+  .wl-wide { grid-column: auto; }
+}

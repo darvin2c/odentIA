@@ -1,6 +1,7 @@
 ---
 // Portada oscura de las páginas interiores: etiqueta, título, bajada y botones; a la derecha, la escena (slot "visual").
-import { CTA, registerUrl } from "../lib/site"
+import { ctaOf } from "../lib/site"
+const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
   tag: string
@@ -21,7 +22,7 @@ const hasVisual = Astro.slots.has("visual")
       <h1 class="h1 rise d1">{title}{accent && <> <span class="acc">{accent}</span></>}</h1>
       <p class="lead lead-d rise d2">{lead}</p>
       <div class="ctas rise d3">
-        <a class="btn btn-p" href={registerUrl}>{CTA}</a>
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
         {secondary && <a class="btn btn-g" href={secondary.href}>{secondary.label}</a>}
       </div>
       <p class="mono note rise d4">Sin tarjeta para probar. Tú decides qué puede hacer cada agente.</p>

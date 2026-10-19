@@ -12,11 +12,12 @@ import { useForm } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Check } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { API_URL, authClient } from "../lib/auth-client"
 import { AuthAlert, AuthLegal } from "../lib/auth-screens"
 import { creditText } from "../lib/credit"
+import { invitationQuery, moneyText, rememberInvitation } from "../lib/founders"
 import { GoogleAuthButton } from "../lib/google-auth"
 import { webUrl } from "../lib/host"
 
@@ -24,6 +25,8 @@ export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(typeof search.email === "string" ? { email: search.email } : {}),
     ...(typeof search.invitationId === "string" ? { invitationId: search.invitationId } : {}),
+    // Invitación Fundadores (issue 165): el enlace del correo de la lista de espera.
+    ...(typeof search.invitacion === "string" && search.invitacion ? { invitacion: search.invitacion } : {}),
   }),
   component: RegisterPage,
 })
@@ -32,6 +35,7 @@ const signUpInfoSchema = z.object({
   offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
   legalVersion: z.string(),
   agreementVersion: z.string(),
+  signupMode: z.enum(["invitacion", "abierta"]).default("abierta"),
 })
 
 /** Crédito de prueba y versión de los documentos: los dice el servidor, no la pantalla. */
@@ -61,13 +65,32 @@ const registration = z.object({
  */
 function RegisterPage() {
   const navigate = useNavigate()
-  const { email: initialEmail, invitationId } = useSearch({ from: "/register" })
+  const { email: initialEmail, invitationId, invitacion } = useSearch({ from: "/register" })
   const info = useQuery(signUpInfoQuery)
+  const founderToken = invitacion ?? null
+  useEffect(() => {
+    if (founderToken) rememberInvitation(founderToken)
+  }, [founderToken])
+  const founderQuery = useQuery(invitationQuery(founderToken))
+  const founder = founderQuery.data ?? null
+  // Fundadores: sin invitación propia, la cuenta se crea igual pero la clínica no se abre (decisión 1).
+  const invitationOnly = info.data?.signupMode === "invitacion" && !founder && !invitationId
   const offer = info.data?.offer ?? null
-  const credit =
-    offer && offer.creditCents > 0 ? creditText(offer.currency, offer.creditCents) : null
-  // Quien entra invitado no abre una clínica: no recibe el crédito.
-  const cta = credit && !invitationId ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  const credit = founder
+    ? founder.offer.trialCreditCents > 0
+      ? moneyText(founder.offer.currency, founder.offer.trialCreditCents)
+      : null
+    : offer && offer.creditCents > 0
+      ? creditText(offer.currency, offer.creditCents)
+      : null
+  // Quien entra invitado a un equipo no abre una clínica: no recibe el crédito.
+  const cta = credit && !invitationId && !founder && !invitationOnly ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  // Tras verificar el correo (o con Google), quien trae invitación Fundadores sigue a abrir su clínica.
+  const nextPath = invitationId
+    ? `/accept-invitation/${encodeURIComponent(invitationId)}`
+    : founderToken
+      ? `/onboarding?invitacion=${encodeURIComponent(founderToken)}`
+      : "/"
   const [work, setWork] = useState<DayEvent | null>(null)
   const [problem, setProblem] = useState<{
     field: "email" | "password" | "form"
@@ -103,9 +126,7 @@ function RegisterPage() {
         termsVersion: info.data.legalVersion,
         // El contrato de encargo lo acepta quien abre la clínica; quien entra invitado, no (decisión 2).
         ...(invitationId ? {} : { processingAgreementVersion: info.data.agreementVersion }),
-        callbackURL: invitationId
-          ? `${window.location.origin}/accept-invitation/${encodeURIComponent(invitationId)}`
-          : `${window.location.origin}/`,
+        callbackURL: `${window.location.origin}${nextPath}`,
       })
       if (error) {
         const code = error.code ?? ""
@@ -129,12 +150,37 @@ function RegisterPage() {
     },
   })
 
-  const trust = [
-    "Sin tarjeta",
-    offer ? `${offer.days} días` : "Prueba gratis",
-    "Sin límite de usuarios",
-  ]
-  const headline = credit ? `Obtén ${credit} de crédito.` : "Prueba odentIA."
+  // La invitación trae su correo: se escribe solo y no se cambia (vale para ese correo).
+  useEffect(() => {
+    if (founder && !form.getFieldValue("email")) form.setFieldValue("email", founder.email)
+  }, [founder, form])
+
+  const trust = founder
+    ? [
+        ...(founder.offer.priceCents === 0 ? ["Sin cuota"] : []),
+        ...(founder.offer.discountPercent ? [`Acciones con ${founder.offer.discountPercent} % menos`] : []),
+        "Sin tarjeta",
+      ]
+    : invitationOnly
+      ? ["Sin tarjeta", "Tu clínica entra con invitación"]
+      : ["Sin tarjeta", offer ? `${offer.days} días` : "Prueba gratis", "Sin límite de usuarios"]
+  const headline: React.ReactNode = founder ? (
+    credit ? (
+      <>
+        Los primeros <span className="text-[1.2em] leading-none whitespace-nowrap text-[#f5c46b]">{credit}</span> los pagamos nosotros.
+      </>
+    ) : (
+      "Tu lugar en odentIA está listo."
+    )
+  ) : invitationOnly ? (
+    "Crea tu cuenta."
+  ) : credit ? (
+    `Obtén ${credit} de crédito.`
+  ) : (
+    "Prueba odentIA."
+  )
+  const accent = founder ? "Tus agentes empiezan hoy." : invitationOnly ? "Para abrir tu clínica, pide tu invitación." : "Tus agentes empiezan hoy."
+  const tag = founder ? "Invitación Fundadores" : invitationOnly ? "Programa Fundadores" : offer ? `Prueba de ${offer.days} días` : "Prueba gratis"
 
   return (
     <AuthSplit
@@ -147,18 +193,14 @@ function RegisterPage() {
         </span>
       }
       aside={
-        <AuthAside
-          tag={offer ? `Prueba de ${offer.days} días` : "Prueba gratis"}
-          title={headline}
-          accent="Tus agentes empiezan hoy."
-        >
+        <AuthAside tag={tag} title={headline} accent={accent}>
           <TrustChips items={trust} />
         </AuthAside>
       }
       mobileAside={
         <div className="flex flex-col gap-3 text-left">
           <p className="text-2xl leading-tight font-extrabold tracking-[-0.02em] text-[#f1f5f9]">
-            {headline} <span className="text-[#4fc3d7]">Tus agentes empiezan hoy.</span>
+            {headline} <span className="text-[#4fc3d7]">{accent}</span>
           </p>
           <TrustChips items={trust} />
         </div>
@@ -176,10 +218,12 @@ function RegisterPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <GoogleAuthButton
-          label="Continuar con Google"
-          callbackURL={invitationId ? `/accept-invitation/${invitationId}` : "/"}
-        />
+        {founderToken && founderQuery.data === null ? (
+          <AuthAlert>
+            Esa invitación ya no sirve: venció, se usó o se anuló. Responde el correo de la invitación y te enviamos otra.
+          </AuthAlert>
+        ) : null}
+        <GoogleAuthButton label="Continuar con Google" callbackURL={nextPath} />
         <div className="flex items-center gap-3">
           <Separator className="flex-1" aria-hidden />
           <span className="text-xs text-muted-foreground">o con tu correo</span>
@@ -249,12 +293,14 @@ function RegisterPage() {
                     type="email"
                     inputMode="email"
                     autoComplete="email"
+                    readOnly={Boolean(founder)}
                     value={field.state.value}
                     onChange={(event) => {
                       field.handleChange(event.target.value)
                       if (exists) setProblem(null)
                     }}
                   />
+                  {founder ? <p className="text-xs text-muted-foreground">Es el correo de tu invitación.</p> : null}
                   <FieldError id="email-error">
                     {exists ? (
                       <>
@@ -373,8 +419,18 @@ function RegisterPage() {
             )}
           </form.Subscribe>
           <p className="text-center text-xs text-muted-foreground">
-            Sin tarjeta. Te la pediremos solo cuando elijas tu plan.
+            {founder
+              ? "Sin tarjeta. Después sigues a «Configura tu clínica», ya como Fundadora."
+              : "Sin tarjeta. Te la pediremos solo cuando elijas tu plan."}
           </p>
+          {invitationOnly ? (
+            <p className="text-center text-sm text-muted-foreground">
+              ¿Quieres usar odentIA en tu clínica?{" "}
+              <a href={webUrl("/solicitar-invitacion")} className="font-medium text-foreground underline">
+                Pide tu invitación
+              </a>
+            </p>
+          ) : null}
         </FieldGroup>
       </form>
     </AuthSplit>

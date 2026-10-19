@@ -1,14 +1,15 @@
 // «Lo que pagas y lo que recuperas»: la clínica pone sus números y compara lo que hoy pierde
 // sin agentes con su cuenta del mes en odentIA. Es un ejemplo, nunca una promesa de resultados.
 import { type ChangeEvent, useEffect, useId, useState } from "react"
-import { CONSULTATION, CONVERSATION, PLAN, RECOVERED, usd } from "../../lib/pricing"
+import { usd, type ValuePrices } from "../../lib/pricing"
 import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../../lib/value"
 import SizePicker from "../SizePicker"
 import "./value-calculator.css"
 
 type Key = keyof ValueInput
 
-export default function ValueCalculator() {
+export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
+  const { plan: PLAN, conversation: CONVERSATION, consultation: CONSULTATION, recovered: RECOVERED } = prices
   const [v, setV] = useState<ValueInput>(DEFAULT_VALUE_INPUT)
   const [narrow, setNarrow] = useState(false)
   // Prefijo único para asociar cada etiqueta con su campo (htmlFor/id).
@@ -28,7 +29,7 @@ export default function ValueCalculator() {
     setV((prev) => ({ ...prev, [k]: n }))
   }
 
-  const r = computeValue(v)
+  const r = computeValue(v, prices)
   const top = Math.max(r.withoutUs, r.withUs, 1)
   const sinPct = `${((r.withoutUs / top) * 100).toFixed(1)}%`
   const conPct = `${Math.max(2, (r.withUs / top) * 100).toFixed(1)}%`

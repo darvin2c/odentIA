@@ -2,6 +2,7 @@ import { LEGAL } from "@odentia/auth/legal"
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
+import { saasSignupPolicy } from "@odentia/db/schema/saas-billing"
 import { test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test"
 import { hashPassword } from "better-auth/crypto"
 import { API, PANEL } from "./env"
@@ -38,7 +39,7 @@ export async function call<T>(page: Page, method: string, path: string, slug: st
 
 const PASSWORD = "e2e-secreto-123"
 type TestFixtures = { createOwner: (tag: string) => Promise<OwnerFixture>; owner: OwnerFixture }
-type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number }
+type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number; signupOpen: void }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   fixtureDb: [async ({}, use) => {
@@ -48,6 +49,13 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     try { await use(connection.db) } finally { await connection.close() }
   }, { scope: "worker" }],
   passwordHash: [async ({}, use) => { await use(await hashPassword(PASSWORD)) }, { scope: "worker" }],
+  // La migración deja el alta «solo con invitación» (Fundadores, issue 165). Los recorridos abren
+  // clínicas desde el alta sin invitación: el run la deja abierta. La política es global, así que
+  // ningún caso la cambia; el de Fundadores usa una invitación, que sirve con cualquiera de las dos.
+  signupOpen: [async ({ fixtureDb }, use) => {
+    await fixtureDb.update(saasSignupPolicy).set({ mode: "abierta", updatedAt: new Date() })
+    await use()
+  }, { scope: "worker", auto: true }],
   nextEventId: [async ({}, use, workerInfo) => {
     let counter = 0
     await use(() => {

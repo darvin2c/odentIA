@@ -1,7 +1,11 @@
 // Preguntas del inicio (sección 08). Los textos vienen del lienzo aprobado.
 import type { FaqItem } from "../../lib/faq"
+import type { PlanPrices } from "../../lib/pricing"
 
-export const HOME_FAQ: (FaqItem & { pending?: boolean })[] = [
+/** Las preguntas con los días de prueba del plan que se muestra (no van fijos en el código). */
+export const homeFaq = (plan: PlanPrices | null): (FaqItem & { pending?: boolean })[] => {
+  const days = plan ? `${plan.trialDays} días` : "la prueba"
+  return [
   {
     q: "¿Qué significa omnicanal y agéntica?",
     a: "Omnicanal: atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona. Agéntica: los agentes no solo conversan, también actúan. Agendan, mueven citas, preparan la nota, recuerdan y retoman presupuestos, siempre dentro de lo que tú les permites.",
@@ -38,10 +42,11 @@ export const HOME_FAQ: (FaqItem & { pending?: boolean })[] = [
   },
   {
     q: "¿Qué pasa cuando termina la prueba?",
-    a: "Activas el plan y sigues donde estabas. Si el crédito de la prueba se termina antes de los 30 días, te avisamos con tiempo y los agentes se pausan hasta que actives el plan.",
+    a: "Activas el plan y sigues donde estabas. Si el crédito de la prueba se termina antes de terminar la prueba, te avisamos con tiempo y los agentes se pausan hasta que actives el plan.",
   },
   {
     q: "¿La prueba pide tarjeta?",
-    a: "No. Te registras, conectas tus canales y tus agentes trabajan 30 días con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.",
+    a: `No. Te registras, conectas tus canales y tus agentes trabajan ${days} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
   },
 ]
+}

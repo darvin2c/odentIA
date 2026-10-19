@@ -4,7 +4,7 @@
  * administración), cada cuánto se factura y lo que hicieron los agentes.
  */
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { ErrorState, LoadingState, UsageMeter } from "@odentia/ui-patterns"
+import { DatePickerButton, ErrorState, LoadingState, UsageMeter } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../lib/api"
@@ -29,6 +29,9 @@ interface BillingTerms {
   status: string
   trial: { creditCents: number; days: number; startedAt: string | null; endsAt: string | null }
   discountBps: number
+  /** Último instante del descuento (issue 168); null = no vence. */
+  discountEndsAt: string | null
+  guaranteedUntil: string | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
   seller: { name: string } | null
@@ -40,7 +43,18 @@ interface BillingTerms {
     creditCents: number
     period: { credit: "prueba" | "mes" }
   }
-  negotiations: Array<{ id: string; kind: "descuento" | "prueba"; status: string; discountBps: number | null; trialCreditCents: number | null; trialDays: number | null; requestedByName: string | null }>
+  negotiations: Array<{
+    id: string
+    kind: "descuento" | "prueba"
+    status: string
+    discountBps: number | null
+    discountEndsAt: string | null
+    trialCreditCents: number | null
+    trialDays: number | null
+    requestedByName: string | null
+    createdAt: string
+    decidedAt: string | null
+  }>
   notices: Array<{ kind: string; sentAt: string | null }>
 }
 
@@ -59,7 +73,21 @@ const NOTICE_WORDS: Record<string, string> = {
   prueba_vencida_sin_plan: "Prueba terminada sin plan",
   gracia_inicio: "Inicio de gracia",
   restriccion_inicio: "Acceso restringido",
+  precio_especial_aviso: "Aviso: su precio especial termina",
+  precio_especial_alarma: "Alarma: su precio especial termina en 3 días",
+  condiciones_aviso: "Aviso: sus condiciones de Fundador terminan",
+  condiciones_alarma: "Alarma: sus condiciones de Fundador terminan en 7 días",
 }
+
+/** El día elegido (`yyyy-MM-dd`) vale completo: el descuento termina al final de ese día, en la hora de este equipo. */
+const endOfDay = (day: string) => new Date(`${day}T23:59:59.999`).toISOString()
+const dayOf = (iso: string | null) => {
+  if (!iso) return ""
+  const date = new Date(iso)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+}
+const shortDay = (iso: string) =>
+  new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso)).replaceAll(".", "")
 
 function priceText(micros: number, currency: string): string {
   return new Intl.NumberFormat("es-PE", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
@@ -77,6 +105,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
   const [trialCredit, setTrialCredit] = useState("")
   const [trialDays, setTrialDays] = useState("")
   const [discount, setDiscount] = useState("")
+  const [discountEnd, setDiscountEnd] = useState("")
   const [message, setMessage] = useState<string | null>(null)
   useEffect(() => {
     if (!terms.data) return
@@ -84,6 +113,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     setTrialCredit(centsToMajor(terms.data.trial.creditCents, currency))
     setTrialDays(String(terms.data.trial.days))
     setDiscount(String(terms.data.discountBps / 100))
+    setDiscountEnd(dayOf(terms.data.discountEndsAt))
   }, [terms.data])
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "organizations", organizationId] })
   const outcome = (result: { status: "aplicado" | "pendiente" }) =>
@@ -104,7 +134,10 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     mutationFn: () =>
       api<{ status: "aplicado" | "pendiente" }>(`/api/admin/organizations/${organizationId}/billing/discount`, {
         method: "POST",
-        body: JSON.stringify({ discountBps: Math.round(Number(discount.replace(",", ".")) * 100) }),
+        body: JSON.stringify({
+          discountBps: Math.round(Number(discount.replace(",", ".")) * 100),
+          discountEndsAt: discountEnd ? endOfDay(discountEnd) : null,
+        }),
       }),
     onSuccess: (res) => {
       outcome(res)
@@ -159,7 +192,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
           {pending
             .map((item) =>
               item.kind === "descuento"
-                ? `descuento de ${(item.discountBps ?? 0) / 100} %`
+                ? `descuento de ${(item.discountBps ?? 0) / 100} %${item.discountEndsAt ? ` hasta el ${shortDay(item.discountEndsAt)}` : ""}`
                 : `prueba con ${money(item.trialCreditCents ?? 0)} y ${item.trialDays} días`,
             )
             .join(" · ")}
@@ -210,22 +243,79 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
             }}
           >
             <p className="text-sm font-medium">Precio negociado</p>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="org-discount">Descuento sobre el precio base (%)</Label>
-              <Input id="org-discount" inputMode="decimal" value={discount} onChange={(event) => setDiscount(event.target.value)} />
-              <p className="text-xs text-muted-foreground">
-                El vendedor da hasta {plan.sellerDiscountBps / 100} % sin aprobación; la administración, hasta {plan.maxDiscountBps / 100} %. La cuota no
-                cambia.
-              </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="org-discount">Descuento en todas las acciones (%)</Label>
+                <Input id="org-discount" inputMode="decimal" value={discount} onChange={(event) => setDiscount(event.target.value)} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="org-discount-end">
+                  Vence <span className="font-normal text-muted-foreground">(opcional)</span>
+                </Label>
+                <DatePickerButton
+                  id="org-discount-end"
+                  value={discountEnd}
+                  onChange={setDiscountEnd}
+                  min={dayOf(new Date(Date.now() + 86_400_000).toISOString())}
+                  emptyLabel="No vence"
+                />
+              </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              El vendedor da hasta {plan.sellerDiscountBps / 100} % sin aprobación; la administración, hasta {plan.maxDiscountBps / 100} %. La cuota no
+              cambia. Sin fecha, no vence; con fecha, se avisa a la clínica y aquí 15 días antes.
+            </p>
             {Number.isFinite(bps) && bps >= 0 ? (
-              <p className="text-xs">
-                {(["conversacion", "consulta", "cita"] as const)
-                  .filter((kind) => plan.base[kind] !== null)
-                  .map((kind) => {
-                    const base = plan.base[kind] ?? 0
-                    return `${kind === "conversacion" ? "Conversación" : kind === "consulta" ? "Consulta" : "Cita"} ${priceText(base, currency)} → ${priceText(discounted(base, Math.min(bps, plan.maxDiscountBps)), currency)}`
-                  })
+              <table className="w-full text-sm">
+                <caption className="sr-only">Precio de lista y lo que paga esta clínica</caption>
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground">
+                    <th scope="col" className="py-1 font-medium">
+                      Acción
+                    </th>
+                    <th scope="col" className="py-1 text-right font-medium">
+                      Lista
+                    </th>
+                    <th scope="col" className="py-1 text-right font-medium">
+                      Paga esta clínica
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(["conversacion", "consulta", "cita"] as const)
+                    .filter((kind) => plan.base[kind] !== null)
+                    .map((kind) => {
+                      const base = plan.base[kind] ?? 0
+                      return (
+                        <tr key={kind}>
+                          <td className="py-1">{kind === "conversacion" ? "Conversación" : kind === "consulta" ? "Consulta" : "Cita recuperada"}</td>
+                          <td className="py-1 text-right text-muted-foreground tabular-nums">
+                            {bps > 0 ? <s>{priceText(base, currency)}</s> : priceText(base, currency)}
+                          </td>
+                          <td className="py-1 text-right font-semibold tabular-nums">
+                            {priceText(discounted(base, Math.min(bps, plan.maxDiscountBps)), currency)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </table>
+            ) : null}
+            {bps > 0 ? (
+              <p className="text-xs text-muted-foreground">Si sube el precio de lista, esta clínica sigue pagando {bps / 100} % menos sobre el precio nuevo.</p>
+            ) : null}
+            {data.negotiations.some((item) => item.kind === "descuento" && item.status !== "pendiente") ? (
+              <p className="text-xs text-muted-foreground">
+                Historial:{" "}
+                {data.negotiations
+                  .filter((item) => item.kind === "descuento" && item.status !== "pendiente")
+                  .slice(0, 3)
+                  .map(
+                    (item) =>
+                      `${(item.discountBps ?? 0) / 100} % ${item.status === "aprobada" ? "aprobado" : "rechazado"}${
+                        item.decidedAt ? ` el ${shortDay(item.decidedAt)}` : ""
+                      }${item.requestedByName ? ` (lo pidió ${item.requestedByName})` : ""}`,
+                  )
                   .join(" · ")}
               </p>
             ) : null}
