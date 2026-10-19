@@ -267,7 +267,8 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("borrador-linea-nueva", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
-  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  // Recién cambiado el ancho, la página aún se reacomoda: se mide cuando termina.
+  await expect.poll(() => overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("borrador-linea-nueva-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
 

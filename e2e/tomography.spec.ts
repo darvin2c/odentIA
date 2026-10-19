@@ -55,7 +55,8 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   const slices = writeCd(cd, "QUISPE^ROSA")
 
   await gotoHydrated(page, tenant(slug, `/patients/${patient.id}?tab=documentos&tipo=imagenes`))
-  await page.getByRole("button", { name: /^Nuevo/ }).click()
+  // «Nuevo ▾» es el menú de la sección; otro botón también empieza con «Nuevo».
+  await page.getByRole("button", { name: /^Nuevo/ }).and(page.locator("[aria-haspopup=menu]")).click()
   await page.getByRole("menuitem", { name: "Imagen o archivo" }).click()
   const upload = surface(page, { name: "Subir imágenes o documentos" })
   await expect(upload).toBeVisible()
