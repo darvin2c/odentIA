@@ -113,17 +113,31 @@ function DockedColumn({
   const [touched, setTouched] = React.useState(false)
   const [armed, setArmed] = React.useState(true)
 
-  React.useLayoutEffect(() => {
+  // Quién la abrió se anota al renderizar, antes de que un campo con
+  // `autoFocus` del formulario tome el foco y pase por ser el que la abrió.
+  const [opener] = React.useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null
     const active = document.activeElement
-    const opener = active instanceof HTMLElement && active !== document.body ? active : null
+    return active instanceof HTMLElement && active !== document.body ? active : null
+  })
+  React.useLayoutEffect(() => {
     const column = ref.current
     column?.focus({ preventScroll: true })
     return () => {
       const current = document.activeElement
       const lost = current === null || current === document.body || column?.contains(current)
-      if (lost && opener?.isConnected) opener.focus()
+      if (lost && opener?.isConnected) {
+        opener.focus()
+        return
+      }
+      // Si se cierra desde «¿Salir sin guardar?», el foco está en esa pregunta y
+      // cae al `body` cuando ella también se va: se comprueba de nuevo después.
+      requestAnimationFrame(() => {
+        const after = document.activeElement
+        if ((after === null || after === document.body) && opener?.isConnected) opener.focus()
+      })
     }
-  }, [])
+  }, [opener])
 
   return (
     <SideColumn

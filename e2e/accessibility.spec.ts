@@ -209,17 +209,16 @@ for (const viewport of [
       await gotoHydrated(page, tenant(owner.org.slug, "/people"))
       await theme(page, dark)
       await audit(page, info, "personas")
-      // La acción de la cabecera; la lista vacía repite «Nueva persona» como su acción.
-      const create = page.locator("header").getByRole("button", { name: "Nueva persona", exact: true })
-      await expect(page.getByRole("button", { name: "Nueva persona", exact: true })).toHaveCount(2)
+      // La acción de la cabecera; la lista vacía repite «Nuevo paciente» como su acción.
+      const surfaceRole = viewport.width >= 1280 ? "region" : "dialog"
+      const create = page.locator("header").getByRole("button", { name: "Nuevo paciente", exact: true })
+      await expect(page.getByRole("button", { name: "Nuevo paciente", exact: true })).toHaveCount(2)
       await create.focus()
       await page.keyboard.press("Enter")
-      const dialog = page.getByRole(viewport.width >= 1280 ? "region" : "dialog", {
-        name: "Nueva persona",
-        exact: true,
-      })
-      await expect(dialog).toBeVisible()
-      await audit(page, info, "nueva-persona")
+      const newPatient = page.getByRole(surfaceRole, { name: "Nuevo paciente", exact: true })
+      await expect(newPatient).toBeVisible()
+      await expect(newPatient.getByLabel("Nombres", { exact: true })).toBeVisible()
+      await audit(page, info, "nuevo-paciente")
       if (viewport.width >= 1280) {
         const separator = page.getByRole("separator", { name: "Redimensionar panel", exact: true })
         const beforeValue = Number(await separator.getAttribute("aria-valuenow"))
@@ -240,37 +239,41 @@ for (const viewport of [
           .poll(async () => Number(await separator.getAttribute("aria-valuenow")))
           .toBeLessThan(beforeValue)
         await separator.press("Escape")
-        await expect(dialog).not.toBeVisible()
-        await expect(create).toBeFocused()
-        await create.press("Enter")
-        await expect(dialog).toBeVisible()
+      } else {
+        await page.keyboard.press("Escape")
       }
+      // Sin nada escrito, Escape cierra sin preguntar y devuelve el foco a quien lo abrió.
+      await expect(newPatient).not.toBeVisible()
+      await expect(create).toBeFocused()
+
+      // Quien aún no es paciente se agrega desde el menú del botón: «Nuevo contacto».
+      await page.getByRole("button", { name: "Más formas de agregar a alguien", exact: true }).click()
+      await page.getByRole("menuitem", { name: /^Nuevo contacto/ }).click()
+      const dialog = page.getByRole(surfaceRole, { name: "Nuevo contacto", exact: true })
+      await expect(dialog).toBeVisible()
+      await audit(page, info, "nuevo-contacto")
       // Sin nombre no se crea: el botón espera a que esté.
       await expect(dialog.getByRole("button", { name: "Crear y abrir su página", exact: true })).toBeDisabled()
       await dialog.getByLabel("Apellidos", { exact: true }).fill("Accesible")
       await dialog.getByLabel("Nombres", { exact: true }).fill("Paciente")
-      await audit(page, info, "nueva-persona-llena")
+      await audit(page, info, "nuevo-contacto-lleno")
       await dialog.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/people/"))
       await expect(page.getByRole("heading", { level: 1, name: "Paciente Accesible" })).toBeVisible()
       await audit(page, info, "pagina-persona")
 
-      // Registrarla: el mismo formulario, con lo que ya se sabe escrito.
+      // Registrarla: la misma ventana de «Nuevo paciente», con lo que ya se sabe escrito.
       const register = page.getByRole("button", { name: "Registrar", exact: true })
       await register.focus()
       await page.keyboard.press("Enter")
-      const form = page.getByRole(viewport.width >= 1280 ? "region" : "dialog", {
-        name: "Nuevo paciente",
-        exact: true,
-      })
+      const form = page.getByRole(surfaceRole, { name: /^(Registrar a |Nuevo paciente)/ })
       await expect(form).toBeVisible()
+      await expect(form.getByLabel("Nombres", { exact: true })).toHaveValue("Paciente")
       await audit(page, info, "alta-paciente")
-      await form.getByRole("button", { name: "Siguiente", exact: true }).click()
-      await audit(page, info, "alta-paciente-contacto")
-      for (const surface of ["salud", "salud-dental", "revision"]) {
-        await form.getByRole("button", { name: "Siguiente", exact: true }).click()
-        await audit(page, info, `alta-paciente-${surface}`)
-      }
+      // «Yo, ahora» abre en la misma ventana lo que completa recepción.
+      await form.getByRole("button", { name: "Yo, ahora", exact: true }).click()
+      await expect(form.getByText("Fecha de nacimiento", { exact: true })).toBeVisible()
+      await audit(page, info, "alta-paciente-recepcion")
       // Cerrar con Escape devuelve el foco a «Registrar»; si pregunta, se descarta.
       await page.keyboard.press("Escape")
       const confirmation = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
