@@ -357,7 +357,7 @@ describe("Libro de Reclamaciones en la administración", () => {
       }),
     )
     const { response, copy } = consumerComplaintResponseEmails(detail)
-    expect(response.subject).toBe(`Respuesta a tu Hoja de Reclamación N.º ${saved.number} — odentIA`)
+    expect(response.subject).toBe(`Respuesta a tu Hoja de Reclamación N.º ${saved.number}`)
     expect(response.html).not.toContain("<script>")
     expect(response.html).toContain("&lt;script&gt;x&lt;/script&gt;")
     expect(response.text).toContain("NUESTRA RESPUESTA")

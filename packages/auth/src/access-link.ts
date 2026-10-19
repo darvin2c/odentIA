@@ -348,7 +348,7 @@ export const accessLink = (options: AccessLinkOptions) => {
               to: user.email,
               ...passwordChangedTemplate({
                 firstName,
-                whenText: `a las ${whenText}`,
+                whenText,
                 deviceText: deviceText(ctx.request?.headers.get("user-agent")),
                 url: `${panel}/forgot-password`,
               }),

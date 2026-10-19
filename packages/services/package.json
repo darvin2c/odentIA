@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "seed:dev": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-dev.ts",
+    "mail:preview": "tsx --env-file-if-exists=../../infra/dev/.env src/mail-preview.ts",
     "bench:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/bench-reports.ts"
   },
   "dependencies": {

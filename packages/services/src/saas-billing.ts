@@ -10,6 +10,7 @@
  * Sin pasarela ni precios en código: los planes y métodos los configura admin.
  */
 import type { Db } from "@odentia/db"
+import type { MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
 import { invitation, member, organization, user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
@@ -33,19 +34,20 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale } from "./locale.js"
 import { assertActionPricingFloor } from "./saas-actions.js"
-import { getSaasAlerts, type SaasAlertFamily } from "./saas-terms.js"
+import { getSaasAlerts } from "./saas-terms.js"
+import {
+  saasAlertEmail,
+  saasBillingUrl,
+  saasOverdueEmail,
+  saasPlanStartedEmail,
+  saasRestrictedEmail,
+  saasSettlementEmail,
+  saasTrialEndedEmail,
+} from "./saas-emails.js"
 import { addMonth, closeSaasPeriods, overdueChargeOrgs } from "./saas-invoicing.js"
 
-const SAAS_ALERT_SUBJECT: Record<SaasAlertFamily, string> = {
-  saldo_prueba: "tu saldo de prueba",
-  dias_prueba: "tu prueba termina pronto",
-  credito: "el crédito del mes",
-  tope: "tu tope de gasto",
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
+/** Lo que se guarda en el aviso: el buzón de respuesta no aplica a Plan y pagos. */
+const mailParts = (mail: MailTemplate) => ({ subject: mail.subject, text: mail.text, html: mail.html })
 
 /** Días de prueba al crear la suscripción. */
 /** Prueba cuando ningún plan dice la suya (ADR 0031: 30 días). */
@@ -2503,9 +2505,19 @@ export async function settleSaasCommissions(
   if (sellerEmail) {
     const noticeOrgId = pending[0]?.organizationId ?? adjustments[0]?.organizationId ?? null
     if (noticeOrgId) {
-      const subject = `Liquidación de comisiones ${input.year}-${String(input.month).padStart(2, "0")} — Odentia`
-      const text = `Hola ${seller.displayName}: tu liquidación de ${input.year}-${String(input.month).padStart(2, "0")} es ${totalCents} ${unit} (cobros ${grossCents}, ajustes ${adjustmentCents}).`
-      const html = `<p>Hola ${seller.displayName}:</p><p>Tu liquidación de ${input.year}-${String(input.month).padStart(2, "0")} es <strong>${totalCents} ${unit}</strong> (cobros ${grossCents}, ajustes ${adjustmentCents}).</p>`
+      const money = (cents: number) =>
+        new Intl.NumberFormat("es", { style: "currency", currency: unit, currencyDisplay: "code" }).format(cents / 100)
+      const { subject, text, html } = saasSettlementEmail({
+        sellerName: seller.displayName,
+        monthText: new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" }).format(
+          new Date(Date.UTC(input.year, input.month - 1, 1)),
+        ),
+        clinics: new Set(pending.map((commission) => commission.organizationId)).size,
+        gross: money(grossCents),
+        // Los ajustes se descuentan del total: van con su signo.
+        adjustments: money(-adjustmentCents),
+        total: money(totalCents),
+      })
       await tx
         .insert(saasNotice)
         .values({
@@ -2671,6 +2683,8 @@ export interface SaasTickMail {
 export async function tickSaasBilling(
   tx: Db,
   now = new Date(),
+  /** Origen del panel para el botón a Plan y pagos; sin él, los avisos van sin botón. */
+  links: { panelUrl?: string | undefined } = {},
 ): Promise<{ summary: SaasTickSummary; mails: SaasTickMail[] }> {
   const mails: SaasTickMail[] = []
   const mailedKeys: Record<string, true> = {}
@@ -2689,6 +2703,36 @@ export async function tickSaasBilling(
       .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
       .limit(5)
     return owners.length ? owners.map((owner) => owner.email).join(", ") : null
+  }
+
+  // El ciclo corre cada minuto y casi siempre el aviso ya existe: el nombre se lee una vez por clínica.
+  const clinicNames = new Map<string, string>()
+  async function clinicName(orgId: string): Promise<string> {
+    const known = clinicNames.get(orgId)
+    if (known) return known
+    const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
+    const name = org?.name ?? "tu clínica"
+    clinicNames.set(orgId, name)
+    return name
+  }
+  const billingUrl = (orgId: string) => saasBillingUrl(links.panelUrl, orgId)
+
+  /** El último día de la gracia y lo que se debe, como se leen en la clínica. */
+  async function overdueEmail(orgId: string, lastDay: Date): Promise<MailTemplate> {
+    const locale = await getOrgLocale(tx, orgId).catch(() => null)
+    const day = new Intl.DateTimeFormat(locale?.locale ?? "es", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: locale?.timezone ?? "UTC",
+    }).format(lastDay)
+    const amounts = (await outstandingByCurrency(tx, orgId))
+      .filter((entry) => entry.cents > 0)
+      .map((entry) =>
+        new Intl.NumberFormat(locale?.locale ?? "es", { style: "currency", currency: entry.currency }).format(entry.cents / 100),
+      )
+    return saasOverdueEmail({ clinic: await clinicName(orgId), lastDay: day, amounts, url: billingUrl(orgId) })
   }
 
   async function recordNotice(
@@ -2743,9 +2787,7 @@ export async function tickSaasBilling(
         emailTo
           ? {
               to: emailTo,
-              subject: `odentIA · ${alert.title}: ${SAAS_ALERT_SUBJECT[alert.family]}`,
-              text: `${alert.message} Revisa tu plan y lo que hicieron tus agentes en Plan y pagos.`,
-              html: `<p>${escapeHtml(alert.message)}</p><p>Revisa tu plan y lo que hicieron tus agentes en Plan y pagos.</p>`,
+              ...mailParts(saasAlertEmail(alert, await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
               dedupeKey: `${dedupeKey}:${sub.organizationId}`,
               organizationId: sub.organizationId,
               kind: `${alert.family}_${alert.level}`,
@@ -2795,9 +2837,7 @@ export async function tickSaasBilling(
         emailTo
           ? {
               to: emailTo,
-              subject: "odentIA · Tu prueba terminó",
-              text: "Tu prueba terminó sin un plan elegido: el sistema queda en solo lectura hasta que lo elijas en Plan y pagos. No se pierde ningún dato.",
-              html: "<p>Tu prueba terminó sin un plan elegido: el sistema queda en solo lectura hasta que lo elijas en <strong>Plan y pagos</strong>. No se pierde ningún dato.</p>",
+              ...mailParts(saasTrialEndedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
               dedupeKey: `prueba-vencida-sin-plan:${sub.organizationId}:${day}`,
               organizationId: sub.organizationId,
               kind: "prueba_vencida_sin_plan",
@@ -2831,9 +2871,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            subject: "odentIA · Tu plan empezó hoy",
-            text: "Tu prueba terminó y tu plan empezó hoy: tu mes va de este día al mismo día del mes que viene. La cuota vuelve en crédito para tus agentes y lo que pase del crédito se cobra por acción. Lo ves en Plan y pagos.",
-            html: "<p>Tu prueba terminó y tu plan empezó hoy: tu mes va de este día al mismo día del mes que viene.</p><p>La cuota vuelve en crédito para tus agentes y lo que pase del crédito se cobra por acción. Lo ves en <strong>Plan y pagos</strong>.</p>",
+            ...mailParts(saasPlanStartedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
             dedupeKey: `plan-activo:${sub.organizationId}:${day}`,
             organizationId: sub.organizationId,
             kind: "plan_activo",
@@ -2905,9 +2943,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            subject: "Acceso restringido por falta de pago",
-            text: "Tu acceso se restringió por falta de pago. Puedes ver tu plan, registrar tu comprobante y contactar soporte desde el panel.",
-            html: "<p>Tu acceso se restringió por falta de pago. Puedes ver tu plan, registrar tu comprobante y contactar soporte desde el panel.</p>",
+            ...mailParts(saasRestrictedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
             dedupeKey: `restriccion:${sub.organizationId}:${now.toISOString().slice(0, 10)}`,
             organizationId: sub.organizationId,
             kind: "restriccion_inicio",
@@ -2939,9 +2975,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            subject: "odentIA · Tienes un cargo vencido",
-            text: `Tienes un cargo vencido. Tienes hasta el ${graceEndsAt.toISOString().slice(0, 10)} para registrar tu comprobante en Plan y pagos antes de que el acceso se restrinja.`,
-            html: `<p>Tienes un cargo vencido. Tienes hasta el <strong>${graceEndsAt.toISOString().slice(0, 10)}</strong> para registrar tu comprobante en Plan y pagos antes de que el acceso se restrinja.</p>`,
+            ...mailParts(await overdueEmail(orgId, graceEndsAt)),
             dedupeKey: `gracia-inicio:${orgId}:${day}`,
             organizationId: orgId,
             kind: "gracia_inicio",

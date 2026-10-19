@@ -3,7 +3,7 @@ import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@o
 import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
-import { createMailer } from "@odentia/mail"
+import { configureMailLinks, createMailer } from "@odentia/mail"
 import { createStorage, secretsKeyFromEnv } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
@@ -11,6 +11,8 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 
 // Una sola versión del Graph de Meta: el botón de Facebook, WhatsApp, Messenger e Instagram.
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
+// Términos, Privacidad y Ayuda del pie de cada correo.
+configureMailLinks(env.WEB_URL)
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)

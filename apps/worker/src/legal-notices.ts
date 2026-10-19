@@ -6,10 +6,12 @@ import { claimLegalNotices } from "@odentia/services"
 export interface LegalNoticeDeps {
   ownerDb: Db
   mailer?: {
-    send(message: { to: string; subject: string; html: string; text: string }): Promise<void>
+    send(message: { to: string; subject: string; html: string; text: string; replyTo?: string }): Promise<void>
   }
   /** Origen del panel: entrar es donde se aceptan. */
   webUrl: string
+  /** Buzón que recibe a quien responde «no estoy de acuerdo»; sin él, se pide escribir desde Ayuda. */
+  replyTo?: string | undefined
   now?: Date
   /** La versión vigente; por defecto la de `@odentia/auth`. */
   terms?: { version: string; effectiveAt: string; changes: readonly string[] }
@@ -49,6 +51,7 @@ export async function runLegalNoticesTick(
           effectiveText: longDate(terms.effectiveAt),
           changes: terms.changes,
           url: `${deps.webUrl.replace(/\/+$/, "")}/login`,
+          replyTo: deps.replyTo,
         }),
       })
       result.mailed++
