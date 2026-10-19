@@ -63,8 +63,15 @@ export function addressFromName(name: string): string {
   return cutAtHyphen(rest.join("-"), SUGGESTED_ADDRESS_MAX)
 }
 
-/** Alternativas a una dirección ocupada, en orden: `sonrisa-2`, `sonrisa-3`… */
+/** Largo máximo de una etiqueta de nombre de dominio (RFC 1035). */
+const DNS_LABEL_MAX = 63
+
+/**
+ * Alternativas a una dirección ocupada, en orden: `sonrisa-2`, `sonrisa-3`…
+ * Conserva lo que la persona escribió; solo se acorta si el número no cabe en
+ * una etiqueta de dominio.
+ */
 export function addressAlternatives(address: string, count = 8): string[] {
-  const base = cutAtHyphen(address, SUGGESTED_ADDRESS_MAX - 2)
+  const base = cutAtHyphen(address, DNS_LABEL_MAX - 2)
   return Array.from({ length: count }, (_, index) => `${base}-${index + 2}`)
 }

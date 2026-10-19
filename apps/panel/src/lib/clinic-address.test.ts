@@ -45,9 +45,11 @@ describe("addressAlternatives", () => {
     expect(addressAlternatives("sonrisa", 3)).toEqual(["sonrisa-2", "sonrisa-3", "sonrisa-4"])
   })
 
-  it("no pasa de 30 caracteres", () => {
-    for (const option of addressAlternatives("especialistas-asociados-en")) {
-      expect(option.length).toBeLessThanOrEqual(30)
+  it("conserva lo escrito y no pasa de una etiqueta de dominio", () => {
+    const typed = "direccion-89a80434-e591-4571-8507-a5e6cc6c36a9"
+    expect(addressAlternatives(typed, 1)).toEqual([`${typed}-2`])
+    for (const option of addressAlternatives("a".repeat(30) + "-" + "b".repeat(32))) {
+      expect(option.length).toBeLessThanOrEqual(63)
       expect(option).toMatch(CLINIC_ADDRESS_PATTERN)
     }
   })

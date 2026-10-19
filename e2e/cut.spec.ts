@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { Page } from "@playwright/test"
 import { PANEL, panelPattern, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { gotoHydrated } from "./hydration"
+import { gotoHydrated, waitForHydration } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 type UiUser = { name: string; email: string; password: string }
@@ -77,11 +77,14 @@ test("auth: la dirección sigue al nombre, avisa si está en uso y el teléfono 
     await verifyEmail(page, user.email)
     await login(page, user)
     await expect(page).toHaveURL(/onboarding/)
+    // Se escribe tecla por tecla: lo tecleado antes de hidratar se perdería.
+    await waitForHydration(page)
 
     // Issue 106: la dirección sigue cada tecla del nombre, sin lo genérico.
     const address = page.getByLabel("Dirección de tu clínica en odentIA")
     await page.getByLabel("Nombre de tu clínica").pressSequentially("Clínica Dental Sonrisa")
     await expect(address).toHaveValue("sonrisa")
+    await expect(page.getByText(/^✓ sonrisa\..+ está libre\.$/)).toBeVisible()
 
     // Escrita a mano deja de seguir al nombre y dice al momento si está en uso.
     await address.fill(taken.org.slug)
@@ -97,10 +100,11 @@ test("auth: la dirección sigue al nombre, avisa si está en uso y el teléfono 
 
     // Issue 107: el país del paso 2 manda en el teléfono del paso 3, aunque el campo ya exista.
     await page.getByLabel("Razón social").fill("Sonrisa S.A.C.")
+    // Los nombres siguen el idioma del navegador de la prueba.
     await page.getByRole("combobox", { name: "País" }).click()
-    await page.getByRole("option", { name: "México (+52)" }).click()
+    await page.getByRole("option", { name: /^M[ée]xico \(\+52\)$/ }).click()
     await page.getByRole("combobox", { name: "País" }).click()
-    await page.getByRole("option", { name: "Perú (+51)" }).click()
+    await page.getByRole("option", { name: /^Per[úu] \(\+51\)$/ }).click()
     await page.getByRole("button", { name: "Continuar", exact: true }).click()
     await expect(page.getByLabel("Nombre de la sede")).toBeVisible()
     await expect(page.getByRole("combobox", { name: "País" })).toHaveText("PE +51")
