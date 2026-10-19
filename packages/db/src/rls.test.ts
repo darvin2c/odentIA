@@ -1045,3 +1045,38 @@ it("ventas: solo los cuatro pasos fijos y una sola tarea abierta por oportunidad
   await ownerDb.execute(sql`update task set status = 'done' where id = ${primera!.id}::uuid`)
   await ownerDb.execute(tarea("Siguiente"))
 })
+
+it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínica lleva RLS", async () => {
+  // ADR 0063: el acceso del rol app se concede tabla por tabla, nunca por defecto.
+  await ownerDb.execute(sql`create table "permiso_por_defecto" ("id" int primary key)`)
+  try {
+    const [nueva] = (await ownerDb.execute(
+      sql`select has_table_privilege(${APP_ROLE}, 'public.permiso_por_defecto', 'select, insert, update, delete') as "alcanza"`,
+    )) as unknown as { alcanza: boolean }[]
+    expect(nueva!.alcanza).toBe(false)
+  } finally {
+    await ownerDb.execute(sql`drop table "permiso_por_defecto"`)
+  }
+
+  // Vendedores y liquidaciones son solo de odentIA.
+  const admin = (await ownerDb.execute(sql`
+    select c.relname as "tabla"
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname in ('saas_seller', 'saas_commission_settlement', 'saas_commission_settlement_line')
+      and has_table_privilege(${APP_ROLE}, c.oid, 'select, insert, update, delete')
+  `)) as unknown as { tabla: string }[]
+  expect(admin).toEqual([])
+
+  // Una tabla con organization_id que el rol app alcanza sin RLS mostraría las
+  // filas de todas las clínicas. member e invitation son del adaptador de
+  // identidad, que filtra por organización en cada consulta.
+  const abiertas = (await ownerDb.execute(sql`
+    select c.relname as "tabla"
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity
+      and has_table_privilege(${APP_ROLE}, c.oid, 'select, insert, update, delete')
+      and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'organization_id' and not a.attisdropped)
+    order by 1
+  `)) as unknown as { tabla: string }[]
+  expect(abiertas.map((r) => r.tabla)).toEqual(["invitation", "member"])
+})

@@ -232,6 +232,13 @@
       "when": 1792375570004,
       "tag": "0032_fundadores_y_precio_negociado_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792378634060,
+      "tag": "0033_tablas_nuevas_cerradas_a_la_app",
+      "breakpoints": true
     }
   ]
 }
