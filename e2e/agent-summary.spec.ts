@@ -215,7 +215,7 @@ test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir 
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   await panelLoaded
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()
-  await expect(page.getByRole("tab", { name: /^Por atender/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Por atender/ })).toBeVisible()
   await expect(notice).toHaveCount(0)
   await call(page, "PUT", "/api/agent/config", org.slug, { enabled: false })
 

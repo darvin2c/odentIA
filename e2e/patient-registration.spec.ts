@@ -1,13 +1,13 @@
 import { createHash, randomBytes } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
-import type { Browser, Page } from "@playwright/test"
-import { eq } from "drizzle-orm"
+import { crmTask } from "@odentia/db/schema/crm"
+import type { Browser, Locator, Page } from "@playwright/test"
+import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
-import { call, expect, fillPatientNames, test, writtenDate } from "./fixtures"
+import { call, chooseOption, expect, fillPatientNames, test, writtenDate } from "./fixtures"
 import { gotoHydrated } from "./hydration"
-import { surface } from "./surface"
 
 /**
  * Registro directo de pacientes: wizard público anónimo (QR genérico y enlace
@@ -58,41 +58,73 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
   return { context, page: await context.newPage() }
 }
 
-/** Paso "Datos": adulto con nombre y nacimiento, y avanza al siguiente paso. */
+/**
+ * El registro es un cuestionario de una pantalla por tema: avanza hasta que
+ * `target` está a la vista. Lo opcional se salta y la salud, si aparece sin
+ * contestar, se responde «No»; con una respuesta puesta se sigue con
+ * «Siguiente», porque «Saltar» la borraría.
+ */
+async function advanceTo(page: Page, target: Locator) {
+  const progress = page.getByText(/^Paso \d+ de \d+$/)
+  for (let step = 0; step < 12 && !(await target.isVisible()); step += 1) {
+    for (const question of [/alérgic/, /alguna enfermedad/, /medicamento todos los días/]) {
+      const group = page.getByRole("group", { name: question }).first()
+      if ((await group.isVisible()) && (await group.locator('[aria-pressed="true"]').count()) === 0)
+        await group.getByRole("button", { name: "No", exact: true }).click()
+    }
+    const before = await progress.textContent()
+    const skip = page.getByRole("button", { name: "Saltar", exact: true })
+    await ((await skip.isVisible()) ? skip : page.getByRole("button", { name: "Siguiente", exact: true })).click()
+    await expect(progress).not.toHaveText(before ?? "")
+  }
+  await expect(target).toBeVisible()
+}
+
+/** Primera pantalla: el registro es para quien lo llena. */
+async function forMe(page: Page) {
+  await page.getByRole("radio", { name: "Para mí" }).click()
+  await advanceTo(page, page.getByLabel(/^Nombres/))
+}
+
+/** «Tus datos»: adulto con nombre y nacimiento. */
 async function fillAdultDatos(page: Page, input: { name: string; birthDate: string }) {
   await fillPatientNames(page, input.name)
   // Se escribe en el orden de la clínica (día/mes/año en Perú); se guarda en ISO.
   await page.getByLabel("Fecha de nacimiento").fill(writtenDate(input.birthDate))
-  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
 }
 
-/** Paso "Contacto y filiación": solo teléfono para la config por defecto. */
+/** «¿Cómo te contactamos?»: el celular, con el país de la clínica ya elegido. */
+function ownPhone(page: Page) {
+  return page.getByRole("textbox", { name: /^Tu celular/ })
+}
+
 async function fillContacto(page: Page, phone: string) {
-  await page.getByLabel(/^Teléfono(?: \*)?$/).fill(phone)
-  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await advanceTo(page, ownPhone(page))
+  await ownPhone(page).fill(maskedPhone(phone))
 }
 
-/** Paso "Salud": alergia declarada, O+, «No sé» en enfermedades y «No» en medicación. */
+/** «Tu salud»: alérgico a la penicilina, «No sé» en enfermedades, «No» en medicamentos y O+. */
 async function fillSalud(page: Page) {
-  await page.getByLabel("Grupo sanguíneo").click()
-  await page.getByRole("option", { name: "O+", exact: true }).click()
-  await page.getByLabel("¿Tiene alergias?").click()
-  await page.getByRole("option", { name: "Sí", exact: true }).click()
-  // El grupo de alergias es el primero de los tres ("Agregar otra" por grupo).
-  await page.getByRole("button", { name: "Agregar otra" }).first().click()
-  await page.getByLabel("Sustancia").fill("Penicilina")
-  await page.getByLabel("Gravedad").click()
-  await page.getByRole("option", { name: "Severa", exact: true }).click()
-  await page.getByLabel("¿Tiene alguna enfermedad actual?").click()
-  await page.getByRole("option", { name: "No sé", exact: true }).click()
-  await page.getByLabel("¿Toma medicación actualmente?").click()
-  await page.getByRole("option", { name: "No", exact: true }).click()
+  const allergies = page.getByRole("group", { name: /alérgic/ }).first()
+  await advanceTo(page, allergies)
+  await allergies.getByRole("button", { name: "Sí", exact: true }).click()
+  await page.getByLabel(/^¿A qué\?/).fill("Penicilina")
+  await page.getByRole("group", { name: /alguna enfermedad/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
+  await page.getByRole("group", { name: /medicamento todos los días/ }).first().getByRole("button", { name: "No", exact: true }).click()
+  await chooseOption(page.getByRole("combobox", { name: "Grupo sanguíneo" }), { label: "O+" })
+  const before = await page.getByText(/^Paso \d+ de \d+$/).textContent()
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await expect(page.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(before ?? "")
 }
 
-/** Paso "Revisión": acepta el aviso y envía. */
+/** «Antes de enviar»: acepta el aviso y envía. */
+function privacyBox(page: Page) {
+  return page.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })
+}
+
 async function acceptAndSubmit(page: Page) {
-  await page.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
+  await advanceTo(page, privacyBox(page))
+  await privacyBox(page).check()
   await page.getByRole("button", { name: "Enviar registro", exact: true }).click()
 }
 
@@ -157,14 +189,15 @@ async function getPatientDetail(page: Page, slug: string, patientId: string, cli
 test("registro público QR en escritorio: conserva borrador, declara salud y no vincula por teléfono", async ({
   browser,
   createOwner,
+  fixtureDb,
   nextEventId,
 }) => {
   const owner = await createOwner("qr-desk")
   const { page, org } = owner
   await publishConfig(page, org.slug)
-  // Teléfono deliberadamente repetido: el contacto previo y el formulario
-  // comparten número para probar que no se reclama la ficha existente.
+  // Un contacto previo con su celular: un registro por QR con ese número no lo reclama.
   const sharedPhone = phoneFromId(nextEventId())
+  const ownNumber = phoneFromId(nextEventId())
   const contact = await call<{ id: string }>(
     page,
     "POST",
@@ -182,26 +215,25 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   })
   try {
     await gotoHydrated(anon, tenant(org.slug, "/registro?via=qr"))
-    await expect(anon.getByText(`Registro de paciente · ${org.name}`).first()).toBeVisible()
+    await expect(anon.getByRole("heading", { level: 1, name: org.name })).toBeVisible()
+    await expect(anon.getByText("Registro de paciente", { exact: true })).toBeVisible()
 
-    await fillPatientNames(anon, patientName)
-    await anon.getByLabel("Fecha de nacimiento").fill("11/04/1990")
-    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await anon.getByLabel(/^Teléfono(?: \*)?$/).fill(sharedPhone)
-    // Volver conserva el nombre y reavanzar conserva el teléfono.
-    await anon.getByRole("button", { name: "Anterior", exact: true }).click()
-    await expect(anon.getByLabel(/^Nombres/)).toHaveValue(patientName.split(" ")[0] ?? "")
-    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await expect(anon.getByLabel(/^Teléfono(?: \*)?$/)).toHaveValue(
-      maskedPhone(sharedPhone),
-    )
-    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    await forMe(anon)
+    await fillAdultDatos(anon, { name: patientName, birthDate: "1990-04-11" })
+    await fillContacto(anon, ownNumber)
+    // Volver hasta «Tus datos» conserva el nombre, y reavanzar conserva el celular.
+    const names = anon.getByLabel(/^Nombres/)
+    for (let step = 0; step < 6 && !(await names.isVisible()); step += 1)
+      await anon.getByRole("button", { name: "Anterior", exact: true }).click()
+    await expect(names).toHaveValue(patientName.split(" ")[0] ?? "")
+    await advanceTo(anon, ownPhone(anon))
+    await expect(ownPhone(anon)).toHaveValue(maskedPhone(ownNumber))
 
     await fillSalud(anon)
     await acceptAndSubmit(anon)
 
-    await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible()
-    await expect(anon.getByText(new RegExp(`recibidos por ${org.name}`))).toBeVisible()
+    await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
+    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
     // Éxito sin sesión: no expone ficha, número clínico ni edición.
     await expect(anon).toHaveURL(/\/registro/)
     await expect(anon.locator('a[href*="/patients/"]')).toHaveCount(0)
@@ -210,8 +242,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await anonContext.close()
   }
 
-  // El teléfono coincidente no reclama el contacto existente: la persona del
-  // paciente es nueva (todo paciente es una persona).
+  // Todo paciente es una persona: la del registro es nueva.
   const created = await findPatientByName(page, org.slug, patientName)
   // Abrir la ficha no es una lectura clínica: lo administrativo del registro viaja sin la salud declarada.
   const administrative = await getPatientDetail(page, org.slug, created.id)
@@ -226,7 +257,8 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   expect(detail.registration?.answers.health.bloodGroup).toBe("O+")
   expect(detail.registration?.answers.health.allergies).toMatchObject({
     state: "recorded",
-    items: [{ substance: "Penicilina", severity: "severa" }],
+    // El registro no pregunta la gravedad: queda «desconocida» hasta que la revise quien atiende.
+    items: [{ substance: "Penicilina", severity: "desconocida" }],
   })
   // «No sé» se conserva distinto de «No»: desconocimiento frente a negación.
   expect(detail.registration?.answers.health.conditions.state).toBe("unknown")
@@ -246,7 +278,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   expect(consents[0]?.purposes).toContain("atencion")
   expect(detail.activeAllergies).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ substance: "Penicilina", severity: "severa" }),
+      expect.objectContaining({ substance: "Penicilina", severity: "desconocida" }),
     ]),
   )
   const untouched = await call<{ patients: unknown[] }>(
@@ -260,10 +292,35 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   // La alergia declarada aparece de inmediato en la ficha interna.
   await gotoHydrated(page, tenant(org.slug, `/patients/${created.id}`))
   await expect(
-    page.getByLabel("Alertas clínicas").getByText("Alergia severa: Penicilina", {
-      exact: true,
-    }),
+    page.getByLabel("Alertas clínicas").getByText(/^Alergia: Penicilina/),
   ).toBeVisible()
+
+  // Con el celular de alguien que ya está, el QR no crea a nadie ni toca su ficha:
+  // responde como siempre (sin decir de quién era) y deja a recepción decidir si es ella.
+  const heldName = `Otra Persona ${org.slug}`
+  const { context: heldContext, page: held } = await anonymousPage(browser)
+  try {
+    await gotoHydrated(held, tenant(org.slug, "/registro?via=qr"))
+    await forMe(held)
+    await fillAdultDatos(held, { name: heldName, birthDate: "1991-05-12" })
+    await fillContacto(held, sharedPhone)
+    await acceptAndSubmit(held)
+    await expect(held.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
+    await expect(held.getByText("Contacto Previo")).toHaveCount(0)
+  } finally {
+    await heldContext.close()
+  }
+  const sameName = await call<PatientListItem[]>(page, "GET", `/api/patients?q=${encodeURIComponent(heldName)}`, org.slug)
+  expect(sameName.filter((item) => item.displayName === heldName)).toEqual([])
+  const tasks = await fixtureDb
+    .select({ title: crmTask.title, kind: crmTask.kind, status: crmTask.status })
+    .from(crmTask)
+    .where(and(eq(crmTask.organizationId, org.id), eq(crmTask.contactId, contactId)))
+  expect(tasks).toEqual([
+    { title: "Se registró por el código QR: ¿es Contacto Previo?", kind: "registro_con_documento", status: "open" },
+  ])
+  const stillUntouched = await call<{ patients: unknown[] }>(page, "GET", `/api/contacts/${contactId}`, org.slug)
+  expect(stillUntouched.patients).toEqual([])
 })
 
 test("registro público QR en móvil: flujo completo en 390px sin cuenta", async ({
@@ -282,13 +339,16 @@ test("registro público QR en móvil: flujo completo en 390px sin cuenta", async
     await gotoHydrated(anon, tenant(org.slug, "/registro?via=qr"))
     const patientName = `Paciente Móvil ${org.slug}`
     const phone = phoneFromId(nextEventId())
+    await forMe(anon)
     await fillAdultDatos(anon, { name: patientName, birthDate: "1988-11-02" })
     await fillContacto(anon, phone)
     await fillSalud(anon)
     await acceptAndSubmit(anon)
 
-    await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible()
-    await expect(anon.getByText(new RegExp(`recibidos por ${org.name}`))).toBeVisible()
+    await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
+    await expect(anon.getByText(new RegExp(`${org.name} ya tiene tus datos`))).toBeVisible()
+    // En el celular nada se sale de la pantalla.
+    expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await expect(anon).toHaveURL(/\/registro/)
     await expect(anon.locator('a[href*="/patients/"]')).toHaveCount(0)
   } finally {
@@ -317,6 +377,7 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
     await gotoHydrated(anon, tenant(org.slug, "/registro?via=qr"))
     const patientName = `Paciente Versión ${org.slug}`
     const phone = phoneFromId(nextEventId())
+    await forMe(anon)
     await fillAdultDatos(anon, { name: patientName, birthDate: "1992-07-19" })
     await fillContacto(anon, phone)
     await fillSalud(anon)
@@ -342,23 +403,25 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
     await acceptAndSubmit(anon)
 
     await expect(
-      anon.getByText(/El formulario cambió: recargamos la configuración vigente/),
+      anon.getByText("La clínica cambió el registro: revisa tus respuestas y vuelve a enviar."),
     ).toBeVisible()
     await refetched
     // Sin éxito, sin reintento automático y con el borrador intacto.
-    await expect(anon.getByText("Paciente registrado", { exact: true })).toHaveCount(0)
+    await expect(anon.getByRole("heading", { name: "Registro recibido" })).toHaveCount(0)
     expect(publicPosts).toBe(1)
     await expect(anon.getByText(/rev\. 2/)).toBeVisible()
     await expect(
       anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }),
     ).toBeChecked()
     // La declaración de salud se conserva al retroceder.
-    await anon.getByRole("button", { name: "Anterior", exact: true }).click()
-    await expect(anon.getByLabel("¿Tiene alergias?")).toHaveText("Sí")
-    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    const allergies = anon.getByRole("group", { name: /alérgic/ }).first()
+    for (let step = 0; step < 6 && !(await allergies.isVisible()); step += 1)
+      await anon.getByRole("button", { name: "Anterior", exact: true }).click()
+    await expect(allergies.getByRole("button", { name: "Sí", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await expect(anon.getByLabel(/^¿A qué\?/)).toHaveValue("Penicilina")
     // El segundo envío es manual y usa la versión vigente.
     await acceptAndSubmit(anon)
-    await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible()
+    await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
     expect(publicPosts).toBe(2)
   } finally {
     await anonContext.close()
@@ -470,26 +533,27 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
   try {
     await gotoHydrated(minor, linkUrl)
     await expect(
-      minor.getByText("Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."),
+      minor.getByText("Ya tienes tu registro en la clínica. Aquí registras a tu hijo o a un familiar."),
     ).toBeVisible()
-    await expect(minor.getByLabel("¿Quién completa el registro?")).toHaveCount(0)
+    // Empieza en los datos de quien se atenderá: no se le pregunta para quién es.
+    await expect(minor.getByText("Datos de quien se atenderá", { exact: true })).toBeVisible()
+    await expect(minor.getByRole("radio", { name: "Para mí" })).toHaveCount(0)
     const minorName = `Menor Enlace ${org.slug}`
     await fillPatientNames(minor, minorName)
     await minor.getByLabel("Fecha de nacimiento").fill("15/06/2018")
+    // Quien registra a un menor queda como su representante: nombre, relación, celular y documento.
+    const repName = minor.getByLabel("Tu nombre y apellidos")
+    await advanceTo(minor, repName)
+    await repName.fill(`Madre Enlace ${org.slug}`)
+    await minor.getByRole("button", { name: "Madre, padre o tutor", exact: true }).click()
+    await minor.getByRole("textbox", { name: /^Tu celular/ }).fill(maskedPhone(phoneFromId(nextEventId())))
+    await minor.getByLabel(/^Tu DNI/).fill("41526374")
+    const before = await minor.getByText(/^Paso \d+ de \d+$/).textContent()
     await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
-    // El responsable se pide en "Contacto y filiación" cuando el paciente es menor.
-    await minor.getByLabel("Nombre del responsable").fill(`Madre Enlace ${org.slug}`)
-    await minor.getByLabel("Detalle de la relación").fill("Madre")
-    // El representante legal de un menor se identifica con su documento.
-    await minor.getByLabel("Documento del representante", { exact: true }).fill("41526374")
-    await minor.getByLabel(/^Teléfono del responsable(?: \*)?$/).fill(phoneFromId(nextEventId()))
-    await minor.getByLabel(/^Teléfono(?: \*)?$/).fill(phoneFromId(nextEventId()))
-    await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await minor.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
-    await minor.getByRole("button", { name: "Enviar registro", exact: true }).click()
+    await expect(minor.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(before ?? "")
+    await acceptAndSubmit(minor)
 
-    await expect(minor.getByText("Paciente registrado", { exact: true })).toBeVisible()
+    await expect(minor.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
     await minor.screenshot({ path: testInfo.outputPath("registro-contextual.png") })
     await expect(minor.locator('a[href*="/patients/"]')).toHaveCount(0)
   } finally {
@@ -514,7 +578,7 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
   expect(minorDetail.registration?.answers.representative).toMatchObject({
     displayName: `Madre Enlace ${org.slug}`,
     relationship: "guardian",
-    relationshipDetail: "Madre",
+    relationshipDetail: "Madre, padre o tutor",
   })
   const contactDetail = await call<{ patients: { id: string; relationship: string }[] }>(
     page,
@@ -546,19 +610,22 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
 test("vista previa de configuración no crea pacientes", async ({ createOwner }) => {
   const owner = await createOwner("qr-previa")
   const { page, org } = owner
+  let posts = 0
+  page.on("request", (request) => {
+    if (request.method() === "POST" && /\/api\/(public\/)?patient/.test(request.url())) posts += 1
+  })
   await gotoHydrated(page, tenant(org.slug, "/settings/patient-registration"))
-  await expect(page.getByRole("button", { name: "Vista previa", exact: true })).toBeEnabled()
-  await page.getByRole("button", { name: "Vista previa", exact: true }).click()
-  const dialog = surface(page, { name: "Vista previa del formulario" })
-  await expect(dialog).toBeVisible()
-  // Datos ficticios en memoria: avanzar hasta finalizar sin POST.
-  await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
-  await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
-  await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
-  await dialog.getByRole("button", { name: "Finalizar vista previa", exact: true }).click()
-  await expect(dialog.getByText("Vista previa: no se guardaron datos")).toBeVisible()
-  // El «Cerrar» del pie; la equis del diálogo también se llama «Cerrar».
-  await dialog.getByRole("button", { name: "Cerrar", exact: true }).first().click()
+  // La vista previa está siempre al lado, como la verá el paciente, y no guarda nada.
+  const preview = page.getByRole("complementary", { name: "Así lo ve el paciente" })
+  await expect(preview).toBeVisible()
+  await preview.getByRole("radio", { name: "Para mí" }).click()
+  await advanceTo(page, preview.getByLabel(/^Nombres/))
+  await fillAdultDatos(page, { name: "Vista Previa", birthDate: "1990-01-01" })
+  await fillContacto(page, phoneFromId(1))
+  await acceptAndSubmit(page)
+  await expect(preview.getByText("Vista previa: no se guardaron datos.")).toBeVisible()
+  await expect(preview.getByRole("button", { name: "Volver a la vista previa" })).toBeVisible()
+  expect(posts).toBe(0)
 
   expect(await call<unknown[]>(page, "GET", "/api/patients", org.slug)).toEqual([])
 })

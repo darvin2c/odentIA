@@ -104,11 +104,11 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   expect(registered?.displayName).toBe("Rosa Quispe")
   const ficha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${registered!.id}`, org.slug)
   expect(ficha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
-  // Su página lo dice con su acción: lo que la clínica pide y falta, y confirmar la identidad.
+  // Su página lo dice con su acción: lo que la clínica pide y falta (los apellidos ya los dio al crearla).
   await gotoHydrated(page, tenant(org.slug, `/people/${detail.contact.id}`))
   const pendingRow = page.getByText("Faltan datos para atenderla").first()
   await expect(pendingRow).toBeVisible()
-  await expect(page.getByText("Fecha de nacimiento. Confirma sus apellidos.")).toBeVisible()
+  await expect(page.getByText("Fecha de nacimiento.", { exact: true })).toBeVisible()
   await info.attach("persona-ficha-minima", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Odontología escribe a las personas, pero no lee el CRM: sin «Contexto» ni «Nueva conversación» ---
