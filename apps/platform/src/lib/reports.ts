@@ -230,8 +230,6 @@ export const REPORT_LISTS = [
   "no_show",
   "cancelled",
   "unmarked",
-  "controls_pending",
-  "budgets_waiting",
   "new_patients",
   // Pacientes: las personas de cada paso del embudo, las que se cayeron en él y las de «Si vuelven».
   "funnel_sought",

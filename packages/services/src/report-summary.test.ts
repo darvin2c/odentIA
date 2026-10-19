@@ -12,9 +12,8 @@ import { expect, it } from "vitest"
 import { addPlanItem } from "./plan.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { collectedNetMany, getFinanceTotalsBetween } from "./finance.js"
+import { collectedNetMany } from "./finance.js"
 import { budgetAcceptanceMany, overdueDebtMany } from "./report-summary.js"
-import { budgetTotalsMany } from "./reports.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -33,7 +32,7 @@ const day = (iso: string): Date => new Date(iso)
 const AUGUST = { start: day("2026-08-01T05:00:00Z"), end: day("2026-09-01T05:00:00Z") }
 const SEPTEMBER = { start: day("2026-09-01T05:00:00Z"), end: day("2026-10-01T05:00:00Z") }
 
-it("lo cobrado neto de varios tramos es lo mismo que Finanzas, con anulaciones y devoluciones", async () => {
+it("lo cobrado neto de varios tramos: la anulación y la devolución corrigen el tramo en que ocurren", async () => {
   const c = await clinic()
   const pay = async (paidAt: string, amountCents: number) => {
     const [row] = await ownerDb
@@ -51,11 +50,10 @@ it("lo cobrado neto de varios tramos es lo mismo que Finanzas, con anulaciones y
   await ownerDb.insert(patientPaymentRefund).values({ organizationId: c.orgId, patientId: c.patientId, paymentId: september.id, amountCents: 5_000, refundedAt: day("2026-09-20T15:00:00Z"), reason: "Devolución" })
 
   const [sep, aug] = await c.run((tx) => collectedNetMany(tx, c.orgId, [SEPTEMBER, AUGUST]))
-  const finance = async (span: { start: Date; end: Date }) => (await c.run((tx) => getFinanceTotalsBetween(tx, c.orgId, span)))[0]?.netoCents
-  expect(sep).toEqual([{ currency: "PEN", cents: await finance(SEPTEMBER) }])
-  expect(aug).toEqual([{ currency: "PEN", cents: await finance(AUGUST) }])
   // 50 000 − 5 000 de devolución − 30 000 del cobro de agosto anulado.
-  expect(sep?.[0]?.cents).toBe(15_000)
+  expect(sep).toEqual([{ currency: "PEN", cents: 15_000 }])
+  // Agosto queda como se cerró: el cobro anulado después sigue contando ahí.
+  expect(aug).toEqual([{ currency: "PEN", cents: 40_000 }])
 })
 
 it("te deben hace más de 30 días: lo que se debía en cada momento, descontado lo que tenía a favor", async () => {
@@ -90,7 +88,7 @@ it("te deben hace más de 30 días: lo que se debía en cada momento, descontado
   expect(other).toEqual([])
 })
 
-it("aceptación: un presupuesto aceptado en parte es uno aceptado, aunque sus líneas caigan en dos grupos", async () => {
+it("aceptación: un presupuesto aceptado en parte es uno aceptado, aunque deje líneas para después", async () => {
   const f = await clinicalFixture()
   const items = [
     await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id })),
@@ -111,6 +109,4 @@ it("aceptación: un presupuesto aceptado en parte es uno aceptado, aunque sus l�
   const span = { start: new Date(at.getTime() - 60_000), end: new Date(at.getTime() + 60_000) }
   const [acceptance] = await f.run((tx) => budgetAcceptanceMany(tx, "org_a", [span]))
   expect(acceptance).toEqual({ presented: 1, accepted: 1 })
-  const [groups] = await f.run((tx) => budgetTotalsMany(tx, "org_a", [span]))
-  expect(groups?.[0]).toMatchObject({ accepted: { count: 1 }, waiting: { count: 1 } })
 })

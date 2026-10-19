@@ -72,21 +72,6 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: false,
   },
-  controls_pending: {
-    title: "Controles pendientes",
-    noun: { one: "control", many: "controles" },
-    how: (period) => `Controles que tocaban en ${period} y hoy siguen pendientes.`,
-    where: { to: "/agenda", label: "Abrir la Agenda" },
-    showNext: true,
-  },
-  budgets_waiting: {
-    title: "Presupuestos que esperan respuesta",
-    noun: { one: "presupuesto", many: "presupuestos" },
-    how: (period) => `Presupuestos presentados en ${period} que hoy siguen sin respuesta o pospuestos.`,
-    where: { to: "/people", label: "Ir a Pacientes" },
-    patientTab: "plan",
-    showNext: false,
-  },
   new_patients: {
     title: "Pacientes nuevos",
     noun: { one: "persona", many: "personas" },
