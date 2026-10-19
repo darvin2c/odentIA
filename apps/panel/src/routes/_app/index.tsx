@@ -1,11 +1,11 @@
-import { Avatar, AvatarFallback, AvatarImage, Badge, Button, Input, toast } from "@odentia/ui"
+import { Avatar, AvatarFallback, AvatarImage, Button, Input, toast } from "@odentia/ui"
 import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
-import { ChevronRight, ClipboardCheck, CreditCard, LogOut, Plus, Search, ShieldCheck } from "lucide-react"
+import { ChevronRight, LogOut, Plus, Search, ShieldCheck } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
+import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema, clinicNoticeSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
 import { adminAccessQuery } from "../../lib/admin-access"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
@@ -43,16 +43,35 @@ const SERIES_INICIAL = ["text-series-1", "text-series-2", "text-series-3"] as co
 
 const ULTIMA_KEY = "odentia.panel.ultima-clinica"
 
-/** Última clínica usada por esta persona, guardada en su navegador. */
-function ultimaClinica(userId: string): string | null {
+/** Última clínica usada por esta persona, guardada en su navegador, con cuándo se abrió. */
+function ultimaClinica(userId: string): { organizationId: string; at: number | null } | null {
   try {
     const raw = window.localStorage.getItem(`${ULTIMA_KEY}.${userId}`)
     if (!raw) return null
-    const parsed = z.object({ organizationId: z.string().min(1) }).passthrough().safeParse(JSON.parse(raw))
-    return parsed.success ? parsed.data.organizationId : null
+    const parsed = z.object({ organizationId: z.string().min(1), at: z.number().optional() }).passthrough().safeParse(JSON.parse(raw))
+    return parsed.success ? { organizationId: parsed.data.organizationId, at: parsed.data.at ?? null } : null
   } catch {
     return null
   }
+}
+
+/** «Abriste hoy», «Abriste ayer», «Abriste hace 3 días»: en vez de la etiqueta «Última usada». */
+function abriste(at: number | null): string | null {
+  if (at === null) return null
+  const dia = (value: number) => Math.floor((value - new Date(value).getTimezoneOffset() * 60_000) / 86_400_000)
+  const dias = dia(Date.now()) - dia(at)
+  if (dias <= 0) return "Abriste hoy"
+  if (dias === 1) return "Abriste ayer"
+  if (dias < 30) return `Abriste hace ${dias} días`
+  return null
+}
+
+/** «3 sedes: Miraflores, San Isidro y Surco»; con más de tres, solo cuántas. */
+function sedesTexto(sedes: string[]): string | null {
+  if (sedes.length === 0) return null
+  if (sedes.length === 1) return "1 sede"
+  if (sedes.length > 3) return `${sedes.length} sedes`
+  return `${sedes.length} sedes: ${new Intl.ListFormat("es", { type: "conjunction" }).format(sedes)}`
 }
 
 function recordarClinica(userId: string, organizationId: string): void {
@@ -93,38 +112,49 @@ function fechaCorta(iso: string): string | null {
     .format(date)
     .replace(/\./g, "")
 }
+type Tono = "suave" | "plazo" | "detenido" | "neutro"
+
 /**
- * Un solo estado por clínica, sin contradicciones (issue 114): la
- * demostración no muestra el fin de la prueba.
+ * Un solo estado por clínica, solo cuando importa (issue 114, ADR 0065): sin
+ * «Plan activo», que no ayuda a elegir. La demostración no muestra el fin de
+ * la prueba y «pausada» (la pone odentIA) dice «En pausa».
  */
-function estadoClinica(status: BillingStatus): { insignia: string; detalle: string | null } {
-  if (status.isDemo) return { insignia: "Demostración · sin cobro", detalle: null }
+function estadoClinica(status: BillingStatus): { insignia: string; tono: Tono; detalle: string | null } | null {
+  if (status.isDemo) return { insignia: "Demostración · sin cobro", tono: "neutro", detalle: null }
   switch (status.status) {
     case "prueba": {
-      if (!status.trialEndsAt) return { insignia: "En prueba", detalle: null }
+      if (!status.trialEndsAt) return { insignia: "En prueba", tono: "suave", detalle: null }
       const fin = new Date(status.trialEndsAt).getTime()
       const fecha = fechaCorta(status.trialEndsAt)
-      if (Number.isNaN(fin) || fecha === null) return { insignia: "En prueba", detalle: null }
+      if (Number.isNaN(fin) || fecha === null) return { insignia: "En prueba", tono: "suave", detalle: null }
       const dias = Math.max(0, Math.ceil((fin - Date.now()) / 86_400_000))
       const quedan = dias <= 0 ? "termina hoy" : dias === 1 ? "queda 1 día" : `quedan ${dias} días`
-      return { insignia: `Prueba · ${quedan}`, detalle: `Termina ${fecha}` }
+      return { insignia: `Prueba · ${quedan}`, tono: "suave", detalle: null }
     }
     case "activa":
-      return { insignia: "Plan activo", detalle: null }
+      return null
     case "gracia": {
       const fecha = status.graceEndsAt ? fechaCorta(status.graceEndsAt) : null
-      return { insignia: "Pago pendiente", detalle: fecha ? `Gracia hasta el ${fecha}` : null }
+      return { insignia: "Pago pendiente", tono: "plazo", detalle: fecha ? `Se puede usar hasta el ${fecha}` : null }
     }
     case "restringida":
-      return { insignia: "Solo lectura", detalle: null }
+      return { insignia: "Solo lectura", tono: "detenido", detalle: null }
     case "pausada":
-      return { insignia: "Suspendida", detalle: null }
+      return { insignia: "En pausa", tono: "detenido", detalle: null }
     case "cancelada":
-      return { insignia: "Cancelada", detalle: null }
+      return { insignia: "Cancelada", tono: "detenido", detalle: null }
     case "sin_suscripcion":
-      return { insignia: "Sin suscripción", detalle: null }
+      return { insignia: "Sin suscripción", tono: "neutro", detalle: null }
   }
 }
+
+const TONO_CLASE: Record<Tono, string> = {
+  suave: "bg-primary-soft text-primary-soft-foreground",
+  plazo: "bg-warning-soft text-warning",
+  detenido: "bg-destructive/10 text-destructive",
+  neutro: "bg-muted text-muted-foreground",
+}
+
 function OrgsPage() {
   const { session } = appRouteApi.useRouteContext()
   const search = Route.useSearch()
@@ -135,8 +165,9 @@ function OrgsPage() {
   // La invitación Fundadores que trajo el enlace del correo, si quedó guardada al crear la cuenta.
   const [founderToken, setFounderToken] = useState<string | null>(null)
   useEffect(() => setFounderToken(storedInvitation()), [])
-  const [ultima, setUltima] = useState<string | null>(null)
+  const [ultimaGuardada, setUltima] = useState<{ organizationId: string; at: number | null } | null>(null)
   useEffect(() => setUltima(ultimaClinica(session.userId)), [session.userId])
+  const ultima = ultimaGuardada?.organizationId ?? null
   const [texto, setTexto] = useState("")
   // Tras salir de una clínica o responder una invitación no se autoentra:
   // la persona está mirando la lista y elige a dónde ir. Igual cuando el
@@ -231,7 +262,7 @@ function OrgsPage() {
             {ordenadas.length === 0 ? <p className="rounded-xl border bg-card p-4 text-center text-sm text-muted-foreground">Ninguna clínica coincide con «{texto.trim()}».</p> : (
               <ul className="space-y-3">
                 {ordenadas.map((org) => (
-                  <OrganizationItem key={org.organizationId} org={org} esUltima={org.organizationId === ultima} userId={session.userId} onLeave={() => setLeaving(org)} />
+                  <OrganizationItem key={org.organizationId} org={org} abiertaEl={org.organizationId === ultima ? (ultimaGuardada?.at ?? null) : undefined} userId={session.userId} onLeave={() => setLeaving(org)} />
                 ))}
               </ul>
             )}
@@ -251,49 +282,71 @@ function OrgsPage() {
   )
 }
 
-function OrganizationItem({ org, esUltima, userId, onLeave }: { org: AccountOrganization; esUltima: boolean; userId: string; onLeave: () => void }) {
-  const navigate = useNavigate()
+function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrganization; abiertaEl?: number | null; userId: string; onLeave: () => void }) {
   const status = useQuery({
     queryKey: ["account", "billing-status", org.organizationId],
     queryFn: async () => z.object({ data: billingStatusSchema }).parse(await apiFetch<unknown>(`/api/account/billing/status?orgId=${encodeURIComponent(org.organizationId)}`)).data,
   })
+  // Lo que pide actuar sale de la misma franja de la clínica, con el público que decide el servidor.
+  const notices = useQuery({
+    queryKey: ["account", "notices", org.organizationId],
+    queryFn: async () => z.object({ data: z.array(clinicNoticeSchema) }).parse(await apiFetch<unknown>(`/api/account/billing/notices?orgId=${encodeURIComponent(org.organizationId)}`)).data,
+    retry: false,
+  })
   const canManage = org.role === "owner" || org.role === "admin"
   const incomplete = !org.provisioning.hasProfile || !org.provisioning.hasBranch
-  const dominio = `${org.slug}.${BASE_DOMAIN}`
   const estado = status.data ? estadoClinica(status.data) : null
+  const urgente = notices.data?.find((notice) => (notice.topic === "cobro" || notice.topic === "tope") && notice.tone !== "aviso")
+  const insignia = urgente
+    ? { texto: urgente.short, clase: TONO_CLASE[urgente.tone === "limite" ? "detenido" : "plazo"] }
+    : estado
+      ? { texto: estado.insignia, clase: TONO_CLASE[estado.tono] }
+      : null
+  const accionPlan = canManage && urgente?.action && ["pagar", "elegir_plan", "subir_tope"].includes(urgente.action.kind) ? urgente.action : null
   const inicial = org.organizationName.trim().charAt(0).toUpperCase() || "C"
   let serie = 0
   for (const punto of org.organizationName) serie = (serie * 31 + (punto.codePointAt(0) ?? 0)) % SERIES_INICIAL.length
-  const acciones: RowActionItem[] = []
-  if (canManage && !incomplete) acciones.push({ key: "plan", label: "Plan y pagos", icon: <CreditCard className="size-4" aria-hidden />, onSelect: () => void navigate({ to: "/billing/$organizationId", params: { organizationId: org.organizationId } }) })
-  if (incomplete && canManage) acciones.push({ key: "alta", label: "Terminar el alta", icon: <ClipboardCheck className="size-4" aria-hidden />, onSelect: () => void navigate({ to: "/onboarding", search: { continue: org.organizationId } }) })
-  if (org.canLeave) acciones.push({ key: "salir", label: "Salir de esta clínica", tone: "danger", icon: <LogOut className="size-4" aria-hidden />, onSelect: onLeave })
-  // Toda la fila lleva a la clínica con el enlace estirado: el menú «⋯» queda
-  // por encima y sigue siendo accionable por separado.
+  // El «⋯» queda solo para salir: lo que pide acción va en la fila (ADR 0065).
+  const acciones: RowActionItem[] = org.canLeave
+    ? [{ key: "salir", label: "Salir de esta clínica", tone: "danger", icon: <LogOut className="size-4" aria-hidden />, onSelect: onLeave }]
+    : []
+  const linea = [`${org.slug}.${BASE_DOMAIN}`, org.roleLabel, sedesTexto(org.branches), abiertaEl !== undefined ? abriste(abiertaEl) : null]
+    .filter(Boolean)
+    .join(" · ")
   const enlace = "font-medium break-words before:absolute before:inset-0 before:rounded-xl focus-visible:outline-none"
+  const boton = "relative min-h-11 sm:min-h-9"
   return (
-    <li className="relative flex items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring">
+    <li className="relative flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring">
       <Avatar className="size-11 shrink-0">
         {org.logo ? <AvatarImage src={org.logo} alt="" /> : null}
         <AvatarFallback className={`bg-muted font-semibold ${SERIES_INICIAL[serie] ?? "text-series-1"}`}>{inicial}</AvatarFallback>
       </Avatar>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-48">
         <div className="flex flex-wrap items-center gap-2">
           {incomplete && !canManage ? <span className={enlace}>{org.organizationName}</span>
             : incomplete ? <Link to="/onboarding" search={{ continue: org.organizationId }} onClick={() => recordarClinica(userId, org.organizationId)} aria-label={`Terminar el alta de ${org.organizationName}`} className={enlace}>{org.organizationName}</Link>
             : <a href={tenantUrl(org.slug, "/home")} onClick={() => recordarClinica(userId, org.organizationId)} aria-label={`Entrar a ${org.organizationName}`} className={enlace}>{org.organizationName}</a>
           }
-          {esUltima && <Badge variant="outline">Última usada</Badge>}
-          {estado && <Badge variant="secondary">{estado.insignia}</Badge>}
+          {incomplete ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${TONO_CLASE.neutro}`}>Falta terminar el alta</span>
+            : insignia ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${insignia.clase}`}>{insignia.texto}</span> : null}
         </div>
-        <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">{dominio} · {org.roleLabel}</p>
-        {estado?.detalle && <p className="mt-0.5 text-sm text-muted-foreground">{estado.detalle}</p>}
-        {status.data?.restricted && <p className="mt-1 text-sm">{canManage ? "Consulta Plan y pagos o contacta con soporte para revisar la restricción." : "La operación está restringida. Contacta con quien administra tu clínica."}</p>}
+        <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">{linea}</p>
+        {estado?.detalle && !urgente ? <p className="mt-0.5 text-sm text-muted-foreground">{estado.detalle}</p> : null}
+        {!canManage && urgente ? <p className="mt-0.5 text-sm text-muted-foreground">{urgente.message}</p> : null}
         {incomplete && !canManage && <p className="mt-1 text-sm">Quien administra la clínica debe terminar el alta.</p>}
         {status.isError && <p className="relative mt-2 text-sm text-destructive">No se pudo consultar el estado. <button type="button" className="underline" onClick={() => void status.refetch()}>Reintentar</button></p>}
       </div>
-      <div className="relative flex shrink-0 items-center gap-1">
-        {!incomplete && <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />}
+      <div className="relative flex shrink-0 items-center gap-1 max-sm:basis-full max-sm:justify-end">
+        {incomplete && canManage ? (
+          <Button className={boton} render={<Link to="/onboarding" search={{ continue: org.organizationId }} onClick={() => recordarClinica(userId, org.organizationId)} />}>
+            Terminar el alta
+          </Button>
+        ) : accionPlan ? (
+          <Button variant="outline" className={boton} render={<a href={tenantUrl(org.slug, "/settings/plan")} onClick={() => recordarClinica(userId, org.organizationId)} />}>
+            {accionPlan.kind === "pagar" ? "Pagar" : accionPlan.label}
+          </Button>
+        ) : null}
+        {!incomplete && <ChevronRight className="size-5 shrink-0 text-muted-foreground max-sm:hidden" aria-hidden />}
         {acciones.length > 0 && <RowActions label={`Acciones de ${org.organizationName}`} items={acciones} />}
       </div>
     </li>
