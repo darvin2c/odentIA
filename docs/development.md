@@ -18,6 +18,8 @@ pnpm db:seed
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 
+La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y San Isidro, `packages/services/src/seed-reports.ts`): citas, atenciones, cobros, gastos y conversaciones para que Reportes muestre tendencias. `pnpm --filter @odentia/services bench:reports` mide cada consulta de Reportes contra esa base, sin escribir nada; la meta es menos de 300 ms por consulta.
+
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
 Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 24 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.

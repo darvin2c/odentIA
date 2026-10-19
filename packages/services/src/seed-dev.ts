@@ -350,7 +350,9 @@ const LUIS_ID = "seed-user-luis"
 const CORA_ID = "seed-user-cora"
 /** La endodoncista de Dental Smile (fase 4, tablero 2): atiende martes y jueves por la tarde. */
 const ROJAS_ID = "seed-user-rojas"
-const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID]
+/** El odontólogo de la Sede San Isidro: la segunda sede con historia en Reportes. */
+const SALAS_ID = "seed-user-salas"
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -754,10 +756,19 @@ await db.insert(user).values([
     emailVerified: true,
     ...SEED_TERMS,
   },
+  {
+    id: SALAS_ID,
+    name: "Dr. Diego Salas",
+    firstName: "Diego",
+    lastName: "Salas",
+    email: "salas@odentia.dev",
+    emailVerified: true,
+    ...SEED_TERMS,
+  },
 ])
 const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
-  [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID].map((userId) => ({
+  SEED_USERS.map((userId) => ({
     id: randomUUID(),
     accountId: userId,
     providerId: "credential",
@@ -778,6 +789,13 @@ await db.insert(member).values([
     id: randomUUID(),
     organizationId: ORG_A,
     userId: ROJAS_ID,
+    role: "dentist",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: SALAS_ID,
     role: "dentist",
     createdAt: new Date(),
   },
@@ -812,6 +830,7 @@ await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
   specialtyRegistration: "RNE 1024",
 })
 await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_DENTIST, registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, SALAS_ID, { ...PERU_DENTIST, signatureName: "Diego Salas", registrationNumber: "56789" })
 await setProfessionalProfile(db, ORG_A, ANA_ID, ROJAS_ID, {
   ...PERU_DENTIST,
   signatureName: "Elena Rojas",
@@ -870,6 +889,8 @@ const [miraflores] = await db
       phone: "+51987655001",
       timezone: "America/Lima",
     },
+    // San Isidro es la segunda sede con historia: dos años de citas en Reportes, con el Dr. Salas.
+    { organizationId: ORG_A, name: "Sede San Isidro", department: "Lima", province: "Lima", district: "San Isidro" },
   ])
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
@@ -3147,6 +3168,24 @@ await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   dentistUserId: ROJAS_ID,
   rules: [2, 4].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
 })
+// San Isidro, la segunda sede con historia: dos unidades dentales y el Dr. Salas
+// de lunes a sábado (Miraflores le dio horario a todos sus profesionales; él no atiende ahí).
+const sanIsidro = await db.query.branch.findFirst({
+  where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede San Isidro")),
+})
+if (!sanIsidro) throw new Error("Falta la Sede San Isidro")
+const chairsSanIsidro = await Promise.all(
+  ["Unidad dental 1", "Unidad dental 2"].map((name) => createChair(db, ORG_A, { branchId: sanIsidro.id, name })),
+)
+await setProfessionalSchedule(db, ORG_A, ANA_ID, { branchId: miraflores.id, dentistUserId: SALAS_ID, rules: [] })
+await setProfessionalSchedule(db, ORG_A, ANA_ID, {
+  branchId: sanIsidro.id,
+  dentistUserId: SALAS_ID,
+  rules: [1, 2, 3, 4, 5, 6].flatMap((weekday) => [
+    { weekday, startMin: 9 * 60, endMin: 13 * 60 },
+    ...(weekday === 6 ? [] : [{ weekday, startMin: 14 * 60, endMin: 18 * 60 }]),
+  ]),
+})
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
   if (!chair) throw new Error("Faltan unidades dentales semilla")
@@ -3476,15 +3515,40 @@ await db.transaction(async (tx) => {
 })
 await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
-// Dos meses de historia para que Reportes tenga con qué comparar.
-await db.transaction((tx) =>
-  seedReports(tx, {
-    ...domainSeed,
-    chairId: chairA(0),
-    dentistUserIds: [ANA_ID, LUIS_ID],
+// Dos años de historia de una clínica mediana en dos sedes: Reportes con
+// tendencia, comparación con el año anterior y mapas de días y horas.
+const reportsHistory = await db.transaction((tx) => {
+  const service = (code: string, weight: number, firstVisit = false) => {
+    const found = catalogA.find((item) => item.code === code)
+    if (!found || found.priceCents === null) throw new Error(`Falta el servicio semilla ${code}`)
+    return { id: found.id, name: found.name, priceCents: found.priceCents, durationMin: found.durationMin ?? 30, weight, firstVisit }
+  }
+  return seedReports(tx, {
+    orgId: ORG_A,
+    ownerUserId: ANA_ID,
+    branches: [
+      { id: miraflores.id, chairIds: chairsMiraflores.map((chair) => chair.id), rent: 6_500_00 },
+      { id: sanIsidro.id, chairIds: chairsSanIsidro.map((chair) => chair.id), rent: 4_800_00 },
+    ],
+    dentists: [
+      { userId: ANA_ID, signerName: "Ana Torres", registration: "12345", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.8 },
+      { userId: LUIS_ID, signerName: "Luis Prado", registration: "23456", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.66 },
+      { userId: ROJAS_ID, signerName: "Elena Rojas", registration: "45678", branchId: miraflores.id, weekdays: [2, 4], afternoonOnly: true, occupancy: 0.85 },
+      { userId: SALAS_ID, signerName: "Diego Salas", registration: "56789", branchId: sanIsidro.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.7 },
+    ],
+    services: [
+      service("EVALUACION", 1, true),
+      service("LIMPIEZA", 30),
+      service("OBTURACION", 26),
+      service("ORTODONCIA_CTRL", 18),
+      service("EXODONCIA", 8),
+      service("ENDODONCIA", 7),
+      service("BLANQUEAMIENTO", 5),
+      service("CORONA", 6),
+    ],
     patientIds: [...patientIdByName.values()],
-  }),
-)
+  })
+})
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3666,5 +3730,8 @@ async function summary(orgId: string, label: string): Promise<string> {
 console.log("seed-dev ok")
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
+console.log(
+  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones`,
+)
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)

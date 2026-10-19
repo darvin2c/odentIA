@@ -11,17 +11,20 @@ export interface ChartPoint {
   value: number;
 }
 
-/** Paleta categórica del tema (ciclada si hay más de 5 series). */
-const PALETA = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-] as const;
+/**
+ * Paleta categórica de datos (`--series-1..3`, comprobada para daltonismo en
+ * `globals.css`). De la cuarta categoría en adelante van en gris: la leyenda
+ * con valores las nombra, el color no alcanza para distinguir más de tres.
+ */
+const PALETA = ["var(--series-1)", "var(--series-2)", "var(--series-3)"] as const;
+const RESTO = "var(--series-muted)";
+
+function colorDe(indice: number): string {
+  return PALETA[indice] ?? RESTO;
+}
 
 function paletaPara(cantidad: number): string[] {
-  return Array.from({ length: cantidad }, (_, i) => PALETA[i % PALETA.length]);
+  return Array.from({ length: cantidad }, (_, i) => colorDe(i));
 }
 
 /**
@@ -39,7 +42,7 @@ function LeyendaConValores(props: {
           <span
             aria-hidden
             className="size-2.5 shrink-0 translate-y-[-1px] rounded-full"
-            style={{ backgroundColor: PALETA[i % PALETA.length] }}
+            style={{ backgroundColor: colorDe(i) }}
           />
           <span className="font-medium text-foreground">{entrada.label}</span>
           {entrada.detail ? (
@@ -165,7 +168,7 @@ export function TrendChart(props: {
             x: "label",
             y: "value",
             points: true,
-            stroke: "var(--chart-2)",
+            stroke: "var(--series-1)",
             key: "label",
           }),
         ],
@@ -205,7 +208,7 @@ export function BarChart(props: {
           barY(bars, {
             x: "label",
             y: "value",
-            fill: "var(--chart-1)",
+            fill: "var(--series-1)",
             key: "label",
             inset: 2,
           }),

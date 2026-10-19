@@ -8,10 +8,10 @@ import { withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
-import { clinicalFollowUp, patientPayment } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, encounter, encounterProcedure, patientPayment } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { updateAdminSettings } from "./agent-admin.js"
 import { setLine } from "./automation.js"
@@ -98,7 +98,7 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   const [p1, p2, p3, p4, p5] = [await c.person("Uno", 1), await c.person("Dos", 2), await c.person("Tres", 3), await c.person("Cuatro", 4), await c.person("Cinco", 5)]
   // Septiembre.
   await c.visit(a, ana, p1, "2026-09-03T15:00:00Z", "atendida")
-  await c.visit(a, ana, p2, "2026-09-04T15:00:00Z", "atendida", "agente")
+  await c.visit(a, ana, p2, "2026-09-04T15:00:00Z", "atendida", "agent")
   await c.visit(b, luis, p3, "2026-09-05T15:00:00Z", "atendida", "enlace")
   await c.visit(a, ana, p4, "2026-09-08T15:00:00Z", "no_asistio")
   await c.visit(b, luis, p5, "2026-09-09T15:00:00Z", "cancelada")
@@ -123,7 +123,7 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   ])
   expect(september.bySource).toEqual([
     { source: "recepcion", count: 5 },
-    { source: "agente", count: 1 },
+    { source: "agent", count: 1 },
     { source: "enlace", count: 1 },
   ])
   // Un solo mes no trae serie; varios meses, una fila por mes.
@@ -173,6 +173,25 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   expect(overview.sales).toEqual({ newPatients: 2, previousNewPatients: 2 })
   expect(overview.money).toEqual([])
   expect(overview.service).toEqual({ avgFirstResponseSeconds: null, previousAvgFirstResponseSeconds: null })
+})
+
+it("tratamientos realizados: un acto con cantidad cuenta sus unidades y vale precio × cantidad, como su cargo", async () => {
+  const f = await clinicalFixture()
+  const name = `Sellante ${randomUUID().slice(0, 8)}`
+  await ownerDb.insert(encounterProcedure).values({
+    organizationId: "org_a",
+    encounterId: f.encounter.id,
+    description: name,
+    quantity: 3,
+    priceCents: 4_000,
+    currency: "PEN",
+  })
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), endedAt: new Date(), finalizedBy: f.actor, signerName: "Clínico", signerRegistration: "1" })
+    .where(eq(encounter.id, f.encounter.id))
+  const sales = await f.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))
+  expect(sales.procedures.find((row) => row.name === name)).toEqual({ name, currency: "PEN", count: 3, cents: 12_000 })
 })
 
 it("controles: los que tocaban en el periodo, según su estado a hoy", async () => {
