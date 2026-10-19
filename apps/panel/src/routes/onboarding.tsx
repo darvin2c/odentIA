@@ -278,7 +278,7 @@ function OnboardingPage() {
           ) {
             // Alguien la tomó entre la comprobación y el envío: se dice junto al campo.
             takenAddresses.current.add(value.slug)
-            void form.validateField("slug", "submit")
+            void validateStepField("slug")
             void queryClient.invalidateQueries({ queryKey: ["onboarding", "address", value.slug] })
             return
           }
@@ -435,10 +435,22 @@ function OnboardingPage() {
     }
   }
 
+  /**
+   * Valida un campo del paso con su propio validador. `form.validateField`
+   * correría además el esquema de todo el formulario y dejaría errores en los
+   * campos de pasos que aún no se ven («Nombre de la sede» en rojo al llegar).
+   */
+  function validateStepField(field: keyof typeof FIELD_SCHEMAS) {
+    const instance = form.fieldInfo[field]?.instance
+    if (!instance) return form.validateField(field, "submit")
+    if (!form.getFieldMeta(field)?.isTouched) form.setFieldMeta(field, (prev) => ({ ...prev, isTouched: true }))
+    return instance.validate("submit", { skipFormValidation: true })
+  }
+
   /** Valida los campos del paso actual y avanza si pasan. */
   async function handleContinue() {
     const results = await Promise.all(
-      STEP_FIELDS[step].map((field) => Promise.resolve(form.validateField(field, "submit"))),
+      STEP_FIELDS[step].map((field) => Promise.resolve(validateStepField(field))),
     )
     if (results.some((errors) => errors.length > 0)) return
     goTo(step + 1 === 1 && skipOrg ? 2 : step + 1)

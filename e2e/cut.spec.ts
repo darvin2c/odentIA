@@ -108,6 +108,12 @@ test("auth: la dirección sigue al nombre, avisa si está en uso y el teléfono 
     await page.getByRole("button", { name: "Continuar", exact: true }).click()
     await expect(page.getByLabel("Nombre de la sede")).toBeVisible()
     await expect(page.getByRole("combobox", { name: "País" })).toHaveText("PE +51")
+
+    // Llegar al paso no lo marca en rojo: solo intentar crear la clínica sin el dato.
+    const branch = page.getByLabel("Nombre de la sede")
+    await expect(branch).not.toHaveAttribute("aria-invalid", "true")
+    await page.getByRole("button", { name: "Crear organización" }).click()
+    await expect(branch).toHaveAttribute("aria-invalid", "true")
   } finally {
     await context.close()
   }
