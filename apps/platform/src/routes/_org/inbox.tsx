@@ -49,7 +49,6 @@ import {
   PromptInputTools,
   usePromptInputAttachments,
 } from "@odentia/ui/components/ai-elements/prompt-input"
-import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
 import {
   AgentMark,
   ConfirmDialog,
@@ -62,6 +61,7 @@ import {
   PageShell,
   RowActions,
   SideDockScopeProvider,
+  SpeechInput,
   SubmitButton,
   useDetailMode,
   useListSearch,

@@ -1,7 +1,7 @@
 import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { AgentMark, AgentSurface, SubmitButton } from "@odentia/ui-patterns"
+import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useMicLevel } from "@odentia/ui-patterns"
 import { Mic, Pause, Play, Square } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { dictationClock, dictationErrorText, type DictationSession, highlightTranscript } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -9,6 +9,10 @@ export type { DictationKind, DictationSuggestion } from "./dictation-session"
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
 const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
+/** Silencio con medición real tras el que se avisa que el micrófono no capta voz. */
+const SILENCE_NOTICE_MS = 8000
+/** Nivel por encima del ruido de fondo: por debajo no cuenta como voz. */
+const AUDIBLE_LEVEL = 0.06
 
 /** «5 listas y 1 por revisar», con lo que haya. */
 function readiness(session: DictationSession): string {
@@ -37,9 +41,43 @@ export function DictationPanel({
 }) {
   const [typing, setTyping] = useState(false)
   const [typed, setTyped] = useState("")
-  if (!session.enabled) return null
   const { mode, pending, ready } = session
   const listening = mode === "listening"
+  // El reconocimiento del navegador no expone su flujo de audio: el nivel se
+  // mide en un getUserMedia paralelo de solo-nivel, solo mientras se escucha.
+  // Sin permiso o sin micrófono el indicador queda quieto: no finge volumen.
+  const metering = useMicLevel({ active: session.enabled && listening, acquire: true })
+  const [silentNotice, setSilentNotice] = useState(false)
+  const lastAudible = useRef(0)
+  const meteringRef = useRef(metering)
+  meteringRef.current = metering
+  // El aviso lo decide un reloj que consulta la última medición, no el nivel
+  // del render: con voz constante o silencio total no hay repintados que
+  // renueven nada. Sin medición activa nunca se avisa.
+  useEffect(() => {
+    if (!listening) {
+      lastAudible.current = 0
+      setSilentNotice(false)
+      return undefined
+    }
+    const timer = window.setInterval(() => {
+      const current = meteringRef.current
+      if (current.streamState !== "active") {
+        setSilentNotice(false)
+        return
+      }
+      const now = Date.now()
+      if (lastAudible.current === 0) lastAudible.current = now
+      if (current.level >= AUDIBLE_LEVEL) {
+        lastAudible.current = now
+        setSilentNotice(false)
+      } else {
+        setSilentNotice(now - lastAudible.current >= SILENCE_NOTICE_MS)
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [listening])
+  if (!session.enabled) return null
 
   const status = (
     <>
@@ -73,8 +111,8 @@ export function DictationPanel({
     return (
       <AgentSurface aria-label="Dictado en curso" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <span aria-hidden="true" className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-soft-foreground">
-            <Mic className="size-5" />
+          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-soft-foreground">
+            <ListeningIndicator state={listening ? "listening" : "paused"} level={metering.level} size="sm" />
           </span>
           <div className="min-w-0 flex-1 basis-48">
             <h2 className="font-heading text-base font-semibold">
@@ -110,6 +148,7 @@ export function DictationPanel({
           {session.organizing ? (pending > 0 ? " y ordenando lo último que dijiste" : "Ordenando lo que dijiste…") : null}
         </p>
         {session.interim ? <p className="rounded-lg border border-dashed border-agent-border px-3 py-2 text-sm text-muted-foreground">Escuchando: «…{session.interim}»</p> : null}
+        {silentNotice ? <p role="status" className="text-xs text-muted-foreground">No te oigo; revisa el micrófono.</p> : null}
         <p className="text-xs text-muted-foreground sm:hidden">Para corregir, dilo: «no, es la veintiséis» o «quita la endodoncia».</p>
         {status}
       </AgentSurface>
