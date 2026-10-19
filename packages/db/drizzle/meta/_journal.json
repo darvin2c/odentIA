@@ -120,6 +120,20 @@
       "when": 1792306402641,
       "tag": "0016_el_agente_usa_un_solo_modelo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792354933141,
+      "tag": "0017_compras_pagadas_y_horario_con_historia",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792354945762,
+      "tag": "0018_compras_pagadas_y_horario_con_historia_reglas",
+      "breakpoints": true
     }
   ]
 }

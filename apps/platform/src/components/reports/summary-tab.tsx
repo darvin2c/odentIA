@@ -313,7 +313,8 @@ function Professionals({ query }: { query: ReportQuery }) {
   const sum = (pick: (row: (typeof rows)[number]) => number): number => rows.reduce((total, row) => total + pick(row), 0)
   const clinicNoShow = rateOf(sum((row) => row.noShow), sum((row) => row.total))
   const clinicAcceptance = rateOf(sum((row) => row.accepted), sum((row) => row.presented))
-  const legend = `Las flechas marcan lo que se aparta más de ${APART_POINTS} puntos de la clínica${clinicNoShow !== null ? ` (no vinieron ${clinicNoShow} %` : ""}${clinicAcceptance !== null ? `${clinicNoShow !== null ? ", " : " ("}aceptaron ${clinicAcceptance} %` : ""}${clinicNoShow !== null || clinicAcceptance !== null ? ")" : ""}.`
+  const clinicBusy = rateOf(sum((row) => row.occMin), sum((row) => row.availMin))
+  const legend = `Las flechas marcan lo que se aparta más de ${APART_POINTS} puntos de la clínica${clinicNoShow !== null ? ` (no vinieron ${clinicNoShow} %` : ""}${clinicAcceptance !== null ? `${clinicNoShow !== null ? ", " : " ("}aceptaron ${clinicAcceptance} %` : ""}${clinicBusy !== null ? `${clinicNoShow !== null || clinicAcceptance !== null ? ", " : " ("}ocupado ${clinicBusy} %` : ""}${clinicNoShow !== null || clinicAcceptance !== null || clinicBusy !== null ? ")" : ""}.`
   const amount = (cents: number): string => plainAmount(cents, currency, locale)
   return (
     <ReportCard title="Por profesional" note={`Ordenado por lo cobrado · ${currency}`}>
@@ -332,6 +333,9 @@ function Professionals({ query }: { query: ReportQuery }) {
               </span>
               <span className="inline-flex gap-1">
                 Aceptaron <Apart value={rateOf(row.accepted, row.presented)} clinic={clinicAcceptance} worse="down" />
+              </span>
+              <span className="inline-flex gap-1">
+                Ocupado <Apart value={rateOf(row.occMin, row.availMin)} clinic={clinicBusy} worse="down" />
               </span>
             </span>
           </li>
@@ -352,6 +356,9 @@ function Professionals({ query }: { query: ReportQuery }) {
                 Aceptaron
               </TableHead>
               <TableHead scope="col" className="text-right">
+                Ocupado
+              </TableHead>
+              <TableHead scope="col" className="text-right">
                 Cobrado
               </TableHead>
             </TableRow>
@@ -368,6 +375,9 @@ function Professionals({ query }: { query: ReportQuery }) {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   <Apart value={rateOf(row.accepted, row.presented)} clinic={clinicAcceptance} worse="down" />
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  <Apart value={rateOf(row.occMin, row.availMin)} clinic={clinicBusy} worse="down" />
                 </TableCell>
                 <TableCell className="text-right font-semibold tabular-nums">{amount(row.collectedCents)}</TableCell>
               </TableRow>

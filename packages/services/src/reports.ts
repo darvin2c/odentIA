@@ -16,6 +16,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { getFinanceResultBetween, getFinanceTotalsBetween } from "./finance.js"
 import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
+import { FINANCE_LISTS, financeListRows, isFinanceList } from "./report-finance.js"
 import { addMonths, reportDayOf, monthStart, monthsOf, type ReportBucket, type ReportSpan, type YearMonth } from "./report-periods.js"
 import {
   at,
@@ -116,7 +117,7 @@ export type WaitInRoom = {
   byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }>
 }
 
-async function waitInRoom(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<WaitInRoom> {
+export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, span: Span): Promise<WaitInRoom> {
   const rows = await tx.execute<{ userId: string | null; name: string | null; median: number | string | null; measured: number }>(sql`
     select e.dentist_user_id as "userId", u.name,
       percentile_cont(0.5) within group (order by extract(epoch from (e.started_at - a.arrived_at)) / 60) as median,
@@ -539,6 +540,7 @@ export const REPORT_LISTS = [
   "budgets_waiting",
   "new_patients",
   "debts_overdue",
+  ...FINANCE_LISTS,
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -626,6 +628,9 @@ export async function getReportList(
         join patient p on p.id=w.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         order by w.presented_at, w.id limit ${REPORT_LIST_LIMIT}`)),
     ]
+  } else if (isFinanceList(query.list)) {
+    // Las listas de Reportes › Finanzas: «Te deben» por antigüedad y lo aceptado sin cita.
+    rows = (await financeListRows(tx, orgId, scope, query.list, REPORT_LIST_LIMIT, now)).map((row) => ({ ...row, at: new Date(row.at).toISOString() }))
   } else if (query.list === "debts_overdue") {
     // Quién debía hace más de 30 días al cerrar el periodo: la misma consulta de la cifra.
     rows = [

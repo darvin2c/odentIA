@@ -26,6 +26,7 @@ import {
   spansSql,
 } from "./report-scope.js"
 import { appointmentTotalsMany, budgetLinesSql, newPatientsMany } from "./reports.js"
+import { occupancyMany } from "./report-agenda.js"
 import { AGENT_SOURCES } from "./saas-actions.js"
 
 /** Presupuestos presentados y cuántos de ellos se aceptaron (en todo o en parte), por tramo. */
@@ -205,10 +206,15 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
     const entry = rows.get(row.userId)
     if (entry) Object.assign(entry, { presented: row.presented, accepted: row.accepted })
   }
+  // «Ocupado»: la agenda ocupada de cada uno, la misma cuenta de Reportes › Agenda (decisión 4).
+  const [occupancy] = await occupancyMany(tx, orgId, [{ start: window.start, end: window.end }], { branchId })
+  const minutesOf = new Map((occupancy?.byProfessional ?? []).map((row) => [row.userId, row]))
 
 
   return {
     ...reportHead(scope),
-    rows: [...rows.values()].sort((a, b) => b.collectedCents - a.collectedCents || b.attended - a.attended || a.name.localeCompare(b.name)),
+    rows: [...rows.values()]
+      .map((row) => ({ ...row, availMin: minutesOf.get(row.userId)?.availMin ?? 0, occMin: minutesOf.get(row.userId)?.occMin ?? 0 }))
+      .sort((a, b) => b.collectedCents - a.collectedCents || b.attended - a.attended || a.name.localeCompare(b.name)),
   }
 }

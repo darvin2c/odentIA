@@ -332,6 +332,11 @@ export const REPORT_LISTS = [
   "budgets_waiting",
   "new_patients",
   "debts_overdue",
+  "debts_age_0_30",
+  "debts_age_31_60",
+  "debts_age_61_90",
+  "debts_age_90_plus",
+  "upcoming_unbooked",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -385,7 +390,17 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
   return apiFetch(`/api/reports/advice?${params(query)}`)
 }
 
-export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service"
+export type ReportSection =
+  | "summary"
+  | "professionals"
+  | "money"
+  | "agenda"
+  | "sales"
+  | "service"
+  | "finance"
+  | "finance/commissions"
+  | "finance/outlook"
+  | "finance/promotions"
 
 // --- Resumen ------------------------------------------------------------------------
 
@@ -446,6 +461,9 @@ export interface ReportProfessionals extends ReportHead {
     presented: number
     accepted: number
     collectedCents: number
+    /** Minutos de su horario y de citas en el periodo: «Ocupado». */
+    availMin: number
+    occMin: number
   }>
 }
 
@@ -478,4 +496,169 @@ export function fetchReportList(list: ReportListKey, query: ReportQuery): Promis
 /** Clave de caché de una sección: cambia con el periodo y la sede, que valen para toda la pantalla. */
 export function reportKey(section: string, query: ReportQuery): readonly unknown[] {
   return ["report", section, query.period, query.branchId ?? null]
+}
+
+// --- Finanzas (fase 3) ----------------------------------------------------------------
+
+/** Un tramo de Finanzas: lo cobrado, la comisión que generó, los demás gastos y lo que deja. */
+export interface FinanceSpan {
+  cobradoCents: number
+  commissionCents: number
+  otherExpensesCents: number
+  leavesCents: number
+  /** Lo cobrado menos todo lo gastado, también el pago de comisiones. */
+  cashLeftCents: number
+}
+
+export type DebtAgeKey = "0_30" | "31_60" | "61_90" | "90_plus"
+
+export interface ReportFinance extends ReportHead {
+  months: ReportBucket[]
+  totals: { current: FinanceSpan; previous: FinanceSpan }
+  trend: FinanceSpan[]
+  otherCurrencies: Array<{ currency: string; cobradoCents: number }>
+  commissions: { generatedCents: number; paidCents: number; pendingCents: number; professionals: number }
+  cascade: {
+    cobradoCents: number
+    commissionCents: number
+    categories: Array<{ category: string; cents: number }>
+    purchasePaidCents: number
+    commissionPaidCents: number
+    leavesCents: number
+  }
+  chart: Array<ReportBucket & FinanceSpan>
+  debts: {
+    current: { totalCents: number; people: number; ages: Array<{ key: DebtAgeKey; cents: number; people: number }> }
+    previousOverdueCents: number
+    overdueCents: number
+  }
+  payables: {
+    commissions: { cents: number; professionals: number }
+    purchases: { cents: number; orders: number; oldestReceivedAt: string | null }
+  }
+  missing: Array<{
+    category: string
+    branch: { id: string; name: string }
+    previous: Array<{ month: string; cents: number }>
+    copy: { month: string; concept: string; amountCents: number; day: number }
+  }>
+  byMethod: { methods: Array<{ label: string; cash: boolean; cents: number }>; closures: { count: number; cashCents: number } }
+  byTreatment: { rows: Array<{ name: string; cents: number }>; others: { count: number; cents: number } | null }
+}
+
+export interface ReportCommissions extends ReportHead {
+  rows: Array<{
+    userId: string
+    name: string
+    attendedCents: number
+    unpaidCents: number
+    collectedCents: number
+    rateBps: number
+    commissionCents: number
+    paidCents: number
+    pendingCents: number
+    discountCents: number
+  }>
+}
+
+export interface ReportOutlook extends ReportHead {
+  upcoming: { cents: number; patients: number; unbooked: { cents: number; patients: number } }
+  patientValue: { patients: number; averageCents: number | null }
+  wholeClinic: string[]
+}
+
+export type PromotionVerdict = "solo_bajo_precio" | "trajo_nuevos" | "volvieron" | "aceptaron"
+
+export interface ReportPromotions extends ReportHead {
+  promotions: Array<{
+    promotionId: string
+    name: string
+    startsAt: string | null
+    endsAt: string | null
+    people: number
+    fresh: number
+    accepted: number
+    paidSome: number
+    returned: number
+    discountCents: number
+    collectedCents: number
+    verdict: PromotionVerdict
+  }>
+  people: number
+  fresh: number
+  discountCents: number
+  collectedCents: number
+  loose: { count: number; cents: number }
+  wholeClinic: string[]
+}
+
+// --- Agenda (fase 3) ------------------------------------------------------------------
+
+export interface AgendaOccupancy {
+  availMin: number
+  occMin: number
+}
+
+export interface AgendaReport extends ReportHead {
+  months: ReportBucket[]
+  appointments: { current: AppointmentTotals; previous: AppointmentTotals; months: AppointmentTotals[] }
+  occupancy: { current: AgendaOccupancy; previous: AgendaOccupancy; months: AgendaOccupancy[] }
+  chart: Array<ReportBucket & AppointmentTotals>
+  professionals: Array<{
+    userId: string
+    name: string
+    attended: number
+    noShow: number
+    cancelled: number
+    unmarked: number
+    availMin: number
+    occMin: number
+    waitMinutes: number | null
+  }>
+  waitInRoom: { medianMinutes: number | null; measured: number }
+  map: {
+    days: Array<{ day: string; weekday: number; userId: string; scheduledMin: number; availMin: number; occMin: number; assumed: boolean }>
+    hours: Array<{ month: string; hour: number; userId: string; availMin: number; occMin: number }>
+    week: Array<{ weekday: number; hour: number; userId: string; availMin: number; occMin: number }>
+    firstSchedule: Array<{ userId: string; day: string }>
+    assumed: boolean
+  }
+}
+
+/** Compras de Inventario por pagar (Finanzas › Gastos y «¿Es el pago de una compra?»). */
+export interface PurchaseBalance {
+  orderId: string
+  orderNumber: number
+  supplierId: string
+  supplierName: string
+  status: string
+  currency: string
+  branchId: string
+  branchName: string
+  orderedCents: number
+  receivedCents: number
+  cashCents: number
+  creditCents: number
+  paidCents: number
+  dueCents: number
+  aheadCents: number
+  firstReceivedAt: string | null
+  createdAt: string
+}
+
+export interface PurchasesToPay {
+  currency: string
+  unpaid: { orders: number; cents: number; oldest: PurchaseBalance | null }
+  orders: PurchaseBalance[]
+  credits: Array<{ supplierId: string; supplierName: string; currency: string; cents: number }>
+}
+
+/** «OC-0012». */
+export function purchaseOrderLabel(orderNumber: number): string {
+  return `OC-${String(orderNumber).padStart(4, "0")}`
+}
+
+/** Minutos a horas enteras: «62 h». */
+export function hoursLabel(minutes: number, locale: string): string {
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(Math.round(minutes / 60))} h`
 }
