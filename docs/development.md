@@ -24,6 +24,15 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 
 Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 24 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
 
+El correo de liquidación incluye una fila por clínica y otra por ajuste antes
+del total. `mail:preview --html <carpeta>` permite revisar ese detalle sin
+enviar correos ni ejecutar una liquidación.
+
+Los correos públicos `hola@` y `privacidad@` se derivan de `VITE_BASE_DOMAIN`,
+sin puerto. Antes de publicar, configurar ambas direcciones en Cloudflare
+Email Routing hacia un buzón supervisado y comprobar la recepción desde una
+cuenta externa. Cambiar el código no crea los buzones ni acredita su entrega.
+
 ### Migraciones
 
 La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, colas y cron). Las 108 migraciones anteriores están en git hasta el commit `405b732`.
@@ -231,6 +240,20 @@ emergente y avisa a la página que la abrió: una cabecera
 - `pnpm e2e remote-states.spec.ts --workers=2`: 500/red, 404 y 403 con reintento real; una respuesta perdida tras aplicar un POST conserva la entrada y no reenvía la operación.
 - `pnpm e2e home-start.spec.ts --workers=2`: organización nueva, parcial, configurada sin actividad, jornada activa, error recuperable y roles en 1440px/390px.
 
+Para comprobar el selector de clínicas sin alterar membresías, recorrerlo con
+cero, una y varias clínicas, una invitación pendiente y un alta incompleta.
+«Cambiar de clínica» abre el panel con `?cambiar=1`: debe conservar el selector
+incluso con una sola clínica. La última clínica se recuerda por usuario en
+este navegador, no se sincroniza entre dispositivos.
+
+En Tareas, Oportunidades y Soporte, comprobar textos largos y palabras sin
+espacios en lista, tabla y detalle. `ExpandableText` de `ui-patterns` ofrece
+«Ver más / Ver menos» solo si el texto desborda las líneas visibles; ampliar
+no abre el registro, no marca lectura ni escribe datos. El texto se muestra
+una sola vez. Las acciones móviles van debajo para no comprimir el título,
+y los datos de persona, responsable y vencimiento no se recortan junto al
+resumen. En el formulario de tarea el contexto va después del título editable.
+
 ### Verificación operativa del agente
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
@@ -251,6 +274,17 @@ Para comprobar la firma, el isotipo y su independencia del primario, ejecutar `p
 `Identidad/Cargas/Recorridos` y `Recorridos oscuros` presentan la variante B elegida (corchetes y barrido luminoso del 32) sobre tabla, acciones, drawer, inputs y cambio de contexto. La tabla permite crear/editar datos sintéticos y observar el guardado y la recarga como operaciones separadas; «Fallar recarga tras guardar» demuestra cómo reintentar solo la lista sin repetir la mutación. También se muestra invalidación por evento externo, primera consulta con skeleton, búsqueda con debounce de 300 ms, opciones dependientes, carga incremental y vista previa.
 
 La variante B es la primitiva `Spinner` de `@odentia/ui`: corchetes y barrido luminoso, sin giro del logo; respeta movimiento reducido. `SubmitButton` la muestra solo durante `pending`, conserva su nombre y bloquea el botón, sin reservar espacio en reposo. `SearchInput.isFetching` y `FilterBar.searchPending` representan la lectura real del servidor sin bloquear escritura ni limpieza.
+
+`ListeningIndicator`, `useMicLevel` y `SpeechInput` viven en `ui-patterns`:
+son personalizaciones de odentIA, sin modificar las primitivas del registro
+en `ui`. Comparten la indicación de escucha entre dictado clínico y Bandeja.
+Las barras siguen el nivel medido con Web Audio; con movimiento reducido se
+muestra un punto fijo.
+Comprobar voz continua, silencio, pausa, permiso denegado y liberación del
+micrófono al salir. El dictado avisa tras ocho segundos sin señal audible.
+`MediaRecorder` reutiliza su flujo; `SpeechRecognition` no expone el suyo y
+requiere una captura paralela solo para medir. La story `Identidad/Escuchando`
+muestra estados visuales con niveles de ejemplo, no acredita captura real.
 
 `DataTable.isFetching` añade el estado fijo de actualización sin sustituir filas. La primera consulta usa `DataTableSkeleton`; `LoadingState` usa skeleton por defecto y acepta `kind="indeterminate"` para preparar documentos o esperar sin estructura conocida. Una revalidación fallida conserva los datos recibidos y ofrece reintentar la lectura; un guardado confirmado no se repite porque falle esa lectura. La firma global permanece estática. Subidas y descargas con progreso medido conservan su progreso real.
 
