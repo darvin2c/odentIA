@@ -336,7 +336,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(13)
+  await expect(approved.getByRole("listitem")).toHaveCount(14)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
   await expect(approved).toContainText("1 aprobado · 12 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v2")

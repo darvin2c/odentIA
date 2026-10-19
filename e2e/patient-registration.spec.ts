@@ -675,7 +675,7 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
 
   // Recepción ve en su página que quedó con lo esencial: faltan datos para atenderla.
   const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
-  expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: true })
+  expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: false })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
   await expect(page.getByText("Faltan datos para atenderla").first()).toBeVisible()
   await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })

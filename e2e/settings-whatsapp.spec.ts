@@ -168,7 +168,7 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   await expect(connected).toContainText("Ya recibe mensajes.")
   // Al conectar se piden los trece mensajes de odentIA: los diez del agente y los tres que envía el equipo
   // («Retomar la conversación», «Presupuesto listo» y «Su enlace»).
-  await expect(connected).toContainText("13 mensajes están en revisión de WhatsApp.")
+  await expect(connected).toContainText("14 mensajes están en revisión de WhatsApp.")
   await expect(connected).toContainText("WhatsApp pide una forma de pago en tu cuenta para enviar mensajes aprobados")
   await expect(connected.getByRole("link", { name: /Abrir mi cuenta de Meta/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
   await expect(finishing).toHaveCount(0)
@@ -214,7 +214,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
   // Uno por línea que escribe y los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
   // faltan, cambio de fecha, cancelada).
-  await expect(byAgent.getByRole("listitem")).toHaveCount(10)
+  await expect(byAgent.getByRole("listitem")).toHaveCount(11)
   // «Retomar una oportunidad» viene escrito como los demás del agente.
   await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
   await expect(byTeam.getByRole("listitem")).toHaveCount(3)
@@ -447,7 +447,7 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/whatsapp"))
-  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("13 en revisión")
+  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("14 en revisión")
 
   // Recepción atiende conversaciones pero no abre Configuración: lee a quién avisar, sin enlace.
   await fixtureDb

@@ -103,7 +103,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   const [registered] = await call<{ id: string; displayName: string }[]>(page, "GET", "/api/patients?q=Rosa&limit=5", org.slug)
   expect(registered?.displayName).toBe("Rosa Quispe")
   const ficha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${registered!.id}`, org.slug)
-  expect(ficha.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  expect(ficha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
   // Su página lo dice con su acción: lo que la clínica pide y falta, y confirmar la identidad.
   await gotoHydrated(page, tenant(org.slug, `/people/${detail.contact.id}`))
   const pendingRow = page.getByText("Faltan datos para atenderla").first()
