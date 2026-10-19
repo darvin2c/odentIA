@@ -11,12 +11,12 @@ import { formatMoney } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { ColumnChart, EmptyState, LoadingState, ShareBar, type SharePart } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
-import { ArrowUpRight, Bot } from "lucide-react"
+import { Link, useNavigate } from "@tanstack/react-router"
+import { ArrowRight, Bot } from "lucide-react"
 import { useId } from "react"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
-import { panelUrl } from "../../lib/host"
+import { PLAN_PATH } from "../../lib/billing"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
@@ -38,7 +38,6 @@ import {
 import { ReceptionOffNotice } from "../agent/reception-off-notice"
 import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
 
-const orgRoute = getRouteApi("/_org")
 
 /**
  * Cada línea de lo pagado con las palabras de Facturación: quién lo hizo y cuándo cuenta una. La
@@ -231,7 +230,6 @@ function Paid({
   timezone: string
   wholeClinic: boolean
 }) {
-  const { org } = orgRoute.useRouteContext()
   const charged = paid.charging !== "no"
   // Sin la moneda del plan no hay importe: nunca se supone una.
   const currency = paid.currency
@@ -301,13 +299,13 @@ function Paid({
         <EmptyLine>{upperFirst(during(period))} el agente no hizo nada que se cobre.</EmptyLine>
       )}
       {notes.length > 0 ? <p className="text-[13px] text-muted-foreground">{notes.join(" ")}</p> : null}
-      <a
-        href={panelUrl(`/billing/${org.id}`)}
+      <Link
+        to={PLAN_PATH}
         className="inline-flex min-h-11 items-center gap-1 self-start text-[13px] font-bold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
       >
-        Ver en Facturación
-        <ArrowUpRight aria-hidden className="size-3.5" />
-      </a>
+        Ver en Plan y pagos
+        <ArrowRight aria-hidden className="size-3.5" />
+      </Link>
     </div>
   )
 }

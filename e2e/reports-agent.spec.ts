@@ -158,7 +158,7 @@ for (const width of [1440, 390]) {
     await expect(money).toContainText("USD 0.50 cada una")
     await expect(money).toContainText("El crédito del plan cubrió USD 29.00; USD 5.80 se cobraron aparte.")
     await expect(money).toContainText("Sin el IGV, que tu factura suma aparte.")
-    await expect(money.getByRole("link", { name: "Ver en Facturación" })).toHaveAttribute("href", new RegExp(`/billing/${owner.org.id}$`))
+    await expect(money.getByRole("link", { name: "Ver en Plan y pagos" })).toHaveAttribute("href", /\/settings\/plan$/)
     await expect(money).toContainText("Cobrado en citas que agendó el agente")
     await expect(money).toContainText("S/ 430.00")
     await expect(money).toContainText("En la cita recuperada")

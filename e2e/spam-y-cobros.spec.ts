@@ -6,7 +6,7 @@ import { saasAction, saasActionReview, saasPlan, saasSubscription } from "@odent
 import type { Page } from "@playwright/test"
 import { desc, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
-import { API, hostUrl, PANEL, tenant } from "./env"
+import { API, hostUrl, tenant } from "./env"
 import { api, call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -165,7 +165,7 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
     .returning({ id: saasAction.id })
   await fixtureDb.insert(saasAction).values(people.map((person, index) => row(person.id, 60 + index * 60)))
 
-  await gotoHydrated(page, `${PANEL}/billing/${org.id}/acciones`)
+  await gotoHydrated(page, tenant(org.slug, "/settings/plan/acciones"))
   await expect(page.getByRole("heading", { name: "Cada acción de tus agentes" })).toBeVisible()
   const rowOf = (name: string) => page.getByRole("row").filter({ hasText: name })
   await expect(rowOf("Carmen Huamán").getByRole("link", { name: "Ver conversación" })).toHaveAttribute("href", new RegExp(`conversation=${real.id}`))
@@ -224,7 +224,7 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   await expect(panel.getByText("El permiso para leerla terminó con la respuesta.")).toBeVisible()
 
   // La clínica ve cómo terminó y la respuesta en su fila.
-  await gotoHydrated(page, `${PANEL}/billing/${org.id}/acciones`)
+  await gotoHydrated(page, tenant(org.slug, "/settings/plan/acciones"))
   await expect(rowOf("Carmen Huamán")).toContainText("No se cobra: odentIA la devolvió")
   await rowOf("Carmen Huamán").getByRole("button", { name: "ver respuesta" }).click()
   await expect(rowOf("Carmen Huamán")).toContainText("el agente leyó el horario de verano")

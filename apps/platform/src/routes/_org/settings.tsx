@@ -1,9 +1,9 @@
-import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
+import { canAccessAny, platformPathPermission, seesBilling } from "@odentia/auth/permissions"
 import { PageShell, SectionNav, type SectionNavGroup, type SectionNavItem } from "@odentia/ui-patterns"
-import { createFileRoute, getRouteApi, Outlet, useRouterState } from "@tanstack/react-router"
+import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { useMyRole } from "../../lib/crm"
+import { PLAN_PATH } from "../../lib/billing"
 import { RouterLink } from "../../lib/router-link"
-import { panelUrl } from "../../lib/host"
 
 export const Route = createFileRoute("/_org/settings")({
   component: SettingsLayout,
@@ -48,6 +48,15 @@ const grupos: SectionNavGroup[] = [
   },
 ]
 
+/**
+ * Lo que la clínica paga a odentIA (ADR 0065): al final, solo para quien ve
+ * Facturación (`seesBilling`), que no es un permiso repartible.
+ */
+const cuentaOdentia: SectionNavGroup = {
+  label: "Tu cuenta odentIA",
+  items: [{ label: "Plan y pagos", to: PLAN_PATH }],
+}
+
 /** Lo que no pertenece a un grupo: al final, tras un separador. */
 const sueltas: SectionNavItem[] = [
   { label: "Integraciones", to: "/settings/integrations" },
@@ -63,7 +72,6 @@ const sueltas: SectionNavItem[] = [
 function SettingsLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = useMyRole()
-  const { org } = getRouteApi("/_org").useRouteContext()
   // Un apartado solo se ofrece a quien puede abrirlo, con la misma regla que el guard.
   const canOpen = (item: SectionNavItem) => {
     const permissions = platformPathPermission(item.to)
@@ -72,6 +80,7 @@ function SettingsLayout() {
   const visibleGroups = grupos
     .map((group) => ({ ...group, items: group.items.filter(canOpen) }))
     .filter((group) => group.items.length > 0)
+  if (seesBilling(role)) visibleGroups.push(cuentaOdentia)
 
   return (
     <PageShell>
@@ -82,11 +91,6 @@ function SettingsLayout() {
         pathname={pathname}
         LinkComponent={RouterLink}
       >
-        {(role === "owner" || role === "admin") && (
-          <a href={panelUrl(`/billing/${org.id}`)} className="mb-4 inline-flex text-sm font-medium underline underline-offset-4">
-            Plan y pagos de odentIA ↗
-          </a>
-        )}
         <Outlet />
       </SectionNav>
     </PageShell>

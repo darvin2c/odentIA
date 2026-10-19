@@ -1,9 +1,10 @@
 /**
  * Cambiar el tope de gasto (ADR 0031, tablero C5): cuánto como mucho al mes
  * por encima del crédito, con lo que se usará a este ritmo y lo que pasa al
- * llegar, dicho antes de guardar.
+ * llegar, dicho antes de guardar. Desde la franja de avisos se abre igual,
+ * con «+10» y «+25» para subirlo sin hacer la cuenta (ADR 0065).
  */
-import { Input, Label } from "@odentia/ui"
+import { Button, Input, Label } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useEffect, useState } from "react"
 import { centsToMajor, formatPlanMoney, majorToCents } from "./money"
@@ -67,6 +68,23 @@ export function SpendCapDrawer({
       <div className="flex flex-col gap-2">
         <Label htmlFor="spend-cap">Tope mensual ({currency}, sin impuestos)</Label>
         <Input id="spend-cap" inputMode="decimal" autoComplete="off" value={text} onChange={(event) => setText(event.target.value)} placeholder="Sin tope" />
+        {currentCents !== null ? (
+          <fieldset className="flex flex-wrap gap-2">
+            <legend className="sr-only">Subir el tope</legend>
+            {[1_000, 2_500].map((step) => (
+              <Button
+                key={step}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11 sm:min-h-8"
+                onClick={() => setText(centsToMajor((cents ?? currentCents) + step, currency))}
+              >
+                +{money(step)}
+              </Button>
+            ))}
+          </fieldset>
+        ) : null}
         {projectedOverCents !== null ? (
           <p className="text-xs text-muted-foreground">A este ritmo pasarás tu crédito en unos {money(projectedOverCents)} este mes.</p>
         ) : null}
@@ -82,7 +100,7 @@ export function SpendCapDrawer({
         <div className="rounded-lg border p-3 text-sm">
           <p className="font-medium">Te avisaremos</p>
           <p className="mt-1 text-muted-foreground">
-            Al llegar a {money(Math.round(cents * 0.75))} (75 %) y a {money(Math.round(cents * 0.9))} (90 %), en la plataforma y por correo.
+            Al llegar a {money(Math.round(cents * 0.75))} (75 %), en la clínica; a {money(Math.round(cents * 0.9))} (90 %), también por correo.
           </p>
         </div>
       ) : (

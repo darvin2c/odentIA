@@ -4,7 +4,7 @@ import { aiUsage } from "@odentia/db/schema/agent"
 import { session } from "@odentia/db/schema/auth"
 import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { desc, eq } from "drizzle-orm"
-import { hostUrl, PANEL, tenant } from "./env"
+import { hostUrl, tenant } from "./env"
 import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -75,7 +75,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   ])
 
   // Plan y pagos: lo que hicieron los agentes con el precio base y el propio.
-  await gotoHydrated(page, `${PANEL}/billing/${org.id}`)
+  await gotoHydrated(page, tenant(org.slug, "/settings/plan"))
   const consumption = page.getByRole("region", { name: "Lo que hicieron tus agentes este mes" })
   await expect(consumption).toBeVisible()
   await expect(consumption.getByText("64 conversaciones atendidas")).toBeVisible()
@@ -100,7 +100,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
 
   // En el teléfono, el mismo orden y el detalle en tarjetas.
   await page.setViewportSize({ width: 390, height: 844 })
-  await gotoHydrated(page, `${PANEL}/billing/${org.id}`)
+  await gotoHydrated(page, tenant(org.slug, "/settings/plan"))
   await expect(page.getByRole("region", { name: "Lo que hicieron tus agentes este mes" })).toBeVisible()
   await shot("panel-telefono")
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -108,7 +108,8 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   // La plataforma avisa arriba de cada pantalla, con su acción.
   await gotoHydrated(page, tenant(org.slug, "/home"))
   // Con el crédito y el tope en el límite, avisa primero el tope: corta los casos nuevos.
-  await expect(page.getByText("Llegaste a tu tope de gasto", { exact: false })).toBeVisible()
+  // La franja pinta el escritorio y el teléfono: se mira la que está a la vista.
+  await expect(page.getByText("Llegaste a tu tope de gasto", { exact: false }).filter({ visible: true })).toBeVisible()
   await shot("plataforma-aviso")
 
   // Una segunda clínica en prueba con el saldo casi agotado, para Hoy.
