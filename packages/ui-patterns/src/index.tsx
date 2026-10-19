@@ -41,9 +41,22 @@ export { isPasswordBreachedOnline, PASSWORD_MIN_LENGTH, usePasswordRequirements 
 export { Brand } from "./brand.js"
 export {
   BarChart,
+  type ChartCategory,
   type ChartPoint,
+  ColumnChart,
+  type ColumnChartProps,
+  type ColumnSeries,
   DonutChart,
   FunnelChart,
+  type HeatmapAxis,
+  HeatmapGrid,
+  type HeatmapGridProps,
+  niceTicks,
+  scaleLevel,
+  type SeriesTone,
+  ShareBar,
+  type SharePart,
+  Sparkline,
   TrendChart,
 } from "./charts/index.js"
 export { common } from "./common.js"
