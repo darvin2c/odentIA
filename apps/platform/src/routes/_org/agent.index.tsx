@@ -1,5 +1,6 @@
 import { Alert, AlertDescription, AlertTitle, Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
+import { CapReachedNotice } from "../../components/agent/reception-off-notice"
 import { AgentMark, AgentSurface, ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
@@ -164,6 +165,7 @@ function AgentSummaryPage() {
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader title="Agente" subtitle="Cómo va y qué necesita de ti." />
+      <CapReachedNotice />
       <AgentTabs />
       {overviewQuery.isPending || rolesQuery.isPending ? (
         <LoadingState message="Cargando el resumen…" />

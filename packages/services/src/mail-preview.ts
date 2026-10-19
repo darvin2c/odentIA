@@ -27,9 +27,11 @@ import {
   founderInvitationEmail,
   saasAlertEmail,
   saasBillingUrl,
+  saasChargeIssuedEmail,
   saasOverdueEmail,
   saasPlanStartedEmail,
   saasRestrictedEmail,
+  saasRestrictionSoonEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
   waitlistReceivedEmail,
@@ -95,7 +97,7 @@ const MAILS: Record<string, MailTemplate> = {
     replyTo: "soporte@odentia.localhost",
   }),
   "11-alerta-de-credito": saasAlertEmail(
-    { family: "credito", level: "aviso", periodKey: "2026-10-01", title: "Aviso", message: "Tus agentes usaron 76 % del crédito del mes.", action: "ver_consumo" },
+    { family: "credito", level: "aviso", periodKey: "2026-10-01", title: "Aviso", message: "Tus agentes usaron 76 % del crédito del mes.", short: "Usaste 76 % del crédito", action: "ver_consumo" },
     clinic,
     billing,
   ),
@@ -156,11 +158,14 @@ const MAILS: Record<string, MailTemplate> = {
       periodKey: "2026-10-24",
       title: "Aviso",
       message: "Tu precio especial (10 % menos en cada acción) termina el sábado, 24 de octubre. Desde el día siguiente pagas el precio de lista. ¿Quieres conversarlo? Escríbenos desde Soporte.",
+      short: "Tu precio especial termina el sáb 24 oct",
       action: "ver_plan",
     },
     clinic,
     billing,
   ),
+  "28-tu-cargo-del-mes": saasChargeIssuedEmail({ clinic, monthText: "octubre de 2026", amount: "USD 32.76", dueDay: "viernes, 30 de octubre", url: billing }),
+  "29-manana-solo-lectura": saasRestrictionSoonEmail({ clinic, amounts: ["USD 32.76"], url: billing }),
 }
 
 const htmlAt = process.argv.indexOf("--html")

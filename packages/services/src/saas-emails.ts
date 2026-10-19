@@ -22,7 +22,11 @@ const ALERT_ACTION: Record<SaasAlert["action"], string> = {
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
-/** Plan y pagos de la clínica en el panel; sin el origen del panel, el correo va sin botón. */
+/**
+ * Plan y pagos de la clínica: el enlace va al panel, que lleva a la página
+ * dentro de la clínica (ADR 0065) sin que el correo necesite su dirección.
+ * Sin el origen del panel, el correo va sin botón.
+ */
 export function saasBillingUrl(panelUrl: string | undefined, orgId: string): string | null {
   return panelUrl ? `${panelUrl.replace(/\/+$/, "")}/billing/${orgId}` : null
 }
@@ -80,7 +84,7 @@ export function saasRestrictedEmail(clinic: string, url: string | null): MailTem
     title: "Tu acceso quedó restringido",
     band: { tone: "vencido", text: "Acceso restringido desde hoy" },
     paragraphs: [
-      "Tu acceso se restringió por falta de pago. Puedes ver tu plan, registrar tu comprobante y contactar soporte desde el panel.",
+      "Tu acceso se restringió por falta de pago: la clínica queda en solo lectura. Dentro de la clínica, en Configuración › Plan y pagos, puedes ver tu plan y registrar tu comprobante.",
     ],
     ...action("Registrar mi comprobante", url),
     reason: reason(clinic),
@@ -109,6 +113,47 @@ export function saasOverdueEmail(input: {
     facts,
     ...action("Registrar mi comprobante", input.url),
     note: "Si no se registra a tiempo, el acceso se restringe. No se pierde ningún dato.",
+    reason: reason(input.clinic),
+  })
+}
+
+/** Llegó el cargo del mes (ADR 0065): vence 7 días después, y se dice el día. */
+export function saasChargeIssuedEmail(input: {
+  clinic: string
+  monthText: string
+  amount: string
+  dueDay: string
+  url: string | null
+}): MailTemplate {
+  return renderEmail({
+    subject: `Tu cargo de ${input.monthText}`,
+    preview: `Vence el ${input.dueDay}.`,
+    title: `Tu cargo de ${input.monthText}`,
+    paragraphs: [
+      `Ya está el cargo de ${input.monthText} de ${input.clinic}. Regístralo en Plan y pagos antes de que venza para que el equipo siga trabajando sin cortes.`,
+    ],
+    facts: [
+      { label: "Monto", value: input.amount },
+      { label: "Vence", value: capitalized(input.dueDay), total: true },
+    ],
+    ...action("Registrar mi comprobante", input.url),
+    reason: reason(input.clinic),
+  })
+}
+
+/** Mañana termina la gracia (ADR 0065): el último aviso antes de pasar a solo lectura. */
+export function saasRestrictionSoonEmail(input: { clinic: string; amounts: readonly string[]; url: string | null }): MailTemplate {
+  return renderEmail({
+    subject: "Mañana tu clínica pasa a solo lectura",
+    preview: "Registra tu comprobante hoy para que el equipo siga trabajando.",
+    title: "Mañana tu clínica pasa a solo lectura",
+    band: { tone: "vencido", text: "Último día para registrar el pago" },
+    paragraphs: [
+      `El cargo de ${input.clinic} sigue sin pagar. Si hoy no se registra el comprobante, mañana el equipo podrá ver todo, pero no guardar, y el agente no responderá.`,
+    ],
+    facts: input.amounts.map((value) => ({ label: "Monto pendiente", value })),
+    ...action("Registrar mi comprobante", input.url),
+    note: "No se pierde ningún dato.",
     reason: reason(input.clinic),
   })
 }

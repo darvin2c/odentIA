@@ -345,7 +345,7 @@ export function MasterDetail({
       // propósito: así la caja de cada columna abarca el alto de la lista y la
       // tarjeta pegada tiene recorrido dentro de ella.
       style={{
-        height: open && !pageScroll ? "calc(100dvh - 3rem)" : "auto",
+        height: open && !pageScroll ? "calc(100dvh - 3rem - var(--notice-strip-h, 0px))" : "auto",
         ...(pageScroll ? { overflow: "visible" } : {}),
       }}
       className={cn(ANCHO_ANIMADO, className)}
@@ -359,7 +359,7 @@ export function MasterDetail({
           // propia de la columna competiría con aquella. El mínimo la deja del
           // alto del detalle pegado, así una lista corta no deja la tarjeta
           // salida del group.
-          pageScroll && "min-h-[calc(100dvh-3rem)]",
+          pageScroll && "min-h-[calc(100dvh-3rem-var(--notice-strip-h,0px))]",
         )}
       >
         {pageScroll ? (
@@ -385,7 +385,7 @@ export function MasterDetail({
           !open && "w-0 overflow-hidden",
           // El handle acompaña al detalle pegado: sin esto se estiraría a todo
           // el alto de la lista.
-          pageScroll && open && "sticky top-6 h-[calc(100dvh-3rem)]",
+          pageScroll && open && "sticky top-[calc(1.5rem+var(--notice-strip-h,0px))] h-[calc(100dvh-3rem-var(--notice-strip-h,0px))]",
         )}
       />
       <ResizablePanel
@@ -401,7 +401,7 @@ export function MasterDetail({
         // una caja que abarca la lista entera.
         className={cn(
           "min-w-0",
-          pageScroll && open ? "sticky top-6 h-[calc(100dvh-3rem)]" : "h-full",
+          pageScroll && open ? "sticky top-[calc(1.5rem+var(--notice-strip-h,0px))] h-[calc(100dvh-3rem-var(--notice-strip-h,0px))]" : "h-full",
         )}
       >
         {/* La caja recorta el deslizamiento: sin ella, mover el formulario

@@ -1,14 +1,17 @@
-import { buttonVariants, cn } from "@odentia/ui"
+import { Button } from "@odentia/ui"
+import { PageNotice } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { usePermission } from "../../lib/crm"
 import { useAgentPanelSummary } from "../agent-panel"
+import { useClinicNotices, useRaiseCap } from "../clinic-notices"
 
 /**
  * «Recepción está apagada», para la Bandeja: quien atiende sabe que nadie más
  * responde. El estado sale del resumen del panel del agente (la misma consulta
  * que ya mantiene el layout), así que lo ve quien decide o supervisa al agente.
  * La acción solo aparece para quien lo administra; el resto lee a quién pedirlo.
- * Mientras no se sabe el estado no se dice nada.
+ * Mientras no se sabe el estado no se dice nada. Es un aviso de esta pantalla
+ * (`PageNotice`), no de la franja: solo importa donde se atienden conversaciones.
  */
 export function ReceptionOffNotice({ className }: { className?: string }) {
   const canSee = usePermission("agent.read")
@@ -17,23 +20,49 @@ export function ReceptionOffNotice({ className }: { className?: string }) {
   const summary = useAgentPanelSummary(canSee || canDecide)
   if (summary.data?.data.enabled !== false) return null
   return (
-    <div role="status" className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-muted px-3.5 py-2.5", className)}>
-      <div className="min-w-0 flex-1 basis-52">
-        <p className="font-bold">Recepción está apagada</p>
-        <p className="text-sm text-muted-foreground">
-          {canManage
-            ? "Tu equipo responde todas las conversaciones."
-            : "Tu equipo responde todo. Para encenderla, habla con quien administra la clínica."}
-        </p>
-      </div>
-      {canManage ? (
-        <Link
-          to="/agent/recepcion"
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 border-primary bg-card text-primary-soft-foreground sm:min-h-9")}
-        >
-          Ver y encender
-        </Link>
-      ) : null}
-    </div>
+    <PageNotice
+      tone="aviso"
+      label="Recepción está apagada"
+      className={className}
+      action={
+        canManage ? (
+          <Button variant="outline" size="sm" className="min-h-11 sm:min-h-9" render={<Link to="/agent/recepcion" />}>
+            Ver y encender
+          </Button>
+        ) : undefined
+      }
+    >
+      {canManage
+        ? "Tu equipo responde todas las conversaciones."
+        : "Tu equipo responde todo. Para encenderla, habla con quien administra la clínica."}
+    </PageNotice>
+  )
+}
+
+/**
+ * Llegaron al tope de gasto (ADR 0065): Recepción deja de atender casos nuevos
+ * y le llegan al equipo. Lo dice en la Bandeja y en el Agente, con el texto que
+ * el servidor da a cada uno; «Subir tope» solo para quien ve Plan y pagos.
+ */
+export function CapReachedNotice({ className }: { className?: string }) {
+  const notices = useClinicNotices()
+  const raiseCap = useRaiseCap()
+  const cap = notices.data?.find((notice) => notice.topic === "tope" && notice.tone === "limite")
+  if (!cap) return null
+  return (
+    <PageNotice
+      tone="limite"
+      label="Tope de gasto"
+      className={className}
+      action={
+        cap.action?.kind === "subir_tope" ? (
+          <Button variant="outline" size="sm" className="min-h-11 sm:min-h-9" onClick={raiseCap}>
+            Subir tope
+          </Button>
+        ) : undefined
+      }
+    >
+      {cap.message}
+    </PageNotice>
   )
 }

@@ -89,6 +89,7 @@ export {
 export { KpiCard, type KpiCardProps } from "./kpi-card.js"
 export { UsageMeter, type UsageMeterProps, usageMeterLevel } from "./usage-meter.js"
 export { PageNotice, type PageNoticeProps } from "./page-notice.js"
+export { NoticeStrip, type NoticeStripProps, type NoticeTone, type StripNotice, sortNotices } from "./notice-strip.js"
 export * from "./list-filtering/index.js"
 export {
   DataRefreshMarker,

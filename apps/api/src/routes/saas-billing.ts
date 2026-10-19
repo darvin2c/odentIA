@@ -11,6 +11,7 @@ import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
   activateSaasSubscription,
+  getClinicNotices,
   archiveSaasPlan,
   assertSaasAllowed,
   assertSaasSeatAvailable,
@@ -989,6 +990,17 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
   })
 
   // C4: avisos de la prueba, del crédito y del tope; solo owner/admin los ve.
+  // La franja de avisos de la clínica (ADR 0065): cualquier miembro; el
+  // servicio decide qué ve cada uno según su rol.
+  app.get("/notices", async (c) => {
+    const orgId = c.req.query("orgId")
+    if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
+    const membership = await accountMember(deps, c, orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicNotices(tx, orgId, membership)))
+  })
+
   app.get("/alerts", async (c) => {
     const orgId = c.req.query("orgId")
     if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)

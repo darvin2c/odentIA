@@ -1,8 +1,12 @@
-import { canAccess, canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
+import { canAccess, canAccessAny, platformPathPermission, ROLE_LABELS, seesBilling, type OrgRole } from "@odentia/auth/permissions"
 import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@odentia/ui"
 import {
@@ -24,14 +28,16 @@ import {
   getRouteApi,
   Outlet,
   redirect,
+  useNavigate,
   useRouterState,
 } from "@tanstack/react-router"
 import {
+  ArrowLeftRight,
   BarChart3,
   Bot,
-  Building2,
   CalendarDays,
   ChevronsUpDown,
+  CreditCard,
   Home,
   Inbox,
   Kanban,
@@ -55,8 +61,7 @@ import {
 } from "../components/agent-panel"
 import { HelpButton } from "../components/help-panel"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
-import { SaasStatusBanner } from "../components/saas-status-banner"
-import { SupportGrantBanner } from "../components/support-grant-banner"
+import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
 import { requireTermsAccepted, requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
@@ -67,6 +72,7 @@ import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
+import { PLAN_PATH } from "../lib/billing"
 
 /**
  * Formato regional de la clínica, conocido antes del primer render para que
@@ -177,50 +183,74 @@ const navDefinitions: NavDefinition[] = [
 const orgRouteApi = getRouteApi("/_org")
 
 function OrgSwitcher() {
-  const { org } = orgRouteApi.useRouteContext()
+  const { org, session } = orgRouteApi.useRouteContext()
+  const navigate = useNavigate()
+  const role = org.members.find((member) => member.userId === session.userId)?.role ?? "member"
+  const billing = seesBilling(role)
   const { data: orgs } = useQuery({
     queryKey: ["orgs"],
     queryFn: async () => (await authClient.organization.list()).data ?? [],
   })
-
-  const card = (
-    <>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
-        <Building2 className="size-[18px]" aria-hidden />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-        <span className="truncate text-sm font-semibold">{org.name}</span>
-        <span className="truncate text-xs text-muted-foreground">Organización</span>
-      </span>
-    </>
-  )
-  const cardClass =
-    "elevated flex min-h-14 w-full items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2"
-
-  if (!orgs || orgs.length <= 1) {
-    return <div className={cardClass}>{card}</div>
-  }
+  // Lo de cobro que pide actuar marca el nombre de la clínica (ADR 0065).
+  const notices = useClinicNotices()
+  const billingNotice = billing
+    ? notices.data?.find((notice) => (notice.topic === "cobro" || notice.topic === "tope") && notice.tone !== "aviso")
+    : undefined
+  const others = (orgs ?? []).filter((item) => item.id !== org.id)
+  const initial = org.name.trim().charAt(0).toUpperCase() || "C"
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={`Organización ${org.name}. Cambiar`}
-        className={`${cardClass} transition-colors outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring`}
+        aria-label={`${org.name}${billingNotice ? `, ${billingNotice.short}` : ""}. Menú de la clínica`}
+        className="elevated flex min-h-14 w-full items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2 transition-colors outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {card}
+        <span className="relative shrink-0">
+          <Avatar className="size-9 rounded-[10px]">
+            {org.logo ? <AvatarImage src={org.logo} alt="" className="rounded-[10px]" /> : null}
+            <AvatarFallback className="rounded-[10px] bg-primary-soft font-semibold text-primary">{initial}</AvatarFallback>
+          </Avatar>
+          {billingNotice ? (
+            <span
+              aria-hidden
+              className={`absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card ${billingNotice.tone === "limite" ? "bg-destructive" : "bg-warning-strong"}`}
+            />
+          ) : null}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+          <span className="truncate text-sm font-semibold">{org.name}</span>
+          <span className="truncate text-xs text-muted-foreground">{ROLE_LABELS[role as OrgRole] ?? "Miembro"}</span>
+        </span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-(--anchor-width) min-w-56">
-        {orgs.map((item) => (
-          <DropdownMenuItem
-            key={item.id}
-            onClick={() => window.location.assign(tenantUrl(item.slug, "/home"))}
-          >
-            {item.name}
+        {billing ? (
+          <DropdownMenuItem onClick={() => void navigate({ to: PLAN_PATH })}>
+            <CreditCard aria-hidden />
+            <span className="flex-1">Plan y pagos</span>
+            {billingNotice ? (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${billingNotice.tone === "limite" ? "bg-destructive text-destructive-foreground" : "bg-warning-strong text-warning-strong-foreground"}`}
+              >
+                {billingNotice.short}
+              </span>
+            ) : null}
           </DropdownMenuItem>
-        ))}
+        ) : null}
+        {others.length > 0 ? (
+          <>
+            {billing ? <DropdownMenuSeparator /> : null}
+            {others.map((item) => (
+              <DropdownMenuItem key={item.id} onClick={() => window.location.assign(tenantUrl(item.slug, "/home"))}>
+                {item.name}
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
+        {billing || others.length > 0 ? <DropdownMenuSeparator /> : null}
         {/* Vuelve al selector sin autoentrar (issue 114). */}
         <DropdownMenuItem onClick={() => window.location.assign(panelUrl("/?cambiar=1"))}>
+          <ArrowLeftRight aria-hidden />
           Cambiar de clínica
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -244,9 +274,14 @@ function OrgLayout() {
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
   // Una sola suscripción SSE para el layout: agenda y panel del agente.
-  useOrgEvents(["appointment.updated", ...AGENT_PANEL_EVENTS], (kind) => {
+  useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_PANEL_EVENTS], (kind) => {
     if (kind === "appointment.updated" || kind === "stream.reconnected") {
       void invalidateAppointmentQueries(queryClient)
+    }
+    // Un pago, un tope o un acceso de soporte cambian la franja de avisos sin recargar.
+    if (kind === "saas.subscription.updated" || kind === "stream.reconnected") {
+      void queryClient.invalidateQueries({ queryKey: ["saas", org.id] })
+      if (kind === "saas.subscription.updated") return
     }
     if (kind !== "appointment.updated") invalidateAgentPanelQueries(queryClient)
   })
@@ -291,15 +326,18 @@ function OrgLayout() {
   }
 
   return (
+    <RaiseCapProvider>
     <AppShell
+      notice={<ClinicNoticeStrip userId={session.userId} />}
       items={navItems}
       LinkComponent={RouterLink}
       pathname={pathname}
       user={{ name: session.name, email: session.email }}
       // El perfil vive en el panel de la cuenta (otro origen): se llega con un enlace normal.
       userMenuItems={[
-        { label: "Mi perfil", icon: UserRound, href: panelUrl("/profile") },
-        { label: "Cambiar contraseña", icon: KeyRound, href: panelUrl("/profile?edit=password") },
+        // `clinica` deja en el panel el enlace para volver a esta clínica.
+        { label: "Mi perfil", icon: UserRound, href: panelUrl(`/profile?clinica=${encodeURIComponent(org.slug)}`) },
+        { label: "Cambiar contraseña", icon: KeyRound, href: panelUrl(`/profile?edit=password&clinica=${encodeURIComponent(org.slug)}`) },
       ]}
       footerItems={footerItems}
       brand={<Brand />}
@@ -322,8 +360,6 @@ function OrgLayout() {
               </>
             }
           >
-            <SaasStatusBanner organizationId={org.id} role={role} />
-            <SupportGrantBanner canRevoke={role === "owner" || role === "admin"} />
             <Outlet />
           </HeaderUtilitiesProvider>
         </AgentPanelProvider>
@@ -333,5 +369,6 @@ function OrgLayout() {
       {/* Términos nuevos de cada persona y, para quien administra, el contrato de encargo de la clínica. */}
       <LegalGate request={authFetch} clinic={clinicAgreement} links={legalLinks} />
     </AppShell>
+    </RaiseCapProvider>
   )
 }
