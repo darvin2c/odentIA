@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { Page } from "@playwright/test"
 import { PANEL, panelPattern, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { gotoHydrated } from "./hydration"
+import { gotoHydrated, waitForHydration } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 type UiUser = { name: string; email: string; password: string }
@@ -34,8 +34,8 @@ async function login(page: Page, user: UiUser): Promise<void> {
 
 async function onboard(page: Page, org: UiOrg): Promise<void> {
   await expect(page).toHaveURL(/onboarding/)
-  await page.getByLabel("Nombre comercial").fill(org.name)
-  await page.getByLabel("Slug (subdominio)").fill(org.slug)
+  await page.getByLabel("Nombre de tu clínica").fill(org.name)
+  await page.getByLabel("Dirección de tu clínica en odentIA").fill(org.slug)
   await page.getByRole("button", { name: "Continuar" }).click()
   await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`)
   await page.getByRole("button", { name: "Continuar" }).click()
@@ -57,6 +57,63 @@ test("auth: registro, verificación y onboarding", async ({ browser }) => {
     await verifyEmail(page, user.email)
     await login(page, user)
     await onboard(page, org)
+  } finally {
+    await context.close()
+  }
+})
+
+test("auth: la dirección sigue al nombre, avisa si está en uso y el teléfono sigue al país", async ({
+  browser,
+  createOwner,
+}) => {
+  // Una clínica que ya existe: su dirección está tomada.
+  const taken = await createOwner("direccion")
+  const id = randomUUID()
+  const user: UiUser = { name: "Carmen Pruebas", email: `direccion-${id}@test.dev`, password: "secreto-123" }
+  const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })
+  try {
+    const page = await context.newPage()
+    await register(page, user)
+    await verifyEmail(page, user.email)
+    await login(page, user)
+    await expect(page).toHaveURL(/onboarding/)
+    // Se escribe tecla por tecla: lo tecleado antes de hidratar se perdería.
+    await waitForHydration(page)
+
+    // Issue 106: la dirección sigue cada tecla del nombre, sin lo genérico.
+    const address = page.getByLabel("Dirección de tu clínica en odentIA")
+    await page.getByLabel("Nombre de tu clínica").pressSequentially("Clínica Dental Sonrisa")
+    await expect(address).toHaveValue("sonrisa")
+    await expect(page.getByText(/^✓ sonrisa\..+ está libre\.$/)).toBeVisible()
+
+    // Escrita a mano deja de seguir al nombre y dice al momento si está en uso.
+    await address.fill(taken.org.slug)
+    await page.getByLabel("Nombre de tu clínica").fill("Clínica Dental Sonrisa Miraflores")
+    await expect(address).toHaveValue(taken.org.slug)
+    await expect(page.getByText("Ya está en uso.")).toBeVisible()
+    await page.getByRole("button", { name: "Continuar", exact: true }).click()
+    await expect(page.getByText("Esa dirección ya está en uso. Elige otra.")).toBeVisible()
+    await page.getByRole("button", { name: `Usar ${taken.org.slug}-2` }).click()
+    await expect(address).toHaveValue(`${taken.org.slug}-2`)
+    await expect(page.getByText(`${taken.org.slug}-2.`, { exact: false })).toContainText("está libre")
+    await page.getByRole("button", { name: "Continuar", exact: true }).click()
+
+    // Issue 107: el país del paso 2 manda en el teléfono del paso 3, aunque el campo ya exista.
+    await page.getByLabel("Razón social").fill("Sonrisa S.A.C.")
+    // Los nombres siguen el idioma del navegador de la prueba.
+    await page.getByRole("combobox", { name: "País" }).click()
+    await page.getByRole("option", { name: /^M[ée]xico \(\+52\)$/ }).click()
+    await page.getByRole("combobox", { name: "País" }).click()
+    await page.getByRole("option", { name: /^Per[úu] \(\+51\)$/ }).click()
+    await page.getByRole("button", { name: "Continuar", exact: true }).click()
+    await expect(page.getByLabel("Nombre de la sede")).toBeVisible()
+    await expect(page.getByRole("combobox", { name: "País" })).toHaveText("PE +51")
+
+    // Llegar al paso no lo marca en rojo: solo intentar crear la clínica sin el dato.
+    const branch = page.getByLabel("Nombre de la sede")
+    await expect(branch).not.toHaveAttribute("aria-invalid", "true")
+    await page.getByRole("button", { name: "Crear organización" }).click()
+    await expect(branch).toHaveAttribute("aria-invalid", "true")
   } finally {
     await context.close()
   }

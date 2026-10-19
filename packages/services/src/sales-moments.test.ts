@@ -54,8 +54,10 @@ it("agendar una cita mueve sola su oportunidad «Interesado» y la tarjeta dice 
   )
   // Con servicio, el valor sale de la lista de precios.
   expect(wanted).toMatchObject({ amountCents: 120000, currency: "PEN", amountFromPriceList: true, moment: "interesado" })
+  // Hora fija: con la del reloj, una corrida entre las 03:00 y las 04:00 UTC
+  // chocaba en la misma unidad dental con la cita de la prueba de cancelar.
   const startsAt = new Date(Date.now() + 3 * DAY)
-  startsAt.setUTCMinutes(0, 0, 0)
+  startsAt.setUTCHours(15, 0, 0, 0)
   await f.run((tx) =>
     createAppointment(tx, "org_a", f.actor, {
       branchId, chairId, patientId: f.patient.id, dentistUserId: f.actor, serviceId: f.service.id,

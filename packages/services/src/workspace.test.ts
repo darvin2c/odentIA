@@ -312,6 +312,15 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   expect(inbox.attend + inbox.agent).toBeGreaterThanOrEqual(3)
 })
 
+/** Si faltan o pasaron menos de 5 minutos de la medianoche de Lima, espera a que el día quede lejos. */
+async function outsideLimaMidnight(): Promise<void> {
+  const [hour, minute] = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .format(new Date()).split(":").map(Number)
+  const sinceMidnight = hour! * 60 + minute!
+  const waitMinutes = sinceMidnight >= 24 * 60 - 5 ? 24 * 60 - sinceMidnight + 5 : sinceMidnight < 5 ? 5 - sinceMidnight : 0
+  if (waitMinutes > 0) await new Promise((resolve) => setTimeout(resolve, waitMinutes * 60_000))
+}
+
 it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen del día", async () => {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `hoy-${orgId.slice(0, 8)}`)
@@ -324,24 +333,25 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   const [norte] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Norte", timezone: "America/Lima" }).returning({ id: branch.id })
   const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
-  // Horas fijas del día de la sede: lo atendido al empezar el día y lo pendiente al final,
-  // para que «la siguiente» no dependa de la hora en que corre la prueba (salvo el último cuarto de hora).
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
-  const visit = async (name: string, time: string, status: string, dentistUserId: string, where: "centro" | "norte") => {
+  // Horas a minutos del reloj, dentro del mismo día de la sede: lo atendido ya pasó y
+  // lo pendiente viene enseguida. Con horas fijas, una corrida al final del día de Lima
+  // veía terminada la cita que debía ser «la siguiente».
+  await outsideLimaMidnight()
+  const visit = async (name: string, minutesFromNow: number, status: string, dentistUserId: string, where: "centro" | "norte") => {
     const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) })
-    const startsAt = new Date(`${day}T${time}:00-05:00`)
+    const startsAt = new Date(Math.floor(Date.now() / 60_000) * 60_000 + minutesFromNow * 60_000)
     await ownerDb.insert(appointment).values({
       organizationId: orgId, patientId: person!.id, dentistUserId, status, serviceName: "Control",
       branchId: where === "centro" ? centro!.id : norte!.id, chairId: where === "centro" ? chairCentro!.id : chairNorte!.id,
-      startsAt, endsAt: new Date(startsAt.getTime() + 15 * 60_000), durationMin: 15,
+      startsAt, endsAt: new Date(startsAt.getTime() + 60_000), durationMin: 1,
     })
   }
-  await visit("Atendida de Ana", "00:10", "atendida", ana, "centro")
-  await visit("No asistió", "00:30", "no_asistio", luis, "centro")
-  await visit("Cancelada", "00:50", "cancelada", luis, "centro")
-  await visit("Confirmada de Luis", "23:15", "confirmada", luis, "centro")
-  await visit("Sin confirmar de Ana", "23:40", "programada", ana, "centro")
-  await visit("Ana en Norte", "23:00", "confirmada", ana, "norte")
+  await visit("Atendida de Ana", -3, "atendida", ana, "centro")
+  await visit("No asistió", -2, "no_asistio", luis, "centro")
+  await visit("Cancelada", -1, "cancelada", luis, "centro")
+  await visit("Confirmada de Luis", 2, "confirmada", luis, "centro")
+  await visit("Sin confirmar de Ana", 3, "programada", ana, "centro")
+  await visit("Ana en Norte", 1, "confirmada", ana, "norte")
 
   const reception: WorkspaceAccess = { ...restricted, appointments: true }
   const home = (access: WorkspaceAccess, userId: string, branchId?: string) =>
@@ -380,7 +390,7 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   // Un rol sin agenda ni caja no recibe citas, caja ni filas de otros.
   const bare = await home(restricted, recipient)
   expect(bare).toMatchObject({ today: null, cash: null, waiting: [] })
-})
+}, 11 * 60_000)
 
 it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus planes y recepción ninguno", async () => {
   const orgId = randomUUID()
