@@ -687,6 +687,9 @@ importers:
       '@types/nodemailer':
         specifier: 8.0.1
         version: 8.0.1
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -9276,7 +9279,7 @@ snapshots:
 
   '@img/sharp-wasm32@0.34.4':
     dependencies:
-      '@emnapi/runtime': 1.11.0
+      '@emnapi/runtime': 1.11.3
     optional: true
 
   '@img/sharp-wasm32@0.35.5':

@@ -22,6 +22,8 @@ La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
+Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 24 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
+
 ### Migraciones
 
 La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, colas y cron). Las 108 migraciones anteriores están en git hasta el commit `405b732`.
@@ -167,10 +169,14 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    desarrollador): alcanza para probar.
 4. En Facebook Login for Business › Configuración, activar el inicio de sesión
    con el SDK de JavaScript y los demás interruptores que lista la guía de
-   implementación, y agregar a «Dominios permitidos» y a «URI de redirección de
-   OAuth válidos» el dominio donde se abre la plataforma. Solo HTTPS con
-   certificado válido. Cada clínica entra por su subdominio: confirmar con Meta
-   si admite comodín o hay que servir el botón desde un único dominio.
+   implementación, y agregar a «Dominios permitidos para el SDK para
+   JavaScript» y a «URI de redirección de OAuth válidos» un solo dominio, el
+   del panel (`https://app.<dominio>/`; en producción
+   `https://app.odentia32.com/`), más el de desarrollo si se prueba en local.
+   Solo HTTPS con certificado válido. La lista no admite comodín, así que la
+   ventana de Meta nunca se abre desde el subdominio de una clínica: su botón
+   lleva a `app.<dominio>/whatsapp/conectar?org=<slug>`, que abre la ventana y
+   vuelve a la clínica (issue 166, ADR 0059). Una clínica nueva no pide tocar Meta.
 5. Crear la configuración de «Facebook Login for Business» con la variante
    «WhatsApp Embedded Signup» y elegir los productos: eso fija la versión 4. Su
    identificador es `META_LOGIN_CONFIG_ID`.

@@ -23,6 +23,8 @@ export interface SaasMailSender {
 export interface SaasBillingWorkerDeps {
   ownerDb: Db
   mailer?: SaasMailSender
+  /** Origen del panel: el botón a Plan y pagos de cada aviso. */
+  panelUrl?: string
 }
 
 export interface SaasBillingTickResult {
@@ -82,7 +84,7 @@ export async function runSaasBillingTick(
       else if (typeof value === "string") now = new Date(value)
     }
   }
-  const tick = await tickSaasBilling(deps.ownerDb, now)
+  const tick = await tickSaasBilling(deps.ownerDb, now, { panelUrl: deps.panelUrl })
   let mailed = 0
   let uncertain = 0
   for (const mail of tick.mails) {

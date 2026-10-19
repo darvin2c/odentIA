@@ -26,6 +26,7 @@ import {
   setAdminStaffRole,
   writeAdminAudit,
 } from "@odentia/services"
+import { staffInvitationTemplate } from "@odentia/mail"
 import { and, eq } from "drizzle-orm"
 import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
@@ -47,12 +48,7 @@ async function sendStaffInvite(
   email: string,
   acceptUrl: string,
 ): Promise<void> {
-  await mailer.send({
-    to: email,
-    subject: "Invitación al personal de odentIA",
-    text: `Fuiste invitado al personal de odentIA. Acepta aquí con tu cuenta verificada: ${acceptUrl} (caduca en 7 días).`,
-    html: `<p>Fuiste invitado al personal de odentIA.</p><p><a href="${acceptUrl}">Aceptar invitación</a> (caduca en 7 días).</p>`,
-  })
+  await mailer.send({ to: email, ...staffInvitationTemplate({ url: acceptUrl }) })
 }
 
 const passwordInput = z.object({ password: z.string().min(1).max(200).optional() })
