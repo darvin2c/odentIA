@@ -24,7 +24,7 @@ import {
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { nextPatientNumber } from "./patients.js"
 import {
@@ -38,8 +38,9 @@ import {
   getReportAgent,
 } from "./report-agent.js"
 import { agentBookingsMany, getReportSummary } from "./report-summary.js"
+import { billedAboveCredit, previousSaasPeriod } from "./saas-action-review.js"
 import { countRecoveredAppointment } from "./saas-actions.js"
-import { createSaasPlan } from "./saas-billing.js"
+import { createSaasPlan, updateSaasPlan } from "./saas-billing.js"
 import { closeSaasPeriods } from "./saas-invoicing.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
@@ -258,7 +259,7 @@ describe("lo que pagaste por el agente", () => {
     const hidden = await c.run((tx) => getReportAgent(tx, c.orgId, { period: "2026-11" }, day("2026-12-05T12:00:00Z")))
     expect(hidden.paid).toBeNull()
 
-    // La clínica cambia a un plan con menos crédito: los meses ya cobrados siguen con el crédito del plan de su cargo.
+    // La clínica cambia a un plan con menos crédito: los meses ya cobrados siguen con el crédito que guardó su cargo.
     const smaller = await createSaasPlan(ownerDb, admin, {
       code: `agent-report-chico-${randomUUID().slice(0, 6)}`,
       name: "Plan chico",
@@ -274,6 +275,40 @@ describe("lo que pagaste por el agente", () => {
     await ownerDb.update(saasSubscription).set({ planId: smaller.id }).where(eq(saasSubscription.organizationId, c.orgId))
     const [again] = await c.run((tx) => agentBillingMany(tx, c.orgId, [NOVEMBER], day("2026-12-05T12:00:00Z")))
     expect(again).toMatchObject({ coveredCents: 2900, overCents: 350, planCreditCents: 2900 })
+  })
+
+  it("subir después el crédito del mismo plan no cambia un mes ya cobrado: ni lo pagado, ni lo que se devuelve, ni el mes anterior de Facturación", async () => {
+    // Un plan propio, porque la administración lo edita: el de las demás pruebas no se toca.
+    const own = await createSaasPlan(ownerDb, admin, {
+      code: `agent-report-editado-${randomUUID().slice(0, 6)}`,
+      name: "Plan que se edita",
+      currency: "USD",
+      priceCents: 3500,
+      creditCents: 2900,
+      conversationMicros: 500_000,
+      consultationMicros: 400_000,
+      recoveryMicros: 4_000_000,
+      trialCreditCents: 5000,
+      trialMaxCreditCents: 13000,
+    })
+    const c = await clinic(OCTOBER)
+    await ownerDb.update(saasSubscription).set({ planId: own.id }).where(eq(saasSubscription.organizationId, c.orgId))
+    // Octubre: 60 conversaciones de 0,50; el crédito de 29,00 cubre 58 y la factura suma las 2 que pasan.
+    await filler(c.orgId, 60, day("2026-10-02T12:00:00Z"))
+    await closeSaasPeriods(ownerDb, day("2026-11-01T06:00:00Z"))
+    const [october] = await chargesOf(c.orgId)
+    expect(october).toMatchObject({ creditCents: 2900, subtotalCents: 3600 })
+    const [last] = await ownerDb.select().from(saasAction).where(eq(saasAction.organizationId, c.orgId)).orderBy(desc(saasAction.occurredAt)).limit(1)
+
+    // En diciembre la administración sube el crédito del mismo plan a 39,00: con él, octubre no habría pasado del crédito.
+    await updateSaasPlan(ownerDb, admin, own.id, { creditCents: 3900 })
+    const [paid] = await c.run((tx) => agentBillingMany(tx, c.orgId, [OCTOBER], day("2026-12-05T12:00:00Z")))
+    // Reportes › Agente sigue diciendo lo de la factura de octubre.
+    expect(paid).toMatchObject({ totalCents: 3000, coveredCents: 2900, overCents: (october!.subtotalCents ?? 0) - (await cuotaOf(october!.id)), planCreditCents: 2900 })
+    // «Pedir revisión»: la última conversación se cobró por encima del crédito, y devolverla sigue siendo devolver lo pagado.
+    expect(await c.run((tx) => billedAboveCredit(tx, c.orgId, last!.id, october!.id))).toBe(true)
+    // Facturación › el mes anterior se ve con el crédito de su cargo.
+    expect(await c.run((tx) => previousSaasPeriod(tx, c.orgId, { start: OCTOBER.end }))).toMatchObject({ start: OCTOBER.start, end: OCTOBER.end, creditCents: 2900 })
   })
 
   it("un mes calendario que cruza dos tramos toma cada acción con el estado de su tramo", async () => {

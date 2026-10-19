@@ -317,11 +317,10 @@ async function saasTramos(tx: Db, orgId: string, hull: Span, now: Date): Promise
   if (!first?.at) return { tramos: [], chargingNow, reasonNow }
   const from = new Date(Math.max(hull.start.getTime(), new Date(first.at).getTime()))
   const pricing = await getActionPricing(tx, orgId)
-  // Los meses que el cobro ya cerró se facturaron. El cargo no guarda el crédito: se toma el del plan con que se emitió.
+  // Los meses que el cobro ya cerró se facturaron, con el crédito que guardó su cargo (aunque el plan cambie después).
   const charges = await tx
-    .select({ start: saasCharge.periodStart, creditCents: saasPlan.creditCents })
+    .select({ start: saasCharge.periodStart, creditCents: saasCharge.creditCents })
     .from(saasCharge)
-    .leftJoin(saasPlan, eq(saasPlan.id, saasCharge.planId))
     .where(and(eq(saasCharge.organizationId, orgId), like(saasCharge.dedupeKey, "ciclo:%:final"), isNull(saasCharge.voidedAt)))
   const closed = new Map(charges.map((row) => [row.start.getTime(), row.creditCents]))
   const past: Tramo[] = []
