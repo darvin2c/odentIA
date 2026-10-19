@@ -15,6 +15,8 @@ import { gotoHydrated } from "./hydration"
 const connectPage = (slug: string) => `${PANEL}/whatsapp/conectar?org=${encodeURIComponent(slug)}`
 
 test("whatsapp en el panel: la clínica sale de la membresía, y vuelve a la clínica", async ({ createOwner, fixtureDb }) => {
+  // Dos cuentas con su clínica cada una.
+  test.setTimeout(240_000)
   const mine = await createOwner("fbmine")
   const other = await createOwner("fbother")
 
@@ -50,12 +52,14 @@ test("whatsapp en el panel: la clínica sale de la membresía, y vuelve a la cl�
 })
 
 test("whatsapp en el panel: sin sesión, entrar vuelve a la misma página", async ({ owner, browser }) => {
+  test.setTimeout(180_000)
   const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })
   try {
     const page = await context.newPage()
     await gotoHydrated(page, connectPage(owner.org.slug))
     await expect(page).toHaveURL(/\/login\?/)
     expect(new URL(page.url()).searchParams.get("next")).toBe(connectPage(owner.org.slug))
+    await expect(page.getByLabel("Contraseña")).toBeEditable({ timeout: 30_000 })
     await page.getByLabel("Correo").fill(owner.user.email)
     await page.getByLabel("Contraseña").fill(owner.user.password)
     await page.getByRole("button", { name: "Entrar", exact: true }).click()

@@ -78,10 +78,11 @@ function WhatsAppConnectPage() {
       accent="conecta su número."
     />
   )
+  // Un nombre largo pasa a la línea siguiente en vez de salirse de la tarjeta.
   const back = clinic ? (
     <Button
       variant="ghost"
-      className="min-h-11 sm:min-h-9"
+      className="h-auto min-h-11 whitespace-normal text-left sm:min-h-9"
       render={<a href={whatsappPage(clinic.slug)} />}
     >
       Volver a {clinic.organizationName}
