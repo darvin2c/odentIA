@@ -27,6 +27,7 @@ import {
   Input,
   RadioGroup,
   RadioGroupItem,
+  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -596,7 +597,9 @@ export function BookingDataForm({
             <DialogTitle>Aviso de privacidad</DialogTitle>
             <DialogDescription>Así usa la clínica los datos que nos das.</DialogDescription>
           </DialogHeader>
-          <p className="max-h-[60svh] overflow-y-auto whitespace-pre-wrap text-sm">{info.config.privacyNotice}</p>
+          <ScrollArea className="flex max-h-[60svh] flex-col">
+            <p className="whitespace-pre-wrap text-sm">{info.config.privacyNotice}</p>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </form>

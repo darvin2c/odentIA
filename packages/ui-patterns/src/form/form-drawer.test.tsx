@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type * as React from "react"
+import { useState } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { common } from "../common.js"
@@ -136,6 +137,37 @@ describe("FormDrawer", () => {
     // El cajón sigue abierto y el foco vuelve a quien pidió cerrar.
     expect(screen.getByText("Editar mesa")).not.toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(cancelar))
+  })
+
+  it("con un campo autoFocus dentro, al cerrar el foco vuelve a quien lo abrió", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Abrir
+          </button>
+          <FormDrawer
+            open={open}
+            onClose={() => setOpen(false)}
+            title="Nuevo paciente"
+            onSubmit={(event) => event.preventDefault()}
+          >
+            {/* biome-ignore lint/a11y/noAutofocus: es justo el caso que se prueba */}
+            <input aria-label="Nombres" autoFocus />
+          </FormDrawer>
+        </>
+      )
+    }
+    render(<Harness />)
+    const opener = screen.getByRole("button", { name: "Abrir" })
+    opener.focus()
+    fireEvent.click(opener)
+    await screen.findByText("Nuevo paciente")
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Nombres")))
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    await waitFor(() => expect(screen.queryByText("Nuevo paciente")).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(opener))
   })
 
   it("con cambios, «Descartar y salir» cierra", async () => {

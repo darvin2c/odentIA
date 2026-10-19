@@ -1,4 +1,4 @@
-import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { Button, Field, FieldLabel, Input, ScrollArea } from "@odentia/ui"
 import { DataRefreshMarker } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck } from "lucide-react"
@@ -178,25 +178,27 @@ export function AgentSandbox({
       </div>
 
       {/* En teléfono los ejemplos van en una fila que se desplaza; el contenedor es `relative` por lo que lleva dentro. */}
-      <fieldset
-        className="relative m-0 flex min-w-0 shrink-0 gap-2 border-0 p-0 max-sm:-mx-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-1 sm:flex-wrap"
-        aria-label="Ejemplos"
-      >
-        {STARTERS.map((starter) => (
-          <Button
-            key={starter.label}
-            type="button"
-            variant="outline"
-            size="sm"
-            className={`min-h-11 shrink-0 rounded-full sm:min-h-8 ${used === starter.label ? "border-primary bg-primary-soft" : ""}`}
-            aria-pressed={used === starter.label}
-            disabled={send.isPending}
-            onClick={() => start(starter.text)}
-          >
-            {starter.label}
-          </Button>
-        ))}
-      </fieldset>
+      <ScrollArea horizontal className="min-w-0 shrink-0 max-sm:-mx-4">
+        <fieldset
+          className="relative m-0 flex min-w-0 gap-2 border-0 p-0 max-sm:px-4 max-sm:pb-2 sm:flex-wrap"
+          aria-label="Ejemplos"
+        >
+          {STARTERS.map((starter) => (
+            <Button
+              key={starter.label}
+              type="button"
+              variant="outline"
+              size="sm"
+              className={`min-h-11 shrink-0 rounded-full sm:min-h-8 ${used === starter.label ? "border-primary bg-primary-soft" : ""}`}
+              aria-pressed={used === starter.label}
+              disabled={send.isPending}
+              onClick={() => start(starter.text)}
+            >
+              {starter.label}
+            </Button>
+          ))}
+        </fieldset>
+      </ScrollArea>
 
       {turns.length === 0 ? (
         <p className="text-sm text-muted-foreground max-sm:flex-1">Elige un ejemplo o escribe tu propio mensaje.</p>

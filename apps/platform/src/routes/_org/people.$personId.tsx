@@ -2,6 +2,7 @@ import { ContactScreenBanner } from "../../components/inbox-contact-screen"
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import {
   Button,
+  ScrollArea,
   Select,
   SelectContent,
   SelectGroup,
@@ -135,7 +136,7 @@ export const Route = createFileRoute("/_org/people/$personId")({
 /** Pestañas: pocas y cortas; pueden envolver. La altura fija de la primitiva se libera para no solapar. */
 const TAB_LIST_CLASS = "group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start"
 /** Secciones: una sola fila con scroll horizontal propio; en móvil no empujan ni tapan el contenido. */
-const SECTION_SCROLL_CLASS = "max-w-full overflow-x-auto pb-1"
+const SECTION_SCROLL_CLASS = "max-w-full pb-1"
 const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
 
 function PersonPageRoute() {
@@ -461,7 +462,7 @@ function PersonPageRoute() {
         }}
       >
         {mobileNav}
-        <div className="hidden max-w-full overflow-x-auto border-b pb-1 sm:block">
+        <ScrollArea horizontal className="hidden max-w-full border-b pb-1 sm:block">
           <TabsList className={TAB_LIST_CLASS} variant="line" aria-label="Pestañas de la página">
             {areas.map((area) => (
               <TabsTrigger key={area.id} value={area.id}>
@@ -469,7 +470,7 @@ function PersonPageRoute() {
               </TabsTrigger>
             ))}
           </TabsList>
-        </div>
+        </ScrollArea>
         <TabsContent value={current.area} className="pt-4">
           {entries.length > 1 ? (
             <Tabs
@@ -479,7 +480,7 @@ function PersonPageRoute() {
                 if (isPatientSectionId(value)) openTab(value)
               }}
             >
-              <div className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
+              <ScrollArea horizontal className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
                 <TabsList
                   className={SECTION_LIST_CLASS}
                   aria-label={`Secciones de ${areas.find((area) => area.id === current.area)?.label ?? "la página"}`}
@@ -490,7 +491,7 @@ function PersonPageRoute() {
                     </TabsTrigger>
                   ))}
                 </TabsList>
-              </div>
+              </ScrollArea>
               <TabsContent value={navSectionOf(current.id)}>{content()}</TabsContent>
             </Tabs>
           ) : (

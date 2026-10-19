@@ -5,7 +5,7 @@
  * quien tiene el rol admin, siempre con lo que se le dice a la clínica;
  * soporte lo lee y deja notas.
  */
-import { Button, Textarea } from "@odentia/ui"
+import { Button, ScrollArea, Textarea } from "@odentia/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { z } from "zod"
@@ -203,16 +203,18 @@ export function SupportCaseReview({
         </p>
       ) : null}
       {conversation.data ? (
-        <ol className="flex max-h-80 flex-col gap-1.5 overflow-y-auto rounded-lg bg-card px-3 py-2" aria-label="Mensajes de la conversación">
-          {conversation.data.map((message) => (
-            <li key={`${message.createdAt}-${message.direction}-${message.senderKind}`}>
-              <span className="text-xs font-bold text-muted-foreground">
-                {speaker(message)} · {dayTime(message.createdAt)}
-              </span>
-              <p className="whitespace-pre-wrap">{message.body ?? "(sin texto)"}</p>
-            </li>
-          ))}
-        </ol>
+        <ScrollArea className="flex max-h-80 flex-col rounded-lg bg-card">
+          <ol className="flex flex-col gap-1.5 px-3 py-2" aria-label="Mensajes de la conversación">
+            {conversation.data.map((message) => (
+              <li key={`${message.createdAt}-${message.direction}-${message.senderKind}`}>
+                <span className="text-xs font-bold text-muted-foreground">
+                  {speaker(message)} · {dayTime(message.createdAt)}
+                </span>
+                <p className="whitespace-pre-wrap">{message.body ?? "(sin texto)"}</p>
+              </li>
+            ))}
+          </ol>
+        </ScrollArea>
       ) : null}
 
       {pending ? (

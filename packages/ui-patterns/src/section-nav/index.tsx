@@ -163,6 +163,8 @@ export function SectionNav({
   // toda la pantalla: con sus títulos se lee como una página, entera cuando cabe.
   // El padding lateral deshace el sangrado del nav: la raíz recorta lo que
   // sobresale, así que el contenido se alinea con ella para no quedar cortado.
+  // scroll-nativo: la misma lista es menú desplegable en la barra y riel visible
+  // en ancho (`lg:overflow-visible`); ScrollArea no se apaga por ancho. Barra fina.
   const pickerListClasses = cn(
     "flex-col overflow-y-auto overscroll-y-contain px-4 py-2 [scrollbar-width:thin] sm:px-6 lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
     // Todo el alto menos el botón del selector y su aire (y el margen seguro
@@ -212,6 +214,7 @@ export function SectionNav({
           // Agrupado es más ancho (sus nombres son frases) y, si la ventana es
           // más baja que la lista, se desplaza dentro del riel en vez de
           // quedar cortado mientras está pegado.
+          // scroll-nativo: solo en el riel agrupado y solo si la ventana es más baja que la lista; barra fina.
           isGrouped
             ? "lg:max-h-[calc(100svh-3rem)] lg:w-64 lg:overflow-y-auto lg:[scrollbar-width:thin]"
             : "lg:w-56",

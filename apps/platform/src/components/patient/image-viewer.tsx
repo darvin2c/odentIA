@@ -113,6 +113,7 @@ export function AdjustedImage({
   className?: string
 }) {
   return (
+    // scroll-nativo: visor con zoom; se recorre arrastrando y con el teclado sobre la imagen ampliada.
     <div
       className={`overflow-auto rounded-md bg-black/90 ${className}`}
       // El marco desplazable recibe foco para recorrer la imagen ampliada con teclado.

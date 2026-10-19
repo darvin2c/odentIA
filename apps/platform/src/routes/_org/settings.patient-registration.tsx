@@ -14,6 +14,7 @@ import {
   Field,
   FieldError,
   FieldLabel,
+  ScrollArea,
   Skeleton,
   Textarea,
   toast,
@@ -528,40 +529,42 @@ function RegistrationSettings() {
               guarda nada.
             </p>
           </div>
-          <div className="max-h-[75vh] min-h-[32rem] overflow-y-auto rounded-[2rem] border-8 border-foreground/85 bg-background p-5 shadow-sm">
-            {previewDone ? (
-              <div className="flex flex-col items-start gap-3 p-2">
-                <p role="status" className="text-sm">
-                  Vista previa: no se guardaron datos.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPreviewDone(false)}
-                >
-                  Volver a la vista previa
-                </Button>
-              </div>
-            ) : (
-              <RegistrationQuestionnaire
-                config={{
-                  version: expectedVersion,
-                  enabled,
-                  fields,
-                  privacyNotice,
-                  askReminders,
-                  askMessages,
-                }}
-                today={today}
-                countryCode={profile.data?.countryCode ?? null}
-                shortcuts={false}
-                onSubmit={async () => {
-                  setPreviewDone(true)
-                }}
-              />
-            )}
-          </div>
+          <ScrollArea className="flex max-h-[75vh] min-h-[32rem] flex-col rounded-[2rem] border-8 border-foreground/85 bg-background shadow-sm">
+            <div className="p-5">
+              {previewDone ? (
+                <div className="flex flex-col items-start gap-3 p-2">
+                  <p role="status" className="text-sm">
+                    Vista previa: no se guardaron datos.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setPreviewDone(false)}
+                  >
+                    Volver a la vista previa
+                  </Button>
+                </div>
+              ) : (
+                <RegistrationQuestionnaire
+                  config={{
+                    version: expectedVersion,
+                    enabled,
+                    fields,
+                    privacyNotice,
+                    askReminders,
+                    askMessages,
+                  }}
+                  today={today}
+                  countryCode={profile.data?.countryCode ?? null}
+                  shortcuts={false}
+                  onSubmit={async () => {
+                    setPreviewDone(true)
+                  }}
+                />
+              )}
+            </div>
+          </ScrollArea>
         </aside>
       </div>
     </div>

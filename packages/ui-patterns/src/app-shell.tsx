@@ -8,6 +8,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Kbd,
+  KbdGroup,
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -30,7 +32,7 @@ import {
   TooltipProvider,
   useSidebar,
 } from "@odentia/ui"
-import { ChevronDown, ChevronLeft, ExternalLink, LogOut } from "lucide-react"
+import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
 import { RiSideBarLine } from "@remixicon/react"
 import * as React from "react"
 import { type ThemeMode, ThemeTabs, useTheme } from "./theme.js"
@@ -301,12 +303,28 @@ function SidebarNav({
   )
 }
 
+/** Atajo del `Sidebar` de shadcn (Ctrl/⌘ + B), escrito como lo pulsa cada equipo. */
+function SidebarShortcut() {
+  const [mac, setMac] = React.useState(false)
+  React.useEffect(() => {
+    setMac(/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+  }, [])
+  return (
+    <KbdGroup>
+      <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
+      <Kbd>B</Kbd>
+    </KbdGroup>
+  )
+}
+
 /**
  * Cabecera del sidebar, patrón ChatGPT sin search: expandido muestra la marca
- * a la izquierda y el colapso a la derecha; en el riel colapsado la marca se
- * vuelve el botón superior y al pasar el hover troca al icono de expandir.
- * Ambos estados con tooltip. En móvil el drawer lo dispara el `PageHeader`,
- * así que aquí no se monta nada por debajo de `md`.
+ * a la izquierda y el icono de panel lateral a la derecha; en el riel colapsado
+ * la marca se vuelve el botón superior y al pasar el hover troca al mismo icono.
+ * Un solo icono para contraer y expandir, en el mismo sitio, y el mismo que
+ * abre el menú en móvil (`PageHeader`); la flecha queda para navegar. Ambos
+ * estados con tooltip y el atajo. En móvil el drawer lo dispara el
+ * `PageHeader`, así que aquí no se monta nada por debajo de `md`.
  */
 function ShellSidebarHeader({
   brand,
@@ -318,27 +336,27 @@ function ShellSidebarHeader({
   switcher?: React.ReactNode
 }) {
   const { toggleSidebar } = useSidebar()
+  const tip = (label: string) => (
+    <TooltipContent side="right" align="center" className="flex items-center gap-2">
+      {label}
+      <SidebarShortcut />
+    </TooltipContent>
+  )
   return (
     <SidebarHeader>
       <div className="flex min-w-0 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
         <div className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{brand}</div>
-        {/* Colapsar montado sobre el borde: se encuentra sin buscarlo junto a la marca. */}
         <Tooltip>
           <TooltipTrigger
             render={
-              <button
-                type="button"
-                onClick={() => toggleSidebar()}
+              <SidebarTrigger
                 aria-label="Contraer el panel lateral"
-                className="elevated absolute top-4 -right-4 z-20 hidden size-8 items-center justify-center rounded-full border bg-card text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:flex group-data-[collapsible=icon]:hidden"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
+                aria-keyshortcuts="Control+B Meta+B"
+                className="hidden shrink-0 text-muted-foreground hover:text-foreground md:inline-flex group-data-[collapsible=icon]:hidden"
+              />
             }
           />
-          <TooltipContent side="right" align="center">
-            Contraer el panel lateral
-          </TooltipContent>
+          {tip("Contraer el panel lateral")}
         </Tooltip>
         {brandIcon ? (
           <Tooltip>
@@ -348,18 +366,17 @@ function ShellSidebarHeader({
                   type="button"
                   onClick={() => toggleSidebar()}
                   aria-label="Expandir el panel lateral"
+                  aria-keyshortcuts="Control+B Meta+B"
                   className="group/rail relative hidden size-8 cursor-ew-resize items-center justify-center rounded-md text-sidebar-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring md:group-data-[collapsible=icon]:flex"
                 >
-                  <span className="flex items-center justify-center transition-opacity group-hover/rail:opacity-0">
+                  <span className="flex items-center justify-center transition-opacity group-hover/rail:opacity-0 group-focus-visible/rail:opacity-0">
                     {brandIcon}
                   </span>
-                  <RiSideBarLine className="absolute size-4 opacity-0 transition-opacity group-hover/rail:opacity-100" />
+                  <RiSideBarLine className="absolute size-4 opacity-0 transition-opacity group-hover/rail:opacity-100 group-focus-visible/rail:opacity-100" />
                 </button>
               }
             />
-            <TooltipContent side="right" align="center">
-              Expandir el panel lateral
-            </TooltipContent>
+            {tip("Expandir el panel lateral")}
           </Tooltip>
         ) : (
           <Tooltip>
@@ -367,13 +384,12 @@ function ShellSidebarHeader({
               render={
                 <SidebarTrigger
                   aria-label="Expandir el panel lateral"
+                  aria-keyshortcuts="Control+B Meta+B"
                   className="hidden md:group-data-[collapsible=icon]:inline-flex"
                 />
               }
             />
-            <TooltipContent side="right" align="center">
-              Expandir el panel lateral
-            </TooltipContent>
+            {tip("Expandir el panel lateral")}
           </Tooltip>
         )}
       </div>

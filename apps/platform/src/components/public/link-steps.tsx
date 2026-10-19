@@ -1,4 +1,4 @@
-import { Checkbox, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
+import { Checkbox, Field, FieldDescription, FieldLabel, Input, ScrollArea } from "@odentia/ui"
 import { ErrorState, LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CircleCheck } from "lucide-react"
@@ -61,24 +61,26 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">{consent.title}</h2>
-      <div className="flex max-h-[50svh] flex-col gap-3 overflow-y-auto rounded-2xl border bg-card p-4 text-sm">
-        {sections?.procedure ? (
-          <div>
-            <p className="font-semibold">Qué te van a hacer</p>
-            <p>{sections.procedure}</p>
-          </div>
-        ) : null}
-        {list("Beneficios", sections?.benefits)}
-        {list("Riesgos", sections?.risks)}
-        {list("Otras opciones", sections?.alternatives)}
-        {sections?.consequences ? (
-          <div>
-            <p className="font-semibold">Si no te lo haces</p>
-            <p>{sections.consequences}</p>
-          </div>
-        ) : null}
-        {consent.body ? <p className="whitespace-pre-wrap">{consent.body}</p> : null}
-      </div>
+      <ScrollArea className="flex max-h-[50svh] flex-col rounded-2xl border bg-card">
+        <div className="flex flex-col gap-3 p-4 text-sm">
+          {sections?.procedure ? (
+            <div>
+              <p className="font-semibold">Qué te van a hacer</p>
+              <p>{sections.procedure}</p>
+            </div>
+          ) : null}
+          {list("Beneficios", sections?.benefits)}
+          {list("Riesgos", sections?.risks)}
+          {list("Otras opciones", sections?.alternatives)}
+          {sections?.consequences ? (
+            <div>
+              <p className="font-semibold">Si no te lo haces</p>
+              <p>{sections.consequences}</p>
+            </div>
+          ) : null}
+          {consent.body ? <p className="whitespace-pre-wrap">{consent.body}</p> : null}
+        </div>
+      </ScrollArea>
       <p className="text-sm text-muted-foreground">
         Firma {consent.signer.name}
         {consent.signer.asRepresentative ? ", como su representante" : ""}.

@@ -5,6 +5,7 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
+  ScrollArea,
   usePanelRef,
 } from "@odentia/ui"
 import * as React from "react"
@@ -358,10 +359,17 @@ export function MasterDetail({
           // propia de la columna competiría con aquella. El mínimo la deja del
           // alto del detalle pegado, así una lista corta no deja la tarjeta
           // salida del group.
-          pageScroll ? "min-h-[calc(100dvh-3rem)]" : "overflow-y-auto",
+          pageScroll && "min-h-[calc(100dvh-3rem)]",
         )}
       >
-        {children}
+        {pageScroll ? (
+          children
+        ) : (
+          // La lista se desplaza dentro de su columna con la barra de odentIA (issue 100).
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex min-h-full flex-col gap-6">{children}</div>
+          </ScrollArea>
+        )}
       </ResizablePanel>
       <ResizableHandle
         elementRef={handleRef}

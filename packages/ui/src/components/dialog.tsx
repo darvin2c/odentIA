@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { cn } from "cn"
 
 import { Button } from "@odentia/ui/components/button"
+import { ScrollArea } from "@odentia/ui/components/scroll-area"
 import { RiCloseLine } from "@remixicon/react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -39,11 +40,22 @@ function DialogOverlay({
 
 function DialogContent({
   className,
+  contentClassName,
   children,
   showCloseButton = true,
+  scrollable = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * Desviación del registry: el contenido que no cabe en el alto del diálogo
+   * (`max-h-*` en `className`) se desplaza dentro de `ScrollArea`, con la barra
+   * de odentIA y no la del navegador (issue 100). El relleno y el espacio entre
+   * bloques pasan al contenido (`contentClassName`).
+   */
+  scrollable?: boolean
+  /** Con `scrollable`: clases del contenido desplazable (por defecto `grid gap-6 p-6`). */
+  contentClassName?: string
 }) {
   return (
     <DialogPortal>
@@ -52,11 +64,18 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 rounded-4xl bg-popover p-6 text-sm text-popover-foreground shadow-xl ring-1 ring-foreground/5 duration-100 outline-none sm:max-w-md dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          scrollable && "flex flex-col gap-0 overflow-hidden p-0",
           className
         )}
         {...props}
       >
-        {children}
+        {scrollable ? (
+          <ScrollArea className="flex min-h-0 flex-1 flex-col rounded-[inherit]">
+            <div className={cn("grid gap-6 p-6", contentClassName)}>{children}</div>
+          </ScrollArea>
+        ) : (
+          children
+        )}
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"

@@ -18,6 +18,7 @@ import {
   EmptyTitle,
   Field,
   FieldLabel,
+  ScrollArea,
   Select,
   SelectContent,
   SelectGroup,
@@ -555,7 +556,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="max-w-full overflow-x-auto">
+        <ScrollArea horizontal className="max-w-full">
           <ButtonGroup aria-label="Filtrar historia clínica">
             {FILTERS.map((option) => (
               <Button
@@ -570,7 +571,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
               </Button>
             ))}
           </ButtonGroup>
-        </div>
+        </ScrollArea>
         <div className="flex flex-wrap items-center gap-2">
           <ButtonGroup aria-label="Agrupar historia clínica">
             {GROUP_MODES.map((option) => (

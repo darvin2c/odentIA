@@ -9,7 +9,7 @@
  * `globals.css`. El color nunca es la única señal: la tabla y el detalle
  * dicen lo mismo con palabras.
  */
-import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
+import { Button, cn, ScrollArea, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { moveInGrid, niceTicks, scaleLevel, sparkPoints, type WaterfallKind, waterfallBars } from "./chart-math.js"
 
@@ -251,7 +251,7 @@ export function ColumnChart({
         {title}
       </figcaption>
       {asTable ? (
-        <div className="min-w-0 overflow-x-auto">
+        <ScrollArea horizontal className="min-w-0 [&_[data-slot=table-container]]:overflow-visible">
           <Table>
             <TableHeader>
               <TableRow>
@@ -302,7 +302,7 @@ export function ColumnChart({
               ))}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       ) : (
         <div className="flex min-w-0 gap-2">
           <div aria-hidden className="relative w-12 shrink-0 text-right text-xs text-muted-foreground" style={{ height }}>
@@ -544,7 +544,7 @@ export function WaterfallChart({ title, steps, format, short = format, detail, s
         {title}
       </figcaption>
       {asTable ? (
-        <div className="min-w-0 overflow-x-auto">
+        <ScrollArea horizontal className="min-w-0 [&_[data-slot=table-container]]:overflow-visible">
           <Table>
             <TableHeader>
               <TableRow>
@@ -574,81 +574,83 @@ export function WaterfallChart({ title, steps, format, short = format, detail, s
               ))}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       ) : (
         <div className="flex min-w-0 flex-wrap items-start gap-4">
           {/* Cada barra necesita su ancho para su importe y su nombre: en una pantalla angosta el gráfico se desplaza solo. */}
-          <div className="flex min-w-0 flex-[1_1_480px] gap-2 overflow-x-auto pt-2 pb-1">
-            <div aria-hidden className="relative w-12 shrink-0 text-right text-xs text-muted-foreground" style={{ height }}>
-              {axisTicks.map((tick) => (
-                <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${percent(tick)}%` }}>
-                  {short(tick)}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5" style={{ minWidth: `${count * 4.75}rem` }}>
-              <div className="relative" style={{ height }}>
+          <ScrollArea horizontal className="min-w-0 flex-[1_1_480px]">
+            <div className="flex gap-2 pt-2 pb-2">
+              <div aria-hidden className="relative w-12 shrink-0 text-right text-xs text-muted-foreground" style={{ height }}>
                 {axisTicks.map((tick) => (
-                  <div
-                    key={tick}
-                    aria-hidden
-                    className={cn("absolute inset-x-0 border-t", tick === 0 ? "border-input" : "border-border")}
-                    style={{ bottom: `${percent(tick)}%` }}
-                  />
-                ))}
-                <div className="absolute inset-0 grid" style={{ gridTemplateColumns: gridColumns }}>
-                  {steps.map((step, index) => {
-                    const bar = bars[index] as { from: number; to: number }
-                    const lower = Math.min(bar.from, bar.to)
-                    const upper = Math.max(bar.from, bar.to)
-                    const chosen = index === at
-                    const tone = stepTone(step)
-                    return (
-                      <button
-                        key={step.key}
-                        ref={(element) => {
-                          marks.current[index] = element
-                        }}
-                        type="button"
-                        tabIndex={chosen ? 0 : -1}
-                        aria-label={describe(index)}
-                        aria-pressed={chosen}
-                        onMouseEnter={() => choose(index)}
-                        onFocus={() => choose(index)}
-                        onClick={() => choose(index)}
-                        onKeyDown={(event) => onKeyDown(event, index)}
-                        className={cn("relative h-full min-w-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring", chosen && "bg-primary/5")}
-                      >
-                        <span
-                          aria-hidden
-                          className={cn("absolute inset-x-[16%] rounded-[4px]", chosen && "ring-2 ring-foreground ring-offset-2 ring-offset-card")}
-                          style={{
-                            bottom: `${percent(lower)}%`,
-                            height: `max(3px, ${percent(upper) - percent(lower)}%)`,
-                            background: chosen ? TONE_VAR[tone] : faded(tone),
-                          }}
-                        />
-                        <span
-                          aria-hidden
-                          className="absolute inset-x-0 text-center text-[11px] font-extrabold whitespace-nowrap tabular-nums text-foreground sm:text-xs"
-                          style={{ bottom: `calc(${percent(upper)}% + 4px)` }}
-                        >
-                          {signed(step)}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-              <div aria-hidden className="grid text-center text-[11px] leading-tight text-muted-foreground sm:text-xs" style={{ gridTemplateColumns: gridColumns }}>
-                {steps.map((step, index) => (
-                  <span key={step.key} className={cn("px-0.5 break-words hyphens-auto", index === at && "font-bold text-foreground")}>
-                    {step.label}
+                  <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${percent(tick)}%` }}>
+                    {short(tick)}
                   </span>
                 ))}
               </div>
+              <div className="flex flex-1 flex-col gap-1.5" style={{ minWidth: `${count * 4.75}rem` }}>
+                <div className="relative" style={{ height }}>
+                  {axisTicks.map((tick) => (
+                    <div
+                      key={tick}
+                      aria-hidden
+                      className={cn("absolute inset-x-0 border-t", tick === 0 ? "border-input" : "border-border")}
+                      style={{ bottom: `${percent(tick)}%` }}
+                    />
+                  ))}
+                  <div className="absolute inset-0 grid" style={{ gridTemplateColumns: gridColumns }}>
+                    {steps.map((step, index) => {
+                      const bar = bars[index] as { from: number; to: number }
+                      const lower = Math.min(bar.from, bar.to)
+                      const upper = Math.max(bar.from, bar.to)
+                      const chosen = index === at
+                      const tone = stepTone(step)
+                      return (
+                        <button
+                          key={step.key}
+                          ref={(element) => {
+                            marks.current[index] = element
+                          }}
+                          type="button"
+                          tabIndex={chosen ? 0 : -1}
+                          aria-label={describe(index)}
+                          aria-pressed={chosen}
+                          onMouseEnter={() => choose(index)}
+                          onFocus={() => choose(index)}
+                          onClick={() => choose(index)}
+                          onKeyDown={(event) => onKeyDown(event, index)}
+                          className={cn("relative h-full min-w-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring", chosen && "bg-primary/5")}
+                        >
+                          <span
+                            aria-hidden
+                            className={cn("absolute inset-x-[16%] rounded-[4px]", chosen && "ring-2 ring-foreground ring-offset-2 ring-offset-card")}
+                            style={{
+                              bottom: `${percent(lower)}%`,
+                              height: `max(3px, ${percent(upper) - percent(lower)}%)`,
+                              background: chosen ? TONE_VAR[tone] : faded(tone),
+                            }}
+                          />
+                          <span
+                            aria-hidden
+                            className="absolute inset-x-0 text-center text-[11px] font-extrabold whitespace-nowrap tabular-nums text-foreground sm:text-xs"
+                            style={{ bottom: `calc(${percent(upper)}% + 4px)` }}
+                          >
+                            {signed(step)}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div aria-hidden className="grid text-center text-[11px] leading-tight text-muted-foreground sm:text-xs" style={{ gridTemplateColumns: gridColumns }}>
+                  {steps.map((step, index) => (
+                    <span key={step.key} className={cn("px-0.5 break-words hyphens-auto", index === at && "font-bold text-foreground")}>
+                      {step.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          </ScrollArea>
           {detail ? (
             <div aria-live="polite" className="flex min-w-60 flex-[0_1_300px] flex-col gap-1.5 rounded-xl border bg-muted/50 p-4">
               {detail(at)}
@@ -769,7 +771,7 @@ export function HeatmapGrid({
         ) : null}
       </div>
       {asTable ? (
-        <div className="min-w-0 overflow-x-auto">
+        <ScrollArea horizontal className="min-w-0 [&_[data-slot=table-container]]:overflow-visible">
           <Table>
             <TableHeader>
               <TableRow>
@@ -799,51 +801,53 @@ export function HeatmapGrid({
               ))}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       ) : (
         <div className="flex min-w-0 flex-wrap items-start gap-4">
-          <div ref={scroller} className="relative min-w-0 flex-[1_1_480px] overflow-x-auto">
-            <div className="grid min-w-fit gap-[3px]" style={{ gridTemplateColumns: `${labelWidth}px repeat(${columns.length}, minmax(10px, 1fr))` }}>
-              <span aria-hidden />
-              {columns.map((column, columnIndex) => (
-                <span key={column.key} aria-hidden className={cn("whitespace-nowrap text-[11px] leading-4 text-muted-foreground", columnIndex === at.column && "font-bold text-foreground")}>
-                  {column.label}
-                </span>
-              ))}
-              {rows.map((row, rowIndex) => (
-                <div key={row.key} className="contents">
-                  <span aria-hidden className={cn("self-center whitespace-nowrap pr-1 text-[11px] text-muted-foreground", rowIndex === at.row && "font-bold text-foreground")}>
-                    {row.label}
+          <ScrollArea horizontal viewportRef={scroller} className="min-w-0 flex-[1_1_480px]">
+            <div ref={scroller} className="relative pb-2">
+              <div className="grid min-w-fit gap-[3px]" style={{ gridTemplateColumns: `${labelWidth}px repeat(${columns.length}, minmax(10px, 1fr))` }}>
+                <span aria-hidden />
+                {columns.map((column, columnIndex) => (
+                  <span key={column.key} aria-hidden className={cn("whitespace-nowrap text-[11px] leading-4 text-muted-foreground", columnIndex === at.column && "font-bold text-foreground")}>
+                    {column.label}
                   </span>
-                  {columns.map((column, columnIndex) => {
-                    const value = values[rowIndex]?.[columnIndex] ?? null
-                    const chosen = rowIndex === at.row && columnIndex === at.column
-                    return (
-                      <button
-                        key={column.key}
-                        ref={(element) => {
-                          cells.current.set(`${rowIndex}:${columnIndex}`, element)
-                        }}
-                        type="button"
-                        tabIndex={chosen ? 0 : -1}
-                        aria-label={describe(rowIndex, columnIndex, value)}
-                        aria-pressed={chosen}
-                        onMouseEnter={() => choose(rowIndex, columnIndex)}
-                        onFocus={() => choose(rowIndex, columnIndex)}
-                        onClick={() => choose(rowIndex, columnIndex)}
-                        onKeyDown={onKeyDown}
-                        className={cn(
-                          "rounded-[3px] focus-visible:ring-2 focus-visible:ring-ring",
-                          chosen ? "outline-2 -outline-offset-1 outline-solid outline-foreground" : "outline-none",
-                        )}
-                        style={{ height: cellHeight, background: value === null ? NO_DATA_FILL : SCALE_VAR[scaleLevel(value, top)] }}
-                      />
-                    )
-                  })}
-                </div>
-              ))}
+                ))}
+                {rows.map((row, rowIndex) => (
+                  <div key={row.key} className="contents">
+                    <span aria-hidden className={cn("self-center whitespace-nowrap pr-1 text-[11px] text-muted-foreground", rowIndex === at.row && "font-bold text-foreground")}>
+                      {row.label}
+                    </span>
+                    {columns.map((column, columnIndex) => {
+                      const value = values[rowIndex]?.[columnIndex] ?? null
+                      const chosen = rowIndex === at.row && columnIndex === at.column
+                      return (
+                        <button
+                          key={column.key}
+                          ref={(element) => {
+                            cells.current.set(`${rowIndex}:${columnIndex}`, element)
+                          }}
+                          type="button"
+                          tabIndex={chosen ? 0 : -1}
+                          aria-label={describe(rowIndex, columnIndex, value)}
+                          aria-pressed={chosen}
+                          onMouseEnter={() => choose(rowIndex, columnIndex)}
+                          onFocus={() => choose(rowIndex, columnIndex)}
+                          onClick={() => choose(rowIndex, columnIndex)}
+                          onKeyDown={onKeyDown}
+                          className={cn(
+                            "rounded-[3px] focus-visible:ring-2 focus-visible:ring-ring",
+                            chosen ? "outline-2 -outline-offset-1 outline-solid outline-foreground" : "outline-none",
+                          )}
+                          style={{ height: cellHeight, background: value === null ? NO_DATA_FILL : SCALE_VAR[scaleLevel(value, top)] }}
+                        />
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          </ScrollArea>
           {detail ? (
             <div aria-live="polite" className="flex min-w-60 flex-[0_1_300px] flex-col gap-1.5 rounded-xl border bg-muted/50 p-4">
               {detail(at.row, at.column, activeValue)}

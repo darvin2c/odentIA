@@ -128,6 +128,7 @@ export function FilterBar({
 
   return (
     <div className={cn("flex p-3 bg-card rounded-md", className)}>
+      {/* scroll-nativo: `useFittedInlineCount` mide este desborde para pasar a «Más filtros» lo que no cabe; casi nunca llega a desplazarse. */}
       <div
         ref={containerRef}
         data-filter-row="desktop"

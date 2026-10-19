@@ -60,6 +60,9 @@ import { activeOrgLocale } from "../lib/locale"
  * página ni sus borradores, con el mismo cajón que los formularios: lateral en
  * escritorio y hoja inferior con asa en móvil.
  *
+ * La misma columna (o el mismo cajón) muestra los Avisos de la campana: uno a
+ * la vez, con la misma cabecera y el mismo «×» (issue 93).
+ *
  * El layout de la organización monta el panel una sola vez y suscribe estos
  * eventos en su única conexión SSE; aquí solo se declara qué invalidar.
  */
@@ -89,6 +92,19 @@ export function invalidateAgentPanelQueries(queryClient: QueryClient): void {
 }
 
 export type AgentPanelTab = "derivadas" | "paciente" | "actividad"
+
+/**
+ * Lo que ocupa la columna de la cabecera: el Agente o los Avisos (issue 93).
+ * Es una sola columna: abrir una cierra la otra.
+ */
+export type HeaderPanelSurface = "agente" | "avisos"
+
+/** Marco que recibe el contenido de Avisos: el mismo de la columna o del cajón. */
+export interface HeaderPanelFrame {
+  /** Dentro del cajón: título y descripción son los del diálogo. */
+  overlay: boolean
+  onClose: () => void
+}
 
 /**
  * Desde este ancho el panel (384 px) cabe como columna junto a la página con el
@@ -128,8 +144,14 @@ interface AgentPanelState {
   /** Ancho elegido para la columna, en px. */
   dockWidth: number
   setDockWidth: (width: number) => void
-  /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Derivadas»). */
+  /** Qué muestra la columna mientras está abierta. */
+  surface: HeaderPanelSurface
+  /** Abre o cierra el Agente; al abrir puede elegir la pestaña (por defecto «Derivadas»). */
   setOpen: (open: boolean, tab?: AgentPanelTab) => void
+  /** Abre o cierra los Avisos en la misma columna. */
+  setNoticesOpen: (open: boolean) => void
+  /** Contenido de Avisos, que aporta el layout. */
+  notices: ((frame: HeaderPanelFrame) => ReactNode) | undefined
   tab: AgentPanelTab
   setTab: (tab: AgentPanelTab) => void
   /** Botón de cabecera, para devolverle el foco al cerrar el panel. */
@@ -145,7 +167,10 @@ const AgentPanelContext = createContext<AgentPanelState>({
   docked: false,
   dockWidth: DOCK_WIDTH.initial,
   setDockWidth: () => {},
+  surface: "agente",
   setOpen: () => {},
+  setNoticesOpen: () => {},
+  notices: undefined,
   tab: "derivadas",
   setTab: () => {},
   buttonRef: { current: null },
@@ -153,10 +178,20 @@ const AgentPanelContext = createContext<AgentPanelState>({
   dockBlockers: { current: 0 },
 })
 
-/** Abrir o cerrar el panel desde otra superficie (banda del hilo, Inicio). */
+/**
+ * Abrir o cerrar el panel desde otra superficie (banda del hilo, Inicio).
+ * `open` y `docked` dicen si la columna de la cabecera está ocupada, sea por el
+ * Agente o por los Avisos: la Bandeja le cede «Contexto» igual en los dos casos.
+ */
 export function useAgentPanel(): Pick<AgentPanelState, "open" | "docked" | "setOpen"> {
   const { open, docked, setOpen } = useContext(AgentPanelContext)
   return { open, docked, setOpen }
+}
+
+/** La campana: si los Avisos están abiertos y cómo abrirlos o cerrarlos. */
+export function useNoticesPanel(): { open: boolean; setOpen: (open: boolean) => void } {
+  const { open, surface, setNoticesOpen } = useContext(AgentPanelContext)
+  return { open: open && surface === "avisos", setOpen: setNoticesOpen }
 }
 
 /** La Bandeja pregunta si, con la columna a su ancho actual, cabe además «Contexto». */
@@ -210,8 +245,16 @@ export function useAgentPanelSummary(enabled: boolean) {
   })
 }
 
-export function AgentPanelProvider({ children }: { children: ReactNode }) {
+export function AgentPanelProvider({
+  children,
+  notices,
+}: {
+  children: ReactNode
+  /** Contenido de Avisos; sin él, la campana no tiene dónde abrirse. */
+  notices?: (frame: HeaderPanelFrame) => ReactNode
+}) {
   const [open, setOpenState] = useState(false)
+  const [surface, setSurface] = useState<HeaderPanelSurface>("agente")
   const [tab, setTab] = useState<AgentPanelTab>("derivadas")
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -232,18 +275,29 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const { occupied } = useSideDock()
   const occupiedRef = useRef(occupied)
   occupiedRef.current = occupied
-  const setOpen = useCallback((next: boolean, nextTab?: AgentPanelTab) => {
+  const openRef = useRef(open)
+  openRef.current = open
+  const show = useCallback((next: boolean, nextSurface: HeaderPanelSurface) => {
     if (next) {
       const active = document.activeElement
       const inPanel = active instanceof HTMLElement && active.closest(`#${PANEL_ID}`) !== null
       if (!inPanel) {
         openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
       }
-      setTab(nextTab ?? "derivadas")
-      setDocked(wideRef.current && dockBlockers.current === 0 && !occupiedRef.current)
+      setSurface(nextSurface)
+      // Si ya está abierta, la otra superficie toma su mismo lugar (columna o cajón).
+      if (!openRef.current) setDocked(wideRef.current && dockBlockers.current === 0 && !occupiedRef.current)
     }
     setOpenState(next)
   }, [])
+  const setOpen = useCallback(
+    (next: boolean, nextTab?: AgentPanelTab) => {
+      if (next) setTab(nextTab ?? "derivadas")
+      show(next, "agente")
+    },
+    [show],
+  )
+  const setNoticesOpen = useCallback((next: boolean) => show(next, "avisos"), [show])
   useEffect(() => {
     if (!wide) setDocked(false)
   }, [wide])
@@ -269,7 +323,10 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
         docked,
         dockWidth,
         setDockWidth,
+        surface,
         setOpen,
+        setNoticesOpen,
+        notices,
         tab,
         setTab,
         buttonRef,
@@ -300,7 +357,8 @@ function useCanSeePanel(): boolean {
  */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
-  const { open, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const { open: columnOpen, surface, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const open = columnOpen && surface === "agente"
   if (!canSee) return null
   return (
     <Button
@@ -354,46 +412,57 @@ function headerStatus(data: AgentPanelSummary): string {
  * página se abra y se cierre igual.
  */
 function AgentPanelDrawer() {
-  const { open, docked, setOpen, buttonRef, openerRef } = useContext(AgentPanelContext)
+  const { open, docked, surface, setOpen, setNoticesOpen, notices, buttonRef, openerRef } =
+    useContext(AgentPanelContext)
   const isMobile = useIsMobile()
   const canSee = useCanSeePanel()
   const shown = open && !docked
-  const summary = useAgentPanelSummary(shown && canSee)
+  const agent = surface === "agente"
+  const summary = useAgentPanelSummary(shown && agent && canSee)
   const data = summary.data?.data
   return (
     <Drawer
       open={shown}
       swipeDirection={isMobile ? "down" : "right"}
       showSwipeHandle={isMobile}
-      onOpenChange={(next) => setOpen(next)}
+      onOpenChange={(next) => (agent ? setOpen(next) : setNoticesOpen(next))}
     >
       <DrawerContent
         id={shown ? PANEL_ID : undefined}
         finalFocus={() => (openerRef.current?.isConnected ? openerRef.current : buttonRef.current)}
         className="data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem-env(safe-area-inset-top))] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem-env(safe-area-inset-top))]"
-        aria-label="Agente"
+        aria-label={agent ? "Agente" : "Avisos"}
       >
-        <PanelHeader data={data} overlay />
-        {shown ? <PanelBody summary={data} /> : null}
+        {agent ? (
+          <>
+            <PanelHeader data={data} overlay />
+            {shown ? <PanelBody summary={data} /> : null}
+          </>
+        ) : (
+          notices?.({ overlay: true, onClose: () => setNoticesOpen(false) })
+        )}
       </DrawerContent>
     </Drawer>
   )
 }
 
-/** Columna fija a la derecha: no es modal, la página sigue usable al lado. */
+/** Columna fija a la derecha: no es modal, la página sigue usable al lado. Muestra el Agente o los Avisos. */
 function DockedAgentPanel() {
   const {
     open,
     docked,
+    surface,
     setOpen,
+    notices,
     buttonRef,
     openerRef,
     dockWidth: width,
     setDockWidth: resize,
   } = useContext(AgentPanelContext)
   const canSee = useCanSeePanel()
-  const shown = open && docked && canSee
-  const summary = useAgentPanelSummary(shown)
+  const agent = surface === "agente"
+  const shown = open && docked && (agent ? canSee : notices !== undefined)
+  const summary = useAgentPanelSummary(shown && agent)
   const data = summary.data?.data
   const ref = useRef<HTMLElement | null>(null)
   // Al abrir, el foco entra en la columna: queda después de la página en el
@@ -413,7 +482,7 @@ function DockedAgentPanel() {
     <SideColumn
       ref={ref}
       id={PANEL_ID}
-      aria-label="Agente"
+      aria-label={agent ? "Agente" : "Avisos"}
       tabIndex={-1}
       width={width}
       onResize={resize}
@@ -428,8 +497,14 @@ function DockedAgentPanel() {
         close()
       }}
     >
-      <PanelHeader data={data} onClose={close} />
-      <PanelBody summary={data} />
+      {agent ? (
+        <>
+          <PanelHeader data={data} onClose={close} />
+          <PanelBody summary={data} />
+        </>
+      ) : (
+        notices?.({ overlay: false, onClose: close })
+      )}
     </SideColumn>
   )
 }
@@ -499,11 +574,27 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
       onValueChange={(value) => setTab(value as AgentPanelTab)}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <TabsList className="mx-4 mt-3 grid grid-cols-3 sm:mx-5">
+      {/*
+        Nombres cortos y cada pestaña del ancho de su texto (issue 92): en la
+        columna más angosta (320 px) y a 200 % de zoom caben sin pisarse. El
+        nombre completo queda como nombre accesible y en el título.
+      */}
+      <TabsList className="mx-4 mt-3 max-w-[calc(100%-2rem)] sm:mx-5 sm:max-w-[calc(100%-2.5rem)]">
         {/* Sin número: el único contador de los casos está en el menú. */}
-        <TabsTrigger value="derivadas">{AGENT_CASES_TITLE}</TabsTrigger>
-        <TabsTrigger value="paciente">Esperan al paciente{awaiting > 0 ? ` · ${awaiting}` : ""}</TabsTrigger>
-        <TabsTrigger value="actividad">Actividad</TabsTrigger>
+        <TabsTrigger value="derivadas" className="flex-none" aria-label={AGENT_CASES_TITLE} title={AGENT_CASES_TITLE}>
+          Casos
+        </TabsTrigger>
+        <TabsTrigger
+          value="paciente"
+          className="flex-none"
+          aria-label={`Esperan al paciente${awaiting > 0 ? ` · ${awaiting}` : ""}`}
+          title="Esperan al paciente"
+        >
+          Esperan{awaiting > 0 ? ` · ${awaiting}` : ""}
+        </TabsTrigger>
+        <TabsTrigger value="actividad" className="flex-none">
+          Actividad
+        </TabsTrigger>
       </TabsList>
       {/* Pestañas montadas: cambiar de pestaña no pierde lo que se estaba mirando. */}
       <ScrollArea className="min-h-0 flex-1">

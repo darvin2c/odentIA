@@ -656,7 +656,8 @@ function StudioBody({
         <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
           <DialogContent
             initialFocus={officialTitleRef}
-            className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl"
+            scrollable
+            className="max-h-[90vh] w-full sm:max-w-4xl"
           >
             <DialogHeader>
               <DialogTitle ref={officialTitleRef} tabIndex={-1}>

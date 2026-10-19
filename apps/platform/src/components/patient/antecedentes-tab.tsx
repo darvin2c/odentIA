@@ -1440,7 +1440,7 @@ function RegistrationSnapshotDialog({
         if (!next) onClose()
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent scrollable className="max-h-[85vh] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Declaración original del registro</DialogTitle>
           <DialogDescription>

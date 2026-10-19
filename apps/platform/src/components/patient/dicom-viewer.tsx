@@ -144,6 +144,7 @@ export function DicomViewer({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      {/* scroll-nativo: visor con zoom; se recorre arrastrando y con el teclado sobre la imagen ampliada. */}
       <div
         className="max-h-[60vh] overflow-auto rounded-md bg-black"
         tabIndex={zoom > 1 ? 0 : undefined}

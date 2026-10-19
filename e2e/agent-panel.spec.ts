@@ -115,6 +115,18 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(panel.getByText(/Activo|Pausado/)).toBeVisible()
   await expect(panel.getByRole("tab", { name: "Casos del agente", exact: true })).toBeVisible()
   await expect(panel.getByRole("tab", { name: "Esperan al paciente · 1", exact: true })).toBeVisible()
+  // Issue 92: cada pestaña cabe en su caja y ninguna pisa a la siguiente.
+  const tabs = await panel.getByRole("tab").evaluateAll((items) =>
+    items.map((item) => {
+      const box = item.getBoundingClientRect()
+      return { left: box.left, right: box.right, fits: item.scrollWidth <= item.clientWidth + 1 }
+    }),
+  )
+  expect(tabs).toHaveLength(3)
+  for (const [index, tab] of tabs.entries()) {
+    expect(tab.fits).toBe(true)
+    if (index > 0) expect(tab.left).toBeGreaterThanOrEqual(tabs[index - 1]!.right - 1)
+  }
   // La página sigue montada debajo (el cajón modal la saca del árbol accesible, no del DOM).
   await expect(page.locator("h1", { hasText: "Inicio" })).toHaveCount(1)
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toHaveCount(0)
@@ -157,6 +169,44 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(panel).toBeHidden()
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
   await expect(button).toBeFocused()
+
+  // Issue 93: donde cabe la columna, Avisos se abre en ella como el Agente, sin tapar la
+  // página; abrir uno cierra el otro y Esc devuelve el foco a la campana.
+  await page.setViewportSize({ width: 1680, height: 900 })
+  const bell = page.getByRole("button", { name: /^Avisos/ })
+  await bell.click()
+  const noticesColumn = page.getByRole("complementary", { name: "Avisos" })
+  await expect(noticesColumn).toBeVisible()
+  await expect(noticesColumn.getByRole("heading", { name: "Avisos" })).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+  await info.attach("avisos-columna", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await button.click()
+  const agentColumn = page.getByRole("complementary", { name: "Agente" })
+  await expect(agentColumn).toBeVisible()
+  await expect(noticesColumn).toHaveCount(0)
+  await bell.click()
+  await expect(noticesColumn).toBeVisible()
+  await expect(agentColumn).toHaveCount(0)
+  await noticesColumn.getByRole("heading", { name: "Avisos" }).click()
+  await page.keyboard.press("Escape")
+  await expect(noticesColumn).toHaveCount(0)
+  await expect(bell).toBeFocused()
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Issue 105: el mismo icono de panel lateral contrae y expande, en el mismo sitio y con su atajo.
+  const collapse = page.getByRole("button", { name: "Contraer el panel lateral" })
+  await expect(collapse).toBeVisible()
+  const before = await collapse.boundingBox()
+  await collapse.click()
+  const expand = page.getByRole("button", { name: "Expandir el panel lateral" })
+  await expect(expand).toBeVisible()
+  await expect(expand).toHaveAttribute("aria-keyshortcuts", /Control\+B/)
+  await info.attach("menu-contraido", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  const after = await expand.boundingBox()
+  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(8)
+  await page.keyboard.press("Control+b")
+  await expect(collapse).toBeVisible()
   // Tomado no es resuelto: el caso sigue contando para quien lo tomó hasta que lo resuelve.
   await expect(sidebarAgent.locator("..")).toContainText("1")
   // «Te espera» trae el caso una sola vez (ni su tarea ni su conversación son otra fila);

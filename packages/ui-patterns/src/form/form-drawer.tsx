@@ -35,6 +35,22 @@ export interface FormDrawerProps {
 }
 
 /**
+ * Quién abrió la superficie, anotado al renderizar la apertura: antes de que un
+ * campo con `autoFocus` dentro del formulario tome el foco. Base UI lo mira
+ * después y creería que lo abrió ese campo; al cerrar, el foco se perdería.
+ */
+function useOpener(open: boolean): React.RefObject<HTMLElement | null> {
+  const opener = React.useRef<HTMLElement | null>(null)
+  const wasOpen = React.useRef(false)
+  if (open && !wasOpen.current && typeof document !== "undefined") {
+    const active = document.activeElement
+    opener.current = active instanceof HTMLElement && active !== document.body ? active : null
+  }
+  wasOpen.current = open
+  return opener
+}
+
+/**
  * Drawer de formulario: cabecera fija, scroll interno y acciones persistentes
  * (shell compartido con `FormPanel` vía `FormSurface`). Es el contenedor modal —
  * overlay, focus-trap y Esc los aporta Base UI — y el único correcto donde no
@@ -69,6 +85,7 @@ export function FormDrawer({
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
+  const opener = useOpener(open)
 
   const drawer = (drawerOpen: boolean) => (
     <Drawer
@@ -89,6 +106,7 @@ export function FormDrawer({
         )}
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
+        finalFocus={() => (opener.current?.isConnected ? opener.current : true)}
       >
         <SideDockScopeProvider value="overlay">
           <FormSurface

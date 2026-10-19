@@ -323,7 +323,7 @@ function SignedOdontogramDialog({
   const viewTitleRef = useRef<HTMLHeadingElement>(null)
   return (
     <Dialog open={viewing !== null} onOpenChange={(value) => (!value ? onClose() : undefined)}>
-      <DialogContent initialFocus={viewTitleRef} className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl">
+      <DialogContent initialFocus={viewTitleRef} scrollable className="max-h-[90vh] w-full sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle ref={viewTitleRef} tabIndex={-1}>
             Odontograma firmado

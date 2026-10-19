@@ -6,8 +6,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
+  FieldError as UiFieldError,
   FieldLabel,
   Input,
+  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -15,7 +17,6 @@ import {
   SelectValue,
   Skeleton,
   toast,
-  FieldError as UiFieldError,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -1434,39 +1435,41 @@ function LegacyTemplateLink({
         />
       ) : (
         <>
-          <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-            {rows.map((tpl) => {
-              const coding = tpl.codings[0]
-              return (
-                <li key={tpl.id}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-auto w-full justify-start py-2 text-left"
-                    disabled={pending}
-                    onClick={() => onSelect(tpl.id)}
-                  >
-                    <span className="flex min-w-0 flex-col items-start">
-                      <span className="font-medium break-words">{tpl.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {coding ? (
-                          <>
-                            <span className="font-mono">{coding.code}</span> ·{" "}
-                          </>
-                        ) : null}
-                        {specialtyNameByKey(specialties, tpl.specialty)} ·{" "}
-                        {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
+          <ScrollArea className="flex max-h-48 flex-col">
+            <ul className="flex flex-col gap-1">
+              {rows.map((tpl) => {
+                const coding = tpl.codings[0]
+                return (
+                  <li key={tpl.id}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto w-full justify-start py-2 text-left"
+                      disabled={pending}
+                      onClick={() => onSelect(tpl.id)}
+                    >
+                      <span className="flex min-w-0 flex-col items-start">
+                        <span className="font-medium break-words">{tpl.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {coding ? (
+                            <>
+                              <span className="font-mono">{coding.code}</span> ·{" "}
+                            </>
+                          ) : null}
+                          {specialtyNameByKey(specialties, tpl.specialty)} ·{" "}
+                          {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
+                        </span>
                       </span>
-                    </span>
-                  </Button>
-                </li>
-              )
-            })}
-            {rows.length === 0 ? (
-              <li className="text-sm text-muted-foreground">Sin resultados.</li>
-            ) : null}
-          </ul>
+                    </Button>
+                  </li>
+                )
+              })}
+              {rows.length === 0 ? (
+                <li className="text-sm text-muted-foreground">Sin resultados.</li>
+              ) : null}
+            </ul>
+          </ScrollArea>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">{total} resultado(s) con este filtro</p>
             <div className="flex gap-2">
