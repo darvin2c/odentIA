@@ -22,6 +22,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation/$invitationId'
+import { Route as WhatsappConectarRouteImport } from './routes/whatsapp.conectar'
 import { Route as AppBillingOrganizationIdRouteImport } from './routes/_app/billing.$organizationId'
 import { Route as AppBillingOrganizationIdAccionesRouteImport } from './routes/_app/billing_.$organizationId.acciones'
 
@@ -90,6 +91,11 @@ const AcceptInvitationInvitationIdRoute =
     path: '/accept-invitation/$invitationId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const WhatsappConectarRoute = WhatsappConectarRouteImport.update({
+  id: '/whatsapp/conectar',
+  path: '/whatsapp/conectar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppBillingOrganizationIdRoute =
   AppBillingOrganizationIdRouteImport.update({
     id: '/billing/$organizationId',
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AppProfileRoute
   '/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/whatsapp/conectar': typeof WhatsappConectarRoute
   '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
   '/billing/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
 }
@@ -131,6 +138,7 @@ export interface FileRoutesByTo {
   '/profile': typeof AppProfileRoute
   '/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/whatsapp/conectar': typeof WhatsappConectarRoute
   '/': typeof AppIndexRoute
   '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
   '/billing/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
@@ -149,6 +157,7 @@ export interface FileRoutesById {
   '/_app/profile': typeof AppProfileRoute
   '/_app/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/whatsapp/conectar': typeof WhatsappConectarRoute
   '/_app/': typeof AppIndexRoute
   '/_app/billing/$organizationId': typeof AppBillingOrganizationIdRoute
   '/_app/billing_/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
@@ -168,6 +177,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/support'
     | '/accept-invitation/$invitationId'
+    | '/whatsapp/conectar'
     | '/billing/$organizationId'
     | '/billing/$organizationId/acciones'
   fileRoutesByTo: FileRoutesByTo
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/support'
     | '/accept-invitation/$invitationId'
+    | '/whatsapp/conectar'
     | '/'
     | '/billing/$organizationId'
     | '/billing/$organizationId/acciones'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/_app/profile'
     | '/_app/support'
     | '/accept-invitation/$invitationId'
+    | '/whatsapp/conectar'
     | '/_app/'
     | '/_app/billing/$organizationId'
     | '/_app/billing_/$organizationId/acciones'
@@ -216,6 +228,7 @@ export interface RootRouteChildren {
   TwoFactorRoute: typeof TwoFactorRoute
   VerifyEmailSentRoute: typeof VerifyEmailSentRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
+  WhatsappConectarRoute: typeof WhatsappConectarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -311,6 +324,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/whatsapp/conectar': {
+      id: '/whatsapp/conectar'
+      path: '/whatsapp/conectar'
+      fullPath: '/whatsapp/conectar'
+      preLoaderRoute: typeof WhatsappConectarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/billing/$organizationId': {
       id: '/_app/billing/$organizationId'
       path: '/billing/$organizationId'
@@ -357,6 +377,7 @@ const rootRouteChildren: RootRouteChildren = {
   TwoFactorRoute: TwoFactorRoute,
   VerifyEmailSentRoute: VerifyEmailSentRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
+  WhatsappConectarRoute: WhatsappConectarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

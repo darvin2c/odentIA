@@ -14,10 +14,11 @@ export class ApiError extends Error {
 
 /** Fetch a la API con cookies de sesión; errores en forma ApiErrorShape. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // `init` primero: sus cabeceras se suman a las de siempre, no las reemplazan.
   const response = await fetch(`${API_URL}${path}`, {
+    ...init,
     credentials: "include",
     headers: { "content-type": "application/json", ...init?.headers },
-    ...init,
   })
   if (!response.ok) {
     let shape: ApiErrorShape = {}
