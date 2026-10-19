@@ -2489,36 +2489,56 @@ export async function settleSaasCommissions(
     })
     .returning()
   if (!settlement) throw new ServiceError("INTERNAL", 409, "No se pudo registrar la liquidación")
+  // Filas congeladas tal como quedaron en BD: el correo se arma desde aquí, no de copias en memoria.
+  const frozen: { kind: string; organizationId: string | null; description: string; amountCents: number }[] = []
   try {
     for (const commission of pending) {
-      await tx.insert(saasCommissionSettlementLine).values({
-        settlementId: settlement.id,
-        kind: "cobro",
-        sourceKey: `saas-comision:${commission.id}`,
-        commissionId: commission.id,
-        organizationId: commission.organizationId,
-        description: `Cobro confirmado ${commission.baseCents} (${commission.rateBps} pb)`,
-        amountCents: commission.commissionCents,
-        currency: commission.currency,
-        occurredAt: commission.createdAt,
-      })
+      const [line] = await tx
+        .insert(saasCommissionSettlementLine)
+        .values({
+          settlementId: settlement.id,
+          kind: "cobro",
+          sourceKey: `saas-comision:${commission.id}`,
+          commissionId: commission.id,
+          organizationId: commission.organizationId,
+          description: `Cobro confirmado ${commission.baseCents} (${commission.rateBps} pb)`,
+          amountCents: commission.commissionCents,
+          currency: commission.currency,
+          occurredAt: commission.createdAt,
+        })
+        .returning({
+          kind: saasCommissionSettlementLine.kind,
+          organizationId: saasCommissionSettlementLine.organizationId,
+          description: saasCommissionSettlementLine.description,
+          amountCents: saasCommissionSettlementLine.amountCents,
+        })
+      if (line) frozen.push(line)
       await tx
         .update(saasSellerCommission)
         .set({ status: "liquidada", settledAt: now })
         .where(eq(saasSellerCommission.id, commission.id))
     }
     for (const adjustment of adjustments) {
-      await tx.insert(saasCommissionSettlementLine).values({
-        settlementId: settlement.id,
-        kind: "ajuste",
-        sourceKey: `saas-ajuste:${adjustment.id}`,
-        adjustmentId: adjustment.id,
-        organizationId: adjustment.organizationId,
-        description: adjustment.reason.slice(0, 500),
-        amountCents: -adjustment.amountCents,
-        currency: adjustment.currency,
-        occurredAt: adjustment.createdAt,
-      })
+      const [line] = await tx
+        .insert(saasCommissionSettlementLine)
+        .values({
+          settlementId: settlement.id,
+          kind: "ajuste",
+          sourceKey: `saas-ajuste:${adjustment.id}`,
+          adjustmentId: adjustment.id,
+          organizationId: adjustment.organizationId,
+          description: adjustment.reason.slice(0, 500),
+          amountCents: -adjustment.amountCents,
+          currency: adjustment.currency,
+          occurredAt: adjustment.createdAt,
+        })
+        .returning({
+          kind: saasCommissionSettlementLine.kind,
+          organizationId: saasCommissionSettlementLine.organizationId,
+          description: saasCommissionSettlementLine.description,
+          amountCents: saasCommissionSettlementLine.amountCents,
+        })
+      if (line) frozen.push(line)
       await tx
         .update(saasCommissionAdjustment)
         .set({ appliedAt: now })
@@ -2549,6 +2569,33 @@ export async function settleSaasCommissions(
     if (noticeOrgId) {
       const money = (cents: number) =>
         new Intl.NumberFormat("es", { style: "currency", currency: unit, currencyDisplay: "code" }).format(cents / 100)
+      // Detalle desde las filas congeladas: una por clínica (comisión sumada) y una por ajuste (motivo).
+      // Los nombres de clínica no están congelados: solo se leen; sin nombre, el id explícito, sin inventar.
+      const cobros = frozen.filter((line) => line.kind === "cobro")
+      const clinicIds = [...new Set(cobros.map((line) => line.organizationId).filter((id): id is string => Boolean(id)))]
+      const orgNames = new Map<string, string>()
+      if (clinicIds.length > 0) {
+        const orgs = await tx
+          .select({ id: organization.id, name: organization.name })
+          .from(organization)
+          .where(inArray(organization.id, clinicIds))
+        for (const org of orgs) orgNames.set(org.id, org.name)
+      }
+      const grossByClinic = new Map<string, number>()
+      for (const line of cobros) {
+        if (!line.organizationId) continue
+        grossByClinic.set(line.organizationId, (grossByClinic.get(line.organizationId) ?? 0) + line.amountCents)
+      }
+      const clinicLines = [...grossByClinic.entries()]
+        .map(([orgId, cents]) => ({ label: orgNames.get(orgId) ?? orgId, amount: money(cents) }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es"))
+      const adjustmentLines = frozen
+        .filter((line) => line.kind === "ajuste")
+        .map((line) => ({
+          // La descripción congelada del ajuste es su motivo.
+          label: `Ajuste: ${line.description}`,
+          amount: money(line.amountCents),
+        }))
       const { subject, text, html } = saasSettlementEmail({
         sellerName: seller.displayName,
         monthText: new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" }).format(
@@ -2559,6 +2606,7 @@ export async function settleSaasCommissions(
         // Los ajustes se descuentan del total: van con su signo.
         adjustments: money(-adjustmentCents),
         total: money(totalCents),
+        lines: [...clinicLines, ...adjustmentLines],
       })
       await tx
         .insert(saasNotice)

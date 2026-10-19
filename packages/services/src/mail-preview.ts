@@ -106,10 +106,15 @@ const MAILS: Record<string, MailTemplate> = {
   "16-tu-liquidacion": saasSettlementEmail({
     sellerName: "Jorge",
     monthText: "septiembre de 2026",
-    clinics: 3,
+    clinics: 2,
     gross: "123,45 USD",
     adjustments: "-5,00 USD",
     total: "118,45 USD",
+    lines: [
+      { label: "Clínica Sonrisa", amount: "100,00 USD" },
+      { label: "Clínica Norte", amount: "23,45 USD" },
+      { label: "Ajuste: cobro duplicado", amount: "-5,00 USD" },
+    ],
   }),
   "17-soporte-caso-nuevo": supportInboxNoticeTemplate({
     kind: "caso_nuevo",

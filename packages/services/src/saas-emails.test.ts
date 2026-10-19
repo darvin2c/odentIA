@@ -76,19 +76,35 @@ describe("correos de Plan y pagos", () => {
     for (const mail of Object.values(mails)) expect(mail.subject).not.toMatch(/odentIA ·/)
   })
 
-  it("la liquidación: montos con moneda, total destacado y el nombre escapado", () => {
+  it("la liquidación incluye el detalle antes del total, con escape", () => {
     const mail = saasSettlementEmail({
       sellerName: "Jorge <b>Ríos</b> & Cía",
       monthText: "septiembre de 2026",
-      clinics: 3,
+      clinics: 2,
       gross: "123,45 USD",
       adjustments: "-5,00 USD",
       total: "118,45 USD",
+      lines: [
+        { label: "Clínica <Sonrisa> & Cía", amount: "100,00 USD" },
+        { label: "Clínica Norte", amount: "23,45 USD" },
+        { label: "Ajuste: cobro <duplicado> & otro", amount: "-5,00 USD" },
+      ],
     })
+    // Inclusión y orden: cada fila del detalle aparece una vez, antes del total.
+    const detail = ["Clínica <Sonrisa> & Cía: 100,00 USD", "Clínica Norte: 23,45 USD", "Ajuste: cobro <duplicado> & otro: -5,00 USD"]
+    const rows = mail.text.split("\n").filter((line) => detail.includes(line))
+    expect(rows).toEqual(detail)
+    for (const row of detail) {
+      expect(mail.text.indexOf(row)).toBeLessThan(mail.text.indexOf("Total a pagarte: 118,45 USD"))
+    }
     expect(mail).toMatchSnapshot()
     expect(mail.subject).toBe("Tu liquidación de septiembre de 2026")
+    // Escape en HTML, texto plano intacto.
     expect(mail.html).not.toContain("<b>Ríos</b>")
     expect(mail.html).toContain("Jorge &lt;b&gt;Ríos&lt;/b&gt; &amp; Cía")
+    expect(mail.html).not.toContain("Clínica <Sonrisa>")
+    expect(mail.html).toContain("Clínica &lt;Sonrisa&gt; &amp; Cía")
+    expect(mail.html).not.toContain("cobro <duplicado>")
     expect(mail.text).toContain("Total a pagarte: 118,45 USD")
     expect(mail.text).toContain("si algo no cuadra, escríbele a tu contacto en odentIA")
     expect(mail.text).not.toContain("escríbenos desde Ayuda")

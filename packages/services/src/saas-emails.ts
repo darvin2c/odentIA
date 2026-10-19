@@ -113,6 +113,12 @@ export function saasOverdueEmail(input: {
   })
 }
 
+/** Una fila del detalle de la liquidación: clínica con su comisión o ajuste con su motivo. */
+export interface SaasSettlementLine {
+  label: string
+  amount: string
+}
+
 /** Liquidación de comisiones a quien vende odentIA: los montos con su moneda y el total destacado. */
 export function saasSettlementEmail(input: {
   sellerName: string
@@ -122,6 +128,8 @@ export function saasSettlementEmail(input: {
   gross: string
   adjustments: string
   total: string
+  /** Detalle congelado: una fila por clínica y una por ajuste, antes del total. */
+  lines: readonly SaasSettlementLine[]
 }): MailTemplate {
   return renderEmail({
     subject: `Tu liquidación de ${input.monthText}`,
@@ -131,6 +139,7 @@ export function saasSettlementEmail(input: {
     facts: [
       { label: "Clínicas con cobros", value: String(input.clinics) },
       { label: "Comisión por cobros", value: input.gross },
+      ...input.lines.map((line) => ({ label: line.label, value: line.amount })),
       { label: "Ajustes", value: input.adjustments },
       { label: "Total a pagarte", value: input.total, total: true },
     ],
