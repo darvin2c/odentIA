@@ -4,6 +4,7 @@
  * permanecen disponibles aunque la operación clínica esté restringida.
  */
 import type { Auth } from "@odentia/auth"
+import { seesBilling } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { invitation, member } from "@odentia/db/schema/auth"
 import type { Mailer } from "@odentia/mail"
@@ -896,11 +897,11 @@ async function accountMember(deps: SaasBillingAccountDeps, c: Context, orgId: st
   if (!membership) return null
   return { userId: session.user.id, role: membership.role }
 }
-/** Miembro con rol owner/admin, o null (sin sesión, sin membresía u otro rol). */
+/** Miembro que ve Facturación (`seesBilling`: owner/admin), o null (sin sesión, sin membresía u otro rol). */
 async function accountOwnerOrAdmin(deps: SaasBillingAccountDeps, c: Context, orgId: string) {
   const membership = await accountMember(deps, c, orgId)
   if (!membership) return null
-  if (membership.role !== "owner" && membership.role !== "admin") return null
+  if (!seesBilling(membership.role)) return null
   return membership
 }
 
@@ -945,7 +946,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    if (membership.role !== "owner" && membership.role !== "admin") {
+    if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve la facturación"), 403)
     }
     return runService(c, 200, () =>
@@ -994,7 +995,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    if (membership.role !== "owner" && membership.role !== "admin") return c.json({ data: [] })
+    if (!seesBilling(membership.role)) return c.json({ data: [] })
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getSaasAlerts(tx, orgId)))
   })
 
@@ -1040,8 +1041,11 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       withOrgContext(deps.db, orgId, async (tx) => {
         const current = await currentSaasPeriod(tx, orgId)
         const previous = await previousSaasPeriod(tx, orgId, current)
+        // El mes anterior ya cobrado se ve con el crédito que guardó su cargo, no con el del plan de hoy.
         const period =
-          query.periodo === "anterior" ? { ...previous, credit: "mes" as const, creditCents: current.creditCents } : current
+          query.periodo === "anterior"
+            ? { start: previous.start, end: previous.end, credit: "mes" as const, creditCents: previous.creditCents ?? current.creditCents }
+            : current
         const pending = query.periodo === "anterior" ? [] : await listPendingRecoveries(tx, orgId)
         // Lo que no se cobra (anulado, dentro de una cita o devuelto) se dice en su fila, no se esconde.
         const rows =
@@ -1150,7 +1154,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, body.orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    if (membership.role !== "owner" && membership.role !== "admin") {
+    if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra puede cambiar el plan"), 403)
     }
     return runService(c, 200, () =>
@@ -1199,7 +1203,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    if (membership.role !== "owner" && membership.role !== "admin") {
+    if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra registra comprobantes"), 403)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())

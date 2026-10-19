@@ -367,7 +367,7 @@ export function ScheduleRangePicker({
                     "absolute inset-x-[3px] z-[2] flex touch-none flex-col rounded-[9px] select-none",
                     state === "free" && "bg-primary text-primary-foreground",
                     state === "outside" &&
-                      "border-2 border-warning bg-warning-soft text-warning-foreground",
+                      "border-2 border-warning bg-warning-soft text-warning",
                     state === "taken" && "bg-destructive text-background",
                   )}
                   style={{

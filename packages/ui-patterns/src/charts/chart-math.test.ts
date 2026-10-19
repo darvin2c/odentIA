@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { moveInGrid, niceTicks, scaleLevel, sparkPoints } from "./chart-math.js"
+import { moveInGrid, niceTicks, scaleLevel, sparkPoints, waterfallBars } from "./chart-math.js"
 
 describe("niceTicks", () => {
   it("cubre el máximo con pasos redondos", () => {
@@ -42,5 +42,33 @@ describe("sparkPoints", () => {
   it("el mayor queda arriba y el menor abajo", () => {
     const [low, high] = sparkPoints([1, 9], 100, 30)
     expect((low?.y ?? 0) > (high?.y ?? 0)).toBe(true)
+  })
+})
+
+describe("waterfallBars", () => {
+  it("baja desde el total paso a paso y el resultado sale de cero", () => {
+    const { bars, low, high } = waterfallBars([
+      { kind: "total", value: 100 },
+      { kind: "less", value: 36 },
+      { kind: "less", value: 39 },
+      { kind: "result", value: 25 },
+    ])
+    expect(bars).toEqual([
+      { from: 0, to: 100 },
+      { from: 100, to: 64 },
+      { from: 64, to: 25 },
+      { from: 0, to: 25 },
+    ])
+    expect({ low, high }).toEqual({ low: 0, high: 100 })
+  })
+
+  it("si se gastó más de lo cobrado, la cascada baja de cero", () => {
+    const { bars, low } = waterfallBars([
+      { kind: "total", value: 50 },
+      { kind: "less", value: 80 },
+      { kind: "result", value: -30 },
+    ])
+    expect(bars[1]).toEqual({ from: 50, to: -30 })
+    expect(low).toBe(-30)
   })
 })

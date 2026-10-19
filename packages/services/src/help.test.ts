@@ -108,6 +108,12 @@ describe("responder", () => {
   })
 
   it("«¿por qué no puedo?» dice lo que falta de verdad en esa pantalla", async () => {
+    // Un horario que dejó de valer (ADR 0060) no cuenta: sigue sin haber horario.
+    const [old] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Sede de antes", timezone: "America/Lima" }).returning({ id: branch.id })
+    await ownerDb.insert(professionalSchedule).values({
+      organizationId: ORG, branchId: old!.id, dentistUserId: USER, weekday: 2, startMin: 540, endMin: 780,
+      isActive: false, validFrom: "2026-01-05", validUntil: "2026-02-02",
+    })
     const empty = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo reservar una cita?", screen: "/agenda" }))
     expect(empty.kind).toBe("estado")
     expect(empty.blockers.map((item) => item.text)).toEqual(expect.arrayContaining([

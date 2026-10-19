@@ -123,6 +123,12 @@ export const purchaseOrder = pgTable(
     warehouseId: uuid("warehouse_id")
       .notNull()
       .references(() => warehouse.id),
+    /**
+     * Número de la orden en la clínica («OC-0012»), sin saltos. Lo pone
+     * `createPurchaseOrder` con el contador de la clínica; la base lo exige
+     * (`NOT NULL` en la migración de reglas).
+     */
+    orderNumber: integer("order_number"),
     status: text("status").notNull().default("borrador"),
     // ISO 4217, siempre explícita: sin moneda por defecto de ningún país.
     currency: text("currency").notNull(),
@@ -132,6 +138,7 @@ export const purchaseOrder = pgTable(
   },
   (table) => [
     uniqueIndex("purchase_order_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("purchase_order_org_number_uidx").on(table.organizationId, table.orderNumber),
     index("purchase_order_org_supplier_idx").on(table.organizationId, table.supplierId),
     index("purchase_order_org_status_idx").on(table.organizationId, table.status),
     check(
@@ -245,6 +252,10 @@ export const stockMovement = pgTable(
     index("stock_movement_org_product_idx").on(table.organizationId, table.productId),
     index("stock_movement_org_warehouse_idx").on(table.organizationId, table.warehouseId),
     index("stock_movement_org_patient_idx").on(table.organizationId, table.patientId),
+    // Lo recibido de cada compra (saldo con el proveedor), sin recorrer los consumos clínicos.
+    index("stock_movement_org_purchase_idx")
+      .on(table.organizationId, table.purchaseOrderId)
+      .where(sql`${table.purchaseOrderId} is not null`),
     foreignKey({
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
@@ -254,5 +265,43 @@ export const stockMovement = pgTable(
       sql`${table.kind} IN ('ingreso','consumo','ajuste','traslado')`,
     ),
     check("stock_movement_delta_check", sql`${table.quantityDelta} <> 0`),
+  ],
+)
+
+/**
+ * Lo que se tenía a favor con un proveedor (una compra pagada de más que ya
+ * llegó, o una cancelada con sus pagos dejados a favor) usado para pagar otra
+ * compra suya. No es un gasto: el dinero ya salió con el pago original. Lo
+ * pagado de una compra es su gasto más lo usado a favor (ADR 0061). Solo se anula.
+ */
+export const supplierCreditUse = pgTable(
+  "supplier_credit_use",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    supplierId: uuid("supplier_id").notNull(),
+    /** La compra que se paga con lo que se tenía a favor. */
+    orderId: uuid("order_id").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    index("supplier_credit_use_org_supplier_idx").on(table.organizationId, table.supplierId),
+    index("supplier_credit_use_org_order_idx").on(table.organizationId, table.orderId),
+    foreignKey({
+      columns: [table.organizationId, table.supplierId],
+      foreignColumns: [supplier.organizationId, supplier.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.orderId],
+      foreignColumns: [purchaseOrder.organizationId, purchaseOrder.id],
+    }),
+    check("supplier_credit_use_amount_check", sql`${table.amountCents} > 0`),
+    check("supplier_credit_use_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
   ],
 )

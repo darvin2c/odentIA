@@ -23,7 +23,8 @@ import {
 } from "./finance.js"
 import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
 import { createPromotion } from "./promotions.js"
-import { getReportMoney } from "./reports.js"
+import { getReportFinance, getReportPromotions } from "./report-finance.js"
+import { getReportProfessionals } from "./report-summary.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
@@ -249,7 +250,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
 })
 
-it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso", async () => {
+it("el mes en Reportes concilia cobrado, gastos y deuda de la sede, y el cobro con promoción cuenta en ella", async () => {
   const f = await clinicalFixture()
   const branchId = await seedBranch()
   await ownerDb.update(encounter).set({ branchId }).where(eq(encounter.id, f.encounter.id))
@@ -272,7 +273,7 @@ it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso"
     createCharge(tx, ...f.args, { encounterProcedureId: procedure.id }),
   )
   // Promoción con precio fijo sobre el mismo servicio: el cargo hereda el
-  // snapshot y el desglose la cuenta aunque el filtro de atención no aplique.
+  // snapshot y su promoción lo cuenta aunque venga de una atención y no de un presupuesto.
   const promo = await f.run((tx) =>
     createPromotion(tx, "org_a", f.actor, {
       name: "Limpieza promo",
@@ -315,26 +316,21 @@ it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso"
       requestId: randomUUID(),
     }),
   )
-  const result = await f.run((tx) => getReportMoney(tx, "org_a", { period: "este_mes", branchId }))
-  const pen = result.byCurrency.find((b) => b.currency === "PEN")
-  expect(pen?.cobradoCents).toBe(19900)
-  expect(pen?.netoCents).toBe(19900)
-  expect(pen?.gastadoCents).toBe(0)
-  expect(pen?.quedaCents).toBe(19900)
-  expect(result.byProfessional).toContainEqual({
-    professionalUserId: f.actor,
-    name: expect.anything(),
-    currency: "PEN",
-    cobradoCents: 19900,
-  })
-  expect(result.byPromotion).toContainEqual({
-    promotionId: promo.id,
+  // Reportes › Finanzas de la sede: lo cobrado, sin gastos, queda en caja; te deben lo que falta del primer concepto.
+  const finance = await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))
+  expect(finance.totals.current).toMatchObject({ cobradoCents: 19900, otherExpensesCents: 0, cashLeftCents: 19900 })
+  expect(finance.debts.current).toMatchObject({ totalCents: 8000, people: 1 })
+  // Por profesional, lo cobrado de lo que atendió.
+  const professionals = await f.run((tx) => getReportProfessionals(tx, "org_a", { period: "este_mes", branchId }))
+  expect(professionals.rows).toContainEqual(expect.objectContaining({ userId: f.actor, collectedCents: 19900 }))
+  // El cobro con promoción de una atención cuenta en su promoción: frente a la tarifa (1 200) se dejó de cobrar 1 121,
+  // y lo pagado desde entonces son los dos cobros de la persona.
+  const promotions = await f.run((tx) => getReportPromotions(tx, "org_a", { period: "este_mes" }))
+  expect(promotions.promotions.find((row) => row.promotionId === promo.id)).toMatchObject({
     name: "Limpieza promo",
-    currency: "PEN",
-    veces: 1,
-    cobradoCents: 7900,
-    mode: "fixed",
-    averageCents: 7900,
+    people: 1,
+    accepted: 1,
+    discountCents: 112_100,
+    collectedCents: 19900,
   })
-  expect(result.outstanding).toContainEqual({ currency: "PEN", pendienteCents: 8000, pacientes: 1 })
 })

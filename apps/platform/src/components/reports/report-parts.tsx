@@ -1,9 +1,11 @@
 /**
- * Piezas de Reportes: la cifra con su comparación, la tarjeta, las filas con
- * barra y la barra repartida. Las barras son un apoyo visual: cada dato va
- * también en texto, y mejor o peor se dice con palabras y flecha, no solo con color.
+ * Piezas de Reportes: la cifra con su comparación, la cifra con su línea de
+ * 12 meses, la tarjeta, las filas con barra y la barra repartida. Las barras
+ * son un apoyo visual: cada dato va también en texto, y mejor o peor se dice
+ * con palabras y flecha, no solo con color.
  */
-import { cn } from "@odentia/ui"
+import { Button, cn } from "@odentia/ui"
+import { Sparkline } from "@odentia/ui-patterns"
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { type ReactNode, useId } from "react"
 import type { Comparison } from "../../lib/reports"
@@ -75,6 +77,74 @@ export function Figure({
       {note ? <span className={cn("text-[13px]", attention ? "text-warning" : "text-muted-foreground")}>{note}</span> : null}
       {children}
     </div>
+  )
+}
+
+/** «en setiembre de 2026» o «del 10 al 25 de setiembre de 2026»: un rango ya trae su preposición. */
+export function during(period: string): string {
+  return /^(del|el) /.test(period) ? period : `en ${period}`
+}
+
+/** «de S/ 38 900 a S/ 48 200»: el recorrido de la línea pequeña dicho con palabras. */
+export function travel(values: Array<number | null>, format: (value: number) => string): string {
+  const known = values.filter((value): value is number => value !== null)
+  if (known.length === 0) return "sin datos"
+  if (known.length === 1) return format(known[0] as number)
+  return `de ${format(known[0] as number)} a ${format(known[known.length - 1] as number)}`
+}
+
+/** Una cifra con su comparación y su línea de 12 meses (Resumen y Agente). */
+export function SummaryFigure({
+  title,
+  icon,
+  value,
+  spark,
+  sparkLabel,
+  sparkPartial,
+  change,
+  better,
+  detail,
+  note,
+  footer,
+}: {
+  title: string
+  icon?: ReactNode
+  value: ReactNode
+  spark: Array<number | null>
+  sparkLabel: string
+  /** El último mes de la línea todavía corre. */
+  sparkPartial?: boolean
+  change?: Comparison | null
+  better: Better
+  detail?: ReactNode
+  note?: string
+  footer?: ReactNode
+}) {
+  const id = useId()
+  return (
+    <section aria-labelledby={id} className="elevated flex min-w-0 flex-col gap-1 rounded-xl border bg-card px-[18px] py-4">
+      <h3 id={id} className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground">
+        {icon}
+        {title}
+        {note ? <span className="font-medium">· {note}</span> : null}
+      </h3>
+      <div className="flex min-w-0 items-end justify-between gap-3">
+        <span className="min-w-0 truncate text-[28px] leading-9 font-extrabold tracking-tight tabular-nums">{value}</span>
+        <Sparkline values={spark} label={`${sparkLabel}${sparkPartial ? ". El último mes no está completo" : ""}`} lastPartial={sparkPartial} />
+      </div>
+      {change !== undefined ? <ChangeLine change={change} better={better} /> : null}
+      {detail ? <span className="text-[13px] text-foreground/80">{detail}</span> : null}
+      {footer ? <div className="mt-auto pt-1.5">{footer}</div> : null}
+    </section>
+  )
+}
+
+/** El pie de una cifra que abre su lista: «Ver quiénes», «Ver cuáles». */
+export function FooterButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-bold sm:min-h-8" onClick={onClick}>
+      {children}
+    </Button>
   )
 }
 

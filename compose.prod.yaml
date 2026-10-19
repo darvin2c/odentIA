@@ -125,7 +125,7 @@ services:
   web:
     build: *app-build
     command: ["pnpm", "--filter", "@odentia/web", "start"]
-    # La web arma cada página al servirla con los precios de la administración (ADR 0059):
+    # La web arma cada página al servirla con los precios de la administración (ADR 0062):
     # los lee de la API por la red del stack, nunca desde fuera.
     environment:
       PORT: "3000"

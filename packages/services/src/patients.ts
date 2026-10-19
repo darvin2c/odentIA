@@ -112,6 +112,7 @@ export interface CreatePatientInput {
   emergencyContactPhone?: string | null
   insuranceType?: string | null
   insuranceScheme?: string | null
+  referralKind?: string | null
   referralSource?: string | null
   registeredBranchId?: string | null
 }
@@ -969,6 +970,7 @@ export interface UpdatePatientPatch {
   emergencyContactPhone?: string | null
   insuranceType?: string | null
   insuranceScheme?: string | null
+  referralKind?: string | null
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive?: boolean
@@ -1011,6 +1013,7 @@ const PATCH_FIELDS = [
   "origin",
   "insuranceType",
   "insuranceScheme",
+  "referralKind",
   "referralSource",
   "registeredBranchId",
 ] as const
@@ -1049,11 +1052,12 @@ export async function updatePatient(
   if (patch.displayName !== undefined) patch = { ...patch, displayName: patch.displayName.trim() }
   // Lo que depende del país se calcula sobre la filiación completa y se guarda
   // solo si cambia (el país emisor cuando cambia el documento, el tipo general
-  // cuando cambia el régimen del seguro, el país de la dirección).
+  // cuando cambia el régimen del seguro, el país de la dirección); «Cómo nos
+  // conoció» deja su texto solo en «Otro».
   const merged = normalizeDemographics({ ...demographics, ...demographicPatch }, countryCode) as Record<string, unknown>
   const derived: Record<string, unknown> = {}
   for (const key of Object.keys(demographicPatch)) derived[key] = merged[key]
-  for (const key of ["docCountry", "insuranceType", "addressCountry"])
+  for (const key of ["docCountry", "insuranceType", "addressCountry", "referralKind", "referralSource"])
     if ((merged[key] ?? null) !== (demographics[key] ?? null)) derived[key] = merged[key]
   patch = { ...patch, ...derived }
   // Un paciente que pasa a ser menor necesita a su representante legal vigente.

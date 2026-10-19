@@ -12,13 +12,11 @@ import { WhatsAppConnectSteps } from "./connect-steps"
  */
 export function WhatsAppConnect({
   another = false,
-  onConnectedWithButton,
   onCreated,
   onCancel,
 }: {
   /** La clínica ya tiene un número: este es otro. */
   another?: boolean
-  onConnectedWithButton: (result: ConnectResult) => void
   onCreated: (result: ConnectResult) => void
   /** Solo al conectar otro número: dejar de ofrecerlo. */
   onCancel?: () => void
@@ -51,7 +49,8 @@ export function WhatsAppConnect({
         </div>
         {/* El botón no se dibuja si la instalación no lo tiene: entonces su explicación tampoco. */}
         <div className="peer flex flex-col gap-3 empty:hidden">
-          <FacebookSignupButton onConnected={onConnectedWithButton} />
+          {/* Lleva al panel, que abre la ventana de Meta y vuelve aquí con `?conectado=`. */}
+          <FacebookSignupButton />
         </div>
         <p className="text-sm text-muted-foreground peer-empty:hidden">
           Entras con el Facebook de quien administra la clínica, eliges el número y vuelves con él conectado, sin copiar ningún

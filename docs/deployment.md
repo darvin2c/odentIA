@@ -30,7 +30,7 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Cloudflare Tunnel»). API, admin, panel, platform y web además publican en loopback
   (API en el host 3101, panel 3010, platform 3011, admin 3012 y web 3013) solo como
   vuelta atrás por el borde de OpenShip. La web redirige `www.` a la raíz.
-- La web (`apps/web`, ADR 0046 y 0059) arma cada página al servirla con el servidor de
+- La web (`apps/web`, ADR 0046 y 0062) arma cada página al servirla con el servidor de
   Astro (`node ./dist/server/entry.mjs`, `HOST=0.0.0.0`). Lee los precios de la API por la
   red del stack (`ODENTIA_API_INTERNAL_URL=http://api:3001`) y los guarda 30 segundos; si
   la API nunca respondió, la página responde 503 en vez de inventar cifras. Su dirección

@@ -17,7 +17,7 @@ import {
 import { setProfessionalSchedule } from "./availability.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createEncounter, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
-import { getReportAgenda } from "./reports.js"
+import { getAgendaReport } from "./report-agenda.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 
@@ -197,8 +197,8 @@ it("dos citas el mismo día: sin indicar cuál, la atención se une a la que lle
 it("«Espera en sala» mide de la llegada al inicio de la atención, por profesional, y sin llegadas dice que no hay datos", async () => {
   const f = await scene()
   const query = { period: "este_mes", branchId: f.site.id }
-  const report = () => withOrgContext(appDb, "org_a", (tx) => getReportAgenda(tx, "org_a", query))
-  expect((await report()).waitInRoom).toEqual({ medianMinutes: null, measured: 0, byProfessional: [] })
+  const report = () => withOrgContext(appDb, "org_a", (tx) => getAgendaReport(tx, "org_a", query))
+  expect((await report()).waitInRoom).toEqual({ medianMinutes: null, measured: 0 })
 
   const waited = await f.book(0, 9)
   await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, waited.id, true))
@@ -219,11 +219,13 @@ it("«Espera en sala» mide de la llegada al inicio de la atención, por profesi
   )
   await f.run((tx) => createEncounter(tx, "org_a", f.actor, unmarked.patient.id, { appointmentId: walkIn.id }))
 
-  const wait = (await report()).waitInRoom
+  const agenda = await report()
+  const wait = agenda.waitInRoom
   expect(wait.measured).toBe(1)
   expect(wait.medianMinutes).toBeGreaterThanOrEqual(11)
   expect(wait.medianMinutes).toBeLessThanOrEqual(13)
-  expect(wait.byProfessional).toEqual([{ userId: f.actor, name: "Clínico", medianMinutes: wait.medianMinutes, measured: 1 }])
+  // La de cada profesional va en su fila.
+  expect(agenda.professionals.find((row) => row.userId === f.actor)).toMatchObject({ name: "Clínico", waitMinutes: wait.medianMinutes })
 })
 
 it("Inicio: la dueña que atiende ve «Mis pacientes de hoy» con la sala, y su atención de ayer sin cerrar espera en «Te espera»", async () => {

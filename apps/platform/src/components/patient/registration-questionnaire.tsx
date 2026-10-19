@@ -12,6 +12,8 @@ import {
   KINSHIP,
   KINSHIP_LABELS,
   MARITAL_STATUS_LABELS,
+  REFERRAL_KIND_LABELS,
+  REFERRAL_KINDS,
   type RegistrationAnswers,
   type RegistrationConfig,
   type RegistrationFieldKey,
@@ -128,6 +130,8 @@ interface Draft {
   educationLevel: string
   occupation: string
   origin: string
+  /** «Cómo nos conoció» de la lista (decisión 3 de Reportes v2); `referralSource` es lo que dijo si eligió «Otro». */
+  referralKind: string
   referralSource: string
   messages: "" | "si" | "no"
   privacy: boolean
@@ -188,6 +192,7 @@ const EMPTY: Draft = {
   educationLevel: "",
   occupation: "",
   origin: "",
+  referralKind: "",
   referralSource: "",
   messages: "",
   privacy: false,
@@ -267,6 +272,7 @@ const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
   ["demographics.educationLevel", "census", "educationLevel"],
   ["demographics.occupation", "census", "occupation"],
   ["demographics.origin", "census", "origin"],
+  ["demographics.referralKind", "census", "referralKind"],
   ["demographics.referralSource", "census", "referralSource"],
   ["representative.relationship", "rep", "repRelation"],
   ["representative.phone", "rep", "repPhone"],
@@ -502,7 +508,12 @@ export function RegistrationQuestionnaire({
         put("affiliationNumber", d.affiliationNumber)
       }
     }
-    for (const key of censusKeys) if (censusAsked(key)) put(key, d[key])
+    for (const key of censusKeys) if (censusAsked(key) && key !== "referralSource") put(key, d[key])
+    // «Cómo nos conoció»: la opción de la lista y, solo con «Otro», lo que dijo.
+    if (censusAsked("referralSource")) {
+      put("referralKind", d.referralKind)
+      if (d.referralKind === "otro") put("referralSource", d.referralSource)
+    }
     for (const key of Object.keys(demographics))
       if (demographics[key] === "") delete demographics[key]
 
@@ -1593,6 +1604,7 @@ export function RegistrationQuestionnaire({
               educationLevel: "",
               occupation: "",
               origin: "",
+              referralKind: "",
               referralSource: "",
             })
           }
@@ -1652,15 +1664,21 @@ export function RegistrationQuestionnaire({
             </Labeled>
           ) : null}
           {asked("referralSource") ? (
-            <Labeled
-              name="referralSource"
-              label="¿Cómo nos conoció?"
-              optional
-              htmlFor={id("referral")}
-            >
+            <Labeled name="referralKind" label="¿Cómo nos conoció?" optional>
+              <Pick
+                label="Cómo nos conoció"
+                value={draft.referralKind}
+                options={REFERRAL_KINDS.map((kind) => ({ value: kind, label: REFERRAL_KIND_LABELS[kind] }))}
+                // Solo «Otro» lleva lo que dijo.
+                onChange={(value) => set({ referralKind: value, ...(value === "otro" ? {} : { referralSource: "" }) })}
+              />
+            </Labeled>
+          ) : null}
+          {asked("referralSource") && draft.referralKind === "otro" ? (
+            <Labeled name="referralSource" label="¿Cuál?" optional htmlFor={id("referral")}>
               <Input
                 id={id("referral")}
-                placeholder="Por ejemplo, me recomendó un amigo"
+                placeholder="Por ejemplo, la radio"
                 autoComplete="off"
                 maxLength={200}
                 value={draft.referralSource}

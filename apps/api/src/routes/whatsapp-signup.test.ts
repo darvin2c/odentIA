@@ -1,6 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createHmac } from "node:crypto"
+import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { channelConnection, channelTemplate } from "@odentia/db/schema/crm"
 import { createConnection, decryptConfig, secretsKeyFromEnv, type Storage } from "@odentia/services"
@@ -10,6 +11,7 @@ import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { requireOrgContext, requireSession } from "../lib/context.js"
 import { createConnectionsRoute } from "./connections.js"
 import type { CrmDeps } from "./helpers.js"
 import { createWebhooksRoute } from "./webhooks.js"
@@ -204,6 +206,48 @@ describe("la configuración de plataforma es opcional", () => {
     expect((await receptionist.request("/channels/whatsapp/signup")).status).toBe(403)
     expect((await post(receptionist, "/channels/whatsapp/signup", { code: "c", wabaId: "1", phoneNumberId: "2" })).status).toBe(403)
     expect((await post(receptionist, "/channels/whatsapp/signup/00000000-0000-4000-8000-000000000000/retry")).status).toBe(403)
+  })
+
+  it("desde el panel, la clínica sale de la membresía, nunca de la dirección", async () => {
+    // La página del panel (`app.<dominio>/whatsapp/conectar?org=<slug>`) pide con
+    // `x-odentia-org`; los guards reales comprueban la membresía y el rol.
+    await ownerDb.execute(
+      sql`insert into "user" ("id", "name", "email") values ('u-fb-owner', 'Dueña', 'fb-owner@test.dev'), ('u-fb-reception', 'Recepción', 'fb-reception@test.dev') on conflict do nothing`,
+    )
+    await ownerDb.execute(
+      sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-fb-owner', 'org_a', 'u-fb-owner', 'owner', now()), ('m-fb-reception', 'org_a', 'u-fb-reception', 'reception', now()) on conflict do nothing`,
+    )
+    const auth = {
+      api: {
+        getSession: async ({ headers }: { headers: Headers }) => {
+          const userId = headers.get("x-test-user")
+          return userId ? { user: { id: userId, image: null }, session: { activeOrganizationId: null } } : null
+        },
+      },
+    } as unknown as Auth
+    const app = new Hono()
+    app.use("*", requireSession({ auth }), requireOrgContext({ db: appDb }))
+    app.route(
+      "/channels/whatsapp/signup",
+      createWhatsAppSignupRoute({ db: appDb, secretsKey: KEY, storage: storageStub, validateExternal: true, webhookBaseUrl: "https://api.example.com", meta: META }),
+    )
+    const ask = (userId: string | null, slug: string, method: "GET" | "POST" = "GET") =>
+      app.request("/channels/whatsapp/signup", {
+        method,
+        headers: { "content-type": "application/json", "x-odentia-org": slug, ...(userId ? { "x-test-user": userId } : {}) },
+        ...(method === "POST" ? { body: JSON.stringify({ code: "c", wabaId: "1", phoneNumberId: "2" }) } : {}),
+      })
+
+    expect((await ask("u-fb-owner", "org_a")).status).toBe(200)
+    // Sin sesión, de otra clínica o sin administrar la configuración: no se abre ni se conecta.
+    expect((await ask(null, "org_a")).status).toBe(401)
+    const foreign = await ask("u-fb-owner", "org_b")
+    expect(foreign.status).toBe(403)
+    expect(await foreign.json()).toMatchObject({ error: { code: "FORBIDDEN" } })
+    expect((await ask("u-fb-owner", "org_b", "POST")).status).toBe(403)
+    expect((await ask("u-fb-reception", "org_a")).status).toBe(403)
+    expect((await ask("u-fb-reception", "org_a", "POST")).status).toBe(403)
+    expect((await ask("u-fb-owner", "no-existe")).status).toBe(404)
   })
 })
 

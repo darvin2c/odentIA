@@ -1,4 +1,4 @@
-# 0059 · Fundadores: abrir una clínica pide invitación y la web muestra los precios de la administración
+# 0062 · Fundadores: abrir una clínica pide invitación y la web muestra los precios de la administración
 
 Fecha: 2026-10-18 · Estado: aceptada · Actualiza [0046](0046-web-de-marketing-en-astro.md) (la web se genera por adelantado y no llama a la API) y [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (precio negociado). Lienzo «Fundadores y lista de espera», aprobado entero el 2026-10-18; issues 165 y 168.
 
@@ -30,4 +30,4 @@ Mientras odentIA esté en su programa Fundadores (pocos lugares, entrada gratis,
 
 ## Referencias
 
-`packages/services/src/saas-founders.ts`, `apps/api/src/routes/saas-billing.ts` (`createSaasPreAuthGuard`), `apps/api/src/routes/public-founders.ts`, `apps/web/src/lib/pricing.ts` y `src/middleware.ts`, `packages/services/src/saas-actions.ts` (`activeDiscountBps`), migraciones `0027` y `0028`.
+`packages/services/src/saas-founders.ts`, `apps/api/src/routes/saas-billing.ts` (`createSaasPreAuthGuard`), `apps/api/src/routes/public-founders.ts`, `apps/web/src/lib/pricing.ts` y `src/middleware.ts`, `packages/services/src/saas-actions.ts` (`activeDiscountBps`), migraciones `0031` y `0032`.

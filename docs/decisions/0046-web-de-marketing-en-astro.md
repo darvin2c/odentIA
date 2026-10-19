@@ -1,6 +1,6 @@
 # 0046 · La web de marketing es una app propia en Astro, generada por adelantado
 
-Fecha: 17 de octubre de 2026 · Estado: aceptada; actualizada por [0059](0059-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md): la web arma cada página al servirla con los precios de la administración y la solicitud de Fundadores llama a la API.
+Fecha: 17 de octubre de 2026 · Estado: aceptada; actualizada por [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md): la web arma cada página al servirla con los precios de la administración y la solicitud de Fundadores llama a la API.
 
 ## Problema
 

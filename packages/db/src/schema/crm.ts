@@ -473,6 +473,8 @@ export const conversation = pgTable(
       table.externalThreadId,
     ),
     index("conversation_org_last_message_idx").on(table.organizationId, table.lastMessageAt.desc()),
+    // Las conversaciones de una persona (Reportes › Pacientes, «Dejaron de escribir»).
+    index("conversation_org_contact_idx").on(table.organizationId, table.contactId),
   ],
 )
 
@@ -532,6 +534,8 @@ export const message = pgTable(
       .on(table.conversationId, table.externalId)
       .where(sql`"external_id" is not null`),
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
+    // Los mensajes de una clínica en un tramo (Reportes): sin él, cada consulta recorre los de todas.
+    index("message_org_created_idx").on(table.organizationId, table.createdAt),
   ],
 )
 

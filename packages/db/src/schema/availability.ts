@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   boolean,
   check,
+  date,
   index,
   pgTable,
   smallint,
@@ -26,6 +27,12 @@ export type ScheduleBlockKind = (typeof SCHEDULE_BLOCK_KINDS)[number]
  * Horario semanal de un profesional en una sede. Los minutos son hora local
  * de la sucursal (zona branch.timezone ?? organización). Sin fila activa, el
  * profesional no ofrece huecos: la configuración es explícita.
+ *
+ * Con su historia (decisión 4 de Reportes; ADR 0060): cambiar el horario no
+ * borra el anterior, lo cierra. Cada fila vale desde `validFrom` hasta el día
+ * antes de `validUntil` (días de la sede); la vigente es la activa, sin
+ * `validUntil`. Agenda y reservas leen solo la activa; Reportes lee la de
+ * cada día.
  */
 export const professionalSchedule = pgTable(
   "professional_schedule",
@@ -42,6 +49,10 @@ export const professionalSchedule = pgTable(
     startMin: smallint("start_min").notNull(),
     endMin: smallint("end_min").notNull(),
     isActive: boolean("is_active").notNull().default(true),
+    /** Primer día en que vale (día de la sede). */
+    validFrom: date("valid_from").notNull().default(sql`current_date`),
+    /** Día en que dejó de valer; nulo mientras es el vigente. */
+    validUntil: date("valid_until"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
@@ -52,6 +63,7 @@ export const professionalSchedule = pgTable(
       table.branchId,
       table.dentistUserId,
     ),
+    index("professional_schedule_org_valid_idx").on(table.organizationId, table.validFrom),
     check("professional_schedule_weekday_check", sql`${table.weekday} between 0 and 6`),
     check(
       "professional_schedule_range_check",

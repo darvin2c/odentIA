@@ -246,6 +246,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["estadísticas", "indicadores", "métricas", "informes", "gráficos", "cuántas citas", "ventas del mes", "inasistencias", "pacientes nuevos", "presupuestos aceptados", "resultado del mes", "cuánto queda", "espera en sala", "cuánto esperan"],
     faqs: [
       { q: "¿Qué es «Espera en sala»?", a: "Cuántos minutos pasan entre que se marca «Llegó» y empieza la atención, la mitad de las veces menos y la mitad más, por profesional. Solo cuenta lo que se mide: si nadie marca la llegada, dice «Sin datos»." },
+      { q: "¿Qué es «Dónde se caen los pacientes»?", a: "En Reportes › Pacientes: las personas que nos buscaron por primera vez en el periodo (escribieron por cualquier canal, las registró recepción o se registraron en línea) y hasta dónde llegaron hasta hoy: agendaron (una cita sin cancelar, aunque no vinieran), vinieron (una cita atendida o una atención firmada), recibieron presupuesto, lo aceptaron (del todo o en parte) y, además, pagaron algo. Cada paso cuenta a quien llegó a él o a uno posterior, así que las cifras nunca suben de un paso al siguiente. Son siempre las mismas personas, aunque el paso ocurra después del periodo; agendar, recibir el presupuesto y aceptarlo son los mismos momentos de Oportunidades. Si alguien escribe por un paciente (una madre por su hijo), cuenta el paciente, una sola vez y con el canal de quien escribió; Spam y bloqueados no cuentan. «Aquí se caen más» marca el paso donde más se quedaron; toca cualquier paso para ver a esas personas." },
     ],
   },
   {

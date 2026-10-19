@@ -507,7 +507,7 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
   const dent2 = buildApp("dentist", DENT2)
   expect((await dent2.request(`/commissions/my?${month}`)).status).toBe(200)
   expect((await dent2.request(`/commissions/monthly?professionalUserId=${DENT1}&${month}`)).status).toBe(403)
-  expect((await dent2.request(`/reports/money?period=2026-09`)).status).toBe(403)
+  expect((await dent2.request(`/reports/finance?period=2026-09`)).status).toBe(403)
   const rateBody = { professionalUserId: DENT2, rateBps: 4000 }
   expect((await dent2.request("/commissions/rates", {
     method: "PUT",
@@ -523,7 +523,7 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
 
   // Caja no ve comisiones ni el resultado del mes, que es de quien dirige la clínica.
   const cashier = buildApp("cashier", CASH)
-  expect((await cashier.request(`/reports/money?period=2026-09`)).status).toBe(403)
+  expect((await cashier.request(`/reports/finance?period=2026-09`)).status).toBe(403)
   expect((await cashier.request(`/commissions/my?${month}`)).status).toBe(403)
   expect((await cashier.request(`/commissions/month?${month}`)).status).toBe(403)
   expect((await cashier.request("/commissions/rates", {
@@ -540,7 +540,7 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
     body: JSON.stringify({ professionalUserId: DENT1, rateBps: 4000 }),
   })).status).toBe(200)
   expect((await admin.request(`/commissions/month?${month}`)).status).toBe(200)
-  expect((await admin.request(`/reports/money?period=2026-09`)).status).toBe(200)
+  expect((await admin.request(`/reports/finance?period=2026-09`)).status).toBe(200)
   // Sin cobros no hay nada que pagar: se rechaza sin registrar un gasto.
   const nothing = await postJson(admin, "/commissions/pay", { ...payBody, professionalUserId: DENT1 })
   expect(nothing.status).toBe(409)

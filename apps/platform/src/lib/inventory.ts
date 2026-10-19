@@ -1,4 +1,5 @@
 /** Tipos mínimos de inventario para la UI (la API es la fuente de verdad). */
+import type { PurchaseBalance } from "./reports"
 
 export interface InventoryProduct {
   id: string
@@ -83,6 +84,8 @@ export interface PurchaseOrderLineItem {
 
 export interface PurchaseOrderItem {
   id: string
+  /** Número de la orden en la clínica: «OC-0012». */
+  orderNumber: number
   status: string
   currency: string
   notes: string | null
@@ -91,11 +94,53 @@ export interface PurchaseOrderItem {
   warehouseId: string
   warehouseName: string | null
   createdAt: string
+  /** Recibido, pagado y por pagar (ADR 0061). */
+  balance: PurchaseBalance | null
+}
+
+/** Un pago de una compra: su gasto de Materiales o lo usado de lo que se tenía a favor. */
+export interface PurchasePayment {
+  id: string
+  kind: "pago" | "a_favor"
+  amountCents: number
+  paidAt: string
+  concept: string | null
+  fromCash: boolean
+  receiptKind: string | null
+  receiptNumber: string | null
+  byName: string | null
+  voidedAt: string | null
+  voidReason: string | null
 }
 
 export interface PurchaseOrderDetail extends PurchaseOrderItem {
   lines: PurchaseOrderLineItem[]
   totalCents: number
+  payments: PurchasePayment[]
+  /** Lo que se tiene a favor con este proveedor, en la moneda de la orden. */
+  supplierCreditCents: number
+}
+
+export type PurchasePaymentTone = "warning" | "info" | "success" | "muted"
+
+/** Cómo va el pago de una compra, en palabras y con su tono (nunca solo con color). */
+export function purchasePaymentState(
+  order: Pick<PurchaseOrderItem, "status">,
+  balance: PurchaseBalance | null,
+  money: (cents: number) => string,
+): { label: string; tone: PurchasePaymentTone } {
+  if (order.status === "borrador") return { label: "Sin confirmar", tone: "muted" }
+  if (!balance) return { label: "—", tone: "muted" }
+  if (order.status === "cancelada") return balance.paidCents > 0 ? { label: `A favor ${money(balance.paidCents)}`, tone: "info" } : { label: "Cancelada", tone: "muted" }
+  if (balance.receivedCents === 0)
+    return balance.paidCents > 0 ? { label: `Adelanto ${money(balance.paidCents)} · aún no llega`, tone: "info" } : { label: "Aún no llega", tone: "muted" }
+  if (balance.dueCents > 0)
+    return balance.paidCents > 0 ? { label: `Pagada en parte · falta ${money(balance.dueCents)}`, tone: "warning" } : { label: `Por pagar ${money(balance.dueCents)}`, tone: "warning" }
+  if (balance.aheadCents > 0)
+    return order.status === "recibida"
+      ? { label: `✓ Pagada · a favor ${money(balance.aheadCents)}`, tone: "success" }
+      : { label: `✓ Pagada · adelanto ${money(balance.aheadCents)}`, tone: "success" }
+  return { label: "✓ Pagada", tone: "success" }
 }
 
 export interface InventoryAlerts {

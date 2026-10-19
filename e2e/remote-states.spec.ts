@@ -91,7 +91,7 @@ test("reportes: un fallo de red conserva el periodo y permite consultar otra vez
   const { page, org } = owner
   let failing = true
   const requested: string[] = []
-  await page.route(url => url.pathname === "/api/reports/overview", async route => {
+  await page.route(url => url.pathname === "/api/reports/summary", async route => {
     requested.push(new URL(route.request().url()).search)
     if (failing) return route.abort("failed")
     await route.continue()
@@ -99,10 +99,10 @@ test("reportes: un fallo de red conserva el periodo y permite consultar otra vez
   await gotoHydrated(page, tenant(org.slug, "/reports?period=mes_pasado"))
   await expect(page.getByRole("button", { name: "Reintentar", exact: true })).toBeVisible()
   // Sin las cifras no se enseña ningún detalle a medias.
-  await expect(page.getByRole("navigation", { name: "Preguntas" })).toBeHidden()
+  await expect(page.getByRole("navigation", { name: "Secciones de Reportes" })).toBeHidden()
   failing = false
   await page.getByRole("button", { name: "Reintentar", exact: true }).click()
-  await expect(page.getByRole("navigation", { name: "Preguntas" }).getByRole("link")).toHaveCount(4)
+  await expect(page.getByRole("navigation", { name: "Secciones de Reportes" }).getByRole("link")).toHaveCount(5)
   // El periodo elegido sigue en la dirección y es el que se volvió a pedir.
   await expect(page).toHaveURL(/period=mes_pasado/)
   expect(requested).toEqual(["?period=mes_pasado", "?period=mes_pasado"])

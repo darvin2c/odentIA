@@ -3,18 +3,28 @@
  * de cada cifra. Montaje del padre: `guarded.route("/reports", createReportsRoute(crmDeps))`.
  *
  * Todo es lectura y todo pide `reports.read`: ni caja ni el profesional lo ven.
- * El periodo es una opción cerrada (meses completos); la sede es opcional.
+ * El periodo es una opción cerrada (meses completos) o un rango de días; la sede es opcional.
  */
+import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
+  getAgendaReport,
+  getPatientReportList,
   getReportAdvice,
-  getReportAgenda,
+  getReportAgent,
+  getReportCommissions,
+  getReportFinance,
+  getReportFunnel,
+  getReportOutlook,
+  getReportPromotions,
   getReportList,
-  getReportMoney,
-  getReportOverview,
-  getReportSales,
-  getReportService,
+  getReportPatients,
+  getReportProfessionals,
+  getReportSummary,
+  isPatientReportList,
+  PATIENT_REPORT_LISTS,
   REPORT_LISTS,
+  REPORT_PERIOD_PATTERN,
   type ReportQuery,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -24,7 +34,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const reportQuery = z.object({
-  period: z.string().regex(/^(este_mes|mes_pasado|ultimos_3_meses|este_ano|\d{4}-(0[1-9]|1[0-2]))$/, "Periodo no reconocido"),
+  period: z.string().regex(REPORT_PERIOD_PATTERN, "Periodo no reconocido"),
   branchId: z.uuid().optional(),
 })
 
@@ -45,11 +55,24 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
       return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => service(tx, orgId, parsed.data)))
     })
 
-  read("/overview", getReportOverview)
-  read("/money", getReportMoney)
-  read("/agenda", getReportAgenda)
-  read("/sales", getReportSales)
-  read("/service", getReportService)
+  read("/summary", getReportSummary)
+  read("/professionals", getReportProfessionals)
+  read("/agenda", getAgendaReport)
+  read("/finance", getReportFinance)
+  read("/finance/commissions", getReportCommissions)
+  read("/finance/outlook", getReportOutlook)
+  read("/finance/promotions", getReportPromotions)
+  read("/patients", getReportPatients)
+  read("/funnel", getReportFunnel)
+
+  // Agente: lo pagado a odentIA va solo a quien ve Facturación (`seesBilling`, la misma regla de su ruta).
+  app.get("/agent", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const parsed = reportQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const billing = seesBilling(memberRole)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReportAgent(tx, orgId, parsed.data, new Date(), { billing })))
+  })
 
   // Los avisos del Administrador: cada línea exige su permiso, como en Inicio.
   app.get("/advice", async (c) => {
@@ -62,9 +85,15 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
 
   app.get("/list/:list", async (c) => {
     const { orgId } = orgContextOf(c)
-    const parsed = reportQuery.extend({ list: z.enum(REPORT_LISTS) }).safeParse({ ...c.req.query(), list: c.req.param("list") })
+    const parsed = reportQuery.extend({ list: z.enum([...REPORT_LISTS, ...PATIENT_REPORT_LISTS]) }).safeParse({ ...c.req.query(), list: c.req.param("list") })
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReportList(tx, orgId, parsed.data)))
+    const { list, ...query } = parsed.data
+    // Las listas de Pacientes son de personas (algunas aún no son pacientes): las arma su propio servicio.
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
+        isPatientReportList(list) ? getPatientReportList(tx, orgId, { ...query, list }) : getReportList(tx, orgId, { ...query, list }),
+      ),
+    )
   })
 
   return app

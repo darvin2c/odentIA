@@ -9,6 +9,9 @@ const BASE_PORT = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE
 export const tenantUrl = (slug: string, path = "/") =>
   `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
 
+/** El propio panel: la página de «Conectar con Facebook» se abre siempre aquí (issue 166). */
+export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
+
 export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT}${path}`
 /** Página de la web de marketing (dominio raíz): términos, privacidad, contacto. */
 export const webUrl = (path = "/") => `https://${BASE_DOMAIN}${BASE_PORT}${path}`

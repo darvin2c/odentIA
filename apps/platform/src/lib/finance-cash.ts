@@ -8,6 +8,7 @@
  * Dinero con `@odentia/clinical`; moneda, formato y zona siempre de la clínica
  * o la sede. Aquí no hay país, moneda ni medio de pago escritos.
  */
+import type { PurchaseBalance, PurchasesToPay } from "./reports"
 import { parseMoney } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
@@ -493,6 +494,11 @@ export interface ExpenseRow {
   voidReason: string | null
   /** Salió del efectivo de la caja. */
   fromCash: boolean
+  /** Es el pago de una compra de Inventario (ADR 0061). */
+  purchaseOrderId: string | null
+  purchaseOrderNumber: number | null
+  /** Es el pago de una comisión. */
+  commission: boolean
 }
 
 export interface MonthExpenses {
@@ -534,6 +540,38 @@ export function createExpenseApi(body: {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Compras por pagar, lo que aún no llega y lo que se tiene a favor con cada proveedor. */
+export function fetchPurchasesToPay(branchId?: string): Promise<{ data: PurchasesToPay }> {
+  return apiFetch<{ data: PurchasesToPay }>(`/api/finance/purchases${branchId ? `?branchId=${branchId}` : ""}`)
+}
+
+/** Registrar el pago (o un adelanto, o una parte) de una compra: la misma operación desde Inventario y Finanzas. */
+export function payPurchaseApi(
+  orderId: string,
+  body: {
+    amountCents: number
+    creditCents?: number
+    fromCash: boolean
+    spentAt?: string
+    receiptKind?: string
+    receiptNumber?: string
+    expectedDueCents?: number
+    /** Lo pagado que mostró la pantalla: un envío repetido no paga dos veces. */
+    expectedPaidCents?: number
+  },
+): Promise<{ data: { balance: PurchaseBalance } }> {
+  return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })
+}
+
+/** «No hubo ese gasto» en Reportes › Finanzas. */
+export function dismissExpenseGapApi(body: { category: string; month: string; branchId?: string | null }): Promise<unknown> {
+  return apiFetch("/api/finance/expense-gaps", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function voidSupplierCreditUseApi(id: string, reason: string): Promise<unknown> {
+  return apiFetch(`/api/finance/supplier-credit-uses/${id}/void`, { method: "POST", body: JSON.stringify({ reason }) })
 }
 
 export function voidExpenseApi(id: string, reason: string): Promise<unknown> {
@@ -600,6 +638,7 @@ export const financeKeys = {
   closure: (id: string) => ["finance-closure", id] as const,
   expenses: (branchId: string, ref: MonthRef) =>
     ["finance-expenses", branchId, ref.year, ref.month] as const,
+  purchases: (branchId: string | null) => ["finance-purchases", branchId] as const,
 }
 
 /** Todo lo que cambia cuando entra o sale dinero, o cuando la caja se cierra. */
@@ -610,6 +649,10 @@ export function invalidateFinance(queryClient: QueryClient): void {
     "finance-movements",
     "finance-closures",
     "finance-expenses",
+    "finance-purchases",
+    // Un gasto o el pago de una compra cambian Inventario y Reportes.
+    "inventory",
+    "report",
   ]) {
     void queryClient.invalidateQueries({ queryKey: [key] })
   }

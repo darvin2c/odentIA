@@ -32,7 +32,7 @@ const KIND_LINE: Record<SaasActionKind, (count: number) => string> = {
 }
 
 /** ¿Cobra esta suscripción por acción? Activa o en gracia, con plan, no demo y con su mes empezado. */
-function chargeable(sub: typeof saasSubscription.$inferSelect): boolean {
+export function chargeable(sub: typeof saasSubscription.$inferSelect): boolean {
   return !sub.isDemo && sub.planId !== null && sub.activatedAt !== null && (sub.status === "activa" || sub.status === "gracia")
 }
 
@@ -163,6 +163,8 @@ async function issueCycleCharge(
       subtotalCents: subtotal,
       taxCents: taxAmount,
       taxLabel: tax?.label ?? null,
+      // El crédito con que se decidió qué cubre y qué pasa: lo que se lea de este mes después usa este.
+      creditCents: plan.creditCents,
       currency: plan.currency,
       dueAt: new Date(input.now.getTime() + SAAS_PAYMENT_DAYS * DAY),
       dedupeKey,

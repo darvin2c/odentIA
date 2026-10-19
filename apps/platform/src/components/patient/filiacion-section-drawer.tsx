@@ -4,6 +4,7 @@ import {
   KINSHIP_LABELS,
   MARITAL_STATUS_LABELS,
   type MissingPersonDatum,
+  REFERRAL_KIND_LABELS,
   SEX_LABELS,
 } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
@@ -144,7 +145,8 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
             type: { kind: "select", options: options(EDUCATION_LEVEL_LABELS) },
           },
           { key: "occupation", label: "Ocupación", type: { kind: "text", max: 200 } },
-          { key: "referralSource", label: "Cómo nos conoció", type: { kind: "text", max: 500, wide: true } },
+          { key: "referralKind", label: "Cómo nos conoció", type: { kind: "select", options: options(REFERRAL_KIND_LABELS) } },
+          { key: "referralSource", label: "¿Cuál?", hint: "Lo que dijo, cuando no está en la lista.", type: { kind: "text", max: 500, wide: true } },
           ...(profile.origin
             ? [{ key: "origin" as const, label: "Procedencia", type: { kind: "text" as const, max: 200 } }]
             : []),
@@ -272,9 +274,12 @@ export function FiliacionSectionDrawer({
     .filter((field) => patient || PERSON_FIELD_KEYS.has(field.key))
   const [values, setValues] = useState(() => initialValues(source, sectionFields))
   const original = initialValues(source, sectionFields)
-  // El país emisor solo se elige cuando el tipo lo permite (el DNI lo emite el Perú).
+  // El país emisor solo se elige cuando el tipo lo permite (el DNI lo emite el
+  // Perú); «¿Cuál?», solo con «Otro» (el servidor vacía el texto de lo demás).
   const fields = sectionFields.filter(
-    (field) => field.key !== "docCountry" || documentCountryChosen(profile, values.docType || null),
+    (field) =>
+      (field.key !== "docCountry" || documentCountryChosen(profile, values.docType || null)) &&
+      (field.key !== "referralSource" || values.referralKind === "otro"),
   )
   const changed = sectionFields.filter((f) => (values[f.key] ?? "") !== (original[f.key] ?? ""))
   const set = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }))
@@ -288,6 +293,9 @@ export function FiliacionSectionDrawer({
         if (f.type.kind === "insurance") Object.assign(patch, insuranceFromChoice(profile, value ?? ""))
         else patch[f.key] = value
       }
+      // Salir de «Otro» borra también lo que dijo: con el texto guardado, el
+      // servidor volvería a ponerlo como «Otro».
+      if (patch.referralKind !== undefined && patch.referralKind !== "otro") patch.referralSource = null
       // Si cambia el tipo a uno que fija su país, el país lo pone el servidor.
       if (patch.docType !== undefined && !documentCountryChosen(profile, values.docType || null)) delete patch.docCountry
       // El documento nacional sin país elegido es del país de la clínica (el

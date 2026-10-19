@@ -1,4 +1,4 @@
-// La web de marketing se arma en el servidor al servir cada página (ADR 0059): así los precios y
+// La web de marketing se arma en el servidor al servir cada página (ADR 0062): así los precios y
 // el programa Fundadores salen de la administración y los buscadores siguen leyendo el HTML entero.
 import { readdirSync } from "node:fs"
 import { join, relative } from "node:path"

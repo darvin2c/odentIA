@@ -23,8 +23,6 @@ import {
   patientPaymentApplication,
   patientPaymentRefund,
   paymentTicket,
-  treatmentBudget,
-  treatmentBudgetItem,
 } from "@odentia/db/schema/clinical"
 import {
   cashClosure,
@@ -34,10 +32,11 @@ import {
   commissionSettlement,
   commissionSettlementLine,
   expense,
+  expenseGapDismissal,
 } from "@odentia/db/schema/finance"
+import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { promotionServicePrice } from "@odentia/db/schema/promotions"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -46,7 +45,9 @@ import {
   validation,
 } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
+import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
@@ -897,12 +898,16 @@ export async function createExpense(
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput,
+  /** Solo `payPurchaseOrder`: el gasto es el pago de esa compra. */
+  link: { purchaseOrderId?: string } = {},
 ) {
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw validation("Tipo de gasto inválido")
+  if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
+    throw validation("El pago de una compra es un gasto de Materiales")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
   const shift = input.fromCash
@@ -922,6 +927,7 @@ export async function createExpense(
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
+      purchaseOrderId: link.purchaseOrderId ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -981,6 +987,24 @@ export async function getMonthExpenses(
   const live = rows.filter((row) => !row.voidedAt && row.currency === unit)
   const byCategory = new Map<string, number>()
   for (const row of live) byCategory.set(row.category, addCents(byCategory.get(row.category) ?? 0, row.amountCents))
+  // El pago de una compra lleva su orden y el de una comisión lo dice: la lista los enlaza (ADR 0061).
+  const orderIds = [...new Set(rows.map((row) => row.purchaseOrderId).filter((id): id is string => id !== null))]
+  const orders = orderIds.length
+    ? await tx
+        .select({ id: purchaseOrder.id, orderNumber: purchaseOrder.orderNumber })
+        .from(purchaseOrder)
+        .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
+    : []
+  const commissionExpenses = rows.length
+    ? new Set(
+        (
+          await tx
+            .select({ expenseId: commissionSettlement.expenseId })
+            .from(commissionSettlement)
+            .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
+        ).map((row) => row.expenseId),
+      )
+    : new Set<string | null>()
   return {
     year: query.year,
     month: query.month,
@@ -990,7 +1014,12 @@ export async function getMonthExpenses(
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
-    expenses: rows.map((row) => ({ ...row, fromCash: row.shiftId !== null })),
+    expenses: rows.map((row) => ({
+      ...row,
+      fromCash: row.shiftId !== null,
+      purchaseOrderNumber: orders.find((order) => order.id === row.purchaseOrderId)?.orderNumber ?? null,
+      commission: commissionExpenses.has(row.id),
+    })),
   }
 }
 
@@ -1007,10 +1036,23 @@ export async function voidExpense(
   input: { reason: string },
   opts: { fromCommission?: boolean } = {},
 ) {
+  const [found] = await tx
+    .select({ purchaseOrderId: expense.purchaseOrderId })
+    .from(expense)
+    .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
+  if (!found) throw notFound("Gasto")
+  // El pago de una compra se anula con su orden y su proveedor bloqueados antes
+  // que el gasto, en el mismo orden que al pagarla o cancelarla: dos de esas
+  // operaciones a la vez se esperan en fila en vez de bloquearse entre sí.
+  if (found.purchaseOrderId) {
+    const order = await lockPurchaseOrder(tx, orgId, found.purchaseOrderId)
+    await lockSupplier(tx, orgId, order.supplierId)
+  }
   const [current] = await tx
     .select()
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
+    .for("update")
   if (!current) throw notFound("Gasto")
   if (current.voidedAt) throw conflict("EXPENSE_VOIDED", "El gasto ya está anulado")
   // El gasto que registra el pago de una comisión se anula con ese pago: si
@@ -1066,9 +1108,292 @@ export async function voidExpense(
       }
     }
   }
+  // El pago de una compra cerrada puede ser lo que se tiene a favor con el
+  // proveedor: si ya se usó para pagar otra compra, anularlo dejaría usado lo
+  // que ya no existe.
+  if (current.purchaseOrderId) await assertSupplierCreditCovered(tx, orgId, current.purchaseOrderId)
   await audit(tx, orgId, actorUserId, "expense", expenseId, "finance.expense_voided")
   await notifyCash(tx, orgId)
   return row
+}
+
+// --- Pago de compras de Inventario (ADR 0061) -----------------------------------------
+//
+// Pagar una compra es registrar un gasto de Materiales enlazado a su orden, en
+// la sede de su almacén: en partes, por adelantado o con lo que se tiene a favor
+// con el proveedor. La misma operación desde Inventario y desde Finanzas › Gastos.
+
+/** Tipo de gasto del pago de una compra. */
+export const PURCHASE_EXPENSE_CATEGORY = "Materiales"
+
+/** «OC-0012»: el número de la orden como lo dicen la pantalla y el gasto. */
+export function purchaseOrderLabel(orderNumber: number): string {
+  return `OC-${String(orderNumber).padStart(4, "0")}`
+}
+
+/**
+ * Bloquea la orden. Todo lo que cambia lo pagado de una compra (pagar, anular
+ * un pago o un uso de lo que se tiene a favor, cancelar) bloquea primero la
+ * orden y después su proveedor (`lockSupplier`), siempre en ese orden.
+ */
+export async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
+  const [row] = await tx
+    .select()
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+    .for("update")
+  if (!row) throw notFound("Orden de compra")
+  return row
+}
+
+/** Lo que se tiene a favor con un proveedor cambia de a uno: se bloquea el proveedor. */
+export async function lockSupplier(tx: Db, orgId: string, supplierId: string): Promise<void> {
+  await tx
+    .select({ id: supplier.id })
+    .from(supplier)
+    .where(and(eq(supplier.organizationId, orgId), eq(supplier.id, supplierId)))
+    .for("update")
+}
+
+/** Lo que se tiene a favor con el proveedor, en una moneda. */
+async function creditWith(tx: Db, orgId: string, supplierId: string, unit: string): Promise<number> {
+  const credits = await supplierCredits(tx, orgId, { supplierId })
+  return credits.find((credit) => credit.currency === unit)?.cents ?? 0
+}
+
+/**
+ * Nunca queda usado más de lo que se tenía a favor con el proveedor de la
+ * orden. Se llama después del cambio, dentro de la misma transacción: si no
+ * alcanza, el error deshace todo.
+ */
+export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId: string): Promise<void> {
+  const [order] = await tx
+    .select({ supplierId: purchaseOrder.supplierId, currency: purchaseOrder.currency })
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+  if (!order) return
+  await lockSupplier(tx, orgId, order.supplierId)
+  if ((await creditWith(tx, orgId, order.supplierId, order.currency)) < 0) {
+    // Dice qué compras lo usaron: ese uso se anula en su detalle, en Inventario › Compras.
+    const users = await tx
+      .select({ orderNumber: purchaseOrder.orderNumber })
+      .from(supplierCreditUse)
+      .innerJoin(purchaseOrder, and(eq(purchaseOrder.organizationId, supplierCreditUse.organizationId), eq(purchaseOrder.id, supplierCreditUse.orderId)))
+      .where(
+        and(
+          eq(supplierCreditUse.organizationId, orgId),
+          eq(supplierCreditUse.supplierId, order.supplierId),
+          eq(supplierCreditUse.currency, order.currency),
+          isNull(supplierCreditUse.voidedAt),
+        ),
+      )
+      .orderBy(desc(supplierCreditUse.createdAt))
+      .limit(3)
+    const labels = [...new Set(users.map((row) => purchaseOrderLabel(Number(row.orderNumber))))]
+    throw conflict(
+      "SUPPLIER_CREDIT_USED",
+      `Lo pagado de más en esta compra ya se usó para pagar ${labels.length > 0 ? labels.join(", ") : "otra compra"}: anula antes ese uso en el detalle de esa compra, en Inventario › Compras`,
+    )
+  }
+}
+
+export interface PayPurchaseOrderInput {
+  orderId: string
+  /** Lo que se paga con dinero (gasto de Materiales). Cero si todo va con lo que se tenía a favor. */
+  amountCents: number
+  /** Lo que se usa de lo que se tiene a favor con el proveedor. */
+  creditCents?: number
+  spentAt?: string | null
+  fromCash?: boolean
+  receiptKind?: string
+  receiptNumber?: string | null
+  notes?: string | null
+  /** Lo que la pantalla mostró por pagar: si cambió mientras tanto, no se paga sobre otra cifra. */
+  expectedDueCents?: number
+  /**
+   * Lo pagado que mostró la pantalla. Si cambió, alguien pagó mientras tanto o
+   * este mismo pago ya entró (un envío repetido): no se registra otra vez. No
+   * es una clave de idempotencia (el gasto no tiene dónde guardarla): el
+   * reintento recibe un aviso, no el pago que ya se hizo.
+   */
+  expectedPaidCents?: number
+}
+
+/**
+ * Registra el pago de una compra (o una parte, o un adelanto): un gasto de
+ * Materiales en la sede de su almacén, enlazado a la orden, y si se pide, lo
+ * que se usa de lo que se tiene a favor con el proveedor. Pagar de más deja
+ * saldo a favor cuando la compra cierra. No se paga una orden en borrador ni
+ * una cancelada.
+ */
+export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: string, input: PayPurchaseOrderInput) {
+  const order = await lockPurchaseOrder(tx, orgId, input.orderId)
+  if (order.status === "borrador") throw conflict("PURCHASE_NOT_CONFIRMED", "Confirma la orden antes de pagarla")
+  if (order.status === "cancelada") throw conflict("PURCHASE_CANCELLED", "La orden está cancelada: ya no se paga")
+  await lockSupplier(tx, orgId, order.supplierId)
+  const amountCents = input.amountCents ?? 0
+  const creditCents = input.creditCents ?? 0
+  if (!Number.isSafeInteger(amountCents) || amountCents < 0 || amountCents > 2147483647)
+    throw validation("El pago debe ser un importe entero")
+  if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
+    throw validation("Lo que se usa a favor debe ser un importe entero")
+  if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
+  const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  if (!before) throw notFound("Orden de compra")
+  if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
+    throw conflict(
+      "PURCHASE_PAID_CHANGED",
+      "Esta compra tiene un pago nuevo desde que la abriste (puede ser este mismo, si se envió dos veces): vuelve a mirarla antes de pagar",
+    )
+  if (input.expectedDueCents !== undefined && input.expectedDueCents !== before.dueCents)
+    throw conflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
+  if (creditCents > 0) {
+    if (creditCents > (await creditWith(tx, orgId, order.supplierId, order.currency)))
+      throw conflict("SUPPLIER_CREDIT_SHORT", "No tienes tanto a favor con este proveedor")
+    if (creditCents > Math.max(0, before.orderedCents - before.paidCents))
+      throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
+  }
+  const label = purchaseOrderLabel(before.orderNumber)
+  // Sin nada recibido por pagar y con algo aún por llegar, lo que se paga es un adelanto
+  // (también en una compra recibida en parte y al día).
+  const kind = before.dueCents === 0 && before.status !== "recibida" ? "Adelanto de compra" : "Pago de compra"
+  const part = before.dueCents > 0 && amountCents + creditCents < before.dueCents ? " (una parte)" : ""
+  let paid: typeof expense.$inferSelect | null = null
+  if (amountCents > 0) {
+    paid = await createExpense(
+      tx,
+      orgId,
+      actorUserId,
+      {
+        branchId: before.branchId,
+        category: PURCHASE_EXPENSE_CATEGORY,
+        concept: `${kind} ${label} · ${before.supplierName}${part}`,
+        amountCents,
+        currency: order.currency,
+        spentAt: input.spentAt ?? null,
+        receiptKind: input.receiptKind,
+        receiptNumber: input.receiptNumber,
+        notes: input.notes,
+        fromCash: input.fromCash ?? false,
+      },
+      { purchaseOrderId: order.id },
+    )
+  }
+  let used: typeof supplierCreditUse.$inferSelect | null = null
+  if (creditCents > 0) {
+    const [row] = await tx
+      .insert(supplierCreditUse)
+      .values({
+        organizationId: orgId,
+        supplierId: order.supplierId,
+        orderId: order.id,
+        amountCents: creditCents,
+        currency: order.currency,
+        createdBy: actorUserId,
+      })
+      .returning()
+    used = row ?? null
+    if (used) await audit(tx, orgId, actorUserId, "supplier_credit_use", used.id, "purchase_order.credit_used")
+  }
+  await audit(tx, orgId, actorUserId, "purchase_order", order.id, "purchase_order.paid")
+  const [after] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  return { expense: paid, creditUse: used, balance: after as PurchaseBalance }
+}
+
+/** Deshace un uso de lo que se tenía a favor: vuelve a estar a favor y la compra vuelve a deberlo. */
+export async function voidSupplierCreditUse(tx: Db, orgId: string, actorUserId: string, id: string, input: { reason: string }) {
+  const [found] = await tx
+    .select({ orderId: supplierCreditUse.orderId })
+    .from(supplierCreditUse)
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+  if (!found) throw notFound("Uso del saldo a favor")
+  // Orden y proveedor primero, como al pagar y al cancelar.
+  const order = await lockPurchaseOrder(tx, orgId, found.orderId)
+  await lockSupplier(tx, orgId, order.supplierId)
+  const [current] = await tx
+    .select()
+    .from(supplierCreditUse)
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .for("update")
+  if (!current) throw notFound("Uso del saldo a favor")
+  if (current.voidedAt) throw conflict("CREDIT_USE_VOIDED", "Ese uso del saldo a favor ya está anulado")
+  const [row] = await tx
+    .update(supplierCreditUse)
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "supplier_credit_use", id, "purchase_order.credit_use_voided")
+  return row
+}
+
+/**
+ * Lo que hay que pagar de las compras: las recibidas sin pagar (el aviso de
+ * Finanzas › Gastos) y lo que aún falta que llegue (se puede adelantar, también
+ * de una compra recibida en parte y al día), con lo que se tiene a favor con
+ * cada proveedor. De la clínica o de una sede. El aviso cuenta y suma en la
+ * moneda de la clínica; otra moneda va aparte y nunca se suma.
+ */
+export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId?: string } = {}) {
+  const { currency: unit } = await getOrgLocale(tx, orgId)
+  const open = (await purchaseBalances(tx, orgId, { openOnly: true })).filter(
+    (order) =>
+      (!query.branchId || order.branchId === query.branchId) &&
+      (order.dueCents > 0 || (order.status !== "recibida" && order.orderedCents > order.paidCents)),
+  )
+  const unpaid = open.filter((order) => order.dueCents > 0 && order.currency === unit)
+  const oldest = unpaid.reduce<PurchaseBalance | null>(
+    (first, order) =>
+      order.firstReceivedAt && (!first?.firstReceivedAt || order.firstReceivedAt < first.firstReceivedAt) ? order : first,
+    null,
+  )
+  const others = new Map<string, { currency: string; orders: number; cents: number }>()
+  for (const order of open) {
+    if (order.dueCents <= 0 || order.currency === unit) continue
+    const entry = others.get(order.currency) ?? { currency: order.currency, orders: 0, cents: 0 }
+    entry.orders += 1
+    entry.cents = addCents(entry.cents, order.dueCents)
+    others.set(order.currency, entry)
+  }
+  return {
+    currency: unit,
+    /** «3 compras recibidas sin pagar: S/ 2 300. La más antigua llegó hace 34 días.» */
+    unpaid: {
+      orders: unpaid.length,
+      cents: unpaid.reduce((total, order) => addCents(total, order.dueCents), 0),
+      oldest,
+      /** Compras en otra moneda sin pagar, cada moneda por su lado. */
+      otherCurrencies: [...others.values()],
+    },
+    /** Lo que se puede pagar ahora: primero lo que más tiempo lleva recibido sin pagar, después lo que aún no llega. */
+    orders: [...open].sort(
+      (a, b) =>
+        Number(b.dueCents > 0) - Number(a.dueCents > 0) ||
+        (a.firstReceivedAt?.getTime() ?? a.createdAt.getTime()) - (b.firstReceivedAt?.getTime() ?? b.createdAt.getTime()),
+    ),
+    credits: (await supplierCredits(tx, orgId)).filter((credit) => credit.cents > 0),
+  }
+}
+
+/**
+ * «No hubo ese gasto»: la clínica dice que ese mes no tuvo gastos de ese tipo y
+ * Reportes deja de avisarlo. Repetirlo no hace nada.
+ */
+export async function dismissExpenseGap(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { category: string; month: string; branchId?: string | null },
+) {
+  if (!(EXPENSE_CATEGORIES as readonly string[]).includes(input.category)) throw validation("Tipo de gasto inválido")
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) throw validation("El mes debe tener formato AAAA-MM")
+  const branchId = input.branchId ? (await requireBranch(tx, orgId, input.branchId)).id : null
+  const [row] = await tx
+    .insert(expenseGapDismissal)
+    .values({ organizationId: orgId, category: input.category, month: input.month, branchId, createdBy: actorUserId })
+    .onConflictDoNothing()
+    .returning()
+  if (row) await audit(tx, orgId, actorUserId, "expense_gap_dismissal", row.id, "finance.expense_gap_dismissed")
+  return { category: input.category, month: input.month, branchId, dismissed: true }
 }
 
 // --- Cuentas por cobrar ------------------------------------------------------------
@@ -1134,11 +1459,6 @@ function monthBounds(timezone: string, year: number, month: number): { start: Da
   if (!Number.isInteger(month) || month < 1 || month > 12) throw validation("Mes inválido")
   const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
   return { start: monthStart(timezone, year, month), end: monthStart(timezone, next.y, next.m) }
-}
-
-/** Vigente en el mes: no anulado, o anulado después del fin de mes. */
-function liveInMonth(voidedAt: Date | null, end: Date): boolean {
-  return voidedAt === null || voidedAt >= end
 }
 
 /** Efectivo por tipo UN/CEFACT 4461 (10); el nombre del medio nunca decide. */
@@ -1263,11 +1583,7 @@ interface CollectedApp {
   dentistUserId: string
 }
 
-/**
- * Aplicación con promoción para el resultado del mes: lo mínimo para
- * netear devoluciones y resolver la promoción, sin filtro de atención ni
- * profesional (las promociones cobradas sin atención también cuentan).
- */
+/** Una aplicación de un pago a un cargo: lo mínimo para repartir sus devoluciones (`allocateRefunds`). */
 interface PromotionApp {
   appId: string
   appCents: number
@@ -1276,8 +1592,6 @@ interface PromotionApp {
   chargePromotionId: string | null
   chargePromotionName: string | null
   chargeBudgetItemId: string | null
-  /** Precio acordado del concepto (solo en el desglose por promoción). */
-  chargeAmountCents?: number
   paymentId: string
 }
 
@@ -1374,147 +1688,11 @@ async function collectedApplications(
 }
 
 /**
- * Aplicaciones cobradas en la ventana sobre TODOS los cargos (con o sin
- * atención): base del desglose por promoción del resultado del mes. Sin
- * join clínico: los cargos manuales y de presupuesto también cuentan.
- */
-async function promotionApplications(
-  tx: Db,
-  orgId: string,
-  start: Date,
-  end: Date,
-  currency: string,
-  query: { branchId?: string } = {},
-): Promise<PromotionApp[]> {
-  const filters = [
-    eq(patientPaymentApplication.organizationId, orgId),
-    gte(patientPaymentApplication.createdAt, start),
-    lt(patientPaymentApplication.createdAt, end),
-    or(isNull(patientPaymentApplication.voidedAt), gte(patientPaymentApplication.voidedAt, end)),
-    eq(patientCharge.currency, currency),
-    or(isNull(patientCharge.voidedAt), gte(patientCharge.voidedAt, end)),
-    or(isNull(patientPayment.voidedAt), gte(patientPayment.voidedAt, end)),
-  ]
-  if (query.branchId) filters.push(eq(patientPayment.branchId, query.branchId))
-  const rows = await tx
-    .select({
-      app: patientPaymentApplication,
-      charge: patientCharge,
-      payment: patientPayment,
-    })
-    .from(patientPaymentApplication)
-    .innerJoin(
-      patientPayment,
-      and(
-        eq(patientPayment.id, patientPaymentApplication.paymentId),
-        eq(patientPayment.organizationId, orgId),
-      ),
-    )
-    .innerJoin(
-      patientCharge,
-      and(
-        eq(patientCharge.id, patientPaymentApplication.chargeId),
-        eq(patientCharge.organizationId, orgId),
-      ),
-    )
-    .where(and(...filters))
-  return rows.map((r) => ({
-    appId: r.app.id,
-    appCents: r.app.amountCents,
-    appCreatedAt: r.app.createdAt,
-    chargeId: r.charge.id,
-    chargePromotionId: r.charge.promotionId,
-    chargePromotionName: r.charge.promotionName,
-    chargeBudgetItemId: r.charge.budgetItemId,
-    chargeAmountCents: r.charge.amountCents,
-    paymentId: r.payment.id,
-  }))
-}
-
-/**
- * Modo de cada promoción: «desde» si alguno de sus servicios admite precio
- * abierto, fijo si todos lo traen cerrado, ausente si ya no tiene servicios.
- */
-async function promotionModes(
-  tx: Db,
-  orgId: string,
-  promotionIds: string[],
-): Promise<Map<string, "fixed" | "from">> {
-  const out = new Map<string, "fixed" | "from">()
-  // El cargo guarda la promoción como texto: solo se consultan identificadores válidos.
-  const ids = promotionIds.filter((id) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))
-  if (ids.length === 0) return out
-  const rows = await tx
-    .select({ promotionId: promotionServicePrice.promotionId, mode: promotionServicePrice.mode })
-    .from(promotionServicePrice)
-    .where(
-      and(
-        eq(promotionServicePrice.organizationId, orgId),
-        inArray(promotionServicePrice.promotionId, ids),
-      ),
-    )
-  for (const row of rows) {
-    if (row.mode === "from") out.set(row.promotionId, "from")
-    else if (!out.has(row.promotionId)) out.set(row.promotionId, "fixed")
-  }
-  return out
-}
-
-/**
- * Promoción de cada aplicación: snapshot del cargo y, en su defecto, la
- * línea del presupuesto origen cuando su propuesta ya no es borrador.
- */
-async function promotionOfApps(
-  tx: Db,
-  orgId: string,
-  apps: PromotionApp[],
-): Promise<Map<string, { id: string; name: string }>> {
-  const out = new Map<string, { id: string; name: string }>()
-  for (const app of apps) {
-    if (app.chargePromotionId && app.chargePromotionName)
-      out.set(app.appId, { id: app.chargePromotionId, name: app.chargePromotionName })
-  }
-  const missing = apps.filter((a) => !out.has(a.appId) && a.chargeBudgetItemId)
-  if (missing.length === 0) return out
-  const lines = await tx
-    .select({
-      id: treatmentBudgetItem.id,
-      promotionId: treatmentBudgetItem.promotionId,
-      promotionName: treatmentBudgetItem.promotionName,
-      status: treatmentBudget.status,
-    })
-    .from(treatmentBudgetItem)
-    .innerJoin(
-      treatmentBudget,
-      and(
-        eq(treatmentBudget.id, treatmentBudgetItem.budgetId),
-        eq(treatmentBudget.organizationId, orgId),
-      ),
-    )
-    .where(
-      and(
-        eq(treatmentBudgetItem.organizationId, orgId),
-        inArray(
-          treatmentBudgetItem.id,
-          missing.map((a) => a.chargeBudgetItemId as string),
-        ),
-      ),
-    )
-  const byItem = new Map(lines.map((l) => [l.id, l]))
-  for (const app of missing) {
-    const line = byItem.get(app.chargeBudgetItemId as string)
-    if (line && line.status !== "borrador" && line.promotionId && line.promotionName)
-      out.set(app.appId, { id: line.promotionId, name: line.promotionName })
-  }
-  return out
-}
-
-/**
  * Reparte las devoluciones del mes entre las aplicaciones incluidas: cada
  * devolución consume primero el saldo sin aplicar del pago y solo el
  * excedente reduce la base comisionable, a prorrata del importe aplicado.
  */
-async function allocateRefunds(
+export async function allocateRefunds(
   tx: Db,
   orgId: string,
   apps: PromotionApp[],
@@ -2136,394 +2314,77 @@ export async function voidCommissionSettlement(
   return row
 }
 
-// --- Resultado de un tramo (Reportes › Dinero) ---------------------------------------------
-
-/** Tramo semiabierto [start, end) de un resultado. */
-export interface FinanceResultRange {
-  start: Date
-  end: Date
-  branchId?: string
-  currency?: string
-}
+// --- Lo cobrado de un tramo (Reportes) -----------------------------------------------------
 
 /**
- * Cobrado, devuelto, anulado y gastado de un tramo, por moneda. Es la base
- * común del resultado completo y de los totales con que se compara un periodo.
+ * Lo cobrado por profesional en un tramo: solo lo atendido, la misma base de
+ * las comisiones (aplicaciones del tramo, netas de devoluciones con la regla
+ * de las comisiones). Lo usan Finanzas y el Resumen de Reportes.
  */
-async function financeBuckets(
+export async function collectedByProfessional(
   tx: Db,
   orgId: string,
-  start: Date,
-  end: Date,
-  branch: { id: string } | null,
-  unit: string | null,
-) {
-  const paymentFilters = [
-    eq(patientPayment.organizationId, orgId),
-    gte(patientPayment.paidAt, start),
-    lt(patientPayment.paidAt, end),
-  ]
-  if (unit) paymentFilters.push(eq(patientPayment.currency, unit))
-  if (branch) paymentFilters.push(eq(patientPayment.branchId, branch.id))
-  const payments = await tx.select().from(patientPayment).where(and(...paymentFilters))
-
-  // Anulaciones del mes sobre cobros de meses anteriores: corrigen este mes.
-  const voidCorrectionFilters = [
-    eq(patientPayment.organizationId, orgId),
-    lt(patientPayment.paidAt, start),
-    gte(patientPayment.voidedAt, start),
-    lt(patientPayment.voidedAt, end),
-  ]
-  if (unit) voidCorrectionFilters.push(eq(patientPayment.currency, unit))
-  if (branch) voidCorrectionFilters.push(eq(patientPayment.branchId, branch.id))
-  const voidCorrections = await tx.select().from(patientPayment).where(and(...voidCorrectionFilters))
-
-  const paymentById = new Map(payments.map((p) => [p.id, p]))
-  for (const p of voidCorrections) paymentById.set(p.id, p)
-  const refunds = await tx
-    .select()
-    .from(patientPaymentRefund)
-    .where(
-      and(
-        eq(patientPaymentRefund.organizationId, orgId),
-        gte(patientPaymentRefund.refundedAt, start),
-        lt(patientPaymentRefund.refundedAt, end),
-      ),
-    )
-  // La devolución corrige el mes en que ocurre aunque el cobro sea anterior.
-  const missingPaymentIds = [...new Set(refunds.map((r) => r.paymentId))].filter(
-    (id) => !paymentById.has(id),
+  range: { start: Date; end: Date; branchId?: string },
+  curr: string,
+): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
+  const apps = await collectedApplications(tx, orgId, range.start, range.end, curr, { branchId: range.branchId })
+  const totals = await paymentTotalsOf(
+    tx,
+    orgId,
+    apps.map((a) => a.paymentId),
   )
-  if (missingPaymentIds.length > 0) {
-    const older = await tx
-      .select()
-      .from(patientPayment)
-      .where(
-        and(
-          eq(patientPayment.organizationId, orgId),
-          inArray(patientPayment.id, missingPaymentIds),
-        ),
-      )
-    for (const p of older) paymentById.set(p.id, p)
+  for (const app of apps) if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
+  const refundByApp = await allocateRefunds(tx, orgId, apps, totals, range.start, range.end)
+  const profSums = new Map<string, number>()
+  for (const a of apps) {
+    const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
+    profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
   }
-
-  const expenseFilters = [
-    eq(expense.organizationId, orgId),
-    gte(expense.spentAt, start),
-    lt(expense.spentAt, end),
-  ]
-  if (unit) expenseFilters.push(eq(expense.currency, unit))
-  if (branch) expenseFilters.push(eq(expense.branchId, branch.id))
-  const expenses = await tx.select().from(expense).where(and(...expenseFilters))
-  const expenseVoidFilters = [
-    eq(expense.organizationId, orgId),
-    lt(expense.spentAt, start),
-    gte(expense.voidedAt, start),
-    lt(expense.voidedAt, end),
-  ]
-  if (unit) expenseVoidFilters.push(eq(expense.currency, unit))
-  if (branch) expenseVoidFilters.push(eq(expense.branchId, branch.id))
-  const expenseCorrections = await tx.select().from(expense).where(and(...expenseVoidFilters))
-
-  interface Bucket {
-    cobradoCents: number
-    devolucionesCents: number
-    anulacionesCents: number
-    gastadoCents: number
-    efectivoCents: number
-    byMethod: Map<string, { label: string; cash: boolean; cents: number }>
-    byCategory: Map<string, number>
-  }
-  const buckets = new Map<string, Bucket>()
-  const bucket = (curr: string): Bucket => {
-    let entry = buckets.get(curr)
-    if (!entry) {
-      entry = {
-        cobradoCents: 0,
-        devolucionesCents: 0,
-        anulacionesCents: 0,
-        gastadoCents: 0,
-        efectivoCents: 0,
-        byMethod: new Map(),
-        byCategory: new Map(),
-      }
-      buckets.set(curr, entry)
-    }
-    return entry
-  }
-  const methodAdd = (curr: string, payment: typeof payments[number], cents: number): void => {
-    const entry = bucket(curr)
-    const key = payment.methodName
-    const slot = entry.byMethod.get(key) ?? { label: key, cash: methodCashOf(payment), cents: 0 }
-    slot.cents = addCents(slot.cents, cents)
-    entry.byMethod.set(key, slot)
-  }
-  for (const p of payments) {
-    if (!liveInMonth(p.voidedAt, end)) continue
-    const entry = bucket(p.currency)
-    entry.cobradoCents = addCents(entry.cobradoCents, p.amountCents)
-    methodAdd(p.currency, p, p.amountCents)
-    if (methodCashOf(p)) entry.efectivoCents = addCents(entry.efectivoCents, p.amountCents)
-  }
-  for (const p of voidCorrections) {
-    const entry = bucket(p.currency)
-    entry.anulacionesCents = addCents(entry.anulacionesCents, p.amountCents)
-    methodAdd(p.currency, p, -p.amountCents)
-    if (methodCashOf(p)) entry.efectivoCents = addCents(entry.efectivoCents, -p.amountCents)
-  }
-  for (const r of refunds) {
-    const payment = paymentById.get(r.paymentId)
-    if (!payment) continue
-    if (unit && payment.currency !== unit) continue
-    if (branch && payment.branchId !== branch.id) continue
-    const entry = bucket(payment.currency)
-    entry.devolucionesCents = addCents(entry.devolucionesCents, r.amountCents)
-    methodAdd(payment.currency, payment, -r.amountCents)
-    if (methodCashOf(payment)) entry.efectivoCents = addCents(entry.efectivoCents, -r.amountCents)
-  }
-  for (const e of expenses) {
-    if (!liveInMonth(e.voidedAt, end)) continue
-    const entry = bucket(e.currency)
-    entry.gastadoCents = addCents(entry.gastadoCents, e.amountCents)
-    const category = e.category ?? "Otros"
-    entry.byCategory.set(category, addCents(entry.byCategory.get(category) ?? 0, e.amountCents))
-  }
-  for (const e of expenseCorrections) {
-    const entry = bucket(e.currency)
-    entry.gastadoCents = addCents(entry.gastadoCents, -e.amountCents)
-    const category = e.category ?? "Otros"
-    entry.byCategory.set(category, addCents(entry.byCategory.get(category) ?? 0, -e.amountCents))
-  }
-  return buckets
+  const names = await userNames(tx, [...profSums.keys()])
+  return [...profSums].map(([professionalUserId, cobradoCents]) => ({
+    professionalUserId,
+    name: names.get(professionalUserId) ?? null,
+    currency: curr,
+    cobradoCents,
+  }))
 }
 
 /**
- * Solo los totales por moneda de un tramo: con ellos se compara un periodo con
- * el anterior y se dibujan las barras por mes, sin recalcular los desgloses.
+ * Lo cobrado neto de varios tramos en una sola consulta, por moneda: los
+ * cobros del tramo que siguen en pie al cerrarlo, menos las anulaciones del
+ * tramo de cobros anteriores y las devoluciones del tramo. Así el Resumen y
+ * Finanzas dibujan sus 12 meses sin 12 idas.
  */
-export async function getFinanceTotalsBetween(tx: Db, orgId: string, range: FinanceResultRange) {
-  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
-  const unit = range.currency ? currency(range.currency) : null
-  const buckets = await financeBuckets(tx, orgId, range.start, range.end, branch, unit)
-  return [...buckets.entries()].map(([curr, entry]) => {
-    const netoCents = entry.cobradoCents - entry.devolucionesCents - entry.anulacionesCents
-    return { currency: curr, netoCents, gastadoCents: entry.gastadoCents, quedaCents: netoCents - entry.gastadoCents }
-  })
-}
-
-/**
- * Resultado completo de un tramo: cobrado (pagos vigentes por fecha de pago,
- * sin aportes de caja como ingreso) menos devoluciones y anulaciones, gastado
- * por categoría, queda por moneda, desgloses por medio/profesional/promoción,
- * deuda al cierre del tramo y cierres de caja para conciliar el efectivo.
- */
-export async function getFinanceResultBetween(tx: Db, orgId: string, range: FinanceResultRange) {
-  const { start, end } = range
-  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
-  const unit = range.currency ? currency(range.currency) : null
-  const buckets = await financeBuckets(tx, orgId, start, end, branch, unit)
-
-  // Cobrado por profesional (solo atendido) y por promoción (todo cargo con
-  // snapshot): aplicaciones del mes, netas de devoluciones con la misma
-  // regla de las comisiones.
-  const currencies = [...buckets.keys()]
-  const byProfessional: Array<{
-    professionalUserId: string
-    name: string | null
-    currency: string
-    cobradoCents: number
-  }> = []
-  const byPromotion: Array<{
-    promotionId: string
-    name: string
-    currency: string
-    veces: number
-    cobradoCents: number
-    /** Precio fijo o «desde»; nulo si la promoción ya no tiene servicios. */
-    mode: "fixed" | "from" | null
-    /** Promedio del precio acordado de sus conceptos (no de lo cobrado). */
-    averageCents: number | null
-  }> = []
-  for (const curr of currencies) {
-    // Por profesional: solo lo atendido (misma base de las comisiones).
-    const apps = await collectedApplications(tx, orgId, start, end, curr, {
-      branchId: branch?.id,
-    })
-    const totals = await paymentTotalsOf(
-      tx,
-      orgId,
-      apps.map((a) => a.paymentId),
-    )
-    for (const app of apps)
-      if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
-    const refundByApp = await allocateRefunds(tx, orgId, apps, totals, start, end)
-    const profSums = new Map<string, number>()
-    for (const a of apps) {
-      const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-      profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
-    }
-    const names = await userNames(tx, [...profSums.keys()])
-    for (const [professionalUserId, cobradoCents] of profSums)
-      byProfessional.push({
-        professionalUserId,
-        name: names.get(professionalUserId) ?? null,
-        currency: curr,
-        cobradoCents,
-      })
-    // Por promoción: todos los cargos cobrados con snapshot (con o sin
-    // atención). veces = cargos distintos cobrados en el mes (sin doble
-    // conteo por pagos parciales); importe = neto cobrado en el mes. El uso
-    // histórico total (incluye gratuitas cotizadas) lo cuenta
-    // getPromotionMetrics del dominio de promociones (tablero Tarifario);
-    // cortesías directas sin línea ni cargo no existen en tablas.
-    const promoApps = await promotionApplications(tx, orgId, start, end, curr, {
-      branchId: branch?.id,
-    })
-    const promoTotals = await paymentTotalsOf(
-      tx,
-      orgId,
-      promoApps.map((a) => a.paymentId),
-    )
-    const promoRefunds = await allocateRefunds(tx, orgId, promoApps, promoTotals, start, end)
-    const promotions = await promotionOfApps(tx, orgId, promoApps)
-    const promoAgg = new Map<
-      string,
-      { name: string; veces: Set<string>; cents: number; agreedCents: number }
-    >()
-    for (const a of promoApps) {
-      const promo = promotions.get(a.appId)
-      if (!promo) continue
-      const net = a.appCents - Math.min(a.appCents, promoRefunds.get(a.appId) ?? 0)
-      const slot = promoAgg.get(promo.id) ?? {
-        name: promo.name,
-        veces: new Set<string>(),
-        cents: 0,
-        agreedCents: 0,
-      }
-      // El precio acordado cuenta una vez por concepto, aunque se pague en partes.
-      if (!slot.veces.has(a.chargeId)) slot.agreedCents += a.chargeAmountCents ?? 0
-      slot.veces.add(a.chargeId)
-      slot.cents += net
-      promoAgg.set(promo.id, slot)
-    }
-    const modes = await promotionModes(tx, orgId, [...promoAgg.keys()])
-    for (const [promotionId, agg] of promoAgg)
-      byPromotion.push({
-        promotionId,
-        name: agg.name,
-        currency: curr,
-        veces: agg.veces.size,
-        cobradoCents: agg.cents,
-        mode: modes.get(promotionId) ?? null,
-        averageCents: agg.veces.size > 0 ? Math.round(agg.agreedCents / agg.veces.size) : null,
-      })
-  }
-  byProfessional.sort((a, b) => b.cobradoCents - a.cobradoCents)
-  byPromotion.sort((a, b) => b.cobradoCents - a.cobradoCents)
-
-  // Deuda al fin de mes: cargos creados antes del cierre menos aplicaciones
-  // anteriores al cierre, con la vigencia de ese momento.
-  const chargeFilters = [eq(patientCharge.organizationId, orgId), lt(patientCharge.createdAt, end)]
-  if (unit) chargeFilters.push(eq(patientCharge.currency, unit))
-  const charges = await tx.select().from(patientCharge).where(and(...chargeFilters))
-  const oldApps = await tx
-    .select()
-    .from(patientPaymentApplication)
-    .where(
-      and(
-        eq(patientPaymentApplication.organizationId, orgId),
-        lt(patientPaymentApplication.createdAt, end),
-      ),
-    )
-  const outstandingByCurrency = new Map<string, { pendienteCents: number; pacientes: Set<string> }>()
-  const appliedByCharge = new Map<string, number>()
-  for (const a of oldApps) {
-    if (!liveInMonth(a.voidedAt, end)) continue
-    appliedByCharge.set(a.chargeId, (appliedByCharge.get(a.chargeId) ?? 0) + a.amountCents)
-  }
-  for (const c of charges) {
-    if (!liveInMonth(c.voidedAt, end)) continue
-    if (branch && c.branchId !== branch.id) continue
-    const remaining = c.amountCents - (appliedByCharge.get(c.id) ?? 0)
-    if (remaining <= 0) continue
-    const slot = outstandingByCurrency.get(c.currency) ?? {
-      pendienteCents: 0,
-      pacientes: new Set<string>(),
-    }
-    slot.pendienteCents = addCents(slot.pendienteCents, remaining)
-    slot.pacientes.add(c.patientId)
-    outstandingByCurrency.set(c.currency, slot)
-  }
-
-  // Cierres del mes como ayuda para contrastar el efectivo: sus ventanas
-  // pueden cruzar de mes, así que no se promete igualdad exacta.
-  const closureFilters = [
-    eq(cashClosure.organizationId, orgId),
-    gte(cashClosure.closedAt, start),
-    lt(cashClosure.closedAt, end),
-  ]
-  if (unit) closureFilters.push(eq(cashClosure.currency, unit))
-  if (branch) closureFilters.push(eq(cashClosure.branchId, branch.id))
-  const closures = await tx.select().from(cashClosure).where(and(...closureFilters))
-  const closureAgg = new Map<
-    string,
-    {
-      cierres: number
-      efectivoCents: number
-      /** Efectivo devuelto a pacientes en esas ventanas: el resultado compara el efectivo ya descontado. */
-      efectivoDevueltoCents: number
-      gastosCajaCents: number
-      diferenciasCents: number
-    }
-  >()
-  for (const c of closures) {
-    const slot = closureAgg.get(c.currency) ?? {
-      cierres: 0,
-      efectivoCents: 0,
-      efectivoDevueltoCents: 0,
-      gastosCajaCents: 0,
-      diferenciasCents: 0,
-    }
-    slot.cierres += 1
-    slot.efectivoCents = addCents(slot.efectivoCents, c.cashCollectedCents)
-    slot.efectivoDevueltoCents = addCents(slot.efectivoDevueltoCents, c.cashRefundedCents)
-    slot.gastosCajaCents = addCents(slot.gastosCajaCents, c.expenseCashCents)
-    slot.diferenciasCents = addCents(slot.diferenciasCents, c.differenceCents)
-    closureAgg.set(c.currency, slot)
-  }
-
-  return {
-    branchId: branch?.id ?? null,
-    branchName: branch?.name ?? null,
-    byCurrency: [...buckets.entries()].map(([curr, entry]) => {
-      const netoCents = entry.cobradoCents - entry.devolucionesCents - entry.anulacionesCents
-      return {
-        currency: curr,
-        cobradoCents: entry.cobradoCents,
-        devolucionesCents: entry.devolucionesCents,
-        anulacionesCents: entry.anulacionesCents,
-        netoCents,
-        gastadoCents: entry.gastadoCents,
-        quedaCents: netoCents - entry.gastadoCents,
-        efectivoCents: entry.efectivoCents,
-        byMethod: [...entry.byMethod.entries()].map(([key, slot]) => ({
-          key,
-          label: slot.label,
-          cash: slot.cash,
-          cents: slot.cents,
-        })),
-        byCategory: [...entry.byCategory.entries()].map(([category, cents]) => ({ category, cents })),
-      }
-    }),
-    byProfessional,
-    byPromotion,
-    outstanding: [...outstandingByCurrency.entries()].map(([curr, slot]) => ({
-      currency: curr,
-      pendienteCents: slot.pendienteCents,
-      pacientes: slot.pacientes.size,
-    })),
-    closures: [...closureAgg.entries()].map(([curr, slot]) => ({ currency: curr, ...slot })),
-  }
+export async function collectedNetMany(
+  tx: Db,
+  orgId: string,
+  spans: Span[],
+  options: { branchId?: string } = {},
+): Promise<Array<Array<{ currency: string; cents: number }>>> {
+  const branchOf = (column: SQL): SQL => (options.branchId ? sql`and ${column} = ${options.branchId}` : sql``)
+  const rows = await tx.execute<{ idx: number; currency: string; cents: string }>(sql`
+    select b.idx, x.currency, sum(x.cents)::text as cents
+    from ${spansSql(spans)}
+    join lateral (
+      select p.currency, p.amount_cents::bigint as cents from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
+        and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -p.amount_cents::bigint from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at < b.start_at
+        and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -r.amount_cents::bigint from patient_payment_refund r
+      join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
+      where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
+    ) x on true
+    group by b.idx, x.currency`)
+  return bySpan(
+    spans,
+    [...rows],
+    (): Array<{ currency: string; cents: number }> => [],
+    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents) }],
+  )
 }
 
 // --- Caja del día: deudas, movimientos, estado y cierres --------------------------------------
