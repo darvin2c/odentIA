@@ -111,20 +111,33 @@ export function DictationPanel({
     return (
       <AgentSurface aria-label="Dictado en curso" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-soft-foreground">
-            <ListeningIndicator state={listening ? "listening" : "paused"} level={metering.level} size="sm" />
-          </span>
-          <div className="min-w-0 flex-1 basis-48">
+          {/* La onda entre corchetes de la marca (lienzo del dictado, opción A). */}
+          <ListeningIndicator state={listening ? "listening" : "paused"} level={metering.level} size="md" />
+          <div className="min-w-0 flex-1 basis-40">
             <h2 className="font-heading text-base font-semibold">
-              {listening ? "Escuchando" : "En pausa"} <span className="tabular-nums">{dictationClock(session.seconds)}</span>
+              {listening ? "Escuchando" : "En pausa"}{" "}
+              <span className="font-medium text-muted-foreground tabular-nums">{dictationClock(session.seconds)}</span>
             </h2>
-            <p className="text-sm text-muted-foreground">
-              <span className="max-sm:hidden">Lo que dictas aparece abajo como sugerencias. </span>Nada entra a la historia hasta que confirmes.
-            </p>
+            {silentNotice ? (
+              // En el lugar de la explicación: no suma otra línea.
+              <p role="status" className="mt-0.5 inline-flex rounded-full bg-warning-soft px-2.5 py-0.5 text-sm font-semibold text-warning">
+                No te oigo; revisa el micrófono
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {listening ? (
+                  <>
+                    <span className="max-sm:hidden">Lo que dictas aparece abajo como sugerencias. </span>Nada entra a la historia hasta que confirmes.
+                  </>
+                ) : (
+                  "El micrófono está apagado."
+                )}
+              </p>
+            )}
           </div>
           <Button
             type="button"
-            variant="outline"
+            variant={listening ? "outline" : "default"}
             className="min-h-11 max-sm:size-11 sm:min-h-9"
             aria-label={listening ? "Pausar el dictado" : "Reanudar el dictado"}
             onClick={() => {
@@ -138,7 +151,7 @@ export function DictationPanel({
             {listening ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
             <span className="max-sm:hidden">{listening ? "Pausar" : "Reanudar"}</span>
           </Button>
-          <Button type="button" className="min-h-11 max-sm:hidden sm:min-h-9" onClick={onFinish}>
+          <Button type="button" variant={listening ? "default" : "outline"} className="min-h-11 max-sm:hidden sm:min-h-9" onClick={onFinish}>
             <Square className="size-4" aria-hidden /> Terminar dictado
           </Button>
         </div>
@@ -147,8 +160,13 @@ export function DictationPanel({
           {pending > 0 ? plural(pending, "sugerencia", "sugerencias") : null}
           {session.organizing ? (pending > 0 ? " y ordenando lo último que dijiste" : "Ordenando lo que dijiste…") : null}
         </p>
-        {session.interim ? <p className="rounded-lg border border-dashed border-agent-border px-3 py-2 text-sm text-muted-foreground">Escuchando: «…{session.interim}»</p> : null}
-        {silentNotice ? <p role="status" className="text-xs text-muted-foreground">No te oigo; revisa el micrófono.</p> : null}
+        {session.interim ? (
+          <p className="border-l-[3px] border-primary py-0.5 pl-2.5 text-sm [overflow-wrap:anywhere]">
+            <span className="block text-[11px] font-bold tracking-wide text-muted-foreground uppercase">Lo último que oí</span>
+            «…{session.interim}
+            <span aria-hidden className="ml-0.5 inline-block h-[1em] w-0.5 animate-pulse bg-primary align-[-2px] motion-reduce:animate-none" />»
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground sm:hidden">Para corregir, dilo: «no, es la veintiséis» o «quita la endodoncia».</p>
         {status}
       </AgentSurface>

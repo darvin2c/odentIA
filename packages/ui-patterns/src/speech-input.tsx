@@ -371,7 +371,7 @@ export const SpeechInput = ({
       {...props}
     >
       {isProcessing ? <Spinner /> : null}
-      {!isProcessing && isListening ? <ListeningIndicator state="listening" level={level} size="sm" announce={false} /> : null}
+      {!isProcessing && isListening ? <ListeningIndicator state="listening" level={level} size="sm" color="inherit" announce={false} /> : null}
       {!isProcessing && !isListening ? <MicIcon className="size-4" /> : null}
     </Button>
     {announcement !== null ? <span role="status" className="sr-only">{announcement}</span> : null}
