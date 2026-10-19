@@ -1,7 +1,7 @@
 import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useMicLevel } from "@odentia/ui-patterns"
+import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
 import { Mic, Pause, Play, Square } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { dictationClock, dictationErrorText, type DictationSession, highlightTranscript } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -9,10 +9,6 @@ export type { DictationKind, DictationSuggestion } from "./dictation-session"
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
 const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
-/** Silencio con medición real tras el que se avisa que el micrófono no capta voz. */
-const SILENCE_NOTICE_MS = 8000
-/** Nivel por encima del ruido de fondo: por debajo no cuenta como voz. */
-const AUDIBLE_LEVEL = 0.06
 
 /** «5 listas y 1 por revisar», con lo que haya. */
 function readiness(session: DictationSession): string {
@@ -47,36 +43,8 @@ export function DictationPanel({
   // mide en un getUserMedia paralelo de solo-nivel, solo mientras se escucha.
   // Sin permiso o sin micrófono el indicador queda quieto: no finge volumen.
   const metering = useMicLevel({ active: session.enabled && listening, acquire: true })
-  const [silentNotice, setSilentNotice] = useState(false)
-  const lastAudible = useRef(0)
-  const meteringRef = useRef(metering)
-  meteringRef.current = metering
-  // El aviso lo decide un reloj que consulta la última medición, no el nivel
-  // del render: con voz constante o silencio total no hay repintados que
-  // renueven nada. Sin medición activa nunca se avisa.
-  useEffect(() => {
-    if (!listening) {
-      lastAudible.current = 0
-      setSilentNotice(false)
-      return undefined
-    }
-    const timer = window.setInterval(() => {
-      const current = meteringRef.current
-      if (current.streamState !== "active") {
-        setSilentNotice(false)
-        return
-      }
-      const now = Date.now()
-      if (lastAudible.current === 0) lastAudible.current = now
-      if (current.level >= AUDIBLE_LEVEL) {
-        lastAudible.current = now
-        setSilentNotice(false)
-      } else {
-        setSilentNotice(now - lastAudible.current >= SILENCE_NOTICE_MS)
-      }
-    }, 1000)
-    return () => window.clearInterval(timer)
-  }, [listening])
+  // El «No te oigo» con la misma regla que todo lo que escucha (Bandeja incluida).
+  const { silent: silentNotice } = useListeningStatus(listening, metering)
   if (!session.enabled) return null
 
   const status = (

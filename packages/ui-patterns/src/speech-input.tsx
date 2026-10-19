@@ -3,6 +3,7 @@ import { MicIcon } from "lucide-react"
 import type { ComponentProps } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ListeningIndicator } from "./listening-indicator.js"
+import { listeningClock, useListeningStatus } from "./use-listening-status.js"
 import { useMicLevel } from "./use-mic-level.js"
 
 interface SpeechRecognition extends EventTarget {
@@ -344,7 +345,12 @@ export const SpeechInput = ({
   // El reconocimiento no expone su flujo: en ese modo se mide con un
   // getUserMedia paralelo de solo-nivel. En modo grabadora se reutiliza el
   // flujo ya abierto, sin pedir otro micrófono.
-  const { level } = useMicLevel({ stream: meterStream, active: isListening, acquire: mode === "speech-recognition" })
+  const metering = useMicLevel({ stream: meterStream, active: isListening, acquire: mode === "speech-recognition" })
+  const { seconds, silent } = useListeningStatus(isListening, metering)
+  // El silencio se anuncia una vez al empezar; el reloj nunca.
+  useEffect(() => {
+    if (silent) setAnnouncement("No te oigo; revisa el micrófono")
+  }, [silent])
 
   // Determine if button should be disabled
   const isDisabled =
@@ -353,25 +359,34 @@ export const SpeechInput = ({
     (mode === "media-recorder" && !onAudioRecorded) ||
     isProcessing
 
-  // Mientras escucha, el mismo indicador de la marca que el dictado: el
-  // micrófono entre corchetes con el nivel real. El indicador no anuncia:
-  // el estado lo dice el texto fuera del botón.
+  // Mientras escucha, el botón se abre en una píldora con la onda de la marca,
+  // «Escuchando» y el reloj, como el dictado (lienzo del dictado, decisión 4):
+  // en todo lugar que escucha se ve que escucha. Tras ocho segundos sin voz
+  // dice «No te oigo». El estado lo anuncia el texto fuera del botón.
   return (
     <>
     <Button
+      {...props}
       className={cn(
-        "rounded-full transition-all duration-300",
-        isListening
-          ? "bg-destructive text-white hover:bg-destructive/80 hover:text-white"
-          : "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklab,var(--primary),black_12%)] hover:text-primary-foreground",
-        className
+        "rounded-full bg-primary text-primary-foreground transition-all duration-300 hover:bg-[color-mix(in_oklab,var(--primary),black_12%)] hover:text-primary-foreground",
+        className,
+        isListening && "w-auto gap-1.5 pr-3 pl-2",
+        isListening && silent && "bg-warning-strong text-warning-strong-foreground hover:bg-warning-strong hover:text-warning-strong-foreground",
       )}
+      aria-label={isListening ? "Terminar de dictar" : props["aria-label"]}
+      title={isListening ? "Terminar de dictar" : props.title}
       disabled={isDisabled}
       onClick={toggleListening}
-      {...props}
     >
       {isProcessing ? <Spinner /> : null}
-      {!isProcessing && isListening ? <ListeningIndicator state="listening" level={level} size="sm" color="inherit" announce={false} /> : null}
+      {!isProcessing && isListening ? (
+        <>
+          <ListeningIndicator state="listening" level={metering.level} size="sm" color="inherit" announce={false} />
+          <span aria-hidden className="text-xs font-semibold whitespace-nowrap">
+            {silent ? "No te oigo" : "Escuchando"} <span className="font-medium tabular-nums opacity-80">{listeningClock(seconds)}</span>
+          </span>
+        </>
+      ) : null}
       {!isProcessing && !isListening ? <MicIcon className="size-4" /> : null}
     </Button>
     {announcement !== null ? <span role="status" className="sr-only">{announcement}</span> : null}

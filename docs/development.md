@@ -283,7 +283,7 @@ muestra un punto fijo.
 Comprobar voz continua, silencio, pausa, permiso denegado y liberación del
 micrófono al salir. El dictado avisa tras ocho segundos sin señal audible.
 `MediaRecorder` reutiliza su flujo; `SpeechRecognition` no expone el suyo y
-requiere una captura paralela solo para medir. La story `Identidad/Escuchando`
+requiere una captura paralela solo para medir. Todo lo que escucha dice que escucha: el dictado con la onda grande y «Lo último que oí», y el micrófono de la Bandeja (`SpeechInput`) abierto en una píldora «Escuchando 0:08»; el reloj y el «No te oigo» salen de `useListeningStatus`. La story `Identidad/Escuchando`
 muestra estados visuales con niveles de ejemplo, no acredita captura real.
 
 `DataTable.isFetching` añade el estado fijo de actualización sin sustituir filas. La primera consulta usa `DataTableSkeleton`; `LoadingState` usa skeleton por defecto y acepta `kind="indeterminate"` para preparar documentos o esperar sin estructura conocida. Una revalidación fallida conserva los datos recibidos y ofrece reintentar la lectura; un guardado confirmado no se repite porque falle esa lectura. La firma global permanece estática. Subidas y descargas con progreso medido conservan su progreso real.
