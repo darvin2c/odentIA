@@ -1,70 +1,99 @@
 ---
 // «Un plan y tres precios»: el plan mensual, que vuelve como crédito, y el precio de cada resultado.
-import {
-  CONSULTATION,
-  CONVERSATION,
-  PLAN,
-  PRICING,
-  RECOVERED,
-  TRIAL_CREDIT,
-  usd,
-} from "../../lib/pricing"
-import { CTA, registerUrl } from "../../lib/site"
+// Mientras se entra por invitación y el plan Fundadores se publica, la tarjeta es la del Fundador:
+// sin cuota, con el regalo y cada acción con el precio de lista tachado (lienzo, tablero 4).
+import { money, shownPlan } from "../../lib/pricing"
+import { ctaOf } from "../../lib/site"
 
-const actions = [
-  {
-    title: "Conversación atendida",
-    price: CONVERSATION,
-    text: "Todo lo que Recepción responde a una persona en 24 horas.",
-    note: "No se cobra si el agente no llegó a responder.",
-    agent: { href: "/agentes/recepcion", label: "Recepción" },
-  },
-  {
-    title: "Consulta documentada",
-    price: CONSULTATION,
-    text: "Cuando el odontólogo confirma lo que dictó.",
-    note: "No se cobra si descarta las sugerencias.",
-    agent: { href: "/agentes/asistente-clinico", label: "Asistente clínico" },
-  },
-  {
-    title: "Cita recuperada",
-    price: RECOVERED,
-    text: "Reservada en los 7 días siguientes a un mensaje del agente, y el paciente asistió.",
-    note: "No se cobra si no asiste. Su conversación va incluida.",
-    agent: { href: "/agentes/administrador", label: "Administrador" },
-  },
-]
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
+const cta = ctaOf(pricing)
+const struck = (own: number | null, base: number | null | undefined) =>
+  founder && own !== null && base !== null && base !== undefined && base !== own ? money(base, plan!.currency) : null
+
+const actions = plan
+  ? [
+      {
+        title: "Conversación atendida",
+        price: plan.conversation,
+        before: struck(plan.conversation, list?.conversation),
+        text: "Todo lo que Recepción responde a una persona en 24 horas.",
+        note: "No se cobra si el agente no llegó a responder.",
+        agent: { href: "/agentes/recepcion", label: "Recepción" },
+      },
+      {
+        title: "Consulta documentada",
+        price: plan.consultation,
+        before: struck(plan.consultation, list?.consultation),
+        text: "Cuando el odontólogo confirma lo que dictó.",
+        note: "No se cobra si descarta las sugerencias.",
+        agent: { href: "/agentes/asistente-clinico", label: "Asistente clínico" },
+      },
+      {
+        title: "Cita recuperada",
+        price: plan.recovered,
+        before: struck(plan.recovered, list?.recovered),
+        text: "Reservada en los 7 días siguientes a un mensaje del agente, y el paciente asistió.",
+        note: "No se cobra si no asiste. Su conversación va incluida.",
+        agent: { href: "/agentes/administrador", label: "Administrador" },
+      },
+    ].filter((action) => action.price !== null)
+  : []
 ---
 <section class="wrap sec" id="precio">
   <div class="head">
     <span class="tag">[ El precio ]</span>
-    <h2 class="h2">Un plan y tres precios.</h2>
+    <h2 class="h2">{founder ? "Fundadores: entras gratis." : "Un plan y tres precios."}</h2>
   </div>
-  <div class="grid">
-    <div class="plan">
-      <span class="tag tag-d">Plan odentIA</span>
-      <div class="amount"><span class="big">{usd(PLAN)}</span><span class="per">al mes</span></div>
-      <p class="back">Te devolvemos los {usd(PLAN)} en crédito para lo que hagan tus agentes. Es lo mínimo que pagas en un mes.</p>
-      <ul class="feats">
-        <li>El sistema completo, igual para todas las clínicas.</li>
-        <li>Sin límite de odontólogos, sedes ni usuarios.</li>
-        <li>Un tope de gasto que eliges tú, con aviso antes de llegar.</li>
-      </ul>
-      <a class="btn btn-p cta" href={registerUrl}>{CTA}</a>
-      <span class="mono trial">{PRICING.trialDays} días gratis, con {usd(TRIAL_CREDIT)} de crédito para tus agentes.</span>
-    </div>
-    <div class="acts">
-      {actions.map((a) => (
-        <div class="card act">
-          <h3 class="t">{a.title}</h3>
-          <span class="p">{usd(a.price)}</span>
-          <span class="d">{a.text}</span>
-          <span class="mono nt">{a.note}</span>
-          <a class="ag" href={a.agent.href}>Lo hace {a.agent.label} →</a>
+  {plan ? (
+    <div class="grid">
+      <div class="plan">
+        <span class="tag tag-d">{founder ? "Programa Fundadores" : plan.name}</span>
+        <div class="amount">
+          <span class="big">{money(plan.plan, plan.currency)}</span><span class="per">al mes</span>
+          {founder && list && list.plan !== plan.plan ? <s class="per">{money(list.plan, list.currency)}</s> : null}
         </div>
-      ))}
+        {founder ? (
+          <p class="back">
+            Sin cuota. Los primeros <b class="gift">{money(plan.trialCredit, plan.currency)}</b> de tus agentes los pagamos nosotros y, después, pagas solo lo que hacen
+            {founder.discountPercent ? <>, con <b>{founder.discountPercent} % menos</b></> : null}.
+          </p>
+        ) : (
+          <p class="back">Te devolvemos los {money(plan.credit, plan.currency)} en crédito para lo que hagan tus agentes. Es lo mínimo que pagas en un mes.</p>
+        )}
+        <ul class="feats">
+          {founder?.guaranteeMonths ? <li>Estas condiciones se mantienen {founder.guaranteeMonths} meses desde que entras.</li> : null}
+          <li>El sistema completo, igual para todas las clínicas.</li>
+          <li>Sin límite de odontólogos, sedes ni usuarios.</li>
+          <li>Un tope de gasto que eliges tú, con aviso antes de llegar.</li>
+        </ul>
+        <a class="btn btn-p cta" href={cta.href}>{cta.label}</a>
+        <span class="mono trial">
+          {founder
+            ? "Sin tarjeta. Se entra por invitación: te respondemos en 2 días hábiles."
+            : <>{plan.trialDays} días gratis, con <span class="gift">{money(plan.trialCredit, plan.currency)}</span> de crédito para tus agentes.</>}
+        </span>
+      </div>
+      <div class="acts">
+        {actions.map((a) => (
+          <div class="card act">
+            <h3 class="t">{a.title}</h3>
+            <span class="p">
+              {money(a.price!, plan.currency)}
+              {a.before ? <s class="was">{a.before}</s> : null}
+            </span>
+            <span class="d">{a.text}</span>
+            <span class="mono nt">{a.note}</span>
+            <a class="ag" href={a.agent.href}>Lo hace {a.agent.label} →</a>
+          </div>
+        ))}
+      </div>
     </div>
-  </div>
+  ) : (
+    <p class="lead">Los precios se publican en un momento. Escríbenos y te los contamos.</p>
+  )}
 </section>
 
 <style>
@@ -82,7 +111,8 @@ const actions = [
   .acts { display: flex; flex-direction: column; gap: 14px; }
   .act { padding: 26px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "t p" "d p" "n p" "a p"; gap: 6px 20px; align-items: start; }
   .t { grid-area: t; font-size: 19px; font-weight: 800; line-height: 1.3; }
-  .p { grid-area: p; font-size: 34px; font-weight: 800; letter-spacing: -.03em; white-space: nowrap; }
+  .p { grid-area: p; font-size: 34px; font-weight: 800; letter-spacing: -.03em; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
+  .was { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
   .d { grid-area: d; color: var(--muted); line-height: 1.5; }
   .nt { grid-area: n; font-size: 13px; color: var(--soft); }
   .ag { grid-area: a; justify-self: start; font-size: 14px; font-weight: 700; text-decoration: none; padding: 6px 0; min-height: 32px; }

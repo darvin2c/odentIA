@@ -12,7 +12,12 @@ import {
 import { AGENTS, CHANS, DAY, type DayEvent, dir, type SceneHost, ToothScene, via } from "@odentia/brand-scene"
 import { pauseStore, useInterval, useNarrow, usePaused, useReducedMotion } from "./motion"
 
-type Props = { ctaHref: string; ctaLabel: string }
+type Props = {
+  ctaHref: string
+  ctaLabel: string
+  /** La nota bajo los botones; con Fundadores lleva el regalo (en ámbar). */
+  note?: { gift: string | null; text: string }
+}
 type Cur = {
   agent: string
   color: string
@@ -118,7 +123,7 @@ function d3vals(sStep: number, hover: number, cycle: number, still: boolean) {
 
 const cssVar = (o: Record<string, string>) => o as CSSProperties
 
-export default function HomeHero({ ctaHref, ctaLabel }: Props) {
+export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
   const narrow = useNarrow()
   const reduced = useReducedMotion()
   const paused = usePaused()
@@ -349,8 +354,17 @@ export default function HomeHero({ ctaHref, ctaLabel }: Props) {
             </a>
           </div>
           <p className="mono hh-note rise d4">
-            Sin tarjeta para probar. Tú decides qué puede hacer cada agente, y lo que no da
-            resultado no se cobra.
+            {note ? (
+              note.gift ? (
+                <>
+                  Programa Fundadores: <span className="gift">{note.gift}</span> {note.text}
+                </>
+              ) : (
+                note.text
+              )
+            ) : (
+              "Sin tarjeta para probar. Tú decides qué puede hacer cada agente, y lo que no da resultado no se cobra."
+            )}
           </p>
           {!narrow && (
             <div className="hh-key rise d4">

@@ -29,11 +29,13 @@ import {
   zonesForCountry,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
-import { authClient } from "../lib/auth-client"
+import { API_URL, authClient } from "../lib/auth-client"
+import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
 
@@ -44,6 +46,8 @@ export const Route = createFileRoute("/onboarding")({
   },
   validateSearch: (search: Record<string, unknown>) => ({
     continue: typeof search.continue === "string" ? search.continue : undefined,
+    // Invitación Fundadores (issue 165): viaja al crear la clínica.
+    ...(typeof search.invitacion === "string" && search.invitacion ? { invitacion: search.invitacion } : {}),
   }),
   component: OnboardingPage,
 })
@@ -154,11 +158,30 @@ function splitName(full: string): { firstName: string; lastName: string } {
 function OnboardingPage() {
   const sessionUser = authClient.useSession().data?.user
   const navigate = useNavigate()
-  const { continue: continueOrgId } = useSearch({ from: "/onboarding" })
+  const { continue: continueOrgId, invitacion } = useSearch({ from: "/onboarding" })
+  // La invitación llega en la dirección (correo de verificación, Google) o quedó guardada al crear la cuenta.
+  const [founderToken] = useState(() => invitacion ?? (typeof window === "undefined" ? null : storedInvitation()))
+  useEffect(() => {
+    if (invitacion) rememberInvitation(invitacion)
+  }, [invitacion])
+  const signUpInfo = useQuery({
+    queryKey: ["public", "sign-up"],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/public/sign-up`)
+      if (!res.ok) throw new Error(`Error ${res.status}`)
+      return z.object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta") }).passthrough().parse(await res.json())
+    },
+    staleTime: 60_000,
+  })
   // Alta asistida: la clínica ya existe (invitación aceptada); se completa su
   // perfil y sede sin crear otra. El servidor solo deja a owner/admin
   // (settings.write); el resto espera al responsable.
   const skipOrg = typeof continueOrgId === "string" && continueOrgId.length > 0
+  // Sin invitación y con el alta «solo con invitación», no hay clínica que abrir: vuelve a «Mis organizaciones», que lo explica.
+  const blocked = !skipOrg && !founderToken && signUpInfo.data?.signupMode === "invitacion"
+  useEffect(() => {
+    if (blocked) void navigate({ to: "/" })
+  }, [blocked, navigate])
   // Quien se registró por email ya dio nombre y apellidos: el paso "Tu perfil"
   // solo aparece cuando la sesión no los tiene (p. ej. cuenta vía Google).
   const hasStoredName = Boolean(sessionUser?.firstName || sessionUser?.lastName)
@@ -214,15 +237,23 @@ function OnboardingPage() {
       }
       let slug = value.slug
       if (!skipOrg) {
-        const { error: orgError } = await authClient.organization.create({
-          name: value.orgName,
-          slug: value.slug,
-        })
+        const { error: orgError } = await authClient.organization.create(
+          { name: value.orgName, slug: value.slug },
+          founderToken ? { headers: { [FOUNDER_INVITATION_HEADER]: founderToken } } : undefined,
+        )
         if (orgError) {
+          const code = (orgError as { code?: string }).code ?? ""
+          if (code.startsWith("INVITATION")) {
+            if (code === "INVITATION_INVALID") forgetInvitation()
+            toast.error(orgError.message ?? "Por ahora se abren clínicas solo con invitación.")
+            if (code === "INVITATION_REQUIRED" || code === "INVITATION_INVALID") await navigate({ to: "/" })
+            return
+          }
           goTo(1)
           toast.error(orgError.message ?? "No se pudo crear la organización (¿slug en uso?).")
           return
         }
+        forgetInvitation()
       } else if (continueOrgId) {
         await authClient.organization.setActive({ organizationId: continueOrgId }).catch(() => {})
         const { data: orgs } = await authClient.organization.list()

@@ -1,6 +1,6 @@
 ---
 // Términos y condiciones del servicio (texto en src/lib/legal/terminos.ts).
 import LegalPage from "../components/pages/LegalPage.astro"
-import { TERMINOS } from "../lib/legal/terminos"
+import { terminosFor } from "../lib/legal/terminos"
 ---
-<LegalPage doc={TERMINOS} />
+<LegalPage doc={terminosFor(Astro.locals.pricing)} />

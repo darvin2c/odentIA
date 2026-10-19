@@ -1,17 +1,25 @@
 ---
 // 05 · El valor y el precio: la cuenta con los números de la clínica, el precio y un día fila por fila.
-// Única sección del inicio con cifras de precio; todas salen de src/lib/pricing.ts.
-import {
-  CONSULTATION,
-  CONVERSATION,
-  PLAN,
-  PRICING,
-  RECOVERED,
-  TRIAL_CREDIT,
-  usd,
-} from "../../lib/pricing"
+// Única sección del inicio con cifras de precio; salen de la administración (src/lib/pricing.ts).
+import { money, shownPlan, valuePricesOf } from "../../lib/pricing"
 import DayRows from "./DayRows"
 import ValueCalc from "./ValueCalc"
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
+const prices = valuePricesOf(plan)
+const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
+const was = (own: number | null, base: number | null | undefined) =>
+  founder && own !== null && base != null && base !== own ? money(base, plan!.currency) : null
+const cards = plan
+  ? [
+      { tag: "Conversación atendida", price: plan.conversation, before: was(plan.conversation, list?.conversation), desc: "Todo lo que Recepción habla con una persona en 24 horas, aunque sean veinte mensajes." },
+      { tag: "Consulta documentada", price: plan.consultation, before: was(plan.consultation, list?.consultation), desc: "Cuando el odontólogo confirma la nota que dictó. Si la descarta, no se cobra." },
+      { tag: "Cita recuperada", price: plan.recovered, before: was(plan.recovered, list?.recovered), desc: "Un paciente que vuelve por un mensaje del agente y asiste. Si no asiste, no se cobra.", hi: true },
+    ]
+  : []
 ---
 <section class="hs hs-night" id="precio">
   <div class="grain" aria-hidden="true"></div>
@@ -21,31 +29,29 @@ import ValueCalc from "./ValueCalc"
       <h2 class="h2">Lo que te cuesta no tenernos.</h2>
       <p class="lead lead-d">Cada mes sin agentes pierdes pacientes que escribieron de noche y no tuvieron respuesta, controles que nadie recordó y horas de tu equipo en mensajes y notas. Haz la cuenta con los números de tu clínica.</p>
     </div>
-    <ValueCalc client:visible />
+    {prices ? <ValueCalc client:visible prices={prices} /> : null}
     <div class="vsep" aria-hidden="true"></div>
     <div class="sr hs-head">
       <span class="tag tag-d">[ El precio ]</span>
       <h2 class="h2">No pagas por el software. Pagas por el trabajo hecho.</h2>
-      <p class="lead lead-d">Un solo plan de {usd(PLAN)} al mes que vuelve completo como crédito para tus agentes. Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios. Para probarlo te damos {usd(TRIAL_CREDIT)} de crédito por {PRICING.trialDays} días.</p>
+      {founder ? (
+        <p class="lead lead-d">Fundadores: entras sin cuota. Los primeros <b class="gift">{m(plan!.trialCredit)}</b> de tus agentes los pagamos nosotros y, después, pagas solo lo que hacen{founder.discountPercent ? <>, con {founder.discountPercent} % menos</> : null}. Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios.</p>
+      ) : plan ? (
+        <p class="lead lead-d">Un solo plan de {m(plan.plan)} al mes que vuelve completo como crédito para tus agentes. Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios. Para probarlo te damos <span class="gift">{m(plan.trialCredit)}</span> de crédito por {plan.trialDays} días.</p>
+      ) : (
+        <p class="lead lead-d">Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios. Pagas por lo que hacen tus agentes.</p>
+      )}
     </div>
     <div class="pcards">
-      <div class="pcard">
-        <span class="tag tag-d">Conversación atendida</span>
-        <span class="pamt">{usd(CONVERSATION)}</span>
-        <span class="pdesc">Todo lo que Recepción habla con una persona en 24 horas, aunque sean veinte mensajes.</span>
-      </div>
-      <div class="pcard">
-        <span class="tag tag-d">Consulta documentada</span>
-        <span class="pamt">{usd(CONSULTATION)}</span>
-        <span class="pdesc">Cuando el odontólogo confirma la nota que dictó. Si la descarta, no se cobra.</span>
-      </div>
-      <div class="pcard hi">
-        <span class="tag tag-d">Cita recuperada</span>
-        <span class="pamt">{usd(RECOVERED)}</span>
-        <span class="pdesc">Un paciente que vuelve por un mensaje del agente y asiste. Si no asiste, no se cobra.</span>
-      </div>
+      {cards.filter((card) => card.price !== null).map((card) => (
+        <div class:list={["pcard", { hi: card.hi }]}>
+          <span class="tag tag-d">{card.tag}</span>
+          <span class="pamt">{m(card.price)}{card.before ? <s class="pwas"> {card.before}</s> : null}</span>
+          <span class="pdesc">{card.desc}</span>
+        </div>
+      ))}
     </div>
-    <DayRows client:visible />
+    {prices ? <DayRows client:visible prices={prices} /> : null}
     <div class="pfoot">
       <p>Nunca se cobran el spam, los recordatorios ni los avisos a tu equipo, y el sistema no se cobra aparte. Precios en dólares, más los impuestos de tu país. Los mensajes de plantilla de WhatsApp los cobra Meta directamente a la clínica.</p>
       <a class="btn btn-p" href="/precios">Calcula cuánto pagarías</a>

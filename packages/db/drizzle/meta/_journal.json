@@ -190,6 +190,20 @@
       "when": 1792355105615,
       "tag": "0026_lo_que_escribio_quien_se_parece",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792371784305,
+      "tag": "0027_fundadores_y_precio_negociado",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792371795803,
+      "tag": "0028_fundadores_y_precio_negociado_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import Faq from "../components/Faq.astro"
 import AgentsSection from "../components/home/AgentsSection.astro"
 import CaseSection from "../components/home/CaseSection.astro"
 import ControlSection from "../components/home/ControlSection.astro"
-import { HOME_FAQ } from "../components/home/faqItems"
+import { homeFaq } from "../components/home/faqItems"
 import HomeHero from "../components/home/HomeHero"
 import OmniSection from "../components/home/OmniSection.astro"
 import StickyCta from "../components/home/StickyCta.astro"
@@ -15,11 +15,22 @@ import ValueSection from "../components/home/ValueSection.astro"
 import "../components/home/home.css"
 import Base from "../layouts/Base.astro"
 import { faqJsonLd } from "../lib/faq"
-import { CTA, registerUrl } from "../lib/site"
+import { giftOf, shownPlan } from "../lib/pricing"
+import { ctaOf } from "../lib/site"
 
 const title = "odentIA · Software dental omnicanal y agéntico con IA"
 const description =
   "Software para clínicas dentales: WhatsApp, Instagram, correo y más en una sola ficha por persona, con agentes de IA que agendan, documentan la consulta y traen de vuelta a tus pacientes."
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const HOME_FAQ = homeFaq(plan)
+// Mientras se entra por invitación, la nota de la portada dice el regalo y cómo se entra.
+const note =
+  pricing.signupMode === "invitacion"
+    ? { gift, text: gift ? "de regalo para tus agentes, sin cuota ni tarjeta. Se entra por invitación; te respondemos en 2 días hábiles." : "Se entra por invitación; te respondemos en 2 días hábiles." }
+    : undefined
 // La pregunta pendiente de confirmar se muestra en la página, pero no se publica en los datos estructurados.
 const faqLd = faqJsonLd(HOME_FAQ.filter((q) => !q.pending))
 const softwareLd = {
@@ -33,7 +44,7 @@ const softwareLd = {
 ---
 <Base title={title} description={description} jsonLd={[softwareLd, faqLd]}>
   <div class="home">
-    <HomeHero client:load ctaHref={registerUrl} ctaLabel={CTA} />
+    <HomeHero client:load ctaHref={cta.href} ctaLabel={cta.label} note={note} />
     <OmniSection />
     <AgentsSection />
     <CaseSection />
@@ -42,7 +53,11 @@ const softwareLd = {
     <SystemSection />
     <TrustSection />
     <Faq items={HOME_FAQ} tag="08 · Preguntas" />
-    <CtaBand text="Pruébalo 30 días: tus agentes trabajan en tu clínica desde el primer día, con el crédito de prueba. Sin límite de odontólogos, sedes ni usuarios." />
+    <CtaBand
+      text={plan
+        ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en tu clínica desde el primer día, con el crédito de prueba. Sin límite de odontólogos, sedes ni usuarios.`
+        : "Tus agentes trabajan en tu clínica desde el primer día. Sin límite de odontólogos, sedes ni usuarios."}
+    />
     <StickyCta />
   </div>
 </Base>

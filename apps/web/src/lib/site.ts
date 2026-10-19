@@ -1,4 +1,5 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
+import { giftOf, type Pricing } from "./pricing"
 
 const domain = import.meta.env.VITE_BASE_DOMAIN || "odentia.localhost"
 const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
@@ -7,8 +8,20 @@ const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT
 export const registerUrl = `https://app.${domain}${port}/register`
 export const loginUrl = `https://app.${domain}${port}/login`
 export const contactEmail = "hola@odentia.com"
+/** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
+export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
 
-export const CTA = "Obtén USD 100 de crédito"
+/**
+ * La llamada a la acción de toda la web, con el regalo del plan que se
+ * muestra (Fundadores, issue 165). Mientras se entra por invitación lleva a
+ * la lista de espera; con el alta abierta, al registro.
+ */
+export function ctaOf(pricing: Pricing): { href: string; label: string } {
+  const gift = giftOf(pricing)
+  return pricing.signupMode === "invitacion"
+    ? { href: "/solicitar-invitacion", label: gift ? `Pide tus ${gift}` : "Solicita tu invitación" }
+    : { href: registerUrl, label: gift ? `Obtén ${gift} de crédito` : "Crear mi cuenta" }
+}
 
 export type NavLink = { href: string; label: string }
 

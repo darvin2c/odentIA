@@ -41,12 +41,17 @@ export interface ActionPricing {
 
 /**
  * Precios con los que se cuenta hoy en una clínica: los de su plan o, si aún
- * no eligió, los del plan por defecto; con su descuento negociado. Sin plan
- * con precio, las acciones se cuentan sin importe (nunca 0).
+ * no eligió, los del plan por defecto; con su descuento negociado mientras no
+ * haya vencido (issue 168: pasado su último instante se cuenta a precio de
+ * lista). Sin plan con precio, las acciones se cuentan sin importe (nunca 0).
  */
-export async function getActionPricing(tx: Db, orgId: string): Promise<ActionPricing> {
+export async function getActionPricing(tx: Db, orgId: string, now = new Date()): Promise<ActionPricing> {
   const [sub] = await tx
-    .select({ planId: saasSubscription.planId, discountBps: saasSubscription.discountBps })
+    .select({
+      planId: saasSubscription.planId,
+      discountBps: saasSubscription.discountBps,
+      discountEndsAt: saasSubscription.discountEndsAt,
+    })
     .from(saasSubscription)
     .where(eq(saasSubscription.organizationId, orgId))
     .limit(1)
@@ -61,7 +66,7 @@ export async function getActionPricing(tx: Db, orgId: string): Promise<ActionPri
     planId: plan?.id ?? null,
     currency: plan?.currency ?? null,
     creditCents: plan?.creditCents ?? 0,
-    discountBps: Math.min(sub?.discountBps ?? 0, plan?.maxDiscountBps ?? 0),
+    discountBps: Math.min(activeDiscountBps(sub ?? null, now), plan?.maxDiscountBps ?? 0),
     maxDiscountBps: plan?.maxDiscountBps ?? 0,
     base: {
       conversacion: plan?.conversationMicros ?? null,
@@ -69,6 +74,16 @@ export async function getActionPricing(tx: Db, orgId: string): Promise<ActionPri
       cita: plan?.recoveryMicros ?? null,
     },
   }
+}
+
+/** El descuento negociado que rige en `now`: el de la clínica hasta su vencimiento; después, ninguno. */
+export function activeDiscountBps(
+  sub: { discountBps: number; discountEndsAt: Date | null } | null,
+  now: Date,
+): number {
+  if (!sub) return 0
+  if (sub.discountEndsAt && sub.discountEndsAt.getTime() <= now.getTime()) return 0
+  return sub.discountBps
 }
 
 /** Precio con descuento, redondeado a la millonésima. */
@@ -332,7 +347,7 @@ export interface SaasPeriod {
  */
 export async function currentSaasPeriod(tx: Db, orgId: string, now = new Date()): Promise<SaasPeriod & { creditCents: number }> {
   const [sub] = await tx.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId)).limit(1)
-  const pricing = await getActionPricing(tx, orgId)
+  const pricing = await getActionPricing(tx, orgId, now)
   if (sub?.status === "prueba" && sub.trialStartedAt && sub.trialEndsAt) {
     const [plan] = pricing.planId ? await tx.select().from(saasPlan).where(eq(saasPlan.id, pricing.planId)).limit(1) : []
     return { start: sub.trialStartedAt, end: sub.trialEndsAt, credit: "prueba", creditCents: sub.trialCreditCents ?? plan?.trialCreditCents ?? 0 }
@@ -603,7 +618,7 @@ export interface SaasConsumption {
 /** C2: lo que hicieron los agentes en el tramo, con precio base, precio propio e importe. */
 export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()): Promise<SaasConsumption> {
   const period = await currentSaasPeriod(tx, orgId, now)
-  const pricing = await getActionPricing(tx, orgId)
+  const pricing = await getActionPricing(tx, orgId, now)
   const actions = await listPeriodActions(tx, orgId, period)
   const pending = await listPendingRecoveries(tx, orgId)
   const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita" && row.state !== "devuelta")

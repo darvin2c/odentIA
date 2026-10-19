@@ -24,6 +24,7 @@ import {
 } from "@odentia/mail"
 import { type ConsumerComplaintSheet, consumerComplaintEmails, consumerComplaintResponseEmails } from "./consumer-complaints.js"
 import {
+  founderInvitationEmail,
   saasAlertEmail,
   saasBillingUrl,
   saasOverdueEmail,
@@ -31,6 +32,7 @@ import {
   saasRestrictedEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
+  waitlistReceivedEmail,
 } from "./saas-emails.js"
 
 const webUrl = process.env.WEB_URL ?? "https://app.odentia.localhost"
@@ -133,6 +135,27 @@ const MAILS: Record<string, MailTemplate> = {
   "22-reclamos-hoja-nueva": received.notice,
   "23-respuesta-a-tu-hoja": answered.response,
   "24-reclamos-respuesta-enviada": answered.copy,
+  "25-estas-en-la-lista": waitlistReceivedEmail({ firstName: "Ana", clinicName: "Clínica Sonrisa", phone: "+51987654321", answerDays: 2 }),
+  "26-invitacion-fundadores": founderInvitationEmail({
+    firstName: "Ana",
+    clinicName: "Clínica Sonrisa",
+    email: "ana@clinicasonrisa.pe",
+    url,
+    expiresText: "domingo 1 de noviembre",
+    offer: { currency: "USD", priceCents: 0, trialCreditCents: 10_000, discountPercent: 40, guaranteeMonths: 12 },
+  }),
+  "27-tu-precio-especial-termina": saasAlertEmail(
+    {
+      family: "precio_especial",
+      level: "aviso",
+      periodKey: "2026-10-24",
+      title: "Aviso",
+      message: "Tu precio especial (10 % menos en cada acción) termina el sábado, 24 de octubre. Desde el día siguiente pagas el precio de lista. ¿Quieres conversarlo? Escríbenos desde Soporte.",
+      action: "ver_plan",
+    },
+    clinic,
+    billing,
+  ),
 }
 
 const htmlAt = process.argv.indexOf("--html")

@@ -189,7 +189,13 @@ function BillingPage() {
         <h2 id="planes" className="text-base font-semibold">
           Planes
         </h2>
-        {plans.isPending ? (
+        {summary.guaranteedUntil ? (
+          <p className="rounded-lg border bg-card px-4 py-3 text-sm">
+            Tienes el plan <span className="font-medium">{summary.plan?.name ?? "Fundadores"}</span> con condiciones de Fundador hasta el{" "}
+            {new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(summary.guaranteedUntil))}.
+            Después pasas al plan de lista de odentIA; te avisamos 30 días antes. Si quieres cambiar algo antes, escríbenos desde Soporte.
+          </p>
+        ) : plans.isPending ? (
           <LoadingState message="Cargando planes…" />
         ) : plans.isError ? (
           <p className="text-sm text-muted-foreground">No se pudieron cargar los planes.</p>

@@ -72,7 +72,22 @@ const orgItemSchema = z.object({
   hasBranch: z.boolean(),
   billingStatus: z.string().nullable(),
   restricted: z.boolean(),
+  /** Precio negociado vigente (issue 168). */
+  negotiated: z.object({ discountBps: z.number(), endsAt: z.string().nullable() }).nullable().default(null),
 })
+
+/** «20 % negociado · vence 30 abr»; en rojo si faltan 7 días o menos. */
+function NegotiatedBadge({ deal }: { deal: { discountBps: number; endsAt: string | null } }) {
+  const percent = `${deal.discountBps / 100} %`
+  if (!deal.endsAt) return <Badge variant="warning">{percent} negociado</Badge>
+  const end = new Date(deal.endsAt)
+  const days = Math.ceil((end.getTime() - Date.now()) / 86_400_000)
+  if (days <= 7) {
+    return <Badge variant="destructive">{`${percent} · vence en ${Math.max(days, 0)} ${days === 1 ? "día" : "días"}`}</Badge>
+  }
+  const day = new Intl.DateTimeFormat("es", { day: "numeric", month: "short" }).format(end).replaceAll(".", "")
+  return <Badge variant="warning">{`${percent} negociado · vence ${day}`}</Badge>
+}
 
 const orgListSchema = z.object({ items: z.array(orgItemSchema), total: z.number() })
 const orgDetailSchema = z.object({
@@ -264,11 +279,12 @@ function OrganizationsPage() {
     return countries.find((country) => country.code === code)?.label ?? code
   }
 
+  const [onlyNegotiated, setOnlyNegotiated] = useState(false)
   const listQuery = useQuery({
-    queryKey: ["admin-organizations", activeSearch],
+    queryKey: ["admin-organizations", activeSearch, onlyNegotiated],
     queryFn: async () => {
       const raw = await api<unknown>(
-        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30`,
+        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30${onlyNegotiated ? "&negotiated=1" : ""}`,
       )
       return orgListSchema.parse(raw)
     },
@@ -398,6 +414,19 @@ function OrganizationsPage() {
         <Button type="submit" variant="outline">
           Buscar
         </Button>
+        <Select
+          value={onlyNegotiated ? "negociado" : "todas"}
+          items={{ todas: "Todas", negociado: "Con precio negociado" }}
+          onValueChange={(value) => setOnlyNegotiated(value === "negociado")}
+        >
+          <SelectTrigger aria-label="Precio" className="w-56 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas</SelectItem>
+            <SelectItem value="negociado">Con precio negociado</SelectItem>
+          </SelectContent>
+        </Select>
       </form>
 
       {listQuery.isPending ? (
@@ -430,6 +459,7 @@ function OrganizationsPage() {
                   <span className="flex items-center gap-2 font-medium">
                     <span className="truncate">{item.name}</span>
                     {item.restricted ? <Badge variant="destructive">Restringida</Badge> : null}
+                    {item.negotiated ? <NegotiatedBadge deal={item.negotiated} /> : null}
                     {!item.hasProfile || !item.hasBranch ? (
                       <Badge variant="outline">Alta incompleta</Badge>
                     ) : null}

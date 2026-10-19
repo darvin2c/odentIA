@@ -11,6 +11,7 @@ import { createFileRoute, getRouteApi, Link, Outlet, useRouterState } from "@tan
 import {
   BookOpen,
   Building2,
+  ListChecks,
   CircleHelp,
   Coins,
   CreditCard,
@@ -49,8 +50,16 @@ function AdminLayout() {
         .parse(await api<unknown>("/api/admin/consumer-complaints/summary")),
     staleTime: 60_000,
   })
+  // Solicitudes por revisar de la lista de espera (Fundadores, issue 165).
+  const waitlist = useQuery({
+    queryKey: ["admin", "overview", "nav"],
+    queryFn: async () => api<{ items: { key: string; count: number }[] }>("/api/admin/overview"),
+    select: (data) => data.items.find((item) => item.key === "waitlist")?.count ?? 0,
+    staleTime: 60_000,
+  })
   const items: AppShellNavEntry[] = [
     { label: "Inicio", to: "/", icon: Home },
+    { label: "Lista de espera", to: "/waitlist", icon: ListChecks, badge: waitlist.data || undefined },
     { label: "Organizaciones", to: "/organizations", icon: Building2 },
     { label: "Usuarios", to: "/users", icon: Users },
     ...(adminSession.actor.role === "admin"

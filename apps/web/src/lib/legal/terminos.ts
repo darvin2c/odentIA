@@ -1,13 +1,20 @@
 // Términos y condiciones del servicio odentIA (contrato entre odentIA y la clínica).
-// Las cifras salen de src/lib/pricing.ts para que nunca difieran de la página Precios.
-import { CONSULTATION, CONVERSATION, PLAN, PRICING, RECOVERED, TRIAL_CREDIT, usd } from "../pricing"
+// Las cifras son las del plan de lista publicado (la administración), las mismas de la página Precios.
+import { money, type Pricing } from "../pricing"
 import { contactEmail } from "../site"
 import { type LegalDoc, TITULAR } from "./types"
 
-/** Importe sin corte de línea entre «USD» y la cifra (para las celdas estrechas de la tabla). */
-const price = (v: number) => usd(v).replace(" ", " ")
-
-export const TERMINOS: LegalDoc = {
+/** Los términos con las cifras vigentes del plan de lista; sin plan publicado, remiten a la página Precios. */
+export function terminosFor(pricing: Pricing): LegalDoc {
+  const list = pricing.list
+  /** Importe sin corte de línea entre la moneda y la cifra (para las celdas estrechas de la tabla). */
+  const price = (v: number | null | undefined) =>
+    list && v !== null && v !== undefined ? money(v, list.currency).replace(" ", " ") : "Según la página Precios"
+  const PLAN = list?.plan
+  const CONVERSATION = list?.conversation
+  const CONSULTATION = list?.consultation
+  const RECOVERED = list?.recovered
+  return {
   path: "/terminos",
   title: "Términos y condiciones del servicio",
   description:
@@ -46,7 +53,9 @@ export const TERMINOS: LegalDoc = {
       id: "prueba",
       title: "Prueba gratuita",
       blocks: [
-        `La Clínica puede probar el servicio durante ${PRICING.trialDays} días con un crédito de ${usd(TRIAL_CREDIT)} para los agentes, sin registrar una tarjeta.`,
+        list
+          ? `La Clínica puede probar el servicio durante ${list.trialDays} días con un crédito de ${money(list.trialCredit, list.currency)} para los agentes, sin registrar una tarjeta.`
+          : "La Clínica puede probar el servicio con el crédito de prueba que indica la página Precios, sin registrar una tarjeta.",
         "Si el crédito de prueba se agota antes de terminar el periodo, los agentes se pausan; el resto del sistema sigue disponible hasta el fin de la prueba. El crédito de prueba no es reembolsable, no se puede canjear por dinero y vence al terminar la prueba.",
         "Al terminar la prueba, la Clínica puede activar un plan para seguir usando el servicio. Si no lo hace, odentIA conserva sus datos durante el plazo indicado en la sección «Cancelación y exportación de datos».",
       ],
@@ -238,4 +247,5 @@ export const TERMINOS: LegalDoc = {
       ],
     },
   ],
+}
 }

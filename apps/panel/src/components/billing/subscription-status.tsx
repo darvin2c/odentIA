@@ -21,6 +21,8 @@ export interface BillingSummary {
   pauseReason: string | null
   outstandingByCurrency: Array<{ currency: string; cents: number }>
   proofExtensionUntil: string | null
+  /** Fundadores: hasta cuándo valen sus condiciones (el plan no se cambia desde aquí). */
+  guaranteedUntil?: string | null
   usage30d: {
     agentRuns: number
     llmCalls: number

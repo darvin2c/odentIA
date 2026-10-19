@@ -9,12 +9,15 @@ const ALERT_TOPIC: Record<SaasAlertFamily, string> = {
   dias_prueba: "tu prueba termina pronto",
   credito: "el crédito del mes",
   tope: "tu tope de gasto",
+  precio_especial: "tu precio especial termina",
+  condiciones: "tus condiciones de Fundador terminan",
 }
 
 const ALERT_ACTION: Record<SaasAlert["action"], string> = {
   elegir_plan: "Elegir un plan",
   cambiar_tope: "Cambiar mi tope",
   ver_consumo: "Ver mi consumo",
+  ver_plan: "Ver mi plan",
 }
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
@@ -133,5 +136,71 @@ export function saasSettlementEmail(input: {
     ],
     reason: "Te escribimos porque vendes odentIA y cerramos tu mes.",
     replies: "Este correo no recibe respuestas: si algo no cuadra, escríbele a tu contacto en odentIA.",
+  })
+}
+
+/* ---------- Fundadores (issue 165) ---------- */
+
+/** «USD 100», «USD 0,50»: la moneda ISO antes de la cifra, coma decimal y sin «,00». */
+export function moneyText(currency: string, cents: number): string {
+  const fixed = (Math.round(cents) / 100).toFixed(2).replace(".", ",")
+  const trimmed = fixed.endsWith(",00") ? fixed.slice(0, -3) : fixed
+  return `${currency} ${trimmed.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`
+}
+
+/** Copia a quien pidió entrar: qué sigue y en cuánto respondemos. Sin botón: no hay nada que hacer todavía. */
+export function waitlistReceivedEmail(input: {
+  firstName: string
+  clinicName: string
+  phone: string
+  answerDays: number
+  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, el correo no promete que alguien lea las respuestas. */
+  replyTo?: string | undefined
+}): MailTemplate {
+  return renderEmail({
+    subject: `${input.clinicName} está en la lista de odentIA`,
+    preview: `Revisamos tu solicitud en ${input.answerDays} días hábiles.`,
+    title: `Listo, ${input.firstName}. ${input.clinicName} está en la lista`,
+    paragraphs: ["Mientras dure el programa Fundadores, se entra a odentIA por invitación. Esto es lo que sigue:"],
+    list: [
+      `Revisamos tu solicitud en ${input.answerDays} días hábiles.`,
+      `Te escribimos por WhatsApp al ${input.phone} para una llamada corta.`,
+      "Te llega tu invitación por correo y abres tu clínica como Fundadora.",
+    ],
+    note: input.replyTo ? "Si te equivocaste en un dato, responde este correo." : "Si te equivocaste en un dato, te lo preguntamos cuando te escribamos.",
+    reason: "Te escribimos porque pediste una invitación en la web de odentIA.",
+    ...(input.replyTo ? { replyTo: input.replyTo, replies: "Si respondes, te lee el equipo de odentIA." } : {}),
+  })
+}
+
+/** La invitación Fundadores: lo que recibe, en cifras del plan, y hasta cuándo vale el enlace. */
+export function founderInvitationEmail(input: {
+  firstName: string
+  clinicName: string
+  email: string
+  url: string
+  /** «domingo 1 de noviembre». */
+  expiresText: string
+  offer: { currency: string; priceCents: number; trialCreditCents: number; discountPercent: number | null; guaranteeMonths: number | null }
+  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, se pide otra invitación desde la web. */
+  replyTo?: string | undefined
+}): MailTemplate {
+  const credit = moneyText(input.offer.currency, input.offer.trialCreditCents)
+  const fee = input.offer.priceCents === 0 ? "y no pagas cuota" : `y tu cuota es de ${moneyText(input.offer.currency, input.offer.priceCents)} al mes`
+  const after = input.offer.discountPercent
+    ? `Después pagas solo lo que hacen, con ${input.offer.discountPercent} % menos que el precio de lista`
+    : "Después pagas solo lo que hacen"
+  const months = input.offer.guaranteeMonths ? `, durante ${input.offer.guaranteeMonths} meses.` : "."
+  return renderEmail({
+    subject: "Tu lugar en odentIA Fundadores está listo",
+    preview: `Los primeros ${credit} de tus agentes los pagamos nosotros.`,
+    title: `${input.firstName}, ${input.clinicName} ya puede entrar`,
+    paragraphs: [`Te guardamos un lugar en el programa Fundadores. Los primeros ${credit} de tus agentes los pagamos nosotros, ${fee}. ${after}${months}`],
+    action: { label: "Crear mi cuenta", url: input.url },
+    note: `El enlace sirve para ${input.email} y vence el ${input.expiresText}. ${
+      input.replyTo ? "Si vence, responde este correo y te enviamos otro." : "Si vence, pídela de nuevo desde la web de odentIA y te enviamos otra."
+    }`,
+    reason: "Te escribimos porque pediste una invitación en la web de odentIA.",
+    ...(input.replyTo ? { replyTo: input.replyTo, replies: "Si respondes, te lee el equipo de odentIA." } : {}),
   })
 }

@@ -14,10 +14,34 @@ const overviewSchema = z.object({
       label: z.string(),
       count: z.number().int().nonnegative(),
       description: z.string(),
-      path: z.enum(["/support", "/billing", "/commissions", "/organizations", "/users", "/complaints"]),
+      path: z.enum(["/support", "/billing", "/commissions", "/organizations", "/users", "/complaints", "/waitlist"]),
     }),
   ),
+  expiring: z
+    .array(
+      z.object({
+        organizationId: z.string(),
+        organizationName: z.string(),
+        kind: z.enum(["precio_especial", "condiciones"]),
+        endsAt: z.string(),
+        discountBps: z.number().nullable(),
+      }),
+    )
+    .default([]),
 })
+
+const endFormat = new Intl.DateTimeFormat("es", { weekday: "short", day: "numeric", month: "short" })
+
+/** «10 % negociado vence el sáb 24 oct · faltan 6 días». */
+function expiringText(item: z.infer<typeof overviewSchema>["expiring"][number], now: Date): { title: string; tail: string; soon: boolean } {
+  const end = new Date(item.endsAt)
+  const days = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / 86_400_000))
+  const day = endFormat.format(end).replaceAll(".", "").replace(",", "")
+  const tail = days === 0 ? "vence hoy" : `faltan ${days} ${days === 1 ? "día" : "días"}`
+  return item.kind === "precio_especial"
+    ? { title: `Su precio negociado (${(item.discountBps ?? 0) / 100} % menos) vence el ${day}`, tail, soon: days <= 7 }
+    : { title: `Sus condiciones de Fundador terminan el ${day}; después pasa al plan de lista`, tail, soon: days <= 7 }
+}
 
 function AdminHome() {
   const overview = useQuery({
@@ -56,6 +80,38 @@ function AdminHome() {
           ))}
         </ul>
       )}
+      {overview.data && overview.data.expiring.length > 0 ? (
+        <section aria-labelledby="vencen-pronto" className="space-y-3">
+          <h2 id="vencen-pronto" className="text-base font-semibold">
+            Precios especiales que vencen pronto
+          </h2>
+          <ul className="divide-y rounded-xl border bg-card">
+            {overview.data.expiring.map((item) => {
+              const text = expiringText(item, new Date())
+              return (
+                <li key={`${item.kind}-${item.organizationId}`} className="flex flex-wrap items-center gap-3 p-4">
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{item.organizationName}</span>
+                    <span className="block text-sm text-muted-foreground">
+                      {text.title} · <span className={text.soon ? "font-medium text-destructive" : undefined}>{text.tail}</span>
+                    </span>
+                  </span>
+                  <Link
+                    to="/organizations"
+                    search={{ org: item.organizationId }}
+                    className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    {item.kind === "precio_especial" ? "Renovar…" : "Ver la clínica"}
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+          <p className="text-sm text-muted-foreground">
+            Si no haces nada, vence: desde el día siguiente se cuenta al precio de lista y la clínica ya recibió su aviso.
+          </p>
+        </section>
+      ) : null}
       <TodayBilling />
     </PageShell>
   )

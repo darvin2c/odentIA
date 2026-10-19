@@ -8,7 +8,7 @@ import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
-import { currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
+import { activeDiscountBps, currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
 
 /* ---------- Negociación por clínica (ADR 0031, tablero O2) ---------- */
 
@@ -40,7 +40,7 @@ async function requestApproval(
   tx: Db,
   orgId: string,
   actor: AdminActor,
-  values: { kind: "descuento" | "prueba"; discountBps?: number; trialCreditCents?: number; trialDays?: number; note?: string | null },
+  values: { kind: "descuento" | "prueba"; discountBps?: number; discountEndsAt?: Date | null; trialCreditCents?: number; trialDays?: number; note?: string | null },
 ): Promise<NegotiationOutcome> {
   // Una pendiente por tipo: la nueva reemplaza a la anterior sin decidir.
   await tx
@@ -53,6 +53,7 @@ async function requestApproval(
       organizationId: orgId,
       kind: values.kind,
       discountBps: values.discountBps ?? null,
+      discountEndsAt: values.discountEndsAt ?? null,
       trialCreditCents: values.trialCreditCents ?? null,
       trialDays: values.trialDays ?? null,
       note: values.note?.trim() ? values.note.trim().slice(0, 500) : null,
@@ -67,15 +68,19 @@ async function requestApproval(
  * Descuento sobre el precio base de cada acción. La administración lo fija
  * hasta el descuento máximo del plan (el precio mínimo); soporte o el
  * vendedor, hasta lo que da el vendedor, y por encima queda pedido. La cuota
- * no tiene descuento. Rige lo que se cuente desde ahora.
+ * no tiene descuento. Rige lo que se cuente desde ahora y, con `discountEndsAt`,
+ * hasta ese instante (issue 168): después se cuenta a precio de lista.
  */
 export async function setSaasDiscount(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { discountBps: number; note?: string | null },
+  input: { discountBps: number; discountEndsAt?: Date | null; note?: string | null },
+  now = new Date(),
 ): Promise<NegotiationOutcome> {
   if (!Number.isInteger(input.discountBps) || input.discountBps < 0) throw validation("El descuento debe ser un porcentaje válido")
+  const endsAt = input.discountBps > 0 ? (input.discountEndsAt ?? null) : null
+  if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt.getTime() <= now.getTime())) throw validation("El vencimiento tiene que ser una fecha futura")
   const { plan } = await subscriptionAndPlan(tx, orgId)
   if (input.discountBps > plan.maxDiscountBps) {
     throw new ServiceError(
@@ -85,10 +90,13 @@ export async function setSaasDiscount(
     )
   }
   if (actor.role !== "admin" && input.discountBps > plan.sellerDiscountBps) {
-    return requestApproval(tx, orgId, actor, { kind: "descuento", discountBps: input.discountBps, note: input.note ?? null })
+    return requestApproval(tx, orgId, actor, { kind: "descuento", discountBps: input.discountBps, discountEndsAt: endsAt, note: input.note ?? null })
   }
-  await tx.update(saasSubscription).set({ discountBps: input.discountBps, updatedAt: new Date() }).where(eq(saasSubscription.organizationId, orgId))
-  await audit(tx, orgId, actor.userId, "saas.discount_set", { discountBps: input.discountBps })
+  await tx
+    .update(saasSubscription)
+    .set({ discountBps: input.discountBps, discountEndsAt: endsAt, updatedAt: now })
+    .where(eq(saasSubscription.organizationId, orgId))
+  await audit(tx, orgId, actor.userId, "saas.discount_set", { discountBps: input.discountBps, discountEndsAt: endsAt?.toISOString() ?? null })
   return { status: "aplicado", negotiationId: null }
 }
 
@@ -143,6 +151,7 @@ export interface SaasNegotiationRow {
   organizationId: string
   kind: "descuento" | "prueba"
   discountBps: number | null
+  discountEndsAt: Date | null
   trialCreditCents: number | null
   trialDays: number | null
   note: string | null
@@ -170,6 +179,7 @@ export async function listSaasNegotiations(tx: Db, input: { orgId?: string; stat
     organizationId: row.organizationId,
     kind: row.kind as SaasNegotiationRow["kind"],
     discountBps: row.discountBps,
+    discountEndsAt: row.discountEndsAt,
     trialCreditCents: row.trialCreditCents,
     trialDays: row.trialDays,
     note: row.note,
@@ -189,7 +199,7 @@ export async function decideSaasNegotiation(tx: Db, actor: AdminActor, negotiati
   if (row.status !== "pendiente") throw new ServiceError("SAAS_NEGOTIATION_DECIDED", 409, "Ese pedido ya se decidió")
   if (approve) {
     if (row.kind === "descuento" && row.discountBps !== null) {
-      await setSaasDiscount(tx, actor, row.organizationId, { discountBps: row.discountBps })
+      await setSaasDiscount(tx, actor, row.organizationId, { discountBps: row.discountBps, discountEndsAt: row.discountEndsAt })
     } else if (row.kind === "prueba" && row.trialCreditCents !== null && row.trialDays !== null) {
       await setSaasTrialTerms(tx, actor, row.organizationId, { trialCreditCents: row.trialCreditCents, trialDays: row.trialDays })
     }
@@ -240,7 +250,7 @@ export async function setSaasBillingCycle(tx: Db, actor: AdminActor, orgId: stri
 
 /* ---------- Avisos, alarma y límite (tablero C4) ---------- */
 
-export type SaasAlertFamily = "saldo_prueba" | "dias_prueba" | "credito" | "tope"
+export type SaasAlertFamily = "saldo_prueba" | "dias_prueba" | "credito" | "tope" | "precio_especial" | "condiciones"
 export type SaasAlertLevel = "aviso" | "alarma" | "limite"
 
 export interface SaasAlert {
@@ -250,7 +260,7 @@ export interface SaasAlert {
   periodKey: string
   title: string
   message: string
-  action: "elegir_plan" | "cambiar_tope" | "ver_consumo"
+  action: "elegir_plan" | "cambiar_tope" | "ver_consumo" | "ver_plan"
 }
 
 /** Desde qué parte usada avisa y alarma: los mismos niveles del medidor. */
@@ -369,8 +379,44 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
       })
     }
   }
+
+  // Precio negociado con vencimiento (issue 168): se avisa desde 15 días antes.
+  const discount = activeDiscountBps(sub, now)
+  if (discount > 0 && sub.discountEndsAt) {
+    const daysLeft = Math.ceil((sub.discountEndsAt.getTime() - now.getTime()) / DAY)
+    if (daysLeft <= SAAS_DISCOUNT_NOTICE_DAYS) {
+      alerts.push({
+        family: "precio_especial",
+        level: daysLeft <= 3 ? "alarma" : "aviso",
+        periodKey: sub.discountEndsAt.toISOString().slice(0, 10),
+        title: daysLeft <= 3 ? "Alarma" : "Aviso",
+        message: `Tu precio especial (${discount / 100} % menos en cada acción) termina el ${fmtDay(sub.discountEndsAt)}. Desde el día siguiente pagas el precio de lista. ¿Quieres conversarlo? Escríbenos desde Soporte.`,
+        action: "ver_plan",
+      })
+    }
+  }
+
+  // Condiciones garantizadas de quien entró por invitación (Fundadores): se avisa desde 30 días antes.
+  if (sub.guaranteedUntil && sub.guaranteedUntil.getTime() > now.getTime()) {
+    const daysLeft = Math.ceil((sub.guaranteedUntil.getTime() - now.getTime()) / DAY)
+    if (daysLeft <= SAAS_GUARANTEE_NOTICE_DAYS) {
+      alerts.push({
+        family: "condiciones",
+        level: daysLeft <= 7 ? "alarma" : "aviso",
+        periodKey: sub.guaranteedUntil.toISOString().slice(0, 10),
+        title: daysLeft <= 7 ? "Alarma" : "Aviso",
+        message: `Tus condiciones de Fundador terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista de odentIA.`,
+        action: "ver_plan",
+      })
+    }
+  }
   return alerts
 }
+
+/** Días antes del fin de un precio negociado en que se avisa a la clínica y a la administración. */
+export const SAAS_DISCOUNT_NOTICE_DAYS = 15
+/** Días antes del fin de las condiciones garantizadas en que se avisa (decisión 4 de Fundadores). */
+export const SAAS_GUARANTEE_NOTICE_DAYS = 30
 
 export interface AgentSpendGate {
   /** Se usó todo el saldo de prueba: los agentes se pausan. */
@@ -520,6 +566,10 @@ export interface OrganizationBillingTerms {
   status: string
   trial: { creditCents: number; days: number; startedAt: Date | null; endsAt: Date | null }
   discountBps: number
+  /** Último instante del descuento; null = no vence. */
+  discountEndsAt: Date | null
+  /** Entró por invitación con condiciones garantizadas: hasta cuándo. */
+  guaranteedUntil: Date | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
   activatedAt: Date | null
@@ -567,7 +617,9 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
       startedAt: sub.trialStartedAt,
       endsAt: sub.trialEndsAt,
     },
-    discountBps: sub.discountBps,
+    discountBps: activeDiscountBps(sub, now),
+    discountEndsAt: activeDiscountBps(sub, now) > 0 ? sub.discountEndsAt : null,
+    guaranteedUntil: sub.guaranteedUntil,
     spendCapCents: sub.spendCapCents,
     billingCycle: sub.billingCycle as "mensual" | "quincenal",
     activatedAt: sub.activatedAt,

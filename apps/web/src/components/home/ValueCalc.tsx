@@ -1,17 +1,17 @@
 // 05 · «Lo que te cuesta no tenernos»: lo que se pierde sin agentes frente a lo que se paga,
 // con los números que pone la clínica. Es un ejemplo, nunca una promesa de resultados.
 import { type ChangeEvent, useState } from "react"
-import { usd } from "../../lib/pricing"
+import { usd, type ValuePrices } from "../../lib/pricing"
 import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../../lib/value"
 import SizePicker from "../SizePicker"
 
-export default function ValueCalc() {
+export default function ValueCalc({ prices }: { prices: ValuePrices }) {
   const [i, setI] = useState<ValueInput>(DEFAULT_VALUE_INPUT)
   const num = (k: keyof ValueInput, max: number) => (e: ChangeEvent<HTMLInputElement>) => {
     const v = Math.max(0, Math.min(max, Math.round(Number(e.target.value) || 0)))
     setI({ ...i, [k]: v })
   }
-  const r = computeValue(i)
+  const r = computeValue(i, prices)
   const top = Math.max(r.withoutUs, r.withUs, 1)
   const sinPct = ((r.withoutUs / top) * 100).toFixed(1) + "%"
   const conPct = Math.max(2, (r.withUs / top) * 100).toFixed(1) + "%"

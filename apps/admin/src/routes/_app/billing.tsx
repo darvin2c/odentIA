@@ -5,8 +5,11 @@
 import { formatMoney } from "@odentia/clinical"
 import {
   Button,
+  FieldLabel,
   Input,
   Label,
+  RadioGroup,
+  RadioGroupItem,
   Select,
   SelectContent,
   SelectItem,
@@ -399,6 +402,8 @@ function BillingPage() {
         onDone={refresh}
       />
 
+      <SignupModeSection />
+
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">
           Planes
@@ -435,6 +440,9 @@ function BillingPage() {
                   <p className="text-xs text-muted-foreground">
                     {plan.code} · {plan.billingPeriod}
                     {plan.isDefault ? " · por defecto" : ""}
+                    {plan.seatLimit !== null ? ` · por invitación, ${plan.seatLimit} lugares` : ""}
+                    {plan.guaranteeMonths ? ` · garantizado ${plan.guaranteeMonths} meses` : ""}
+                    {plan.showOnWeb ? " · en la web" : ""}
                     {plan.creditCents ? ` · vuelve ${money(plan.creditCents, plan.currency)} en crédito` : ""}
                     {plan.conversationMicros !== null
                       ? ` · conversación ${perAction(plan.conversationMicros, plan.currency)}, consulta ${perAction(plan.consultationMicros ?? 0, plan.currency)}, cita ${perAction(plan.recoveryMicros ?? 0, plan.currency)}`
@@ -493,7 +501,12 @@ function BillingPage() {
       </section>
 
       {planDrawer ? (
-        <PlanDrawer plan={planDrawer.plan} onClose={() => setPlanDrawer(null)} onSaved={refresh} />
+        <PlanDrawer
+          plan={planDrawer.plan}
+          listPlan={plans.data?.find((plan) => plan.isDefault && plan.isActive)}
+          onClose={() => setPlanDrawer(null)}
+          onSaved={refresh}
+        />
       ) : null}
       {chargeDrawer ? (
         <ChargeDrawer
@@ -1109,6 +1122,88 @@ function HistorySection({
           ))}
         </ul>
       )}
+    </section>
+  )
+}
+
+const SIGNUP_MODES = [
+  {
+    value: "invitacion",
+    label: "Solo con invitación",
+    hint: "La web pide invitación y la solicitud entra a la lista de espera. Quien ya tiene cuenta no puede abrir una clínica sin invitación.",
+  },
+  { value: "abierta", label: "Abierta", hint: "Cualquiera abre su clínica con el plan por defecto." },
+] as const
+
+/** «Alta de clínicas nuevas» (Fundadores, decisión 2): cambiarla rige al instante, sin programar nada. */
+function SignupModeSection() {
+  const queryClient = useQueryClient()
+  const mode = useQuery({
+    queryKey: ["admin", "signup-mode"],
+    queryFn: () => api<{ mode: "invitacion" | "abierta" }>("/api/admin/waitlist/signup-mode"),
+  })
+  const save = useMutation({
+    mutationFn: (next: "invitacion" | "abierta") =>
+      api<{ mode: "invitacion" | "abierta" }>("/api/admin/waitlist/signup-mode", { method: "PUT", body: JSON.stringify({ mode: next }) }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["admin", "signup-mode"], data)
+      void queryClient.invalidateQueries({ queryKey: ["admin", "waitlist"] })
+    },
+  })
+  const [confirming, setConfirming] = useState<null | "invitacion" | "abierta">(null)
+  return (
+    <section id="alta" aria-labelledby="alta-titulo" className="flex flex-col gap-2 rounded-xl border bg-card p-4">
+      <h2 id="alta-titulo" className="text-base font-semibold">
+        Alta de clínicas nuevas
+      </h2>
+      {mode.isPending ? (
+        <LoadingState message="Cargando…" />
+      ) : mode.isError ? (
+        <ErrorState title="No se pudo leer cómo se abren clínicas" message={errorMessage(mode.error)} onRetry={() => void mode.refetch()} />
+      ) : (
+        <RadioGroup
+          aria-labelledby="alta-titulo"
+          value={mode.data.mode}
+          onValueChange={(value) => {
+            if (value !== mode.data.mode) setConfirming(value as "invitacion" | "abierta")
+          }}
+          className="gap-3"
+        >
+          {SIGNUP_MODES.map((option) => (
+            <FieldLabel
+              key={option.value}
+              className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal has-data-checked:border-primary"
+            >
+              <RadioGroupItem value={option.value} className="mt-0.5" />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">{option.label}</span>
+                <span className="text-sm text-muted-foreground">{option.hint}</span>
+              </span>
+            </FieldLabel>
+          ))}
+        </RadioGroup>
+      )}
+      {save.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {errorMessage(save.error)}
+        </p>
+      ) : null}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming === "abierta" ? "¿Abrir el alta de clínicas?" : "¿Pedir invitación para abrir clínicas?"}
+        description={
+          confirming === "abierta"
+            ? "Desde ahora cualquiera con cuenta puede abrir su clínica con el plan por defecto, sin pasar por la lista de espera."
+            : "Desde ahora abrir una clínica pide una invitación. Las clínicas que ya existen no cambian."
+        }
+        confirmLabel={confirming === "abierta" ? "Abrir el alta" : "Pedir invitación"}
+        variant="default"
+        pending={save.isPending}
+        onConfirm={() => {
+          if (confirming) save.mutate(confirming, { onSettled: () => setConfirming(null) })
+        }}
+        onClose={() => setConfirming(null)}
+      />
     </section>
   )
 }

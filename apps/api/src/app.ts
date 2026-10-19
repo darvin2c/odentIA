@@ -22,6 +22,7 @@ import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
+import { createAdminFoundersRoute } from "./routes/admin-founders.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
@@ -58,6 +59,7 @@ import {
 } from "./routes/public-patient-registration.js"
 import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
+import { createPublicFoundersRoute } from "./routes/public-founders.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createLegalRoute } from "./routes/legal.js"
 import { createPublicSignUpRoute } from "./routes/public-sign-up.js"
@@ -91,6 +93,8 @@ export interface AppDeps {
   mailer: Mailer
   /** Correo de odentIA que recibe el aviso de cada hoja del Libro de Reclamaciones (COMPLAINTS_EMAIL). */
   complaintsEmail?: string | undefined
+  /** Buzón que lee las respuestas a los correos de Fundadores (FOUNDERS_EMAIL). */
+  foundersEmail?: string | undefined
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -267,6 +271,7 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
+  app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelURL: deps.webURL, replyTo: deps.foundersEmail }))
   app.get("/api/admin/overview", (c) => runService(c, 200, () =>
     deps.ownerDb.transaction((tx) => getBackofficeOverview(tx, adminContextOf(c))),
   ))
@@ -296,7 +301,17 @@ export function createApp(deps: AppDeps) {
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
   app.route("/api/public/sign-up", createPublicSignUpRoute({ ownerDb: deps.ownerDb }))
-  // Libro de Reclamaciones de odentIA: la única ruta que llama la web de marketing.
+  // Fundadores (issue 165): precios que publica la web, solicitudes de la lista de espera y la invitación.
+  app.route(
+    "/api/public/founders",
+    createPublicFoundersRoute({
+      ownerDb: deps.ownerDb,
+      mailer: deps.mailer,
+      remoteAddress: deps.registrationRemoteAddress,
+      replyTo: deps.foundersEmail,
+    }),
+  )
+  // Libro de Reclamaciones de odentIA.
   app.route(
     "/api/public/libro-de-reclamaciones",
     createPublicConsumerComplaintsRoute({
