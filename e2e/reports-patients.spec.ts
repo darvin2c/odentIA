@@ -198,7 +198,7 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
   const advanceTo = async (target: Locator) => {
     for (let step = 0; step < 8 && !(await target.isVisible()); step += 1) {
       for (const question of [/alérgic/, /alguna enfermedad/, /algún medicamento/]) {
-        const group = anon.getByRole("group", { name: question })
+        const group = anon.getByRole("group", { name: question }).first()
         if (await group.isVisible()) await group.getByRole("button", { name: "No", exact: true }).click()
       }
       const before = await progress.textContent()
@@ -214,8 +214,10 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
     await advanceTo(anon.getByLabel(/^Nombres/))
     await fillPatientNames(anon, "Olga Referida")
     await anon.getByLabel("Fecha de nacimiento").fill(writtenDate("1985-06-15"))
-    await advanceTo(anon.getByLabel(/^Teléfono/))
-    await anon.getByLabel(/^Teléfono/).fill("+51999300301")
+    // «¿Cómo te contactamos?»: el celular va con el país de la clínica ya elegido.
+    const phone = anon.getByRole("textbox", { name: /^Tu celular/ })
+    await advanceTo(phone)
+    await phone.fill("999300301")
     // «Para conocerte mejor»: una lista, no texto libre; «¿Cuál?» aparece con «Otro» y se va con otra opción.
     const kind = anon.getByRole("combobox", { name: /^Cómo nos conoció/ })
     await advanceTo(kind)
@@ -226,11 +228,15 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
     await chooseOption(kind, { label: "Recomendación de alguien" })
     await expect(which).toHaveCount(0)
     await info.attach("registro-en-linea", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+    // Con la respuesta puesta se sigue con «Siguiente»: «Saltar» la borraría.
+    const answered = await progress.textContent()
+    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    await expect(progress).not.toHaveText(answered ?? "")
     const consent = anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })
     await advanceTo(consent)
     await consent.check()
     await anon.getByRole("button", { name: "Enviar registro", exact: true }).click()
-    await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(anon.getByRole("heading", { name: "Registro recibido" })).toBeVisible({ timeout: 20_000 })
   } finally {
     await context.close()
   }
