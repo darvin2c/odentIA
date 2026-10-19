@@ -187,9 +187,10 @@ it("lo atendido: un acto con cantidad vale precio × cantidad, como su cargo", a
     priceCents: 4_000,
     currency: "PEN",
   })
+  // Sin hora de fin: el inicio lo puso el reloj de la base y un fin del reloj de la prueba puede quedar antes (`encounter_end_check`).
   await ownerDb
     .update(encounter)
-    .set({ status: "finalizada", finalizedAt: new Date(), endedAt: new Date(), finalizedBy: f.actor, signerName: "Clínico", signerRegistration: "1" })
+    .set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: f.actor, signerName: "Clínico", signerRegistration: "1" })
     .where(eq(encounter.id, f.encounter.id))
   // Reportes › Finanzas › Comisiones: lo que atendió quien firmó, y todavía sin cobrar.
   const commissions = await f.run((tx) => getReportCommissions(tx, "org_a", { period: "este_mes" }))
