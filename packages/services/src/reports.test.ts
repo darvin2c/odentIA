@@ -26,16 +26,12 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
+import { createPromotion } from "./promotions.js"
 import { getAgendaReport } from "./report-agenda.js"
-import { reportScope } from "./report-scope.js"
-import {
-  controlTotals,
-  getReportAdvice,
-  getReportList,
-  getReportMoney,
-  getReportSales,
-  getReportService,
-} from "./reports.js"
+import { getReportAgent } from "./report-agent.js"
+import { getReportCommissions, getReportFinance, getReportOutlook, getReportPromotions } from "./report-finance.js"
+import { getPatientReportList, getReportPatients } from "./report-patients.js"
+import { getReportAdvice, getReportList } from "./reports.js"
 import { getReportSummary } from "./report-summary.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
@@ -154,11 +150,11 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   const unmarked = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "unmarked" }, NOW))
   expect(unmarked.rows.map((row) => row.patientId)).toEqual([p1])
 
-  // Pacientes nuevos: su primera cita atendida cae en el periodo.
-  const sales = await c.run((tx) => getReportSales(tx, c.orgId, { period: "2026-09" }, NOW))
-  expect([sales.newPatients, sales.previousNewPatients]).toEqual([2, 2])
-  const salesA = await c.run((tx) => getReportSales(tx, c.orgId, { period: "2026-09", branchId: a.branchId }, NOW))
-  expect(salesA.newPatients).toBe(1)
+  // Pacientes nuevos (Reportes › Pacientes): su primera cita atendida cae en el periodo, y en la sede elegida.
+  const patients = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(patients.newPatients).toEqual({ current: 2, previous: 2 })
+  const patientsA = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09", branchId: a.branchId }, NOW))
+  expect(patientsA.newPatients.current).toBe(1)
   const fresh = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "new_patients" }, NOW))
   expect(fresh.total).toBe(2)
   expect(fresh.rows.map((row) => [row.patientId, row.hasNextAppointment])).toEqual([
@@ -181,13 +177,12 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   expect(range.period).toMatchObject({ kind: "range", grain: "day", days: { from: "2026-09-03", to: "2026-09-09" } })
 })
 
-it("tratamientos realizados: un acto con cantidad cuenta sus unidades y vale precio × cantidad, como su cargo", async () => {
+it("lo atendido: un acto con cantidad vale precio × cantidad, como su cargo", async () => {
   const f = await clinicalFixture()
-  const name = `Sellante ${randomUUID().slice(0, 8)}`
   await ownerDb.insert(encounterProcedure).values({
     organizationId: "org_a",
     encounterId: f.encounter.id,
-    description: name,
+    description: "Sellante",
     quantity: 3,
     priceCents: 4_000,
     currency: "PEN",
@@ -196,8 +191,9 @@ it("tratamientos realizados: un acto con cantidad cuenta sus unidades y vale pre
     .update(encounter)
     .set({ status: "finalizada", finalizedAt: new Date(), endedAt: new Date(), finalizedBy: f.actor, signerName: "Clínico", signerRegistration: "1" })
     .where(eq(encounter.id, f.encounter.id))
-  const sales = await f.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))
-  expect(sales.procedures.find((row) => row.name === name)).toEqual({ name, currency: "PEN", count: 3, cents: 12_000 })
+  // Reportes › Finanzas › Comisiones: lo que atendió quien firmó, y todavía sin cobrar.
+  const commissions = await f.run((tx) => getReportCommissions(tx, "org_a", { period: "este_mes" }))
+  expect(commissions.rows.find((row) => row.userId === f.actor)).toMatchObject({ attendedCents: 12_000, unpaidCents: 12_000, collectedCents: 0 })
 })
 
 it("controles: los que tocaban en el periodo, según su estado a hoy", async () => {
@@ -210,16 +206,26 @@ it("controles: los que tocaban en el periodo, según su estado a hoy", async () 
     { organizationId: c.orgId, patientId: p2, kind: "mantenimiento", title: "Control antiguo", dueAt: new Date("2026-09-17T15:00:00Z"), status: "realizado" },
     { organizationId: c.orgId, patientId: p1, kind: "mantenimiento", title: "Control de octubre", dueAt: new Date("2026-10-20T15:00:00Z") },
   ])
-  // La misma cuenta que usa Reportes › Pacientes.
-  const september = await c.run((tx) => reportScope(tx, c.orgId, { period: "2026-09" }, NOW))
-  const controls = await c.run((tx) => controlTotals(tx, c.orgId, september.window))
+  // Reportes › Pacientes, «Si vuelven».
+  const september = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09" }, NOW))
+  const controls = september.controls.current
   expect(controls).toEqual({ due: 3, came: 0, pending: 1, cancelled: 1, unknown: 1 })
-  const pending = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "controls_pending" }, NOW))
-  expect(pending.total).toBe(controls.pending)
-  expect(pending.rows).toEqual([expect.objectContaining({ patientId: p1, title: "Control de limpieza" })])
+  // «Ver los que no vinieron» trae tantas filas como dice la cifra: los que tocaban y no cuentan como venidos.
+  const missed = await c.run((tx) => getPatientReportList(tx, c.orgId, { period: "2026-09", list: "controls_missed" }, NOW))
+  expect(missed.total).toBe(controls.due - controls.came)
+  expect(missed.rows.map((row) => [row.patientId, row.title])).toEqual([
+    [p1, "Control de limpieza"],
+    [p2, "Control anual"],
+    [p2, "Control antiguo"],
+  ])
 })
 
-it("presupuestos: tres grupos que suman el total, y lo aceptado en parte cuenta por lo aceptado", async () => {
+it("presupuestos: el aceptado en parte es uno aceptado y cuenta por lo aceptado", async () => {
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
+  // La clínica de prueba es compartida: se mide lo que suman estos presupuestos.
+  const acceptance = async () => (await run((tx) => getReportSummary(tx, "org_a", { period: "este_mes" }))).acceptance.current
+  const upcoming = async () => (await run((tx) => getReportOutlook(tx, "org_a", { period: "este_mes" }))).upcoming
+  const [acceptedBefore, upcomingBefore] = [await acceptance(), await upcoming()]
   const quote = async (decisions: Array<"aceptado" | "rechazado"> | null, lines = 1) => {
     const f = await clinicalFixture()
     const items: Array<{ id: string }> = []
@@ -234,50 +240,77 @@ it("presupuestos: tres grupos que suman el total, y lo aceptado en parte cuenta 
     return f
   }
   await quote(["aceptado"])
-  await quote(["aceptado", "rechazado"], 2)
-  const waiting = await quote(null)
+  const partial = await quote(["aceptado", "rechazado"], 2)
+  await quote(null)
   await quote(["rechazado"])
 
-  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
-  const sales = await run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))
-  expect(sales.budgets).toEqual([
-    {
-      currency: "PEN",
-      accepted: { count: 2, cents: 240000 },
-      waiting: { count: 1, cents: 120000 },
-      rejected: { count: 1, cents: 120000 },
-    },
-  ])
-  const list = await run((tx) => getReportList(tx, "org_a", { period: "este_mes", list: "budgets_waiting" }))
-  expect(list.total).toBe(1)
-  expect(list.rows).toEqual([expect.objectContaining({ patientId: waiting.patient.id, cents: 120000, currency: "PEN" })])
+  // Cuatro presentados y dos aceptados: el aceptado en parte cuenta una vez.
+  const acceptedAfter = await acceptance()
+  expect({ presented: acceptedAfter.presented - acceptedBefore.presented, accepted: acceptedAfter.accepted - acceptedBefore.accepted }).toEqual({
+    presented: 4,
+    accepted: 2,
+  })
+  // Reportes › Finanzas, «Lo que viene»: solo lo aceptado, a su precio; del aceptado en parte, su línea aceptada.
+  const upcomingAfter = await upcoming()
+  expect({ cents: upcomingAfter.cents - upcomingBefore.cents, patients: upcomingAfter.patients - upcomingBefore.patients }).toEqual({
+    cents: 240_000,
+    patients: 2,
+  })
+  // Su lista dice lo mismo de cada persona.
+  const list = await run((tx) => getReportList(tx, "org_a", { period: "este_mes", list: "upcoming_unbooked" }))
+  expect(list.rows.find((row) => row.patientId === partial.patient.id)).toMatchObject({ cents: 120_000, currency: "PEN" })
 })
 
-it("presupuestos con opciones: cuenta la recomendada, como el resto de la aplicación, nunca la suma", async () => {
+it("presupuestos con opciones: vale la recomendada mientras decide y la elegida después, como el resto de la aplicación, nunca la suma", async () => {
   const f = await clinicalFixture()
+  const DAY = 86_400_000
+  const promotion = (name: string, priceCents: number) =>
+    f.run((tx) =>
+      createPromotion(tx, "org_a", f.actor, {
+        name: `${name} ${randomUUID().slice(0, 6)}`,
+        startsAt: new Date(Date.now() - DAY).toISOString(),
+        endsAt: new Date(Date.now() + 30 * DAY).toISOString(),
+        conditions: null,
+        items: [{ serviceId: f.service.id, mode: "fixed", priceCents }],
+      }),
+    )
+  // La tarifa es 1 200: la opción A lleva una promoción a 1 000 y la B, la recomendada, otra a 900.
+  const [inA, inB] = [await promotion("En la A", 100_000), await promotion("En la B", 90_000)]
   const item = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
   const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
-  const withTwo = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, budget.options[0]!.id))
-  const optionB = withTwo.options[1]!
+  const optionA = budget.options[0]!
+  const optionB = (await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, optionA.id))).options[1]!
   await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, optionId: optionB.id, priceCents: 300000 }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [
+        { planItemId: item.id, optionId: optionA.id, promotionId: inA.id },
+        { planItemId: item.id, optionId: optionB.id, promotionId: inB.id },
+      ],
+    }),
   )
   await f.run((tx) => recommendBudgetOption(tx, ...f.args, budget.id, optionB.id))
-  // La clínica de prueba es compartida: se mide lo que suma este presupuesto.
-  const waitingOf = async () =>
-    (await f.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))).budgets[0]?.waiting ?? { count: 0, cents: 0 }
-  const before = await waitingOf()
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
-  const detail = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))
-  expect(detail.totalCents).toBe(300000)
+  expect((await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))).totalCents).toBe(90_000)
 
-  const after = await waitingOf()
-  expect({ count: after.count - before.count, cents: after.cents - before.cents }).toEqual({ count: 1, cents: 300000 })
-  const list = await f.run((tx) => getReportList(tx, "org_a", { period: "este_mes", list: "budgets_waiting" }))
-  expect(list.rows.find((row) => row.id === budget.id)).toEqual(expect.objectContaining({ cents: detail.totalCents }))
+  // Mientras decide vale la recomendada: en «Qué dejó cada promoción» usó la de la B, no las dos.
+  const promotions = async () => (await f.run((tx) => getReportPromotions(tx, "org_a", { period: "este_mes" }))).promotions
+  const deciding = await promotions()
+  expect(deciding.find((row) => row.promotionId === inB.id)).toMatchObject({ people: 1, accepted: 0 })
+  expect(deciding.find((row) => row.promotionId === inA.id)).toBeUndefined()
+
+  // Elige la A: desde entonces vale la elegida, también en «Lo que viene» (su precio, nunca la suma).
+  const upcoming = async () => (await f.run((tx) => getReportOutlook(tx, "org_a", { period: "este_mes" }))).upcoming.cents
+  const before = await upcoming()
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { optionId: optionA.id, decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const decided = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))
+  expect(decided.totalCents).toBe(100_000)
+  expect((await upcoming()) - before).toBe(decided.totalCents)
+  const chosen = await promotions()
+  expect(chosen.find((row) => row.promotionId === inA.id)).toMatchObject({ people: 1, accepted: 1, discountCents: 20_000 })
+  expect(chosen.find((row) => row.promotionId === inB.id)).toBeUndefined()
 })
 
-it("atención: quién respondió primero, por dónde escribieron y qué pasó el agente al equipo", async () => {
+it("cómo respondimos: quién respondió primero, por dónde escribieron y qué pasó el agente al equipo, frente al mes anterior", async () => {
   const c = await clinic()
   const [person] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Interlocutor" }).returning()
   const channel = async (name: string) => {
@@ -310,16 +343,18 @@ it("atención: quién respondió primero, por dónde escribieron y qué pasó el
   await thread(whatsapp, "2026-08-13T15:00:00Z", { kind: "user", seconds: 300 })
   await ownerDb.insert(agentHandoff).values({ organizationId: c.orgId, conversationId: handed, contactId: person!.id, reason: "Pide hablar con alguien", summary: "Escribió", createdAt: new Date("2026-09-10T15:05:00Z") })
 
-  const report = await c.run((tx) => getReportService(tx, c.orgId, { period: "2026-09" }, NOW))
-  expect(report.responses).toEqual({ conversations: 4, responded: 3, timedResponses: 3, avgFirstResponseSeconds: 260, byAgent: 2, byTeam: 1, handedOff: 1 })
-  expect(report.previousResponses).toMatchObject({ conversations: 1, responded: 1, avgFirstResponseSeconds: 300 })
-  expect(report.byChannel).toEqual([
+  // Reportes › Agente: medianas del agente (60 y 120 s) y del equipo (600 s), por separado.
+  const report = await c.run((tx) => getReportAgent(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(report.responses.current).toEqual({ conversations: 4, responded: 3, byAgent: 2, byTeam: 1, agentMedianSeconds: 90, teamMedianSeconds: 600 })
+  expect(report.responses.handedOff).toBe(1)
+  expect(report.responses.previous).toEqual({ conversations: 1, responded: 1, byAgent: 0, byTeam: 1, agentMedianSeconds: null, teamMedianSeconds: 300 })
+  expect(report.responses.byChannel).toEqual([
     { channel: "whatsapp", count: 3 },
     { channel: "instagram", count: 1 },
   ])
 })
 
-it("dinero: totales del periodo, del anterior y por mes, en la moneda y la zona de otra clínica", async () => {
+it("lo cobrado: el periodo, el anterior y por mes, en la moneda y la zona de otra clínica", async () => {
   // Una clínica de otro país: euros y hora de Madrid.
   const c = await clinic({ country: "ES", currency: "EUR", timezone: "Europe/Madrid", locale: "es-ES" })
   const place = await c.site("Centro")
@@ -332,18 +367,20 @@ it("dinero: totales del periodo, del anterior y por mes, en la moneda y la zona 
   await pay("2026-09-15T10:00:00Z", 20000)
   await c.visit(place, doctor, p1, "2026-08-31T22:30:00Z", "atendida")
 
-  const september = await c.run((tx) => getReportMoney(tx, c.orgId, { period: "2026-09" }, NOW))
-  expect(september).toMatchObject({ timezone: "Europe/Madrid", locale: "es-ES", currency: "EUR", series: [] })
-  expect(september.byCurrency).toEqual([expect.objectContaining({ currency: "EUR", netoCents: 25000, gastadoCents: 0, quedaCents: 25000 })])
-  expect(september.previousTotals).toEqual([{ currency: "EUR", netoCents: 10000, gastadoCents: 0, quedaCents: 10000 }])
+  // Reportes › Finanzas: sin gastos, todo lo cobrado queda en caja.
+  const september = await c.run((tx) => getReportFinance(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(september).toMatchObject({ timezone: "Europe/Madrid", locale: "es-ES", currency: "EUR", otherCurrencies: [] })
+  expect(september.totals.current).toMatchObject({ cobradoCents: 25000, otherExpensesCents: 0, leavesCents: 25000, cashLeftCents: 25000 })
+  expect(september.totals.previous).toMatchObject({ cobradoCents: 10000, cashLeftCents: 10000 })
 
-  const quarter = await c.run((tx) => getReportMoney(tx, c.orgId, { period: "ultimos_3_meses" }, NOW))
-  expect(quarter.series.map((row) => [row.month, row.totals])).toEqual([
-    [7, []],
-    [8, [{ currency: "EUR", netoCents: 10000, gastadoCents: 0, quedaCents: 10000 }]],
-    [9, [{ currency: "EUR", netoCents: 25000, gastadoCents: 0, quedaCents: 25000 }]],
+  // Por mes, en los meses de Madrid; tres meses se comparan con los tres anteriores, que no cobraron nada.
+  const quarter = await c.run((tx) => getReportFinance(tx, c.orgId, { period: "ultimos_3_meses" }, NOW))
+  expect(quarter.chart.slice(-3).map((row) => [row.key, row.cobradoCents])).toEqual([
+    ["2026-07", 0],
+    ["2026-08", 10000],
+    ["2026-09", 25000],
   ])
-  expect(quarter.previousTotals).toEqual([])
+  expect(quarter.totals).toMatchObject({ current: { cobradoCents: 35000 }, previous: { cobradoCents: 0 } })
 
   // El Resumen cobra lo mismo que Finanzas, ahora y en sus 12 meses, con la regla de lo neto.
   const summary = await c.run((tx) => getReportSummary(tx, c.orgId, { period: "2026-09" }, NOW))

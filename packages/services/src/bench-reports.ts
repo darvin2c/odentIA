@@ -7,7 +7,7 @@
  *   pnpm --filter @odentia/services bench:reports
  */
 import { createAppDb, type Db, withOrgContext } from "@odentia/db"
-import { getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
+import { getReportList } from "./reports.js"
 import { getReportProfessionals, getReportSummary } from "./report-summary.js"
 import { getAgentReportList, getReportAgent } from "./report-agent.js"
 import { getAgendaReport } from "./report-agenda.js"
@@ -24,10 +24,7 @@ type Read = (tx: Db, org: string, query: { period: string }) => Promise<unknown>
 const READS: Record<string, Read> = {
   summary: getReportSummary,
   professionals: getReportProfessionals,
-  money: getReportMoney,
   agenda: getAgendaReport,
-  sales: getReportSales,
-  service: getReportService,
   "list:new_patients": (tx, org, query) => getReportList(tx, org, { ...query, list: "new_patients" }),
   // Agente, con lo pagado a odentIA (lo más pesado: cada tramo de la suscripción entero).
   agent: (tx, org, query) => getReportAgent(tx, org, query, new Date(), { billing: true }),
@@ -42,7 +39,7 @@ const READS: Record<string, Read> = {
   "list:funnel_lost_booked": (tx, org, query) => getPatientReportList(tx, org, { ...query, list: "funnel_lost_booked" }),
   "list:lapsed": (tx, org, query) => getPatientReportList(tx, org, { ...query, list: "lapsed" }),
 }
-// `BENCH_ONLY=agenda,money` mide solo esas consultas.
+// `BENCH_ONLY=agenda,finance` mide solo esas consultas.
 const only = process.env.BENCH_ONLY?.split(",").map((name) => name.trim()).filter(Boolean)
 
 const rows: Array<{ consulta: string; periodo: string; ms: number }> = []

@@ -23,8 +23,6 @@ import {
   patientPaymentApplication,
   patientPaymentRefund,
   paymentTicket,
-  treatmentBudget,
-  treatmentBudgetItem,
 } from "@odentia/db/schema/clinical"
 import {
   cashClosure,
@@ -38,7 +36,6 @@ import {
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { promotionServicePrice } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
@@ -1464,11 +1461,6 @@ function monthBounds(timezone: string, year: number, month: number): { start: Da
   return { start: monthStart(timezone, year, month), end: monthStart(timezone, next.y, next.m) }
 }
 
-/** Vigente en el mes: no anulado, o anulado después del fin de mes. */
-function liveInMonth(voidedAt: Date | null, end: Date): boolean {
-  return voidedAt === null || voidedAt >= end
-}
-
 /** Efectivo por tipo UN/CEFACT 4461 (10); el nombre del medio nunca decide. */
 function methodCashOf(payment: { methodTypeCode: string | null }): boolean {
   return payment.methodTypeCode === "10"
@@ -1591,11 +1583,7 @@ interface CollectedApp {
   dentistUserId: string
 }
 
-/**
- * Aplicación con promoción para el resultado del mes: lo mínimo para
- * netear devoluciones y resolver la promoción, sin filtro de atención ni
- * profesional (las promociones cobradas sin atención también cuentan).
- */
+/** Una aplicación de un pago a un cargo: lo mínimo para repartir sus devoluciones (`allocateRefunds`). */
 interface PromotionApp {
   appId: string
   appCents: number
@@ -1604,8 +1592,6 @@ interface PromotionApp {
   chargePromotionId: string | null
   chargePromotionName: string | null
   chargeBudgetItemId: string | null
-  /** Precio acordado del concepto (solo en el desglose por promoción). */
-  chargeAmountCents?: number
   paymentId: string
 }
 
@@ -1699,142 +1685,6 @@ async function collectedApplications(
     patientId: r.app.patientId,
     dentistUserId: r.dentistUserId,
   }))
-}
-
-/**
- * Aplicaciones cobradas en la ventana sobre TODOS los cargos (con o sin
- * atención): base del desglose por promoción del resultado del mes. Sin
- * join clínico: los cargos manuales y de presupuesto también cuentan.
- */
-async function promotionApplications(
-  tx: Db,
-  orgId: string,
-  start: Date,
-  end: Date,
-  currency: string,
-  query: { branchId?: string } = {},
-): Promise<PromotionApp[]> {
-  const filters = [
-    eq(patientPaymentApplication.organizationId, orgId),
-    gte(patientPaymentApplication.createdAt, start),
-    lt(patientPaymentApplication.createdAt, end),
-    or(isNull(patientPaymentApplication.voidedAt), gte(patientPaymentApplication.voidedAt, end)),
-    eq(patientCharge.currency, currency),
-    or(isNull(patientCharge.voidedAt), gte(patientCharge.voidedAt, end)),
-    or(isNull(patientPayment.voidedAt), gte(patientPayment.voidedAt, end)),
-  ]
-  if (query.branchId) filters.push(eq(patientPayment.branchId, query.branchId))
-  const rows = await tx
-    .select({
-      app: patientPaymentApplication,
-      charge: patientCharge,
-      payment: patientPayment,
-    })
-    .from(patientPaymentApplication)
-    .innerJoin(
-      patientPayment,
-      and(
-        eq(patientPayment.id, patientPaymentApplication.paymentId),
-        eq(patientPayment.organizationId, orgId),
-      ),
-    )
-    .innerJoin(
-      patientCharge,
-      and(
-        eq(patientCharge.id, patientPaymentApplication.chargeId),
-        eq(patientCharge.organizationId, orgId),
-      ),
-    )
-    .where(and(...filters))
-  return rows.map((r) => ({
-    appId: r.app.id,
-    appCents: r.app.amountCents,
-    appCreatedAt: r.app.createdAt,
-    chargeId: r.charge.id,
-    chargePromotionId: r.charge.promotionId,
-    chargePromotionName: r.charge.promotionName,
-    chargeBudgetItemId: r.charge.budgetItemId,
-    chargeAmountCents: r.charge.amountCents,
-    paymentId: r.payment.id,
-  }))
-}
-
-/**
- * Modo de cada promoción: «desde» si alguno de sus servicios admite precio
- * abierto, fijo si todos lo traen cerrado, ausente si ya no tiene servicios.
- */
-async function promotionModes(
-  tx: Db,
-  orgId: string,
-  promotionIds: string[],
-): Promise<Map<string, "fixed" | "from">> {
-  const out = new Map<string, "fixed" | "from">()
-  // El cargo guarda la promoción como texto: solo se consultan identificadores válidos.
-  const ids = promotionIds.filter((id) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))
-  if (ids.length === 0) return out
-  const rows = await tx
-    .select({ promotionId: promotionServicePrice.promotionId, mode: promotionServicePrice.mode })
-    .from(promotionServicePrice)
-    .where(
-      and(
-        eq(promotionServicePrice.organizationId, orgId),
-        inArray(promotionServicePrice.promotionId, ids),
-      ),
-    )
-  for (const row of rows) {
-    if (row.mode === "from") out.set(row.promotionId, "from")
-    else if (!out.has(row.promotionId)) out.set(row.promotionId, "fixed")
-  }
-  return out
-}
-
-/**
- * Promoción de cada aplicación: snapshot del cargo y, en su defecto, la
- * línea del presupuesto origen cuando su propuesta ya no es borrador.
- */
-async function promotionOfApps(
-  tx: Db,
-  orgId: string,
-  apps: PromotionApp[],
-): Promise<Map<string, { id: string; name: string }>> {
-  const out = new Map<string, { id: string; name: string }>()
-  for (const app of apps) {
-    if (app.chargePromotionId && app.chargePromotionName)
-      out.set(app.appId, { id: app.chargePromotionId, name: app.chargePromotionName })
-  }
-  const missing = apps.filter((a) => !out.has(a.appId) && a.chargeBudgetItemId)
-  if (missing.length === 0) return out
-  const lines = await tx
-    .select({
-      id: treatmentBudgetItem.id,
-      promotionId: treatmentBudgetItem.promotionId,
-      promotionName: treatmentBudgetItem.promotionName,
-      status: treatmentBudget.status,
-    })
-    .from(treatmentBudgetItem)
-    .innerJoin(
-      treatmentBudget,
-      and(
-        eq(treatmentBudget.id, treatmentBudgetItem.budgetId),
-        eq(treatmentBudget.organizationId, orgId),
-      ),
-    )
-    .where(
-      and(
-        eq(treatmentBudgetItem.organizationId, orgId),
-        inArray(
-          treatmentBudgetItem.id,
-          missing.map((a) => a.chargeBudgetItemId as string),
-        ),
-      ),
-    )
-  const byItem = new Map(lines.map((l) => [l.id, l]))
-  for (const app of missing) {
-    const line = byItem.get(app.chargeBudgetItemId as string)
-    if (line && line.status !== "borrador" && line.promotionId && line.promotionName)
-      out.set(app.appId, { id: line.promotionId, name: line.promotionName })
-  }
-  return out
 }
 
 /**
@@ -2464,166 +2314,7 @@ export async function voidCommissionSettlement(
   return row
 }
 
-// --- Resultado de un tramo (Reportes › Dinero) ---------------------------------------------
-
-/** Tramo semiabierto [start, end) de un resultado. */
-export interface FinanceResultRange {
-  start: Date
-  end: Date
-  branchId?: string
-  currency?: string
-}
-
-/**
- * Cobrado, devuelto, anulado y gastado de un tramo, por moneda. Es la base
- * común del resultado completo y de los totales con que se compara un periodo.
- */
-async function financeBuckets(
-  tx: Db,
-  orgId: string,
-  start: Date,
-  end: Date,
-  branch: { id: string } | null,
-  unit: string | null,
-) {
-  const paymentFilters = [
-    eq(patientPayment.organizationId, orgId),
-    gte(patientPayment.paidAt, start),
-    lt(patientPayment.paidAt, end),
-  ]
-  if (unit) paymentFilters.push(eq(patientPayment.currency, unit))
-  if (branch) paymentFilters.push(eq(patientPayment.branchId, branch.id))
-  const payments = await tx.select().from(patientPayment).where(and(...paymentFilters))
-
-  // Anulaciones del mes sobre cobros de meses anteriores: corrigen este mes.
-  const voidCorrectionFilters = [
-    eq(patientPayment.organizationId, orgId),
-    lt(patientPayment.paidAt, start),
-    gte(patientPayment.voidedAt, start),
-    lt(patientPayment.voidedAt, end),
-  ]
-  if (unit) voidCorrectionFilters.push(eq(patientPayment.currency, unit))
-  if (branch) voidCorrectionFilters.push(eq(patientPayment.branchId, branch.id))
-  const voidCorrections = await tx.select().from(patientPayment).where(and(...voidCorrectionFilters))
-
-  const paymentById = new Map(payments.map((p) => [p.id, p]))
-  for (const p of voidCorrections) paymentById.set(p.id, p)
-  const refunds = await tx
-    .select()
-    .from(patientPaymentRefund)
-    .where(
-      and(
-        eq(patientPaymentRefund.organizationId, orgId),
-        gte(patientPaymentRefund.refundedAt, start),
-        lt(patientPaymentRefund.refundedAt, end),
-      ),
-    )
-  // La devolución corrige el mes en que ocurre aunque el cobro sea anterior.
-  const missingPaymentIds = [...new Set(refunds.map((r) => r.paymentId))].filter(
-    (id) => !paymentById.has(id),
-  )
-  if (missingPaymentIds.length > 0) {
-    const older = await tx
-      .select()
-      .from(patientPayment)
-      .where(
-        and(
-          eq(patientPayment.organizationId, orgId),
-          inArray(patientPayment.id, missingPaymentIds),
-        ),
-      )
-    for (const p of older) paymentById.set(p.id, p)
-  }
-
-  const expenseFilters = [
-    eq(expense.organizationId, orgId),
-    gte(expense.spentAt, start),
-    lt(expense.spentAt, end),
-  ]
-  if (unit) expenseFilters.push(eq(expense.currency, unit))
-  if (branch) expenseFilters.push(eq(expense.branchId, branch.id))
-  const expenses = await tx.select().from(expense).where(and(...expenseFilters))
-  const expenseVoidFilters = [
-    eq(expense.organizationId, orgId),
-    lt(expense.spentAt, start),
-    gte(expense.voidedAt, start),
-    lt(expense.voidedAt, end),
-  ]
-  if (unit) expenseVoidFilters.push(eq(expense.currency, unit))
-  if (branch) expenseVoidFilters.push(eq(expense.branchId, branch.id))
-  const expenseCorrections = await tx.select().from(expense).where(and(...expenseVoidFilters))
-
-  interface Bucket {
-    cobradoCents: number
-    devolucionesCents: number
-    anulacionesCents: number
-    gastadoCents: number
-    efectivoCents: number
-    byMethod: Map<string, { label: string; cash: boolean; cents: number }>
-    byCategory: Map<string, number>
-  }
-  const buckets = new Map<string, Bucket>()
-  const bucket = (curr: string): Bucket => {
-    let entry = buckets.get(curr)
-    if (!entry) {
-      entry = {
-        cobradoCents: 0,
-        devolucionesCents: 0,
-        anulacionesCents: 0,
-        gastadoCents: 0,
-        efectivoCents: 0,
-        byMethod: new Map(),
-        byCategory: new Map(),
-      }
-      buckets.set(curr, entry)
-    }
-    return entry
-  }
-  const methodAdd = (curr: string, payment: typeof payments[number], cents: number): void => {
-    const entry = bucket(curr)
-    const key = payment.methodName
-    const slot = entry.byMethod.get(key) ?? { label: key, cash: methodCashOf(payment), cents: 0 }
-    slot.cents = addCents(slot.cents, cents)
-    entry.byMethod.set(key, slot)
-  }
-  for (const p of payments) {
-    if (!liveInMonth(p.voidedAt, end)) continue
-    const entry = bucket(p.currency)
-    entry.cobradoCents = addCents(entry.cobradoCents, p.amountCents)
-    methodAdd(p.currency, p, p.amountCents)
-    if (methodCashOf(p)) entry.efectivoCents = addCents(entry.efectivoCents, p.amountCents)
-  }
-  for (const p of voidCorrections) {
-    const entry = bucket(p.currency)
-    entry.anulacionesCents = addCents(entry.anulacionesCents, p.amountCents)
-    methodAdd(p.currency, p, -p.amountCents)
-    if (methodCashOf(p)) entry.efectivoCents = addCents(entry.efectivoCents, -p.amountCents)
-  }
-  for (const r of refunds) {
-    const payment = paymentById.get(r.paymentId)
-    if (!payment) continue
-    if (unit && payment.currency !== unit) continue
-    if (branch && payment.branchId !== branch.id) continue
-    const entry = bucket(payment.currency)
-    entry.devolucionesCents = addCents(entry.devolucionesCents, r.amountCents)
-    methodAdd(payment.currency, payment, -r.amountCents)
-    if (methodCashOf(payment)) entry.efectivoCents = addCents(entry.efectivoCents, -r.amountCents)
-  }
-  for (const e of expenses) {
-    if (!liveInMonth(e.voidedAt, end)) continue
-    const entry = bucket(e.currency)
-    entry.gastadoCents = addCents(entry.gastadoCents, e.amountCents)
-    const category = e.category ?? "Otros"
-    entry.byCategory.set(category, addCents(entry.byCategory.get(category) ?? 0, e.amountCents))
-  }
-  for (const e of expenseCorrections) {
-    const entry = bucket(e.currency)
-    entry.gastadoCents = addCents(entry.gastadoCents, -e.amountCents)
-    const category = e.category ?? "Otros"
-    entry.byCategory.set(category, addCents(entry.byCategory.get(category) ?? 0, -e.amountCents))
-  }
-  return buckets
-}
+// --- Lo cobrado de un tramo (Reportes) -----------------------------------------------------
 
 /**
  * Lo cobrado por profesional en un tramo: solo lo atendido, la misma base de
@@ -2659,10 +2350,10 @@ export async function collectedByProfessional(
 }
 
 /**
- * Lo cobrado neto de varios tramos en una sola consulta, por moneda: la misma
- * regla de `netoCents` de `financeBuckets` (cobros del tramo que siguen en pie
- * al cerrarlo, menos las anulaciones del tramo de cobros anteriores y las
- * devoluciones del tramo). Así el Resumen dibuja sus 12 meses sin 12 idas.
+ * Lo cobrado neto de varios tramos en una sola consulta, por moneda: los
+ * cobros del tramo que siguen en pie al cerrarlo, menos las anulaciones del
+ * tramo de cobros anteriores y las devoluciones del tramo. Así el Resumen y
+ * Finanzas dibujan sus 12 meses sin 12 idas.
  */
 export async function collectedNetMany(
   tx: Db,
@@ -2694,211 +2385,6 @@ export async function collectedNetMany(
     (): Array<{ currency: string; cents: number }> => [],
     (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents) }],
   )
-}
-
-/**
- * Solo los totales por moneda de un tramo: con ellos se compara un periodo con
- * el anterior y se dibujan las barras por mes, sin recalcular los desgloses.
- */
-export async function getFinanceTotalsBetween(tx: Db, orgId: string, range: FinanceResultRange) {
-  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
-  const unit = range.currency ? currency(range.currency) : null
-  const buckets = await financeBuckets(tx, orgId, range.start, range.end, branch, unit)
-  return [...buckets.entries()].map(([curr, entry]) => {
-    const netoCents = entry.cobradoCents - entry.devolucionesCents - entry.anulacionesCents
-    return { currency: curr, netoCents, gastadoCents: entry.gastadoCents, quedaCents: netoCents - entry.gastadoCents }
-  })
-}
-
-/**
- * Resultado completo de un tramo: cobrado (pagos vigentes por fecha de pago,
- * sin aportes de caja como ingreso) menos devoluciones y anulaciones, gastado
- * por categoría, queda por moneda, desgloses por medio/profesional/promoción,
- * deuda al cierre del tramo y cierres de caja para conciliar el efectivo.
- */
-export async function getFinanceResultBetween(tx: Db, orgId: string, range: FinanceResultRange) {
-  const { start, end } = range
-  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
-  const unit = range.currency ? currency(range.currency) : null
-  const buckets = await financeBuckets(tx, orgId, start, end, branch, unit)
-
-  // Cobrado por profesional (solo atendido) y por promoción (todo cargo con
-  // snapshot): aplicaciones del mes, netas de devoluciones con la misma
-  // regla de las comisiones.
-  const currencies = [...buckets.keys()]
-  const byProfessional: Array<{
-    professionalUserId: string
-    name: string | null
-    currency: string
-    cobradoCents: number
-  }> = []
-  const byPromotion: Array<{
-    promotionId: string
-    name: string
-    currency: string
-    veces: number
-    cobradoCents: number
-    /** Precio fijo o «desde»; nulo si la promoción ya no tiene servicios. */
-    mode: "fixed" | "from" | null
-    /** Promedio del precio acordado de sus conceptos (no de lo cobrado). */
-    averageCents: number | null
-  }> = []
-  for (const curr of currencies) {
-    byProfessional.push(...(await collectedByProfessional(tx, orgId, { start, end, branchId: branch?.id }, curr)))
-    // Por promoción: todos los cargos cobrados con snapshot (con o sin
-    // atención). veces = cargos distintos cobrados en el mes (sin doble
-    // conteo por pagos parciales); importe = neto cobrado en el mes. El uso
-    // histórico total (incluye gratuitas cotizadas) lo cuenta
-    // getPromotionMetrics del dominio de promociones (tablero Tarifario);
-    // cortesías directas sin línea ni cargo no existen en tablas.
-    const promoApps = await promotionApplications(tx, orgId, start, end, curr, {
-      branchId: branch?.id,
-    })
-    const promoTotals = await paymentTotalsOf(
-      tx,
-      orgId,
-      promoApps.map((a) => a.paymentId),
-    )
-    const promoRefunds = await allocateRefunds(tx, orgId, promoApps, promoTotals, start, end)
-    const promotions = await promotionOfApps(tx, orgId, promoApps)
-    const promoAgg = new Map<
-      string,
-      { name: string; veces: Set<string>; cents: number; agreedCents: number }
-    >()
-    for (const a of promoApps) {
-      const promo = promotions.get(a.appId)
-      if (!promo) continue
-      const net = a.appCents - Math.min(a.appCents, promoRefunds.get(a.appId) ?? 0)
-      const slot = promoAgg.get(promo.id) ?? {
-        name: promo.name,
-        veces: new Set<string>(),
-        cents: 0,
-        agreedCents: 0,
-      }
-      // El precio acordado cuenta una vez por concepto, aunque se pague en partes.
-      if (!slot.veces.has(a.chargeId)) slot.agreedCents += a.chargeAmountCents ?? 0
-      slot.veces.add(a.chargeId)
-      slot.cents += net
-      promoAgg.set(promo.id, slot)
-    }
-    const modes = await promotionModes(tx, orgId, [...promoAgg.keys()])
-    for (const [promotionId, agg] of promoAgg)
-      byPromotion.push({
-        promotionId,
-        name: agg.name,
-        currency: curr,
-        veces: agg.veces.size,
-        cobradoCents: agg.cents,
-        mode: modes.get(promotionId) ?? null,
-        averageCents: agg.veces.size > 0 ? Math.round(agg.agreedCents / agg.veces.size) : null,
-      })
-  }
-  byProfessional.sort((a, b) => b.cobradoCents - a.cobradoCents)
-  byPromotion.sort((a, b) => b.cobradoCents - a.cobradoCents)
-
-  // Deuda al fin de mes: cargos creados antes del cierre menos aplicaciones
-  // anteriores al cierre, con la vigencia de ese momento.
-  const chargeFilters = [eq(patientCharge.organizationId, orgId), lt(patientCharge.createdAt, end)]
-  if (unit) chargeFilters.push(eq(patientCharge.currency, unit))
-  const charges = await tx.select().from(patientCharge).where(and(...chargeFilters))
-  const oldApps = await tx
-    .select()
-    .from(patientPaymentApplication)
-    .where(
-      and(
-        eq(patientPaymentApplication.organizationId, orgId),
-        lt(patientPaymentApplication.createdAt, end),
-      ),
-    )
-  const outstandingByCurrency = new Map<string, { pendienteCents: number; pacientes: Set<string> }>()
-  const appliedByCharge = new Map<string, number>()
-  for (const a of oldApps) {
-    if (!liveInMonth(a.voidedAt, end)) continue
-    appliedByCharge.set(a.chargeId, (appliedByCharge.get(a.chargeId) ?? 0) + a.amountCents)
-  }
-  for (const c of charges) {
-    if (!liveInMonth(c.voidedAt, end)) continue
-    if (branch && c.branchId !== branch.id) continue
-    const remaining = c.amountCents - (appliedByCharge.get(c.id) ?? 0)
-    if (remaining <= 0) continue
-    const slot = outstandingByCurrency.get(c.currency) ?? {
-      pendienteCents: 0,
-      pacientes: new Set<string>(),
-    }
-    slot.pendienteCents = addCents(slot.pendienteCents, remaining)
-    slot.pacientes.add(c.patientId)
-    outstandingByCurrency.set(c.currency, slot)
-  }
-
-  // Cierres del mes como ayuda para contrastar el efectivo: sus ventanas
-  // pueden cruzar de mes, así que no se promete igualdad exacta.
-  const closureFilters = [
-    eq(cashClosure.organizationId, orgId),
-    gte(cashClosure.closedAt, start),
-    lt(cashClosure.closedAt, end),
-  ]
-  if (unit) closureFilters.push(eq(cashClosure.currency, unit))
-  if (branch) closureFilters.push(eq(cashClosure.branchId, branch.id))
-  const closures = await tx.select().from(cashClosure).where(and(...closureFilters))
-  const closureAgg = new Map<
-    string,
-    {
-      cierres: number
-      efectivoCents: number
-      /** Efectivo devuelto a pacientes en esas ventanas: el resultado compara el efectivo ya descontado. */
-      efectivoDevueltoCents: number
-      gastosCajaCents: number
-      diferenciasCents: number
-    }
-  >()
-  for (const c of closures) {
-    const slot = closureAgg.get(c.currency) ?? {
-      cierres: 0,
-      efectivoCents: 0,
-      efectivoDevueltoCents: 0,
-      gastosCajaCents: 0,
-      diferenciasCents: 0,
-    }
-    slot.cierres += 1
-    slot.efectivoCents = addCents(slot.efectivoCents, c.cashCollectedCents)
-    slot.efectivoDevueltoCents = addCents(slot.efectivoDevueltoCents, c.cashRefundedCents)
-    slot.gastosCajaCents = addCents(slot.gastosCajaCents, c.expenseCashCents)
-    slot.diferenciasCents = addCents(slot.diferenciasCents, c.differenceCents)
-    closureAgg.set(c.currency, slot)
-  }
-
-  return {
-    branchId: branch?.id ?? null,
-    branchName: branch?.name ?? null,
-    byCurrency: [...buckets.entries()].map(([curr, entry]) => {
-      const netoCents = entry.cobradoCents - entry.devolucionesCents - entry.anulacionesCents
-      return {
-        currency: curr,
-        cobradoCents: entry.cobradoCents,
-        devolucionesCents: entry.devolucionesCents,
-        anulacionesCents: entry.anulacionesCents,
-        netoCents,
-        gastadoCents: entry.gastadoCents,
-        quedaCents: netoCents - entry.gastadoCents,
-        efectivoCents: entry.efectivoCents,
-        byMethod: [...entry.byMethod.entries()].map(([key, slot]) => ({
-          key,
-          label: slot.label,
-          cash: slot.cash,
-          cents: slot.cents,
-        })),
-        byCategory: [...entry.byCategory.entries()].map(([category, cents]) => ({ category, cents })),
-      }
-    }),
-    byProfessional,
-    byPromotion,
-    outstanding: [...outstandingByCurrency.entries()].map(([curr, slot]) => ({
-      currency: curr,
-      pendienteCents: slot.pendienteCents,
-      pacientes: slot.pacientes.size,
-    })),
-    closures: [...closureAgg.entries()].map(([curr, slot]) => ({ currency: curr, ...slot })),
-  }
 }
 
 // --- Caja del día: deudas, movimientos, estado y cierres --------------------------------------

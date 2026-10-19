@@ -15,7 +15,8 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { claimHandoff, countOpenHandoffs, createHandoff, getAgentPanelSummary, getAgentRunStats, listAgentRuns } from "./agent-operations.js"
 import { countConversationViews } from "./conversations.js"
 import { getDebts } from "./finance.js"
-import { getReportSales, getReportService } from "./reports.js"
+import { getReportAgent } from "./report-agent.js"
+import { getReportCommissions } from "./report-finance.js"
 import type { WaitingRow } from "./workspace-home.js"
 import {
   createWorkspaceNotification,
@@ -299,8 +300,10 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
       })
     }
   }
-  const report = await withOrgContext(appDb, orgId, tx => getReportService(tx, orgId, { period: "2026-09" }))
-  expect(report.responses).toMatchObject({ conversations: 5, responded: 2, timedResponses: 1, avgFirstResponseSeconds: 30, byAgent: 0, byTeam: 2 })
+  // Reportes › Agente: respondieron la enviada y la antigua sin hora de envío; la mediana solo mide la que tiene hora
+  // (con la antigua contada desde que se creó saldría 20 s, no 30).
+  const report = await withOrgContext(appDb, orgId, tx => getReportAgent(tx, orgId, { period: "2026-09" }))
+  expect(report.responses.current).toEqual({ conversations: 5, responded: 2, byAgent: 0, byTeam: 2, agentMedianSeconds: null, teamMedianSeconds: 30 })
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
   // Una sola fila: cuántas esperan y desde cuándo la más antigua; la misma cuenta que «Sin responder» de la Bandeja.
   expect(rowsOf(home.waiting, "conversations")).toEqual([{ kind: "conversations", waiting: 3, oldestAt: inboundAt.toISOString() }])
@@ -453,8 +456,9 @@ it("la producción clínica excluye los actos anulados", async () => {
   const anulado = procedures.find(procedure => procedure.description === "Acto duplicado")
   await ownerDb.update(encounterProcedure).set({ voidedAt: new Date(), voidReason: "Registro duplicado" }).where(eq(encounterProcedure.id, anulado!.id))
   await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: dentist, signerName: "Dentista fase cero", signerRegistration: "12345" }).where(eq(encounter.id, visit!.id))
-  const report = await withOrgContext(appDb, orgId, tx => getReportSales(tx, orgId, { period: "este_mes" }))
-  expect(report.procedures).toEqual([{ name: "Resina vigente", currency: "PEN", count: 1, cents: 30000 }])
+  // Reportes › Finanzas › Comisiones: lo atendido es solo el acto vigente.
+  const report = await withOrgContext(appDb, orgId, tx => getReportCommissions(tx, orgId, { period: "este_mes" }))
+  expect(report.rows).toEqual([expect.objectContaining({ userId: dentist, attendedCents: 30000, unpaidCents: 30000 })])
 })
 
 it("un caso del agente sale una sola vez: ni su tarea ni su conversación se repiten, la campana no lo anuncia y el contador cuenta lo de cada quien", async () => {

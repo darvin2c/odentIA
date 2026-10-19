@@ -18,7 +18,6 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { closeOpportunity, createOpportunity, dayWords, getOpportunity, listOpportunities } from "./opportunities.js"
 import { addPlanItem } from "./plan.js"
-import { getReportSales } from "./reports.js"
 import { completeTask, createTask, pageTasks } from "./tasks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -107,9 +106,6 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
   expect(await g.run((tx) => getOpportunity(tx, "org_a", recent.id))).toMatchObject({
     status: "lost", closeReason: "rechazo_presupuesto", why: "Perdida: «Rechazó el presupuesto»",
   })
-  // Reportes dice por qué se pierden las ventas, con las claves de la lista.
-  const sales = await g.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))
-  expect(sales.lostReasons).toContainEqual({ reason: "rechazo_presupuesto", count: 1 })
 })
 
 it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otra cita; con otra por venir, no", async () => {
