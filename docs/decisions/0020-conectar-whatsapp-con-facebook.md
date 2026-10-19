@@ -38,6 +38,6 @@ Restricciones que no cambian: el número y la cuenta son de la clínica; el cód
 
 - `packages/channels/src/whatsapp-embedded-signup.ts`, `whatsapp-cloud-api.ts` (`splitWhatsAppWebhook`).
 - `packages/services/src/whatsapp-signup.ts`, `connections.ts`.
-- `apps/api/src/routes/whatsapp-signup.ts`, `webhooks.ts`; `apps/platform/src/components/whatsapp/facebook-signup.tsx`.
+- `apps/api/src/routes/whatsapp-signup.ts`, `webhooks.ts`; la ventana se abre en el panel (ADR 0059): `apps/panel/src/components/whatsapp/facebook-signup.tsx`.
 - Migración `0070_conectar_con_facebook`. Variables y trámite: `docs/development.md`.
 - Documentación de Meta leída el 2026-10-13: `https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/` (`versions`, `implementation`, `onboarding-customers-as-a-tech-provider`), `…/whatsapp/solution-providers/manage-webhooks`, `…/whatsapp/webhooks/override`.

@@ -17,15 +17,18 @@ export const ssrFetchOptions = createIsomorphicFn()
   .server(() => ({ headers: getRequestHeaders() }))
   .client(() => ({}))
 
-/** Sesión actual o redirect a /login. Para beforeLoad de rutas privadas. */
-export async function requireSession(): Promise<SessionInfo> {
+/**
+ * Sesión actual o redirect a /login. Para beforeLoad de rutas privadas. Con
+ * `next` (una dirección completa del dominio), entrar vuelve ahí.
+ */
+export async function requireSession(next?: string): Promise<SessionInfo> {
   // En SSR el fetch corre en Node y no ve las cookies del navegador: hay que
   // reenviar las cabeceras de la petición entrante.
   const { data } = await authClient.getSession({
     fetchOptions: ssrFetchOptions(),
   })
   if (!data) {
-    throw redirect({ to: "/login" })
+    throw redirect({ to: "/login", ...(next ? { search: { next } } : {}) })
   }
   return {
     userId: data.user.id,
@@ -38,8 +41,8 @@ export async function requireSession(): Promise<SessionInfo> {
 }
 
 /** Sesión con correo verificado; si no, a /verify-email-sent. */
-export async function requireVerifiedSession(): Promise<SessionInfo> {
-  const session = await requireSession()
+export async function requireVerifiedSession(next?: string): Promise<SessionInfo> {
+  const session = await requireSession(next)
   if (!session.emailVerified) {
     throw redirect({ to: "/verify-email-sent" })
   }

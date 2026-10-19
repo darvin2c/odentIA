@@ -165,10 +165,14 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    desarrollador): alcanza para probar.
 4. En Facebook Login for Business › Configuración, activar el inicio de sesión
    con el SDK de JavaScript y los demás interruptores que lista la guía de
-   implementación, y agregar a «Dominios permitidos» y a «URI de redirección de
-   OAuth válidos» el dominio donde se abre la plataforma. Solo HTTPS con
-   certificado válido. Cada clínica entra por su subdominio: confirmar con Meta
-   si admite comodín o hay que servir el botón desde un único dominio.
+   implementación, y agregar a «Dominios permitidos para el SDK para
+   JavaScript» y a «URI de redirección de OAuth válidos» un solo dominio, el
+   del panel (`https://app.<dominio>/`; en producción
+   `https://app.odentia32.com/`), más el de desarrollo si se prueba en local.
+   Solo HTTPS con certificado válido. La lista no admite comodín, así que la
+   ventana de Meta nunca se abre desde el subdominio de una clínica: su botón
+   lleva a `app.<dominio>/whatsapp/conectar?org=<slug>`, que abre la ventana y
+   vuelve a la clínica (issue 166, ADR 0059). Una clínica nueva no pide tocar Meta.
 5. Crear la configuración de «Facebook Login for Business» con la variante
    «WhatsApp Embedded Signup» y elegir los productos: eso fija la versión 4. Su
    identificador es `META_LOGIN_CONFIG_ID`.

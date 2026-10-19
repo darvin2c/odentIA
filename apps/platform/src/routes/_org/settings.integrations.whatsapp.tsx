@@ -14,8 +14,10 @@ import type { ConnectResult } from "../../lib/whatsapp"
 
 export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
   // `?mensaje=` abre ese mensaje: «Cambiar el texto» de «Te espera» llega así (ADR 0040).
-  validateSearch: (search: Record<string, unknown>) => ({
+  // `?conectado=` lo pone el panel al volver de «Conectar con Facebook» (issue 166).
+  validateSearch: (search: Record<string, unknown>): { mensaje: string | undefined; conectado?: string } => ({
     mensaje: typeof search.mensaje === "string" && search.mensaje ? search.mensaje : undefined,
+    ...(typeof search.conectado === "string" && search.conectado ? { conectado: search.conectado } : {}),
   }),
   component: WhatsAppPage,
 })
@@ -75,7 +77,8 @@ function WhatsAppSkeleton() {
  * enviar, que la clínica puede cambiar.
  */
 function WhatsAppPage() {
-  const { mensaje } = Route.useSearch()
+  const { mensaje, conectado } = Route.useSearch()
+  const navigate = Route.useNavigate()
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   const [fresh, setFresh] = useState<Fresh | null>(null)
@@ -98,6 +101,16 @@ function WhatsAppPage() {
   useEffect(() => {
     if (none) setConnectOpen(true)
   }, [none])
+  // De vuelta del panel con la conexión hecha con el botón: se dice como si se hubiera hecho aquí.
+  // Lo pendiente y los mensajes los lee la tarjeta del servidor; `conectado` solo dice cuál fue.
+  useEffect(() => {
+    if (!conectado || listQuery.data === undefined) return
+    if (connections.some((connection) => connection.id === conectado)) {
+      setConnectOpen(false)
+      setFresh({ result: { id: conectado }, byButton: true, read: true })
+    }
+    void navigate({ search: ({ conectado: _shown, ...rest }) => rest, replace: true, resetScroll: false })
+  }, [conectado, connections, listQuery.data, navigate])
 
   if (!canRead) {
     return (
@@ -111,10 +124,6 @@ function WhatsAppPage() {
 
   const connect = (
     <WhatsAppConnect
-      onConnectedWithButton={(result) => {
-        setConnectOpen(false)
-        setFresh({ result, byButton: true, read: true })
-      }}
       onCreated={(result) => {
         setConnectOpen(false)
         setFresh({ result, byButton: false, read: false })

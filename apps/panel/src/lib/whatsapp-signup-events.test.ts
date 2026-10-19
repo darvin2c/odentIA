@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fromFacebook, readSessionEvent } from "./signup-events"
+import { fromFacebook, readSessionEvent } from "./whatsapp-signup-events"
 
 /**
  * Los avisos de la ventana de Meta con la forma que publica su guía. No

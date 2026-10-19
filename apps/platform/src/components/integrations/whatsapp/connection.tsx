@@ -423,13 +423,7 @@ export function WhatsAppConnection({
               con el mismo botón.
             </p>
             {/* No se dibuja si la instalación no tiene habilitado el botón. */}
-            <FacebookSignupButton
-              reconnectConnectionId={connection.id}
-              onConnected={() => {
-                setTested(null)
-                void refreshMessages()
-              }}
-            />
+            <FacebookSignupButton reconnectConnectionId={connection.id} />
           </div>
         ) : null}
       </section>
