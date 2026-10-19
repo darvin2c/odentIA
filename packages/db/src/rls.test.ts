@@ -1108,3 +1108,62 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   `)) as unknown as { tabla: string }[]
   expect(abiertas.map((r) => r.tabla)).toEqual(["invitation", "member"])
 })
+
+it("inventario: la app no borra nada y ninguna fila apunta a otra clínica", async () => {
+  const sedeA = "11111111-1111-1111-1111-111111111111"
+  const sedeB = "22222222-2222-2222-2222-222222222222"
+  const almacenA = "1a1a1a1a-0000-4000-8000-000000000001"
+  const almacenB = "1a1a1a1a-0000-4000-8000-000000000002"
+  const proveedorA = "1a1a1a1a-0000-4000-8000-000000000003"
+  const proveedorB = "1a1a1a1a-0000-4000-8000-000000000004"
+  const productoA = "1a1a1a1a-0000-4000-8000-000000000005"
+  const productoB = "1a1a1a1a-0000-4000-8000-000000000006"
+  const loteA = "1a1a1a1a-0000-4000-8000-000000000007"
+  await ownerDb.execute(sql`insert into warehouse (id, organization_id, branch_id, name) values
+    (${almacenA}::uuid, 'org_a', ${sedeA}::uuid, 'Almacén A'), (${almacenB}::uuid, 'org_b', ${sedeB}::uuid, 'Almacén B')`)
+  await ownerDb.execute(sql`insert into supplier (id, organization_id, name) values
+    (${proveedorA}::uuid, 'org_a', 'Proveedor A'), (${proveedorB}::uuid, 'org_b', 'Proveedor B')`)
+  await ownerDb.execute(sql`insert into product (id, organization_id, sku, name) values
+    (${productoA}::uuid, 'org_a', 'INS-A', 'Insumo A'), (${productoB}::uuid, 'org_b', 'INS-B', 'Insumo B')`)
+  await ownerDb.execute(sql`insert into product_lot (id, organization_id, product_id, warehouse_id, code, quantity_on_hand) values
+    (${loteA}::uuid, 'org_a', ${productoA}::uuid, ${almacenA}::uuid, 'L-A', 5)`)
+
+  // Vínculos compuestos: ni siquiera el owner deja una fila de A apuntando a algo de B.
+  const cruces = [
+    sql`insert into warehouse (organization_id, branch_id, name) values ('org_a', ${sedeB}::uuid, 'Almacén cruzado')`,
+    sql`insert into purchase_order (organization_id, supplier_id, warehouse_id, order_number, currency)
+        values ('org_a', ${proveedorB}::uuid, ${almacenA}::uuid, 1, 'PEN')`,
+    sql`insert into purchase_order (organization_id, supplier_id, warehouse_id, order_number, currency)
+        values ('org_a', ${proveedorA}::uuid, ${almacenB}::uuid, 1, 'PEN')`,
+    sql`insert into product_lot (organization_id, product_id, warehouse_id, code) values ('org_a', ${productoB}::uuid, ${almacenA}::uuid, 'L-X')`,
+    sql`insert into product_lot (organization_id, product_id, warehouse_id, supplier_id, code)
+        values ('org_a', ${productoA}::uuid, ${almacenA}::uuid, ${proveedorB}::uuid, 'L-Y')`,
+    sql`insert into stock_movement (organization_id, product_id, lot_id, warehouse_id, kind, quantity_delta, reason, idempotency_key)
+        values ('org_a', ${productoA}::uuid, ${loteA}::uuid, ${almacenB}::uuid, 'ajuste', 1, 'Cruzado', 'rls:cruce-almacen')`,
+    sql`insert into stock_movement (organization_id, product_id, lot_id, warehouse_id, dest_warehouse_id, kind, quantity_delta, reason, idempotency_key)
+        values ('org_a', ${productoA}::uuid, ${loteA}::uuid, ${almacenA}::uuid, ${almacenB}::uuid, 'traslado', -1, 'Cruzado', 'rls:cruce-destino')`,
+  ]
+  for (const cruce of cruces) {
+    await expect(ownerDb.execute(cruce)).rejects.toMatchObject({ cause: { code: "23503" } })
+  }
+
+  // La app desactiva y cancela, nunca borra: tampoco el ledger.
+  for (const table of [
+    "product",
+    "product_lot",
+    "purchase_order",
+    "purchase_order_line",
+    "supplier",
+    "warehouse",
+    "stock_movement",
+  ] as const) {
+    await expect(
+      withOrgContext(appDb, "org_a", (tx) => tx.execute(sql`delete from ${sql.identifier(table)}`)),
+      `${table}: DELETE denegado`,
+    ).rejects.toMatchObject({ cause: { code: "42501" } })
+  }
+  const desactivado = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`update product set is_active = false where id = ${productoA}::uuid returning id`),
+  )
+  expect(desactivado).toHaveLength(1)
+})

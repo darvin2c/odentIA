@@ -14,7 +14,7 @@ import type { Db } from "@odentia/db"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgCounter, treatmentBudget, treatmentBudgetItem, treatmentBudgetOption, treatmentPlan, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { product, supplier, warehouse } from "@odentia/db/schema/inventory"
-import { and, eq, sql } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { payPurchaseOrder, setCommissionRate } from "./finance.js"
 import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, createWarehouse, receivePurchaseOrder } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
@@ -233,10 +233,12 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   const main = input.branches[0] as { id: string; name: string }
   const second = input.branches[1] ?? main
   const warehouseOf = async (branchId: string, name: string) => {
+    // El de ese nombre primero: la sede también tiene el gabinete de la semilla de inventario.
     const [found] = await tx
       .select({ id: warehouse.id })
       .from(warehouse)
       .where(and(eq(warehouse.organizationId, orgId), eq(warehouse.branchId, branchId)))
+      .orderBy(sql`${warehouse.name} = ${name} desc`, asc(warehouse.createdAt), asc(warehouse.id))
       .limit(1)
     return found?.id ?? (await createWarehouse(tx, orgId, ownerUserId, { branchId, name })).id
   }

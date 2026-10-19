@@ -445,6 +445,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "personal_link.messages_chosen": say("Eligió sus mensajes desde su enlace", "paciente"),
   "personal_link.paper_downloaded": say("Descargó un papel desde su enlace", "paciente"),
   // Inventario
+  "stock.ingreso": say("Registró un ingreso de existencias"),
+  "stock.consumo": say("Registró el uso de un insumo con un paciente"),
   "stock.ajuste": say("Ajustó las existencias de un producto"),
   "stock.traslado": say("Trasladó existencias entre almacenes"),
   "purchase_order.created": say("Creó una orden de compra"),

@@ -1007,6 +1007,7 @@ function MovementsSection({ kind }: { kind: string | null }) {
             {row.original.reason}
             {row.original.patientName ? ` · Paciente: ${row.original.patientName}` : ""}
             {row.original.lotCode ? ` · Lote ${row.original.lotCode}` : ""} · {row.original.warehouseName ?? ""}
+            {row.original.destWarehouseName ? ` → ${row.original.destWarehouseName}` : ""}
           </span>
         ),
       },
@@ -1046,6 +1047,9 @@ function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError
   })
   const [productId, setProductId] = React.useState("")
   const [kind, setKind] = React.useState("ingreso")
+  // Clave UUID por formulario abierto: persiste a reintentos hasta el éxito y
+  // rota después, como la recepción; así un reintento nunca duplica el movimiento.
+  const [movementKey, setMovementKey] = React.useState(() => crypto.randomUUID())
   const lotsQuery = useQuery({
     retry: false,
     queryKey: ["inventory", "lots", productId],
@@ -1057,6 +1061,7 @@ function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError
     mutationFn: (values: Record<string, unknown>) =>
       apiFetch("/api/inventory/movements", { method: "POST", body: JSON.stringify(values) }),
     onSuccess: () => {
+      setMovementKey(crypto.randomUUID())
       onError(null)
       toast.success("Movimiento registrado")
       onDone()
@@ -1076,7 +1081,7 @@ function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError
       destWarehouseId: String(form.get("destWarehouseId") ?? "") || null,
       reason: String(form.get("reason") ?? ""),
       patientId: String(form.get("patientId") ?? "") || null,
-      idempotencyKey: `ui:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+      idempotencyKey: movementKey,
     })
   }
   return (

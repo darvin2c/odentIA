@@ -41,6 +41,7 @@ import {
   branchNotFound,
   isUniqueViolation,
   notFound,
+  purchaseOrderNotFound,
   ServiceError,
   validation,
 } from "./errors.js"
@@ -1142,7 +1143,7 @@ export async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) 
     .from(purchaseOrder)
     .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
     .for("update")
-  if (!row) throw notFound("Orden de compra")
+  if (!row) throw purchaseOrderNotFound()
   return row
 }
 
@@ -1239,7 +1240,7 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
     throw validation("Lo que se usa a favor debe ser un importe entero")
   if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
-  if (!before) throw notFound("Orden de compra")
+  if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
     throw conflict(
       "PURCHASE_PAID_CHANGED",

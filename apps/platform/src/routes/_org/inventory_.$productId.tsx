@@ -9,7 +9,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { MOVEMENT_KIND_LABELS, type ProductDetail, type WarehouseItem } from "../../lib/inventory"
 
-export const Route = createFileRoute("/_org/inventory/$productId")({
+export const Route = createFileRoute("/_org/inventory_/$productId")({
   component: ProductDetailPage,
 })
 
@@ -190,10 +190,13 @@ function DetailMovementFormDrawer({
     queryFn: () => apiFetch<{ data: WarehouseItem[] }>("/api/inventory/warehouses?onlyActive=true"),
   })
   const [kind, setKind] = React.useState("ingreso")
+  // Clave UUID por formulario abierto: persiste a reintentos hasta el éxito y
+  // rota después, como la recepción; así un reintento nunca duplica el movimiento.
+  const [movementKey, setMovementKey] = React.useState(() => crypto.randomUUID())
   const mutation = useMutation({
     mutationFn: (values: Record<string, unknown>) =>
       apiFetch("/api/inventory/movements", { method: "POST", body: JSON.stringify(values) }),
-    onSuccess: () => { onError(null); toast.success("Movimiento registrado"); onDone() },
+    onSuccess: () => { setMovementKey(crypto.randomUUID()); onError(null); toast.success("Movimiento registrado"); onDone() },
     onError: (error) => onError(errorMessage(error)),
   })
   function handleSubmit(event: React.FormEvent) {
@@ -208,7 +211,7 @@ function DetailMovementFormDrawer({
       destWarehouseId: String(form.get("destWarehouseId") ?? "") || null,
       reason: String(form.get("reason") ?? ""),
       patientId: String(form.get("patientId") ?? "") || null,
-      idempotencyKey: `ui:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+      idempotencyKey: movementKey,
     })
   }
   return (

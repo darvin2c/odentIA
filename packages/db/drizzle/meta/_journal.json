@@ -253,6 +253,13 @@
       "when": 1792429381146,
       "tag": "0035_buscador_sin_tildes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792438969361,
+      "tag": "0036_las_compras_y_existencias_cuidan_su_historia",
+      "breakpoints": true
     }
   ]
 }

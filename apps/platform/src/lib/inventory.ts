@@ -47,7 +47,9 @@ export interface StockMovementItem {
   lotCode: string | null
   warehouseId: string
   warehouseName: string | null
+  /** Traslado: las dos filas llevan el origen en `warehouse*` y el destino aquí. */
   destWarehouseId: string | null
+  destWarehouseName: string | null
   createdAt: string
 }
 
