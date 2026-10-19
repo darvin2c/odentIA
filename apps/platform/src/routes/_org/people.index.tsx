@@ -49,10 +49,12 @@ const NEW_PATIENT: NewPatientTarget = { kind: "new" }
  * con páginas del servidor. Cada fila abre la página de la persona.
  */
 export const Route = createFileRoute("/_org/people/")({
-  validateSearch: (search: Record<string, unknown>): { ver?: PeopleView; q?: string } => ({
+  // `nuevo`: abre «Nuevo paciente» con ese nombre (lo usa el buscador rápido cuando no encuentra a alguien).
+  validateSearch: (search: Record<string, unknown>): { ver?: PeopleView; q?: string; nuevo?: string } => ({
     ...search,
     ver: isPeopleView(search.ver) ? search.ver : undefined,
     q: typeof search.q === "string" ? search.q : undefined,
+    nuevo: typeof search.nuevo === "string" ? search.nuevo : undefined,
   }),
   component: PeoplePage,
 })
@@ -84,7 +86,18 @@ function PeoplePage() {
   // Registrar un paciente es el botón principal; un contacto (aún no es paciente), su menú.
   const canRegister = can("patients.write")
   const [registering, setRegistering] = useState(false)
+  const [registerTarget, setRegisterTarget] = useState<NewPatientTarget>(NEW_PATIENT)
   const listSearch = useListSearch()
+  const { nuevo } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  useEffect(() => {
+    if (nuevo === undefined) return
+    if (canRegister) {
+      setRegisterTarget({ kind: "new", name: nuevo })
+      setRegistering(true)
+    }
+    void navigate({ search: (previous) => ({ ...previous, nuevo: undefined }), replace: true })
+  }, [nuevo, canRegister, navigate])
   // Quien aún no es paciente solo lo ven recepción y quien dirige; caja y odontología, solo pacientes.
   const seesAll = can("crm.read")
   const views = PEOPLE_VIEWS.filter(
@@ -232,7 +245,7 @@ function PeoplePage() {
         <FilterBar
           filters={[]}
           sortOptions={[]}
-          searchPlaceholder="Buscar por nombre, teléfono o documento"
+          searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
           searchPending={query.isFetching && filtered}
         />
         <p className="text-xs text-muted-foreground">Una sola búsqueda en toda la clínica.</p>
@@ -305,7 +318,14 @@ function PeoplePage() {
           </div>
         </>
       )}
-      <NewPatientDrawer open={registering} onClose={() => setRegistering(false)} target={NEW_PATIENT} />
+      <NewPatientDrawer
+        open={registering}
+        onClose={() => {
+          setRegistering(false)
+          setRegisterTarget(NEW_PATIENT)
+        }}
+        target={registerTarget}
+      />
       <NewPersonDrawer open={creating} onClose={() => setCreating(false)} />
     </PageShell>
   )

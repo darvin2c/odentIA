@@ -32,7 +32,8 @@ import {
 import { canAccess } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
@@ -193,7 +194,7 @@ export async function listSpecialties(
   const conditions = [eq(orgSpecialty.organizationId, orgId)]
   if (query.activeOnly) conditions.push(eq(orgSpecialty.isActive, true))
   const q = (query.q ?? "").trim()
-  if (q) conditions.push(ilike(orgSpecialty.name, `%${q}%`))
+  if (q) conditions.push(foldedWordsMatch([orgSpecialty.name], q))
   return tx
     .select()
     .from(orgSpecialty)
@@ -893,7 +894,7 @@ export async function listFormTemplates(
     conditions.push(eq(clinicalFormTemplate.status, query.status))
   }
   const q = (query.q ?? "").trim()
-  if (q) conditions.push(ilike(clinicalFormTemplate.title, `%${q}%`))
+  if (q) conditions.push(foldedWordsMatch([clinicalFormTemplate.title], q))
   const rows = await tx
     .select()
     .from(clinicalFormTemplate)
@@ -1480,7 +1481,7 @@ export async function listConsentTemplates(
     conditions.push(eq(consentTemplate.status, query.status))
   }
   const q = (query.q ?? "").trim()
-  if (q) conditions.push(ilike(consentTemplate.title, `%${q}%`))
+  if (q) conditions.push(foldedWordsMatch([consentTemplate.title], q))
   return tx
     .select()
     .from(consentTemplate)

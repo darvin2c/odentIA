@@ -32,7 +32,8 @@ import { orgCounter, patient } from "@odentia/db/schema/clinical"
 import { expense } from "@odentia/db/schema/finance"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
+import { foldedWordsMatch } from "./search-text.js"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -339,7 +340,7 @@ export async function listSuppliers(tx: Db, orgId: string, options?: { q?: strin
   const conditions = [eq(supplier.organizationId, orgId)]
   if (options?.onlyActive) conditions.push(eq(supplier.isActive, true))
   const q = options?.q?.trim()
-  if (q) conditions.push(or(ilike(supplier.name, `%${q}%`), ilike(supplier.docNumber, `%${q}%`))!)
+  if (q) conditions.push(foldedWordsMatch([supplier.name, supplier.docNumber], q))
   return tx.select().from(supplier).where(and(...conditions)).orderBy(asc(supplier.name)).limit(200)
 }
 
@@ -539,7 +540,7 @@ export async function listProducts(
     conditions.push(eq(product.kind, options.kind))
   }
   const q = options?.q?.trim()
-  if (q) conditions.push(or(ilike(product.name, `%${q}%`), ilike(product.sku, `%${q}%`))!)
+  if (q) conditions.push(foldedWordsMatch([product.name, product.sku], q))
   const rows = await tx
     .select({
       id: product.id,

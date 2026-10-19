@@ -34,7 +34,8 @@ export interface PageHeaderProps {
 }
 
 function HeaderDivider() {
-  return <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-border" />
+  // En el teléfono las acciones pueden bajar de fila: ahí la raya quedaría colgando al final.
+  return <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-border max-sm:hidden" />
 }
 
 export function PageHeader({
@@ -64,7 +65,8 @@ export function PageHeader({
         ) : null}
       </div>
       {utilities || actions ? (
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        // En el teléfono, si utilidades y acciones no caben en una fila, las acciones bajan: nunca se salen de la pantalla.
+        <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
           {utilities}
           {utilities && actions ? <HeaderDivider /> : null}
           {actions ? <div className="flex items-center gap-2">{actions}</div> : null}

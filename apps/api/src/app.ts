@@ -31,6 +31,7 @@ import { createHelpRoute } from "./routes/help.js"
 import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
+import { createSearchRoute } from "./routes/search.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
 import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
@@ -758,6 +759,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agent", createAgentRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))
+  guarded.route("/search", createSearchRoute({ ...crmDeps, embedder: deps.embedder }))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/fields", createFieldsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))

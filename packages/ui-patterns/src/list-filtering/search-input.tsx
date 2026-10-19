@@ -18,6 +18,11 @@ export interface SearchInputProps {
    */
   isFetching?: boolean
   className?: string
+  /**
+   * Texto plegado: «Buscar en pacientes». Distingue el buscador de una lista
+   * del buscador rápido de toda la clínica («Buscar en todo»).
+   */
+  label?: string
 }
 
 export function SearchInput({
@@ -25,6 +30,7 @@ export function SearchInput({
   expandable = false,
   isFetching = false,
   className,
+  label = common.filters.search,
 }: SearchInputProps) {
   const { get, setParam } = useListSearch()
   const query = get("q") ?? ""
@@ -48,7 +54,7 @@ export function SearchInput({
     <div
       className={cn(
         expandable
-          ? "relative w-36 shrink-0 transition-[width] duration-200 ease-out focus-within:w-64 motion-reduce:transition-none"
+          ? "relative w-48 shrink-0 transition-[width] duration-200 ease-out focus-within:w-64 motion-reduce:transition-none"
           : "relative w-full min-w-52",
         className,
       )}
@@ -61,7 +67,7 @@ export function SearchInput({
           type="search"
           value={value}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
-          placeholder={folded ? common.filters.search : placeholder}
+          placeholder={folded ? label : placeholder}
           aria-label={placeholder}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}

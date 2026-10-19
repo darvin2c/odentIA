@@ -525,7 +525,7 @@ function TarifarioPage() {
             { key: "estado", label: "Estado", type: "select", options: STATE_OPTIONS },
           ]}
           sortOptions={TARIFARIO_SORT_OPTIONS}
-          searchPlaceholder="Buscar por nombre o código interno"
+          searchPlaceholder="Buscar por nombre o código interno" searchLabel="Buscar en servicios"
         />
 
         {pagesQuery.isPending ? (

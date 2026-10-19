@@ -312,7 +312,7 @@ function PipelinePage() {
             },
           ]}
           sortOptions={[]}
-          searchPlaceholder="Buscar por persona o interés…"
+          searchPlaceholder="Buscar por persona o interés…" searchLabel="Buscar en oportunidades"
           searchPending={boardFetching + listFetching > 0}
           resetKeys={["q", "asignado", "tarea"]}
         />

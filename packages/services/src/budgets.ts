@@ -151,7 +151,7 @@ async function notifyBudget(tx: Db, orgId: string): Promise<void> {
   )
 }
 
-function isDentist(memberRole?: string): boolean {
+export function isDentist(memberRole?: string): boolean {
   return (memberRole ?? "").trim().toLowerCase() === "dentist"
 }
 
@@ -161,10 +161,18 @@ function isDentist(memberRole?: string): boolean {
  * restricción; caja y recepción no arman presupuestos (la ruta lo decide).
  */
 function ownBudgetSql(actorUserId: string) {
-  return sql`(${treatmentBudget.createdBy} = ${actorUserId} or exists (
+  return ownBudgetOf(treatmentBudget, actorUserId)
+}
+
+/** La misma regla sobre cualquier alias de `treatment_budget` (el buscador rápido usa SQL a mano). */
+export function ownBudgetOf(
+  budget: { id: SQLWrapper; organizationId: SQLWrapper; createdBy: SQLWrapper },
+  actorUserId: string,
+): SQL {
+  return sql`(${budget.createdBy} = ${actorUserId} or exists (
     select 1 from treatment_budget_item own_line
       join treatment_plan_item own_item on own_item.id = own_line.plan_item_id and own_item.organization_id = own_line.organization_id
-    where own_line.organization_id = ${treatmentBudget.organizationId} and own_line.budget_id = ${treatmentBudget.id}
+    where own_line.organization_id = ${budget.organizationId} and own_line.budget_id = ${budget.id}
       and own_item.created_by = ${actorUserId}))`
 }
 
