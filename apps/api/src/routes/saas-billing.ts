@@ -1034,8 +1034,11 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       withOrgContext(deps.db, orgId, async (tx) => {
         const current = await currentSaasPeriod(tx, orgId)
         const previous = await previousSaasPeriod(tx, orgId, current)
+        // El mes anterior ya cobrado se ve con el crédito que guardó su cargo, no con el del plan de hoy.
         const period =
-          query.periodo === "anterior" ? { ...previous, credit: "mes" as const, creditCents: current.creditCents } : current
+          query.periodo === "anterior"
+            ? { start: previous.start, end: previous.end, credit: "mes" as const, creditCents: previous.creditCents ?? current.creditCents }
+            : current
         const pending = query.periodo === "anterior" ? [] : await listPendingRecoveries(tx, orgId)
         // Lo que no se cobra (anulado, dentro de una cita o devuelto) se dice en su fila, no se esconde.
         const rows =

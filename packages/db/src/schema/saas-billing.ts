@@ -251,6 +251,12 @@ export const saasCharge = pgTable(
     subtotalCents: integer("subtotal_cents"),
     taxCents: integer("tax_cents").notNull().default(0),
     taxLabel: text("tax_label"),
+    /**
+     * Cargo del cobro por acción: el crédito del plan con que se emitió, congelado
+     * como su cuota. Lo que se lea después de ese mes (Reportes, «Pedir revisión»,
+     * el mes anterior en Facturación) usa este, no el del plan de hoy. Manual: null.
+     */
+    creditCents: integer("credit_cents"),
     status: text("status").notNull().default("pendiente"),
     dueAt: timestamp("due_at", { withTimezone: true }),
     createdBy: text("created_by"),
@@ -272,6 +278,7 @@ export const saasCharge = pgTable(
     uniqueIndex("saas_charge_org_dedupe_uidx").on(table.organizationId, table.dedupeKey),
     check("saas_charge_amount_check", sql`${table.amountCents} >= 0`),
     check("saas_charge_paid_check", sql`${table.paidCents} >= 0`),
+    check("saas_charge_credit_check", sql`${table.creditCents} IS NULL OR ${table.creditCents} >= 0`),
     check(
       "saas_charge_status_check",
       sql`${table.status} IN ('pendiente','parcial','pagada','reversada','anulada')`,

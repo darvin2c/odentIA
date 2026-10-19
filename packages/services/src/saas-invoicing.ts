@@ -163,6 +163,8 @@ async function issueCycleCharge(
       subtotalCents: subtotal,
       taxCents: taxAmount,
       taxLabel: tax?.label ?? null,
+      // El crédito con que se decidió qué cubre y qué pasa: lo que se lea de este mes después usa este.
+      creditCents: plan.creditCents,
       currency: plan.currency,
       dueAt: new Date(input.now.getTime() + SAAS_PAYMENT_DAYS * DAY),
       dedupeKey,

@@ -9,7 +9,6 @@ import {
   saasAction,
   saasActionReview,
   saasCharge,
-  saasPlan,
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
@@ -59,19 +58,24 @@ function subMonth(date: Date): Date {
 }
 
 /**
- * El tramo anterior al de hoy: el del último cargo final emitido o, si nunca
- * se cobró, el mes que termina donde empieza el de hoy. Es lo único que se
+ * El tramo anterior al de hoy: el del último cargo final emitido, con el
+ * crédito que guardó, o, si nunca se cobró, el mes que termina donde empieza
+ * el de hoy (sin crédito propio: `creditCents` nulo). Es lo único que se
  * puede revisar además del mes en curso (decisión 7).
  */
-export async function previousSaasPeriod(tx: Db, orgId: string, current: { start: Date }): Promise<{ start: Date; end: Date }> {
+export async function previousSaasPeriod(
+  tx: Db,
+  orgId: string,
+  current: { start: Date },
+): Promise<{ start: Date; end: Date; creditCents: number | null }> {
   const [last] = await tx
-    .select({ start: saasCharge.periodStart, end: saasCharge.periodEnd })
+    .select({ start: saasCharge.periodStart, end: saasCharge.periodEnd, creditCents: saasCharge.creditCents })
     .from(saasCharge)
     .where(and(eq(saasCharge.organizationId, orgId), lte(saasCharge.periodEnd, current.start)))
     .orderBy(desc(saasCharge.periodEnd))
     .limit(1)
-  if (last?.start && last.end) return { start: last.start, end: last.end }
-  return { start: subMonth(current.start), end: current.start }
+  if (last?.start && last.end) return { start: last.start, end: last.end, creditCents: last.creditCents }
+  return { start: subMonth(current.start), end: current.start, creditCents: null }
 }
 
 /** Los dos tramos que se pueden revisar: el de hoy y el anterior. */
@@ -443,13 +447,13 @@ export async function readReviewConversation(
  * ¿Se pagó aparte esta acción ya cobrada? Solo lo que pasó del crédito de su
  * mes: lo que cubrió el crédito (o la prueba) no costó nada más que la cuota,
  * y devolverlo sería pagar lo que nunca se pagó. Se calcula con la misma
- * regla del cargo (`listPeriodActions` sobre el tramo y el plan de ese cargo).
+ * regla del cargo (`listPeriodActions` sobre el tramo y el crédito que guardó
+ * ese cargo, aunque el plan haya cambiado después).
  */
 export async function billedAboveCredit(tx: Db, orgId: string, actionId: string, chargeId: string): Promise<boolean> {
   const [charge] = await tx
-    .select({ start: saasCharge.periodStart, end: saasCharge.periodEnd, creditCents: saasPlan.creditCents })
+    .select({ start: saasCharge.periodStart, end: saasCharge.periodEnd, creditCents: saasCharge.creditCents })
     .from(saasCharge)
-    .leftJoin(saasPlan, eq(saasPlan.id, saasCharge.planId))
     .where(and(eq(saasCharge.organizationId, orgId), eq(saasCharge.id, chargeId)))
     .limit(1)
   if (!charge) return false
