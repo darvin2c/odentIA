@@ -236,13 +236,9 @@ export function SideColumn({
   const floor = Math.min(bounds.min, 320)
   // Lo que se guarda nunca supera lo que cabe ahora: si no, el tirador tendría
   // un tramo muerto hasta volver por debajo del tope.
-  const apply = (next: number) =>
-    onResize(
-      Math.min(
-        next,
-        Math.max(floor, document.documentElement.clientWidth - sidebar - pageMinWidth),
-      ),
-    )
+  const fits = () =>
+    Math.max(floor, document.documentElement.clientWidth - sidebar - pageMinWidth)
+  const apply = (next: number) => onResize(Math.min(next, fits()))
   return (
     <aside
       {...props}
@@ -278,8 +274,10 @@ export function SideColumn({
         }}
         onDoubleClick={() => apply(bounds.initial)}
         onKeyDown={(event) => {
-          // Desde el ancho que se ve, que puede ser menor que el guardado.
-          const shown = event.currentTarget.parentElement?.getBoundingClientRect().width ?? width
+          // Desde el ancho que se ve, que puede ser menor que el guardado. Se
+          // calcula y no se mide: la transición de ancho lo cambia en el cuadro
+          // siguiente, y dos flechas seguidas partían ambas del ancho anterior.
+          const shown = Math.min(width, fits())
           const next =
             event.key === "ArrowLeft"
               ? shown + STEP
