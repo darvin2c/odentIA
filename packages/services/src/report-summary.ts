@@ -45,7 +45,7 @@ export async function budgetAcceptanceMany(tx: Db, orgId: string, spans: Span[])
   const rows = await tx.execute<{ idx: number; presented: number; accepted: number }>(sql`
     ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(hull.start)} and b.presented_at < ${at(hull.end)}`)}
     select s.idx, count(distinct bl.id)::int as presented,
-      count(distinct bl.id) filter (where bl.grp = 'accepted')::int as accepted
+      count(distinct bl.id) filter (where bl.accepted)::int as accepted
     from budget_line bl join ${spansSql(spans, "s")} on bl.presented_at >= s.start_at and bl.presented_at < s.end_at
     group by s.idx`)
   return bySpan(spans, [...rows], () => ({ presented: 0, accepted: 0 }), (_, row) => ({ presented: row.presented, accepted: row.accepted }))
@@ -180,7 +180,7 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
   const presentedBy = await tx.execute<{ userId: string; presented: number; accepted: number }>(sql`
     ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}`)}
     select created_by as "userId", count(distinct id)::int as presented,
-      count(distinct id) filter (where grp = 'accepted')::int as accepted
+      count(distinct id) filter (where accepted)::int as accepted
     from budget_line where created_by is not null group by created_by`)
   const collectedBy = await collectedByProfessional(tx, orgId, { start: window.start, end: window.end, branchId }, currency)
   const rows = new Map<string, { userId: string; name: string; attended: number; noShow: number; total: number; presented: number; accepted: number; collectedCents: number }>()
