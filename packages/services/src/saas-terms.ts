@@ -260,6 +260,8 @@ export interface SaasAlert {
   periodKey: string
   title: string
   message: string
+  /** Una línea para la franja en el teléfono (ADR 0065). */
+  short: string
   action: "elegir_plan" | "cambiar_tope" | "ver_consumo" | "ver_plan"
 }
 
@@ -303,6 +305,11 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   const locale = await getOrgLocale(tx, orgId).catch(() => null)
   const fmtDay = (date: Date) =>
     new Intl.DateTimeFormat(locale?.locale ?? "es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: locale?.timezone ?? "UTC" }).format(date)
+  // «vie 30 oct»: lo que cabe en una línea del teléfono.
+  const fmtShort = (date: Date) =>
+    new Intl.DateTimeFormat(locale?.locale ?? "es-PE", { weekday: "short", day: "numeric", month: "short", timeZone: locale?.timezone ?? "UTC" })
+      .format(date)
+      .replace(/\./g, "")
   const money = (cents: number) =>
     new Intl.NumberFormat(locale?.locale ?? "es-PE", { style: "currency", currency: consumption.currency ?? "USD" }).format(cents / 100)
   const periodKey = consumption.period.start.toISOString().slice(0, 10)
@@ -326,6 +333,12 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
             : level === "alarma" && ends
               ? `A este ritmo, tu saldo de prueba se acaba el ${fmtDay(ends)}. Cuando se acabe, los agentes se pausan.`
               : `Te quedan ${money(left)} de tu saldo de prueba. ${did(consumption)}`,
+        short:
+          level === "limite"
+            ? "Agentes en pausa: se usó el saldo de prueba"
+            : level === "alarma" && ends
+              ? `Tu saldo de prueba se acaba el ${fmtShort(ends)}`
+              : `Te quedan ${money(left)} de saldo de prueba`,
         action: "elegir_plan",
       })
     }
@@ -341,6 +354,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         periodKey,
         title: level === "alarma" ? "Alarma" : "Aviso",
         message: `Tu prueba termina en ${Math.max(daysLeft, 0)} ${daysLeft === 1 ? "día" : "días"}, el ${fmtDay(sub.trialEndsAt)}. Después, el sistema queda en solo lectura hasta que elijas un plan. No se pierde ningún dato.`,
+        short: `Tu prueba termina el ${fmtShort(sub.trialEndsAt)}`,
         action: "elegir_plan",
       })
     }
@@ -358,6 +372,10 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
           level === "limite"
             ? `Tu crédito del mes se acabó${consumption.creditExhaustedAt ? ` el ${fmtDay(consumption.creditExhaustedAt)}` : ""}. Desde entonces cada acción se cobra con tu precio y los agentes siguen atendiendo.`
             : `Tus agentes usaron ${Math.round((consumption.subtotalCents / consumption.creditCents) * 100)} % del crédito del mes.`,
+        short:
+          level === "limite"
+            ? "Se acabó el crédito del mes"
+            : `Usaste ${Math.round((consumption.subtotalCents / consumption.creditCents) * 100)} % del crédito`,
         action: "ver_consumo",
       })
     }
@@ -365,6 +383,12 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
 
   if (sub.status !== "prueba" && sub.spendCapCents !== null && sub.spendCapCents > 0) {
     const level = levelOf(consumption.overCreditCents, sub.spendCapCents, false)
+    // Cuándo se llega al tope a este ritmo: lo de encima del crédito corre desde que se acabó.
+    const reachesAt =
+      level && level !== "limite"
+        ? exhaustionDate(consumption.overCreditCents, sub.spendCapCents, consumption.creditExhaustedAt ?? consumption.period.start, now)
+        : null
+    const reachesThisPeriod = reachesAt !== null && reachesAt < consumption.period.end ? reachesAt : null
     if (level) {
       alerts.push({
         family: "tope",
@@ -374,7 +398,11 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         message:
           level === "limite"
             ? "Llegaste a tu tope de gasto: Recepción pasa los casos nuevos a tu equipo con un mensaje fijo. El dictado y las citas en curso siguen."
-            : `Los agentes llevan ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)} este mes.`,
+            : `Los agentes llevan ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)} este mes.${reachesThisPeriod ? ` A este ritmo llegas el ${fmtDay(reachesThisPeriod)}.` : ""}`,
+        short:
+          level === "limite"
+            ? "Llegaste a tu tope de gasto"
+            : `Llevas ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)}`,
         action: "cambiar_tope",
       })
     }
@@ -391,6 +419,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         periodKey: sub.discountEndsAt.toISOString().slice(0, 10),
         title: daysLeft <= 3 ? "Alarma" : "Aviso",
         message: `Tu precio especial (${discount / 100} % menos en cada acción) termina el ${fmtDay(sub.discountEndsAt)}. Desde el día siguiente pagas el precio de lista. ¿Quieres conversarlo? Escríbenos desde Soporte.`,
+        short: `Tu precio especial termina el ${fmtShort(sub.discountEndsAt)}`,
         action: "ver_plan",
       })
     }
@@ -406,6 +435,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         periodKey: sub.guaranteedUntil.toISOString().slice(0, 10),
         title: daysLeft <= 7 ? "Alarma" : "Aviso",
         message: `Tus condiciones de Fundador terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista de odentIA.`,
+        short: `Tus condiciones de Fundador terminan el ${fmtShort(sub.guaranteedUntil)}`,
         action: "ver_plan",
       })
     }

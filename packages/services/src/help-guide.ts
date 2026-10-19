@@ -260,7 +260,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       { q: "¿Qué nombre de la clínica ven mis pacientes?", a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va solo en el comprobante y en los papeles legales. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace." },
       { q: "¿Trabajo con la CIE-10 o con la CIE-11?", a: "Con la que elija la clínica en «Datos de la clínica» › «Lista de diagnósticos». Viene la que recomienda tu país (la CIE-10 en Perú, Chile, México o Argentina; la CIE-11 en Colombia). Si eliges otra, te dice qué implica en tu país. Desde ese día los diagnósticos nuevos se eligen en la lista nueva; lo registrado antes no se reescribe y una atención abierta conserva lo que ya tenía. Puedes volver atrás, y cada cambio queda en la actividad." },
-      { q: "¿Cómo elijo el diagnóstico de una atención?", a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes»." },{ q: "¿Dónde pago la suscripción de odentIA?", a: "Quien es propietario o administrador abre Plan y pagos de odentIA desde Configuración o desde Mis organizaciones en su cuenta. Ahí consulta el plan y aporta un comprobante; subirlo no confirma el pago. Esta pantalla y Soporte siguen disponibles aunque la operación de la clínica esté restringida." }],
+      { q: "¿Cómo elijo el diagnóstico de una atención?", a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes»." },{ q: "¿Dónde pago la suscripción de odentIA?", a: "Quien es propietario o administrador abre Configuración › Plan y pagos, o el menú con el nombre de la clínica, arriba a la izquierda. Ahí consulta el plan y aporta un comprobante; subirlo no confirma el pago. Plan y pagos y Ayuda siguen disponibles aunque la clínica esté en solo lectura." }],
   },
   {
     id: "sucursales",
@@ -353,6 +353,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "Con qué puede pagar un paciente en tu clínica y cómo sale el ticket. Los medios que enciendas son los que ofrece caja al cobrar, en el orden que les des, y los que el agente puede mencionar. Ahí también eliges el ancho del ticket, el tamaño de hoja del presupuesto y la frase al pie.",
     terms: ["efectivo", "tarjeta", "transferencia", "billetera", "formas de pago", "cómo pagar", "métodos de pago", "ancho del ticket", "frase al pie", "pie del ticket", "tamaño de hoja", "impresora térmica"],
     writePermission: "settings.write",
+  },
+  {
+    id: "plan-y-pagos",
+    path: "/settings/plan",
+    alsoAt: ["/settings/plan/acciones"],
+    title: "Plan y pagos",
+    parent: SETTINGS,
+    purpose: "Lo que la clínica paga a odentIA: el plan, lo que hicieron los agentes este mes y cada acción cobrada, el crédito y el tope de gasto, los cargos, el comprobante y los pagos. Solo lo ven propietario y administrador, y sigue abierto aunque la clínica esté en solo lectura.",
+    terms: ["suscripción", "factura de odentIA", "pagar odentIA", "mi plan", "cargo", "comprobante", "tope de gasto", "crédito del mes", "cada acción", "pedir revisión", "solo lectura", "pago pendiente"],
   },
   {
     id: "pipelines",

@@ -1,5 +1,5 @@
 import { Button, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, ExpandableText, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -317,20 +317,27 @@ function AccountSupportPage() {
             ) : (
               <ul className="flex flex-col gap-2">
                 {items.map((item) => (
-                  <li key={item.id}>
+                  <li key={item.id} className="flex min-w-0 flex-col gap-1.5 rounded-xl border px-3 py-2.5">
+                    <span className="flex w-full flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
+                        {STATUS_LABEL[item.status]}
+                      </span>
+                      <span className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]">{item.organizationName ?? "Acceso a la cuenta"}</span>
+                    </span>
+                    <ExpandableText
+                      text={`«${item.question}»`}
+                      label="Consulta del caso"
+                      className="min-w-0 text-sm [overflow-wrap:anywhere]"
+                    />
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-auto min-h-11 w-full flex-col items-start gap-1 py-2 text-left sm:min-h-10"
+                      size="sm"
+                      className="min-h-11 self-start sm:min-h-9"
                       onClick={() => openCase(item.id)}
+                      aria-label={`Abrir caso: ${item.question.slice(0, 80)}`}
                     >
-                      <span className="flex w-full flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
-                          {STATUS_LABEL[item.status]}
-                        </span>
-                        <span className="text-sm font-semibold">{item.organizationName ?? "Acceso a la cuenta"}</span>
-                      </span>
-                      <span className="block truncate text-sm">«{item.question}»</span>
+                      Abrir caso
                     </Button>
                   </li>
                 ))}
@@ -363,7 +370,11 @@ function AccountSupportPage() {
             <ErrorState message="No pude cargar este caso." onRetry={() => void detail.refetch()} />
           ) : (
             <>
-              <p className="text-sm font-semibold">«{kase.question}»</p>
+              <ExpandableText
+                text={`«${kase.question}»`}
+                label="Consulta inicial del caso"
+                className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
+              />
               <ol className="flex flex-col gap-2">
                 {kase.messages.map((message) => (
                   <li
@@ -374,7 +385,7 @@ function AccountSupportPage() {
                         : "max-w-[92%] self-end rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm font-semibold text-primary-foreground"
                     }
                   >
-                    <p className="whitespace-pre-wrap">{message.body}</p>
+                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
                   </li>
                 ))}
               </ol>

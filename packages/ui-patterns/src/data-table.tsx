@@ -249,11 +249,12 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
               {columns.media ? (
                 <ItemMedia variant="image">{renderCell(cells, columns.media)}</ItemMedia>
               ) : null}
-              <ItemContent>
-                <ItemTitle>{renderCell(cells, columns.title)}</ItemTitle>
+              <ItemContent className="min-w-0 basis-full">
+                {/* Sin ItemTitle/ItemDescription: recortan a una línea y el párrafo no admite bloques como ExpandableText. */}
+                <div data-slot="data-table-list-title" className="min-w-0 text-sm font-medium">{renderCell(cells, columns.title)}</div>
                 {columns.summary.length > 0 ? (
-                  <ItemDescription>
-                    <span className="flex flex-wrap items-center gap-x-1.5">
+                  <div data-slot="data-table-list-summary" className="text-sm text-muted-foreground">
+                    <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
                       {columns.summary.map((column, index) => (
                         <React.Fragment key={column.id}>
                           {index > 0 ? (
@@ -261,17 +262,17 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refresh
                               ·
                             </span>
                           ) : null}
-                          <span className="inline-flex items-center gap-1">
+                          <div className="min-w-0 max-w-full">
                             {renderCell(cells, column)}
-                          </span>
+                          </div>
                         </React.Fragment>
                       ))}
-                    </span>
-                  </ItemDescription>
+                    </div>
+                  </div>
                 ) : null}
               </ItemContent>
               {columns.actions ? (
-                <ItemActions>{renderCell(cells, columns.actions)}</ItemActions>
+                <ItemActions className="ml-auto">{renderCell(cells, columns.actions)}</ItemActions>
               ) : null}
             </Item>
           )

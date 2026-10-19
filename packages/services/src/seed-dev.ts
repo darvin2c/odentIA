@@ -180,7 +180,7 @@ import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./see
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
-import { seedSaasBillingDemo } from "./seed-saas-billing.js"
+import { seedClinicNoticesDemo, seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, quickAddServices, updateService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 import { createStorage } from "./storage.js"
@@ -3603,6 +3603,8 @@ const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { o
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
+  // Clínicas de Ana con los avisos de cobro de la franja (ADR 0065).
+  await seedClinicNoticesDemo(tx, { ownerUserId: ANA_ID, dentistUserId: LUIS_ID, acceptedVersion: LEGAL.agreement.version })
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })

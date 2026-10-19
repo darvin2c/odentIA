@@ -6,6 +6,7 @@
 // - «[texto](/ruta)» es un enlace (rutas internas, mailto: o https:).
 // - «[Por completar: …]» y «[Por confirmar: …]» son marcadores visibles de datos que faltan; mientras un
 //   documento tenga alguno, la página va con noindex.
+import { privacyEmail } from "../site"
 
 /** Un bloque de una sección: párrafo, subtítulo, lista, tabla o recuadro destacado. */
 export type LegalBlock =
@@ -36,12 +37,12 @@ export type LegalDoc = {
 export const LEGAL_UPDATED = "17 de octubre de 2026"
 export const LEGAL_UPDATED_ISO = "2026-10-17"
 
-/** Datos del titular que aún no conocemos; el mismo marcador en todos los documentos. */
+/** Datos del titular; lo pendiente conserva el mismo marcador en todos los documentos. */
 export const TITULAR = {
   razonSocial: "[Por completar: razón social]",
   ruc: "[Por completar: RUC]",
   domicilio: "[Por completar: domicilio fiscal]",
-  correoPrivacidad: "[Por completar: correo de privacidad]",
+  correoPrivacidad: privacyEmail,
 } as const
 
 const PENDIENTE = /\[Por (completar|confirmar)/

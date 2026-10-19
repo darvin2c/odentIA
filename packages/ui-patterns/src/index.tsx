@@ -76,6 +76,11 @@ export {
 export type { ColumnViewMeta, DataTableView } from "./data-table-view.js"
 export * from "./detail/index.js"
 export { EmptyState, type EmptyStateProps } from "./empty-state.js"
+export { ExpandableText, type ExpandableTextProps } from "./expandable-text.js"
+export { ListeningIndicator, type ListeningIndicatorProps, type ListeningState } from "./listening-indicator.js"
+export { useMicLevel, type MicLevel, type MicStreamState } from "./use-mic-level.js"
+export { listeningClock, type ListeningStatus, useListeningStatus } from "./use-listening-status.js"
+export { SpeechInput, type SpeechInputProps } from "./speech-input.js"
 export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
 export * from "./form/index.js"
 export {
@@ -85,6 +90,7 @@ export {
 export { KpiCard, type KpiCardProps } from "./kpi-card.js"
 export { UsageMeter, type UsageMeterProps, usageMeterLevel } from "./usage-meter.js"
 export { PageNotice, type PageNoticeProps } from "./page-notice.js"
+export { NoticeStrip, type NoticeStripProps, type NoticeTone, type StripNotice, sortNotices } from "./notice-strip.js"
 export * from "./list-filtering/index.js"
 export {
   DataRefreshMarker,

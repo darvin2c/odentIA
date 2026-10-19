@@ -69,6 +69,8 @@ import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.w
 import { Route as OrgSettingsIntegrationsIndexRouteImport } from './routes/_org/settings.integrations.index'
 import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
 import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
+import { Route as OrgSettingsPlanIndexRouteImport } from './routes/_org/settings.plan.index'
+import { Route as OrgSettingsPlanAccionesRouteImport } from './routes/_org/settings.plan.acciones'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
 import { Route as OrgPatientsPatientIdOdontogramPrintRouteImport } from './routes/_org/patients.$patientId.odontogram.print'
 import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
@@ -383,6 +385,16 @@ const OrgSettingsIntegrationsWhatsappRoute =
     path: '/integrations/whatsapp',
     getParentRoute: () => OrgSettingsRoute,
   } as any)
+const OrgSettingsPlanIndexRoute = OrgSettingsPlanIndexRouteImport.update({
+  id: '/plan/',
+  path: '/plan/',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
+const OrgSettingsPlanAccionesRoute = OrgSettingsPlanAccionesRouteImport.update({
+  id: '/plan/acciones',
+  path: '/plan/acciones',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
 const OrgPatientsPatientIdEncountersEncounterIdRoute =
   OrgPatientsPatientIdEncountersEncounterIdRouteImport.update({
     id: '/encounters/$encounterId',
@@ -479,7 +491,9 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof OrgSettingsIndexRoute
   '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
   '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
+  '/settings/plan/': typeof OrgSettingsPlanIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
@@ -544,7 +558,9 @@ export interface FileRoutesByTo {
   '/settings': typeof OrgSettingsIndexRoute
   '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
   '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
+  '/settings/plan': typeof OrgSettingsPlanIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
@@ -613,7 +629,9 @@ export interface FileRoutesById {
   '/_org/settings/': typeof OrgSettingsIndexRoute
   '/_org/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/_org/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/_org/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
   '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
+  '/_org/settings/plan/': typeof OrgSettingsPlanIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/_org/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
@@ -682,7 +700,9 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
+    | '/settings/plan/acciones'
     | '/settings/integrations/'
+    | '/settings/plan/'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
@@ -747,7 +767,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
+    | '/settings/plan/acciones'
     | '/settings/integrations'
+    | '/settings/plan'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
@@ -815,7 +837,9 @@ export interface FileRouteTypes {
     | '/_org/settings/'
     | '/_org/settings/integrations/webchat'
     | '/_org/settings/integrations/whatsapp'
+    | '/_org/settings/plan/acciones'
     | '/_org/settings/integrations/'
+    | '/_org/settings/plan/'
     | '/_org/patients/$patientId/encounters/$encounterId'
     | '/_org/patients/$patientId/odontogram/print'
     | '/_org/patients/$patientId/consents/$consentId/print'
@@ -1257,6 +1281,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsIntegrationsWhatsappRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/plan/': {
+      id: '/_org/settings/plan/'
+      path: '/plan'
+      fullPath: '/settings/plan/'
+      preLoaderRoute: typeof OrgSettingsPlanIndexRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/plan/acciones': {
+      id: '/_org/settings/plan/acciones'
+      path: '/plan/acciones'
+      fullPath: '/settings/plan/acciones'
+      preLoaderRoute: typeof OrgSettingsPlanAccionesRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/patients/$patientId/encounters/$encounterId': {
       id: '/_org/patients/$patientId/encounters/$encounterId'
       path: '/encounters/$encounterId'
@@ -1349,7 +1387,9 @@ interface OrgSettingsRouteChildren {
   OrgSettingsIndexRoute: typeof OrgSettingsIndexRoute
   OrgSettingsIntegrationsWebchatRoute: typeof OrgSettingsIntegrationsWebchatRoute
   OrgSettingsIntegrationsWhatsappRoute: typeof OrgSettingsIntegrationsWhatsappRoute
+  OrgSettingsPlanAccionesRoute: typeof OrgSettingsPlanAccionesRoute
   OrgSettingsIntegrationsIndexRoute: typeof OrgSettingsIntegrationsIndexRoute
+  OrgSettingsPlanIndexRoute: typeof OrgSettingsPlanIndexRoute
 }
 
 const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
@@ -1371,7 +1411,9 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsIndexRoute: OrgSettingsIndexRoute,
   OrgSettingsIntegrationsWebchatRoute: OrgSettingsIntegrationsWebchatRoute,
   OrgSettingsIntegrationsWhatsappRoute: OrgSettingsIntegrationsWhatsappRoute,
+  OrgSettingsPlanAccionesRoute: OrgSettingsPlanAccionesRoute,
   OrgSettingsIntegrationsIndexRoute: OrgSettingsIntegrationsIndexRoute,
+  OrgSettingsPlanIndexRoute: OrgSettingsPlanIndexRoute,
 }
 
 const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(

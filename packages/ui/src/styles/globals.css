@@ -60,6 +60,8 @@
     --color-success-soft: var(--success-soft);
     --color-warning: var(--warning);
     --color-warning-soft: var(--warning-soft);
+    --color-warning-strong: var(--warning-strong);
+    --color-warning-strong-foreground: var(--warning-strong-foreground);
     --color-info: var(--info);
     --color-info-soft: var(--info-soft);
     --color-agent: var(--agent);
@@ -145,6 +147,9 @@
     --success-soft: #e3f5ea;
     --warning: #7a4a00;
     --warning-soft: #fdf3df;
+    /* Ámbar lleno de la franja de avisos («Alarma»): texto oscuro, 9:1; el blanco no se lee. */
+    --warning-strong: #f2b134;
+    --warning-strong-foreground: #2a1a00;
     --info: var(--primary-soft-foreground);
     --info-soft: var(--primary-soft);
 
@@ -215,6 +220,8 @@
     --success-soft: #0f3323;
     --warning: #fbbf24;
     --warning-soft: #3a2a0b;
+    --warning-strong: #e0a22a;
+    --warning-strong-foreground: #1f1300;
 
     /* Datos en oscuro: las mismas reglas contra la tarjeta oscura; en la escala, más es más claro. */
     --series-1: #5fd3ea;

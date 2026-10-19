@@ -29,7 +29,7 @@ import {
   saasSellerCommission,
   saasSubscription,
 } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale } from "./locale.js"
@@ -38,6 +38,8 @@ import { getSaasAlerts } from "./saas-terms.js"
 import {
   saasAlertEmail,
   saasBillingUrl,
+  saasChargeIssuedEmail,
+  saasRestrictionSoonEmail,
   saasOverdueEmail,
   saasPlanStartedEmail,
   saasRestrictedEmail,
@@ -2489,36 +2491,56 @@ export async function settleSaasCommissions(
     })
     .returning()
   if (!settlement) throw new ServiceError("INTERNAL", 409, "No se pudo registrar la liquidación")
+  // Filas congeladas tal como quedaron en BD: el correo se arma desde aquí, no de copias en memoria.
+  const frozen: { kind: string; organizationId: string | null; description: string; amountCents: number }[] = []
   try {
     for (const commission of pending) {
-      await tx.insert(saasCommissionSettlementLine).values({
-        settlementId: settlement.id,
-        kind: "cobro",
-        sourceKey: `saas-comision:${commission.id}`,
-        commissionId: commission.id,
-        organizationId: commission.organizationId,
-        description: `Cobro confirmado ${commission.baseCents} (${commission.rateBps} pb)`,
-        amountCents: commission.commissionCents,
-        currency: commission.currency,
-        occurredAt: commission.createdAt,
-      })
+      const [line] = await tx
+        .insert(saasCommissionSettlementLine)
+        .values({
+          settlementId: settlement.id,
+          kind: "cobro",
+          sourceKey: `saas-comision:${commission.id}`,
+          commissionId: commission.id,
+          organizationId: commission.organizationId,
+          description: `Cobro confirmado ${commission.baseCents} (${commission.rateBps} pb)`,
+          amountCents: commission.commissionCents,
+          currency: commission.currency,
+          occurredAt: commission.createdAt,
+        })
+        .returning({
+          kind: saasCommissionSettlementLine.kind,
+          organizationId: saasCommissionSettlementLine.organizationId,
+          description: saasCommissionSettlementLine.description,
+          amountCents: saasCommissionSettlementLine.amountCents,
+        })
+      if (line) frozen.push(line)
       await tx
         .update(saasSellerCommission)
         .set({ status: "liquidada", settledAt: now })
         .where(eq(saasSellerCommission.id, commission.id))
     }
     for (const adjustment of adjustments) {
-      await tx.insert(saasCommissionSettlementLine).values({
-        settlementId: settlement.id,
-        kind: "ajuste",
-        sourceKey: `saas-ajuste:${adjustment.id}`,
-        adjustmentId: adjustment.id,
-        organizationId: adjustment.organizationId,
-        description: adjustment.reason.slice(0, 500),
-        amountCents: -adjustment.amountCents,
-        currency: adjustment.currency,
-        occurredAt: adjustment.createdAt,
-      })
+      const [line] = await tx
+        .insert(saasCommissionSettlementLine)
+        .values({
+          settlementId: settlement.id,
+          kind: "ajuste",
+          sourceKey: `saas-ajuste:${adjustment.id}`,
+          adjustmentId: adjustment.id,
+          organizationId: adjustment.organizationId,
+          description: adjustment.reason.slice(0, 500),
+          amountCents: -adjustment.amountCents,
+          currency: adjustment.currency,
+          occurredAt: adjustment.createdAt,
+        })
+        .returning({
+          kind: saasCommissionSettlementLine.kind,
+          organizationId: saasCommissionSettlementLine.organizationId,
+          description: saasCommissionSettlementLine.description,
+          amountCents: saasCommissionSettlementLine.amountCents,
+        })
+      if (line) frozen.push(line)
       await tx
         .update(saasCommissionAdjustment)
         .set({ appliedAt: now })
@@ -2549,6 +2571,33 @@ export async function settleSaasCommissions(
     if (noticeOrgId) {
       const money = (cents: number) =>
         new Intl.NumberFormat("es", { style: "currency", currency: unit, currencyDisplay: "code" }).format(cents / 100)
+      // Detalle desde las filas congeladas: una por clínica (comisión sumada) y una por ajuste (motivo).
+      // Los nombres de clínica no están congelados: solo se leen; sin nombre, el id explícito, sin inventar.
+      const cobros = frozen.filter((line) => line.kind === "cobro")
+      const clinicIds = [...new Set(cobros.map((line) => line.organizationId).filter((id): id is string => Boolean(id)))]
+      const orgNames = new Map<string, string>()
+      if (clinicIds.length > 0) {
+        const orgs = await tx
+          .select({ id: organization.id, name: organization.name })
+          .from(organization)
+          .where(inArray(organization.id, clinicIds))
+        for (const org of orgs) orgNames.set(org.id, org.name)
+      }
+      const grossByClinic = new Map<string, number>()
+      for (const line of cobros) {
+        if (!line.organizationId) continue
+        grossByClinic.set(line.organizationId, (grossByClinic.get(line.organizationId) ?? 0) + line.amountCents)
+      }
+      const clinicLines = [...grossByClinic.entries()]
+        .map(([orgId, cents]) => ({ label: orgNames.get(orgId) ?? orgId, amount: money(cents) }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es"))
+      const adjustmentLines = frozen
+        .filter((line) => line.kind === "ajuste")
+        .map((line) => ({
+          // La descripción congelada del ajuste es su motivo.
+          label: `Ajuste: ${line.description}`,
+          amount: money(line.amountCents),
+        }))
       const { subject, text, html } = saasSettlementEmail({
         sellerName: seller.displayName,
         monthText: new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" }).format(
@@ -2559,6 +2608,7 @@ export async function settleSaasCommissions(
         // Los ajustes se descuentan del total: van con su signo.
         adjustments: money(-adjustmentCents),
         total: money(totalCents),
+        lines: [...clinicLines, ...adjustmentLines],
       })
       await tx
         .insert(saasNotice)
@@ -2821,7 +2871,10 @@ export async function tickSaasBilling(
     for (const alert of alerts) {
       if (alert.family === "dias_prueba") trialsEnding += 1
       const dedupeKey = `${alert.family}:${alert.level}:${alert.periodKey}`
-      const emailTo = await orgEmail(sub.organizationId)
+      // Ni un correo más (ADR 0065): el crédito avisa por correo solo al
+      // acabarse y el tope desde el 90 %; lo demás queda en la franja.
+      const mailed = !(alert.family === "credito" && alert.level !== "limite") && !(alert.family === "tope" && alert.level === "aviso")
+      const emailTo = mailed ? await orgEmail(sub.organizationId) : null
       await recordNotice(
         sub.organizationId,
         `${alert.family}_${alert.level}`,
@@ -2844,6 +2897,90 @@ export async function tickSaasBilling(
   // avisos de antes ya salieron en el paso 1 (`precio_especial`, `condiciones`).
   await clearExpiredDiscounts(tx, now)
   for (const orgId of await endFounderGuarantees(tx, now)) await notifyOrg(tx, orgId, "saas.subscription.updated")
+
+  // 1c. Llegó un cargo (ADR 0065): se avisa por correo el día que llega, con
+  // el día en que vence (7 días después). Una vez por cargo.
+  const issuedCharges = await tx
+    .select()
+    .from(saasCharge)
+    .innerJoin(saasSubscription, eq(saasSubscription.organizationId, saasCharge.organizationId))
+    .where(
+      and(
+        eq(saasSubscription.isDemo, false),
+        inArray(saasCharge.status, ["pendiente", "parcial"]),
+        isNull(saasCharge.voidedAt),
+        gte(saasCharge.createdAt, new Date(now.getTime() - 2 * 86_400_000)),
+        gt(saasCharge.dueAt, now),
+      ),
+    )
+  for (const { saas_charge: charge } of issuedCharges) {
+    if (!charge.dueAt) continue
+    const orgId = charge.organizationId
+    const emailTo = await orgEmail(orgId)
+    const locale = await getOrgLocale(tx, orgId).catch(() => null)
+    const lang = locale?.locale ?? "es"
+    const dueDay = new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long", timeZone: locale?.timezone ?? "UTC" }).format(charge.dueAt)
+    const monthText = new Intl.DateTimeFormat(lang, { month: "long", year: "numeric", timeZone: "UTC" }).format(charge.periodStart)
+    const amount = new Intl.NumberFormat(lang, { style: "currency", currency: charge.currency, currencyDisplay: "code" }).format(
+      (charge.amountCents - charge.paidCents) / 100,
+    )
+    await recordNotice(
+      orgId,
+      "cargo_emitido",
+      `cargo:${charge.id}`,
+      emailTo
+        ? {
+            to: emailTo,
+            ...mailParts(saasChargeIssuedEmail({ clinic: await clinicName(orgId), monthText, amount, dueDay, url: billingUrl(orgId) })),
+            dedupeKey: `cargo:${orgId}:${charge.id}`,
+            organizationId: orgId,
+            kind: "cargo_emitido",
+          }
+        : null,
+    )
+  }
+
+  // 1d. Mañana termina la gracia (ADR 0065): último correo antes de solo
+  // lectura. Con un comprobante en revisión no se avisa: el servidor espera.
+  const gracesEndingTomorrow = await tx
+    .select()
+    .from(saasSubscription)
+    .where(
+      and(
+        eq(saasSubscription.status, "gracia"),
+        eq(saasSubscription.isDemo, false),
+        gt(saasSubscription.graceEndsAt, now),
+        lte(saasSubscription.graceEndsAt, new Date(now.getTime() + 86_400_000)),
+      ),
+    )
+  for (const sub of gracesEndingTomorrow) {
+    const [inReview] = await tx
+      .select({ id: saasPayment.id })
+      .from(saasPayment)
+      .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
+      .limit(1)
+    if (inReview || !sub.graceEndsAt) continue
+    const emailTo = await orgEmail(sub.organizationId)
+    const day = sub.graceEndsAt.toISOString().slice(0, 10)
+    const locale = await getOrgLocale(tx, sub.organizationId).catch(() => null)
+    const amounts = (await outstandingByCurrency(tx, sub.organizationId))
+      .filter((entry) => entry.cents > 0)
+      .map((entry) => new Intl.NumberFormat(locale?.locale ?? "es", { style: "currency", currency: entry.currency }).format(entry.cents / 100))
+    await recordNotice(
+      sub.organizationId,
+      "restriccion_manana",
+      `restriccion-manana:${day}`,
+      emailTo
+        ? {
+            to: emailTo,
+            ...mailParts(saasRestrictionSoonEmail({ clinic: await clinicName(sub.organizationId), amounts, url: billingUrl(sub.organizationId) })),
+            dedupeKey: `restriccion-manana:${sub.organizationId}:${day}`,
+            organizationId: sub.organizationId,
+            kind: "restriccion_manana",
+          }
+        : null,
+    )
+  }
 
   // 2. Prueba vencida → gracia 7 días.
   const trialsOver = await tx

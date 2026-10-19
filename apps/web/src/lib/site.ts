@@ -7,7 +7,8 @@ const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT
 /** La cuenta de la clínica vive en el panel; la web solo enlaza a registrarse e ingresar. */
 export const registerUrl = `https://app.${domain}${port}/register`
 export const loginUrl = `https://app.${domain}${port}/login`
-export const contactEmail = "hola@odentia.com"
+export const contactEmail = `hola@${domain}`
+export const privacyEmail = `privacidad@${domain}`
 /** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
 export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
 

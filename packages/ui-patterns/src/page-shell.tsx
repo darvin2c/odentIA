@@ -23,7 +23,7 @@ export function PageShell({ children, className, maxWidth, fill }: PageShellProp
   // El fondo cubre todo el viewport; la columna interior acota y paddingea.
   // Evita la "banda" gris recortada que producía bg-muted + mx-auto en el mismo div.
   return (
-    <div className={cn("bg-canvas w-full", fill ? "h-svh overflow-hidden" : "min-h-svh")}>
+    <div className={cn("bg-canvas w-full", fill ? "h-[calc(100svh-var(--notice-strip-h,0px))] overflow-hidden" : "min-h-[calc(100svh-var(--notice-strip-h,0px))]")}>
       <div
         className={cn(
           "mx-auto w-full p-4",

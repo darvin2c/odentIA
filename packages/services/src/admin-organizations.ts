@@ -284,6 +284,10 @@ export interface MyOrganization {
   organizationId: string
   organizationName: string
   slug: string
+  /** Dirección pública del logo de la clínica, si subió uno en «Datos de la clínica». */
+  logo: string | null
+  /** Sedes activas, por nombre: el selector dice cuántas tiene cada clínica (ADR 0065). */
+  branches: string[]
   role: string
   roleLabel: string
   /** false cuando es la única propietaria (el servidor también lo rechaza). */
@@ -1353,6 +1357,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       organizationId: member.organizationId,
       organizationName: organization.name,
       slug: organization.slug,
+      logo: organization.logo,
       role: member.role,
     })
     .from(member)
@@ -1366,19 +1371,21 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, row.organizationId))
       .limit(1)
-    const [sede] = await tx
-      .select({ id: branch.id })
+    const sedes = await tx
+      .select({ name: branch.name, isActive: branch.isActive })
       .from(branch)
       .where(eq(branch.organizationId, row.organizationId))
-      .limit(1)
+      .orderBy(branch.name)
     out.push({
       organizationId: row.organizationId,
       organizationName: row.organizationName,
       slug: row.slug,
+      logo: row.logo ?? null,
+      branches: sedes.filter((sede) => sede.isActive).map((sede) => sede.name),
       role: row.role,
       roleLabel: roleLabelOf(row.role),
       canLeave: await canLeaveOrganization(tx, userId, row.organizationId, row.role),
-      provisioning: { hasProfile: Boolean(profile), hasBranch: Boolean(sede) },
+      provisioning: { hasProfile: Boolean(profile), hasBranch: sedes.length > 0 },
     })
   }
   return out

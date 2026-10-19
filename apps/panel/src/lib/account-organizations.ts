@@ -5,6 +5,7 @@ import { apiFetch } from "./api"
 const provisioningSchema = z.object({ hasProfile: z.boolean(), hasBranch: z.boolean() })
 const organizationSchema = z.object({
   organizationId: z.string(), organizationName: z.string(), slug: z.string(),
+  logo: z.string().nullable(), branches: z.array(z.string()),
   role: z.string(), roleLabel: z.string(), canLeave: z.boolean(), provisioning: provisioningSchema,
 })
 const invitationSchema = z.object({
@@ -30,3 +31,15 @@ export const billingStatusSchema = z.object({
   currentPeriodEnd: z.string().nullable(), planCode: z.string().nullable(), planName: z.string().nullable(), currency: z.string().nullable(),
 })
 export type AccountBillingStatus = z.infer<typeof billingStatusSchema>
+
+/** El aviso de la franja (ADR 0065) que decide el servidor para quien mira; el selector usa el más grave de cobro. */
+export const clinicNoticeSchema = z.object({
+  id: z.string(),
+  topic: z.enum(["cobro", "tope", "plan", "soporte"]),
+  tone: z.enum(["aviso", "alarma", "limite"]),
+  message: z.string(),
+  short: z.string(),
+  action: z.object({ kind: z.string(), label: z.string(), shortLabel: z.string() }).passthrough().nullable(),
+  dismiss: z.enum(["nivel", "dia"]).nullable(),
+})
+export type ClinicNotice = z.infer<typeof clinicNoticeSchema>

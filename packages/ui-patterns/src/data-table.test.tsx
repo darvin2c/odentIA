@@ -174,8 +174,8 @@ describe("DataTable en lista", () => {
 
     expect(container.querySelector("table")).toBeNull()
     expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
-    expect(screen.getByText("Llamar a Ana")).toBeTruthy()
-    const summary = container.querySelector("[data-slot='item-description']")
+    expect(container.querySelector("[data-slot='data-table-list-title']")?.textContent).toBe("Llamar a Ana")
+    const summary = container.querySelector("[data-slot='data-table-list-summary']")
     expect(summary?.textContent).toContain("12 mar")
     expect(summary?.textContent).toContain("open")
   })

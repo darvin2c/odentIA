@@ -15,9 +15,11 @@ export interface PageNoticeProps {
 }
 
 /**
- * Aviso de página: una línea arriba de la pantalla con el nivel, lo que pasa
- * y la acción que lo resuelve. Lo comparten la plataforma (avisos de cobro) y
- * el panel de la cuenta. `alarma` y `limite` se anuncian como alerta.
+ * Aviso de una pantalla: con el nivel, lo que pasa y la acción que lo
+ * resuelve, dentro de la pantalla donde importa («Recepción está apagada» en
+ * la Bandeja, lo pendiente de un registro en la administración). Lo que afecta
+ * a toda la clínica va en la franja (`NoticeStrip`), no aquí (ADR 0065).
+ * `alarma` y `limite` se anuncian como alerta.
  */
 export function PageNotice({ tone, label, children, action, onDismiss, className }: PageNoticeProps) {
   return (

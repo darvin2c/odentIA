@@ -1,3 +1,4 @@
+import { ExpandableText } from "@odentia/ui-patterns"
 import { Button, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
@@ -190,24 +191,31 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
       ) : selectedId === null ? (
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
-            <li key={item.id}>
+            <li key={item.id} className="flex min-w-0 flex-col gap-1.5 rounded-xl border px-3 py-2.5">
+              <span className="flex w-full flex-wrap items-center gap-2">
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
+                  {STATUS_LABEL[item.status]}
+                </span>
+                {item.unread ? (
+                  <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
+                    Nueva respuesta
+                  </span>
+                ) : null}
+              </span>
+              <ExpandableText
+                text={item.question}
+                label="Consulta del caso"
+                className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
+              />
               <Button
                 type="button"
                 variant="outline"
-                className="h-auto min-h-11 w-full flex-col items-start gap-1 py-2 text-left sm:min-h-10"
+                size="sm"
+                className="min-h-11 self-start sm:min-h-9"
                 onClick={() => openCase(item.id)}
+                aria-label={`Abrir caso: ${item.question.slice(0, 80)}`}
               >
-                <span className="flex w-full items-center gap-2">
-                  <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-bold">
-                    {STATUS_LABEL[item.status]}
-                  </span>
-                  {item.unread ? (
-                    <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
-                      Nueva respuesta
-                    </span>
-                  ) : null}
-                  <span className="truncate text-sm font-semibold">{item.question}</span>
-                </span>
+                Abrir caso
               </Button>
             </li>
           ))}
@@ -246,7 +254,11 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
               {STATUS_LABEL[kase.status]}
             </span>
           </div>
-          <p className="text-sm font-semibold">«{kase.question}»</p>
+          <ExpandableText
+            text={`«${kase.question}»`}
+            label="Consulta inicial del caso"
+            className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
+          />
 
           {detail.isPending ? (
             <p className="text-sm text-muted-foreground">Cargando la conversación…</p>
@@ -269,7 +281,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                     {message.authorKind === "staff" ? (
                       <p className="text-xs font-bold text-muted-foreground">odentIA · soporte</p>
                     ) : null}
-                    <p className="whitespace-pre-wrap">{message.body}</p>
+                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
                   </li>
                 ))}
               </ol>

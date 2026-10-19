@@ -162,7 +162,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const backup = page.getByRole("region", { name: "Lo dictado" })
   await expect(backup).toContainText("Para corregir, dilo")
   await say("y hacemos endodoncia", false)
-  await expect(live).toContainText("Escuchando: «…y hacemos endodoncia»")
+  await expect(live).toContainText("Lo último que oí«…y hacemos endodoncia»")
+  await info.attach("dictado-oyendo", { body: await live.screenshot(), contentType: "image/png" })
   await say("En la veinticinco hacemos endodoncia.")
   // Tras la pausa se ordena solo ese tramo, y el micrófono sigue encendido.
   await expect(suggested("Plan de tratamiento")).toContainText("Pieza 25", { timeout: 15_000 })

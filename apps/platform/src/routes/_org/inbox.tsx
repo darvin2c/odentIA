@@ -49,7 +49,6 @@ import {
   PromptInputTools,
   usePromptInputAttachments,
 } from "@odentia/ui/components/ai-elements/prompt-input"
-import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
 import {
   AgentMark,
   ConfirmDialog,
@@ -62,6 +61,7 @@ import {
   PageShell,
   RowActions,
   SideDockScopeProvider,
+  SpeechInput,
   SubmitButton,
   useDetailMode,
   useListSearch,
@@ -108,7 +108,7 @@ import {
 import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { LessonDrawer } from "../../components/agent/lesson-drawer"
-import { ReceptionOffNotice } from "../../components/agent/reception-off-notice"
+import { CapReachedNotice, ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
@@ -604,6 +604,7 @@ function InboxPage() {
         </div>
       ) : null}
       {/* Con el agente apagado en toda la clínica, lo dice junto a la lista; en angosto, con un hilo abierto, la pantalla es del hilo. */}
+      {mode === "panel" || !selectedId ? <CapReachedNotice className="shrink-0" /> : null}
       {mode === "panel" || !selectedId ? <ReceptionOffNotice className="shrink-0" /> : null}
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
           composer queda fijo como footer suyo. En escritorio hay tres paneles

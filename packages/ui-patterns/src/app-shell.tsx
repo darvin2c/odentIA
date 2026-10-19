@@ -107,6 +107,11 @@ export interface AppShellProps {
    * usuario (ajustes de la organización, por ejemplo). Mismo ítem que el nav
    * principal: activo por URL, badge y cierre del drawer móvil. */
   footerItems?: AppShellNavItem[]
+  /**
+   * La franja de avisos (`NoticeStrip`): arriba de todo, también de la barra
+   * lateral, que se corre lo que la franja mide (`--notice-strip-h`).
+   */
+  notice?: React.ReactNode
   children: React.ReactNode
 }
 
@@ -417,6 +422,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     switcher,
     sidebarFooter,
     footerItems,
+    notice,
     children,
   } = props
   const { mode: themeMode, setMode: setThemeMode } = useTheme({
@@ -470,8 +476,12 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
 
   return (
     <TooltipProvider>
-      <SidebarProvider>
-        <Sidebar collapsible="icon">
+      {notice}
+      <SidebarProvider className="min-h-[calc(100svh-var(--notice-strip-h,0px))]">
+        <Sidebar
+          collapsible="icon"
+          className="top-(--notice-strip-h) h-[calc(100svh-var(--notice-strip-h,0px))]"
+        >
           <ShellSidebarHeader brand={brand} brandIcon={brandIcon} switcher={switcher} />
           <SidebarNav items={items} activeTo={activeTo} LinkComponent={LinkComponent} />
           <SidebarFooter>
@@ -522,7 +532,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {/* `SidebarInset` ya renderiza el landmark `<main>`: un `<main>`
             anidado sería HTML inválido y duplicaría el landmark para lectores
             de pantalla. El alto mínimo vive ahora en el propio inset. */}
-        <SidebarInset className="min-h-svh">{children}</SidebarInset>
+        <SidebarInset className="min-h-[calc(100svh-var(--notice-strip-h,0px))]">{children}</SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
   )
