@@ -208,6 +208,16 @@ export function canAccessAny(role: string, permissions: readonly string[]): bool
   return permissions.some((permission) => canAccess(role, permission));
 }
 
+/**
+ * ¿Ve `role` Facturación? Lo que la clínica paga a odentIA (plan, cargos,
+ * consumo, avisos y lo pagado por el agente en Reportes) es solo de
+ * propietario y administrador; no es un permiso que se reparta a otros roles.
+ */
+export function seesBilling(role: string): boolean {
+  const normalized = normalizeRole(role);
+  return normalized === "owner" || normalized === "admin";
+}
+
 /** Roles que `memberRole` puede asignar a otros (sin escalada propia). */
 export function assignableRoles(memberRole: string): OrgRole[] {
   const normalized = normalizeRole(memberRole);

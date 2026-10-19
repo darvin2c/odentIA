@@ -457,7 +457,7 @@ export function WhenFields({ when }: { when: WhenState }) {
             A esa hora {professional?.label} ya está ocupado. Mueve el bloque a una zona blanca.
           </p>
         ) : state === "outside" ? (
-          <p className="text-sm text-warning-foreground">
+          <p className="text-sm text-warning">
             Esa hora queda fuera del horario de {professional?.label}.
           </p>
         ) : null}

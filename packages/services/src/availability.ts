@@ -204,6 +204,8 @@ export interface ProfessionalScheduleView {
   dentistUserId: string
   timeZone: string
   rules: ScheduleRule[]
+  /** Desde qué día (de la sede) vale el horario de hoy; nulo sin horario. */
+  validFrom: string | null
 }
 
 /** Horario activo de un profesional en una sede (vacío = sin configurar). */
@@ -238,12 +240,16 @@ export async function getProfessionalSchedule(
       endMin: row.endMin,
       isActive: row.isActive,
     })),
+    validFrom: rows.reduce<string | null>((first, row) => (first === null || row.validFrom < first ? row.validFrom : first), null),
   }
 }
 
 /**
- * Reemplaza el horario semanal del profesional en la sede. Reglas vacías =
- * sin atención (pero explícito: `cleared: true` lo distingue de "sin configurar").
+ * Cambia el horario semanal del profesional en la sede desde hoy (día de la
+ * sede). El anterior no se borra: se cierra, para que la historia de la
+ * agenda sea verdadera (decisión 4 de Reportes; ADR 0060). Lo que empezó hoy
+ * mismo se reemplaza: un día no tiene dos horarios. Guardar el mismo horario
+ * no deja otra versión. Reglas vacías = sin atención desde hoy.
  */
 export async function setProfessionalSchedule(
   tx: Db,
@@ -251,7 +257,7 @@ export async function setProfessionalSchedule(
   actorUserId: string,
   input: { branchId: string; dentistUserId: string; rules: ScheduleRuleInput[] },
 ): Promise<ProfessionalScheduleView> {
-  await requireBranch(tx, orgId, input.branchId)
+  const resolved = await requireBranch(tx, orgId, input.branchId)
   await requireDentist(tx, orgId, input.dentistUserId)
   const seen = new Set<string>()
   for (const rule of input.rules) {
@@ -263,15 +269,28 @@ export async function setProfessionalSchedule(
     if (seen.has(key)) throw validation("Hay turnos duplicados en el horario")
     seen.add(key)
   }
+  const scope = and(
+    eq(professionalSchedule.organizationId, orgId),
+    eq(professionalSchedule.branchId, input.branchId),
+    eq(professionalSchedule.dentistUserId, input.dentistUserId),
+  )
+  const current = await tx
+    .select()
+    .from(professionalSchedule)
+    .where(and(scope, eq(professionalSchedule.isActive, true)))
+    .for("update")
+  const same =
+    current.length === input.rules.length &&
+    current.every((row) => seen.has(`${row.weekday}:${row.startMin}:${row.endMin}`))
+  if (same) return getProfessionalSchedule(tx, orgId, input.branchId, input.dentistUserId)
+  const { year, month, day } = zonedPartsOf(new Date(), resolved.timeZone)
+  const today = toISODate(year, month, day)
+  // Lo que empezó hoy se reemplaza; lo de antes deja de valer hoy.
+  await tx.delete(professionalSchedule).where(and(scope, eq(professionalSchedule.isActive, true), eq(professionalSchedule.validFrom, today)))
   await tx
-    .delete(professionalSchedule)
-    .where(
-      and(
-        eq(professionalSchedule.organizationId, orgId),
-        eq(professionalSchedule.branchId, input.branchId),
-        eq(professionalSchedule.dentistUserId, input.dentistUserId),
-      ),
-    )
+    .update(professionalSchedule)
+    .set({ isActive: false, validUntil: today, updatedAt: new Date() })
+    .where(and(scope, eq(professionalSchedule.isActive, true)))
   if (input.rules.length > 0) {
     await tx.insert(professionalSchedule).values(
       input.rules.map((rule) => ({
@@ -282,6 +301,7 @@ export async function setProfessionalSchedule(
         startMin: rule.startMin,
         endMin: rule.endMin,
         isActive: true,
+        validFrom: today,
         createdBy: actorUserId,
       })),
     )
@@ -833,10 +853,11 @@ export async function listAvailableSlots(
 
 const NEXT_FREE_DAYS = 14
 
+/** Un tramo en milisegundos: `[inicio, fin)`. Reportes › Agenda usa las mismas cuentas. */
 type Span = [start: number, end: number]
 
 /** Une tramos solapados o contiguos. */
-function mergeSpans(spans: Span[]): Span[] {
+export function mergeSpans(spans: Span[]): Span[] {
   const sorted = spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
   const out: Span[] = []
   for (const [a, b] of sorted) {
@@ -848,7 +869,7 @@ function mergeSpans(spans: Span[]): Span[] {
 }
 
 /** Lo que queda de `base` al quitarle `cuts`. */
-function subtractSpans(base: Span[], cuts: Span[]): Span[] {
+export function subtractSpans(base: Span[], cuts: Span[]): Span[] {
   let rest = mergeSpans(base)
   for (const [from, to] of mergeSpans(cuts)) {
     rest = rest.flatMap(([a, b]): Span[] => {
@@ -863,7 +884,7 @@ function subtractSpans(base: Span[], cuts: Span[]): Span[] {
 }
 
 /** Lo común a dos listas de tramos. */
-function intersectSpans(first: Span[], second: Span[]): Span[] {
+export function intersectSpans(first: Span[], second: Span[]): Span[] {
   const out: Span[] = []
   for (const [a, b] of mergeSpans(first)) {
     for (const [c, d] of mergeSpans(second)) {

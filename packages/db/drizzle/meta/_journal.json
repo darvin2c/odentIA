@@ -190,6 +190,27 @@
       "when": 1792355105615,
       "tag": "0026_lo_que_escribio_quien_se_parece",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792362302923,
+      "tag": "0027_como_nos_conocio_compras_pagadas_y_horario_con_historia",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792362318404,
+      "tag": "0028_compras_pagadas_y_horario_con_historia_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792362980764,
+      "tag": "0029_indices_de_reportes",
+      "breakpoints": true
     }
   ]
 }

@@ -28,3 +28,22 @@ export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number]
  */
 export const PATIENT_DOCUMENT_CATEGORIES = ["consentimiento", "radiografia", "foto_clinica", "informe", "otro"] as const
 export type PatientDocumentCategory = (typeof PATIENT_DOCUMENT_CATEGORIES)[number]
+
+/**
+ * «Cómo nos conoció» (decisión 3 de Reportes v2): una lista fija, la misma en
+ * todas las clínicas, para que se pueda sumar y dibujar. No hay un estándar
+ * internacional del origen de un paciente (HL7 FHIR no lo codifica), por eso la
+ * lista es propia y corta. «otro» guarda lo que dijo en `referral_source`; lo
+ * que se escribía antes como texto libre quedó como «otro» con su texto.
+ */
+export const REFERRAL_KINDS = ["recomendacion", "redes_sociales", "google_mapas", "paso_por_aqui", "convenio", "otro"] as const
+export type ReferralKind = (typeof REFERRAL_KINDS)[number]
+
+export const REFERRAL_KIND_LABELS: Record<ReferralKind, string> = {
+  recomendacion: "Recomendación de alguien",
+  redes_sociales: "Redes sociales",
+  google_mapas: "Google o mapas",
+  paso_por_aqui: "Pasaba por aquí",
+  convenio: "Convenio o empresa",
+  otro: "Otro",
+}

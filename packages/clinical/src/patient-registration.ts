@@ -1,4 +1,4 @@
-import { ALLERGY_SEVERITIES } from "./catalogs.js"
+import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
 import {
   type ClinicalCountryProfile,
@@ -61,8 +61,8 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  *   por ella). Siempre cuentan para el aviso «Faltan datos para atenderla».
  * - `clinic`: los que la clínica decide en «Registro de pacientes»; cuentan
  *   solo si los marca obligatorios.
- * - `census`: opcionales y nunca obligatorios (nadie los lee: ni reportes,
- *   ni impresos, ni el agente). Nunca cuentan.
+ * - `census`: opcionales y nunca obligatorios (nadie los usa para atender: ni
+ *   impresos ni el agente; Reportes solo suma «Cómo nos conoció»). Nunca cuentan.
  * - `health`: los antecedentes que el registro puede preguntar. Los de la
  *   entrevista (`personal.*` y `dental.*`) llegan a «Entrevista de salud»
  *   de la ficha con las mismas claves y solo pueden ser opcionales.
@@ -163,7 +163,9 @@ export const demographicsSchema = z.strictObject({
   origin: optionalText(200), emergencyContactName: optionalText(200), emergencyContactPhone: optionalText(50),
   emergencyContactRelationship: codeOrEmpty(KINSHIP),
   insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceScheme: optionalText(20),
-  insurerName: optionalText(200), affiliationNumber: optionalText(50), referralSource: optionalText(500),
+  insurerName: optionalText(200), affiliationNumber: optionalText(50),
+  /** «Cómo nos conoció» de la lista (`REFERRAL_KINDS`); `referralSource` es lo que dijo cuando es «Otro». */
+  referralKind: codeOrEmpty(REFERRAL_KINDS), referralSource: optionalText(500),
 })
 export type RegistrationDemographics = z.infer<typeof demographicsSchema>
 export const healthAllergyDeclarationSchema = z.strictObject({
@@ -277,7 +279,7 @@ export function documentIssuerCountry(
 export function normalizePersonData<T extends Partial<RegistrationDemographics>>(
   data: T,
   profile: ClinicalCountryProfile,
-): T & Pick<Partial<RegistrationDemographics>, "docCountry" | "insuranceType" | "addressCountry"> {
+): T & Pick<Partial<RegistrationDemographics>, "docCountry" | "insuranceType" | "addressCountry" | "referralKind" | "referralSource"> {
   const out: Record<string, unknown> = { ...data }
   for (const key of ["docCountry", "nationality", "birthCountry", "addressCountry"] as const) {
     if (typeof out[key] === "string") out[key] = (out[key] as string).trim().toUpperCase() || null
@@ -287,6 +289,10 @@ export function normalizePersonData<T extends Partial<RegistrationDemographics>>
   if (typeof out.address === "string" && out.address.trim() && !out.addressCountry) out.addressCountry = profile.country
   const scheme = insuranceScheme(profile, out.insuranceScheme as string)
   if (scheme) out.insuranceType = scheme.type
+  // «Cómo nos conoció»: lo escrito sin elegir de la lista es «Otro» con su texto;
+  // otra opción de la lista no lleva texto.
+  if (typeof out.referralSource === "string" && out.referralSource.trim() && !out.referralKind) out.referralKind = "otro"
+  if (out.referralKind && out.referralKind !== "otro") out.referralSource = null
   return out as T
 }
 

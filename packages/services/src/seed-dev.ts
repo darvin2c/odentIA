@@ -170,6 +170,9 @@ import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
 import { seedReports } from "./seed-reports.js"
+import { seedReportsAgent } from "./seed-reports-agent.js"
+import { seedReportsFinance } from "./seed-reports-finance.js"
+import { seedReportsPatients } from "./seed-reports-patients.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -438,6 +441,8 @@ async function wipeSeed(): Promise<void> {
     "commission_rule",
     "cash_closure",
     "cash_movement",
+    "supplier_credit_use",
+    "expense_gap_dismissal",
     "expense",
     "cash_shift",
     "stock_movement",
@@ -2900,6 +2905,8 @@ const pedro = await db.transaction((tx) =>
           givenNames: "Pedro",
           familyName: "Quispe",
           birthDate: "2016-05-20",
+          // La clínica de la semilla también pide el sexo.
+          sex: "M",
           // La clínica pide el documento: el DNI del menor.
           docType: "DNI",
           docNumber: "78901234",
@@ -3011,6 +3018,9 @@ const revisionPedro = await reviseBudget(db, ORG_A, ANA_ID, pedro.id, presupuest
 })
 await deliverBudget(db, ORG_A, ANA_ID, pedro.id, revisionPedro.id)
 
+// Su propio celular: quien se registra por el QR con el de alguien que ya
+// está queda por confirmar en «Te espera», y Valeria es de otro hogar.
+const VALERIA_PHONE = "+51987000920"
 await db.transaction((tx) =>
   registerPatient(
     tx,
@@ -3022,15 +3032,18 @@ await db.transaction((tx) =>
       answers: {
         demographics: {
           displayName: "Valeria Quispe · QR demo",
+          givenNames: "Valeria",
+          familyName: "Quispe · QR demo",
           birthDate: "1998-04-10",
-          phone: SHARED_PHONE,
+          sex: "F",
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "45678920",
         },
         respondent: "patient",
         privacyAccepted: true,
+        // Sin grupo sanguíneo: la clínica de la semilla no lo pregunta.
         health: {
-          bloodGroup: "O+",
           allergies: {
             state: "recorded",
             items: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }],
@@ -3061,7 +3074,8 @@ await db.transaction((tx) =>
           givenNames: "Thiago",
           familyName: "Quispe",
           birthDate: "2019-03-02",
-          phone: SHARED_PHONE,
+          sex: "M",
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "78901299",
         },
@@ -3070,7 +3084,7 @@ await db.transaction((tx) =>
           displayName: "Valeria Quispe · QR demo",
           relationship: "guardian",
           relationshipDetail: "Madre",
-          phone: SHARED_PHONE,
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "45678920",
         },
@@ -3099,6 +3113,7 @@ await db
             givenNames: "Valeria",
             familyName: "Quispe Rojas",
             birthDate: "1990-01-01",
+            sex: "F",
             phone: "+51987000999",
             docType: "DNI",
             docNumber: "45678920",
@@ -3549,6 +3564,12 @@ const reportsHistory = await db.transaction((tx) => {
     patientIds: [...patientIdByName.values()],
   })
 })
+// Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
+await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
+// Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
+const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
+// Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
+const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3731,7 +3752,11 @@ console.log("seed-dev ok")
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
 console.log(
-  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones`,
+  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones, ${reportsHistory.budgets} presupuestos`,
+)
+console.log(
+  `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
+  `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)

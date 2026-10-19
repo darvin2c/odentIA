@@ -274,7 +274,7 @@ function PaymentMethodsPage() {
             </p>
             <p className="border-t px-4 pt-2.5 pb-3.5 text-sm text-muted-foreground">
               {noneActive ? (
-                <span className="font-medium text-warning-foreground">
+                <span className="font-medium text-warning">
                   Ningún medio está encendido: caja no puede cobrar.{" "}
                 </span>
               ) : null}

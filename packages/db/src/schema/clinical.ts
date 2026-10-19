@@ -172,6 +172,12 @@ export const patient = pgTable(
     insuranceType: text("insurance_type"),
     /** Régimen con nombre propio del país (SIS, EsSalud, EPS en Perú), si lo tiene. */
     insuranceScheme: text("insurance_scheme"),
+    /**
+     * «Cómo nos conoció», de una lista fija (`REFERRAL_KINDS` de
+     * `@odentia/clinical`, decisión 3 de Reportes v2). `referral_source` es lo
+     * que dijo cuando es «otro»; con otra opción va vacío.
+     */
+    referralKind: text("referral_kind"),
     referralSource: text("referral_source"),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
     /** Revisión de antecedentes (agregado transaccional de salud). */
@@ -218,6 +224,11 @@ export const patient = pgTable(
       // CINE (ISCED) 2011, niveles 0 a 8.
       sql`${table.educationLevel} IS NULL OR ${table.educationLevel} IN ('0','1','2','3','4','5','6','7','8')`,
     ),
+    check(
+      "patient_referral_kind_check",
+      sql`${table.referralKind} IS NULL OR ${table.referralKind} IN ('recomendacion','redes_sociales','google_mapas','paso_por_aqui','convenio','otro')`,
+    ),
+    check("patient_referral_source_check", sql`${table.referralSource} IS NULL OR ${table.referralKind} = 'otro'`),
     check(
       "patient_asa_class_check",
       sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,

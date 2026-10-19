@@ -17,6 +17,7 @@ import { sql } from "drizzle-orm"
 import {
   char,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -29,6 +30,7 @@ import {
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
 import { patient, patientCharge, patientPayment, patientPaymentApplication } from "./clinical.js"
+import { purchaseOrder } from "./inventory.js"
 import { branch } from "./org.js"
 
 /** Turno de caja de una sucursal. Solo un turno abierto por sucursal+moneda. */
@@ -152,6 +154,12 @@ export const expense = pgTable(
     receiptKind: text("receipt_kind").notNull().default("ninguno"),
     receiptNumber: text("receipt_number"),
     notes: text("notes"),
+    /**
+     * El pago (o adelanto) de una compra de Inventario: un gasto de Materiales
+     * enlazado a su orden. Lo pagado de una compra es la suma de sus gastos
+     * vigentes; no hay otro registro del pago (ADR 0061).
+     */
+    purchaseOrderId: uuid("purchase_order_id"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -164,8 +172,41 @@ export const expense = pgTable(
       table.branchId,
       table.spentAt,
     ),
+    index("expense_org_purchase_idx")
+      .on(table.organizationId, table.purchaseOrderId)
+      .where(sql`${table.purchaseOrderId} IS NOT NULL`),
+    foreignKey({
+      columns: [table.organizationId, table.purchaseOrderId],
+      foreignColumns: [purchaseOrder.organizationId, purchaseOrder.id],
+    }),
     check("expense_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "expense_purchase_category_check",
+      sql`${table.purchaseOrderId} IS NULL OR ${table.category} = 'Materiales'`,
+    ),
   ],
+)
+
+/**
+ * «Puede faltar un gasto · No hubo ese gasto»: la clínica dijo que ese mes no
+ * tuvo gastos de ese tipo, y Reportes deja de avisarlo. Uno por tipo, mes y
+ * sede (sin sede: la clínica entera).
+ */
+export const expenseGapDismissal = pgTable(
+  "expense_gap_dismissal",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    category: text("category").notNull(),
+    /** Mes civil en la zona de la clínica, `YYYY-MM`. */
+    month: text("month").notNull(),
+    branchId: uuid("branch_id").references(() => branch.id),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Uno por tipo, mes y sede: el índice único con NULLS NOT DISTINCT va en la
+  // migración de reglas (Drizzle no lo declara en un índice).
+  (table) => [check("expense_gap_dismissal_month_check", sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`)],
 )
 /** Cierre de caja inmutable: congela la ventana desde el cierre anterior. Lo posterior corrige como movimiento del día en que se corrige. */
 export const cashClosure = pgTable(

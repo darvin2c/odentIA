@@ -169,7 +169,11 @@ export function createInventoryRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listPurchaseOrders(tx, orgId, { status: query.status, supplierId: query.supplierId }),
+        listPurchaseOrders(tx, orgId, {
+          status: query.status,
+          supplierId: query.supplierId,
+          ...(query.pago === "por_pagar" ? { payment: "por_pagar" as const } : {}),
+        }),
       ),
     )
   })
@@ -366,8 +370,18 @@ export function createInventoryRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const denied = deny(c, "inventory.write", memberRole)
     if (denied) return denied
+    // Con pagos hay que decir qué pasa con ellos (anularlos o dejarlos a favor): eso es de caja.
+    const parsed = z
+      .object({ payments: z.enum(["anular", "a_favor"]).optional(), reason: z.string().trim().min(1).max(2000).optional() })
+      .strict()
+      .safeParse((await c.req.json().catch(() => null)) ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    if (parsed.data.payments) {
+      const money = deny(c, "finance.write", memberRole)
+      if (money) return money
+    }
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => cancelPurchaseOrder(tx, orgId, userId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) => cancelPurchaseOrder(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
   })
 

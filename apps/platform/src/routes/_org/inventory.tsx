@@ -1,6 +1,6 @@
-import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
-import { DataTable, DatePickerButton, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
-import { formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { Badge, Button, cn, Field, FieldLabel, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
+import { ConfirmDialog, DataTable, DatePickerButton, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
+import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AlertTriangle, Package, Plus } from "lucide-react"
@@ -8,7 +8,10 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import * as React from "react"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
+import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type PurchasePayment, type PurchasePaymentTone, purchasePaymentState, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
+import { PurchasePaymentDrawer } from "../../components/inventory/purchase-payment-drawer"
+import { cashErrorMessage, invalidateFinance, voidSupplierCreditUseApi } from "../../lib/finance-cash"
+import { purchaseOrderLabel } from "../../lib/reports"
 import { useOrgProfile } from "../../lib/org"
 import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
@@ -18,6 +21,11 @@ export const Route = createFileRoute("/_org/inventory")({
 })
 
 type Tab = "productos" | "compras" | "movimientos" | "catalogos" | "alertas"
+const TABS: readonly Tab[] = ["productos", "compras", "movimientos", "catalogos", "alertas"]
+
+function isTab(value: unknown): value is Tab {
+  return typeof value === "string" && (TABS as readonly string[]).includes(value)
+}
 
 function errorMessage(error: unknown): string {
   return mutationErrorMessage(error) ?? "No se guardaron los cambios. Revisa los campos antes de continuar."
@@ -27,8 +35,16 @@ function InventoryPage() {
   const canRead = usePermission("inventory.read")
   const canWrite = usePermission("inventory.write")
   const queryClient = useQueryClient()
-  const { get } = useListSearch()
-  const [tab, setTab] = React.useState<Tab>("productos")
+  const { get, setParam } = useListSearch()
+  const urlTab = get("tab")
+  const [tab, setTabState] = React.useState<Tab>(isTab(urlTab) ? urlTab : "productos")
+  React.useEffect(() => {
+    if (isTab(urlTab)) setTabState(urlTab)
+  }, [urlTab])
+  const setTab = (next: Tab) => {
+    setTabState(next)
+    setParam("tab", next === "productos" ? undefined : next, { replace: true })
+  }
   const [drawer, setDrawer] = React.useState<"product" | "order" | "movement" | "supplier" | "warehouse" | null>(null)
   const [formError, setFormError] = React.useState<string | null>(null)
   const [receptionDirty, setReceptionDirty] = React.useState(false)
@@ -103,7 +119,16 @@ function InventoryPage() {
       </div>
 
       {tab === "productos" && <ProductsSection search={get("q") ?? ""} lowStock={get("lowStock") ?? null} kind={get("kind") ?? null} />}
-      {tab === "compras" && <OrdersSection status={get("status") ?? null} canWrite={canWrite} onDirtyChange={setReceptionDirty} requestLeave={draftGuard.requestLeave} />}
+      {tab === "compras" && (
+        <OrdersSection
+          status={get("status") ?? null}
+          payment={get("pago") === "por_pagar" ? "por_pagar" : null}
+          openOrderId={get("orden") ?? null}
+          canWrite={canWrite}
+          onDirtyChange={setReceptionDirty}
+          requestLeave={draftGuard.requestLeave}
+        />
+      )}
       {tab === "movimientos" && <MovementsSection kind={get("kind") ?? null} />}
       {tab === "catalogos" && <CatalogsSection canWrite={canWrite} />}
       {tab === "alertas" && <AlertsSection />}
@@ -267,14 +292,35 @@ function ProductFormDrawer({ formError, onClose, onDone, onError }: { formError:
 
 /* ---------------- compras ---------------- */
 
-function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
+const TONE_CLASS: Record<PurchasePaymentTone, string> = {
+  warning: "bg-warning-soft text-warning",
+  info: "bg-primary-soft text-primary-soft-foreground",
+  success: "bg-success-soft text-success",
+  muted: "bg-secondary text-foreground/80",
+}
+
+function PaymentChip({ order }: { order: Pick<PurchaseOrderItem, "status" | "balance" | "currency"> }) {
+  const profile = useOrgProfile().data
+  const money = (cents: number) => formatMoney(cents, order.currency, profile?.locale ?? "es")
+  const state = purchasePaymentState(order, order.balance, money)
+  return <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-bold whitespace-nowrap", TONE_CLASS[state.tone])}>{state.label}</span>
+}
+
+function OrdersSection({ status, payment, openOrderId, canWrite, onDirtyChange, requestLeave }: {
   status: string | null
+  payment: "por_pagar" | null
+  openOrderId: string | null
   canWrite: boolean
   onDirtyChange: (dirty: boolean) => void
   requestLeave: (action: () => void) => void
 }) {
   const queryClient = useQueryClient()
-  const [expanded, setExpanded] = React.useState<string | null>(null)
+  const canPay = usePermission("finance.write")
+  const [expanded, setExpanded] = React.useState<string | null>(openOrderId)
+  const [cancelling, setCancelling] = React.useState<PurchaseOrderItem | null>(null)
+  React.useEffect(() => {
+    if (openOrderId) setExpanded(openOrderId)
+  }, [openOrderId])
   const filters: FilterDef[] = React.useMemo(
     () => [
       {
@@ -283,14 +329,18 @@ function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
         type: "select",
         options: Object.entries(ORDER_STATUS_LABELS).map(([value, label]) => ({ value, label })),
       },
+      { key: "pago", label: "Pago", type: "select", options: [{ value: "por_pagar", label: "Por pagar" }] },
     ],
     [],
   )
   const query = useQuery({
     retry: false,
-    queryKey: ["inventory", "orders", status],
+    queryKey: ["inventory", "orders", status, payment],
     queryFn: () => {
-      const suffix = status ? `?status=${encodeURIComponent(status)}` : ""
+      const params = new URLSearchParams()
+      if (status) params.set("status", status)
+      if (payment) params.set("pago", payment)
+      const suffix = params.size ? `?${params}` : ""
       return apiFetch<{ data: PurchaseOrderItem[] }>(`/api/inventory/purchase-orders${suffix}`)
     },
   })
@@ -302,26 +352,40 @@ function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
   })
   const cancel = useMutation({
     retry: false,
-    mutationFn: (id: string) => apiFetch(`/api/inventory/purchase-orders/${id}/cancel`, { method: "POST" }),
-    onSuccess: () => { toast.success("Orden cancelada"); void queryClient.invalidateQueries({ queryKey: ["inventory"] }) },
+    mutationFn: (input: { id: string; payments?: "anular" | "a_favor" }) =>
+      apiFetch(`/api/inventory/purchase-orders/${input.id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify(input.payments ? { payments: input.payments, reason: input.payments === "anular" ? "Se canceló la compra" : undefined } : {}),
+      }),
+    onSuccess: () => {
+      toast.success("Orden cancelada")
+      setCancelling(null)
+      invalidateFinance(queryClient)
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] })
+    },
     onError: (error) => toast.error(errorMessage(error)),
   })
   const rows = query.data?.data ?? []
   const columns = React.useMemo<ColumnDef<PurchaseOrderItem>[]>(
     () => [
       {
-        accessorKey: "supplierName",
-        header: "Proveedor",
+        accessorKey: "orderNumber",
+        header: "Orden",
         cell: ({ row }) => (
           <button
             type="button"
-            className="text-left font-medium hover:underline"
+            className="text-left font-bold whitespace-nowrap hover:underline"
             onClick={() => requestLeave(() => setExpanded((current) => (current === row.original.id ? null : row.original.id)))}
             aria-expanded={expanded === row.original.id}
           >
-            {row.original.supplierName ?? "Proveedor"}
+            {purchaseOrderLabel(row.original.orderNumber)}
           </button>
         ),
+      },
+      {
+        accessorKey: "supplierName",
+        header: "Proveedor",
+        cell: ({ row }) => row.original.supplierName ?? "Proveedor",
       },
       {
         accessorKey: "warehouseName",
@@ -332,6 +396,11 @@ function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
         accessorKey: "status",
         header: "Estado",
         cell: ({ row }) => <Badge>{ORDER_STATUS_LABELS[row.original.status] ?? row.original.status}</Badge>,
+      },
+      {
+        id: "pago",
+        header: "Pago",
+        cell: ({ row }) => <PaymentChip order={row.original} />,
       },
       {
         id: "actions",
@@ -360,14 +429,19 @@ function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
               tone: "danger",
               disabled: confirm.isPending || cancel.isPending || isAmbiguousMutationError(confirm.error) || isAmbiguousMutationError(cancel.error),
               onSelect: () => requestLeave(() => {
+                // Con pagos hay que decir qué pasa con ellos; sin pagos, se cancela.
+                if ((order.balance?.paidCents ?? 0) > 0) {
+                  setCancelling(order)
+                  return
+                }
                 setExpanded(null)
-                cancel.mutate(order.id)
+                cancel.mutate({ id: order.id })
               }),
             })
           }
           return (
             <div className="text-right">
-              <RowActions label={`Acciones de la orden de ${order.supplierName ?? "Proveedor"}`} items={items} />
+              <RowActions label={`Acciones de la orden ${purchaseOrderLabel(order.orderNumber)} de ${order.supplierName ?? "Proveedor"}`} items={items} />
             </div>
           )
         },
@@ -385,23 +459,142 @@ function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
       ) : query.isError ? (
         <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} />
       ) : rows.length === 0 ? (
-        <EmptyState title={status ? "Sin resultados" : "Sin órdenes de compra"} description={status ? "Prueba otro estado para encontrar órdenes." : "Registra la primera con el botón Orden de compra."} />
+        <EmptyState
+          title={status || payment ? "Sin resultados" : "Sin órdenes de compra"}
+          description={payment ? "No hay compras recibidas sin pagar." : status ? "Prueba otro estado para encontrar órdenes." : "Registra la primera con el botón Orden de compra."}
+        />
       ) : (
         <DataTable table={table} />
       )}
-      {expanded && <OrderDetail key={expanded} orderId={expanded} canWrite={canWrite} onDirtyChange={onDirtyChange} />}
-      <p className="text-xs text-muted-foreground">
-        Las órdenes registran compromiso comercial referencial; nunca equivalen a un pago ni tocan caja.
-      </p>
+      {expanded && <OrderDetail key={expanded} orderId={expanded} canWrite={canWrite} canPay={canPay} onDirtyChange={onDirtyChange} />}
+      <ul className="grid gap-2 text-sm sm:grid-cols-2">
+        <li className="rounded-lg border bg-card px-3 py-2.5"><strong>En partes.</strong> Cada pago se suma; la compra dice cuánto falta. Por pagar = lo recibido − lo pagado.</li>
+        <li className="rounded-lg border bg-card px-3 py-2.5"><strong>Por adelantado.</strong> Se puede pagar antes de recibir. Al llegar, lo adelantado se descuenta de lo que hay que pagar.</li>
+        <li className="rounded-lg border bg-card px-3 py-2.5"><strong>Si se pagó de más</strong> en una compra que ya llegó entera, queda a favor con el proveedor y se usa en la próxima.</li>
+        <li className="rounded-lg border bg-card px-3 py-2.5"><strong>Cancelar una compra pagada</strong> pide anular sus pagos o dejarlos a favor con el proveedor; nunca quedan sueltos.</li>
+      </ul>
+      <CancelPaidDialog
+        order={cancelling}
+        pending={cancel.isPending}
+        canPay={canPay}
+        onClose={() => setCancelling(null)}
+        onConfirm={(payments) => {
+          if (!cancelling) return
+          setExpanded(null)
+          cancel.mutate({ id: cancelling.id, payments })
+        }}
+      />
     </div>
   )
 }
 
-function OrderDetail({ orderId, canWrite, onDirtyChange }: {
+/** Cancelar una compra con pagos: anularlos (el proveedor devolvió el dinero) o dejarlos a favor. */
+function CancelPaidDialog({ order, pending, canPay, onClose, onConfirm }: {
+  order: PurchaseOrderItem | null
+  pending: boolean
+  canPay: boolean
+  onClose: () => void
+  onConfirm: (payments: "anular" | "a_favor") => void
+}) {
+  const [choice, setChoice] = React.useState<"anular" | "a_favor" | "">("")
+  const profile = useOrgProfile().data
+  React.useEffect(() => {
+    if (order) setChoice("")
+  }, [order])
+  const paid = order?.balance?.paidCents ?? 0
+  // Nunca se supone una moneda: la de la orden, y sin orden no hay importe que decir.
+  const money = (cents: number) => (order ? formatMoney(cents, order.currency, profile?.locale ?? "es") : "")
+  return (
+    <ConfirmDialog
+      open={order !== null}
+      title={order ? `Cancelar ${purchaseOrderLabel(order.orderNumber)}` : "Cancelar la compra"}
+      description={
+        canPay
+          ? `Esta compra ya tiene ${money(paid)} pagados. Elige qué pasa con ese dinero: nunca queda suelto.`
+          : `Esta compra ya tiene ${money(paid)} pagados: cancelarla la hace quien registra los pagos (caja).`
+      }
+      confirmLabel="Cancelar la compra"
+      cancelLabel="Volver"
+      pending={pending}
+      confirmDisabled={!canPay || choice === ""}
+      onClose={onClose}
+      onConfirm={() => {
+        if (choice) onConfirm(choice)
+      }}
+    >
+      {canPay ? (
+        <RadioGroup aria-label="Qué pasa con lo pagado" value={choice} onValueChange={(value) => setChoice(value as "anular" | "a_favor")} className="flex flex-col gap-2">
+          <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
+            <RadioGroupItem value="a_favor" className="mt-0.5" />
+            <span><strong>Dejarlo a favor con {order?.supplierName ?? "el proveedor"}</strong><br /><span className="text-sm text-muted-foreground">Se usa al pagar su próxima compra.</span></span>
+          </FieldLabel>
+          <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
+            <RadioGroupItem value="anular" className="mt-0.5" />
+            <span><strong>Anular los pagos</strong><br /><span className="text-sm text-muted-foreground">El proveedor devolvió el dinero: los gastos quedan anulados con su motivo.</span></span>
+          </FieldLabel>
+        </RadioGroup>
+      ) : null}
+    </ConfirmDialog>
+  )
+}
+
+/** Anular lo usado a favor: la misma confirmación que los otros anulados, en cajón y con motivo. */
+function VoidCreditUseDrawer({ open, description, isSubmitting, error, onClose, onConfirm }: {
+  open: boolean
+  description: string
+  isSubmitting: boolean
+  error: string | null
+  onClose: () => void
+  onConfirm: (reason: string) => void
+}) {
+  const fieldId = React.useId()
+  const [reason, setReason] = React.useState("")
+  const [missing, setMissing] = React.useState(false)
+  React.useEffect(() => {
+    if (!open) return
+    setReason("")
+    setMissing(false)
+  }, [open])
+  return (
+    <FormDrawer
+      dock={false}
+      open={open}
+      title="Anular lo usado a favor"
+      description={description}
+      error={missing ? "Escribe el motivo de la anulación." : error}
+      isSubmitting={isSubmitting}
+      isDirty={reason !== ""}
+      submitLabel="Anular"
+      cancelLabel="No anular"
+      onClose={() => {
+        if (!isSubmitting) onClose()
+      }}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!reason.trim()) {
+          setMissing(true)
+          return
+        }
+        setMissing(false)
+        onConfirm(reason.trim())
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor={fieldId}>Motivo</FieldLabel>
+        <Textarea id={fieldId} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} />
+      </Field>
+    </FormDrawer>
+  )
+}
+
+function OrderDetail({ orderId, canWrite, canPay, onDirtyChange }: {
   orderId: string
   canWrite: boolean
+  canPay: boolean
   onDirtyChange: (dirty: boolean) => void
 }) {
+  const [paying, setPaying] = React.useState(false)
+  const profile = useOrgProfile().data
   const queryClient = useQueryClient()
   const [receiveError, setReceiveError] = React.useState<string | null>(null)
   // Clave UUID por recepción: persiste a reintentos hasta el éxito y rota
@@ -440,10 +633,35 @@ function OrderDetail({ orderId, canWrite, onDirtyChange }: {
     },
     onError: (error) => setReceiveError(errorMessage(error)),
   })
+  // El uso de lo que se tenía a favor se anula aquí, con motivo; un pago con dinero, en Finanzas › Gastos.
+  const canFinance = usePermission("finance.read")
+  const [voidingCredit, setVoidingCredit] = React.useState<PurchasePayment | null>(null)
+  const voidCredit = useMutation({
+    retry: false,
+    mutationFn: (input: { id: string; reason: string }) => voidSupplierCreditUseApi(input.id, input.reason),
+    onSuccess: () => {
+      toast.success("Uso anulado: vuelve a estar a favor con el proveedor y esta compra lo vuelve a deber")
+      setVoidingCredit(null)
+      invalidateFinance(queryClient)
+    },
+  })
   const detail = detailQuery.data?.data
   if (detailQuery.isPending) return <LoadingState message="Cargando detalle…" />
   if (detailQuery.isError || !detail) return <QueryErrorState error={detailQuery.error} onRetry={() => { void detailQuery.refetch() }} notFound="La orden de compra ya no está disponible." />
   const pending = detail.lines.filter((line) => line.receivedQuantity < line.quantity)
+  const locale = profile?.locale ?? "es"
+  const money = (cents: number) => formatMoney(cents, detail.currency, locale)
+  const balance = detail.balance
+  const payable = canPay && balance !== null && detail.status !== "borrador" && detail.status !== "cancelada"
+  const restToAdvance = balance ? Math.max(0, balance.orderedCents - balance.paidCents) : 0
+  /** El mes del pago en la zona de la clínica: «Ver gasto» abre ese mes de Gastos. */
+  const monthOf = (iso: string): { year: number; month: number } => {
+    const [year, month] = new Intl.DateTimeFormat("en-CA", { timeZone: profile?.timezone ?? "UTC", year: "numeric", month: "2-digit" })
+      .format(new Date(iso))
+      .split("-")
+      .map(Number)
+    return { year: year ?? 0, month: month ?? 0 }
+  }
   function handleReceive(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (receive.isPending || isAmbiguousMutationError(receive.error)) return
@@ -463,6 +681,124 @@ function OrderDetail({ orderId, canWrite, onDirtyChange }: {
   }
   return (
     <div className="mt-3 flex flex-col gap-3 rounded-md bg-muted/40 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <strong className="text-base">
+          {purchaseOrderLabel(detail.orderNumber)} · {detail.supplierName ?? "Proveedor"}
+        </strong>
+        {balance ? <span className="text-sm text-muted-foreground">{balance.branchName}</span> : null}
+      </div>
+      {balance && detail.status !== "borrador" ? (
+        <section aria-label="Pago de la compra" className="flex flex-col gap-2.5 rounded-lg border bg-card p-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="flex flex-col rounded-md bg-muted/50 px-2.5 py-2"><span className="text-xs font-bold text-muted-foreground">Recibido</span><strong className="tabular-nums">{money(balance.receivedCents)}</strong></div>
+            <div className="flex flex-col rounded-md bg-muted/50 px-2.5 py-2"><span className="text-xs font-bold text-muted-foreground">Pagado</span><strong className="tabular-nums">{money(balance.paidCents)}</strong></div>
+            <div className={cn("flex flex-col rounded-md px-2.5 py-2", balance.dueCents > 0 ? "bg-warning-soft text-warning" : balance.aheadCents > 0 ? "bg-primary-soft text-primary-soft-foreground" : "bg-success-soft text-success")}>
+              <span className="text-xs font-bold">{balance.dueCents > 0 ? "Por pagar" : balance.aheadCents > 0 ? (detail.status === "recibida" || detail.status === "cancelada" ? "A favor" : "Adelantado") : "Por pagar"}</span>
+              <strong className="tabular-nums">{money(balance.dueCents > 0 ? balance.dueCents : balance.aheadCents)}</strong>
+            </div>
+          </div>
+          <div
+            role="img"
+            aria-label={`De ${money(balance.orderedCents)} pedidos: pagado ${money(Math.min(balance.paidCents, balance.orderedCents))}, recibido sin pagar ${money(balance.dueCents)}, falta recibir ${money(Math.max(0, balance.orderedCents - balance.receivedCents))}`}
+            className="flex h-3 gap-0.5 overflow-hidden rounded"
+          >
+            <span className="h-full bg-series-1" style={{ flex: `${Math.min(balance.paidCents, balance.orderedCents)} 1 0` }} />
+            <span className="h-full bg-series-2" style={{ flex: `${balance.dueCents} 1 0` }} />
+            <span className="h-full flex-1 bg-secondary" style={{ flex: `${Math.max(0, balance.orderedCents - Math.max(balance.receivedCents, balance.paidCents))} 1 0` }} />
+          </div>
+          <ul className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-foreground/80">
+            <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-[3px] bg-series-1" />Pagado</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-[3px] bg-series-2" />Recibido sin pagar</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-[3px] bg-secondary" />Falta recibir</li>
+          </ul>
+          {detail.supplierCreditCents > 0 ? (
+            <p className="text-sm">A favor con {detail.supplierName}: <strong>{money(detail.supplierCreditCents)}</strong>, para pagar una próxima compra.</p>
+          ) : null}
+          {payable ? (
+            <Button
+              type="button"
+              variant={balance.dueCents > 0 ? "default" : "outline"}
+              className="self-start"
+              disabled={balance.dueCents === 0 && restToAdvance === 0}
+              onClick={() => setPaying(true)}
+            >
+              {balance.dueCents > 0
+                ? `Registrar pago de ${money(balance.dueCents)}`
+                : balance.receivedCents === 0
+                  ? balance.paidCents > 0 ? "Registrar otro adelanto" : "Registrar un adelanto"
+                  : "Adelantar lo que falta recibir"}
+            </Button>
+          ) : null}
+          <div className="flex flex-col gap-1.5">
+            <strong className="text-sm">Pagos</strong>
+            {detail.payments.length === 0 ? (
+              <span className="text-sm text-muted-foreground">Todavía no hay pagos.</span>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {detail.payments.map((item) => (
+                  <li key={item.id} className={cn("flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm", item.voidedAt && "text-muted-foreground line-through")}>
+                    <span className="flex flex-col">
+                      <strong className="tabular-nums">{money(item.amountCents)}</strong>
+                      <span className="text-xs text-muted-foreground">
+                        {[
+                          new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: profile?.timezone ?? "UTC" }).format(new Date(item.paidAt)).replace(/\./g, ""),
+                          item.kind === "a_favor" ? "con lo que se tenía a favor" : item.fromCash ? "efectivo de la caja" : null,
+                          item.receiptKind && item.receiptKind !== "ninguno" ? `${item.receiptKind}${item.receiptNumber ? ` ${item.receiptNumber}` : ""}` : null,
+                          item.byName,
+                          item.voidedAt ? "anulado" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    {item.kind === "pago" ? (
+                      canFinance ? (
+                        <Link
+                          to="/finance"
+                          search={{ tab: "gastos", branch: balance.branchId, ...monthOf(item.paidAt) }}
+                          className="text-sm font-semibold text-primary-soft-foreground"
+                        >
+                          Ver gasto
+                        </Link>
+                      ) : null
+                    ) : canPay && !item.voidedAt ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Anular el uso de ${money(item.amountCents)} a favor`}
+                        onClick={() => {
+                          voidCredit.reset()
+                          setVoidingCredit(item)
+                        }}
+                      >
+                        Anular
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      ) : null}
+      {paying && profile ? (
+        <PurchasePaymentDrawer order={detail} locale={locale} timeZone={profile.timezone ?? "UTC"} open={paying} onClose={() => setPaying(false)} />
+      ) : null}
+      <VoidCreditUseDrawer
+        open={voidingCredit !== null}
+        description={
+          voidingCredit
+            ? `${money(voidingCredit.amountCents)} vuelven a estar a favor con ${detail.supplierName ?? "el proveedor"} y esta compra los vuelve a deber. Queda en el historial con su motivo.`
+            : ""
+        }
+        isSubmitting={voidCredit.isPending}
+        error={voidCredit.error ? cashErrorMessage(voidCredit.error) : null}
+        onClose={() => setVoidingCredit(null)}
+        onConfirm={(reason) => {
+          if (voidingCredit) voidCredit.mutate({ id: voidingCredit.id, reason })
+        }}
+      />
       <ul className="flex flex-col gap-1 text-sm">
         {detail.lines.map((line) => (
           <li key={line.id} className="flex flex-wrap justify-between gap-2">

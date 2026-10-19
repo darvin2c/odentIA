@@ -41,6 +41,9 @@ export { isPasswordBreachedOnline, PASSWORD_MIN_LENGTH, usePasswordRequirements 
 export { Brand } from "./brand.js"
 export {
   BarChart,
+  BarList,
+  type BarListProps,
+  type BarListRow,
   type ChartCategory,
   type ChartPoint,
   ColumnChart,
@@ -58,6 +61,9 @@ export {
   type SharePart,
   Sparkline,
   TrendChart,
+  WaterfallChart,
+  type WaterfallChartProps,
+  type WaterfallStep,
 } from "./charts/index.js"
 export { common } from "./common.js"
 export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"
