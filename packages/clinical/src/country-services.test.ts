@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor, kindOfSpecialty, phaseForKind, specialtyForKind, TREATMENT_KIND_KEYS } from "./index.js"
 
-describe("lista de servicios y especialidades de cada país (ADR 0067)", () => {
+describe("lista de servicios y especialidades de cada país (ADR 0069)", () => {
   it("Perú pide la CPMS a toda clínica; un país sin perfil no tiene lista", () => {
     expect(clinicalProfileFor("PE").services).toMatchObject({ system: "CPMS", label: "CPMS", codeName: "código CPMS", required: true, norm: "RM 550-2023-MINSA" })
     expect(clinicalProfileFor("UY").services).toBeNull()

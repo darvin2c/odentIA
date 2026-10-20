@@ -36,7 +36,7 @@ export const SEARCH_MAX_DISTANCE = 0.65
 /**
  * Palabras con que la gente nombra cada tipo de tratamiento. Solo van al
  * índice, para que «matar el nervio» encuentre una endodoncia; el agente nunca
- * las dice como dato. Van con el tipo del servicio (ADR 0067), que no cambia
+ * las dice como dato. Van con el tipo del servicio (ADR 0069), que no cambia
  * aunque la clínica renombre su especialidad.
  */
 const KIND_WORDS: Record<TreatmentKind, string> = {

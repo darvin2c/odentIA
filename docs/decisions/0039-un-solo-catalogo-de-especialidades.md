@@ -1,6 +1,6 @@
 # 0039 · Un solo catálogo de especialidades y la agenda ofrece a quien atiende
 
-Fecha: 2026-10-16 · Estado: aceptada · Precisa: [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) · Actualizada por [0067](0067-biblioteca-de-servicios-por-pais.md): la clínica nace con las especialidades de su país (en el Perú, las del DS 023-2020-SA y Odontología general), no con las 14 de la biblioteca; las claves de la biblioteca pasan a ser tipos de tratamiento internos, y cada especialidad del país dice qué tipos recibe.
+Fecha: 2026-10-16 · Estado: aceptada · Precisa: [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) · Actualizada por [0069](0069-biblioteca-de-servicios-por-pais.md): la clínica nace con las especialidades de su país (en el Perú, las del DS 023-2020-SA y Odontología general), no con las 14 de la biblioteca; las claves de la biblioteca pasan a ser tipos de tratamiento internos, y cada especialidad del país dice qué tipos recibe.
 
 ## Problema
 

@@ -16,6 +16,7 @@ import {
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteLabel } from "./encounter-diagnoses"
+import { EncounterMaterialsBlock } from "./encounter-materials"
 import { activeOrgLocale } from "../../lib/locale"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
@@ -435,6 +436,10 @@ export function EncounterDetailView({
             </p>
           ) : null}
         </section>
+      ) : null}
+
+      {encounter.status === "finalizada" ? (
+        <EncounterMaterialsBlock patientId={patientId} encounterId={encounter.id} />
       ) : null}
 
       <section aria-label="Adendas">

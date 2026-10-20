@@ -25,6 +25,65 @@ export interface ClosingCheck {
   odontogram: ClosingOdontogram | null
   /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */
   periodontal: ClosingPeriodontal | null
+  /**
+   * Lo que se descontará al firmar (los materiales de sus servicios), con la
+   * sede de la que sale. Informa, no pide confirmar; null si la atención no
+   * tiene sede o no hay nada que descontar (ADR 0067).
+   */
+  materials: ClosingMaterials | null
+}
+
+/** Cuánto de un producto, en su unidad de uso («2 guantes»). */
+export interface MaterialQuantity {
+  productId: string
+  name: string
+  /** Unidad de uso, en singular. */
+  unit: string
+  quantity: number
+  quantityText: string
+}
+
+/** Lo que el cierre anuncia que se descontará. */
+export interface ClosingMaterials {
+  branch: { id: string; name: string }
+  items: MaterialQuantity[]
+}
+
+/** Lo que descontó el cierre: lo que no había quedó como faltante. */
+export interface FinalizedMaterials {
+  branch: { id: string; name: string }
+  items: Array<MaterialQuantity & { shortage: number }>
+  /** No se pudo descontar: la atención se firmó igual y lo usado se registra con «Corregir». */
+  failed: boolean
+}
+
+/** «Materiales usados» de una atención firmada. */
+export interface EncounterMaterials {
+  /** La sede de la atención; null sin sede (no salió nada de ningún almacén). */
+  branch: { id: string; name: string } | null
+  /** Lo usado, neto de lo devuelto, por producto. */
+  items: MaterialQuantity[]
+  /** Quien atendió, el dueño o la administración, con la atención firmada y con sede. */
+  canCorrect: boolean
+}
+
+export function fetchEncounterMaterials(patientId: string, encounterId: string) {
+  return apiFetch<{ data: EncounterMaterials }>(`${base(patientId)}/encounters/${encounterId}/materials`)
+}
+
+/**
+ * «Fueron 4, no 2»: deja lo usado de un producto en la cantidad real. La clave
+ * es la del formulario abierto: reintentar lo mismo no descuenta dos veces.
+ */
+export function correctEncounterMaterialApi(
+  patientId: string,
+  encounterId: string,
+  body: { productId: string; quantity: number; idempotencyKey: string },
+) {
+  return post<EncounterMaterials & { changed: number; replayed: boolean }>(
+    `${base(patientId)}/encounters/${encounterId}/materials`,
+    body,
+  )
 }
 
 /** El periodontograma en el cierre: cuántas piezas y, a medias, qué falta (se firma como parcial). */

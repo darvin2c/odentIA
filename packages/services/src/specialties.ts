@@ -9,7 +9,7 @@ import { orgClinicalProfile } from "./locale.js"
 
 /**
  * Una sola lista de especialidades, la de la clínica (ADR 0039). Nace con las
- * del perfil de su país (ADR 0067): en Perú, las del DS 023-2020-SA que
+ * del perfil de su país (ADR 0069): en Perú, las del DS 023-2020-SA que
  * atienden pacientes; sin perfil, la lista del núcleo. El servicio apunta a
  * una por id, y la agenda ofrece el servicio a quien la atiende. Toda función
  * recibe un `tx` ya dentro de `withOrgContext`.
@@ -79,7 +79,7 @@ export async function requireOrgSpecialtyId(tx: Db, orgId: string, specialtyId: 
 }
 
 /**
- * El tipo de tratamiento de un servicio (ADR 0067), para la fase del plan y
+ * El tipo de tratamiento de un servicio (ADR 0069), para la fase del plan y
  * las palabras del agente: el de su tratamiento si viene de la biblioteca; si
  * es propio, el de su especialidad del país; null con una especialidad que
  * creó la clínica o sin especialidad.

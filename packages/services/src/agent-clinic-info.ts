@@ -56,7 +56,7 @@ export interface AgentServiceInfo {
   /** La especialidad de la clínica, con su nombre (ADR 0039). */
   specialty: string | null
   /**
-   * Su tipo de tratamiento (ADR 0067): el de su tratamiento de la biblioteca o
+   * Su tipo de tratamiento (ADR 0069): el de su tratamiento de la biblioteca o
    * el de su especialidad del país. Las palabras de la calle del índice van
    * con él; null con una especialidad que creó la clínica.
    */

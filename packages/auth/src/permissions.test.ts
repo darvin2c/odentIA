@@ -53,6 +53,19 @@ describe("permiso operativo agent.decide", () => {
     expect(ALL_PERMISSIONS).toContain("clinical.alerts")
   })
 
+  it("recepción ve el inventario sin precios y recibe lo que llega (ADR 0067)", () => {
+    expect(canAccess("reception", "inventory.stock")).toBe(true)
+    expect(canAccess("reception", "inventory.receive")).toBe(true)
+    expect(canAccess("reception", "inventory.read")).toBe(false)
+    expect(canAccess("reception", "inventory.write")).toBe(false)
+    for (const role of ["dentist", "cashier", "member"]) {
+      expect(canAccess(role, "inventory.stock")).toBe(false)
+      expect(canAccess(role, "inventory.receive")).toBe(false)
+    }
+    expect(canAccess("admin", "inventory.receive")).toBe(true)
+    expect(ALL_PERMISSIONS).toContain("inventory.stock")
+  })
+
   it("recepción recibe la tomografía sin abrirla (ADR 0055)", () => {
     expect(canAccess("reception", "clinical.receive")).toBe(true)
     expect(canAccess("reception", "clinical.read")).toBe(false)

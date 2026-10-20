@@ -1,13 +1,13 @@
 /**
  * Contratos de prestaciones y validación del sitio clínico.
  * La biblioteca es de odentIA: tratamientos de consultorio con nombre propio,
- * y por debajo el código de la lista de cada país (ADR 0067). Los nombres
+ * y por debajo el código de la lista de cada país (ADR 0069). Los nombres
  * comerciales y los precios pertenecen a cada clínica.
  */
 import { isValidTooth, surfacesForTooth } from "./anatomy.js"
 
 /**
- * Tipos de tratamiento de la biblioteca (ADR 0067): ordenan la biblioteca,
+ * Tipos de tratamiento de la biblioteca (ADR 0069): ordenan la biblioteca,
  * proponen la fase del plan, guardan las palabras de la calle del agente y
  * dicen qué especialidad del país recibe cada tratamiento. Son de uso
  * interno: la clínica ve y edita la especialidad, nunca el tipo. Antes eran

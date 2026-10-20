@@ -38,6 +38,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Building2, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
+import { BranchWarehouses } from "../../components/settings/branch-warehouses"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -119,6 +120,8 @@ function BranchesPage() {
   const hasCriteria = search !== "" || estadoFilter !== undefined
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
+  // Los almacenes de cada sede los lleva quien lleva el inventario (ADR 0067).
+  const canWarehouses = usePermission("inventory.write")
 
   // País y zonas del perfil: definen la máscara del teléfono y las sugerencias.
   const profile = useOrgProfile()
@@ -424,6 +427,7 @@ function BranchesPage() {
           </div>
         )}
       </form.Field>
+      {editing && canWarehouses ? <BranchWarehouses branchId={editing.id} branchName={editing.name} /> : null}
     </div>
   )
 

@@ -79,7 +79,7 @@ test("una compra recibida llega a Finanzas: se avisa, se paga como gasto de Mate
   // El mismo pago es el de la orden: Inventario la da por pagada.
   const purchases = await call<{ unpaid: { orders: number; cents: number } }>(page, "GET", `/api/finance/purchases?branchId=${owner.branchId}`, org.slug)
   expect(purchases.unpaid).toMatchObject({ orders: 0, cents: 0 })
-  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras"))
+  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras&ver=todas"))
   const row = page.getByRole("row").filter({ hasText: label })
   await expect(row).toContainText("✓ Pagada")
 
@@ -105,11 +105,13 @@ test("cancelar una compra pagada pide qué pasa con lo pagado; el servidor no la
   expect(refused.status).toBe(409)
   expect(refused.body.error.code).toBe("PURCHASE_HAS_PAYMENTS")
 
-  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras"))
+  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras&ver=todas"))
   const row = page.getByRole("row").filter({ hasText: label })
-  await expect(row).toContainText("Adelanto S/ 200.00 · aún no llega")
-  await page.getByRole("button", { name: `Acciones de la orden ${label} de Insumos de prueba` }).click()
-  await page.getByRole("menuitem", { name: "Cancelar" }).click()
+  await expect(row).toContainText("Adelanto S/ 200.00")
+  // La compra se abre al lado; cancelar está en su «⋯».
+  await page.getByRole("button", { name: `${label} · Insumos de prueba`, exact: true }).click()
+  await page.getByRole("button", { name: `Más acciones de ${label}` }).click()
+  await page.getByRole("menuitem", { name: "Cancelar la compra" }).click()
   const dialog = page.getByRole("alertdialog", { name: `Cancelar ${label}` })
   await expect(dialog).toContainText("Esta compra ya tiene S/ 200.00 pagados")
   // Sin elegir no se cancela.
@@ -128,8 +130,8 @@ test("cancelar una compra pagada pide qué pasa con lo pagado; el servidor no la
   const next = await base.order(2, 5000)
   const nextLabel = `OC-${String(next.orderNumber).padStart(4, "0")}`
   await call(page, "POST", `/api/finance/purchases/${next.id}/payments`, org.slug, { amountCents: 0, creditCents: 10000, fromCash: false }, 201)
-  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras"))
-  await page.getByRole("button", { name: nextLabel, exact: true }).click()
+  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras&ver=todas"))
+  await page.getByRole("button", { name: `${nextLabel} · Insumos de prueba`, exact: true }).click()
   await page.getByRole("button", { name: "Anular el uso de S/ 100.00 a favor" }).click()
   const voiding = surface(page, { name: "Anular lo usado a favor", exact: true })
   await voiding.getByLabel("Motivo", { exact: true }).fill("Se usó en la compra equivocada")

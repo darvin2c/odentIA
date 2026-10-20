@@ -8,7 +8,7 @@ import { expect, it } from "vitest"
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
 // atrapan antes del merge, sin base de datos, y concilian la cobertura de la
-// lista oficial (release.expected_count) y la biblioteca de odentIA (ADR 0067).
+// lista oficial (release.expected_count) y la biblioteca de odentIA (ADR 0069).
 const here = dirname(fileURLToPath(import.meta.url))
 const utf8 = new TextDecoder("utf-8", { fatal: true })
 

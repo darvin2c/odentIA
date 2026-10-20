@@ -1,4 +1,4 @@
-# 0067 · Una biblioteca de consultorio y el código de la lista de cada país
+# 0069 · Una biblioteca de consultorio y el código de la lista de cada país
 
 Fecha: 2026-10-19 · **Estado:** aceptada (fases 1 a 3: núcleo, Perú, Colombia, México, Chile, Costa Rica y El Salvador; lienzo del issue 40, versión 3, nueve decisiones aprobadas) · Actualiza [0039](0039-un-solo-catalogo-de-especialidades.md) (con qué especialidades nace la clínica), [0036](0036-nucleo-internacional-y-lo-que-solo-es-de-peru.md) (lo que deja un tratamiento en la pieza) y [0003](0003-nota-clinica-normativa.md) (procedimientos con CPMS). Issue 40.
 
@@ -50,6 +50,6 @@ La biblioteca de servicios era la CPMS del Perú copiada uno a uno: 505 plantill
 ## Referencias
 
 - `packages/clinical/src/country-profiles.ts` (`services`, `specialties`, `specialtyForKind`, `kindOfSpecialty`), `treatment-templates.ts` (`TREATMENT_KINDS`, `phaseForKind`).
-- `packages/db/src/procedure-codes.ts` (`seedProcedureCodes`), `seeds/biblioteca.csv`, `seeds/biblioteca_codigos.csv`; migraciones `0036_biblioteca_por_pais.sql`, `0037_biblioteca_por_pais_reglas.sql` y `0038_biblioteca_variantes_por_pais.sql`.
+- `packages/db/src/procedure-codes.ts` (`seedProcedureCodes`), `seeds/biblioteca.csv`, `seeds/biblioteca_codigos.csv`; migraciones `0043_biblioteca_por_pais.sql` y `0044_biblioteca_por_pais_reglas.sql`.
 - `packages/services/src/service-catalog.ts` (`listTemplates`, `searchOfficialCodes`, `assertOwnCode`), `procedure-codings.ts` (`serviceCoding`, `resolveServiceCodings`), `specialties.ts` (`ensureClinicSpecialties`, `librarySpecialtyIds`, `serviceKindOf`).
 - Lienzo «Servicios por país» (issue 40, versión 3), tableros 2 a 7b y decisiones 1 a 9.

@@ -1,5 +1,5 @@
 /**
- * Siembra el catálogo de servicios (ADR 0067): las listas oficiales de cada
+ * Siembra el catálogo de servicios (ADR 0069): las listas oficiales de cada
  * país y la biblioteca de odentIA con el código de cada tratamiento en ellas.
  *
  * - Listas oficiales: una edición vigente por lista

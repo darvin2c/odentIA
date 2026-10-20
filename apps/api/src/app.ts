@@ -528,7 +528,7 @@ export function createApp(deps: AppDeps) {
       })
       // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
       if (!current) await turnOnNewClinicLines(tx, orgId, userId)
-      // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0067).
+      // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
       if (!current) await ensureClinicSpecialties(tx, orgId)
       await tx.insert(auditEvent).values({
         organizationId: orgId,

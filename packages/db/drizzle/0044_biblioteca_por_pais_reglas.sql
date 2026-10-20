@@ -1,4 +1,4 @@
--- Biblioteca de servicios por país (ADR 0067, issue 40).
+-- Biblioteca de servicios por país (ADR 0069, issue 40).
 -- Sale el estado «Heredada»: ningún flujo crea un servicio heredado y no hay
 -- datos reales. Lo que quede de una base de desarrollo pasa a servicio propio.
 -- Un servicio de la biblioteca anterior (plantillas `cpms:`, que la siembra
@@ -13,7 +13,7 @@ ALTER TABLE public.service_catalog ADD CONSTRAINT service_catalog_source_check C
 -- Lo que deja un tratamiento de la biblioteca en la pieza tiene la misma forma
 -- que el de un servicio: un hallazgo y, si corresponde, su variante.
 ALTER TABLE catalog.treatment_template ADD CONSTRAINT treatment_template_leaves_finding_check CHECK (leaves_finding IS NULL OR (jsonb_typeof(leaves_finding) = 'object' AND jsonb_typeof(leaves_finding -> 'condition') = 'string'));--> statement-breakpoint
--- La clínica nace con las especialidades de su país (ADR 0067). En una que ya
+-- La clínica nace con las especialidades de su país (ADR 0069). En una que ya
 -- existía, las claves de la biblioteca que corresponden una a una con una del
 -- país pasan a esa clave, con su nombre del país si conservaba el de la
 -- biblioteca: así no quedan «Periodoncia» y «Periodoncia e Implantología» a la

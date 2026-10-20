@@ -4,7 +4,7 @@ import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
 /**
- * Servicios por país (ADR 0067, lienzo del issue 40): la biblioteca es la de
+ * Servicios por país (ADR 0069, lienzo del issue 40): la biblioteca es la de
  * consultorio y cada tratamiento lleva el código de la lista del país; donde
  * la lista es obligatoria, el servicio propio elige el suyo con un buscador.
  */

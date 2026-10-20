@@ -21,7 +21,8 @@ import { ChoiceSelect } from "../ui/choice-select"
 
 export interface SendFinancialDocumentProps {
   patientId: string
-  documentType: "ticket" | "budget"
+  /** «return»: la devolución de un cobro (ADR 0068), de caja como el ticket. */
+  documentType: "ticket" | "budget" | "return"
   documentId: string
   trigger?: ReactNode
   onSent?: (info: { conversationId: string; messageId: string }) => void

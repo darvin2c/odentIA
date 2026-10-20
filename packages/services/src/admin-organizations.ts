@@ -770,7 +770,7 @@ export async function createAssistedOrganization(
     locale: region.locale,
     diagnosisSystem: region.diagnosisSystem,
   })
-  // La clínica nace con las especialidades de su país (ADR 0039 y 0067).
+  // La clínica nace con las especialidades de su país (ADR 0039 y 0069).
   await ensureClinicSpecialties(tx, organizationId)
   if (loaders.startTrial) {
     await loaders.startTrial(tx, organizationId, {

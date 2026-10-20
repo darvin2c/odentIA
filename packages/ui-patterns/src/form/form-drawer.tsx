@@ -4,7 +4,7 @@ import { SideDockScopeProvider } from "../side-dock.js"
 import { DockedSurface, useDockDecision } from "../docked-surface.js"
 import { useCloseGuard } from "../surface.js"
 import { FormPanel } from "./form-panel.js"
-import { FormSurface } from "./form-surface.js"
+import { type FormSecondaryAction, FormSurface } from "./form-surface.js"
 
 export interface FormDrawerProps {
   open: boolean
@@ -24,6 +24,11 @@ export interface FormDrawerProps {
   cancelLabel?: string
   submitDisabled?: boolean
   hideSubmit?: boolean
+  /**
+   * Acción secundaria opcional del pie, entre «Cancelar» y la principal
+   * («Guardar borrador»). Enter sigue haciendo la principal.
+   */
+  secondaryAction?: FormSecondaryAction
   /** Layout extra del panel (p. ej. ancho mayor para formularios extensos). */
   className?: string
   /**
@@ -77,6 +82,7 @@ export function FormDrawer({
   cancelLabel,
   submitDisabled = false,
   hideSubmit = false,
+  secondaryAction,
   className,
   dock = true,
 }: FormDrawerProps) {
@@ -124,6 +130,7 @@ export function FormDrawer({
             cancelLabel={cancelLabel}
             submitDisabled={submitDisabled}
             hideSubmit={hideSubmit}
+            secondaryAction={secondaryAction}
           >
             {children}
           </FormSurface>
@@ -154,6 +161,7 @@ export function FormDrawer({
           cancelLabel={cancelLabel}
           submitDisabled={submitDisabled}
           hideSubmit={hideSubmit}
+          secondaryAction={secondaryAction}
         >
           {children}
         </FormPanel>

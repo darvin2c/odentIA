@@ -65,7 +65,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
       from procedure_catalog_release r where r.is_current and r.system_key = 'CPMS'`)
     // La lista oficial entra entera; la biblioteca es la de consultorio y cada
     // tratamiento lleva su código CPMS, salvo las variantes de la norma de otro
-    // país (`coded_only`), que en el Perú no se ofrecen (ADR 0067).
+    // país (`coded_only`), que en el Perú no se ofrecen (ADR 0069).
     expect(coverage).toMatchObject({ expected: 505, available: 505, uncoded: 0 })
     expect(Number(Reflect.get(coverage!, "library"))).toBeGreaterThan(300)
     // Simula una actualización posterior de la CPMS: la edición instalada pasa a histórica.

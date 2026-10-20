@@ -178,7 +178,7 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   )
   const args = [c.orgId, c.dentist, andrea.id] as const
   // Una resina propia que deja una restauración, sin variante: fuera de Perú es opcional.
-  // En Colombia cada servicio lleva su código CUPS (ADR 0067): el de la obturación con resina.
+  // En Colombia cada servicio lleva su código CUPS (ADR 0069): el de la obturación con resina.
   await seedProcedureCodes(ownerDb)
   const resin = await c.run(async (tx) =>
     createService(tx, c.orgId, c.dentist, {

@@ -216,7 +216,7 @@ async function assertLeavesFinding(
 
 /**
  * Lo que deja un servicio de la biblioteca: lo que odentIA puso en su
- * tratamiento (`treatment_template.leaves_finding`, ADR 0067); null si no
+ * tratamiento (`treatment_template.leaves_finding`, ADR 0069); null si no
  * deja nada claro o no encaja con el ámbito.
  */
 function libraryLeavesFinding(template: TreatmentTemplateRow): LeavesFinding | null {
@@ -228,7 +228,7 @@ function libraryLeavesFinding(template: TreatmentTemplateRow): LeavesFinding | n
     : null
 }
 
-/** La lista de servicios del país de la clínica (ADR 0067), o null. */
+/** La lista de servicios del país de la clínica (ADR 0069), o null. */
 async function orgServiceList(tx: Db, orgId: string): Promise<ServiceListProfile | null> {
   return (await orgClinicalProfile(tx, orgId)).services
 }
@@ -256,7 +256,7 @@ async function assertTemplateUsable(
 }
 
 /**
- * El código oficial que elige la clínica para un servicio propio (ADR 0067):
+ * El código oficial que elige la clínica para un servicio propio (ADR 0069):
  * obligatorio donde la lista lo es, opcional donde es de referencia, y nada
  * sin lista. `undefined` = no se toca.
  */
@@ -295,7 +295,7 @@ async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTem
 /**
  * Detalle read-only de un tratamiento de la biblioteca por id, sin exigir
  * vigencia (incluye retirados), para fichas enlazadas. Lleva solo el código
- * vigente de la lista del país de la clínica (ADR 0067): nada de otro país.
+ * vigente de la lista del país de la clínica (ADR 0069): nada de otro país.
  */
 export async function getTemplate(
   tx: Db,
@@ -419,7 +419,7 @@ function toLibraryTemplate(row: LibraryRow, list: ServiceListProfile | null): Li
 }
 
 /**
- * La biblioteca como la ve la clínica (ADR 0067): todos los tratamientos de
+ * La biblioteca como la ve la clínica (ADR 0069): todos los tratamientos de
  * consultorio, con el código de la lista de su país si tiene una. Donde la
  * lista es obligatoria, solo los que tienen código en ella.
  */
@@ -615,7 +615,7 @@ export async function listServices(
 
 /**
  * Un servicio de la clínica, en cualquier estado, con el nombre de su
- * especialidad y su código oficial en la lista de su país (ADR 0067).
+ * especialidad y su código oficial en la lista de su país (ADR 0069).
  */
 export async function getService(
   tx: Db,
@@ -686,7 +686,7 @@ export interface CreateServiceInput {
    */
   leavesFinding?: LeavesFinding | null
   /**
-   * Código oficial de un servicio propio en la lista del país (ADR 0067):
+   * Código oficial de un servicio propio en la lista del país (ADR 0069):
    * obligatorio donde la lista lo es. Uno de la biblioteca toma el de su
    * tratamiento y no lo admite.
    */
@@ -943,7 +943,7 @@ export async function updateService(
   if (!resolvedScope) throw validation("Elige dónde se hace el servicio")
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
   // Donde la lista es obligatoria, un servicio propio no se guarda sin su código
-  // (ADR 0067), tampoco si se edita otra cosa: p. ej. uno que dejó de ser «Heredada».
+  // (ADR 0069), tampoco si se edita otra cosa: p. ej. uno que dejó de ser «Heredada».
   const finalTemplateId = set.templateId !== undefined ? set.templateId : current.templateId
   const finalCode = set.procedureCode !== undefined ? set.procedureCode : current.procedureCode
   if (list?.required && !finalTemplateId && !finalCode) {
@@ -1190,7 +1190,7 @@ export interface StarterSuggestion {
 
 /**
  * «Más usados»: punto de partida para una clínica que aún no tiene tarifario
- * (ADR 0067). Son los tratamientos que odentIA marcó en su biblioteca
+ * (ADR 0069). Son los tratamientos que odentIA marcó en su biblioteca
  * (`is_common`), por tipo y en el orden de los tipos, con el código del país y
  * sin los que la clínica ya agregó. Donde la lista es obligatoria, solo los
  * que tienen código en ella.

@@ -52,7 +52,7 @@ export async function seedClinicalForms(
     description: "Tratamiento de conducto y patología pulpar.",
   })
   // La «Cirugía Bucal y Maxilofacial» del Perú, renombrada por la clínica (una
-  // sola lista, ADR 0039; las especialidades del país, ADR 0067): a ella van los
+  // sola lista, ADR 0039; las especialidades del país, ADR 0069): a ella van los
   // servicios de cirugía de la biblioteca.
   const cirugia = await upsertSpecialty(tx, orgId, ownerUserId, {
     key: "cirugia_bucal_maxilofacial",

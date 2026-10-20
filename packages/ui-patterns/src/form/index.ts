@@ -9,5 +9,6 @@
 export { fieldErrorMessages } from "./field-errors.js"
 export { FormDrawer, type FormDrawerProps } from "./form-drawer.js"
 export { FormPanel, type FormPanelProps } from "./form-panel.js"
+export type { FormSecondaryAction } from "./form-surface.js"
 export { SubmitButton, type SubmitButtonProps } from "./submit-button.js"
 export { type WizardStep, WizardSteps, type WizardStepsProps } from "./wizard-steps.js"

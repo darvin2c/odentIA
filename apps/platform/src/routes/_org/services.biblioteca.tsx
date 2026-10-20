@@ -236,7 +236,7 @@ function AddServicesPage() {
   const search = listSearch.get("q") ?? ""
   const kindFilter = listSearch.get("tipo") ?? "todos"
   const cursor = listSearch.get("cursor")
-  // La biblioteca se ordena por tipo de tratamiento (ADR 0067): no son las especialidades de la clínica.
+  // La biblioteca se ordena por tipo de tratamiento (ADR 0069): no son las especialidades de la clínica.
   const libraryFilterOptions = [
     { value: "todos", label: "Todos" },
     ...TREATMENT_KINDS.map((kind) => ({ value: kind.key, label: kind.name })),

@@ -25,7 +25,7 @@ import { type BudgetPrintLine, type BudgetPrintOption, getBudgetPrintPayload } f
 import { orgProfile } from "@odentia/db/schema/org"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
+import { getPaymentReturn, getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
 
 const INK = rgb(0.07, 0.09, 0.15)
 const MUTED = rgb(0.4, 0.42, 0.47)
@@ -732,4 +732,79 @@ export async function getRefundReceiptPdf(
     ticketFormat(org, paper),
   )
   return { bytes, filename: `Devolucion-${frozen.refundedAt.slice(0, 10)}.pdf` }
+}
+
+// --- Devolución de un cobro --------------------------------------------------
+
+/**
+ * Devolución de un cobro (ADR 0068), desde lo que se congeló al devolver: de
+ * qué ticket sale, qué se devolvió, si volvió a la sede y cómo se le devolvió
+ * el dinero. Mismo papel que el ticket.
+ */
+export async function renderReturnPdf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  returnId: string,
+  paper?: string | null,
+): Promise<{ bytes: Uint8Array; filename: string; numberLabel: string; tradeName: string }> {
+  const row = await getPaymentReturn(tx, orgId, patientId, returnId)
+  const frozen = row.snapshot
+  const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))
+  if (!profile) {
+    throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
+  }
+  const clinic = frozen.clinic
+  const org: DocOrg = {
+    tradeName: clinic.tradeName || clinic.legalName,
+    legalName: clinic.legalName,
+    address: clinic.fiscalAddress,
+    phone: null,
+    branchName: frozen.branch.name,
+    currency: row.currency,
+    locale: clinic.locale,
+    timezone: clinic.timezone,
+    ticketFooter: frozen.notice,
+    receiptWidth: profile.receiptWidth,
+    sheetSize: profile.sheetSize,
+  }
+  const money = (cents: number) => formatMoney(cents, row.currency, org.locale)
+  const numberLabel = String(row.returnNumber).padStart(6, "0")
+  const ticketLabel = String(frozen.ticket.number).padStart(6, "0")
+  const bytes = await buildPdf(
+    `Devolución N.º ${numberLabel}`,
+    (w) => {
+      header(w, org, "DEVOLUCIÓN", `N.º ${numberLabel}`)
+      w.text(formatDate(row.createdAt, org), { size: 9, color: MUTED })
+      w.text(`Del ticket N.º ${ticketLabel} del ${formatDay(new Date(frozen.ticket.createdAt), org)}`, { size: 9, color: MUTED })
+      w.text(`Paciente: ${frozen.patient.displayName}`, { size: 10 })
+      if (frozen.patient.docNumber) {
+        w.text(`${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`, { size: 9, color: MUTED })
+      }
+      if (frozen.issuer.name) w.text(`Caja: ${frozen.issuer.name}`, { size: 9, color: MUTED })
+      w.gap(4)
+      w.rule()
+      for (const line of frozen.lines) {
+        w.row(line.description, money(line.amountCents), { size: 10 })
+        if (line.kind === "producto" && line.backToStock === false) {
+          w.text("No volvió a la venta", { size: 9, color: MUTED })
+        }
+      }
+      w.gap(4)
+      w.rule()
+      w.row("TOTAL DEVUELTO", money(row.totalCents), { size: 12, bold: true })
+      if (frozen.payout.kind === "pagado") {
+        w.row(frozen.payout.methodName, money(row.totalCents), { size: 10 })
+      } else {
+        w.text("Queda como saldo a favor del paciente.", { size: 10 })
+      }
+      w.text(`Motivo: ${frozen.reason}`, { size: 10 })
+      if (frozen.payout.kind === "pagado") w.signature("Recibí conforme")
+      w.gap(6)
+      if (org.ticketFooter) w.text(org.ticketFooter, { size: 8, color: MUTED })
+    },
+    org,
+    ticketFormat(org, paper),
+  )
+  return { bytes, filename: `Devolucion-${numberLabel}.pdf`, numberLabel, tradeName: org.tradeName }
 }

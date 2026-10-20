@@ -19,7 +19,7 @@
  *   aquí se usa siempre la denominación oficial ÍNTEGRA (solo trim).
  *
  * La biblioteca no sale de aquí: es de odentIA (`seeds/biblioteca.csv`, ADR
- * 0067) y cada tratamiento dice su código CPMS en `seeds/biblioteca_codigos.csv`.
+ * 0069) y cada tratamiento dice su código CPMS en `seeds/biblioteca_codigos.csv`.
  * Si una edición nueva cambia un código, se ajusta ese archivo a mano.
  *
  * Salida determinista (orden por código, LF, UTF-8 sin BOM, newline final):

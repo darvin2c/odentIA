@@ -141,7 +141,7 @@ const clinicAgreement = {
 }
 
 /** `unlessPermission`: la entrada sobra para quien ya llega a lo mismo por otra pantalla. */
-type NavChild = AppShellNavItem & { permission?: string; unlessPermission?: string }
+type NavChild = AppShellNavItem & { permission?: string; permissionsAny?: string[]; unlessPermission?: string }
 type NavDefinition =
   | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
   | (Omit<AppShellNavGroup, "children"> & {
@@ -175,7 +175,8 @@ const navDefinitions: NavDefinition[] = [
       // Para quien ve Finanzas, Comisiones es una pestaña de allí; la entrada queda
       // para quien solo consulta las suyas.
       { label: "Comisiones", to: "/commissions", icon: Percent, permission: "commissions.read", unlessPermission: "finance.read" },
-      { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
+      // Con precios o sin ellos (recepción, ADR 0067): la misma regla que la ruta.
+      { label: "Inventario", to: "/inventory", icon: Package, permissionsAny: ["inventory.read", "inventory.stock"] },
       { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
     ],
   },
@@ -307,6 +308,7 @@ function OrgLayout() {
       .filter(
         (child) =>
           (!child.permission || canAccess(role, child.permission)) &&
+          (!child.permissionsAny || canAccessAny(role, child.permissionsAny)) &&
           !(child.unlessPermission && canAccess(role, child.unlessPermission)),
       )
       .map(withAgentState)

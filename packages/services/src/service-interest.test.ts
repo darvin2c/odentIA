@@ -177,7 +177,7 @@ it("«Cómo dice el precio» se cambia para varios servicios a la vez, solo de l
 it("lo que se agrega de una vez dice el precio como se eligió al agregarlo", async () => {
   const f = await clinicalFixture()
   const run = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
-  // En el Perú cada servicio propio lleva su código CPMS (ADR 0067).
+  // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
   await seedProcedureCodes(ownerDb)
   const added = await run(async (tx) =>
     quickAddServices(

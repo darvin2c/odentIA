@@ -76,7 +76,7 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
     scope: "tooth",
     priceCents: 45000,
     currency: "PEN",
-    // En el Perú cada servicio propio lleva su código CPMS (ADR 0067).
+    // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
     officialCode: "D3310",
   }, 201)
   const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, {

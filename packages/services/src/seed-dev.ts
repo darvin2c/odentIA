@@ -166,6 +166,7 @@ import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
 import { seedInventory } from "./seed-inventory.js"
+import { seedMaterialsAndSales } from "./seed-materials.js"
 import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
@@ -375,6 +376,12 @@ async function wipeSeed(): Promise<void> {
     .select({ attachments: message.attachments })
     .from(message)
     .where(inArray(message.organizationId, SEED_ORGS))
+  // Un concepto vendido apunta a su producto (ADR 0067): se suelta antes de borrar
+  // los productos; el concepto se borra después con los cobros.
+  await db.execute(
+    sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
+      where organization_id in (${ORG_A}, ${ORG_B}) and product_id is not null`,
+  )
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
     // La revisión de un cobro apunta a su acción y a su caso de Soporte.
@@ -446,6 +453,10 @@ async function wipeSeed(): Promise<void> {
     "expense",
     "cash_shift",
     "stock_movement",
+    // Inventario por sede (ADR 0067): faltante, mínimos y materiales antes que sus productos.
+    "stock_shortage",
+    "product_minimum",
+    "service_material",
     "product_lot",
     "purchase_order_line",
     "purchase_order",
@@ -470,6 +481,8 @@ async function wipeSeed(): Promise<void> {
   await db
     .delete(patientPaymentRefund)
     .where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
+  // Las devoluciones (ADR 0068) después de lo que las nombra y antes de sus tickets.
+  await db.execute(sql`delete from payment_return where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
   await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
   await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B})`)
@@ -599,6 +612,15 @@ async function wipeSeed(): Promise<void> {
   await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
   await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
+  // Las clínicas demo de los avisos (`seedClinicNoticesDemo`) quedan entre
+  // corridas, pero su contrato lo aceptó Ana: esa aceptación se va con ella y
+  // la semilla la vuelve a poner junto con su membresía (que se va en cascada).
+  await db.execute(
+    sql`delete from processing_agreement_acceptance where accepted_by in (${sql.join(
+      SEED_USERS.map((id) => sql`${id}`),
+      sql`, `,
+    )})`,
+  )
   await db.delete(user).where(inArray(user.id, SEED_USERS))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const row of previousMessages) {
@@ -1686,7 +1708,7 @@ const seedOffers: Array<{
   priceDisclosure: "exacto" | "desde" | "evaluacion"
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
   leavesFinding?: { condition: string; variant?: string }
-  /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0067). */
+  /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0069). */
   officialCode: string
 }> = [
   {
@@ -1776,7 +1798,7 @@ const seedOffers: Array<{
     leavesFinding: { condition: "missing_tooth" },
   },
 ]
-// Cada clínica nace con las especialidades de su país (ADR 0039 y 0067): el
+// Cada clínica nace con las especialidades de su país (ADR 0039 y 0069): el
 // servicio apunta a la suya por id. Aquí se buscan por el tipo que reciben.
 const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_KIND_KEYS)
 const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_KIND_KEYS)
@@ -3248,7 +3270,8 @@ const chairA = (index: number): string => {
 }
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
 const lima = (dayOffset: number, hhmm: string): string => {
-  const base = new Date()
+  // El día de Lima, no el de UTC: desde las 19:00 de Lima en UTC ya es mañana.
+  const base = new Date(Date.now() - 5 * 60 * 60 * 1000)
   base.setUTCDate(base.getUTCDate() + dayOffset)
   return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
 }
@@ -3442,6 +3465,8 @@ for (const seed of [
   seedClinicalForms,
   seedInventory,
   seedFinance,
+  // Después de Inventario: materiales de dos servicios, la atención de Rosa descontada y un cepillo vendido.
+  seedMaterialsAndSales,
   seedMailbox,
   seedOpportunities,
   seedPortal,

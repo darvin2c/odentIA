@@ -111,7 +111,7 @@ export const SEARCH_TYPE_PERMISSIONS: Record<SearchType, readonly string[] | nul
   tarea: ["tasks.read"],
   oportunidad: ["crm.read"],
   servicio: ["catalog.read"],
-  inventario: ["inventory.read"],
+  inventario: ["inventory.read", "inventory.stock"],
   equipo: null,
   respuesta: ["conversations.read"],
 }
@@ -210,11 +210,11 @@ export function targetHref(target: SearchTarget, timeZone?: string): string {
     case "promociones":
       return "/services/promotions"
     case "producto":
-      return `/inventory/${encodeURIComponent(target.productId)}`
+      return `/inventory${query({ producto: target.productId })}`
     case "compra":
       return `/inventory${query({ tab: "compras", orden: target.purchaseOrderId })}`
     case "proveedores":
-      return "/inventory?tab=catalogos"
+      return "/inventory?tab=proveedores"
     case "gastos": {
       const [year = "", month = ""] = new Date(target.spentAt)
         .toLocaleDateString("en-CA", { timeZone })

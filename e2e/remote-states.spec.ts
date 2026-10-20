@@ -18,9 +18,9 @@ async function failResponse(page: Page, route: Route, status: number) {
 }
 
 for (const section of [
-  { tab: "productos", endpoint: "/api/inventory/products", loading: "Cargando productos…", empty: "Sin productos" },
-  { tab: "compras", endpoint: "/api/inventory/purchase-orders", loading: "Cargando órdenes…", empty: "Sin órdenes de compra" },
-  { tab: "alertas", endpoint: "/api/inventory/alerts", loading: "Cargando alertas…", empty: "Todo en orden" },
+  { tab: "Productos", endpoint: "/api/inventory/products", loading: "Cargando productos…", empty: "Todavía no hay productos" },
+  { tab: "Compras", endpoint: "/api/inventory/purchase-orders", loading: "Cargando compras…", empty: "Nada por llegar" },
+  { tab: "Movimientos", endpoint: "/api/inventory/movements", loading: "Cargando movimientos…", empty: "Sin movimientos en Sede Central" },
 ]) {
   test(`inventario: ${section.tab} distingue carga, error y vacío confirmado`, async ({ owner }) => {
     const { page, org } = owner
@@ -35,9 +35,9 @@ for (const section of [
       await failResponse(page, route, 500)
     })
     await gotoHydrated(page, tenant(org.slug, "/inventory"))
-    if (section.tab !== "productos") await page.getByRole("tab", { name: section.tab, exact: true }).click()
+    if (section.tab !== "Productos") await page.getByRole("tab", { name: section.tab, exact: true }).click()
     try {
-      await expect(page.getByText(section.loading, { exact: true })).toBeVisible()
+      await expect(page.getByRole("status", { name: section.loading, exact: true })).toBeVisible()
       await expect(page.getByText(section.empty, { exact: true })).toBeHidden()
     } finally {
       gate.resolve()
@@ -199,7 +199,6 @@ for (const surface of ["knowledge", "product"] as const) {
       await drawer.getByLabel("La pregunta", { exact: true }).fill("Entrada confirmada en servidor")
       await drawer.getByLabel("La respuesta", { exact: true }).fill("No duplicar esta entrada.")
     } else {
-      await drawer.getByLabel("SKU", { exact: true }).fill("PROD-UNICO")
       await drawer.getByLabel("Nombre", { exact: true }).fill("Producto confirmado en servidor")
     }
     await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
@@ -208,8 +207,11 @@ for (const surface of ["knowledge", "product"] as const) {
     const field = drawer.getByLabel(surface === "knowledge" ? "La pregunta" : "Nombre", { exact: true })
     await expect(field).toHaveValue(surface === "knowledge" ? "Entrada confirmada en servidor" : "Producto confirmado en servidor")
     await field.press("Enter")
-    const saved = await call<Array<{ title?: string; sku?: string }>>(page, "GET", `${endpoint}${surface === "knowledge" ? "?status=borrador" : ""}`, org.slug)
-    expect(saved.map(item => surface === "knowledge" ? item.title : item.sku)).toEqual([surface === "knowledge" ? "Entrada confirmada en servidor" : "PROD-UNICO"])
+    // Los productos se leen por sede (ADR 0067): la lista trae sus filas en `items`.
+    const saved = surface === "knowledge"
+      ? (await call<Array<{ title: string }>>(page, "GET", `${endpoint}?status=borrador`, org.slug)).map(item => item.title)
+      : (await call<{ items: Array<{ name: string }> }>(page, "GET", `${endpoint}?branchId=${owner.branchId}`, org.slug)).items.map(item => item.name)
+    expect(saved).toEqual([surface === "knowledge" ? "Entrada confirmada en servidor" : "Producto confirmado en servidor"])
     expect(writes).toBe(1)
   })
 }

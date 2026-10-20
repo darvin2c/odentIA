@@ -41,6 +41,17 @@ export interface DocumentTypeProfile {
 }
 
 /**
+ * Documentos tributarios: con el que una empresa o una persona factura (el RUC
+ * de la SUNAT en Perú). Cada país con perfil trae el suyo; el núcleo, que no
+ * conoce el de ningún país, uno genérico («Documento tributario»).
+ */
+export const TAX_DOC_TYPES = ["TRIBUTARIO", "RUC"] as const
+export type TaxDocType = (typeof TAX_DOC_TYPES)[number]
+
+/** Tipo de documento de un proveedor: tributario o de persona. */
+export type SupplierDocType = TaxDocType | IdentityDocType
+
+/**
  * Tipo general del seguro, igual en todos los países: lo que permitirá, más
  * adelante, conectar con los seguros de cada país sin tocar la ficha de los
  * demás. Correspondencia con HL7 FHIR Coverage.type (v3 ActCode): público →
@@ -118,6 +129,8 @@ export interface ClinicalCountryProfile {
   odontogram: OdontogramStandardProfile | null
   /** Documentos que se ofrecen, en el orden de la lista. */
   documentTypes: readonly DocumentTypeProfile[]
+  /** Documentos tributarios del país (los primeros que se ofrecen a un proveedor). */
+  taxDocumentTypes: readonly TaxDocType[]
   /** Regímenes de seguro con nombre propio. */
   insuranceSchemes: readonly InsuranceScheme[]
   address: AddressProfile
@@ -134,7 +147,7 @@ export interface ClinicalCountryProfile {
    */
   diagnosis: DiagnosisProfile
   /**
-   * La lista de servicios del país (ADR 0067), o null: sin lista, los
+   * La lista de servicios del país (ADR 0069), o null: sin lista, los
    * servicios no llevan código.
    */
   services: ServiceListProfile | null
@@ -252,6 +265,7 @@ const CORE_SPECIALTIES: SpecialtiesProfile = {
 const CORE: Omit<ClinicalCountryProfile, "country"> = {
   odontogram: null,
   documentTypes: CORE_DOCUMENTS,
+  taxDocumentTypes: ["TRIBUTARIO"],
   insuranceSchemes: [],
   address: CORE_ADDRESS,
   phone: null,
@@ -336,9 +350,9 @@ const PERU_REGIONS: readonly RegionOption[] = [
 /**
  * Perú. Fuentes: NTS 188-MINSA/DGIESP-2022 (RM 559-2022-MINSA), obligatoria en
  * todos los establecimientos, públicos, privados y mixtos (III); documentos de
- * RENIEC (DNI, CNV) y Migraciones (CE); SIS y EsSalud como seguros públicos y
- * las EPS como privados (Ley 26790); colegiatura del Colegio Odontológico del
- * Perú (COP).
+ * RENIEC (DNI, CNV) y Migraciones (CE); el RUC de la SUNAT como documento
+ * tributario; SIS y EsSalud como seguros públicos y las EPS como privados (Ley
+ * 26790); colegiatura del Colegio Odontológico del Perú (COP).
  */
 const PERU: Omit<ClinicalCountryProfile, "country"> = {
   odontogram: {
@@ -356,6 +370,7 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
     { code: "DIE", issuer: { kind: "foreign" } },
     { code: "OTRO", issuer: { kind: "any" } },
   ],
+  taxDocumentTypes: ["RUC"],
   insuranceSchemes: [
     { code: "SIS", label: "SIS", type: "PUBLICO" },
     { code: "ESSALUD", label: "EsSalud", type: "PUBLICO" },
@@ -472,7 +487,7 @@ const CHILE_SPECIALTIES: SpecialtiesProfile = {
 
 /**
  * La lista de servicios (y, si las tiene, las especialidades) de un país que
- * no tiene perfil propio (ADR 0067): lo demás es el núcleo. Solo entra un país
+ * no tiene perfil propio (ADR 0069): lo demás es el núcleo. Solo entra un país
  * cuando su lista está cargada con su archivo oficial y su huella.
  */
 const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile; specialties?: SpecialtiesProfile }> = {
@@ -571,6 +586,27 @@ export function documentTypeProfile(
   return profile.documentTypes.find((item) => item.code === docType)
 }
 
+/**
+ * Documentos de persona que no identifican a quien vende: el del recién
+ * nacido (CNV) y el documento de identidad extranjero (DIE), que es el del
+ * paciente que vive fuera. Un proveedor que es una persona se identifica con
+ * el documento del país, el de residente extranjero o el pasaporte.
+ */
+const NOT_FOR_SUPPLIERS: ReadonlySet<IdentityDocType> = new Set(["CNV", "DIE"])
+
+/**
+ * Los tipos de documento que se ofrecen a un proveedor, en el orden de la
+ * lista: los tributarios del país, los de persona que sirven a quien vende (en
+ * Perú DNI, carné de extranjería y pasaporte) y «Otro» al final. Es una lista
+ * cerrada: el servidor rechaza cualquier otro valor.
+ */
+export function supplierDocumentTypes(profile: ClinicalCountryProfile): readonly SupplierDocType[] {
+  const people = profile.documentTypes
+    .map((item) => item.code)
+    .filter((code) => code !== "OTRO" && !NOT_FOR_SUPPLIERS.has(code))
+  return [...profile.taxDocumentTypes, ...people, "OTRO"]
+}
+
 /** Régimen de seguro con nombre propio del país, o undefined. */
 export function insuranceScheme(
   profile: ClinicalCountryProfile,
@@ -589,7 +625,7 @@ export function regionOption(
 
 /**
  * La especialidad del país que recibe un tipo de la biblioteca: la regla con
- * que un servicio de la biblioteca toma su especialidad (ADR 0067).
+ * que un servicio de la biblioteca toma su especialidad (ADR 0069).
  */
 export function specialtyForKind(profile: ClinicalCountryProfile, kind: string): SpecialtyProfile | null {
   return profile.specialties.list.find((item) => (item.receives as readonly string[]).includes(kind)) ?? null
@@ -601,6 +637,6 @@ export function kindOfSpecialty(profile: ClinicalCountryProfile, specialtyKey: s
   const kind = profile.specialties.list.find((item) => item.key === specialtyKey)?.kind
   if (kind) return kind
   // Una especialidad que la clínica conservó con la clave de un tipo de la
-  // biblioteca (las de antes de ADR 0067, p. ej. «Estética») sigue siendo ese tipo.
+  // biblioteca (las de antes de ADR 0069, p. ej. «Estética») sigue siendo ese tipo.
   return isTreatmentKind(specialtyKey) ? specialtyKey : null
 }

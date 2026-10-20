@@ -19,7 +19,7 @@ import { fetchOfficialCodes, type OfficialCoding } from "../lib/services"
 const NOTHING_CHOSEN: OfficialCoding | null = null
 
 /**
- * El código de un servicio propio en la lista de servicios del país (ADR 0067,
+ * El código de un servicio propio en la lista de servicios del país (ADR 0069,
  * tablero 3 del lienzo del issue 40). Lo que pide sale del perfil del país:
  * obligatorio donde la lista lo es, «(opcional)» donde es de referencia y sin
  * campo donde no hay lista. El buscador es el de la lista oficial, por nombre

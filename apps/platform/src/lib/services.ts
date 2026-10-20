@@ -26,10 +26,22 @@ export interface ServiceCatalogItem {
   evaluationServiceId: string | null
   /** Qué deja en la pieza al completarse (lo tratado queda dibujado); null = nada. */
   leavesFinding: LeavesFindingBody | null
-  /** Código propio en la lista del país (ADR 0067); uno de la biblioteca usa el de su tratamiento. */
+  /** Código propio en la lista del país (ADR 0069); uno de la biblioteca usa el de su tratamiento. */
   procedureSystem: string | null
   procedureCode: string | null
   isActive: boolean
+  /**
+   * Sus materiales («3 · S/ 2.18» o «Sin materiales», ADR 0067). Solo llega en
+   * la lista y solo a quien ve Inventario; el costo, solo a quien ve precios.
+   */
+  materials?: ServiceMaterialsSummary
+}
+
+/** Lo que la lista dice de los materiales de un servicio. */
+export interface ServiceMaterialsSummary {
+  count: number
+  /** Lo que cuestan cada vez con los últimos precios de compra; null sin precios o sin compras con precio. */
+  cost: { cents: number; currency: string; unpriced: number } | null
 }
 
 /** Un código de la lista oficial del país, con su texto oficial. */
@@ -41,7 +53,7 @@ export interface OfficialCoding {
 }
 
 /**
- * La lista de servicios del país de la clínica (ADR 0067): «CPMS», obligatoria
+ * La lista de servicios del país de la clínica (ADR 0069): «CPMS», obligatoria
  * en el Perú; null donde el país no tiene una cargada.
  */
 export interface ServiceCodeList {
@@ -341,6 +353,85 @@ export function setServicesPriceDisclosureApi(
     method: "POST",
     body: JSON.stringify({ serviceIds, priceDisclosure }),
   })
+}
+
+/* ---------------- Materiales de un servicio (ADR 0067) ---------------- */
+
+/** Un material de un servicio: cuánto se usa de un producto cada vez que se hace. */
+export interface ServiceMaterialLine {
+  productId: string
+  name: string
+  /** Unidad de uso, en singular («guante»): la cantidad se escribe en ella. */
+  unit: string
+  quantity: number
+  /** «2 guantes». */
+  quantityText: string
+  /** Falso si el producto se desactivó o ya no se usa en las atenciones: queda, pero no se descuenta. */
+  discounted: boolean
+  /** Solo para quien ve precios: lo que cuesta cada vez; null si nunca se compró con precio. */
+  costCents: number | null
+}
+
+export interface ServiceMaterials {
+  serviceId: string
+  serviceName: string
+  items: ServiceMaterialLine[]
+  /** Solo para quien ve precios; null sin precios o si ningún material tiene una compra con precio. */
+  cost: {
+    cents: number
+    currency: string
+    /** Materiales sin una compra con precio: no entran en la suma. */
+    unpriced: number
+    /** Qué parte del precio del servicio son (0.018 = 1,8 %); null sin precio o con otra moneda. */
+    shareOfPrice: number | null
+  } | null
+}
+
+/** Cuántos materiales admite un servicio y lo más que se usa de uno cada vez (los mismos topes del servidor). */
+export const SERVICE_MATERIALS_MAX = 50
+export const MATERIAL_QUANTITY_MAX = 9999
+
+export function fetchServiceMaterials(serviceId: string): Promise<{ data: ServiceMaterials }> {
+  return apiFetch<{ data: ServiceMaterials }>(`/api/services/${encodeURIComponent(serviceId)}/materials`)
+}
+
+/** Reemplaza la lista entera de materiales del servicio (es de quien lleva el inventario). */
+export function saveServiceMaterialsApi(
+  serviceId: string,
+  items: Array<{ productId: string; quantity: number }>,
+): Promise<{ data: ServiceMaterials }> {
+  return apiFetch<{ data: ServiceMaterials }>(`/api/services/${encodeURIComponent(serviceId)}/materials`, {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  })
+}
+
+/** «Empieza por estos 5»: los servicios más hechos que aún no tienen materiales. */
+export interface ServicesWithoutMaterials {
+  days: number
+  services: Array<{ serviceId: string; name: string; times: number }>
+  totalEncounters: number
+  coveredEncounters: number
+  /** coveredEncounters ÷ totalEncounters (0.72 = «Son el 72 % de tus atenciones»); null sin atenciones. */
+  share: number | null
+}
+
+export function fetchServicesWithoutMaterials(): Promise<{ data: ServicesWithoutMaterials }> {
+  return apiFetch<{ data: ServicesWithoutMaterials }>("/api/services/without-materials")
+}
+
+/** Producto que se puede poner como material: activo y que se usa en las atenciones. */
+export interface MaterialProductOption {
+  productId: string
+  name: string
+  /** Unidad de uso, en singular. */
+  unit: string
+}
+
+export function fetchMaterialProducts(q: string, limit = 20): Promise<{ data: MaterialProductOption[] }> {
+  const search = new URLSearchParams({ limit: String(limit) })
+  if (q.trim()) search.set("q", q.trim())
+  return apiFetch<{ data: MaterialProductOption[] }>(`/api/services/material-products?${search}`)
 }
 
 /** Un tipo de tratamiento de «Más usados» con sus tratamientos de la biblioteca. */

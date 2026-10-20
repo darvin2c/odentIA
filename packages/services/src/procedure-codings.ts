@@ -9,7 +9,7 @@ import { and, eq } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
 /**
- * El código oficial de cada servicio en la lista de su país (ADR 0067) y los
+ * El código oficial de cada servicio en la lista de su país (ADR 0069) y los
  * snapshots que se congelan.
  *
  * Un servicio de la biblioteca toma el código de su tratamiento en la lista
@@ -167,7 +167,7 @@ export async function resolveServiceCodings(
 
 /**
  * Valida un snapshot congelado antes de ejecutar o facturar: a lo sumo un
- * código. Un histórico con varios (de antes de ADR 0067) falla con un error
+ * código. Un histórico con varios (de antes de ADR 0069) falla con un error
  * accionable: no se elige uno, se pide una nueva indicación.
  */
 export function assertExecutableCodings(codings: ProcedureCodingSnapshot[]): void {

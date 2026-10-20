@@ -6,7 +6,7 @@
  * (NTS 188, 5.8): nunca lo planificado.
  *
  * odentIA lo deja puesto en cada tratamiento de su biblioteca
- * (`treatment_template.leaves_finding`, ADR 0067), solo en los que dejan algo
+ * (`treatment_template.leaves_finding`, ADR 0069), solo en los que dejan algo
  * claro en una pieza; en un servicio propio se elige al crearlo o editarlo.
  * Lo que es por arcada o por tramo (prótesis, puentes) no se dibuja solo: se
  * registra en la atención. La corona temporal tampoco: pide escribir su

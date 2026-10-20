@@ -18,7 +18,7 @@ setupTestDb()
 
 const ACTOR = "u-coding-tests"
 const VERSION = "RM-550-2023-MINSA"
-// Las clínicas de prueba son del Perú: la CPMS es obligatoria (ADR 0067).
+// Las clínicas de prueba son del Perú: la CPMS es obligatoria (ADR 0069).
 const LIST = clinicalProfileFor("PE").services
 
 async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {

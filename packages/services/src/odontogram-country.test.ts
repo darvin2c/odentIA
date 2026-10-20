@@ -224,7 +224,7 @@ it("«Firmar odontograma» firma con el perfil, solo para pedidos y reingreso, y
 it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", async () => {
   const f = await attending("org_a")
   const draft = await f.open()
-  // En el Perú cada servicio propio lleva su código CPMS (ADR 0067).
+  // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
   await seedProcedureCodes(ownerDb)
   const resin = await f.run(async (tx) =>
     createService(tx, f.orgId, f.actor, {

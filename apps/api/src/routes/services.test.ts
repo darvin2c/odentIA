@@ -134,14 +134,14 @@ async function getJson(app: Hono, path: string): Promise<Response> {
   return app.request(path, { method: "GET" })
 }
 
-// Tratamientos de la biblioteca de odentIA (ADR 0067): el ámbito y el tipo se
+// Tratamientos de la biblioteca de odentIA (ADR 0069): el ámbito y el tipo se
 // heredan de ella; el código, de la lista del país (CPMS D1110 y D2391).
 const PREVENCION_KEY = "profilaxis"
 const RESTAURADORA_KEY = "resina-fotocurable-1-superficie-posterior"
 
 /**
  * La especialidad de la clínica que recibe ese tipo de tratamiento según su
- * país (ADR 0039 y 0067): las organizaciones de la prueba se crean a mano,
+ * país (ADR 0039 y 0069): las organizaciones de la prueba se crean a mano,
  * así que nacen aquí si faltan.
  */
 async function sp(kind: string, orgId = "org_a"): Promise<string> {

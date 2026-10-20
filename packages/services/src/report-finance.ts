@@ -410,22 +410,43 @@ async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { c
 /** Tratamientos a la vista; el resto va en «Otros». */
 const TREATMENTS_SHOWN = 6
 
-/** Lo aplicado en el tramo a cargos de cada servicio (los 6 mayores y «Otros»). */
+/**
+ * Lo aplicado en el tramo a cargos de cada servicio (los 6 mayores y «Otros»).
+ * Una devolución (ADR 0068) no reescribe el día del cobro: lo pagado cuenta el
+ * día que se aplicó, la parte que pasa a un concepto rebajado no vuelve a
+ * contar, y lo devuelto se resta el día de la devolución.
+ */
 async function collectedByTreatment(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
+  const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
   const rows = await tx.execute<{ name: string; cents: string }>(sql`
-    select coalesce(sc.name, c.description) as name, sum(a.amount_cents)::text as cents
-    from patient_payment_application a
-    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
-    left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
-    left join treatment_budget_item bi on bi.organization_id = c.organization_id and bi.id = c.budget_item_id
-    left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = coalesce(ep.service_id, bi.service_id)
-    where a.organization_id = ${orgId} and c.currency = ${options.currency}
-      and a.created_at >= ${at(span.start)} and a.created_at < ${at(span.end)}
-      and (a.voided_at is null or a.voided_at >= ${at(span.end)}) and (c.voided_at is null or c.voided_at >= ${at(span.end)})
-      and (p.voided_at is null or p.voided_at >= ${at(span.end)})
-      ${options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``}
-    group by 1 order by sum(a.amount_cents) desc`)
+    with x as (
+      select coalesce(sc.name, c.description) as name, a.amount_cents::bigint as cents
+      from patient_payment_application a
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
+      left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+      left join treatment_budget_item bi on bi.organization_id = c.organization_id and bi.id = c.budget_item_id
+      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = coalesce(ep.service_id, bi.service_id)
+      where a.organization_id = ${orgId} and c.currency = ${options.currency} and a.replaces_application_id is null
+        and a.created_at >= ${at(span.start)} and a.created_at < ${at(span.end)}
+        and (a.voided_at is null or a.voided_at >= ${at(span.end)} or a.return_id is not null)
+        and (c.voided_at is null or c.voided_at >= ${at(span.end)} or a.return_id is not null)
+        and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
+      union all
+      select coalesce(sc.name, c.description),
+        -(a.amount_cents - coalesce((select sum(n.amount_cents) from patient_payment_application n
+          where n.organization_id = a.organization_id and n.replaces_application_id = a.id), 0))::bigint
+      from patient_payment_application a
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
+      left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+      left join treatment_budget_item bi on bi.organization_id = c.organization_id and bi.id = c.budget_item_id
+      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = coalesce(ep.service_id, bi.service_id)
+      where a.organization_id = ${orgId} and c.currency = ${options.currency} and a.return_id is not null
+        and a.voided_at >= ${at(span.start)} and a.voided_at < ${at(span.end)}
+        and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
+    )
+    select name, sum(cents)::text as cents from x group by 1 order by sum(cents) desc`)
   const all = rows.map((row) => ({ name: row.name, cents: safeCents(row.cents) })).filter((row) => row.cents > 0)
   const rest = all.slice(TREATMENTS_SHOWN)
   return {

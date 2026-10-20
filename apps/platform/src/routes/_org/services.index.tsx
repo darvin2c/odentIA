@@ -43,21 +43,35 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ChevronDown, Plus, Tag } from "lucide-react"
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
 import { capitalize, missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
+import {
+  ServiceMaterialsCost,
+  ServiceMaterialsEditor,
+  ServiceMaterialsReadOnly,
+  ServicesWithoutMaterialsCard,
+} from "../../components/service-materials"
 import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { financeErrorMessage } from "../../lib/finance"
+import {
+  draftLineOf,
+  type MaterialDraftLine,
+  materialsChanged,
+  materialsToSave,
+} from "../../lib/materials"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
+  MATERIAL_QUANTITY_MAX,
   PRICE_DISCLOSURE_BATCH,
   PRICE_DISCLOSURE_OPTIONS,
   PRICE_DISCLOSURE_TAG,
@@ -65,9 +79,11 @@ import {
   createServiceApi,
   setServicesPriceDisclosureApi,
   fetchService,
+  fetchServiceMaterials,
   fetchServices,
   fetchTreatmentTemplate,
   type OfficialCoding,
+  saveServiceMaterialsApi,
   type ServiceCatalogItem,
   SERVICE_PLACE_OPTIONS,
   TREATMENT_SCOPE_LABELS,
@@ -117,7 +133,8 @@ function stateLabel(state: string): string {
 const TARIFARIO_PAGE = 100
 
 /** Oferta abierta en la superficie lateral del tarifario, o el alta de una nueva. */
-type EditorTarget = { kind: "offer"; id: string } | { kind: "create" }
+/** `materiales`: se abrió desde «Empieza por estos 5» y la sección de materiales se muestra sola. */
+type EditorTarget = { kind: "offer"; id: string; focus?: "materiales" } | { kind: "create" }
 
 /**
  * Tarifario de la clínica: listado agrupado por especialidad con el detalle al
@@ -141,11 +158,18 @@ function TarifarioPage() {
   const estadoFilter = listSearch.get("estado") ?? "active"
   const sortParam = listSearch.get("sort") ?? ""
   const mode = useDetailMode()
+  // Materiales de cada servicio (ADR 0067): los ve quien ve Inventario y los
+  // configura quien lo lleva. La API decide qué llega en cada fila.
+  const can = useCan()
+  const seesMaterials = can("inventory.read") || can("inventory.stock")
+  const canWriteMaterials = can("inventory.write")
   /** Moneda y formato de la clínica: los importes se leen con su locale. */
   const profileQuery = useOrgProfile()
   const profileLocale = profileQuery.data?.locale
   const profileCurrency = profileQuery.data?.currency
   const [target, setTarget] = useState<EditorTarget | null>(null)
+  /** Un servicio abierto desde «Empieza por estos 5» que la lista cargada no trae (otra página u otro filtro). */
+  const [extraOffer, setExtraOffer] = useState<ServiceCatalogItem | null>(null)
   /** Se cierra sin desmontar: el drawer necesita su salida y `MasterDetail` su colapso. */
   const [surfaceOpen, setSurfaceOpen] = useState(false)
   const [toggling, setToggling] = useState<ServiceCatalogItem | null>(null)
@@ -188,9 +212,14 @@ function TarifarioPage() {
 
   const rows = useMemo(() => (pagesQuery.data?.pages ?? []).flatMap((page) => page.data), [pagesQuery.data])
   const total = pagesQuery.data?.pages[0]?.total ?? 0
-  /** Fila vigente de la oferta abierta: si el filtro la deja fuera, no hay detalle. */
+  /**
+   * Fila vigente de la oferta abierta: si el filtro la deja fuera, no hay
+   * detalle, salvo la que se abrió desde «Empieza por estos 5».
+   */
   const editing =
-    target?.kind === "offer" ? (rows.find((row) => row.id === target.id) ?? null) : null
+    target?.kind === "offer"
+      ? (rows.find((row) => row.id === target.id) ?? (extraOffer?.id === target.id ? extraOffer : null))
+      : null
 
   const sortedRows = useMemo(() => {
     if (!sortParam) return rows
@@ -259,13 +288,36 @@ function TarifarioPage() {
   })
 
   /** Abre la superficie sobre una oferta; `null` es el alta de una prestación propia. */
-  const openOffer = useCallback((offer: ServiceCatalogItem | null) => {
-    setTarget(offer ? { kind: "offer", id: offer.id } : { kind: "create" })
+  const openOffer = useCallback((offer: ServiceCatalogItem | null, focus?: "materiales") => {
+    setTarget(offer ? { kind: "offer", id: offer.id, focus } : { kind: "create" })
     setSurfaceOpen(true)
   }, [])
 
   /** Cierra sin desmontar: `MasterDetail` colapsa la columna y el drawer anima su salida. */
   const closeOffer = useCallback(() => setSurfaceOpen(false), [])
+
+  /** Abre un servicio por su id («Empieza por estos 5»): el de la lista, o lo pide si no está cargado. */
+  const openOfferById = useCallback(
+    async (serviceId: string) => {
+      const loaded = rows.find((row) => row.id === serviceId)
+      if (loaded) {
+        openOffer(loaded, "materiales")
+        return
+      }
+      try {
+        const found = await queryClient.fetchQuery({
+          queryKey: ["services", "one", serviceId],
+          queryFn: () => fetchService(serviceId),
+          staleTime: 30_000,
+        })
+        setExtraOffer(found.data)
+        openOffer(found.data, "materiales")
+      } catch (error) {
+        toast.error(financeErrorMessage(error))
+      }
+    },
+    [rows, openOffer, queryClient],
+  )
 
   const columns = useMemo<ColumnDef<ServiceCatalogItem>[]>(
     () => [
@@ -372,6 +424,30 @@ function TarifarioPage() {
         meta: { view: { primary: true } },
         cell: ({ row }) => BILLING_MODE_LABELS[row.original.billingMode],
       },
+      // «3 · S/ 2.18» o «Sin materiales»: solo para quien ve Inventario (el
+      // costo, solo con precios; lo decide la API al entregar la fila).
+      ...(seesMaterials
+        ? [
+            {
+              id: "materials",
+              header: "Materiales",
+              meta: { view: { primary: true } },
+              cell: ({ row }) => {
+                const materials = row.original.materials
+                if (!materials || materials.count === 0)
+                  return <span className="text-muted-foreground">Sin materiales</span>
+                return (
+                  <span className="tabular-nums">
+                    {materials.count}
+                    {materials.cost && profileLocale !== undefined
+                      ? ` · ${formatMoney(materials.cost.cents, materials.cost.currency, profileLocale)}`
+                      : ""}
+                  </span>
+                )
+              },
+            } satisfies ColumnDef<ServiceCatalogItem>,
+          ]
+        : []),
       {
         id: "actions",
         header: "",
@@ -402,7 +478,7 @@ function TarifarioPage() {
           ) : null,
       },
     ],
-    [canManage, openOffer, profileLocale, selected, usesInternalCode],
+    [canManage, openOffer, profileLocale, selected, seesMaterials, usesInternalCode],
   )
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
@@ -445,6 +521,7 @@ function TarifarioPage() {
       <OfferEditor
         key={editing.id}
         offer={editing}
+        revealMaterials={target?.kind === "offer" && target.focus === "materiales"}
         asPanel={mode === "panel"}
         open={surfaceOpen}
         canWrite={canManage}
@@ -501,6 +578,9 @@ function TarifarioPage() {
             ) : undefined
           }
         />
+        {canWriteMaterials && profileLocale !== undefined ? (
+          <ServicesWithoutMaterialsCard locale={profileLocale} onOpen={(id) => void openOfferById(id)} />
+        ) : null}
         <FilterBar
           filters={[
             {
@@ -552,7 +632,7 @@ function TarifarioPage() {
                 <GroupTable
                   rows={group.rows}
                   columns={columns}
-                  onSelect={openOffer}
+                  onSelect={(offer) => openOffer(offer)}
                   activeId={activeOfferId}
                 />
               </section>
@@ -776,7 +856,22 @@ interface OfferEditorProps {
   /** Moneda y formato de la clínica (perfil ya cargado por la página). */
   orgCurrency: string
   orgLocale: string
+  /** Llevar la vista a sus materiales al abrir («Empieza por estos 5»). */
+  revealMaterials?: boolean
 }
+/**
+ * Los materiales no se guardaron (el servicio sí, si había cambios): el
+ * formulario sigue abierto con lo escrito para volver a intentarlo.
+ */
+class MaterialsNotSaved extends Error {
+  constructor(
+    readonly reason: unknown,
+    readonly serviceSaved: boolean,
+  ) {
+    super("No se guardaron los materiales")
+  }
+}
+
 /**
  * Superficie del tarifario: el mismo formulario en panel lateral o drawer, y el
  * detalle de lectura para quien no escribe. Un solo contenedor por vez —montar
@@ -785,6 +880,7 @@ interface OfferEditorProps {
  */
 function OfferEditor({
   offer,
+  revealMaterials = false,
   asPanel,
   open,
   canWrite,
@@ -800,7 +896,7 @@ function OfferEditor({
   const codeList = useClinicalProfile().services
 
   /**
-   * El código vigente del servicio en la lista del país (ADR 0067): el de su
+   * El código vigente del servicio en la lista del país (ADR 0069): el de su
    * tratamiento si es de la biblioteca, el que eligió la clínica si es propio.
    */
   const officialQuery = useQuery({
@@ -868,8 +964,66 @@ function OfferEditor({
   const linkedTemplate = templateId ? (linkedTemplateQuery.data ?? null) : null
   const templateName = linkedTemplate?.name ?? null
 
+  /*
+   * Materiales del servicio (ADR 0067, tablero 17). Viven en el mismo
+   * formulario y se guardan con su «Guardar»: primero el servicio (si cambió) y
+   * después la lista entera de materiales. Lo escrito se conserva en
+   * `materialLines` hasta guardar; `null` es «tal como está guardado».
+   */
+  const can = useCan()
+  const canWriteMaterials = can("inventory.write")
+  const seesMaterials = canWriteMaterials || can("inventory.read") || can("inventory.stock")
+  const seesMaterialCost = can("inventory.read")
+  const materialsQuery = useQuery({
+    queryKey: ["services", "materials", offer?.id ?? null],
+    queryFn: () => fetchServiceMaterials(offer?.id as string),
+    enabled: offer !== null && seesMaterials,
+  })
+  const savedMaterials = materialsQuery.data?.data
+  const [materialLines, setMaterialLines] = useState<MaterialDraftLine[] | null>(null)
+  const [materialErrors, setMaterialErrors] = useState<Record<string, string>>({})
+  const [materialsSaveError, setMaterialsSaveError] = useState<string | null>(null)
+  // Cada apertura empieza de lo guardado, como el formulario.
+  useEffect(() => {
+    if (!open) return
+    setMaterialLines(null)
+    setMaterialErrors({})
+    setMaterialsSaveError(null)
+  }, [open])
+  const savedLines = useMemo(
+    () => (savedMaterials?.items ?? []).map((item) => draftLineOf(item, orgLocale)),
+    [savedMaterials, orgLocale],
+  )
+  const lines = materialLines ?? savedLines
+  const materialsDirty =
+    canWriteMaterials && materialLines !== null && materialsChanged(materialLines, savedMaterials?.items ?? [], orgLocale)
+  const changeMaterials = (next: MaterialDraftLine[]) => {
+    setMaterialLines(next)
+    setMaterialErrors({})
+    setMaterialsSaveError(null)
+  }
+  /** Lo que se guardará de los materiales, o los errores de cada fila (que se muestran). */
+  const checkMaterials = (): { items: Array<{ productId: string; quantity: number }> } | null | false => {
+    if (!materialsDirty) return null
+    const result = materialsToSave(lines, orgLocale, MATERIAL_QUANTITY_MAX)
+    if ("errors" in result) {
+      setMaterialErrors(result.errors)
+      return false
+    }
+    setMaterialErrors({})
+    return result
+  }
+
   const saveMutation = useMutation({
-    mutationFn: (values: OfferFormValues) => {
+    mutationFn: async ({
+      values,
+      saveService,
+      materials,
+    }: {
+      values: OfferFormValues
+      saveService: boolean
+      materials: Array<{ productId: string; quantity: number }> | null
+    }) => {
       const body = {
         name: values.name.trim(),
         code: values.code.trim() === "" ? null : values.code.trim(),
@@ -884,22 +1038,62 @@ function OfferEditor({
       // El código del país lo elige solo un servicio propio; sin lista no viaja, y al
       // editar solo viaja si cambió.
       const code = codeList && (!offer || codeChanged) ? { officialCode: officialCode?.code ?? null } : {}
-      if (!offer) {
-        return createServiceApi({ ...body, ...code, specialtyId: values.specialtyId, scope: values.scope })
+      let serviceId = offer?.id ?? null
+      if (saveService) {
+        const saved = !offer
+          ? await createServiceApi({ ...body, ...code, specialtyId: values.specialtyId, scope: values.scope })
+          : await updateServiceApi(offer.id, {
+              ...body,
+              // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
+              ...(values.specialtyId ? { specialtyId: values.specialtyId } : {}),
+              ...(isTemplate ? {} : { scope: values.scope, ...code }),
+            })
+        serviceId = saved.data.id
       }
-      return updateServiceApi(offer.id, {
-        ...body,
-        // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
-        ...(values.specialtyId ? { specialtyId: values.specialtyId } : {}),
-        ...(isTemplate ? {} : { scope: values.scope, ...code }),
-      })
+      if (materials && serviceId) {
+        try {
+          const result = await saveServiceMaterialsApi(serviceId, materials)
+          queryClient.setQueryData(["services", "materials", serviceId], result)
+        } catch (cause) {
+          throw new MaterialsNotSaved(cause, saveService)
+        }
+      }
+      return { savedService: saveService, savedMaterials: materials !== null }
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
-      toast.success(offer ? "Servicio actualizado" : "Servicio guardado y activo")
+      toast.success(
+        !offer
+          ? result.savedMaterials
+            ? "Servicio guardado y activo, con sus materiales"
+            : "Servicio guardado y activo"
+          : !result.savedService
+            ? "Materiales guardados: se descuentan desde la próxima atención"
+            : result.savedMaterials
+              ? "Servicio y materiales guardados"
+              : "Servicio actualizado",
+      )
       onClose()
     },
     onError: (error) => {
+      if (error instanceof MaterialsNotSaved) {
+        const message = financeErrorMessage(error.reason)
+        setMaterialsSaveError(message)
+        if (error.serviceSaved) {
+          // Lo del servicio ya quedó: la lista lo trae y el formulario deja de
+          // tenerlo como cambio; los materiales siguen escritos para reintentar.
+          void queryClient.invalidateQueries({ queryKey: ["services"] })
+          if (!offer) {
+            toast.error(`El servicio quedó guardado y activo, pero sus materiales no: ${message} Ábrelo para ponerlos.`)
+            onClose()
+            return
+          }
+          toast.error(`Los datos del servicio se guardaron, pero sus materiales no: ${message}`)
+          return
+        }
+        toast.error(`No se guardaron los materiales: ${message}`)
+        return
+      }
       toast.error(
         error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
       )
@@ -907,12 +1101,22 @@ function OfferEditor({
   })
 
   const form = useOfferForm(offer, open, async (value) => {
-    await saveMutation.mutateAsync(value)
+    const materials = checkMaterials()
+    if (materials === false) return
+    // Solo materiales: el servicio no se vuelve a enviar; un código nuevo sí.
+    const saveService = !offer || serviceDirtyRef.current || codeChangedRef.current || materials === null
+    await saveMutation
+      .mutateAsync({ values: value, saveService, materials: materials?.items ?? null })
+      .catch(() => undefined)
   }, orgLocale)
   // Suscripción explícita: la página no se entera de los cambios de meta del
   // formulario por sí sola, y el cierre protegido necesita saber si hay cambios.
-  const formDirty = useStore(form.store, (state) => !state.isDefaultValue)
-  const isDirty = formDirty || codeChanged
+  const serviceDirty = useStore(form.store, (state) => !state.isDefaultValue)
+  const serviceDirtyRef = useRef(serviceDirty)
+  serviceDirtyRef.current = serviceDirty
+  const codeChangedRef = useRef(codeChanged)
+  codeChangedRef.current = codeChanged
+  const isDirty = serviceDirty || materialsDirty || codeChanged
 
   const headerContent = (
     <div className="flex flex-col gap-1">
@@ -936,46 +1140,104 @@ function OfferEditor({
 
   const fields = (
     <div className="flex flex-col gap-4">
-      <OfferFields
-        form={form}
-        offer={offer}
-        allowSpecialtyScope={!isTemplate}
-        currency={currency}
-        locale={orgLocale}
-        officialCodeField={
-          isTemplate ? null : (
-            <OfficialCodeField
-              value={officialCode}
-              onChange={(next) => {
-                setOfficialCode(next)
-                setCodeTouched(true)
-              }}
-              error={
-                officialQuery.isError && !codeTouched
-                  ? "No se pudo leer el código guardado. Si no lo cambias, se conserva."
-                  : codeTouched || retiredCode
-                    ? codeIssue
-                    : null
-              }
-              disabled={offer !== null && officialQuery.isPending && codeList !== null}
+      <>
+        <OfferFields
+          form={form}
+          offer={offer}
+          allowSpecialtyScope={!isTemplate}
+          currency={currency}
+          locale={orgLocale}
+          officialCodeField={
+            isTemplate ? null : (
+              <OfficialCodeField
+                value={officialCode}
+                onChange={(next) => {
+                  setOfficialCode(next)
+                  setCodeTouched(true)
+                }}
+                error={
+                  officialQuery.isError && !codeTouched
+                    ? "No se pudo leer el código guardado. Si no lo cambias, se conserva."
+                    : codeTouched || retiredCode
+                      ? codeIssue
+                      : null
+                }
+                disabled={offer !== null && officialQuery.isPending && codeList !== null}
+              />
+            )
+          }
+        />
+        {canWriteMaterials ? (
+          <>
+            <ServiceMaterialsEditor
+              idPrefix={offer?.id ?? "nueva"}
+              serviceId={offer?.id ?? null}
+              lines={lines}
+              onChange={changeMaterials}
+              errors={materialErrors}
+              saveError={materialsSaveError}
+              loading={offer !== null && materialsQuery.isPending}
+              loadError={offer !== null && materialsQuery.isError ? materialsQuery.error : null}
+              onRetry={() => void materialsQuery.refetch()}
+              disabled={saveMutation.isPending}
+              locale={orgLocale}
+              reveal={revealMaterials}
             />
-          )
-        }
-      />
-      {offer ? <OfferDetails offer={offer} official={official} /> : null}
+            {seesMaterialCost && offer && savedMaterials ? (
+              <ServiceMaterialsCost
+                cost={savedMaterials.cost}
+                count={savedMaterials.items.length}
+                servicePriceCents={offer.priceCents}
+                serviceCurrency={offer.currency}
+                changed={materialsDirty}
+                locale={orgLocale}
+              />
+            ) : null}
+          </>
+        ) : offer && seesMaterials ? (
+          <ServiceMaterialsReadOnly
+            data={savedMaterials}
+            loading={materialsQuery.isPending}
+            loadError={materialsQuery.isError ? materialsQuery.error : null}
+            onRetry={() => void materialsQuery.refetch()}
+            showCost={seesMaterialCost}
+            servicePriceCents={offer.priceCents}
+            serviceCurrency={offer.currency}
+            locale={orgLocale}
+          />
+        ) : null}
+        {offer ? <OfferDetails offer={offer} official={official} /> : null}
+      </>
     </div>
   )
 
   // Quien no escribe lee la prestación en el detalle de lectura: mismos datos,
-  // sin campos que no puede guardar.
+  // sin campos que no puede guardar. Quien ve Inventario lee también sus materiales.
   if (offer && !canWrite) {
+    const readOnly = (
+      <div className="flex flex-col gap-4">
+        <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
+        {seesMaterials ? (
+          <ServiceMaterialsReadOnly
+            data={savedMaterials}
+            loading={materialsQuery.isPending}
+            loadError={materialsQuery.isError ? materialsQuery.error : null}
+            onRetry={() => void materialsQuery.refetch()}
+            showCost={seesMaterialCost}
+            servicePriceCents={offer.priceCents}
+            serviceCurrency={offer.currency}
+            locale={orgLocale}
+          />
+        ) : null}
+      </div>
+    )
     return asPanel ? (
       <DetailPanel title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
+        {readOnly}
       </DetailPanel>
     ) : (
       <DetailDrawer open={open} title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
+        {readOnly}
       </DetailDrawer>
     )
   }
@@ -992,6 +1254,8 @@ function OfferEditor({
     onSubmit: (event: FormEvent) => {
       event.preventDefault()
       setCodeTouched(true)
+      // Los errores de los materiales se marcan aunque falte otro dato del servicio.
+      checkMaterials()
       // Donde la lista es obligatoria, un servicio propio no se guarda sin su código.
       if (codeIssue) {
         void form.validateAllFields("submit")
@@ -1016,17 +1280,17 @@ function OfferEditor({
   )
 }
 
-/**
- * El código del servicio en la lista del país, como un dato más del detalle
- * («Código CPMS · D0140», decisión 4 del lienzo del issue 40). Sin lista en el
- * país no se muestra.
- */
 /** El código vigente del servicio y si ya se pudo leer. */
 interface OfficialState {
   coding: OfficialCoding | null
   status: "pending" | "error" | "ready"
 }
 
+/**
+ * El código del servicio en la lista del país, como un dato más del detalle
+ * («Código CPMS · D0140», decisión 4 del lienzo del issue 40). Sin lista en el
+ * país no se muestra.
+ */
 function OfficialCodeDetail({ official, own }: { official: OfficialState; own: boolean }) {
   const list = useClinicalProfile().services
   if (!list) return null

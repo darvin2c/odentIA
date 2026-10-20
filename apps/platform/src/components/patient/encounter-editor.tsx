@@ -48,6 +48,7 @@ import {
   type ClosingRequirement,
   fetchEncounterClosing,
   fetchMyProfessionalProfile,
+  type FinalizedMaterials,
   takeOverEncounterApi,
   voidEncounterApi,
 } from "../../lib/encounters"
@@ -361,6 +362,8 @@ export function EncounterEditor({
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
   // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
+  // Lo que descontó el cierre (ADR 0067): solo se dice si no se pudo descontar.
+  const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
   const [budgetSent, setBudgetSent] = useState(false)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
@@ -803,6 +806,7 @@ export function EncounterEditor({
     const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
     setFinalizedBilling(null)
     setFinalizedBudget(null)
+    setFinalizedMaterials(null)
     setBudgetSent(false)
     void onFinalized(hadCharges)
   }
@@ -846,6 +850,7 @@ export function EncounterEditor({
           skippedCharges: Array<{ procedureId: string; reason: string }>
           billing: FinalizeBilling
           budget: FinalizedBudget | null
+          materials?: FinalizedMaterials | null
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -858,9 +863,12 @@ export function EncounterEditor({
       setConfirmOpen(false)
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
+      setFinalizedMaterials(result.data.materials ?? null)
       setFinalizedBilling(result.data.billing)
       // En Perú, el cierre que cambió el gráfico firmó el odontograma.
       void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
+      // Lo que salió de la sede cambia lo que hay en Inventario.
+      if (result.data.materials) void queryClient.invalidateQueries({ queryKey: ["inventory"] })
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real. El
       // estado del guardado lo deja `drain` si lo que falló fue guardar.
@@ -2017,6 +2025,7 @@ export function EncounterEditor({
         consents={unsignedConsents}
         odontogram={closingQuery.data?.data.odontogram ?? null}
         periodontal={closingQuery.data?.data.periodontal ?? null}
+        materials={closingQuery.data?.data.materials ?? null}
         onKeepProbing={() => {
           setConfirmOpen(false)
           setContextOpen(false)
@@ -2123,6 +2132,13 @@ export function EncounterEditor({
                 </li>
               ))}
             </ul>
+          ) : null}
+          {/* La atención se firmó igual: lo usado se registra después desde ella. */}
+          {finalizedMaterials?.failed ? (
+            <p role="alert" className="rounded-lg border border-warning/50 p-3 text-sm">
+              No se pudieron descontar los materiales de {finalizedMaterials.branch.name}. Regístralos con
+              «Corregir» en «Materiales usados» de esta atención, en Historia.
+            </p>
           ) : null}
           {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
           {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (

@@ -78,7 +78,7 @@ beforeAll(async () => {
   ])
   const [specialty] = await ownerDb
     .insert(orgSpecialty)
-    // La del país (ADR 0067), renombrada por la clínica: el agente dice el nombre de la clínica.
+    // La del país (ADR 0069), renombrada por la clínica: el agente dice el nombre de la clínica.
     .values({ organizationId: ORG, key: "ortodoncia_ortopedia_maxilar", name: "Ortodoncia y frenillos" })
     .returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: specialty!.id, userId: dentist })

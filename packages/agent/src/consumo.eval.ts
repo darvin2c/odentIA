@@ -140,7 +140,7 @@ const QUESTIONS: Array<{ label: string; turns: string[] }> = [
  */
 const BIG_CATALOG = env.CATALOGO === "grande"
 /**
- * En el Perú cada servicio propio lleva su código CPMS (ADR 0067). Aquí no se
+ * En el Perú cada servicio propio lleva su código CPMS (ADR 0069). Aquí no se
  * mide el código: basta uno vigente por tipo de tratamiento.
  */
 const CPMS_OF_KIND: Record<string, string> = {

@@ -257,22 +257,64 @@
     {
       "idx": 36,
       "version": "7",
-      "when": 1792456269801,
-      "tag": "0036_biblioteca_por_pais",
+      "when": 1792438969361,
+      "tag": "0036_las_compras_y_existencias_cuidan_su_historia",
       "breakpoints": true
     },
     {
       "idx": 37,
       "version": "7",
-      "when": 1792456325604,
-      "tag": "0037_biblioteca_por_pais_reglas",
+      "when": 1792442831767,
+      "tag": "0037_inventario_por_sede_unidades_materiales_y_venta",
       "breakpoints": true
     },
     {
       "idx": 38,
       "version": "7",
-      "when": 1792461650713,
-      "tag": "0038_biblioteca_variantes_por_pais",
+      "when": 1792442873575,
+      "tag": "0038_inventario_por_sede_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792442923460,
+      "tag": "0039_producto_sin_tipo_ni_minimo_unico",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792446235021,
+      "tag": "0040_venta_sin_duplicar",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792462033628,
+      "tag": "0041_devolver_un_cobro",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792462037622,
+      "tag": "0042_devolver_un_cobro_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792502608380,
+      "tag": "0043_biblioteca_por_pais",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792502613752,
+      "tag": "0044_biblioteca_por_pais_reglas",
       "breakpoints": true
     }
   ]
