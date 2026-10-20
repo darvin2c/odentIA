@@ -90,8 +90,10 @@ export interface WorkspaceNoticeInput {
  * - `orden-clinica:<id>`: la orden dejó de estar solicitada.
  * - `oportunidad:<id>`: se cerró o ya no la lleva quien recibió el aviso.
  * - `modelo-del-agente`: el agente volvió a responder después del aviso.
+ * - `clave-meta:<conexión>`: la clave de WhatsApp ya no tiene problema (se
+ *   renovó o se volvió a conectar) o la conexión ya no está activa.
  */
-export const NOTICE_SUBJECTS = ["producto", "orden-clinica", "oportunidad", "modelo-del-agente"] as const
+export const NOTICE_SUBJECTS = ["producto", "orden-clinica", "oportunidad", "modelo-del-agente", "clave-meta"] as const
 
 /**
  * La campana es para enterarse, no para trabajar: lo que pide trabajo está en
@@ -185,6 +187,9 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
             and o.status = 'open' and o.assigned_user_id = n.user_id))
         or (n.subject = 'modelo-del-agente' and exists (select 1 from agent_run_ledger r
           where r.organization_id = n.organization_id and r.status in ('ok', 'handoff') and r.started_at > n.created_at))
+        or (n.subject like 'clave-meta:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("clave-meta")}
+            and c.status = 'active' and c.signup->>'tokenProblem' is not null))
       )`)
 }
 

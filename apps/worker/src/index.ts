@@ -1,4 +1,5 @@
 import { type AgentRuntime, consumeAgentRun, createAlreadyTold, decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
@@ -18,6 +19,7 @@ import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runReportDigestTick } from "./report-digests.js"
+import { runSignupTokenTick } from "./whatsapp-tokens.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -257,11 +259,42 @@ queues.push({
     const result = await runAccountLifecycleTick(ownerDb, {
       notify: { sendReminder: (email, mail) => mailer.send({ to: email, ...mail }) },
       onboardingUrl: `${env.WEB_URL.replace(/\/+$/, "")}/onboarding`,
+      // Lleva al panel ya adentro, como «Reenviar el enlace» de la pantalla de entrar.
+      verificationUrl: (email) =>
+        emailVerificationUrl({
+          secret: env.BETTER_AUTH_SECRET,
+          authUrl: env.BETTER_AUTH_URL,
+          email,
+          callbackURL: `${env.WEB_URL.replace(/\/+$/, "")}/`,
+          expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
+        }),
+      verificationDays: REMINDER_VERIFICATION_TTL_SECONDS / 86_400,
     })
     for (const error of result.errors) console.error(`worker: account_lifecycle ${error}`)
     return result.reminders > 0 || result.cleaned > 0
   },
 })
+
+// La clave de «Conectar con Facebook» vence a los 60 días: se renueva sola (#121).
+const metaApp =
+  env.META_APP_ID.trim() && env.META_APP_SECRET.trim()
+    ? { appId: env.META_APP_ID.trim(), appSecret: env.META_APP_SECRET.trim(), graphVersion: env.META_GRAPH_VERSION }
+    : null
+if (metaApp) {
+  let nextTokenPoll = 0
+  queues.push({
+    name: "whatsapp_tokens",
+    poll: async () => {
+      if (Date.now() < nextTokenPoll) return false
+      nextTokenPoll = Date.now() + 12 * 3_600_000
+      const result = await runSignupTokenTick(ownerDb, db, { app: metaApp, secretsKey, fetch })
+      for (const error of result.errors) console.error(`worker: whatsapp_tokens ${error}`)
+      return result.renewed > 0
+    },
+  })
+} else if (env.META_APP_ID.trim() || env.META_APP_SECRET.trim()) {
+  console.warn("worker: falta META_APP_ID o META_APP_SECRET; la clave de «Conectar con Facebook» no se renovará sola.")
+}
 
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 while (!stopping) {

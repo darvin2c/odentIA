@@ -32,6 +32,7 @@ Restricciones que no cambian: el número y la cuenta son de la clínica; el cód
 - Sacrificio: dos caminos que mantener y una dirección más que recibe avisos; el estado de una conexión del botón (`signup`) y su cuenta viven en `channel_connection`.
 - **Nada de esto está probado contra Meta**: la app de odentIA todavía no existe. Las pruebas usan respuestas con la forma que publica Meta. La primera conexión real debe confirmar, al menos: la forma de la respuesta al canjear el código, que `extras` vacío basta para la versión 4, el registro de un número que ya usaba la aplicación de WhatsApp de un teléfono y los dominios que el botón necesita permitidos.
 - Meta limita al principio a 10 clínicas nuevas cada 7 días.
+- La clave que entrega el botón vence a los 60 días y el worker la renueva sola antes de que venza: [0073](0073-la-clave-de-meta-se-renueva-sola.md).
 - Se revisa si las clínicas conectadas a mano piden pasar al botón, o si Meta cambia la versión del flujo.
 
 ## Referencias

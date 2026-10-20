@@ -7,6 +7,7 @@ import { type AiUsageEntry, recordAiUsage } from "@odentia/services"
  * Precio de lista de un modelo en USD: por millón de tokens o por minuto de
  * audio. `cachedInput` es lo servido desde la caché y `cacheWrite`, lo que se
  * escribe en ella (el proveedor los cobra aparte); sin ellos vale `input`.
+ * `minSeconds`: lo mínimo que el proveedor cobra por audio, aunque dure menos.
  */
 interface ModelPrice {
   input?: number
@@ -14,6 +15,7 @@ interface ModelPrice {
   cacheWrite?: number
   output?: number
   perMinute?: number
+  minSeconds?: number
 }
 
 /**
@@ -31,6 +33,10 @@ interface ModelPrice {
  *   estimación y quedan por si algún día informa minutos. Entrada USD 1,25
  *   (los tokens de audio: no tienen otro precio) y salida USD 5 por millón,
  *   de developers.openai.com/api/docs/pricing, leída el 2026-10-20.
+ * - whisper-large-v3-turbo y whisper-large-v3 (Groq, darvin2c/odentIA#158):
+ *   USD 0,04 y 0,111 por hora de audio, de console.groq.com/docs/models; cobra
+ *   como mínimo 10 s por audio (console.groq.com/docs/speech-to-text). Ambas
+ *   leídas el 2026-10-20.
  * - jev-1.13.0 (modelo de decisión de toda clínica, ADR 0047): el de
  *   docs.typesafe.ai/models, leído el 2026-10-17; la salida no se cobra.
  */
@@ -41,6 +47,8 @@ export const AI_PRICES: Record<string, ModelPrice> = {
   "text-embedding-3-small": { input: 0.02 },
   "whisper-1": { perMinute: 0.006 },
   "gpt-4o-mini-transcribe": { input: 1.25, output: 5, perMinute: 0.003 },
+  "whisper-large-v3-turbo": { perMinute: 0.04 / 60, minSeconds: 10 },
+  "whisper-large-v3": { perMinute: 0.111 / 60, minSeconds: 10 },
 }
 
 /** Lo que reporta una llamada; los campos ausentes son los que el proveedor no entregó. */
@@ -76,6 +84,7 @@ export function costMicrosOf(use: Omit<AiUse, "provider">): number | null {
   const written = num(use.cacheWriteTokens)
   const output = num(use.outputTokens)
   const seconds = num(use.audioSeconds)
+  const billedSeconds = seconds > 0 ? Math.max(seconds, price.minSeconds ?? 0) : 0
   if ((input > 0 && price.input === undefined) || (output > 0 && price.output === undefined)) return null
   if (seconds > 0 && price.perMinute === undefined) return null
   const fresh = Math.max(0, input - cached - written)
@@ -85,7 +94,7 @@ export function costMicrosOf(use: Omit<AiUse, "provider">): number | null {
       written * (price.cacheWrite ?? price.input ?? 0) +
       output * (price.output ?? 0)) /
       1_000_000 +
-    (seconds / 60) * (price.perMinute ?? 0)
+    (billedSeconds / 60) * (price.perMinute ?? 0)
   return Math.round(usd * 1_000_000)
 }
 

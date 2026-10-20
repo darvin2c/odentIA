@@ -255,6 +255,7 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
 export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
+export { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "./email-verification.js"
 export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
 export { termsState } from "./terms.js"
 export * from "./permissions.js"

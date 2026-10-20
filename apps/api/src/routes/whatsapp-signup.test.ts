@@ -65,7 +65,7 @@ function fakeMeta(override?: (call: Call) => Answer) {
   }) as typeof fetch
   function healthy(call: Call): { status?: number; json: unknown } {
     const path = new URL(call.url).pathname
-    if (path.endsWith("/oauth/access_token")) return { json: { access_token: `clave-de-${new URL(call.url).searchParams.get("code")}`, token_type: "bearer" } }
+    if (path.endsWith("/oauth/access_token")) return { json: { access_token: `clave-de-${new URL(call.url).searchParams.get("code")}`, token_type: "bearer", expires_in: 5_184_000 } }
     if (path.endsWith("/subscribed_apps")) return { json: { success: true } }
     if (path.endsWith("/register")) return { json: { success: true } }
     if (call.url.includes("fields=display_phone_number")) {
@@ -290,6 +290,10 @@ describe("conectar con Facebook", () => {
     expect(config["registrationPin"]).toMatch(/^\d{6}$/)
     expect(meta.of("POST", "/register")[0]!.body).toEqual({ messaging_product: "whatsapp", pin: config["registrationPin"] })
     expect(row.configEncrypted).not.toContain(String(config["registrationPin"]))
+    // Cuándo vence la clave que dio Meta: a los 60 días que dijo `expires_in`.
+    const expiresIn = new Date(row.signup!.tokenExpiresAt!).getTime() - Date.now()
+    expect(expiresIn).toBeGreaterThan(59.9 * 86_400_000)
+    expect(expiresIn).toBeLessThanOrEqual(60 * 86_400_000)
 
     // La lista de conexiones la muestra con sus pasos hechos.
     const list = (await (await buildApp("org_a").request("/channels/connections")).json()) as { data: SignupData[] }
@@ -449,7 +453,10 @@ describe("conectar con Facebook", () => {
 describe("volver a conectar", () => {
   it("reemplaza el permiso de la misma conexión: no crea otra ni registra de nuevo el número", async () => {
     const [before] = await rowsOf("org_a")
-    const meta = fakeMeta()
+    // La clave nueva dura otro plazo: el vencimiento guardado es el de esta, no el de la anterior.
+    const meta = fakeMeta((call) =>
+      call.url.includes("/oauth/access_token") ? { json: { access_token: "clave-de-codigo-nuevo", expires_in: 86_400 } } : undefined,
+    )
     const { status, data } = await connect("org_a", meta, { code: "codigo-nuevo", wabaId: "7001", phoneNumberId: "9001", reconnectConnectionId: before!.id })
     expect(status).toBe(200)
     expect(data!.id).toBe(before!.id)
@@ -464,6 +471,7 @@ describe("volver a conectar", () => {
     expect(config["registrationPin"]).toBe(decryptConfig(KEY, before!.configEncrypted)["registrationPin"])
     expect(after).toMatchObject({ webhookSecret: before!.webhookSecret, externalId: "9001", displayName: before!.displayName, createdAt: before!.createdAt })
     expect(after.signup!.registeredAt).toBe(before!.signup!.registeredAt)
+    expect(new Date(after.signup!.tokenExpiresAt!).getTime() - Date.now()).toBeLessThanOrEqual(86_400_000)
     expect(data!.signup).toMatchObject({ pending: [] })
   })
 

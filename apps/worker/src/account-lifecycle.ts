@@ -18,6 +18,10 @@ export interface AccountLifecycleOptions {
   notify: AccountLifecycleMailer
   /** Dónde se crea la clínica: el botón del aviso a una cuenta verificada sin clínica. */
   onboardingUrl: string
+  /** Enlace nuevo de verificación de Better Auth: el botón del recordatorio a una cuenta sin verificar. */
+  verificationUrl: (email: string) => Promise<string>
+  /** Días que sirve ese enlace; el correo lo dice. */
+  verificationDays: number
   now?: Date
   reminderDays?: number
   cleanupDays?: number
@@ -33,8 +37,9 @@ export interface AccountLifecycleResult {
 
 /**
  * Ciclo de cuentas (slice propio, sin Billing):
- * - No verificadas 3d: recordatorio informativo (claim durable ANTES del
- *   SMTP; tras el envío se marca sent; fallo → uncertain SIN reintento).
+ * - No verificadas 3d: recordatorio informativo con un enlace nuevo para
+ *   verificar (claim durable ANTES del SMTP; tras el envío se marca sent;
+ *   fallo → uncertain SIN reintento).
  * - No verificadas 30d sin relaciones: limpieza (verificación y borrado
  *   condicionado en su tx).
  * - Verificadas sin clínica: aviso distinto de onboarding (cómo crear o
@@ -61,12 +66,17 @@ export async function runAccountLifecycleTick(
   }
   for (const candidate of candidates.reminders) {
     try {
+      // Antes de reclamar: si el enlace no se puede armar, el recordatorio queda para la próxima vuelta.
+      const url = await opts.verificationUrl(candidate.email)
       const claimed = await ownerDb.transaction((tx) =>
         claimLifecycleReminder(tx, candidate.userId),
       )
       if (!claimed) continue
       try {
-        await opts.notify.sendReminder(candidate.email, accountReminderTemplate({ kind: "sin_verificar" }))
+        await opts.notify.sendReminder(
+          candidate.email,
+          accountReminderTemplate({ kind: "sin_verificar", url, days: opts.verificationDays }),
+        )
       } catch (error) {
         await ownerDb.transaction((tx) => markLifecycleReminderUncertain(tx, candidate.userId))
         result.errors.push(`Recordatorio ${candidate.email}: ${messageOf(error)}`)

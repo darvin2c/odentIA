@@ -86,7 +86,7 @@ const MAILS: Record<string, MailTemplate> = {
   "03-autoriza-el-cambio-de-correo": changeEmailConfirmationTemplate({ newEmail: "lucia@nuevo.test", url }),
   "04-tu-enlace-para-entrar": accessLinkTemplate({ firstName: "Lucía", url, expiresText: "9:42 (hora de Lima)" }),
   "05-tu-contrasena-cambio": passwordChangedTemplate({ firstName: "Lucía", whenText: "9:12", deviceText: "Chrome en Windows", url }),
-  "06-completa-tu-cuenta": accountReminderTemplate({ kind: "sin_verificar" }),
+  "06-completa-tu-cuenta": accountReminderTemplate({ kind: "sin_verificar", url, days: 7 }),
   "07-crea-o-acepta-tu-clinica": accountReminderTemplate({ kind: "sin_clinica", url }),
   "08-te-invitaron-a-la-clinica": invitationTemplate({ organizationName: clinic, inviterName: "María Pérez", url }),
   "09-te-invitaron-al-equipo-de-odentia": staffInvitationTemplate({ url }),

@@ -13,11 +13,15 @@ export {
 } from "./whatsapp-cloud-api.js"
 export {
   exchangeSignupCode,
+  inspectSignupToken,
   type MetaPlatformApp,
   MetaSignupError,
   type MetaSignupStep,
   newRegistrationPin,
+  refreshSignupToken,
   registerPhoneNumber,
+  type SignupToken,
+  type SignupTokenState,
   subscribeAppToAccount,
 } from "./whatsapp-embedded-signup.js"
 export {

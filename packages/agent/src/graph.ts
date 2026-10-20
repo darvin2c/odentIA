@@ -33,6 +33,7 @@ import {
   listContactChannelHistory,
   listContactNotes,
   listMessages,
+  listMessagesById,
   listOpportunities,
   formatKnowledgeEntry,
   type KnowledgeEntryItem,
@@ -80,6 +81,8 @@ interface ThreadMessage {
   /** «text», «image», «audio» o «document»; ausente en una prueba. */
   contentType?: string
   createdAt?: string
+  /** El mensaje que cita al responder (ADR 0050); ausente si no cita ninguno. */
+  quote?: { body: string | null; contentType?: string }
 }
 
 /**
@@ -98,6 +101,19 @@ function messageForModel(item: { contentType?: string; body: string | null }): s
   if (item.contentType === "audio" && item.body) return item.body
   const note = `[Envió ${what} que no puedes ${item.contentType === "audio" ? "escuchar" : "ver"}: no digas que lo revisaste; si hace falta, pide que lo cuente por escrito o pasa el caso al equipo.]`
   return item.body ? `${note} ${item.body}` : note
+}
+
+/**
+ * A qué mensaje responde quien cita uno anterior (darvin2c/odentIA#96): sin
+ * esto, un «esta no puedo» que cita el segundo de dos avisos de cita llega
+ * solo, y el modelo pregunta cuál o mueve la que no es.
+ */
+function quoteForModel(quote: ThreadMessage["quote"]): string {
+  if (!quote) return ""
+  const said = quote.body?.replace(/\s+/g, " ").trim()
+  if (said) return `[En respuesta a: «${said.length > 300 ? `${said.slice(0, 300)}…` : said}»] `
+  const what = quote.contentType ? ATTACHMENT_WORDS[quote.contentType] : undefined
+  return `[En respuesta a ${what ?? "un mensaje anterior"}] `
 }
 
 interface ThreadContext {
@@ -370,10 +386,7 @@ function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
  * hoy de lo de la semana pasada. Las respuestas propias van sin sello para que
  * no lo imite al escribir.
  */
-function historyToMessages(
-  items: { direction: string; senderKind: string; body: string | null; contentType?: string; createdAt?: string }[],
-  zone: OrgLocale,
-): BaseMessage[] {
+function historyToMessages(items: ThreadMessage[], zone: OrgLocale): BaseMessage[] {
   const stamp = (iso: string | undefined): string => {
     const date = iso ? new Date(iso) : null
     if (!date || Number.isNaN(date.getTime())) return ""
@@ -391,11 +404,11 @@ function historyToMessages(
   for (const item of items) {
     const text = item.direction === "in" ? messageForModel(item) : (item.body ?? "[adjunto]")
     if (item.direction === "in") {
-      out.push(new HumanMessage({ content: `${stamp(item.createdAt)}${text}` }))
+      out.push(new HumanMessage({ content: `${stamp(item.createdAt)}${quoteForModel(item.quote)}${text}` }))
     } else if (item.senderKind === "agent") {
       out.push(new AIMessage({ content: text }))
     } else {
-      out.push(new HumanMessage({ content: `${stamp(item.createdAt)}[operador] ${text}` }))
+      out.push(new HumanMessage({ content: `${stamp(item.createdAt)}[operador] ${quoteForModel(item.quote)}${text}` }))
     }
   }
   return out
@@ -588,9 +601,21 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       .slice(0, 10)
       .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
       .join("; ")
-    const { items } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
-      listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: HISTORY_LIMIT }),
-    )
+    const items: ThreadMessage[] = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+      const { items: page } = await listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: HISTORY_LIMIT })
+      // Lo citado puede ser más viejo que lo leído: un aviso de cita de hace días.
+      const byId = new Map(page.map((item) => [item.id, item]))
+      const older = page
+        .map((item) => item.replyToMessageId)
+        .filter((id): id is string => id !== null && !byId.has(id))
+      for (const item of await listMessagesById(tx, toolCtx.orgId, toolCtx.conversationId, [...new Set(older)])) {
+        byId.set(item.id, item)
+      }
+      return page.map((item) => {
+        const quoted = item.replyToMessageId ? byId.get(item.replyToMessageId) : undefined
+        return quoted ? { ...item, quote: { body: quoted.body, contentType: quoted.contentType } } : item
+      })
+    })
     // Lo ya propuesto, lo que el propio agente anotó y lo que consultó en
     // turnos anteriores: sin esto cada turno empieza de cero y no puede
     // confirmar la propuesta que él mismo dejó pendiente.

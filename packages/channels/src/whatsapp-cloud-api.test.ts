@@ -308,6 +308,26 @@ it("un envío rechazado porque la cuenta no tiene forma de pago lo dice en palab
   await expect(sent).rejects.not.toThrow(/payment/i)
 })
 
+it("un envío rechazado porque la clave de Meta venció lo dice en palabras, con su arreglo", async () => {
+  // Lo que responde el Graph API con una clave vencida (darvin2c/odentIA#121).
+  const { fetch } = fakeFetch({
+    status: 401,
+    json: {
+      error: {
+        message: "Error validating access token: Session has expired on Tuesday, 31-Dec-26 10:00:00 PST.",
+        type: "OAuthException",
+        code: 190,
+        error_subcode: 463,
+      },
+    },
+  })
+  const sent = whatsappCloudApiAdapter.sendMessage(fx.config, { to: "wa:1", kind: { type: "text", text: "Hola" } }, { fetch })
+  await expect(sent).rejects.toThrow(
+    "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
+  )
+  await expect(sent).rejects.not.toThrow(/Session has expired/)
+})
+
 it("el aviso de un envío fallido trae el motivo: en palabras si se conoce, con su código si no", () => {
   const failed = (id: string, error: unknown) => ({ id, status: "failed", timestamp: "1760000000", errors: [error] })
   const result = parse({

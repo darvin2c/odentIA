@@ -115,6 +115,7 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   service_catalog: "configuracion",
   mailbox: "configuracion",
   webchat: "configuracion",
+  whatsapp: "configuracion",
 }
 
 /** De qué trata, para armar la frase de un código sin frase propia. */
@@ -159,6 +160,7 @@ const SUBJECT_WORDS: Record<string, string> = {
   consent_template: "una plantilla de consentimiento",
   mailbox: "un buzón de correo",
   webchat: "el chat web",
+  whatsapp: "la conexión de WhatsApp",
 }
 
 /** Qué se hizo, por la terminación del código. */
@@ -519,6 +521,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "webchat.created": say("Creó el chat web"),
   "webchat.updated": say("Cambió el chat web"),
   "webchat.secret_rotated": say("Cambió la clave de seguridad del chat web"),
+  "whatsapp.token_renewed": say("Renovó con Meta la clave de WhatsApp antes de que venciera", "sistema"),
 }
 
 /** Lo que hace por su cuenta el agente o el paciente, aunque el código no tenga frase propia. */
