@@ -28,11 +28,17 @@ FROM public.org_profile p, (VALUES
   ('PE', 'protesis', 'Prótesis', 'rehabilitacion_oral', 'Rehabilitación Oral'),
   ('PE', 'restauradora', 'Restauradora', 'restauradora_estetica', 'Odontología Restauradora y Estética'),
   ('PE', 'implantologia', 'Implantología', 'implantologia_oral_integral', 'Implantología Oral Integral'),
+  ('CL', 'general', 'Servicios odontológicos generales', 'odontologia_general', 'Odontología general'),
+  ('CL', 'cirugia', 'Cirugía', 'cirugia_traumatologia_bucomaxilofacial', 'Cirugía y traumatología buco maxilofacial'),
+  ('CL', 'ortodoncia', 'Ortodoncia', 'ortodoncia_ortopedia_dentomaxilofacial', 'Ortodoncia y ortopedia dento maxilofacial'),
+  ('CL', 'protesis', 'Prótesis', 'rehabilitacion_oral', 'Rehabilitación oral'),
+  ('CL', 'implantologia', 'Implantología', 'implantologia_bucomaxilofacial', 'Implantología buco maxilofacial'),
+  ('CL', 'disfuncion', 'Disfunción', 'trastornos_temporomandibulares', 'Trastornos temporomandibulares y dolor orofacial'),
   ('*', 'general', 'Servicios odontológicos generales', 'odontologia_general', 'Odontología general'),
   ('*', 'cirugia', 'Cirugía', 'cirugia_oral', 'Cirugía oral y maxilofacial'),
   ('*', 'protesis', 'Prótesis', 'rehabilitacion_oral', 'Rehabilitación oral')
 ) AS m(country, old_key, old_name, new_key, new_name)
 WHERE p.organization_id = s.organization_id
-  AND (p.country_code = m.country OR (m.country = '*' AND p.country_code IS DISTINCT FROM 'PE'))
+  AND (p.country_code = m.country OR (m.country = '*' AND p.country_code IS DISTINCT FROM 'PE' AND p.country_code IS DISTINCT FROM 'CL'))
   AND s.key = m.old_key
   AND NOT EXISTS (SELECT 1 FROM public.org_specialty o WHERE o.organization_id = s.organization_id AND o.key = m.new_key);

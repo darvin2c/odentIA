@@ -398,7 +398,7 @@ it("lo que deja cada tratamiento de la biblioteca encaja con su ámbito y es un 
     .trim()
     .split(/\r?\n/)
     .slice(1)
-    .map((line) => line.split(",", 8))
+    .map((line) => line.split(",", 9))
   const leaving = rows.filter((cols) => cols[5])
   expect(leaving.length).toBeGreaterThan(0)
   for (const [key, , scope, , , condition, variant] of leaving) {

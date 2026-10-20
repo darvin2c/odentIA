@@ -831,7 +831,7 @@ function OfferEditor({
   const codeIssue = isTemplate || (officialQuery.isError && !codeChanged)
     ? null
     : retiredCode && !officialCode
-      ? `El código ${retiredCode} ya no está vigente en la ${codeList?.system ?? "lista"}: elige otro`
+      ? `El código ${retiredCode} ya no está vigente en la lista ${codeList?.label ?? ""}: elige otro`
       : missingOfficialCode(codeList, officialCode)
 
   /** El tratamiento de la biblioteca, por id directo (incluye retirados, solo lectura). */
@@ -1010,7 +1010,7 @@ function OfficialCodeDetail({ coding, own }: { coding: OfficialCoding | null; ow
   if (!list) return null
   // Uno de la biblioteca toma el código de su tratamiento: no hay nada que elegir aquí.
   const missing = !list.required ? null : own ? "Sin código vigente: elígelo al editar" : "Sin código vigente"
-  return <DetailField label={`Código ${list.system}`}>{coding ? coding.code : missing}</DetailField>
+  return <DetailField label={`Código ${list.label}`}>{coding ? coding.code : missing}</DetailField>
 }
 
 /** Detalle de lectura de una prestación, para quien no puede escribir. */

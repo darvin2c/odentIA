@@ -21,7 +21,7 @@ import {
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
@@ -237,12 +237,21 @@ async function orgServiceList(tx: Db, orgId: string): Promise<ServiceListProfile
  * Donde la lista es obligatoria, un tratamiento sin código en ella no se
  * ofrece ni se agrega (decisión 2 del lienzo del issue 40).
  */
-async function assertTemplateUsable(tx: Db, list: ServiceListProfile | null, templateId: string): Promise<void> {
-  if (!list?.required) return
-  if (await templateCodingIn(tx, templateId, list.system)) return
+async function assertTemplateUsable(
+  tx: Db,
+  list: ServiceListProfile | null,
+  template: { id: string; codedOnly: boolean },
+): Promise<void> {
+  // Una variante de la norma de otro país (`coded_only`) solo vale donde la
+  // lista del país le da un código; lo demás, donde la lista no es obligatoria.
+  if (!list?.required && !template.codedOnly) return
+  if (list && (await templateCodingIn(tx, template.id, list.system))) return
+  if (!list?.required) {
+    throw conflict("TEMPLATE_UNCODED", "Este tratamiento es una variante de la norma de otro país: usa el general de la biblioteca")
+  }
   throw conflict(
     "TEMPLATE_UNCODED",
-    `Este tratamiento no tiene un código ${list.system} vigente: en tu país cada servicio lleva el suyo`,
+    `Este tratamiento no tiene un código ${list.label} vigente: en tu país cada servicio lleva el suyo`,
   )
 }
 
@@ -264,11 +273,11 @@ async function assertOwnCode(
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   if (!value) {
-    if (list.required) throw validation(`Elige el código ${list.system} del servicio: en tu país es obligatorio`)
+    if (list.required) throw validation(`Elige el código ${list.label} del servicio: en tu país es obligatorio`)
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   const coding = await currentProcedureCode(tx, list.system, value)
-  if (!coding) throw validation(`«${value}» no es un código ${list.system} vigente`)
+  if (!coding) throw validation(`«${value}» no es un código ${list.label} vigente`)
   return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
 
@@ -364,6 +373,7 @@ const templateColumns = {
   surfaceCountMax: treatmentTemplate.surfaceCountMax,
   leavesFinding: treatmentTemplate.leavesFinding,
   isCommon: treatmentTemplate.isCommon,
+  codedOnly: treatmentTemplate.codedOnly,
   isActive: treatmentTemplate.isActive,
   version: treatmentTemplate.version,
 }
@@ -403,6 +413,17 @@ function libraryQuery(tx: Db, list: ServiceListProfile | null, release: { versio
     : base.leftJoin(treatmentTemplateCode, codeOn).leftJoin(procedureCode, officialOn).$dynamic()
 }
 
+/**
+ * Lo que la biblioteca ofrece en el país: una variante de la norma de un país
+ * (`coded_only`) solo donde su lista le da un código. Donde la lista es
+ * obligatoria ya lo exige la unión con el código.
+ */
+function offeredHere(list: ServiceListProfile | null, release: { version: string } | null) {
+  if (list?.required) return undefined
+  if (!list || !release) return eq(treatmentTemplate.codedOnly, false)
+  return or(eq(treatmentTemplate.codedOnly, false), isNotNull(procedureCode.code))
+}
+
 type LibraryRow = TreatmentTemplateRow & { code: string | null; codeVersion: string | null; display: string | null }
 
 function toLibraryTemplate(row: LibraryRow, list: ServiceListProfile | null): LibraryTemplate {
@@ -434,7 +455,7 @@ export async function listTemplates(
   const release = list ? await currentCatalogRelease(tx, list.system) : null
   // Una lista obligatoria sin edición cargada no deja ofrecer nada.
   if (list?.required && !release) return { data: [], nextCursor: null, total: 0, codeList: { system: list.system, required: true } }
-  const conditions = [eq(treatmentTemplate.isActive, true)]
+  const conditions = [eq(treatmentTemplate.isActive, true), offeredHere(list, release)]
   if (query.kind) conditions.push(eq(treatmentTemplate.kind, assertKind(query.kind)))
   const q = query.q?.trim()
   if (q) {
@@ -702,7 +723,7 @@ export async function createService(
   const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
-    await assertTemplateUsable(tx, list, tpl.id)
+    await assertTemplateUsable(tx, list, tpl)
     if (input.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
     const specialtyId = input.specialtyId
@@ -841,7 +862,7 @@ export async function updateService(
       fields.push("templateId:null")
     } else {
       const tpl = await requireTemplate(tx, patch.templateId)
-      await assertTemplateUsable(tx, list, tpl.id)
+      await assertTemplateUsable(tx, list, tpl)
       if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
       // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
       if (patch.leavesFinding === undefined) {
@@ -1002,7 +1023,7 @@ export async function fromTemplates(
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
-    await assertTemplateUsable(tx, list, tpl.id)
+    await assertTemplateUsable(tx, list, tpl)
   }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
@@ -1196,7 +1217,7 @@ export async function listMostUsedServices(
   const release = list ? await currentCatalogRelease(tx, list.system) : null
   if (list?.required && !release) return []
   const rows = (await libraryQuery(tx, list, release)
-    .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.isCommon, true)))
+    .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.isCommon, true), offeredHere(list, release)))
     .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))) as LibraryRow[]
   if (rows.length === 0) return []
   const owned = await tx

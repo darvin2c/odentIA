@@ -687,7 +687,9 @@ function AddServicesPage() {
       <DataTable table={table} isFetching={activeQuery.isFetching && !activeQuery.isPending} />
       {codeList ? (
         <p className="text-xs text-muted-foreground">
-          {`Los códigos son los de la ${codeList.system}, la lista que pide la norma de tu país (${codeList.norm}).`}
+          {codeList.required
+            ? `Los códigos son los de la lista ${codeList.label}, la que pide la norma de tu país (${codeList.norm}).`
+            : `Los códigos son los de la lista ${codeList.label}, de referencia en tu país (${codeList.norm}).`}
         </p>
       ) : null}
       {view === "biblioteca" ? (
@@ -791,7 +793,7 @@ function AddServicesPage() {
               ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
                 {codeList
-                  ? `El nombre es el que verán caja y el paciente; se puede cambiar. El código ${codeList.system} se conserva.`
+                  ? `El nombre es el que verán caja y el paciente; se puede cambiar. El código ${codeList.label} se conserva.`
                   : "El nombre es el que verán caja y el paciente; se puede cambiar."}
               </p>
               <p className="text-sm font-medium" role="status">

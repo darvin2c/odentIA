@@ -145,6 +145,8 @@ export interface ClinicalCountryProfile {
 export interface ServiceListProfile {
   /** La lista en el catálogo (`procedure_code_system.key`), p. ej. «CPMS». */
   system: string
+  /** Su nombre corto en pantalla: «Código CPMS», «Código CIE-9-MC». */
+  label: string
   /**
    * Obligatoria: la norma pide que la clínica privada codifique con ella, así
    * que todo servicio lleva su código. De referencia: solo cuando lo tiene.
@@ -379,11 +381,118 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   },
   // La RM 550-2023-MINSA (art. 2) obliga a las IPRESS públicas, privadas y
   // mixtas a usar el CPMS en sus sistemas.
-  services: { system: "CPMS", required: true, norm: "RM 550-2023-MINSA" },
+  services: { system: "CPMS", label: "CPMS", required: true, norm: "RM 550-2023-MINSA" },
   specialties: PERU_SPECIALTIES,
 }
 
 const PROFILES: Record<string, Omit<ClinicalCountryProfile, "country">> = { PE: PERU }
+
+/**
+ * Especialidades de Colombia: las nueve que la CUPS (Res. 2706 de 2025)
+ * reconoce en sus códigos de consulta (890217 a 890224 y 890236), y
+ * Odontología general (890203), que recibe también lo restaurador y lo
+ * estético: la CUPS no tiene consulta propia de operatoria ni de estética.
+ */
+const COLOMBIA_SPECIALTIES: SpecialtiesProfile = {
+  source: "CUPS, Res. 2706 de 2025",
+  list: [
+    {
+      key: "odontologia_general",
+      name: "Odontología general",
+      kind: "general",
+      receives: ["diagnostico", "prevencion", "restauradora", "estetica", "anestesia", "general"],
+    },
+    { key: "cirugia_oral", name: "Cirugía oral", kind: "cirugia", receives: ["cirugia", "implantologia"] },
+    { key: "endodoncia", name: "Endodoncia", kind: "endodoncia", receives: ["endodoncia"] },
+    { key: "estomatologia_cirugia_oral", name: "Estomatología y cirugía oral", kind: "cirugia", receives: [] },
+    { key: "odontopediatria", name: "Odontopediatría", kind: "odontopediatria", receives: ["odontopediatria"] },
+    { key: "periodoncia", name: "Periodoncia", kind: "periodoncia", receives: ["periodoncia"] },
+    { key: "ortodoncia", name: "Ortodoncia", kind: "ortodoncia", receives: ["ortodoncia"] },
+    { key: "radiologia_oral_maxilofacial", name: "Radiología oral y maxilofacial", kind: "diagnostico", receives: [] },
+    { key: "rehabilitacion_oral", name: "Rehabilitación oral", kind: "protesis", receives: ["protesis", "disfuncion"] },
+    { key: "cirugia_maxilofacial", name: "Cirugía maxilofacial", kind: "cirugia", receives: [] },
+  ],
+}
+
+/**
+ * Especialidades de Chile: las del Decreto 8 de 2013 (con los Decretos 17 de
+ * 2017 y 30 de 2024) que certifica CONACEO y atienden pacientes en un
+ * consultorio, y Odontología general. Quedan fuera Odontología legal y Salud
+ * pública.
+ */
+const CHILE_SPECIALTIES: SpecialtiesProfile = {
+  source: "Decreto 8 de 2013 (CONACEO)",
+  list: [
+    {
+      key: "odontologia_general",
+      name: "Odontología general",
+      kind: "general",
+      receives: ["diagnostico", "prevencion", "restauradora", "estetica", "anestesia", "general"],
+    },
+    {
+      key: "cirugia_traumatologia_bucomaxilofacial",
+      name: "Cirugía y traumatología buco maxilofacial",
+      kind: "cirugia",
+      receives: ["cirugia"],
+    },
+    { key: "endodoncia", name: "Endodoncia", kind: "endodoncia", receives: ["endodoncia"] },
+    { key: "imagenologia_oral_maxilofacial", name: "Imagenología oral y maxilofacial", kind: "diagnostico", receives: [] },
+    { key: "implantologia_bucomaxilofacial", name: "Implantología buco maxilofacial", kind: "implantologia", receives: ["implantologia"] },
+    { key: "odontopediatria", name: "Odontopediatría", kind: "odontopediatria", receives: ["odontopediatria"] },
+    {
+      key: "ortodoncia_ortopedia_dentomaxilofacial",
+      name: "Ortodoncia y ortopedia dento maxilofacial",
+      kind: "ortodoncia",
+      receives: ["ortodoncia"],
+    },
+    { key: "patologia_oral_maxilofacial", name: "Patología oral y maxilofacial", kind: "diagnostico", receives: [] },
+    { key: "periodoncia", name: "Periodoncia", kind: "periodoncia", receives: ["periodoncia"] },
+    { key: "rehabilitacion_oral", name: "Rehabilitación oral", kind: "protesis", receives: ["protesis"] },
+    { key: "somatoprotesis", name: "Somato-prótesis", kind: "protesis", receives: [] },
+    {
+      key: "trastornos_temporomandibulares",
+      name: "Trastornos temporomandibulares y dolor orofacial",
+      kind: "disfuncion",
+      receives: ["disfuncion"],
+    },
+    { key: "odontogeriatria", name: "Odontogeriatría", kind: "general", receives: [] },
+  ],
+}
+
+/**
+ * La lista de servicios (y, si las tiene, las especialidades) de un país que
+ * no tiene perfil propio (ADR 0067): lo demás es el núcleo. Solo entra un país
+ * cuando su lista está cargada con su archivo oficial y su huella.
+ */
+const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile; specialties?: SpecialtiesProfile }> = {
+  // Res. 2706 de 2025, art. 2: toda IPS, sin distinguir pública o privada.
+  CO: {
+    services: { system: "CUPS", label: "CUPS", required: true, norm: "Res. 2706 de 2025" },
+    specialties: COLOMBIA_SPECIALTIES,
+  },
+  // NOM-024-SSA3-2012: el software de expediente clínico usa el catálogo de
+  // procedimientos de la DGIS, también en el privado.
+  MX: { services: { system: "CIE9MC-MX", label: "CIE-9-MC", required: true, norm: "NOM-024-SSA3-2012" } },
+  // Solo para quien atiende con bono FONASA (Modalidad Libre Elección).
+  CL: {
+    services: { system: "FONASA", label: "FONASA", required: false, norm: "Arancel MLE 2026, Res. Ex. 347/2026" },
+    specialties: CHILE_SPECIALTIES,
+  },
+  // Lo obligatorio del tarifario del Colegio (Ley 10352, art. 5 inc. y) es el
+  // precio mínimo, no el código: la lista es de referencia.
+  CR: {
+    services: {
+      system: "COLEGIO-CR",
+      label: "Colegio de Dentistas",
+      required: false,
+      norm: "tarifas mínimas del Colegio, La Gaceta 19 de 2025",
+    },
+  },
+  // Adaptación propia del MINSAL: el mismo número puede ser otro acto que en
+  // la CIE-9-MC internacional.
+  SV: { services: { system: "CIE9MC-SV", label: "CIE-9-MC", required: false, norm: "CIE-9-MC 2024 del MINSAL" } },
+}
+
 
 /** Código de país normalizado (ISO 3166-1 alfa-2 en mayúsculas) o null. */
 export function normalizeCountryCode(country: string | null | undefined): string | null {
@@ -399,7 +508,14 @@ export function clinicalProfileFor(country: string | null | undefined): Clinical
   const code = normalizeCountryCode(country)
   const base = code && PROFILES[code] ? PROFILES[code] : CORE
   const diagnosis = code && !PROFILES[code] && DIAGNOSIS_BY_COUNTRY[code] ? DIAGNOSIS_BY_COUNTRY[code] : base.diagnosis
-  return { country: code, ...base, diagnosis }
+  const lists = code && !PROFILES[code] ? SERVICES_BY_COUNTRY[code] : undefined
+  return {
+    country: code,
+    ...base,
+    diagnosis,
+    services: lists ? lists.services : base.services,
+    specialties: lists?.specialties ?? base.specialties,
+  }
 }
 
 /** El tipo de documento que se ofrece en ese país, o undefined. */

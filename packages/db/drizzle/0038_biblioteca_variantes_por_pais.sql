@@ -1,0 +1,1 @@
+ALTER TABLE "catalog"."treatment_template" ADD COLUMN "coded_only" boolean DEFAULT false NOT NULL;

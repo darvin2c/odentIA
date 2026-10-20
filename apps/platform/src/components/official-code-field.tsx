@@ -56,7 +56,7 @@ export function OfficialCodeField({
 
   const items = results.data?.data ?? []
   const searching = results.isFetching || query.trim() !== debounced
-  const label = list.required ? `Código ${list.system}` : `Código ${list.system} (opcional)`
+  const label = list.required ? `Código ${list.label}` : `Código ${list.label} (opcional)`
 
   return (
     <Field>
@@ -105,7 +105,7 @@ export function OfficialCodeField({
             id={id}
             disabled={disabled}
             aria-invalid={error ? true : undefined}
-            placeholder={`Buscar en la ${list.system} por nombre o código…`}
+            placeholder="Buscar por nombre o por código…"
             showTrigger={false}
           />
           <ComboboxContent>
@@ -117,7 +117,7 @@ export function OfficialCodeField({
               </p>
             ) : (
               <>
-                <ComboboxList aria-label={`Códigos de la ${list.system}`}>
+                <ComboboxList aria-label={`Códigos ${list.label}`}>
                   {items.map((item) => (
                     <ComboboxItem key={item.code} value={item} className="flex-col items-start gap-0 py-2">
                       <span className="font-medium">{item.code}</span>
@@ -125,7 +125,7 @@ export function OfficialCodeField({
                     </ComboboxItem>
                   ))}
                 </ComboboxList>
-                <ComboboxEmpty>{`Sin resultados en la ${list.system}.`}</ComboboxEmpty>
+                <ComboboxEmpty>{`Sin resultados en la lista ${list.label}.`}</ComboboxEmpty>
               </>
             )}
           </ComboboxContent>
@@ -136,8 +136,8 @@ export function OfficialCodeField({
       ) : (
         <p className="text-xs text-muted-foreground">
           {list.required
-            ? `En tu país cada servicio lleva su código ${list.system}. Busca por nombre o por código.`
-            : `Solo si lo necesitas para reportar o cobrar con la lista ${list.system}.`}
+            ? `En tu país cada servicio lleva su código ${list.label}. Busca por nombre o por código.`
+            : `Solo si lo necesitas para reportar o cobrar con la lista ${list.label}.`}
         </p>
       )}
     </Field>
@@ -146,8 +146,8 @@ export function OfficialCodeField({
 
 /** Si al servicio propio le falta el código que su país exige: la frase del campo. */
 export function missingOfficialCode(
-  list: { system: string; required: boolean } | null,
+  list: { label: string; required: boolean } | null,
   value: { code: string } | null,
 ): string | null {
-  return list?.required && !value ? `Elige el código ${list.system}` : null
+  return list?.required && !value ? `Elige el código ${list.label}` : null
 }

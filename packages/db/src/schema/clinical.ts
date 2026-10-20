@@ -1162,6 +1162,12 @@ export const treatmentTemplate = catalogSchema.table(
     surfaceCountMax: integer("surface_count_max"),
     leavesFinding: jsonb("leaves_finding").$type<{ condition: string; variant?: string }>(),
     isCommon: boolean("is_common").notNull().default(false),
+    /**
+     * Variante que separa la norma de un país (p. ej. la exodoncia por número
+     * de raíces de la CUPS): se ofrece solo donde la lista del país le da un
+     * código, para no repetir el tratamiento general en los demás.
+     */
+    codedOnly: boolean("coded_only").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
   },

@@ -1,407 +1,428 @@
-key,kind,scope,surface_count_min,surface_count_max,leaves_condition,leaves_variant,common,name
-3-4-de-corona-de-acrilico-indirecta,protesis,tooth,,,,,false,3/4 de corona de acrílico indirecta
-3-4-de-corona-de-metal-base,protesis,tooth,,,,,false,3/4 de corona de metal base
-3-4-de-corona-de-porcelana-sin-carillas,protesis,tooth,,,,,false,3/4 de corona de porcelana (sin carillas)
-acceso-quirurgico-a-pieza-retenida,cirugia,tooth,,,,,false,Acceso quirúrgico a pieza retenida
-acondicionamiento-de-tejido-inferior,protesis,arch,,,,,false,Acondicionamiento de tejido, inferior
-acondicionamiento-de-tejido-superior,protesis,arch,,,,,false,Acondicionamiento de tejido, superior
-aditamentos-de-precision-ataches,protesis,arch,,,,,false,Aditamentos de precisión (ataches)
-administracion-de-otros-medicamentos,general,general,,,,,false,Administración de otros medicamentos
-agregar-diente-a-protesis-parcial,protesis,arch,,,,,false,Agregar diente a prótesis parcial
-agregar-retenedor-a-protesis-parcial,protesis,arch,,,,,false,Agregar retenedor a prótesis parcial
-ajuste-de-protesis-completa-inferior,protesis,arch,,,,,false,Ajuste de prótesis completa inferior
-ajuste-de-protesis-completa-superior,protesis,arch,,,,,false,Ajuste de prótesis completa superior
-ajuste-de-protesis-parcial-inferior,protesis,arch,,,,,false,Ajuste de prótesis parcial inferior
-ajuste-de-protesis-parcial-superior,protesis,arch,,,,,false,Ajuste de prótesis parcial superior
-ajuste-oclusal-completo,disfuncion,general,,,,,false,Ajuste oclusal completo
-ajuste-oclusal-limitado,disfuncion,general,,,,,false,Ajuste oclusal limitado
-alargamiento-de-corona-clinica,periodoncia,general,,,,,false,Alargamiento de corona clínica
-aloinjerto-de-tejido-blando,periodoncia,general,,,,,false,Aloinjerto de tejido blando
-alveoloplastia-con-exodoncias-1-a-3-dientes,cirugia,quadrant,,,,,false,Alveoloplastia con exodoncias, 1 a 3 dientes
-alveoloplastia-con-exodoncias-4-o-mas-dientes,cirugia,quadrant,,,,,false,Alveoloplastia con exodoncias, 4 o más dientes
-alveoloplastia-sin-exodoncias-1-a-3-dientes,cirugia,quadrant,,,,,false,Alveoloplastia sin exodoncias, 1 a 3 dientes
-alveoloplastia-sin-exodoncias-4-o-mas-dientes,cirugia,quadrant,,,,,false,Alveoloplastia sin exodoncias, 4 o más dientes
-amalgama-1-superficie,restauradora,surfaces,1,1,definitive_restoration,amalgam,false,Amalgama, 1 superficie
-amalgama-2-superficies,restauradora,surfaces,2,2,definitive_restoration,amalgam,false,Amalgama, 2 superficies
-amalgama-3-superficies,restauradora,surfaces,3,3,definitive_restoration,amalgam,false,Amalgama, 3 superficies
-amalgama-4-superficies,restauradora,surfaces,4,4,definitive_restoration,amalgam,false,Amalgama, 4 superficies
-amputacion-radicular,endodoncia,tooth,,,,,false,Amputación radicular
-analgesia-con-oxido-nitroso,anestesia,general,,,,,false,Analgesia con óxido nitroso
-analisis-oclusal-con-montaje,disfuncion,general,,,,,false,Análisis oclusal con montaje
-anestesia-general-cada-15-minutos-adicionales,anestesia,general,,,,,false,Anestesia general, cada 15 minutos adicionales
-anestesia-general-primeros-30-minutos,anestesia,general,,,,,false,Anestesia general, primeros 30 minutos
-anestesia-local,anestesia,general,,,,,false,Anestesia local
-anestesia-local-sin-procedimiento-quirurgico,anestesia,general,,,,,false,Anestesia local sin procedimiento quirúrgico
-anestesia-por-bloqueo-regional,anestesia,general,,,,,false,Anestesia por bloqueo regional
-antimicrobiano-local-de-liberacion-controlada,periodoncia,general,,,,,false,Antimicrobiano local de liberación controlada
-aparato-para-trismo,protesis,general,,,,,false,Aparato para trismo
-aparatologia-fija-de-ortodoncia,ortodoncia,arch,,,,,false,Aparatología fija de ortodoncia
-aparatologia-removible-de-ortodoncia,ortodoncia,arch,,,,,false,Aparatología removible de ortodoncia
-apertura-cameral,endodoncia,tooth,,,,,false,Apertura cameral
-apexificacion-cambio-de-medicacion,endodoncia,tooth,,,,,false,Apexificación, cambio de medicación
-apexificacion-visita-final,endodoncia,tooth,,,,,false,Apexificación, visita final
-apexificacion-visita-inicial,endodoncia,tooth,,,,,false,Apexificación, visita inicial
-apicectomia-o-cirugia-periapical-anterior,endodoncia,tooth,,,,,false,Apicectomía o cirugía periapical, anterior
-apicectomia-o-cirugia-periapical-bicuspide,endodoncia,tooth,,,,,false,Apicectomía o cirugía periapical, bicúspide
-apicectomia-o-cirugia-periapical-posterior,endodoncia,tooth,,,,,false,Apicectomía o cirugía periapical, posterior
-aplicacion-de-desensibilizante,prevencion,general,,,,,false,Aplicación de desensibilizante
-artrocentesis,cirugia,general,,,,,false,Artrocentesis
-asesoria-nutricional-para-enfermedades-dentales,prevencion,general,,,,,false,Asesoría nutricional para enfermedades dentales
-barra-de-conexion-sobre-implantes,implantologia,general,,,,,false,Barra de conexión sobre implantes
-biopsia-de-tejido-blando,cirugia,general,,,,,false,Biopsia de tejido blando
-biopsia-de-tejido-duro-hueso,cirugia,general,,,,,false,Biopsia de tejido duro (hueso)
-biopsia-extraoral-de-tejido-blando,cirugia,general,,,,,false,Biopsia extraoral de tejido blando
-biopsia-extraoral-de-tejido-duro,cirugia,general,,,,,false,Biopsia extraoral de tejido duro
-biopsia-por-puncion-aspiracion,cirugia,general,,,,,false,Biopsia por punción aspiración
-biopsia-por-raspado-transepitelial,cirugia,general,,,,,false,Biopsia por raspado transepitelial
-blanqueamiento-externo-por-arcada,estetica,arch,,,,,true,Blanqueamiento externo por arcada
-blanqueamiento-externo-por-diente,estetica,tooth,,,,,false,Blanqueamiento externo por diente
-blanqueamiento-interno-por-diente,estetica,tooth,,,,,false,Blanqueamiento interno por diente
-bloqueo-de-rama-del-trigemino,anestesia,general,,,,,false,Bloqueo de rama del trigémino
-carilla-de-porcelana,estetica,surfaces,1,1,definitive_restoration,veneer,false,Carilla de porcelana
-carilla-de-resina-directa,estetica,surfaces,1,1,definitive_restoration,veneer,false,Carilla de resina directa
-carilla-de-resina-indirecta,estetica,surfaces,1,1,definitive_restoration,veneer,false,Carilla de resina indirecta
-cementado-provisional-de-inlay-u-onlay,protesis,tooth,,,,,false,Cementado provisional de inlay u onlay
-cierre-de-fistula-oroantral,cirugia,general,,,,,false,Cierre de fístula oroantral
-cierre-de-perforacion-sinusal,cirugia,general,,,,,false,Cierre de perforación sinusal
-cirugia-periodontal-resectiva-por-cuadrante,periodoncia,quadrant,,,,,false,Cirugía periodontal resectiva, por cuadrante
-cirugia-periodontal-resectiva-por-sextante,periodoncia,general,,,,,false,Cirugía periodontal resectiva, por sextante
-citologia-exfoliativa,cirugia,general,,,,,false,Citología exfoliativa
-cofia-metalica,protesis,tooth,,,,,false,Cofia metálica
-colgajo-con-alisado-radicular-1-a-3-dientes,periodoncia,quadrant,,,,,false,Colgajo con alisado radicular, 1 a 3 dientes
-colgajo-con-alisado-radicular-4-o-mas-dientes,periodoncia,quadrant,,,,,false,Colgajo con alisado radicular, 4 o más dientes
-colgajo-de-reposicion-apical,periodoncia,general,,,,,false,Colgajo de reposición apical
-colgajo-desplazado-con-injerto-de-tejido-conectivo,periodoncia,general,,,,,false,Colgajo desplazado con injerto de tejido conectivo
-colgajo-desplazado-de-tejido-blando,periodoncia,general,,,,,false,Colgajo desplazado de tejido blando
-colocacion-de-implante-endooseo,implantologia,tooth,,,implant,,true,Colocación de implante endoóseo
-colocacion-de-implante-eposteal-subperiostico,implantologia,tooth,,,implant,,false,Colocación de implante eposteal (subperióstico)
-colocacion-de-implante-transoseo,implantologia,tooth,,,implant,,false,Colocación de implante transóseo
-colocacion-intraoral-de-dispositivo-de-fijacion,cirugia,general,,,,,false,Colocación intraoral de dispositivo de fijación
-conector-en-barra,protesis,general,,,,,false,Conector en barra
-consulta-odontologica-especializada,diagnostico,general,,,,,false,Consulta odontológica especializada
-consulta-odontologica-general,diagnostico,general,,,,,true,Consulta odontológica general
-contencion-de-ortodoncia,ortodoncia,arch,,,,,false,Contención de ortodoncia
-control-de-ortodoncia,ortodoncia,general,,,,,true,Control de ortodoncia
-corona-de-acero-con-frente-estetico-de-acrilico,protesis,tooth,,,crown,veneer_crown,false,Corona de acero con frente estético de acrílico
-corona-de-acero-con-frente-estetico-deciduo,protesis,tooth,,,crown,veneer_crown,false,Corona de acero con frente estético, deciduo
-corona-de-acero-prefabricada-deciduo,protesis,tooth,,,crown,metal,false,Corona de acero prefabricada, deciduo
-corona-de-acero-prefabricada-permanente,protesis,tooth,,,crown,metal,false,Corona de acero prefabricada, permanente
-corona-de-acrilico-con-metal-base,protesis,tooth,,,crown,veneer_crown,false,Corona de acrílico con metal base
-corona-de-acrilico-indirecta,protesis,tooth,,,,,false,Corona de acrílico indirecta
-corona-de-metal-base,protesis,tooth,,,crown,metal,false,Corona de metal base
-corona-de-metal-colado-sobre-pilar-metal-base,implantologia,tooth,,,,,false,Corona de metal colado sobre pilar, metal base
-corona-de-metal-colado-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,Corona de metal colado sobre pilar, metal noble
-corona-de-metal-sobre-implante,implantologia,tooth,,,,,false,Corona de metal sobre implante
-corona-de-porcelana,protesis,tooth,,,crown,metal_free,true,Corona de porcelana
-corona-de-porcelana-sobre-pilar,implantologia,tooth,,,,,false,Corona de porcelana sobre pilar
-corona-de-titanio,protesis,tooth,,,crown,metal,false,Corona de titanio
-corona-de-titanio-sobre-pilar,implantologia,tooth,,,,,false,Corona de titanio sobre pilar
-corona-metal-ceramica-metal-base,protesis,tooth,,,crown,metal_ceramic,true,Corona metal-cerámica, metal base
-corona-metal-ceramica-sobre-pilar-metal-base,implantologia,tooth,,,,,false,Corona metal-cerámica sobre pilar, metal base
-corona-metal-ceramica-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,Corona metal-cerámica sobre pilar, metal noble
-corona-prefabricada-de-acrilico,protesis,tooth,,,,,false,Corona prefabricada de acrílico
-corona-provisional,protesis,tooth,,,,,false,Corona provisional
-corona-retenedora-sobre-pilar,implantologia,tooth,,,,,false,Corona retenedora sobre pilar
-coronectomia-profilactica,cirugia,tooth,,,,,false,Coronectomía profiláctica
-correcciones-posquirurgicas,periodoncia,general,,,,,false,Correcciones posquirúrgicas
-cubeta-para-gel-de-fluor,prevencion,general,,,,,false,Cubeta para gel de flúor
-cuna-distal-o-proximal,periodoncia,general,,,,,false,Cuña distal o proximal
-curetaje-subgingival,periodoncia,general,,,,,false,Curetaje subgingival
-destruccion-de-lesiones-por-metodo-fisico-o-quimico,cirugia,general,,,,,false,Destrucción de lesiones por método físico o químico
-dispositivo-dental-flexible,protesis,general,,,,,false,Dispositivo dental flexible
-dispositivo-ortopedico-oclusal,disfuncion,general,,,,,false,Dispositivo ortopédico oclusal
-dispositivo-para-erupcion-de-pieza-impactada,cirugia,tooth,,,,,false,Dispositivo para erupción de pieza impactada
-disyuncion-maxilar,ortodoncia,arch,,,,,false,Disyunción maxilar
-drenaje-de-absceso-extraoral,cirugia,general,,,,,false,Drenaje de absceso extraoral
-drenaje-de-absceso-intraoral,cirugia,general,,,,,false,Drenaje de absceso intraoral
-drenaje-de-absceso-intraoral-complicado,cirugia,general,,,,,false,Drenaje de absceso intraoral complicado
-eliminacion-de-torus-mandibular,cirugia,general,,,,,false,Eliminación de torus mandibular
-eliminacion-de-torus-palatino,cirugia,general,,,,,false,Eliminación de torus palatino
-endodoncia-anterior-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Endodoncia anterior no vital
-endodoncia-anterior-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,Endodoncia anterior vital
-endodoncia-bicuspide-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Endodoncia bicúspide no vital
-endodoncia-bicuspide-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,Endodoncia bicúspide vital
-endodoncia-incompleta,endodoncia,tooth,,,,,false,Endodoncia incompleta
-endodoncia-posterior-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Endodoncia posterior no vital
-endodoncia-posterior-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,Endodoncia posterior vital
-endodoncia-unirradicular-no-vital-sin-obturacion-final,endodoncia,tooth,,,,,false,Endodoncia unirradicular no vital, sin obturación final
-escision-de-encia-pericoronal,cirugia,tooth,,,,,false,Escisión de encía pericoronal
-escision-de-lesion-benigna-complicada,cirugia,general,,,,,false,Escisión de lesión benigna complicada
-escision-de-lesion-benigna-de-mas-de-1-25-cm,cirugia,general,,,,,false,Escisión de lesión benigna de más de 1,25 cm
-escision-de-lesion-benigna-hasta-1-25-cm,cirugia,general,,,,,false,Escisión de lesión benigna hasta 1,25 cm
-escision-de-tejido-hiperplasico,cirugia,arch,,,,,false,Escisión de tejido hiperplásico
-estudio-tomografico,diagnostico,general,,,,,false,Estudio tomográfico
-evaluacion-oral-completa,diagnostico,general,,,,,true,Evaluación oral completa
-evaluacion-periodica-de-paciente-continuador,diagnostico,general,,,,,false,Evaluación periódica de paciente continuador
-exodoncia-de-pieza-erupcionada-o-raiz-expuesta,cirugia,tooth,,,missing_tooth,,false,Exodoncia de pieza erupcionada o raíz expuesta
-exodoncia-de-pieza-impactada-en-hueso,cirugia,tooth,,,missing_tooth,,true,Exodoncia de pieza impactada en hueso
-exodoncia-de-pieza-impactada-en-tejido-blando,cirugia,tooth,,,missing_tooth,,false,Exodoncia de pieza impactada en tejido blando
-exodoncia-de-pieza-parcialmente-impactada-en-hueso,cirugia,tooth,,,missing_tooth,,false,Exodoncia de pieza parcialmente impactada en hueso
-exodoncia-de-resto-coronario-diente-deciduo,cirugia,tooth,,,missing_tooth,,false,Exodoncia de resto coronario, diente deciduo
-exodoncia-intencional,cirugia,tooth,,,missing_tooth,,false,Exodoncia intencional
-exodoncia-quirurgica-con-colgajo-pieza-erupcionada,cirugia,tooth,,,missing_tooth,,true,Exodoncia quirúrgica con colgajo, pieza erupcionada
-exodoncia-quirurgica-de-pieza-retenida,cirugia,tooth,,,missing_tooth,,false,Exodoncia quirúrgica de pieza retenida
-exodoncia-quirurgica-de-restos-radiculares,cirugia,tooth,,,missing_tooth,,false,Exodoncia quirúrgica de restos radiculares
-exodoncia-simple,cirugia,tooth,,,missing_tooth,,true,Exodoncia simple
-ferula-quirurgica,protesis,general,,,,,false,Férula quirúrgica
-ferulizacion-con-resina-fotocurable,periodoncia,arch,,,,,false,Ferulización con resina fotocurable
-ferulizacion-provisional-extracoronal,periodoncia,arch,,,,,false,Ferulización provisional extracoronal
-ferulizacion-provisional-intracoronal,periodoncia,arch,,,,,false,Ferulización provisional intracoronal
-fibrotomia-transeptal-o-supracrestal,cirugia,tooth,,,,,false,Fibrotomía transeptal o supracrestal
-fluor-barniz,prevencion,general,,,,,true,Flúor barniz
-fluor-en-gel,prevencion,general,,,,,false,Flúor en gel
-fotografias-orales-y-faciales,diagnostico,general,,,,,false,Fotografías orales y faciales
-frenectomia-o-frenotomia,cirugia,general,,,,,false,Frenectomía o frenotomía
-frenuloplastia,cirugia,general,,,,,false,Frenuloplastia
-gingivectomia-o-gingivoplastia-1-a-3-dientes,periodoncia,quadrant,,,,,false,Gingivectomía o gingivoplastia, 1 a 3 dientes
-gingivectomia-o-gingivoplastia-4-o-mas-dientes,periodoncia,quadrant,,,,,false,Gingivectomía o gingivoplastia, 4 o más dientes
-hemiseccion-incluye-retiro-de-raiz,endodoncia,tooth,,,,,false,Hemisección (incluye retiro de raíz)
-implante-endodontico-endooseo,endodoncia,tooth,,,,,false,Implante endodóntico endoóseo
-impresiones-dentales-para-diagnostico,diagnostico,general,,,,,false,Impresiones dentales para diagnóstico
-inactivacion-de-caries-diamino-de-plata-resina-o-ionomero,prevencion,tooth,,,,,false,Inactivación de caries (diamino de plata, resina o ionómero)
-injerto-de-tejido-conectivo-incluye-zona-donante,periodoncia,general,,,,,false,Injerto de tejido conectivo (incluye zona donante)
-injerto-gingival-libre-incluye-zona-donante,periodoncia,general,,,,,false,Injerto gingival libre (incluye zona donante)
-injerto-oseo-de-maxilar-mandibula-o-huesos-faciales,cirugia,general,,,,,false,Injerto óseo de maxilar, mandíbula o huesos faciales
-injerto-oseo-para-preservar-el-reborde,cirugia,general,,,,,false,Injerto óseo para preservar el reborde
-inlay-de-porcelana-1-superficie,restauradora,surfaces,1,1,definitive_restoration,aesthetic_inlay,false,Inlay de porcelana, 1 superficie
-inlay-de-porcelana-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,Inlay de porcelana, 2 superficies
-inlay-de-porcelana-3-o-mas-superficies,restauradora,surfaces,3,5,definitive_restoration,aesthetic_inlay,false,Inlay de porcelana, 3 o más superficies
-inlay-de-resina-1-superficie,restauradora,surfaces,1,1,definitive_restoration,aesthetic_inlay,false,Inlay de resina, 1 superficie
-inlay-de-resina-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,Inlay de resina, 2 superficies
-inlay-de-resina-3-o-mas-superficies,restauradora,surfaces,3,5,definitive_restoration,aesthetic_inlay,false,Inlay de resina, 3 o más superficies
-inlay-metalica-1-superficie,restauradora,surfaces,1,1,definitive_restoration,metal_inlay,false,Inlay metálica, 1 superficie
-inlay-metalica-2-superficies,restauradora,surfaces,2,2,definitive_restoration,metal_inlay,false,Inlay metálica, 2 superficies
-inlay-metalica-3-superficies,restauradora,surfaces,3,3,definitive_restoration,metal_inlay,false,Inlay metálica, 3 superficies
-instruccion-de-higiene-oral,prevencion,general,,,,,false,Instrucción de higiene oral
-inyeccion-de-medicamentos,general,general,,,,,false,Inyección de medicamentos
-ionomero-de-vidrio-autocurable-1-superficie,restauradora,surfaces,1,1,definitive_restoration,glass_ionomer,false,Ionómero de vidrio autocurable, 1 superficie
-ionomero-de-vidrio-autocurable-2-superficies,restauradora,surfaces,2,2,definitive_restoration,glass_ionomer,false,Ionómero de vidrio autocurable, 2 superficies
-ionomero-de-vidrio-autocurable-3-superficies,restauradora,surfaces,3,3,definitive_restoration,glass_ionomer,false,Ionómero de vidrio autocurable, 3 superficies
-ionomero-de-vidrio-fotocurable-1-superficie,restauradora,surfaces,1,1,definitive_restoration,glass_ionomer,false,Ionómero de vidrio fotocurable, 1 superficie
-ionomero-de-vidrio-fotocurable-2-superficies,restauradora,surfaces,2,2,definitive_restoration,glass_ionomer,false,Ionómero de vidrio fotocurable, 2 superficies
-ionomero-de-vidrio-fotocurable-3-superficies,restauradora,surfaces,3,3,definitive_restoration,glass_ionomer,false,Ionómero de vidrio fotocurable, 3 superficies
-manejo-de-conducta,general,general,,,,,false,Manejo de conducta
-manipulacion-de-luxacion-bajo-anestesia,cirugia,general,,,,,false,Manipulación de luxación bajo anestesia
-mantenedor-de-espacio-fijo-bilateral,odontopediatria,general,,,,,false,Mantenedor de espacio fijo bilateral
-mantenedor-de-espacio-fijo-unilateral,odontopediatria,general,,,,,false,Mantenedor de espacio fijo unilateral
-mantenedor-de-espacio-removible-bilateral,odontopediatria,general,,,,,false,Mantenedor de espacio removible bilateral
-mantenedor-de-espacio-removible-unilateral,odontopediatria,general,,,,,false,Mantenedor de espacio removible unilateral
-mantenimiento-de-implantes-con-retiro-de-protesis,implantologia,general,,,,,false,Mantenimiento de implantes con retiro de prótesis
-mantenimiento-periodontal,periodoncia,general,,,,,false,Mantenimiento periodontal
-marsupializacion,cirugia,general,,,,,false,Marsupialización
-microabrasion-del-esmalte,estetica,tooth,,,,,false,Microabrasión del esmalte
-modificacion-de-protesis-removible-tras-implantes,protesis,arch,,,,,false,Modificación de prótesis removible tras implantes
-movilizacion-de-diente-para-permitir-erupcion,cirugia,tooth,,,,,false,Movilización de diente para permitir erupción
-munon-para-retenedor-de-puente,protesis,tooth,,,,,false,Muñón para retenedor de puente
-obturacion-retrograda-por-raiz,endodoncia,tooth,,,,,false,Obturación retrógrada, por raíz
-odontoplastia-1-a-2-dientes,estetica,tooth,,,,,false,Odontoplastia, 1 a 2 dientes
-onlay-de-porcelana-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,Onlay de porcelana, 2 superficies
-onlay-de-porcelana-3-superficies,restauradora,surfaces,3,3,definitive_restoration,aesthetic_inlay,false,Onlay de porcelana, 3 superficies
-onlay-de-porcelana-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,aesthetic_inlay,false,Onlay de porcelana, 4 o más superficies
-onlay-de-resina-compuesta-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,Onlay de resina compuesta, 2 superficies
-onlay-de-resina-compuesta-3-superficies,restauradora,surfaces,3,3,definitive_restoration,aesthetic_inlay,false,Onlay de resina compuesta, 3 superficies
-onlay-de-resina-compuesta-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,aesthetic_inlay,false,Onlay de resina compuesta, 4 o más superficies
-onlay-metalica-2-superficies,restauradora,surfaces,2,2,definitive_restoration,metal_inlay,false,Onlay metálica, 2 superficies
-onlay-metalica-3-superficies,restauradora,surfaces,3,3,definitive_restoration,metal_inlay,false,Onlay metálica, 3 superficies
-onlay-metalica-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,metal_inlay,false,Onlay metálica, 4 o más superficies
-ortodoncia-integral-denticion-adolescente,ortodoncia,general,,,,,false,Ortodoncia integral, dentición adolescente
-ortodoncia-integral-denticion-adulta,ortodoncia,general,,,,,false,Ortodoncia integral, dentición adulta
-ortodoncia-integral-denticion-mixta,ortodoncia,general,,,,,false,Ortodoncia integral, dentición mixta
-ortodoncia-interceptiva-denticion-decidua,ortodoncia,general,,,,,false,Ortodoncia interceptiva, dentición decidua
-ortodoncia-interceptiva-denticion-mixta,ortodoncia,general,,,,,false,Ortodoncia interceptiva, dentición mixta
-ortodoncia-limitada-denticion-adolescente,ortodoncia,general,,,,,false,Ortodoncia limitada, dentición adolescente
-ortodoncia-limitada-denticion-adulta,ortodoncia,general,,,,,false,Ortodoncia limitada, dentición adulta
-ortodoncia-limitada-denticion-de-transicion,ortodoncia,general,,,,,false,Ortodoncia limitada, dentición de transición
-ortodoncia-limitada-denticion-decidua,ortodoncia,general,,,,,false,Ortodoncia limitada, dentición decidua
-ortodoncia-realizada-por-otro-odontologo,ortodoncia,general,,,,,false,Ortodoncia realizada por otro odontólogo
-osteoplastia,cirugia,general,,,,,false,Osteoplastia
-otras-radiografias-de-atm-con-informe,diagnostico,general,,,,,false,Otras radiografías de ATM, con informe
-pilar-personalizado-con-colocacion,implantologia,tooth,,,,,false,Pilar personalizado, con colocación
-pilar-prefabricado-con-colocacion,implantologia,tooth,,,,,false,Pilar prefabricado, con colocación
-pin-de-retencion-por-diente,protesis,tooth,,,,,false,Pin de retención, por diente
-poste-colado-adicional-mismo-diente,protesis,tooth,,,,,false,Poste colado adicional, mismo diente
-poste-colado-como-parte-del-retenedor-de-puente,protesis,tooth,,,,,false,Poste colado como parte del retenedor de puente
-poste-colado-y-nucleo-para-retenedor-de-puente,protesis,tooth,,,,,false,Poste colado y núcleo para retenedor de puente
-poste-prefabricado-adicional-mismo-diente,protesis,tooth,,,,,false,Poste prefabricado adicional, mismo diente
-poste-prefabricado-y-nucleo,protesis,tooth,,,post_and_core,,false,Poste prefabricado y núcleo
-poste-prefabricado-y-nucleo-para-retenedor-de-puente,protesis,tooth,,,,,false,Poste prefabricado y núcleo para retenedor de puente
-poste-y-munon,protesis,tooth,,,post_and_core,,true,Poste y muñón
-presentacion-del-caso,general,general,,,,,false,Presentación del caso
-procedimiento-complementario-no-especificado,general,general,,,,,false,Procedimiento complementario no especificado
-procedimiento-de-implantes-no-especificado,implantologia,general,,,,,false,Procedimiento de implantes no especificado
-procedimiento-de-ortodoncia-no-especificado,ortodoncia,general,,,,,false,Procedimiento de ortodoncia no especificado
-procedimiento-de-protesis-fija-no-especificado,protesis,general,,,,,false,Procedimiento de prótesis fija no especificado
-procedimiento-de-protesis-removible-no-especificado,protesis,arch,,,,,false,Procedimiento de prótesis removible no especificado
-procedimiento-endodontico-no-especificado,endodoncia,general,,,,,false,Procedimiento endodóntico no especificado
-procedimiento-periodontal-no-especificado,periodoncia,general,,,,,false,Procedimiento periodontal no especificado
-procedimiento-quirurgico-oral-no-especificado,cirugia,general,,,,,false,Procedimiento quirúrgico oral no especificado
-procedimiento-restaurador-no-especificado,restauradora,general,,,,,false,Procedimiento restaurador no especificado
-profilaxis,prevencion,general,,,,,true,Profilaxis
-protector-bucal-deportivo,general,arch,,,,,false,Protector bucal deportivo
-protector-oclusal-ferula-miorrelajante,disfuncion,arch,,,,,false,Protector oclusal (férula miorrelajante)
-protesis-completa-inferior,protesis,arch,,,,,true,Prótesis completa inferior
-protesis-completa-inferior-provisional,protesis,arch,,,,,false,Prótesis completa inferior provisional
-protesis-completa-superior,protesis,arch,,,,,true,Prótesis completa superior
-protesis-completa-superior-provisional,protesis,arch,,,,,false,Prótesis completa superior provisional
-protesis-fija-sobre-implantes-desdentado-parcial,implantologia,arch,,,,,false,Prótesis fija sobre implantes, desdentado parcial
-protesis-fija-sobre-implantes-desdentado-total,implantologia,arch,,,,,false,Prótesis fija sobre implantes, desdentado total
-protesis-inmediata-inferior,protesis,arch,,,,,false,Prótesis inmediata inferior
-protesis-inmediata-superior,protesis,arch,,,,,false,Prótesis inmediata superior
-protesis-parcial-fija-pediatrica,protesis,general,,,,,false,Prótesis parcial fija pediátrica
-protesis-parcial-inferior-acrilico-termocurado,protesis,arch,,,,,false,Prótesis parcial inferior, acrílico termocurado
-protesis-parcial-inferior-base-flexible,protesis,arch,,,,,false,Prótesis parcial inferior, base flexible
-protesis-parcial-inferior-base-metalica,protesis,arch,,,,,false,Prótesis parcial inferior, base metálica
-protesis-parcial-inferior-provisional-curado-rapido,protesis,arch,,,,,false,Prótesis parcial inferior provisional, curado rápido
-protesis-parcial-superior-acrilico-termocurado,protesis,arch,,,,,false,Prótesis parcial superior, acrílico termocurado
-protesis-parcial-superior-base-flexible,protesis,arch,,,,,false,Prótesis parcial superior, base flexible
-protesis-parcial-superior-base-metalica,protesis,arch,,,,,false,Prótesis parcial superior, base metálica
-protesis-parcial-superior-provisional-curado-rapido,protesis,arch,,,,,false,Prótesis parcial superior provisional, curado rápido
-protesis-parcial-unilateral-de-metal-colado,protesis,arch,,,,,false,Prótesis parcial unilateral de metal colado
-protesis-removible-sobre-implantes-desdentado-parcial,implantologia,arch,,,,,false,Prótesis removible sobre implantes, desdentado parcial
-protesis-removible-sobre-implantes-desdentado-total,implantologia,arch,,,,,false,Prótesis removible sobre implantes, desdentado total
-prueba-de-susceptibilidad-a-caries,diagnostico,general,,,,,false,Prueba de susceptibilidad a caries
-prueba-de-vitalidad-pulpar,diagnostico,general,,,,,false,Prueba de vitalidad pulpar
-puente-de-metal-colado-metal-base,protesis,tooth,,,,,false,Puente de metal colado, metal base
-puente-de-metal-colado-metal-noble,protesis,tooth,,,,,false,Puente de metal colado, metal noble
-puente-de-porcelana,protesis,tooth,,,,,false,Puente de porcelana
-puente-de-resina-compuesta-indirecta,protesis,tooth,,,,,false,Puente de resina compuesta indirecta
-puente-de-resina-con-metal-base,protesis,tooth,,,,,false,Puente de resina con metal base
-puente-de-resina-con-metal-noble,protesis,tooth,,,,,false,Puente de resina con metal noble
-puente-de-titanio,protesis,tooth,,,,,false,Puente de titanio
-puente-metal-ceramico-metal-noble,protesis,tooth,,,,,false,Puente metal-cerámico, metal noble
-puente-provisional,protesis,tooth,,,,,false,Puente provisional
-pulido-dental,periodoncia,general,,,,,false,Pulido dental
-pulpectomia-anterior-deciduo,endodoncia,tooth,,,root_canal_treatment,pulpectomy,false,Pulpectomía anterior, deciduo
-pulpectomia-posterior-deciduo,endodoncia,tooth,,,root_canal_treatment,pulpectomy,false,Pulpectomía posterior, deciduo
-pulpotomia,endodoncia,tooth,,,pulpotomy,,true,Pulpotomía
-pulpotomia-parcial-para-apexogenesis,endodoncia,tooth,,,pulpotomy,,false,Pulpotomía parcial para apexogénesis
-radiografia-cefalometrica,diagnostico,general,,,,,false,Radiografía cefalométrica
-radiografia-de-aleta-bitewing,diagnostico,general,,,,,true,Radiografía de aleta (bitewing)
-radiografia-de-craneo-y-cara-pa-o-lateral,diagnostico,general,,,,,false,Radiografía de cráneo y cara, PA o lateral
-radiografia-extraoral,diagnostico,general,,,,,false,Radiografía extraoral
-radiografia-indice-para-implante-con-informe,implantologia,general,,,,,false,Radiografía índice para implante, con informe
-radiografia-oclusal,diagnostico,general,,,,,false,Radiografía oclusal
-radiografia-panoramica,diagnostico,general,,,,,true,Radiografía panorámica
-radiografia-periapical,diagnostico,general,,,,,true,Radiografía periapical
-raspado-dental-destartraje,periodoncia,general,,,,,true,Raspado dental (destartraje)
-raspado-y-alisado-radicular-1-a-3-dientes,periodoncia,quadrant,,,,,true,Raspado y alisado radicular, 1 a 3 dientes
-raspado-y-alisado-radicular-4-o-mas-dientes,periodoncia,quadrant,,,,,true,Raspado y alisado radicular, 4 o más dientes
-raspado-y-pulido-dental,periodoncia,general,,,,,false,Raspado y pulido dental
-rebase-de-protesis-completa-inferior,protesis,arch,,,,,false,Rebase de prótesis completa inferior
-rebase-de-protesis-completa-superior,protesis,arch,,,,,false,Rebase de prótesis completa superior
-rebase-de-protesis-parcial-inferior,protesis,arch,,,,,false,Rebase de prótesis parcial inferior
-rebase-de-protesis-parcial-superior,protesis,arch,,,,,false,Rebase de prótesis parcial superior
-recementado-de-corona,protesis,tooth,,,,,false,Recementado de corona
-recementado-de-inlay-onlay-o-cobertura-parcial,protesis,tooth,,,,,false,Recementado de inlay, onlay o cobertura parcial
-recementado-de-mantenedor-de-espacio,odontopediatria,general,,,,,false,Recementado de mantenedor de espacio
-recementado-de-poste-prefabricado,protesis,tooth,,,,,false,Recementado de poste prefabricado
-recementado-de-puente,protesis,general,,,,,false,Recementado de puente
-reconstruccion-de-munon,protesis,tooth,,,,,false,Reconstrucción de muñón
-recubrimiento-pulpar-directo,endodoncia,tooth,,,,,false,Recubrimiento pulpar directo
-recubrimiento-pulpar-indirecto,endodoncia,tooth,,,,,false,Recubrimiento pulpar indirecto
-reduccion-abierta-de-fractura-alveolar,cirugia,general,,,,,false,Reducción abierta de fractura alveolar
-reduccion-abierta-de-fractura-alveolar-complicada,cirugia,general,,,,,false,Reducción abierta de fractura alveolar complicada
-reduccion-cerrada-de-fractura-alveolar,cirugia,general,,,,,false,Reducción cerrada de fractura alveolar
-reduccion-cerrada-de-fractura-alveolar-complicada,cirugia,general,,,,,false,Reducción cerrada de fractura alveolar complicada
-reduccion-cerrada-de-luxacion,cirugia,general,,,,,false,Reducción cerrada de luxación
-reduccion-quirurgica-de-tuberosidad-fibrosa,cirugia,general,,,,,false,Reducción quirúrgica de tuberosidad fibrosa
-reduccion-quirurgica-de-tuberosidad-osea,cirugia,general,,,,,false,Reducción quirúrgica de tuberosidad ósea
-reemplazo-de-dientes-fracturados-en-protesis,protesis,arch,,,,,false,Reemplazo de dientes fracturados en prótesis
-reemplazo-de-dientes-perdidos-o-rotos-en-protesis,protesis,arch,,,,,false,Reemplazo de dientes perdidos o rotos en prótesis
-reemplazo-de-dientes-y-acrilico-sobre-armazon-metalico,protesis,arch,,,,,false,Reemplazo de dientes y acrílico sobre armazón metálico
-reemplazo-de-retenedor-perdido-o-roto,ortodoncia,arch,,,,,false,Reemplazo de retenedor perdido o roto
-reevaluacion-oral-limitada,diagnostico,general,,,,,false,Reevaluación oral limitada
-reevaluacion-postoperatoria,diagnostico,general,,,,,false,Reevaluación postoperatoria
-regeneracion-guiada-barrera-absorbible-con-relleno,periodoncia,general,,,,,false,Regeneración guiada, barrera absorbible, con relleno
-regeneracion-guiada-barrera-absorbible-sin-relleno,periodoncia,general,,,,,false,Regeneración guiada, barrera absorbible, sin relleno
-regeneracion-guiada-barrera-no-absorbible-con-relleno,periodoncia,general,,,,,false,Regeneración guiada, barrera no absorbible, con relleno
-regeneracion-guiada-barrera-no-absorbible-sin-relleno,periodoncia,general,,,,,false,Regeneración guiada, barrera no absorbible, sin relleno
-regeneracion-osea,periodoncia,general,,,,,false,Regeneración ósea
-reimplante-intencional-con-ferulizacion,endodoncia,tooth,,,,,false,Reimplante intencional con ferulización
-reimplante-y-o-estabilizacion-de-diente,cirugia,tooth,,,,,false,Reimplante y/o estabilización de diente
-relleno-sedante-eugenato,restauradora,tooth,,,,,false,Relleno sedante (eugenato)
-remocion-de-exostosis-lateral,cirugia,general,,,,,false,Remoción de exostosis lateral
-remocion-de-quiste-o-tumor-no-odontogenico-benigno-hasta-1-25-cm,cirugia,general,,,,,false,Remoción de quiste o tumor no odontogénico benigno, hasta 1,25 cm
-remocion-de-quiste-o-tumor-no-odontogenico-benigno-mas-de-1-25-cm,cirugia,general,,,,,false,Remoción de quiste o tumor no odontogénico benigno, más de 1,25 cm
-remocion-de-quiste-o-tumor-odontogenico-benigno-hasta-1-25-cm,cirugia,general,,,,,false,Remoción de quiste o tumor odontogénico benigno, hasta 1,25 cm
-remocion-de-quiste-o-tumor-odontogenico-benigno-mas-de-1-25-cm,cirugia,general,,,,,false,Remoción de quiste o tumor odontogénico benigno, más de 1,25 cm
-reparacion-de-aparato-de-ortodoncia,ortodoncia,general,,,,,false,Reparación de aparato de ortodoncia
-reparacion-de-armazon-colado,protesis,arch,,,,,false,Reparación de armazón colado
-reparacion-de-base-acrilica-de-protesis-parcial,protesis,arch,,,,,false,Reparación de base acrílica de prótesis parcial
-reparacion-de-base-fracturada-protesis-completa,protesis,arch,,,,,false,Reparación de base fracturada, prótesis completa
-reparacion-de-corona,protesis,tooth,,,,,false,Reparación de corona
-reparacion-de-pilar-de-implante,implantologia,tooth,,,,,false,Reparación de pilar de implante
-reparacion-de-protesis-sobre-implantes,implantologia,general,,,,,false,Reparación de prótesis sobre implantes
-reparacion-de-puente,protesis,general,,,,,false,Reparación de puente
-reparacion-interna-de-raiz-por-perforacion,endodoncia,tooth,,,,,false,Reparación interna de raíz por perforación
-reparacion-o-reacondicionamiento-de-protector-oclusal,disfuncion,arch,,,,,false,Reparación o reacondicionamiento de protector oclusal
-reparacion-o-reemplazo-de-retenedor-fracturado,protesis,arch,,,,,false,Reparación o reemplazo de retenedor fracturado
-reposicionamiento-quirurgico-de-dientes,cirugia,tooth,,,,,false,Reposicionamiento quirúrgico de dientes
-resina-autocurable-1-superficie-anterior,restauradora,surfaces,1,1,definitive_restoration,resin,false,Resina autocurable, 1 superficie, anterior
-resina-autocurable-1-superficie-posterior,restauradora,surfaces,1,1,definitive_restoration,resin,false,Resina autocurable, 1 superficie, posterior
-resina-autocurable-2-superficies-anterior,restauradora,surfaces,2,2,definitive_restoration,resin,false,Resina autocurable, 2 superficies, anterior
-resina-autocurable-2-superficies-posterior,restauradora,surfaces,2,2,definitive_restoration,resin,false,Resina autocurable, 2 superficies, posterior
-resina-autocurable-3-superficies-anterior,restauradora,surfaces,3,3,definitive_restoration,resin,false,Resina autocurable, 3 superficies, anterior
-resina-autocurable-3-superficies-posterior,restauradora,surfaces,3,3,definitive_restoration,resin,false,Resina autocurable, 3 superficies, posterior
-resina-autocurable-4-o-mas-superficies-anterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,Resina autocurable, 4 o más superficies, anterior
-resina-autocurable-4-o-mas-superficies-posterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,Resina autocurable, 4 o más superficies, posterior
-resina-fotocurable-1-superficie-anterior,restauradora,surfaces,1,1,definitive_restoration,resin,true,Resina fotocurable, 1 superficie, anterior
-resina-fotocurable-1-superficie-posterior,restauradora,surfaces,1,1,definitive_restoration,resin,true,Resina fotocurable, 1 superficie, posterior
-resina-fotocurable-2-superficies-anterior,restauradora,surfaces,2,2,definitive_restoration,resin,true,Resina fotocurable, 2 superficies, anterior
-resina-fotocurable-2-superficies-posterior,restauradora,surfaces,2,2,definitive_restoration,resin,true,Resina fotocurable, 2 superficies, posterior
-resina-fotocurable-3-superficies-anterior,restauradora,surfaces,3,3,definitive_restoration,resin,true,Resina fotocurable, 3 superficies, anterior
-resina-fotocurable-3-superficies-posterior,restauradora,surfaces,3,3,definitive_restoration,resin,true,Resina fotocurable, 3 superficies, posterior
-resina-fotocurable-4-o-mas-superficies-anterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,Resina fotocurable, 4 o más superficies, anterior
-resina-fotocurable-4-o-mas-superficies-posterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,Resina fotocurable, 4 o más superficies, posterior
-resina-fotocurable-de-corona-completa-anterior,restauradora,tooth,,,,,false,Resina fotocurable de corona completa, anterior
-resina-para-sensibilidad-de-cuellos-y-raices,restauradora,tooth,,,,,false,Resina para sensibilidad de cuellos y raíces
-restauracion-con-ionomero-de-vidrio,restauradora,surfaces,1,5,definitive_restoration,glass_ionomer,false,Restauración con ionómero de vidrio
-retenedor-ceramico-sobre-implante,implantologia,tooth,,,,,false,Retenedor cerámico sobre implante
-retenedor-de-metal-colado-sobre-pilar-metal-base,implantologia,tooth,,,,,false,Retenedor de metal colado sobre pilar, metal base
-retenedor-de-metal-colado-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,Retenedor de metal colado sobre pilar, metal noble
-retenedor-de-porcelana-sobre-pilar,implantologia,tooth,,,,,false,Retenedor de porcelana sobre pilar
-retenedor-metal-ceramico-sobre-implante,implantologia,tooth,,,,,false,Retenedor metal-cerámico sobre implante
-retenedor-metal-ceramico-sobre-pilar-metal-base,implantologia,tooth,,,,,false,Retenedor metal-cerámico sobre pilar, metal base
-retenedor-metal-ceramico-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,Retenedor metal-cerámico sobre pilar, metal noble
-retiro-de-aparato-de-implante-colocado-por-otro,cirugia,general,,,,,false,Retiro de aparato de implante colocado por otro
-retiro-de-cuerpo-extrano-de-mucosa,cirugia,general,,,,,false,Retiro de cuerpo extraño de mucosa
-retiro-de-cuerpos-extranos-que-producen-reaccion,cirugia,general,,,,,false,Retiro de cuerpos extraños que producen reacción
-retiro-de-implante,implantologia,tooth,,,,,false,Retiro de implante
-retiro-de-mantenedor-fijo-de-otro-odontologo,odontopediatria,general,,,,,false,Retiro de mantenedor fijo de otro odontólogo
-retiro-de-poste,protesis,tooth,,,,,false,Retiro de poste
-retratamiento-de-endodoncia-anterior,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Retratamiento de endodoncia, anterior
-retratamiento-de-endodoncia-bicuspide,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Retratamiento de endodoncia, bicúspide
-retratamiento-de-endodoncia-posterior,endodoncia,tooth,,,root_canal_treatment,root_canal,false,Retratamiento de endodoncia, posterior
-revestimiento-de-protesis-en-laboratorio,protesis,arch,,,,,false,Revestimiento de prótesis en laboratorio
-revestimiento-en-consultorio-completa-inferior,protesis,arch,,,,,false,Revestimiento en consultorio, completa inferior
-revestimiento-en-consultorio-completa-superior,protesis,arch,,,,,false,Revestimiento en consultorio, completa superior
-revestimiento-en-consultorio-parcial-inferior,protesis,arch,,,,,false,Revestimiento en consultorio, parcial inferior
-revestimiento-en-consultorio-parcial-superior,protesis,arch,,,,,false,Revestimiento en consultorio, parcial superior
-revestimiento-en-laboratorio-completa-inferior,protesis,arch,,,,,false,Revestimiento en laboratorio, completa inferior
-revestimiento-en-laboratorio-completa-superior,protesis,arch,,,,,false,Revestimiento en laboratorio, completa superior
-revestimiento-en-laboratorio-parcial-superior,protesis,arch,,,,,false,Revestimiento en laboratorio, parcial superior
-secuestrectomia-de-hueso-no-vital,cirugia,general,,,,,false,Secuestrectomía de hueso no vital
-sedacion-consciente-intravenosa-cada-15-minutos-adicionales,anestesia,general,,,,,false,Sedación consciente intravenosa, cada 15 minutos adicionales
-sedacion-consciente-intravenosa-primeros-30-minutos,anestesia,general,,,,,false,Sedación consciente intravenosa, primeros 30 minutos
-sedacion-consciente-no-intravenosa,anestesia,general,,,,,false,Sedación consciente no intravenosa
-sellante,prevencion,surfaces,1,5,sealant,,true,Sellante
-sialografia,diagnostico,general,,,,,false,Sialografía
-sialolitotomia,cirugia,general,,,,,false,Sialolitotomía
-sinusotomia-por-fragmento-dental-o-cuerpo-extrano,cirugia,general,,,,,false,Sinusotomía por fragmento dental o cuerpo extraño
-sobredentadura-completa,protesis,arch,,,,,false,Sobredentadura completa
-sobredentadura-parcial,protesis,arch,,,,,false,Sobredentadura parcial
-stent-quirurgico,protesis,general,,,,,false,Stent quirúrgico
-sutura-complicada-de-mas-de-5-cm,cirugia,general,,,,,false,Sutura complicada de más de 5 cm
-sutura-complicada-hasta-5-cm,cirugia,general,,,,,false,Sutura complicada hasta 5 cm
-sutura-de-herida-reciente-hasta-5-cm,cirugia,general,,,,,false,Sutura de herida reciente hasta 5 cm
-terapia-de-atm-no-especificada,disfuncion,general,,,,,false,Terapia de ATM no especificada
-toma-de-muestra-para-cultivo-y-sensibilidad,diagnostico,general,,,,,false,Toma de muestra para cultivo y sensibilidad
-trasplante-dental,cirugia,tooth,,,,,false,Trasplante dental
-tratamiento-de-alveolitis-humeda,cirugia,general,,,,,false,Tratamiento de alveolitis húmeda
-tratamiento-de-alveolitis-seca,cirugia,general,,,,,false,Tratamiento de alveolitis seca
-tratamiento-de-complicaciones-posquirurgicas,cirugia,general,,,,,false,Tratamiento de complicaciones posquirúrgicas
-tratamiento-de-conducto-obstruido,endodoncia,tooth,,,,,false,Tratamiento de conducto obstruido
-tratamiento-de-pericoronitis,cirugia,tooth,,,,,false,Tratamiento de pericoronitis
-tratamiento-restaurador-atraumatico-tra,restauradora,surfaces,1,5,definitive_restoration,glass_ionomer,false,Tratamiento restaurador atraumático (TRA)
-visita-de-observacion-sin-procedimiento,general,general,,,,,false,Visita de observación, sin procedimiento
-visita-previa-a-la-ortodoncia,ortodoncia,general,,,,,false,Visita previa a la ortodoncia
+key,kind,scope,surface_count_min,surface_count_max,leaves_condition,leaves_variant,common,coded_only,name
+3-4-de-corona-de-acrilico-indirecta,protesis,tooth,,,,,false,false,3/4 de corona de acrílico indirecta
+3-4-de-corona-de-metal-base,protesis,tooth,,,,,false,false,3/4 de corona de metal base
+3-4-de-corona-de-porcelana-sin-carillas,protesis,tooth,,,,,false,false,3/4 de corona de porcelana (sin carillas)
+acceso-quirurgico-a-pieza-retenida,cirugia,tooth,,,,,false,false,Acceso quirúrgico a pieza retenida
+acondicionamiento-de-tejido-inferior,protesis,arch,,,,,false,false,Acondicionamiento de tejido, inferior
+acondicionamiento-de-tejido-superior,protesis,arch,,,,,false,false,Acondicionamiento de tejido, superior
+aditamentos-de-precision-ataches,protesis,arch,,,,,false,false,Aditamentos de precisión (ataches)
+administracion-de-otros-medicamentos,general,general,,,,,false,false,Administración de otros medicamentos
+agregar-diente-a-protesis-parcial,protesis,arch,,,,,false,false,Agregar diente a prótesis parcial
+agregar-retenedor-a-protesis-parcial,protesis,arch,,,,,false,false,Agregar retenedor a prótesis parcial
+ajuste-de-protesis-completa-inferior,protesis,arch,,,,,false,false,Ajuste de prótesis completa inferior
+ajuste-de-protesis-completa-superior,protesis,arch,,,,,false,false,Ajuste de prótesis completa superior
+ajuste-de-protesis-parcial-inferior,protesis,arch,,,,,false,false,Ajuste de prótesis parcial inferior
+ajuste-de-protesis-parcial-superior,protesis,arch,,,,,false,false,Ajuste de prótesis parcial superior
+ajuste-oclusal-completo,disfuncion,general,,,,,false,false,Ajuste oclusal completo
+ajuste-oclusal-limitado,disfuncion,general,,,,,false,false,Ajuste oclusal limitado
+alargamiento-de-corona-clinica,periodoncia,general,,,,,false,false,Alargamiento de corona clínica
+aloinjerto-de-tejido-blando,periodoncia,general,,,,,false,false,Aloinjerto de tejido blando
+alveoloplastia-con-exodoncias-1-a-3-dientes,cirugia,quadrant,,,,,false,false,Alveoloplastia con exodoncias, 1 a 3 dientes
+alveoloplastia-con-exodoncias-4-o-mas-dientes,cirugia,quadrant,,,,,false,false,Alveoloplastia con exodoncias, 4 o más dientes
+alveoloplastia-sin-exodoncias-1-a-3-dientes,cirugia,quadrant,,,,,false,false,Alveoloplastia sin exodoncias, 1 a 3 dientes
+alveoloplastia-sin-exodoncias-4-o-mas-dientes,cirugia,quadrant,,,,,false,false,Alveoloplastia sin exodoncias, 4 o más dientes
+amalgama-1-superficie,restauradora,surfaces,1,1,definitive_restoration,amalgam,false,false,Amalgama, 1 superficie
+amalgama-2-superficies,restauradora,surfaces,2,2,definitive_restoration,amalgam,false,false,Amalgama, 2 superficies
+amalgama-3-superficies,restauradora,surfaces,3,3,definitive_restoration,amalgam,false,false,Amalgama, 3 superficies
+amalgama-4-superficies,restauradora,surfaces,4,4,definitive_restoration,amalgam,false,false,Amalgama, 4 superficies
+amputacion-radicular,endodoncia,tooth,,,,,false,false,Amputación radicular
+analgesia-con-oxido-nitroso,anestesia,general,,,,,false,false,Analgesia con óxido nitroso
+analisis-oclusal-con-montaje,disfuncion,general,,,,,false,false,Análisis oclusal con montaje
+anestesia-general-cada-15-minutos-adicionales,anestesia,general,,,,,false,false,Anestesia general, cada 15 minutos adicionales
+anestesia-general-primeros-30-minutos,anestesia,general,,,,,false,false,Anestesia general, primeros 30 minutos
+anestesia-local,anestesia,general,,,,,false,false,Anestesia local
+anestesia-local-sin-procedimiento-quirurgico,anestesia,general,,,,,false,false,Anestesia local sin procedimiento quirúrgico
+anestesia-por-bloqueo-regional,anestesia,general,,,,,false,false,Anestesia por bloqueo regional
+antimicrobiano-local-de-liberacion-controlada,periodoncia,general,,,,,false,false,Antimicrobiano local de liberación controlada
+aparato-para-trismo,protesis,general,,,,,false,false,Aparato para trismo
+aparatologia-fija-de-ortodoncia,ortodoncia,arch,,,,,false,false,Aparatología fija de ortodoncia
+aparatologia-removible-de-ortodoncia,ortodoncia,arch,,,,,false,false,Aparatología removible de ortodoncia
+apertura-cameral,endodoncia,tooth,,,,,false,false,Apertura cameral
+apexificacion-cambio-de-medicacion,endodoncia,tooth,,,,,false,false,Apexificación, cambio de medicación
+apexificacion-visita-final,endodoncia,tooth,,,,,false,false,Apexificación, visita final
+apexificacion-visita-inicial,endodoncia,tooth,,,,,false,false,Apexificación, visita inicial
+apicectomia-o-cirugia-periapical-anterior,endodoncia,tooth,,,,,false,false,Apicectomía o cirugía periapical, anterior
+apicectomia-o-cirugia-periapical-bicuspide,endodoncia,tooth,,,,,false,false,Apicectomía o cirugía periapical, bicúspide
+apicectomia-o-cirugia-periapical-posterior,endodoncia,tooth,,,,,false,false,Apicectomía o cirugía periapical, posterior
+aplicacion-de-desensibilizante,prevencion,general,,,,,false,false,Aplicación de desensibilizante
+artrocentesis,cirugia,general,,,,,false,false,Artrocentesis
+asesoria-nutricional-para-enfermedades-dentales,prevencion,general,,,,,false,false,Asesoría nutricional para enfermedades dentales
+barra-de-conexion-sobre-implantes,implantologia,general,,,,,false,false,Barra de conexión sobre implantes
+biopsia-de-tejido-blando,cirugia,general,,,,,false,false,Biopsia de tejido blando
+biopsia-de-tejido-duro-hueso,cirugia,general,,,,,false,false,Biopsia de tejido duro (hueso)
+biopsia-extraoral-de-tejido-blando,cirugia,general,,,,,false,false,Biopsia extraoral de tejido blando
+biopsia-extraoral-de-tejido-duro,cirugia,general,,,,,false,false,Biopsia extraoral de tejido duro
+biopsia-por-puncion-aspiracion,cirugia,general,,,,,false,false,Biopsia por punción aspiración
+biopsia-por-raspado-transepitelial,cirugia,general,,,,,false,false,Biopsia por raspado transepitelial
+blanqueamiento-externo-por-arcada,estetica,arch,,,,,true,false,Blanqueamiento externo por arcada
+blanqueamiento-externo-por-diente,estetica,tooth,,,,,false,false,Blanqueamiento externo por diente
+blanqueamiento-interno-por-diente,estetica,tooth,,,,,false,false,Blanqueamiento interno por diente
+bloqueo-de-rama-del-trigemino,anestesia,general,,,,,false,false,Bloqueo de rama del trigémino
+carilla-de-porcelana,estetica,surfaces,1,1,definitive_restoration,veneer,false,false,Carilla de porcelana
+carilla-de-resina-directa,estetica,surfaces,1,1,definitive_restoration,veneer,false,false,Carilla de resina directa
+carilla-de-resina-indirecta,estetica,surfaces,1,1,definitive_restoration,veneer,false,false,Carilla de resina indirecta
+cementado-provisional-de-inlay-u-onlay,protesis,tooth,,,,,false,false,Cementado provisional de inlay u onlay
+cierre-de-fistula-oroantral,cirugia,general,,,,,false,false,Cierre de fístula oroantral
+cierre-de-perforacion-sinusal,cirugia,general,,,,,false,false,Cierre de perforación sinusal
+cirugia-periodontal-resectiva-por-cuadrante,periodoncia,quadrant,,,,,false,false,Cirugía periodontal resectiva, por cuadrante
+cirugia-periodontal-resectiva-por-sextante,periodoncia,general,,,,,false,false,Cirugía periodontal resectiva, por sextante
+citologia-exfoliativa,cirugia,general,,,,,false,false,Citología exfoliativa
+cofia-metalica,protesis,tooth,,,,,false,false,Cofia metálica
+colgajo-con-alisado-radicular-1-a-3-dientes,periodoncia,quadrant,,,,,false,false,Colgajo con alisado radicular, 1 a 3 dientes
+colgajo-con-alisado-radicular-4-o-mas-dientes,periodoncia,quadrant,,,,,false,false,Colgajo con alisado radicular, 4 o más dientes
+colgajo-de-reposicion-apical,periodoncia,general,,,,,false,false,Colgajo de reposición apical
+colgajo-desplazado-con-injerto-de-tejido-conectivo,periodoncia,general,,,,,false,false,Colgajo desplazado con injerto de tejido conectivo
+colgajo-desplazado-de-tejido-blando,periodoncia,general,,,,,false,false,Colgajo desplazado de tejido blando
+colocacion-de-implante-endooseo,implantologia,tooth,,,implant,,true,false,Colocación de implante endoóseo
+colocacion-de-implante-eposteal-subperiostico,implantologia,tooth,,,implant,,false,false,Colocación de implante eposteal (subperióstico)
+colocacion-de-implante-transoseo,implantologia,tooth,,,implant,,false,false,Colocación de implante transóseo
+colocacion-intraoral-de-dispositivo-de-fijacion,cirugia,general,,,,,false,false,Colocación intraoral de dispositivo de fijación
+conector-en-barra,protesis,general,,,,,false,false,Conector en barra
+consulta-odontologica-especializada,diagnostico,general,,,,,false,false,Consulta odontológica especializada
+consulta-odontologica-general,diagnostico,general,,,,,true,false,Consulta odontológica general
+contencion-de-ortodoncia,ortodoncia,arch,,,,,false,false,Contención de ortodoncia
+control-de-ortodoncia,ortodoncia,general,,,,,true,false,Control de ortodoncia
+corona-de-acero-con-frente-estetico-de-acrilico,protesis,tooth,,,crown,veneer_crown,false,false,Corona de acero con frente estético de acrílico
+corona-de-acero-con-frente-estetico-deciduo,protesis,tooth,,,crown,veneer_crown,false,false,Corona de acero con frente estético, deciduo
+corona-de-acero-prefabricada-deciduo,protesis,tooth,,,crown,metal,false,false,Corona de acero prefabricada, deciduo
+corona-de-acero-prefabricada-permanente,protesis,tooth,,,crown,metal,false,false,Corona de acero prefabricada, permanente
+corona-de-acrilico-con-metal-base,protesis,tooth,,,crown,veneer_crown,false,false,Corona de acrílico con metal base
+corona-de-acrilico-indirecta,protesis,tooth,,,,,false,false,Corona de acrílico indirecta
+corona-de-metal-base,protesis,tooth,,,crown,metal,false,false,Corona de metal base
+corona-de-metal-colado-sobre-pilar-metal-base,implantologia,tooth,,,,,false,false,Corona de metal colado sobre pilar, metal base
+corona-de-metal-colado-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,false,Corona de metal colado sobre pilar, metal noble
+corona-de-metal-sobre-implante,implantologia,tooth,,,,,false,false,Corona de metal sobre implante
+corona-de-porcelana,protesis,tooth,,,crown,metal_free,true,false,Corona de porcelana
+corona-de-porcelana-sobre-pilar,implantologia,tooth,,,,,false,false,Corona de porcelana sobre pilar
+corona-de-titanio,protesis,tooth,,,crown,metal,false,false,Corona de titanio
+corona-de-titanio-sobre-pilar,implantologia,tooth,,,,,false,false,Corona de titanio sobre pilar
+corona-metal-ceramica-metal-base,protesis,tooth,,,crown,metal_ceramic,true,false,Corona metal-cerámica, metal base
+corona-metal-ceramica-sobre-pilar-metal-base,implantologia,tooth,,,,,false,false,Corona metal-cerámica sobre pilar, metal base
+corona-metal-ceramica-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,false,Corona metal-cerámica sobre pilar, metal noble
+corona-prefabricada-de-acrilico,protesis,tooth,,,,,false,false,Corona prefabricada de acrílico
+corona-provisional,protesis,tooth,,,,,false,false,Corona provisional
+corona-retenedora-sobre-pilar,implantologia,tooth,,,,,false,false,Corona retenedora sobre pilar
+coronectomia-profilactica,cirugia,tooth,,,,,false,false,Coronectomía profiláctica
+correcciones-posquirurgicas,periodoncia,general,,,,,false,false,Correcciones posquirúrgicas
+cubeta-para-gel-de-fluor,prevencion,general,,,,,false,false,Cubeta para gel de flúor
+cuna-distal-o-proximal,periodoncia,general,,,,,false,false,Cuña distal o proximal
+curetaje-subgingival,periodoncia,general,,,,,false,false,Curetaje subgingival
+destruccion-de-lesiones-por-metodo-fisico-o-quimico,cirugia,general,,,,,false,false,Destrucción de lesiones por método físico o químico
+dispositivo-dental-flexible,protesis,general,,,,,false,false,Dispositivo dental flexible
+dispositivo-ortopedico-oclusal,disfuncion,general,,,,,false,false,Dispositivo ortopédico oclusal
+dispositivo-para-erupcion-de-pieza-impactada,cirugia,tooth,,,,,false,false,Dispositivo para erupción de pieza impactada
+disyuncion-maxilar,ortodoncia,arch,,,,,false,false,Disyunción maxilar
+drenaje-de-absceso-extraoral,cirugia,general,,,,,false,false,Drenaje de absceso extraoral
+drenaje-de-absceso-intraoral,cirugia,general,,,,,false,false,Drenaje de absceso intraoral
+drenaje-de-absceso-intraoral-complicado,cirugia,general,,,,,false,false,Drenaje de absceso intraoral complicado
+eliminacion-de-torus-mandibular,cirugia,general,,,,,false,false,Eliminación de torus mandibular
+eliminacion-de-torus-palatino,cirugia,general,,,,,false,false,Eliminación de torus palatino
+endodoncia-anterior-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Endodoncia anterior no vital
+endodoncia-anterior-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,false,Endodoncia anterior vital
+endodoncia-bicuspide-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Endodoncia bicúspide no vital
+endodoncia-bicuspide-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,false,Endodoncia bicúspide vital
+endodoncia-de-bicuspide-dos-raices,endodoncia,tooth,,,root_canal_treatment,root_canal,true,true,Endodoncia de bicúspide, dos raíces
+endodoncia-de-bicuspide-una-raiz,endodoncia,tooth,,,root_canal_treatment,root_canal,true,true,Endodoncia de bicúspide, una raíz
+endodoncia-incompleta,endodoncia,tooth,,,,,false,false,Endodoncia incompleta
+endodoncia-posterior-no-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Endodoncia posterior no vital
+endodoncia-posterior-vital,endodoncia,tooth,,,root_canal_treatment,root_canal,true,false,Endodoncia posterior vital
+endodoncia-unirradicular-no-vital-sin-obturacion-final,endodoncia,tooth,,,,,false,false,Endodoncia unirradicular no vital, sin obturación final
+escision-de-encia-pericoronal,cirugia,tooth,,,,,false,false,Escisión de encía pericoronal
+escision-de-lesion-benigna-complicada,cirugia,general,,,,,false,false,Escisión de lesión benigna complicada
+escision-de-lesion-benigna-de-mas-de-1-25-cm,cirugia,general,,,,,false,false,Escisión de lesión benigna de más de 1,25 cm
+escision-de-lesion-benigna-hasta-1-25-cm,cirugia,general,,,,,false,false,Escisión de lesión benigna hasta 1,25 cm
+escision-de-tejido-hiperplasico,cirugia,arch,,,,,false,false,Escisión de tejido hiperplásico
+estudio-tomografico,diagnostico,general,,,,,false,false,Estudio tomográfico
+evaluacion-oral-completa,diagnostico,general,,,,,true,false,Evaluación oral completa
+evaluacion-periodica-de-paciente-continuador,diagnostico,general,,,,,false,false,Evaluación periódica de paciente continuador
+exodoncia-de-diente-deciduo-multirradicular,cirugia,tooth,,,missing_tooth,,false,true,Exodoncia de diente deciduo multirradicular
+exodoncia-de-diente-deciduo-unirradicular,cirugia,tooth,,,missing_tooth,,false,true,Exodoncia de diente deciduo unirradicular
+exodoncia-de-diente-permanente-multirradicular,cirugia,tooth,,,missing_tooth,,true,true,Exodoncia de diente permanente multirradicular
+exodoncia-de-diente-permanente-unirradicular,cirugia,tooth,,,missing_tooth,,true,true,Exodoncia de diente permanente unirradicular
+exodoncia-de-pieza-erupcionada-o-raiz-expuesta,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia de pieza erupcionada o raíz expuesta
+exodoncia-de-pieza-impactada-en-hueso,cirugia,tooth,,,missing_tooth,,true,false,Exodoncia de pieza impactada en hueso
+exodoncia-de-pieza-impactada-en-tejido-blando,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia de pieza impactada en tejido blando
+exodoncia-de-pieza-parcialmente-impactada-en-hueso,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia de pieza parcialmente impactada en hueso
+exodoncia-de-resto-coronario-diente-deciduo,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia de resto coronario, diente deciduo
+exodoncia-intencional,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia intencional
+exodoncia-quirurgica-con-colgajo-pieza-erupcionada,cirugia,tooth,,,missing_tooth,,true,false,Exodoncia quirúrgica con colgajo, pieza erupcionada
+exodoncia-quirurgica-de-pieza-retenida,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia quirúrgica de pieza retenida
+exodoncia-quirurgica-de-restos-radiculares,cirugia,tooth,,,missing_tooth,,false,false,Exodoncia quirúrgica de restos radiculares
+exodoncia-quirurgica-multirradicular,cirugia,tooth,,,missing_tooth,,false,true,Exodoncia quirúrgica multirradicular
+exodoncia-quirurgica-unirradicular,cirugia,tooth,,,missing_tooth,,false,true,Exodoncia quirúrgica unirradicular
+exodoncia-simple,cirugia,tooth,,,missing_tooth,,true,false,Exodoncia simple
+ferula-quirurgica,protesis,general,,,,,false,false,Férula quirúrgica
+ferulizacion-con-resina-fotocurable,periodoncia,arch,,,,,false,false,Ferulización con resina fotocurable
+ferulizacion-provisional-extracoronal,periodoncia,arch,,,,,false,false,Ferulización provisional extracoronal
+ferulizacion-provisional-intracoronal,periodoncia,arch,,,,,false,false,Ferulización provisional intracoronal
+fibrotomia-transeptal-o-supracrestal,cirugia,tooth,,,,,false,false,Fibrotomía transeptal o supracrestal
+fluor-barniz,prevencion,general,,,,,true,false,Flúor barniz
+fluor-en-gel,prevencion,general,,,,,false,false,Flúor en gel
+fotografias-orales-y-faciales,diagnostico,general,,,,,false,false,Fotografías orales y faciales
+frenectomia-labial,cirugia,general,,,,,false,true,Frenectomía labial
+frenectomia-o-frenotomia,cirugia,general,,,,,false,false,Frenectomía o frenotomía
+frenuloplastia,cirugia,general,,,,,false,false,Frenuloplastia
+frenuloplastia-lingual,cirugia,general,,,,,false,true,Frenuloplastia lingual
+gingivectomia-o-gingivoplastia-1-a-3-dientes,periodoncia,quadrant,,,,,false,false,Gingivectomía o gingivoplastia, 1 a 3 dientes
+gingivectomia-o-gingivoplastia-4-o-mas-dientes,periodoncia,quadrant,,,,,false,false,Gingivectomía o gingivoplastia, 4 o más dientes
+hemiseccion-incluye-retiro-de-raiz,endodoncia,tooth,,,,,false,false,Hemisección (incluye retiro de raíz)
+implante-endodontico-endooseo,endodoncia,tooth,,,,,false,false,Implante endodóntico endoóseo
+impresiones-dentales-para-diagnostico,diagnostico,general,,,,,false,false,Impresiones dentales para diagnóstico
+inactivacion-de-caries-diamino-de-plata-resina-o-ionomero,prevencion,tooth,,,,,false,false,Inactivación de caries (diamino de plata, resina o ionómero)
+injerto-de-tejido-conectivo-incluye-zona-donante,periodoncia,general,,,,,false,false,Injerto de tejido conectivo (incluye zona donante)
+injerto-gingival-libre-incluye-zona-donante,periodoncia,general,,,,,false,false,Injerto gingival libre (incluye zona donante)
+injerto-oseo-de-maxilar-mandibula-o-huesos-faciales,cirugia,general,,,,,false,false,Injerto óseo de maxilar, mandíbula o huesos faciales
+injerto-oseo-para-preservar-el-reborde,cirugia,general,,,,,false,false,Injerto óseo para preservar el reborde
+inlay-de-porcelana-1-superficie,restauradora,surfaces,1,1,definitive_restoration,aesthetic_inlay,false,false,Inlay de porcelana, 1 superficie
+inlay-de-porcelana-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,false,Inlay de porcelana, 2 superficies
+inlay-de-porcelana-3-o-mas-superficies,restauradora,surfaces,3,5,definitive_restoration,aesthetic_inlay,false,false,Inlay de porcelana, 3 o más superficies
+inlay-de-resina-1-superficie,restauradora,surfaces,1,1,definitive_restoration,aesthetic_inlay,false,false,Inlay de resina, 1 superficie
+inlay-de-resina-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,false,Inlay de resina, 2 superficies
+inlay-de-resina-3-o-mas-superficies,restauradora,surfaces,3,5,definitive_restoration,aesthetic_inlay,false,false,Inlay de resina, 3 o más superficies
+inlay-metalica-1-superficie,restauradora,surfaces,1,1,definitive_restoration,metal_inlay,false,false,Inlay metálica, 1 superficie
+inlay-metalica-2-superficies,restauradora,surfaces,2,2,definitive_restoration,metal_inlay,false,false,Inlay metálica, 2 superficies
+inlay-metalica-3-superficies,restauradora,surfaces,3,3,definitive_restoration,metal_inlay,false,false,Inlay metálica, 3 superficies
+instruccion-de-higiene-oral,prevencion,general,,,,,false,false,Instrucción de higiene oral
+inyeccion-de-medicamentos,general,general,,,,,false,false,Inyección de medicamentos
+ionomero-de-vidrio-autocurable-1-superficie,restauradora,surfaces,1,1,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio autocurable, 1 superficie
+ionomero-de-vidrio-autocurable-2-superficies,restauradora,surfaces,2,2,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio autocurable, 2 superficies
+ionomero-de-vidrio-autocurable-3-superficies,restauradora,surfaces,3,3,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio autocurable, 3 superficies
+ionomero-de-vidrio-fotocurable-1-superficie,restauradora,surfaces,1,1,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio fotocurable, 1 superficie
+ionomero-de-vidrio-fotocurable-2-superficies,restauradora,surfaces,2,2,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio fotocurable, 2 superficies
+ionomero-de-vidrio-fotocurable-3-superficies,restauradora,surfaces,3,3,definitive_restoration,glass_ionomer,false,false,Ionómero de vidrio fotocurable, 3 superficies
+manejo-de-conducta,general,general,,,,,false,false,Manejo de conducta
+manipulacion-de-luxacion-bajo-anestesia,cirugia,general,,,,,false,false,Manipulación de luxación bajo anestesia
+mantenedor-de-espacio-fijo-bilateral,odontopediatria,general,,,,,false,false,Mantenedor de espacio fijo bilateral
+mantenedor-de-espacio-fijo-unilateral,odontopediatria,general,,,,,false,false,Mantenedor de espacio fijo unilateral
+mantenedor-de-espacio-removible-bilateral,odontopediatria,general,,,,,false,false,Mantenedor de espacio removible bilateral
+mantenedor-de-espacio-removible-unilateral,odontopediatria,general,,,,,false,false,Mantenedor de espacio removible unilateral
+mantenimiento-de-implantes-con-retiro-de-protesis,implantologia,general,,,,,false,false,Mantenimiento de implantes con retiro de prótesis
+mantenimiento-periodontal,periodoncia,general,,,,,false,false,Mantenimiento periodontal
+marsupializacion,cirugia,general,,,,,false,false,Marsupialización
+marsupializacion-de-quiste-odontogenico,cirugia,general,,,,,false,true,Marsupialización de quiste odontogénico
+marsupializacion-de-ranula,cirugia,general,,,,,false,true,Marsupialización de ránula
+microabrasion-del-esmalte,estetica,tooth,,,,,false,false,Microabrasión del esmalte
+modificacion-de-protesis-removible-tras-implantes,protesis,arch,,,,,false,false,Modificación de prótesis removible tras implantes
+movilizacion-de-diente-para-permitir-erupcion,cirugia,tooth,,,,,false,false,Movilización de diente para permitir erupción
+munon-para-retenedor-de-puente,protesis,tooth,,,,,false,false,Muñón para retenedor de puente
+obturacion-retrograda-por-raiz,endodoncia,tooth,,,,,false,false,Obturación retrógrada, por raíz
+odontoplastia-1-a-2-dientes,estetica,tooth,,,,,false,false,Odontoplastia, 1 a 2 dientes
+onlay-de-porcelana-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,false,Onlay de porcelana, 2 superficies
+onlay-de-porcelana-3-superficies,restauradora,surfaces,3,3,definitive_restoration,aesthetic_inlay,false,false,Onlay de porcelana, 3 superficies
+onlay-de-porcelana-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,aesthetic_inlay,false,false,Onlay de porcelana, 4 o más superficies
+onlay-de-resina-compuesta-2-superficies,restauradora,surfaces,2,2,definitive_restoration,aesthetic_inlay,false,false,Onlay de resina compuesta, 2 superficies
+onlay-de-resina-compuesta-3-superficies,restauradora,surfaces,3,3,definitive_restoration,aesthetic_inlay,false,false,Onlay de resina compuesta, 3 superficies
+onlay-de-resina-compuesta-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,aesthetic_inlay,false,false,Onlay de resina compuesta, 4 o más superficies
+onlay-metalica-2-superficies,restauradora,surfaces,2,2,definitive_restoration,metal_inlay,false,false,Onlay metálica, 2 superficies
+onlay-metalica-3-superficies,restauradora,surfaces,3,3,definitive_restoration,metal_inlay,false,false,Onlay metálica, 3 superficies
+onlay-metalica-4-o-mas-superficies,restauradora,surfaces,4,5,definitive_restoration,metal_inlay,false,false,Onlay metálica, 4 o más superficies
+ortodoncia-integral-denticion-adolescente,ortodoncia,general,,,,,false,false,Ortodoncia integral, dentición adolescente
+ortodoncia-integral-denticion-adulta,ortodoncia,general,,,,,false,false,Ortodoncia integral, dentición adulta
+ortodoncia-integral-denticion-mixta,ortodoncia,general,,,,,false,false,Ortodoncia integral, dentición mixta
+ortodoncia-interceptiva-denticion-decidua,ortodoncia,general,,,,,false,false,Ortodoncia interceptiva, dentición decidua
+ortodoncia-interceptiva-denticion-mixta,ortodoncia,general,,,,,false,false,Ortodoncia interceptiva, dentición mixta
+ortodoncia-limitada-denticion-adolescente,ortodoncia,general,,,,,false,false,Ortodoncia limitada, dentición adolescente
+ortodoncia-limitada-denticion-adulta,ortodoncia,general,,,,,false,false,Ortodoncia limitada, dentición adulta
+ortodoncia-limitada-denticion-de-transicion,ortodoncia,general,,,,,false,false,Ortodoncia limitada, dentición de transición
+ortodoncia-limitada-denticion-decidua,ortodoncia,general,,,,,false,false,Ortodoncia limitada, dentición decidua
+ortodoncia-realizada-por-otro-odontologo,ortodoncia,general,,,,,false,false,Ortodoncia realizada por otro odontólogo
+osteoplastia,cirugia,general,,,,,false,false,Osteoplastia
+otras-radiografias-de-atm-con-informe,diagnostico,general,,,,,false,false,Otras radiografías de ATM, con informe
+pilar-personalizado-con-colocacion,implantologia,tooth,,,,,false,false,Pilar personalizado, con colocación
+pilar-prefabricado-con-colocacion,implantologia,tooth,,,,,false,false,Pilar prefabricado, con colocación
+pin-de-retencion-por-diente,protesis,tooth,,,,,false,false,Pin de retención, por diente
+poste-colado-adicional-mismo-diente,protesis,tooth,,,,,false,false,Poste colado adicional, mismo diente
+poste-colado-como-parte-del-retenedor-de-puente,protesis,tooth,,,,,false,false,Poste colado como parte del retenedor de puente
+poste-colado-y-nucleo-para-retenedor-de-puente,protesis,tooth,,,,,false,false,Poste colado y núcleo para retenedor de puente
+poste-prefabricado-adicional-mismo-diente,protesis,tooth,,,,,false,false,Poste prefabricado adicional, mismo diente
+poste-prefabricado-y-nucleo,protesis,tooth,,,post_and_core,,false,false,Poste prefabricado y núcleo
+poste-prefabricado-y-nucleo-para-retenedor-de-puente,protesis,tooth,,,,,false,false,Poste prefabricado y núcleo para retenedor de puente
+poste-y-munon,protesis,tooth,,,post_and_core,,true,false,Poste y muñón
+presentacion-del-caso,general,general,,,,,false,false,Presentación del caso
+procedimiento-complementario-no-especificado,general,general,,,,,false,false,Procedimiento complementario no especificado
+procedimiento-de-implantes-no-especificado,implantologia,general,,,,,false,false,Procedimiento de implantes no especificado
+procedimiento-de-ortodoncia-no-especificado,ortodoncia,general,,,,,false,false,Procedimiento de ortodoncia no especificado
+procedimiento-de-protesis-fija-no-especificado,protesis,general,,,,,false,false,Procedimiento de prótesis fija no especificado
+procedimiento-de-protesis-removible-no-especificado,protesis,arch,,,,,false,false,Procedimiento de prótesis removible no especificado
+procedimiento-endodontico-no-especificado,endodoncia,general,,,,,false,false,Procedimiento endodóntico no especificado
+procedimiento-periodontal-no-especificado,periodoncia,general,,,,,false,false,Procedimiento periodontal no especificado
+procedimiento-quirurgico-oral-no-especificado,cirugia,general,,,,,false,false,Procedimiento quirúrgico oral no especificado
+procedimiento-restaurador-no-especificado,restauradora,general,,,,,false,false,Procedimiento restaurador no especificado
+profilaxis,prevencion,general,,,,,true,false,Profilaxis
+protector-bucal-deportivo,general,arch,,,,,false,false,Protector bucal deportivo
+protector-oclusal-ferula-miorrelajante,disfuncion,arch,,,,,false,false,Protector oclusal (férula miorrelajante)
+protesis-completa-inferior,protesis,arch,,,,,true,false,Prótesis completa inferior
+protesis-completa-inferior-provisional,protesis,arch,,,,,false,false,Prótesis completa inferior provisional
+protesis-completa-superior,protesis,arch,,,,,true,false,Prótesis completa superior
+protesis-completa-superior-provisional,protesis,arch,,,,,false,false,Prótesis completa superior provisional
+protesis-fija-sobre-implantes-desdentado-parcial,implantologia,arch,,,,,false,false,Prótesis fija sobre implantes, desdentado parcial
+protesis-fija-sobre-implantes-desdentado-total,implantologia,arch,,,,,false,false,Prótesis fija sobre implantes, desdentado total
+protesis-inmediata-inferior,protesis,arch,,,,,false,false,Prótesis inmediata inferior
+protesis-inmediata-superior,protesis,arch,,,,,false,false,Prótesis inmediata superior
+protesis-parcial-fija-pediatrica,protesis,general,,,,,false,false,Prótesis parcial fija pediátrica
+protesis-parcial-inferior-acrilico-termocurado,protesis,arch,,,,,false,false,Prótesis parcial inferior, acrílico termocurado
+protesis-parcial-inferior-base-flexible,protesis,arch,,,,,false,false,Prótesis parcial inferior, base flexible
+protesis-parcial-inferior-base-metalica,protesis,arch,,,,,false,false,Prótesis parcial inferior, base metálica
+protesis-parcial-inferior-provisional-curado-rapido,protesis,arch,,,,,false,false,Prótesis parcial inferior provisional, curado rápido
+protesis-parcial-superior-acrilico-termocurado,protesis,arch,,,,,false,false,Prótesis parcial superior, acrílico termocurado
+protesis-parcial-superior-base-flexible,protesis,arch,,,,,false,false,Prótesis parcial superior, base flexible
+protesis-parcial-superior-base-metalica,protesis,arch,,,,,false,false,Prótesis parcial superior, base metálica
+protesis-parcial-superior-provisional-curado-rapido,protesis,arch,,,,,false,false,Prótesis parcial superior provisional, curado rápido
+protesis-parcial-unilateral-de-metal-colado,protesis,arch,,,,,false,false,Prótesis parcial unilateral de metal colado
+protesis-removible-sobre-implantes-desdentado-parcial,implantologia,arch,,,,,false,false,Prótesis removible sobre implantes, desdentado parcial
+protesis-removible-sobre-implantes-desdentado-total,implantologia,arch,,,,,false,false,Prótesis removible sobre implantes, desdentado total
+prueba-de-susceptibilidad-a-caries,diagnostico,general,,,,,false,false,Prueba de susceptibilidad a caries
+prueba-de-vitalidad-pulpar,diagnostico,general,,,,,false,false,Prueba de vitalidad pulpar
+puente-de-metal-colado-metal-base,protesis,tooth,,,,,false,false,Puente de metal colado, metal base
+puente-de-metal-colado-metal-noble,protesis,tooth,,,,,false,false,Puente de metal colado, metal noble
+puente-de-porcelana,protesis,tooth,,,,,false,false,Puente de porcelana
+puente-de-resina-compuesta-indirecta,protesis,tooth,,,,,false,false,Puente de resina compuesta indirecta
+puente-de-resina-con-metal-base,protesis,tooth,,,,,false,false,Puente de resina con metal base
+puente-de-resina-con-metal-noble,protesis,tooth,,,,,false,false,Puente de resina con metal noble
+puente-de-titanio,protesis,tooth,,,,,false,false,Puente de titanio
+puente-metal-ceramico-metal-noble,protesis,tooth,,,,,false,false,Puente metal-cerámico, metal noble
+puente-provisional,protesis,tooth,,,,,false,false,Puente provisional
+pulido-dental,periodoncia,general,,,,,false,false,Pulido dental
+pulpectomia-anterior-deciduo,endodoncia,tooth,,,root_canal_treatment,pulpectomy,false,false,Pulpectomía anterior, deciduo
+pulpectomia-posterior-deciduo,endodoncia,tooth,,,root_canal_treatment,pulpectomy,false,false,Pulpectomía posterior, deciduo
+pulpotomia,endodoncia,tooth,,,pulpotomy,,true,false,Pulpotomía
+pulpotomia-parcial-para-apexogenesis,endodoncia,tooth,,,pulpotomy,,false,false,Pulpotomía parcial para apexogénesis
+radiografia-cefalometrica,diagnostico,general,,,,,false,false,Radiografía cefalométrica
+radiografia-de-aleta-bitewing,diagnostico,general,,,,,true,false,Radiografía de aleta (bitewing)
+radiografia-de-cara-perfilograma,diagnostico,general,,,,,false,true,Radiografía de cara (perfilograma)
+radiografia-de-craneo-y-cara-pa-o-lateral,diagnostico,general,,,,,false,false,Radiografía de cráneo y cara, PA o lateral
+radiografia-de-maxilar-inferior,diagnostico,general,,,,,false,true,Radiografía de maxilar inferior
+radiografia-de-maxilar-superior,diagnostico,general,,,,,false,true,Radiografía de maxilar superior
+radiografia-extraoral,diagnostico,general,,,,,false,false,Radiografía extraoral
+radiografia-indice-para-implante-con-informe,implantologia,general,,,,,false,false,Radiografía índice para implante, con informe
+radiografia-oclusal,diagnostico,general,,,,,false,false,Radiografía oclusal
+radiografia-panoramica,diagnostico,general,,,,,true,false,Radiografía panorámica
+radiografia-periapical,diagnostico,general,,,,,true,false,Radiografía periapical
+radiografia-periapical-dientes-anteriores-inferiores,diagnostico,general,,,,,true,true,Radiografía periapical, dientes anteriores inferiores
+radiografia-periapical-dientes-anteriores-superiores,diagnostico,general,,,,,true,true,Radiografía periapical, dientes anteriores superiores
+radiografia-periapical-molares,diagnostico,general,,,,,true,true,Radiografía periapical, molares
+radiografia-periapical-premolares,diagnostico,general,,,,,true,true,Radiografía periapical, premolares
+radiografia-periapical-serie-completa,diagnostico,general,,,,,false,true,Radiografía periapical, serie completa
+radiografia-periapical-zona-de-caninos,diagnostico,general,,,,,true,true,Radiografía periapical, zona de caninos
+raspado-dental-destartraje,periodoncia,general,,,,,true,false,Raspado dental (destartraje)
+raspado-y-alisado-radicular-1-a-3-dientes,periodoncia,quadrant,,,,,true,false,Raspado y alisado radicular, 1 a 3 dientes
+raspado-y-alisado-radicular-4-o-mas-dientes,periodoncia,quadrant,,,,,true,false,Raspado y alisado radicular, 4 o más dientes
+raspado-y-pulido-dental,periodoncia,general,,,,,false,false,Raspado y pulido dental
+rebase-de-protesis-completa-inferior,protesis,arch,,,,,false,false,Rebase de prótesis completa inferior
+rebase-de-protesis-completa-superior,protesis,arch,,,,,false,false,Rebase de prótesis completa superior
+rebase-de-protesis-parcial-inferior,protesis,arch,,,,,false,false,Rebase de prótesis parcial inferior
+rebase-de-protesis-parcial-superior,protesis,arch,,,,,false,false,Rebase de prótesis parcial superior
+recementado-de-corona,protesis,tooth,,,,,false,false,Recementado de corona
+recementado-de-inlay-onlay-o-cobertura-parcial,protesis,tooth,,,,,false,false,Recementado de inlay, onlay o cobertura parcial
+recementado-de-mantenedor-de-espacio,odontopediatria,general,,,,,false,false,Recementado de mantenedor de espacio
+recementado-de-poste-prefabricado,protesis,tooth,,,,,false,false,Recementado de poste prefabricado
+recementado-de-puente,protesis,general,,,,,false,false,Recementado de puente
+reconstruccion-de-munon,protesis,tooth,,,,,false,false,Reconstrucción de muñón
+recubrimiento-pulpar-directo,endodoncia,tooth,,,,,false,false,Recubrimiento pulpar directo
+recubrimiento-pulpar-indirecto,endodoncia,tooth,,,,,false,false,Recubrimiento pulpar indirecto
+reduccion-abierta-de-fractura-alveolar,cirugia,general,,,,,false,false,Reducción abierta de fractura alveolar
+reduccion-abierta-de-fractura-alveolar-complicada,cirugia,general,,,,,false,false,Reducción abierta de fractura alveolar complicada
+reduccion-cerrada-de-fractura-alveolar,cirugia,general,,,,,false,false,Reducción cerrada de fractura alveolar
+reduccion-cerrada-de-fractura-alveolar-complicada,cirugia,general,,,,,false,false,Reducción cerrada de fractura alveolar complicada
+reduccion-cerrada-de-luxacion,cirugia,general,,,,,false,false,Reducción cerrada de luxación
+reduccion-quirurgica-de-tuberosidad-fibrosa,cirugia,general,,,,,false,false,Reducción quirúrgica de tuberosidad fibrosa
+reduccion-quirurgica-de-tuberosidad-osea,cirugia,general,,,,,false,false,Reducción quirúrgica de tuberosidad ósea
+reemplazo-de-dientes-fracturados-en-protesis,protesis,arch,,,,,false,false,Reemplazo de dientes fracturados en prótesis
+reemplazo-de-dientes-perdidos-o-rotos-en-protesis,protesis,arch,,,,,false,false,Reemplazo de dientes perdidos o rotos en prótesis
+reemplazo-de-dientes-y-acrilico-sobre-armazon-metalico,protesis,arch,,,,,false,false,Reemplazo de dientes y acrílico sobre armazón metálico
+reemplazo-de-retenedor-perdido-o-roto,ortodoncia,arch,,,,,false,false,Reemplazo de retenedor perdido o roto
+reevaluacion-oral-limitada,diagnostico,general,,,,,false,false,Reevaluación oral limitada
+reevaluacion-postoperatoria,diagnostico,general,,,,,false,false,Reevaluación postoperatoria
+regeneracion-guiada-barrera-absorbible-con-relleno,periodoncia,general,,,,,false,false,Regeneración guiada, barrera absorbible, con relleno
+regeneracion-guiada-barrera-absorbible-sin-relleno,periodoncia,general,,,,,false,false,Regeneración guiada, barrera absorbible, sin relleno
+regeneracion-guiada-barrera-no-absorbible-con-relleno,periodoncia,general,,,,,false,false,Regeneración guiada, barrera no absorbible, con relleno
+regeneracion-guiada-barrera-no-absorbible-sin-relleno,periodoncia,general,,,,,false,false,Regeneración guiada, barrera no absorbible, sin relleno
+regeneracion-osea,periodoncia,general,,,,,false,false,Regeneración ósea
+reimplante-intencional-con-ferulizacion,endodoncia,tooth,,,,,false,false,Reimplante intencional con ferulización
+reimplante-y-o-estabilizacion-de-diente,cirugia,tooth,,,,,false,false,Reimplante y/o estabilización de diente
+relleno-sedante-eugenato,restauradora,tooth,,,,,false,false,Relleno sedante (eugenato)
+remocion-de-exostosis-lateral,cirugia,general,,,,,false,false,Remoción de exostosis lateral
+remocion-de-quiste-o-tumor-no-odontogenico-benigno-hasta-1-25-cm,cirugia,general,,,,,false,false,Remoción de quiste o tumor no odontogénico benigno, hasta 1,25 cm
+remocion-de-quiste-o-tumor-no-odontogenico-benigno-mas-de-1-25-cm,cirugia,general,,,,,false,false,Remoción de quiste o tumor no odontogénico benigno, más de 1,25 cm
+remocion-de-quiste-o-tumor-odontogenico-benigno-hasta-1-25-cm,cirugia,general,,,,,false,false,Remoción de quiste o tumor odontogénico benigno, hasta 1,25 cm
+remocion-de-quiste-o-tumor-odontogenico-benigno-mas-de-1-25-cm,cirugia,general,,,,,false,false,Remoción de quiste o tumor odontogénico benigno, más de 1,25 cm
+reparacion-de-aparato-de-ortodoncia,ortodoncia,general,,,,,false,false,Reparación de aparato de ortodoncia
+reparacion-de-armazon-colado,protesis,arch,,,,,false,false,Reparación de armazón colado
+reparacion-de-base-acrilica-de-protesis-parcial,protesis,arch,,,,,false,false,Reparación de base acrílica de prótesis parcial
+reparacion-de-base-fracturada-protesis-completa,protesis,arch,,,,,false,false,Reparación de base fracturada, prótesis completa
+reparacion-de-corona,protesis,tooth,,,,,false,false,Reparación de corona
+reparacion-de-pilar-de-implante,implantologia,tooth,,,,,false,false,Reparación de pilar de implante
+reparacion-de-protesis-sobre-implantes,implantologia,general,,,,,false,false,Reparación de prótesis sobre implantes
+reparacion-de-puente,protesis,general,,,,,false,false,Reparación de puente
+reparacion-interna-de-raiz-por-perforacion,endodoncia,tooth,,,,,false,false,Reparación interna de raíz por perforación
+reparacion-o-reacondicionamiento-de-protector-oclusal,disfuncion,arch,,,,,false,false,Reparación o reacondicionamiento de protector oclusal
+reparacion-o-reemplazo-de-retenedor-fracturado,protesis,arch,,,,,false,false,Reparación o reemplazo de retenedor fracturado
+reposicionamiento-quirurgico-de-dientes,cirugia,tooth,,,,,false,false,Reposicionamiento quirúrgico de dientes
+resina-autocurable-1-superficie-anterior,restauradora,surfaces,1,1,definitive_restoration,resin,false,false,Resina autocurable, 1 superficie, anterior
+resina-autocurable-1-superficie-posterior,restauradora,surfaces,1,1,definitive_restoration,resin,false,false,Resina autocurable, 1 superficie, posterior
+resina-autocurable-2-superficies-anterior,restauradora,surfaces,2,2,definitive_restoration,resin,false,false,Resina autocurable, 2 superficies, anterior
+resina-autocurable-2-superficies-posterior,restauradora,surfaces,2,2,definitive_restoration,resin,false,false,Resina autocurable, 2 superficies, posterior
+resina-autocurable-3-superficies-anterior,restauradora,surfaces,3,3,definitive_restoration,resin,false,false,Resina autocurable, 3 superficies, anterior
+resina-autocurable-3-superficies-posterior,restauradora,surfaces,3,3,definitive_restoration,resin,false,false,Resina autocurable, 3 superficies, posterior
+resina-autocurable-4-o-mas-superficies-anterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,false,Resina autocurable, 4 o más superficies, anterior
+resina-autocurable-4-o-mas-superficies-posterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,false,Resina autocurable, 4 o más superficies, posterior
+resina-fotocurable-1-superficie-anterior,restauradora,surfaces,1,1,definitive_restoration,resin,true,false,Resina fotocurable, 1 superficie, anterior
+resina-fotocurable-1-superficie-posterior,restauradora,surfaces,1,1,definitive_restoration,resin,true,false,Resina fotocurable, 1 superficie, posterior
+resina-fotocurable-2-superficies-anterior,restauradora,surfaces,2,2,definitive_restoration,resin,true,false,Resina fotocurable, 2 superficies, anterior
+resina-fotocurable-2-superficies-posterior,restauradora,surfaces,2,2,definitive_restoration,resin,true,false,Resina fotocurable, 2 superficies, posterior
+resina-fotocurable-3-superficies-anterior,restauradora,surfaces,3,3,definitive_restoration,resin,true,false,Resina fotocurable, 3 superficies, anterior
+resina-fotocurable-3-superficies-posterior,restauradora,surfaces,3,3,definitive_restoration,resin,true,false,Resina fotocurable, 3 superficies, posterior
+resina-fotocurable-4-o-mas-superficies-anterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,false,Resina fotocurable, 4 o más superficies, anterior
+resina-fotocurable-4-o-mas-superficies-posterior,restauradora,surfaces,4,5,definitive_restoration,resin,false,false,Resina fotocurable, 4 o más superficies, posterior
+resina-fotocurable-de-corona-completa-anterior,restauradora,tooth,,,,,false,false,Resina fotocurable de corona completa, anterior
+resina-para-sensibilidad-de-cuellos-y-raices,restauradora,tooth,,,,,false,false,Resina para sensibilidad de cuellos y raíces
+restauracion-con-ionomero-de-vidrio,restauradora,surfaces,1,5,definitive_restoration,glass_ionomer,false,false,Restauración con ionómero de vidrio
+retenedor-ceramico-sobre-implante,implantologia,tooth,,,,,false,false,Retenedor cerámico sobre implante
+retenedor-de-metal-colado-sobre-pilar-metal-base,implantologia,tooth,,,,,false,false,Retenedor de metal colado sobre pilar, metal base
+retenedor-de-metal-colado-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,false,Retenedor de metal colado sobre pilar, metal noble
+retenedor-de-porcelana-sobre-pilar,implantologia,tooth,,,,,false,false,Retenedor de porcelana sobre pilar
+retenedor-metal-ceramico-sobre-implante,implantologia,tooth,,,,,false,false,Retenedor metal-cerámico sobre implante
+retenedor-metal-ceramico-sobre-pilar-metal-base,implantologia,tooth,,,,,false,false,Retenedor metal-cerámico sobre pilar, metal base
+retenedor-metal-ceramico-sobre-pilar-metal-noble,implantologia,tooth,,,,,false,false,Retenedor metal-cerámico sobre pilar, metal noble
+retiro-de-aparato-de-implante-colocado-por-otro,cirugia,general,,,,,false,false,Retiro de aparato de implante colocado por otro
+retiro-de-cuerpo-extrano-de-mucosa,cirugia,general,,,,,false,false,Retiro de cuerpo extraño de mucosa
+retiro-de-cuerpos-extranos-que-producen-reaccion,cirugia,general,,,,,false,false,Retiro de cuerpos extraños que producen reacción
+retiro-de-implante,implantologia,tooth,,,,,false,false,Retiro de implante
+retiro-de-mantenedor-fijo-de-otro-odontologo,odontopediatria,general,,,,,false,false,Retiro de mantenedor fijo de otro odontólogo
+retiro-de-poste,protesis,tooth,,,,,false,false,Retiro de poste
+retratamiento-de-endodoncia-anterior,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Retratamiento de endodoncia, anterior
+retratamiento-de-endodoncia-bicuspide,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Retratamiento de endodoncia, bicúspide
+retratamiento-de-endodoncia-posterior,endodoncia,tooth,,,root_canal_treatment,root_canal,false,false,Retratamiento de endodoncia, posterior
+revestimiento-de-protesis-en-laboratorio,protesis,arch,,,,,false,false,Revestimiento de prótesis en laboratorio
+revestimiento-en-consultorio-completa-inferior,protesis,arch,,,,,false,false,Revestimiento en consultorio, completa inferior
+revestimiento-en-consultorio-completa-superior,protesis,arch,,,,,false,false,Revestimiento en consultorio, completa superior
+revestimiento-en-consultorio-parcial-inferior,protesis,arch,,,,,false,false,Revestimiento en consultorio, parcial inferior
+revestimiento-en-consultorio-parcial-superior,protesis,arch,,,,,false,false,Revestimiento en consultorio, parcial superior
+revestimiento-en-laboratorio-completa-inferior,protesis,arch,,,,,false,false,Revestimiento en laboratorio, completa inferior
+revestimiento-en-laboratorio-completa-superior,protesis,arch,,,,,false,false,Revestimiento en laboratorio, completa superior
+revestimiento-en-laboratorio-parcial-superior,protesis,arch,,,,,false,false,Revestimiento en laboratorio, parcial superior
+secuestrectomia-de-hueso-no-vital,cirugia,general,,,,,false,false,Secuestrectomía de hueso no vital
+sedacion-consciente-intravenosa-cada-15-minutos-adicionales,anestesia,general,,,,,false,false,Sedación consciente intravenosa, cada 15 minutos adicionales
+sedacion-consciente-intravenosa-primeros-30-minutos,anestesia,general,,,,,false,false,Sedación consciente intravenosa, primeros 30 minutos
+sedacion-consciente-no-intravenosa,anestesia,general,,,,,false,false,Sedación consciente no intravenosa
+sellante,prevencion,surfaces,1,5,sealant,,true,false,Sellante
+sialografia,diagnostico,general,,,,,false,false,Sialografía
+sialolitotomia,cirugia,general,,,,,false,false,Sialolitotomía
+sinusotomia-por-fragmento-dental-o-cuerpo-extrano,cirugia,general,,,,,false,false,Sinusotomía por fragmento dental o cuerpo extraño
+sobredentadura-completa,protesis,arch,,,,,false,false,Sobredentadura completa
+sobredentadura-parcial,protesis,arch,,,,,false,false,Sobredentadura parcial
+stent-quirurgico,protesis,general,,,,,false,false,Stent quirúrgico
+sutura-complicada-de-mas-de-5-cm,cirugia,general,,,,,false,false,Sutura complicada de más de 5 cm
+sutura-complicada-hasta-5-cm,cirugia,general,,,,,false,false,Sutura complicada hasta 5 cm
+sutura-de-herida-reciente-hasta-5-cm,cirugia,general,,,,,false,false,Sutura de herida reciente hasta 5 cm
+terapia-de-atm-no-especificada,disfuncion,general,,,,,false,false,Terapia de ATM no especificada
+toma-de-muestra-para-cultivo-y-sensibilidad,diagnostico,general,,,,,false,false,Toma de muestra para cultivo y sensibilidad
+trasplante-dental,cirugia,tooth,,,,,false,false,Trasplante dental
+tratamiento-de-alveolitis-humeda,cirugia,general,,,,,false,false,Tratamiento de alveolitis húmeda
+tratamiento-de-alveolitis-seca,cirugia,general,,,,,false,false,Tratamiento de alveolitis seca
+tratamiento-de-complicaciones-posquirurgicas,cirugia,general,,,,,false,false,Tratamiento de complicaciones posquirúrgicas
+tratamiento-de-conducto-obstruido,endodoncia,tooth,,,,,false,false,Tratamiento de conducto obstruido
+tratamiento-de-pericoronitis,cirugia,tooth,,,,,false,false,Tratamiento de pericoronitis
+tratamiento-restaurador-atraumatico-tra,restauradora,surfaces,1,5,definitive_restoration,glass_ionomer,false,false,Tratamiento restaurador atraumático (TRA)
+visita-de-observacion-sin-procedimiento,general,general,,,,,false,false,Visita de observación, sin procedimiento
+visita-previa-a-la-ortodoncia,ortodoncia,general,,,,,false,false,Visita previa a la ortodoncia

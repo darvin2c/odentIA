@@ -267,6 +267,13 @@
       "when": 1792456325604,
       "tag": "0037_biblioteca_por_pais_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792461650713,
+      "tag": "0038_biblioteca_variantes_por_pais",
+      "breakpoints": true
     }
   ]
 }

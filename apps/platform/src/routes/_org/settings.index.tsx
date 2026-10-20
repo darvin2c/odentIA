@@ -639,12 +639,12 @@ function CountryRules({ country, language }: { country: string; language: string
     [
       "Servicios",
       profile.services
-        ? `${profile.services.system}, ${profile.services.required ? "obligatoria" : "de referencia"} (${profile.services.norm})`
+        ? `${profile.services.label}, ${profile.services.required ? "obligatoria" : "de referencia"} (${profile.services.norm})`
         : "No hay una lista oficial: tus servicios no llevan código",
     ],
     [
       "Especialidades",
-      profile.specialties.source ? `Las del ${profile.specialties.source}` : "Lista general de odentIA",
+      profile.specialties.source ? `Las de su norma (${profile.specialties.source})` : "Lista general de odentIA",
     ],
     ["Diagnósticos", `${diagnosis} (se cambia en «Lista de diagnósticos»)`],
     ["Odontograma", profile.odontogram ? profile.odontogram.standard : "Numeración FDI"],

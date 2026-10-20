@@ -100,7 +100,7 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
       values ('org_a', 'Norte', 'PE', 'PEN', 'America/Lima', 'es-PE'),
-             ('org_c', 'Nueva', 'CL', 'CLP', 'America/Santiago', 'es-CL')`,
+             ('org_c', 'Nueva', 'UY', 'UYU', 'America/Montevideo', 'es-UY')`,
   )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
@@ -181,11 +181,11 @@ it("services: biblioteca sin precios, por tipo y con el código del país (recep
   expect(body.data.find((row) => row.key === PREVENCION_KEY)?.codings.map((c) => c.code)).toEqual(["D1110"])
   expect(body.data.every((row) => row.kind === "prevencion" && row.codings.length === 1)).toBe(true)
   expect(body.data.every((row) => !("priceCents" in row))).toBe(true)
-  // Fuera de un país con lista, la misma biblioteca sin códigos.
-  const chile = (await (await getJson(buildApp("reception", "org_c"), "/services/templates?kind=prevencion&limit=100")).json()) as typeof body
-  expect(chile.codeList).toBeNull()
-  expect(chile.data.map((row) => row.key)).toContain(PREVENCION_KEY)
-  expect(chile.data.every((row) => row.codings.length === 0)).toBe(true)
+  // Fuera de un país con lista (Uruguay), la misma biblioteca sin códigos.
+  const uruguay = (await (await getJson(buildApp("reception", "org_c"), "/services/templates?kind=prevencion&limit=100")).json()) as typeof body
+  expect(uruguay.codeList).toBeNull()
+  expect(uruguay.data.map((row) => row.key)).toContain(PREVENCION_KEY)
+  expect(uruguay.data.every((row) => row.codings.length === 0)).toBe(true)
   const member = buildApp("member")
   expect((await getJson(member, "/services/templates?kind=prevencion")).status).toBe(403)
 })
@@ -455,7 +455,7 @@ it("services: «Más usados» sugiere por tipo a una clínica sin servicios", as
     expect(kind.templates.length).toBeGreaterThanOrEqual(1)
     expect(kind.templates.length).toBeLessThanOrEqual(10)
     expect(kind.templates.every((tpl) => !("priceCents" in tpl))).toBe(true)
-    // En Chile aún no hay lista cargada: sin código.
+    // Uruguay no tiene lista: sin código.
     expect(kind.templates.every((tpl) => tpl.codings.length === 0)).toBe(true)
   }
   const ids = kinds.flatMap((kind) => kind.templates.map((tpl) => tpl.id))
@@ -512,7 +512,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
   expect(body.data.created).toHaveLength(resinaIds.length + 2)
   expect(body.data.existing).toHaveLength(0)
   // Todo queda activo y en la moneda de la clínica.
-  expect(body.data.created.every((row) => row.isActive && row.currency === "CLP")).toBe(true)
+  expect(body.data.created.every((row) => row.isActive && row.currency === "UYU")).toBe(true)
   const limpieza = body.data.created.find((row) => row.templateId === profilaxisId)
   expect(limpieza).toMatchObject({
     name: "Limpieza dental",
@@ -584,7 +584,7 @@ it("services: la carga rápida es todo o nada", async () => {
 })
 
 it("services: sin la edición vigente de la lista obligatoria, «Más usados» queda vacío", async () => {
-  // En el Perú no se ofrece un tratamiento sin su código; en Chile, sin lista, sí.
+  // En el Perú no se ofrece un tratamiento sin su código; en Uruguay, sin lista, sí.
   const current = (await ownerDb.execute(
     sql`update "procedure_catalog_release" set "is_current" = false where "is_current" returning "system_key", "version"`,
   )) as unknown as Array<{ system_key: string; version: string }>
@@ -746,4 +746,67 @@ it("services: cada servicio tiene una sola especialidad de la clínica, también
     body: JSON.stringify({ name: "Sin especialidad", scope: "general", priceCents: 100 }),
   })
   expect(missing.status).toBe(400)
+})
+
+it("services: cada país ve su lista; las variantes de la CUPS solo en Colombia", async () => {
+  for (const [id, country, currency, zone] of [
+    ["org_co", "CO", "COP", "America/Bogota"],
+    ["org_mx", "MX", "MXN", "America/Mexico_City"],
+    ["org_cr", "CR", "CRC", "America/Costa_Rica"],
+  ] as const) {
+    await ownerDb.execute(
+      sql`insert into "organization" ("id", "name", "slug", "created_at") values (${id}, ${id}, ${id}, now()) on conflict do nothing`,
+    )
+    await ownerDb.execute(
+      sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values (${id}, ${id}, ${country}, ${currency}, ${zone}, ${"es-" + country}) on conflict do nothing`,
+    )
+  }
+  type Page = {
+    data: Array<{ key: string; codings: Array<{ system: string; code: string }> }>
+    codeList: { system: string; required: boolean } | null
+  }
+  const library = async (orgId: string, q: string) =>
+    (await (await getJson(buildApp("reception", orgId), `/services/templates?q=${encodeURIComponent(q)}&limit=100`)).json()) as Page
+  // Colombia: la CUPS obligatoria separa la exodoncia por raíces y por dentición.
+  const colombia = await library("org_co", "exodoncia")
+  expect(colombia.codeList).toEqual({ system: "CUPS", required: true })
+  const keys = colombia.data.map((row) => row.key)
+  expect(keys).toContain("exodoncia-de-diente-permanente-unirradicular")
+  expect(keys).not.toContain("exodoncia-simple")
+  expect(colombia.data.find((row) => row.key === "exodoncia-de-diente-permanente-multirradicular")?.codings).toEqual([
+    expect.objectContaining({ system: "CUPS", code: "230102" }),
+  ])
+  // Las resinas van todas al código de obturación con resina de fotocurado.
+  const resin = await library("org_co", "resina fotocurable")
+  const bySurfaces = resin.data.filter((row) => /^resina-fotocurable-\d/.test(row.key))
+  expect(bySurfaces.length).toBe(8)
+  expect(new Set(bySurfaces.flatMap((row) => row.codings.map((c) => c.code)))).toEqual(new Set(["232102"]))
+  // México: la CIE-9-MC de la DGIS, obligatoria y sin las variantes colombianas.
+  const mexico = await library("org_mx", "exodoncia")
+  expect(mexico.codeList).toEqual({ system: "CIE9MC-MX", required: true })
+  expect(mexico.data.map((row) => row.key)).toContain("exodoncia-simple")
+  expect(mexico.data.map((row) => row.key)).not.toContain("exodoncia-de-diente-permanente-unirradicular")
+  // Costa Rica: el tarifario del Colegio es de referencia; se ofrece todo menos las variantes.
+  const costaRica = await library("org_cr", "exodoncia")
+  expect(costaRica.codeList).toEqual({ system: "COLEGIO-CR", required: false })
+  expect(costaRica.data.find((row) => row.key === "exodoncia-simple")?.codings).toEqual([
+    expect.objectContaining({ system: "COLEGIO-CR", code: "12.1" }),
+  ])
+  expect(costaRica.data.map((row) => row.key)).not.toContain("exodoncia-de-diente-permanente-unirradicular")
+  // Una variante no se agrega donde no tiene código.
+  const variant = await templateIdByKey("exodoncia-de-diente-permanente-unirradicular")
+  const refused = await buildApp("owner", "org_cr").request("/services/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ items: [{ kind: "template", templateId: variant, priceCents: 1000 }] }),
+  })
+  expect(refused.status).toBe(409)
+  // En Costa Rica el código de un servicio propio es opcional.
+  const own = await buildApp("owner", "org_cr").request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Blanqueamiento con férula", specialtyId: await sp("estetica", "org_cr"), scope: "general", priceCents: 1000 }),
+  })
+  expect(own.status).toBe(201)
 })
