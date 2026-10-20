@@ -44,14 +44,14 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
             aria-label="Personas que te escriben al mes"
           />
           <label className="vl">
-            <span>Pacientes con su control vencido</span>
+            <span>Pacientes que faltaron a su cita en el mes</span>
             <input
               type="number"
               className="vnum"
               min="0"
               max="1000"
-              value={i.overdue}
-              onChange={num("overdue", 1000)}
+              value={i.noShows}
+              onChange={num("noShows", 1000)}
             />
           </label>
           <input
@@ -60,9 +60,9 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
             min="0"
             max="300"
             step="5"
-            value={Math.min(i.overdue, 300)}
-            onChange={num("overdue", 1000)}
-            aria-label="Pacientes con su control vencido"
+            value={Math.min(i.noShows, 300)}
+            onChange={num("noShows", 1000)}
+            aria-label="Pacientes que faltaron a su cita en el mes"
           />
           <label className="vl">
             <span>Consultas que dictarías al mes</span>
@@ -124,7 +124,7 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
               />
             </label>
             <label className="vl">
-              <span>De los controles vencidos, % que vuelve si alguien le escribe</span>
+              <span>De quienes faltaron, % que vuelve a reservar si alguien le escribe</span>
               <input
                 type="number"
                 className="vnum"
@@ -165,8 +165,8 @@ export default function ValueCalc({ prices }: { prices: ValuePrices }) {
             <strong>{usd(r.lostNew)}</strong>
           </div>
           <div className="vrow">
-            <span>{r.recovered} controles que nadie recordó y no volvieron</span>
-            <strong>{usd(r.lostControls)}</strong>
+            <span>{r.recovered} pacientes que faltaron y nadie les ofreció otra cita</span>
+            <strong>{usd(r.lostNoShows)}</strong>
           </div>
           <div className="vrow">
             <span>{i.teamHours} horas de tu equipo en mensajes y notas</span>

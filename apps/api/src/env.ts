@@ -91,13 +91,10 @@ const envSchema = z.object({
   LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-  /** Modelos de decisión de la plataforma: entienden lo que se le pide al Administrador con palabras. */
+  /** Modelo de decisión de la plataforma (Jev): entiende lo que se le pide al Administrador con palabras. */
   JEV_API_KEY: z.string().optional().default(""),
   JEV_BASE_URL: z.string().url().optional(),
   JEV_MODEL: z.string().optional().default("jev-1.13.0"),
-  OPENAI_DECISIONS_API_KEY: z.string().optional().default(""),
-  OPENAI_DECISIONS_BASE_URL: z.string().url().optional(),
-  OPENAI_DECISIONS_MODEL: z.string().optional().default("gpt-6-luna"),
   DECISIONS_TIMEOUT_MS: z.coerce.number().int().min(500).max(20_000).default(2_000),
   /**
    * Búsqueda por significado del agente (ADR 0021): proveedor de vectores de la

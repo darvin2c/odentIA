@@ -696,7 +696,7 @@ export const agentConfig = pgTable(
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
     /**
-     * Modelo de decisión (none | baseline | jev | openai_decisions). Toda
+     * Modelo de decisión (none | baseline | jev). Toda
      * clínica nace con Jev (ADR 0047), también la fila que crea otra
      * operación sin decir el proveedor (Administrador, horario para escribir).
      */
@@ -764,7 +764,7 @@ export const agentConfig = pgTable(
     ),
     check(
       "agent_config_decision_provider_check",
-      sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,
+      sql`${table.decisionProvider} in ('none','baseline','jev')`,
     ),
     check("agent_config_treatment_check", sql`${table.treatment} is null or ${table.treatment} in ('tu','usted')`),
     check("agent_config_tone_check", sql`${table.tone} in ('cercano','neutro','formal')`),

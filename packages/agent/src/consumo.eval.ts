@@ -448,6 +448,17 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       plan.push({ startsAt, endsAt: new Date(startsAt.getTime() + 10 * 60_000), outcome, person: pick(people) })
     }
   }
+  // La agenda sigue después de hoy, como en una clínica de verdad. Sin el día de
+  // mañana, el último recordatorio sería de una cita que ya pasó cuando Rosa
+  // responde, y Recepción tendría razón al no encontrarla (darvin2c/odentIA#132).
+  // Estas citas no terminan dentro del mes y no sacan números al azar: lo demás
+  // del mes sale igual que antes; solo se suman sus recordatorios de hoy.
+  const tomorrow = new Date(start.getTime() + (CLINIC.days + 1) * DAY)
+  tomorrow.setUTCHours(14, 0, 0, 0)
+  for (let slot = 0; slot < CLINIC.appointmentsPerDay; slot += 1) {
+    const startsAt = new Date(tomorrow.getTime() + slot * 10 * 60_000)
+    plan.push({ startsAt, endsAt: new Date(startsAt.getTime() + 10 * 60_000), outcome: "atendida", person: people[slot % people.length]! })
+  }
   const appointments = await ownerDb
     .insert(appointment)
     .values(plan.map((item) => ({
@@ -568,7 +579,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
 
   console.log("\n=== Prueba real de consumo · un mes de una clínica de prueba ===")
   console.log(REAL ? `Modelo que escribe: ${AGENT_MODEL.modelName} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
-  console.log(`Clínica: ${CLINIC.patients} pacientes, ${plan.length} citas (${outcomes.filter((item) => item.outcome === "no_asistio").length} inasistencias, ${outcomes.filter((item) => item.outcome === "cancelada").length} cancelaciones), ${CLINIC.budgets} presupuestos, ${CLINIC.controls} controles.`)
+  console.log(`Clínica: ${CLINIC.patients} pacientes, ${plan.length - CLINIC.appointmentsPerDay} citas en el mes y ${CLINIC.appointmentsPerDay} mañana (${outcomes.filter((item) => item.outcome === "no_asistio").length} inasistencias, ${outcomes.filter((item) => item.outcome === "cancelada").length} cancelaciones), ${CLINIC.budgets} presupuestos, ${CLINIC.controls} controles.`)
   console.log("\n1. Lo que hizo Argos en el mes (lo cuenta el motor; ningún mensaje salió de la cola)")
   for (const line of lines) {
     const mine = counts.filter((row) => row.kind === line.key)
@@ -587,8 +598,14 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   const openers: ModelCall[] = []
   let sequence = 0
   for (const script of SCRIPTS.filter((item) => ONLY.length === 0 || ONLY.includes(item.kind))) {
+    // Quien responde a un recordatorio de cita responde antes de su cita: la cita
+    // de ese recordatorio todavía está por venir cuando empieza la conversación.
+    const upcoming = script.kind === "recordatorio_cita"
+      ? sql`exists (select 1 from appointment a where a.id = ${automationJob.appointmentId}
+          and a.starts_at > now() and a.status in ('programada', 'confirmada'))`
+      : undefined
     const [job] = await ownerDb.select().from(automationJob)
-      .where(and(eq(automationJob.organizationId, ORG), eq(automationJob.kind, script.kind), eq(automationJob.status, "enviado"), eq(automationJob.via, "plantilla")))
+      .where(and(eq(automationJob.organizationId, ORG), eq(automationJob.kind, script.kind), eq(automationJob.status, "enviado"), eq(automationJob.via, "plantilla"), upcoming))
       .orderBy(desc(automationJob.updatedAt))
       .offset(script.button ? 0 : 1)
       .limit(1)
@@ -602,6 +619,11 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     let conversationId = ""
     const replies: string[] = []
     const detail: string[] = []
+    if (job.appointmentId) {
+      // Para leer en la respuesta si Recepción nombra esta cita y ofrece cambiarla.
+      const [booked] = await ownerDb.select({ startsAt: appointment.startsAt, status: appointment.status }).from(appointment).where(eq(appointment.id, job.appointmentId))
+      if (booked) detail.push(`      Cita del recordatorio: ${booked.startsAt.toLocaleString("es-PE", { timeZone: "America/Lima", dateStyle: "full", timeStyle: "short" })} (${booked.status})`)
+    }
     for (const [index, text] of script.turns.entries()) {
       const firstCall = modelCalls.length
       sequence += 1

@@ -541,8 +541,8 @@ export interface AgentConfig {
   organizationId: string
   enabled: boolean
   dailyRunLimit: number
-  /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
-  decisionProvider: "none" | "baseline" | "jev" | "openai_decisions"
+  /** Modelo de decisión en sombra: none | baseline | jev. */
+  decisionProvider: "none" | "baseline" | "jev"
   handoffKeywords: string[]
   maxTurns: number
   /** Comprueba precios, fechas y horas de cada respuesta antes de enviarla. */

@@ -81,7 +81,6 @@ interface DecisionItem {
 const PROVIDER_LABEL: Record<string, string> = {
   baseline: "Línea base",
   jev: "Jev",
-  openai_decisions: "OpenAI Decisions",
   fake: "Demostración",
 }
 

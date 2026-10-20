@@ -61,13 +61,10 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.coerce.number().int().min(0).max(120).default(30),
   ),
-  /** Modelos de decisión (plataforma); vacíos = ese proveedor no está disponible. */
+  /** Modelo de decisión de la plataforma (Jev); vacío = no está disponible. */
   JEV_API_KEY: z.string().optional().default(""),
   JEV_BASE_URL: z.string().url().optional(),
   JEV_MODEL: z.string().optional().default("jev-1.13.0"),
-  OPENAI_DECISIONS_API_KEY: z.string().optional().default(""),
-  OPENAI_DECISIONS_BASE_URL: z.string().url().optional(),
-  OPENAI_DECISIONS_MODEL: z.string().optional().default("gpt-6-luna"),
   /**
    * Plazo por llamada al modelo de decisión. Camino y conocimiento van uno tras
    * otro antes de responder, y todo debe caber en la visibilidad de la cola (30 s).

@@ -38,7 +38,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
   const L = narrow
     ? {
         lNew: `${r.lost} pacientes que escribieron y se fueron`,
-        lCtrl: `${r.recovered} controles que no volvieron`,
+        lNoShow: `${r.recovered} que faltaron y no volvieron`,
         lTime: `${v.teamHours} horas de tu equipo`,
         lConv: `${v.writers} conversaciones × ${usd(CONVERSATION)}`,
         lRec: `${r.recovered} citas recuperadas × ${usd(RECOVERED)}`,
@@ -48,7 +48,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
       }
     : {
         lNew: `${r.lost} pacientes que escribieron, no recibieron respuesta a tiempo y se fueron`,
-        lCtrl: `${r.recovered} controles que nadie recordó y no volvieron`,
+        lNoShow: `${r.recovered} pacientes que faltaron y nadie les ofreció otra cita`,
         lTime: `${v.teamHours} horas de tu equipo en mensajes y notas`,
         lConv: `${v.writers} conversaciones atendidas × ${usd(CONVERSATION)}`,
         lRec: `${r.recovered} citas recuperadas × ${usd(RECOVERED)}, solo si asisten`,
@@ -93,11 +93,11 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
             {num("writers", 5000)}
           </label>
           {range("writers", 2000, 10, "Personas que te escriben al mes")}
-          <label className="vc-l" htmlFor={fieldId("overdue")}>
-            <span>Pacientes con su control vencido</span>
-            {num("overdue", 1000)}
+          <label className="vc-l" htmlFor={fieldId("noShows")}>
+            <span>Pacientes que faltaron a su cita en el mes</span>
+            {num("noShows", 1000)}
           </label>
-          {range("overdue", 300, 5, "Pacientes con su control vencido")}
+          {range("noShows", 300, 5, "Pacientes que faltaron a su cita en el mes")}
           <label className="vc-l" htmlFor={fieldId("consultations")}>
             <span>Consultas que dictarías</span>
             {num("consultations", 5000)}
@@ -121,7 +121,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
               {num("leavePct", 100)}
             </label>
             <label className="vc-l" htmlFor={fieldId("returnPct")}>
-              <span>De los controles vencidos, % que vuelve si alguien le escribe</span>
+              <span>De quienes faltaron, % que vuelve a reservar si alguien le escribe</span>
               {num("returnPct", 100)}
             </label>
             <label className="vc-l" htmlFor={fieldId("teamHours")}>
@@ -141,8 +141,8 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
             <strong>{usd(r.lostNew)}</strong>
           </div>
           <div className="vc-row">
-            <span>{L.lCtrl}</span>
-            <strong>{usd(r.lostControls)}</strong>
+            <span>{L.lNoShow}</span>
+            <strong>{usd(r.lostNoShows)}</strong>
           </div>
           <div className="vc-row">
             <span>{L.lTime}</span>

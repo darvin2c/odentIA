@@ -4,7 +4,7 @@
  * cuántas se equivoca diciendo estar seguro. Ejemplos escritos por el equipo
  * (nunca mensajes reales de pacientes sin autorización). Uso:
  *
- *   pnpm --filter @odentia/agent eval:knowledge -- --provider=fake|baseline|jev|openai_decisions [--file=eval/conocimiento-banco.json]
+ *   pnpm --filter @odentia/agent eval:knowledge -- --provider=fake|baseline|jev [--file=eval/conocimiento-banco.json]
  *
  * El resultado es evidencia de este banco, no un benchmark del proveedor.
  */
@@ -26,8 +26,8 @@ function arg(name: string, fallback: string): string {
 }
 
 const requested = arg("provider", "fake")
-if (!["fake", "baseline", "jev", "openai_decisions"].includes(requested)) {
-  throw new Error(`Proveedor desconocido: ${requested} (fake | baseline | jev | openai_decisions)`)
+if (!["fake", "baseline", "jev"].includes(requested)) {
+  throw new Error(`Proveedor desconocido: ${requested} (fake | baseline | jev)`)
 }
 if (requested === "fake" && (process.env.LLM_MODEL ?? "fake") !== "fake") {
   throw new Error("--provider=fake exige LLM_MODEL=fake; con un LLM real usa --provider=baseline")
@@ -60,9 +60,6 @@ const decision = await createDecisionModel(
   provider,
   {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
-    ...(env.OPENAI_DECISIONS_API_KEY
-      ? { openai: { apiKey: env.OPENAI_DECISIONS_API_KEY, baseUrl: env.OPENAI_DECISIONS_BASE_URL, model: env.OPENAI_DECISIONS_MODEL } }
-      : {}),
     timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000),
   },
   spec,

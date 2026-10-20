@@ -102,7 +102,7 @@ poner la key en una variable `VITE_*`, un campo de conversación ni el repositor
 ### Modelo de decisión
 
 Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker y la API leen
-`JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`
+`JEV_API_KEY`/`JEV_BASE_URL`
 (la API, para entender lo que se le pide al Administrador con palabras).
 Toda clínica nace con Jev (`docs/decisions/0047-jev-decide-en-toda-clinica.md`): sin
 `JEV_API_KEY` cada corrida deja una fila «sin credenciales» en Agente › Registro técnico

@@ -42,7 +42,7 @@ const DAY = [
   {
     time: "16:05",
     agent: "Argos",
-    what: "Rosa tenía su control vencido. Le escribió y Rosa reservó el viernes desde su enlace.",
+    what: "Rosa faltó ayer a su cita. Le ofreció otro horario y Rosa reservó el viernes con Sofi.",
     why: "La cita recuperada se cobra solo si Rosa asiste.",
     price: null,
     pending: true,

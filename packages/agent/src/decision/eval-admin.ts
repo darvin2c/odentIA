@@ -2,7 +2,7 @@
  * Prueba de lo que el modelo hace para el Administrador, sobre pedidos y
  * mensajes de ejemplo propios (nunca de pacientes reales). Uso:
  *
- *   pnpm --filter @odentia/agent eval:admin -- --provider=baseline|jev|openai_decisions [--file=eval/administrador-pedidos.json]
+ *   pnpm --filter @odentia/agent eval:admin -- --provider=baseline|jev [--file=eval/administrador-pedidos.json]
  *
  * Mide las dos cosas que decide un modelo: entender un pedido con palabras
  * (línea e intención, entre opciones cerradas) y «¿ya avisó algo?» antes de un
@@ -42,8 +42,8 @@ function arg(name: string, fallback: string): string {
 }
 
 const requested = arg("provider", "baseline")
-if (!["baseline", "jev", "openai_decisions"].includes(requested)) {
-  throw new Error(`Proveedor desconocido: ${requested} (baseline | jev | openai_decisions)`)
+if (!["baseline", "jev"].includes(requested)) {
+  throw new Error(`Proveedor desconocido: ${requested} (baseline | jev)`)
 }
 const provider = requested as DecisionProvider
 const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/administrador-pedidos.json")), "utf8")) as {
@@ -58,9 +58,6 @@ const model = await createDecisionModel(
   provider,
   {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
-    ...(env.OPENAI_DECISIONS_API_KEY
-      ? { openai: { apiKey: env.OPENAI_DECISIONS_API_KEY, baseUrl: env.OPENAI_DECISIONS_BASE_URL, model: env.OPENAI_DECISIONS_MODEL } }
-      : {}),
     timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000),
   },
   spec,

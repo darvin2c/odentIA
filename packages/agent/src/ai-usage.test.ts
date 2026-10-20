@@ -28,6 +28,15 @@ describe("costo de una llamada", () => {
     expect(costMicrosOf({ model: "text-embedding-3-small", inputTokens: 1_000 })).toBe(20)
   })
 
+  it("gpt-4o-mini-transcribe informa tokens y se cobra por tokens, no queda en blanco", () => {
+    // Lo que respondió /v1/audio/transcriptions el 2026-10-17 (darvin2c/odentIA#126):
+    // 21 s → {"type":"tokens","input_tokens":203,"output_tokens":71}; 59 s → 589 y 202.
+    expect(costMicrosOf({ model: "gpt-4o-mini-transcribe", inputTokens: 203, outputTokens: 71 })).toBe(609)
+    expect(costMicrosOf({ model: "gpt-4o-mini-transcribe", inputTokens: 589, outputTokens: 202 })).toBe(1_746)
+    // Si algún día informa minutos, sigue valiendo su estimado por minuto.
+    expect(costMicrosOf({ model: "gpt-4o-mini-transcribe", audioSeconds: 60 })).toBe(3_000)
+  })
+
   it("Jev cobra solo la entrada: un mensaje típico de Recepción cuesta 57 millonésimas", () => {
     // Camino, conocimiento e interés: ~1 360 tokens a 0,042 USD por millón; la salida no se cobra.
     expect(costMicrosOf({ model: "jev-1.13.0", inputTokens: 1_360, outputTokens: 12 })).toBe(57)

@@ -10,7 +10,7 @@ export interface AgentConfig {
   organizationId: string
   enabled: boolean
   dailyRunLimit: number
-  /** Modelo de decisión: none | baseline | jev | openai_decisions. Toda clínica nace con Jev (ADR 0047). */
+  /** Modelo de decisión: none | baseline | jev. Toda clínica nace con Jev (ADR 0047). */
   decisionProvider: DecisionProvider
   handoffKeywords: string[]
   maxTurns: number
@@ -51,7 +51,7 @@ const ABOUT_CHARS = 600
 const PERSONA_CHARS = 40
 const FUNCTION_NOTE_CHARS = 300
 
-export const DECISION_PROVIDERS = ["none", "baseline", "jev", "openai_decisions"] as const
+export const DECISION_PROVIDERS = ["none", "baseline", "jev"] as const
 export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 
 /**

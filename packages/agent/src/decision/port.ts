@@ -25,7 +25,7 @@ export interface DecisionResult {
 }
 
 export interface DecisionModel {
-  provider: "jev" | "openai_decisions" | "baseline" | "fake"
+  provider: "jev" | "baseline" | "fake"
   /** false: las respuestas no traen distribución y la confianza es null. */
   reportsProbabilities: boolean
   decide(state: string, questions: DecisionQuestion[], opts?: { signal?: AbortSignal }): Promise<DecisionResult>
@@ -40,18 +40,6 @@ export class DecisionError extends Error {
     super(message)
     this.name = "DecisionError"
   }
-}
-
-/**
- * Confianza de una elección derivada de su distribución, como la define
- * TypeSafe: 1 si toda la probabilidad cae en una opción, 0 si es uniforme.
- */
-export function choiceConfidence(probabilities: Record<string, number>): number {
-  const values = Object.values(probabilities)
-  const n = values.length
-  if (n < 2) return 1
-  const max = Math.max(...values)
-  return Math.max(0, Math.min(1, (max - 1 / n) / (1 - 1 / n)))
 }
 
 export function clamp01(value: unknown): number | null {

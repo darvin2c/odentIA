@@ -705,7 +705,7 @@ export const PAGES = {
           {
             agent: 2,
             title: "Avisa los controles",
-            text: "Encuentra a quien ya le toca su control y le escribe con su enlace para reservar.",
+            text: "Encuentra a quien ya le toca su control y le escribe para buscarle un horario.",
           },
           {
             agent: 2,
@@ -727,23 +727,23 @@ export const PAGES = {
       {
         kind: "steps",
         tag: "Un ejemplo",
-        title: "Rosa vuelve a su control.",
+        title: "Rosa vuelve tras faltar a su cita.",
         steps: [
           {
             when: "Lunes",
             agent: 2,
-            title: "Rosa Vega tiene su control de 6 meses vencido hace tres semanas.",
-            text: "Argos lo encuentra solo, sin que nadie revise listas.",
+            title: "Rosa Vega no llegó a su limpieza del lunes.",
+            text: "Argos lo ve en la agenda, sin que nadie revise listas.",
           },
           {
-            when: "Lunes · 16:05",
+            when: "Martes · 10:00",
             agent: 2,
-            title: "Le escribe por WhatsApp con su enlace para reservar.",
-            text: "«Hola, Rosa, soy Sofi, de Clínica Sonrisa Norte. Ya te toca tu control. Puedes elegir el día aquí.»",
+            title: "Al día siguiente le escribe por WhatsApp para darle otro horario.",
+            text: "«Hola, Rosa. No pudimos verte en la cita del lunes 20 en Clínica Sonrisa Norte. ¿Te buscamos otro horario?»",
           },
           {
-            when: "Lunes · 16:20",
-            title: "Rosa elige el viernes 24 a las 11:00 desde su enlace.",
+            when: "Martes · 10:20",
+            title: "Rosa toca «Sí, otro horario» y Sofi le reserva el viernes 24 a las 11:00.",
             text: "La cita aparece en la agenda de la clínica.",
           },
           {

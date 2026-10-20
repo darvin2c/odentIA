@@ -11,6 +11,7 @@ import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { recordAgentRun } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
+import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
@@ -204,6 +205,32 @@ describe("cita recuperada", () => {
     for (const item of [await scene("recepcion", 1), await scene("agent", 1, "recordatorio_cita"), await scene("agent", 8)]) {
       await attend(item)
     }
+    expect(await actionsOf("cita")).toHaveLength(before)
+  })
+
+  it("no cuenta la que se reserva tras un aviso de cita reservada, movida o cancelada: no estaba perdida", async () => {
+    // Recepción agendó a Lucía por teléfono, le llegó «Tu cita quedó reservada» y días después reservó otra con Sofi.
+    const before = (await actionsOf("cita")).length
+    for (const kind of APPOINTMENT_NOTICE_KEYS) await attend(await scene("agent", 4, kind))
+    expect(await actionsOf("cita")).toHaveLength(before)
+  })
+
+  it("sí cuenta la que se reserva tras «Reprogramar tras una inasistencia»", async () => {
+    const recovered = await scene("agent", 3, "seguimiento_no_asistencia")
+    await attend(recovered)
+    const counted = (await actionsOf("cita")).find((row) => row.appointmentId === recovered.appointmentId)
+    expect(counted?.detail).toBe("Volvió tras «Reprogramar tras una inasistencia» y reservó en la conversación")
+    // Se retira para que «lo que ve la clínica» siga sumando la única cita de la primera prueba.
+    await ownerDb.delete(saasAction).where(eq(saasAction.id, counted!.id))
+  })
+
+  it("«No podré ir» tras un recordatorio: Sofi mueve la cita que ya tenía y no cuenta (ADR 0031)", async () => {
+    const before = (await actionsOf("cita")).length
+    // La cita ya estaba reservada cuando salió el recordatorio; la persona pidió otro día y Sofi la movió.
+    const kept = await scene("agent", -1, "recordatorio_cita")
+    const startsAt = new Date(Date.now() + 3 * 86_400_000)
+    await ownerDb.update(appointment).set({ startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000) }).where(eq(appointment.id, kept.appointmentId))
+    await attend(kept)
     expect(await actionsOf("cita")).toHaveLength(before)
   })
 })

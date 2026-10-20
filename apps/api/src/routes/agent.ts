@@ -26,7 +26,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 const putInput = z.object({
   enabled: z.boolean().optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
-  decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
+  decisionProvider: z.enum(["none", "baseline", "jev"]).optional(),
   handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
   maxTurns: z.number().int().min(1).max(50).optional(),
   replyCheckEnabled: z.boolean().optional(),

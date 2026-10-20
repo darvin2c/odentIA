@@ -45,17 +45,17 @@ const WAVE_BARS = Array.from({ length: 20 }, (_, i) => `barra-${i}`)
 const ADM = [
   {
     when: "Lunes",
-    title: "Rosa Vega tiene su control de 6 meses vencido hace tres semanas.",
-    sub: "Argos lo encuentra solo, sin que nadie revise listas.",
+    title: "Rosa Vega no llegó a su limpieza del lunes.",
+    sub: "Argos lo ve en la agenda, sin que nadie revise listas.",
   },
   {
-    when: "Lunes · 16:05",
-    title: "Le escribe por WhatsApp con su enlace para reservar.",
-    sub: "«Hola, Rosa, soy Sofi, de Clínica Sonrisa Norte. Ya te toca tu control. Puedes elegir el día aquí.»",
+    when: "Martes · 10:00",
+    title: "Al día siguiente le escribe por WhatsApp para darle otro horario.",
+    sub: "«Hola, Rosa. No pudimos verte en la cita del lunes 20 en Clínica Sonrisa Norte. ¿Te buscamos otro horario?»",
   },
   {
-    when: "Lunes · 16:20",
-    title: "Rosa elige el viernes 24 a las 11:00 desde su enlace.",
+    when: "Martes · 10:20",
+    title: "Rosa toca «Sí, otro horario» y Sofi le reserva el viernes 24 a las 11:00.",
     sub: "La cita aparece en la agenda de la clínica.",
   },
   {
@@ -434,7 +434,7 @@ export default function AgentTabs() {
           <div className="ag-grid">
             <div className="card admc">
               <div className="admc-h">
-                <span className="tag">Rosa Vega · control de 6 meses</span>
+                <span className="tag">Rosa Vega · faltó a su cita</span>
                 <button type="button" className="mono replay" onClick={() => replay("adm")}>
                   Volver a ver
                 </button>
