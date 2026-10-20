@@ -134,6 +134,19 @@ export type WaitingRow =
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
+  /**
+   * El inventario de una sede pide trabajo (ADR 0067): productos que hacen falta
+   * y lotes vencidos, una fila por sede para quien pide las compras. Se va sola.
+   */
+  | {
+      kind: "inventory"
+      branchId: string
+      branchName: string
+      needed: number
+      neededNames: string[]
+      expiredLots: number
+      expired: Array<{ productName: string; expiresAt: string }>
+    }
   /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
   | { kind: "promotion"; messageId: string; title: string }
   | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }

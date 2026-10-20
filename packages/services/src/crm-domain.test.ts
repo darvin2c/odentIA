@@ -211,8 +211,8 @@ it("contactos: actividad con >30 marcas en el mismo ms no pierde filas (keyset c
 })
 
 it("contactos: openOpportunityCount es agregado completo aunque la página trunque", async () => {
-  const a = await makeContact("org_a", `Conteo ${TAG} A`)
-  const b = await makeContact("org_a", `Conteo ${TAG} B`)
+  const a = await makeContact("org_a", `Conteo ${TAG} Alfa`)
+  const b = await makeContact("org_a", `Conteo ${TAG} Beta`)
   await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
   for (let i = 0; i < 2; i++) {
     await withOrgContext(appDb, "org_a", (tx) =>
@@ -226,13 +226,14 @@ it("contactos: openOpportunityCount es agregado completo aunque la página trunq
     closeOpportunity(tx, "org_a", won.id, { outcome: "won", reason: "acepto" }),
   )
   // Página de 1: el conteo del contacto sigue siendo completo (2 abiertas, la cerrada no cuenta).
+  // «Alfa» y «Beta» no caben en el TAG (hexadecimal): la búsqueda por partes no confunde los dos.
   const page = await withOrgContext(appDb, "org_a", (tx) =>
-    listContacts(tx, "org_a", { q: `Conteo ${TAG} A`, sort: "nombre", limit: 1 }),
+    listContacts(tx, "org_a", { q: `Conteo ${TAG} Alfa`, sort: "nombre", limit: 1 }),
   )
   expect(page.items).toHaveLength(1)
   expect(page.items[0]?.openOpportunityCount).toBe(2)
   const other = await withOrgContext(appDb, "org_a", (tx) =>
-    listContacts(tx, "org_a", { q: `Conteo ${TAG} B`, sort: "nombre", limit: 10 }),
+    listContacts(tx, "org_a", { q: `Conteo ${TAG} Beta`, sort: "nombre", limit: 10 }),
   )
   expect(other.items[0]?.openOpportunityCount).toBe(0)
   expect(b.id).toBeTruthy()

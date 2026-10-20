@@ -1,7 +1,7 @@
 import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
-import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
+import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import type { WaitingRow } from "../../lib/workspace"
@@ -32,6 +32,8 @@ export interface WaitingHandlers {
   onArrived?: (row: RowOf<"registrationDone">) => void
   /** «Revisar»: abre «¿Es la misma persona?» con lo que escribió quien se registró por el código QR. */
   onReviewRegistration?: (row: RowOf<"possibleDuplicate">) => void
+  /** «Pedir lo que falta» del inventario de una sede: arma los borradores de compra (ADR 0067). */
+  onReorder?: (row: RowOf<"inventory">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
   /** La fila cuya acción está en curso: sus botones se desactivan y el de la acción dice que trabaja. */
@@ -69,6 +71,7 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
   if (row.kind === "promotion") return <TypeIcon icon={MessageCircle} />
+  if (row.kind === "inventory") return <TypeIcon icon={Package} />
   if (row.kind === "possibleDuplicate") return <TypeIcon icon={UsersRound} />
   if (row.kind === "portalReentry") return <TypeIcon icon={KeyRound} />
   if (row.kind === "budgets" || row.kind === "unsentBudget" || row.kind === "consentToPublish" || (row.kind === "more" && row.of === "unsentBudgets"))
@@ -113,6 +116,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
     case "consentToPublish":
       return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
+    case "inventory":
+      // Inventario de esa sede con su filtro: lo que hace falta o, si solo hay vencidos, lo que vence.
+      return <Link to="/inventory" search={{ branch: row.branchId, ver: row.needed > 0 ? "hacen_falta" : "por_vencer" }} {...props} />
     case "promotion":
       // El mensaje abierto, listo para cambiarle el texto.
       return <Link to="/settings/integrations/whatsapp" search={{ mensaje: row.messageId }} {...props} />
@@ -171,6 +177,10 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers): QuickAction[]
       const handler = run[action.id]
       return handler ? [{ ...action, run: () => handler(row) }] : []
     })
+  }
+  if (row.kind === "inventory" && row.needed > 0 && handlers.onReorder) {
+    const reorder = handlers.onReorder
+    return [{ id: "pedir", label: "Pedir lo que falta", run: () => reorder(row), primary: true }]
   }
   if (row.kind === "task" && row.more === 0 && handlers.onDone) {
     const done = handlers.onDone

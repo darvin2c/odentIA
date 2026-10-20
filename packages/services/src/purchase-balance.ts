@@ -6,8 +6,12 @@
  *   Materiales vigentes más lo usado de lo que se tenía a favor con el proveedor.
  * - Por pagar = recibido − pagado, nunca menos de cero: un adelanto de lo que
  *   aún no llega no se debe, ya salió el dinero.
- * - Lo pagado de más de una compra cerrada (recibida entera, o cancelada con
- *   sus pagos dejados a favor) queda a favor con el proveedor, para la próxima.
+ * - Lo pagado de más de una compra cerrada (recibida entera, cerrada con lo
+ *   recibido, o cancelada con sus pagos dejados a favor) queda a favor con el
+ *   proveedor, para la próxima.
+ * - Las cantidades de una línea van en unidades de compra (cajas) y su costo es
+ *   por unidad de compra; el ledger cuenta unidades de uso (ADR 0067): lo que
+ *   entró de una compra se pasa a cajas con el factor copiado en la línea.
  *
  * Solo lecturas y sin dependencias de otros servicios: lo usan `finance.ts` e
  * `inventory.ts` sin ciclos.
@@ -17,7 +21,17 @@ import { sql, type SQL } from "drizzle-orm"
 import { at, bySpan, safeCents } from "./report-spans.js"
 
 /** Compras cerradas: lo pagado de más ya no espera mercadería, queda a favor. */
-export const CLOSED_PURCHASE_STATUSES = ["recibida", "cancelada"] as const
+export const CLOSED_PURCHASE_STATUSES = ["recibida", "cerrada", "cancelada"] as const
+
+/** El estado de una compra en palabras de la clínica: nunca su código en pantalla. */
+export const PURCHASE_STATUS_WORDS: Record<string, string> = {
+  borrador: "Borrador",
+  confirmada: "Pedida",
+  parcialmente_recibida: "Llegó en parte",
+  recibida: "Llegó completa",
+  cerrada: "Cerrada con lo recibido",
+  cancelada: "Cancelada",
+}
 
 export interface PurchaseBalance {
   orderId: string
@@ -79,7 +93,7 @@ export async function purchaseBalances(
   }
   if (filter.supplierId) where.push(sql`o.supplier_id = ${filter.supplierId}`)
   if (filter.currency) where.push(sql`o.currency = ${filter.currency}`)
-  if (filter.openOnly) where.push(sql`o.status in ('confirmada','parcialmente_recibida','recibida')`)
+  if (filter.openOnly) where.push(sql`o.status in ('confirmada','parcialmente_recibida','recibida','cerrada')`)
   // La misma regla que `dueCents` abajo: una cancelada no debe nada; las demás, lo recibido menos lo pagado.
   if (filter.dueOnly)
     where.push(sql`o.status <> 'cancelada' and coalesce(l.received, 0) - coalesce(e.cash, 0) - coalesce(u.credit, 0) > 0`)
@@ -156,7 +170,7 @@ export async function supplierCredits(
           + coalesce((select sum(c.amount_cents) from supplier_credit_use c where c.organization_id = o.organization_id and c.order_id = o.id and c.voided_at is null), 0)
           - coalesce((select sum(pl.received_quantity::bigint * pl.unit_cost_cents) from purchase_order_line pl where pl.organization_id = o.organization_id and pl.order_id = o.id), 0), 0) as excess
       from purchase_order o
-      where o.organization_id = ${orgId} and o.status in ('recibida','cancelada') ${supplierFilter}
+      where o.organization_id = ${orgId} and o.status in ('recibida','cerrada','cancelada') ${supplierFilter}
     ), used as (
       select c.supplier_id, c.currency, sum(c.amount_cents) as used from supplier_credit_use c
       where c.organization_id = ${orgId} and c.voided_at is null ${filter.supplierId ? sql`and c.supplier_id = ${filter.supplierId}` : sql``}
@@ -199,7 +213,8 @@ export async function unpaidPurchasesMany(
       join purchase_order o on o.organization_id = ${orgId} and o.status <> 'borrador' and o.created_at < m.at_moment
       join warehouse w on w.organization_id = o.organization_id and w.id = o.warehouse_id ${branch}
       left join lateral (
-        select sum(sm.quantity_delta::bigint * pl.unit_cost_cents) as cents, min(sm.created_at) as first_at
+        -- El ingreso va en unidades de uso; el costo, por unidad de compra: se divide por el factor de la línea.
+        select sum(sm.quantity_delta::bigint / pl.unit_factor * pl.unit_cost_cents) as cents, min(sm.created_at) as first_at
         from stock_movement sm
         join purchase_order_line pl on pl.organization_id = sm.organization_id and pl.order_id = sm.purchase_order_id and pl.product_id = sm.product_id
         where sm.organization_id = o.organization_id and sm.purchase_order_id = o.id and sm.kind = 'ingreso' and sm.created_at < m.at_moment

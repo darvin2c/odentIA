@@ -1,5 +1,5 @@
 import { PANEL, tenant } from "./env"
-import { expect, test } from "./fixtures"
+import { chooseOption, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso al salir con cambios", async ({
@@ -20,13 +20,13 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
 
   // Con algo escrito, navegar pregunta antes; seguir editando conserva el valor.
-  const sku = column.getByLabel("SKU", { exact: true })
-  await sku.fill("COL-1")
+  const name = column.getByLabel("Nombre", { exact: true })
+  await name.fill("COL-1")
   await page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).click()
   const leave = page.getByRole("alertdialog")
   await expect(leave).toContainText("Salir sin guardar")
   await leave.getByRole("button", { name: "Continuar editando" }).click()
-  await expect(sku).toHaveValue("COL-1")
+  await expect(name).toHaveValue("COL-1")
   await expect(page).toHaveURL(/\/inventory/)
 
   // Con la columna ocupada, el agente se abre como cajón encima y no la toca.
@@ -35,13 +35,12 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await expect(agent).toBeVisible()
   await agent.getByRole("button", { name: "Cerrar el panel del agente" }).click()
   await expect(agent).toBeHidden()
-  await expect(sku).toHaveValue("COL-1")
+  await expect(name).toHaveValue("COL-1")
 
   // Elegir en un desplegable también cuenta como cambio sin guardar.
   await gotoHydrated(page, tenant(org.slug, "/inventory"))
   await open()
-  await column.locator("#inv-kind").click()
-  await page.getByRole("option", { name: "Producto", exact: true }).click()
+  await chooseOption(column.getByLabel("Se usa por", { exact: true }), "caja")
   await page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).click()
   await expect(leave).toContainText("Salir sin guardar")
   await leave.getByRole("button", { name: "Descartar y salir" }).click()

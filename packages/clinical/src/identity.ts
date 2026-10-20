@@ -1,4 +1,4 @@
-import { clinicalProfileFor, type IdentityDocType } from "./country-profiles.js"
+import { clinicalProfileFor, type IdentityDocType, type TaxDocType } from "./country-profiles.js"
 
 /**
  * Catálogos de identidad del paciente (ADR 0004 y 0036). Se guardan códigos estables;
@@ -37,6 +37,25 @@ export const DOC_TYPE_LABELS: Record<IdentityDocType, string> = {
   OTRO: "Otro",
 }
 /**
+ * Documentos tributarios (los de un proveedor): el genérico del núcleo y el
+ * de cada país con perfil. Como los de identidad, se guarda el código.
+ */
+export const TAX_DOC_TYPE_LABELS: Record<TaxDocType, string> = {
+  TRIBUTARIO: "Documento tributario",
+  RUC: "RUC",
+}
+
+/**
+ * Cómo se lee un tipo de documento, de identidad o tributario. Un valor que
+ * no es un código conocido (escrito a mano antes de que hubiera lista) se
+ * muestra tal cual.
+ */
+export function documentTypeLabel(docType: string): string {
+  if (Object.hasOwn(DOC_TYPE_LABELS, docType)) return DOC_TYPE_LABELS[docType as IdentityDocType]
+  if (Object.hasOwn(TAX_DOC_TYPE_LABELS, docType)) return TAX_DOC_TYPE_LABELS[docType as TaxDocType]
+  return docType
+}
+/**
  * Código de cada tipo en la tabla 0203 de HL7 v2 (Identifier Type, CC0;
  * `http://terminology.hl7.org/CodeSystem/v2-0203`), para enviarlo como FHIR
  * `Identifier.type`: pasaporte PPN, carné de extranjería PRC (residente
@@ -67,10 +86,11 @@ export function hl7DocumentTypeCode(
 
 /**
  * Un documento como se lee en pantalla, con la etiqueta del catálogo y nunca
- * el código guardado: «Pasaporte AB1234567», «Carné de extranjería 001234567».
+ * el código guardado: «Pasaporte AB1234567», «Carné de extranjería 001234567»,
+ * «RUC 20123456789».
  */
 export function documentText(docType: string | null | undefined, docNumber: string): string {
-  const label = docType ? (DOC_TYPE_LABELS[docType as IdentityDocType] ?? docType) : ""
+  const label = docType ? documentTypeLabel(docType) : ""
   return `${label} ${docNumber}`.trim()
 }
 

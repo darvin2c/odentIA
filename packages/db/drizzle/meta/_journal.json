@@ -253,6 +253,55 @@
       "when": 1792429381146,
       "tag": "0035_buscador_sin_tildes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792438969361,
+      "tag": "0036_las_compras_y_existencias_cuidan_su_historia",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792442831767,
+      "tag": "0037_inventario_por_sede_unidades_materiales_y_venta",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792442873575,
+      "tag": "0038_inventario_por_sede_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792442923460,
+      "tag": "0039_producto_sin_tipo_ni_minimo_unico",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792446235021,
+      "tag": "0040_venta_sin_duplicar",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792462033628,
+      "tag": "0041_devolver_un_cobro",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792462037622,
+      "tag": "0042_devolver_un_cobro_reglas",
+      "breakpoints": true
     }
   ]
 }

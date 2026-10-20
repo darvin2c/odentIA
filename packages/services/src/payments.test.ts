@@ -5,17 +5,24 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
-import { patientContact } from "@odentia/db/schema/clinical"
-import { and, eq, sql } from "drizzle-orm"
+import { patientCharge, patientContact, patientPaymentRefund } from "@odentia/db/schema/clinical"
+import { cashMovement } from "@odentia/db/schema/finance"
+import { product, productLot, stockMovement } from "@odentia/db/schema/inventory"
+import { and, eq, isNull, like, sql } from "drizzle-orm"
 import { getAgentPatientSummary } from "./agent-operations.js"
+import { defaultWarehouse, lotFor, receiveIntoLot, shortageOf } from "./inventory-stock.js"
 import {
   collectCharge,
   createCharge,
   getAccountSummary,
   getPatientAccount,
+  getTicketReturnable,
+  listSaleProducts,
   refundCredit,
+  returnFromTicket,
   updateCharge,
   voidCharge,
+  voidTicket,
 } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -230,4 +237,337 @@ it("el saldo descuenta lo que tiene a favor, y «Aplicar» cancela la deuda con 
   expect(applied.account.byCurrency[0]).toMatchObject({ porCobrar: 4000, aFavor: 0, saldo: 4000 })
   // Lo registrado se ve en sus cobros.
   expect(applied.account.cobros.some((row) => row.ticketId === applied.ticket.id)).toBe(true)
+})
+
+it("vender un producto desde Cobrar: descuenta de la sede, deja faltante, y quitar el concepto o anular el ticket lo devuelven", async () => {
+  const f = await clinicalFixture()
+  const { cash } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  const store = await f.run((tx) => defaultWarehouse(tx, "org_a", branchId))
+  const tag = randomUUID().slice(0, 8)
+  const newProduct = async (values: Partial<typeof product.$inferInsert>) => {
+    const [row] = await ownerDb
+      .insert(product)
+      .values({ organizationId: "org_a", sku: `VTA-${randomUUID().slice(0, 8)}`, name: `Producto ${tag}`, unit: "unidad", ...values })
+      .returning()
+    return row!
+  }
+  const brush = await newProduct({
+    name: `Cepillo dental suave ${tag}`,
+    unit: "cepillo",
+    usedInCare: false,
+    forSale: true,
+    salePriceCents: 1500,
+    saleCurrency: "PEN",
+  })
+  const lot = await f.run(async (tx) => {
+    const row = await lotFor(tx, "org_a", { productId: brush.id, warehouseId: store.id, code: "C-1", actorUserId: f.actor })
+    await receiveIntoLot(tx, "org_a", {
+      lot: row,
+      quantity: 3,
+      base: { kind: "ingreso", reason: "Prueba", actorUserId: f.actor, keyPrefix: `prueba:${randomUUID()}` },
+    })
+    return row
+  })
+  const lotQuantity = async () =>
+    (await ownerDb.select({ q: productLot.quantityOnHand }).from(productLot).where(eq(productLot.id, lot.id)))[0]?.q
+
+  // «+ Agregar producto»: lo que se vende, con su precio y lo que hay en la sede; nunca el costo.
+  const found = await f.run((tx) => listSaleProducts(tx, "org_a", { branchId, q: `cepillo ${tag}` }))
+  expect(found.items).toEqual([
+    {
+      productId: brush.id,
+      name: brush.name,
+      unit: "cepillo",
+      salePriceCents: 1500,
+      currency: "PEN",
+      onHand: 3,
+      onHandText: "3 cepillos",
+    },
+  ])
+
+  // El concepto toma nombre y precio × cantidad, y sale del lote al agregarlo.
+  const saleKey = randomUUID()
+  const two = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: saleKey }))
+  expect(two).toMatchObject({
+    description: `${brush.name} × 2`,
+    amountCents: 3000,
+    currency: "PEN",
+    productId: brush.id,
+    productQuantity: 2,
+    branchId,
+  })
+  expect(await lotQuantity()).toBe(1)
+  const [sold] = await ownerDb.select().from(stockMovement).where(eq(stockMovement.chargeId, two.id))
+  expect(sold).toMatchObject({ kind: "venta", quantityDelta: -2, patientId: f.patient.id, reason: "Vendido a Paciente de prueba" })
+  // El mismo formulario otra vez (un corte de red): el mismo concepto, sin vender ni descontar de nuevo.
+  const again = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: saleKey }))
+  expect(again.id).toBe(two.id)
+  expect(await lotQuantity()).toBe(1)
+  await expect(
+    f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 3, branchId, requestKey: saleKey })),
+  ).rejects.toThrow("ya se registró con otros datos")
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 1, branchId }))).rejects.toThrow(
+    "No se pudo identificar esta venta",
+  )
+
+  // Sin lo suficiente se vende igual: lo que falta queda como faltante.
+  const more = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: randomUUID() }))
+  expect(await lotQuantity()).toBe(0)
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(1)
+  // Con uno solo, el nombre sin «× 1».
+  const one = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, branchId, requestKey: randomUUID() }))
+  expect(one).toMatchObject({ description: brush.name, amountCents: 1500, productQuantity: 1 })
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(2)
+
+  // Quitar el concepto lo devuelve: primero baja el faltante.
+  await f.run((tx) => voidCharge(tx, ...f.args, more.id, { reason: "Se arrepintió" }))
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(0)
+  const back = await ownerDb
+    .select()
+    .from(stockMovement)
+    .where(and(eq(stockMovement.chargeId, more.id), eq(stockMovement.kind, "devolucion")))
+  expect(back.reduce((sum, row) => sum + row.quantityDelta, 0)).toBe(2)
+
+  // La corrección con motivo sigue igual y no toca lo que hay.
+  const fixed = await f.run((tx) => updateCharge(tx, ...f.args, one.id, { amountCents: 1200, reason: "Precio de campaña" }))
+  expect(fixed.amountCents).toBe(1200)
+
+  // Anular el ticket deshace la venta (ADR 0068): el producto sale de la cuenta y vuelve a la sede.
+  const collected = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      chargeIds: [two.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: 3000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const before = await lotQuantity()
+  const voided = await f.run((tx) =>
+    voidTicket(tx, ...f.args, collected.ticket.id, { reason: "Error de medio", allowPostClose: false }),
+  )
+  expect(voided.returnedProducts).toEqual([{ description: `${brush.name} × 2`, quantity: 2, branchId }])
+  expect(await lotQuantity()).toBe((before ?? 0) + 2)
+  const [gone] = await ownerDb.select().from(patientCharge).where(eq(patientCharge.id, two.id))
+  expect(gone?.voidedAt).not.toBeNull()
+  const after = await ownerDb.select().from(stockMovement).where(eq(stockMovement.chargeId, two.id))
+  expect(after.map((row) => [row.kind, row.quantityDelta])).toEqual([
+    ["venta", -2],
+    ["devolucion", 2],
+  ])
+
+  // Lo que no se vende, sin precio, desactivado o sin sede: error en palabras.
+  const supply = await newProduct({ name: `Guantes ${tag}`, usedInCare: true })
+  const unpriced = await newProduct({ name: `Enjuague ${tag}`, usedInCare: false, forSale: true })
+  const retired = await newProduct({ name: `Hilo ${tag}`, forSale: true, salePriceCents: 900, saleCurrency: "PEN", isActive: false })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: supply.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_NOT_FOR_SALE",
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: unpriced.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_WITHOUT_PRICE",
+    message: expect.stringContaining("no tiene precio de venta"),
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: retired.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_INACTIVE",
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id }))).rejects.toMatchObject({
+    code: "VALIDATION",
+  })
+  await expect(
+    f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, branchId, amountCents: 100 })),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  const listed = await f.run((tx) => listSaleProducts(tx, "org_a", { branchId, q: tag }))
+  expect(listed.items.map((item) => item.productId).sort()).toEqual([brush.id, unpriced.id].sort())
+  expect(listed.items.find((item) => item.productId === unpriced.id)).toMatchObject({ salePriceCents: null, onHandText: null })
+})
+
+it("devolver desde un ticket: la venta queda, el producto vuelve si sirve, se le paga o queda a favor y el ticket ya no se anula", async () => {
+  const f = await clinicalFixture()
+  const { cash, yape } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  const store = await f.run((tx) => defaultWarehouse(tx, "org_a", branchId))
+  const [brush] = await ownerDb
+    .insert(product)
+    .values({
+      organizationId: "org_a",
+      sku: `DEV-${randomUUID().slice(0, 8)}`,
+      name: "Cepillo interdental",
+      unit: "cepillo",
+      usedInCare: false,
+      forSale: true,
+      salePriceCents: 1500,
+      saleCurrency: "PEN",
+    })
+    .returning()
+  const lot = await f.run(async (tx) => {
+    const row = await lotFor(tx, "org_a", { productId: brush!.id, warehouseId: store.id, code: "D-1", actorUserId: f.actor })
+    await receiveIntoLot(tx, "org_a", {
+      lot: row,
+      quantity: 5,
+      base: { kind: "ingreso", reason: "Prueba", actorUserId: f.actor, keyPrefix: `prueba:${randomUUID()}` },
+    })
+    return row
+  })
+  const lotQuantity = async () =>
+    (await ownerDb.select({ q: productLot.quantityOnHand }).from(productLot).where(eq(productLot.id, lot.id)))[0]?.q
+  const sale = await f.run((tx) =>
+    createCharge(tx, ...f.args, { productId: brush!.id, quantity: 2, branchId, requestKey: randomUUID() }),
+  )
+  const cleaning = await f.run((tx) => createCharge(tx, ...f.args, { description: "Limpieza dental", amountCents: 12000 }))
+  const collected = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      chargeIds: [sale.id, cleaning.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const ticketId = collected.ticket.id
+  expect(await lotQuantity()).toBe(3)
+
+  // Qué se puede devolver: cada concepto como está hoy, con lo que pagó este ticket.
+  const open = await f.run((tx) => getTicketReturnable(tx, "org_a", f.patient.id, ticketId))
+  expect(open.lines).toEqual([
+    expect.objectContaining({ chargeId: sale.id, kind: "producto", productName: "Cepillo interdental", quantity: 2, paidCents: 3000, blockedReason: null }),
+    expect.objectContaining({ chargeId: cleaning.id, kind: "servicio", paidCents: 12000, blockedReason: null }),
+  ])
+  expect(open.methods).toEqual([expect.objectContaining({ paymentMethodId: cash.id, typeCode: "10" })])
+
+  // Devuelve 1 de 2 cepillos, en buen estado, y se le pagan en efectivo.
+  const key = randomUUID()
+  const input = {
+    branchId,
+    lines: [{ chargeId: sale.id, quantity: 1 }],
+    paymentMethodId: cash.id,
+    reason: "No lo quería",
+    requestId: key,
+  }
+  const first = await f.run((tx) => returnFromTicket(tx, ...f.args, ticketId, input))
+  expect(first.duplicate).toBe(false)
+  expect(first.paymentReturn).toMatchObject({ returnNumber: 1, totalCents: 1500, outcome: "pagado", methodName: "Efectivo" })
+  expect(await lotQuantity()).toBe(4)
+  // La venta queda en pie: el concepto se anula y otro sigue con lo que queda.
+  const [old] = await ownerDb.select().from(patientCharge).where(eq(patientCharge.id, sale.id))
+  expect(old?.voidedAt).not.toBeNull()
+  const [kept] = await ownerDb
+    .select()
+    .from(patientCharge)
+    .where(and(eq(patientCharge.originalChargeId, sale.id), isNull(patientCharge.voidedAt)))
+  expect(kept).toMatchObject({ description: "Cepillo interdental", amountCents: 1500, productQuantity: 1, returnedCents: 1500 })
+  let account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.byCurrency.find((c) => c.currency === "PEN")).toMatchObject({ porCobrar: 0, pagado: 13500, aFavor: 0 })
+  const refunds = await ownerDb
+    .select()
+    .from(patientPaymentRefund)
+    .where(eq(patientPaymentRefund.returnId, first.paymentReturn.id))
+  expect(refunds.reduce((sum, row) => sum + row.amountCents, 0)).toBe(1500)
+  const [out] = await ownerDb
+    .select()
+    .from(cashMovement)
+    .where(and(eq(cashMovement.organizationId, "org_a"), like(cashMovement.concept, "Devolución 000001%")))
+  expect(out).toMatchObject({ direction: "egreso", kind: "devolucion", amountCents: 1500, methodTypeCode: "10" })
+
+  // Un reintento devuelve la misma devolución, sin devolver dos veces.
+  const again = await f.run((tx) => returnFromTicket(tx, ...f.args, ticketId, input))
+  expect(again).toMatchObject({ duplicate: true, paymentReturn: { id: first.paymentReturn.id } })
+  expect(await lotQuantity()).toBe(4)
+  await expect(
+    f.run((tx) => returnFromTicket(tx, ...f.args, ticketId, { ...input, reason: "Otro motivo" })),
+  ).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
+
+  // Con una devolución, el ticket ya no se anula.
+  await expect(
+    f.run((tx) => voidTicket(tx, ...f.args, ticketId, { reason: "Error", allowPostClose: false })),
+  ).rejects.toMatchObject({ code: "TICKET_HAS_REFUNDS" })
+
+  // El otro cepillo llegó abierto: no vuelve a la venta y el dinero queda a favor.
+  const now = await f.run((tx) => getTicketReturnable(tx, "org_a", f.patient.id, ticketId))
+  expect(now.lines[0]).toMatchObject({ chargeId: kept!.id, quantity: 1, paidCents: 1500 })
+  expect(now.returns).toHaveLength(1)
+  await expect(
+    f.run((tx) =>
+      returnFromTicket(tx, ...f.args, ticketId, { ...input, lines: [{ chargeId: kept!.id, quantity: 2 }], requestId: randomUUID() }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  const second = await f.run((tx) =>
+    returnFromTicket(tx, ...f.args, ticketId, {
+      branchId,
+      lines: [{ chargeId: kept!.id, quantity: 1, backToStock: false }],
+      paymentMethodId: null,
+      reason: "Llegó abierto",
+      requestId: randomUUID(),
+    }),
+  )
+  expect(second.paymentReturn).toMatchObject({ returnNumber: 2, totalCents: 1500, outcome: "a_favor", methodName: null })
+  expect(await lotQuantity()).toBe(4)
+  const stillSold = await ownerDb
+    .select()
+    .from(patientCharge)
+    .where(and(eq(patientCharge.originalChargeId, sale.id), isNull(patientCharge.voidedAt)))
+  expect(stillSold).toHaveLength(0)
+  account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.byCurrency.find((c) => c.currency === "PEN")).toMatchObject({ porCobrar: 0, aFavor: 1500 })
+
+  // De la limpieza se devuelve un importe por un reclamo; nunca más de lo que pagó este ticket.
+  await expect(
+    f.run((tx) =>
+      returnFromTicket(tx, ...f.args, ticketId, {
+        branchId,
+        lines: [{ chargeId: cleaning.id, amountCents: 12001 }],
+        paymentMethodId: yape.id,
+        reason: "Reclamo",
+        requestId: randomUUID(),
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "RETURN_EXCEEDS_PAID" })
+  await f.run((tx) =>
+    returnFromTicket(tx, ...f.args, ticketId, {
+      branchId,
+      lines: [{ chargeId: cleaning.id, amountCents: 5000 }],
+      paymentMethodId: yape.id,
+      reason: "Reclamo",
+      requestId: randomUUID(),
+    }),
+  )
+  const [rest] = await ownerDb
+    .select()
+    .from(patientCharge)
+    .where(and(eq(patientCharge.originalChargeId, cleaning.id), isNull(patientCharge.voidedAt)))
+  expect(rest).toMatchObject({ description: "Limpieza dental", amountCents: 7000, returnedCents: 5000 })
+  account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  expect(account.byCurrency.find((c) => c.currency === "PEN")).toMatchObject({ porCobrar: 0, aFavor: 1500, pagado: 8500 })
+  expect(account.cobros[0]?.returns.map((item) => item.number)).toEqual([1, 2, 3])
+})
+
+it("una devolución no deja otra vez por cobrar lo que ya se cobró de un tratamiento", async () => {
+  const f = await clinicalFixture()
+  const { cash } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: budget.items[0].id }))
+  const collected = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      chargeIds: [charge.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: charge.amountCents }],
+      requestId: randomUUID(),
+    }),
+  )
+  await f.run((tx) =>
+    returnFromTicket(tx, ...f.args, collected.ticket.id, {
+      branchId,
+      lines: [{ chargeId: charge.id, amountCents: 1000 }],
+      paymentMethodId: null,
+      reason: "Descuento por reclamo",
+      requestId: randomUUID(),
+    }),
+  )
+  await expect(
+    f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: budget.items[0].id })),
+  ).rejects.toMatchObject({ code: "CHARGE_EXCEEDS_BUDGET" })
 })

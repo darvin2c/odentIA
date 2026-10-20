@@ -6,7 +6,7 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { encounter, encounterProcedure, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
-import { product } from "@odentia/db/schema/inventory"
+import { product, productLot, productMinimum, warehouse } from "@odentia/db/schema/inventory"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
@@ -544,7 +544,10 @@ it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada avi
 })
 
 it("un aviso se retira solo cuando su asunto se resuelve y vuelve a llegar si el asunto vuelve", async () => {
-  const [item] = await ownerDb.insert(product).values({ organizationId: "org_a", sku: `G-${randomUUID().slice(0, 6)}`, name: "Guantes", minStock: 5 }).returning()
+  // Los avisos de stock bajo de antes (la campana ya no los da): se retiran cuando ninguna sede está bajo su mínimo.
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede avisos ${randomUUID().slice(0, 6)}` }).returning()
+  const [item] = await ownerDb.insert(product).values({ organizationId: "org_a", sku: `G-${randomUUID().slice(0, 6)}`, name: "Guantes" }).returning()
+  await ownerDb.insert(productMinimum).values({ organizationId: "org_a", productId: item!.id, branchId: sede!.id, minQuantity: 5 })
   const lowStock = () => withOrgContext(appDb, "org_a", tx => createWorkspaceNotification(tx, "org_a", {
     userId: recipient, dedupeKey: `inventory:low-stock:${item!.id}`, title: "Stock bajo: Guantes", body: "", href: "/inventory",
     permission: "inventory.read", subject: `producto:${item!.id}`,
@@ -554,11 +557,11 @@ it("un aviso se retira solo cuando su asunto se resuelve y vuelve a llegar si el
   await lowStock()
   expect(await shown()).toContain("Stock bajo: Guantes")
   // Se repone (ya no está bajo el mínimo): el aviso se retira solo, aunque nadie lo leyera.
-  await ownerDb.update(product).set({ minStock: 0 }).where(eq(product.id, item!.id))
+  await ownerDb.update(productMinimum).set({ minQuantity: 0 }).where(eq(productMinimum.productId, item!.id))
   await withOrgContext(appDb, "org_a", tx => settleWorkspaceNotifications(tx, "org_a", { subject: `producto:${item!.id}` }))
   expect(await shown()).not.toContain("Stock bajo: Guantes")
   // Vuelve a bajar: con la misma clave, avisa otra vez y sin leer.
-  await ownerDb.update(product).set({ minStock: 5 }).where(eq(product.id, item!.id))
+  await ownerDb.update(productMinimum).set({ minQuantity: 5 }).where(eq(productMinimum.productId, item!.id))
   await lowStock()
   const again = await withOrgContext(appDb, "org_a", tx => listWorkspaceNotifications(tx, "org_a", recipient, ["inventory.read"]))
   expect(again.items.find(row => row.title === "Stock bajo: Guantes")?.readAt).toBeNull()
@@ -630,4 +633,30 @@ it("la puesta en marcha trae encender Recepción y el Administrador, solo a quie
   expect(await setupOf(() => true)).toMatchObject({ agent: false })
   await ownerDb.update(agentConfig).set({ advisor: { enabled: true } }).where(eq(agentConfig.organizationId, orgId))
   expect(await setupOf(() => true)).toMatchObject({ agent: true })
+})
+
+it("Inicio: lo que hace falta y lo vencido del inventario es una fila por sede para quien pide las compras, y se va sola", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `inventario-${orgId.slice(0, 8)}`)
+  const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning({ id: branch.id })
+  // La sede nace con su almacén principal (disparador de la base).
+  const [principal] = await ownerDb.select({ id: warehouse.id }).from(warehouse).where(eq(warehouse.branchId, centro!.id))
+  const [resina] = await ownerDb.insert(product).values({ organizationId: orgId, sku: "RES", name: "Resina A2", unit: "jeringa" }).returning()
+  const [anestesia] = await ownerDb.insert(product).values({ organizationId: orgId, sku: "ANE", name: "Mepivacaína 3%", unit: "cartucho" }).returning()
+  await ownerDb.insert(productMinimum).values({ organizationId: orgId, productId: resina!.id, branchId: centro!.id, minQuantity: 8 })
+  const [vencido] = await ownerDb.insert(productLot).values({
+    organizationId: orgId, productId: anestesia!.id, warehouseId: principal!.id, code: "L-VIEJO", expiresAt: "2020-01-01", quantityOnHand: 5,
+  }).returning({ id: productLot.id })
+  const access: WorkspaceAccess = { ...restricted, tasks: true }
+  const inventoryRows = async (can: (permission: string) => boolean) =>
+    rowsOf((await withOrgContext(appDb, orgId, (tx) => getWorkspaceHome(tx, orgId, recipient, access, { can }))).waiting, "inventory")
+  expect(await inventoryRows(() => true)).toMatchObject([
+    { branchId: centro!.id, branchName: "Centro", needed: 1, neededNames: ["Resina A2"], expiredLots: 1, expired: [{ productName: "Mepivacaína 3%", expiresAt: "2020-01-01" }] },
+  ])
+  // Recepción no pide compras: no le llega.
+  expect(await inventoryRows((permission) => permission !== "inventory.write")).toEqual([])
+  // Llegó la resina y se dio de baja lo vencido: la fila se va sola.
+  await ownerDb.insert(productLot).values({ organizationId: orgId, productId: resina!.id, warehouseId: principal!.id, code: "L-1", quantityOnHand: 10 })
+  await ownerDb.update(productLot).set({ quantityOnHand: 0 }).where(eq(productLot.id, vencido!.id))
+  expect(await inventoryRows(() => true)).toEqual([])
 })

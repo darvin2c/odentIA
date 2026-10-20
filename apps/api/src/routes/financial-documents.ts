@@ -34,18 +34,19 @@ function canSendBudget(role: string): boolean {
 
 /**
  * Documentos económicos para envío (propiedad Documentos, Fase 7).
- * - GET /:id/financial-document-options?documentType=ticket|budget&documentId=&recipientContactId?
+ * - GET /:id/financial-document-options?documentType=ticket|budget|return&documentId=&recipientContactId?
  *   → destinatarios autorizados, canales utilizables y canal propuesto.
  * - GET /:id/financial-document-pdf?documentType=&documentId=[&paper=A4|Letter] → PDF inline
  *   (misma fuente que impresión y envío; sin paper usa el papel del perfil).
  * - POST /:id/financial-documents/send { documentType, documentId, recipientContactId?,
  *   connectionId, message?, savePreferredChannel?, paper? } → 201 { conversationId, messageId,
  *   status: "queued" } (encolado, nunca entregado).
- * Permisos canónicos: ticket exige finance.read/write; budget exige
+ * Permisos canónicos: ticket y devolución exigen finance.read/write; budget exige
  * budgets.read/send. La titularidad (paciente de la org, destinatario
  * autorizado, lo propio del odontólogo) se valida en el servicio.
  */
-const documentType = z.enum(["ticket", "budget"])
+// La devolución (ADR 0068) es de caja, como el ticket.
+const documentType = z.enum(["ticket", "budget", "return"])
 
 const optionsQuery = z.object({
   documentType,
@@ -126,7 +127,7 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = optionsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if (parsed.data.documentType === "ticket") {
+    if (parsed.data.documentType !== "budget") {
       if (!canAccess(memberRole, "finance.read")) return forbid(c)
     } else if (!canReadBudget(memberRole)) {
       return forbid(c)
@@ -145,7 +146,7 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = paperQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if (parsed.data.documentType === "ticket") {
+    if (parsed.data.documentType !== "budget") {
       if (!canAccess(memberRole, "finance.read")) return forbid(c)
     } else if (!canReadBudget(memberRole)) {
       return forbid(c)
@@ -170,7 +171,7 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = sendInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if (parsed.data.documentType === "ticket") {
+    if (parsed.data.documentType !== "budget") {
       if (!canAccess(memberRole, "finance.write")) return forbid(c)
     } else if (!canSendBudget(memberRole)) {
       return forbid(c)
@@ -258,7 +259,7 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = recipientEmailInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if (parsed.data.documentType === "ticket") {
+    if (parsed.data.documentType !== "budget") {
       if (!canAccess(memberRole, "finance.write")) return forbid(c)
     } else if (!canSendBudget(memberRole)) {
       return forbid(c)

@@ -63,6 +63,12 @@ import {
 } from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
+import {
+  type ClosingMaterials,
+  closingMaterialsOf,
+  type DiscountedMaterials,
+  discountEncounterMaterials,
+} from "./service-materials.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -1431,6 +1437,11 @@ export interface FinalizeEncounterResult {
    * atención cambió el gráfico), con su momento deducido.
    */
   odontogram: Pick<OdontogramAssessmentRow, "id" | "purpose"> | null
+  /**
+   * Los materiales que descontó el cierre (ADR 0067), con lo que quedó como
+   * faltante. Null si la atención no tiene sede o no usó nada configurado.
+   */
+  materials: DiscountedMaterials | null
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1514,6 +1525,12 @@ export interface ClosingCheck {
    * o null si no tiene. A medias no bloquea: se firma como parcial.
    */
   periodontal: ClosingPeriodontal | null
+  /**
+   * Lo que se descontará al firmar (materiales de sus servicios × cantidad),
+   * por producto y con la sede. Informa, no pide confirmar; null si la
+   * atención no tiene sede o no hay nada que descontar.
+   */
+  materials: ClosingMaterials | null
 }
 
 export interface ClosingPeriodontal {
@@ -1601,7 +1618,8 @@ export async function checkEncounterClosing(
   )
   const odontogram = await closingOdontogramOf(tx, orgId, row.patientId, row.id)
   const periodontal = await closingPeriodontalOf(tx, orgId, row.id)
-  return { ready: missing.length === 0, missing, consents, odontogram, periodontal }
+  const materials = await closingMaterialsOf(tx, orgId, row)
+  return { ready: missing.length === 0, missing, consents, odontogram, periodontal, materials }
 }
 
 export async function getEncounterClosing(
@@ -1826,8 +1844,9 @@ export async function finalizeEncounter(
       continue
     }
     if (proc.planItemId) {
+      // Lo cobrado incluye lo devuelto (ADR 0068): una devolución no deja otra vez por cobrar el tratamiento.
       const active = await tx
-        .select({ amountCents: patientCharge.amountCents })
+        .select({ amountCents: patientCharge.amountCents, returnedCents: patientCharge.returnedCents })
         .from(patientCharge)
         .where(
           and(
@@ -1838,7 +1857,7 @@ export async function finalizeEncounter(
           ),
         )
       const agreed = line?.priceCents ?? proc.priceCents
-      const charged = active.reduce((sum, c) => sum + c.amountCents, 0)
+      const charged = active.reduce((sum, c) => sum + c.amountCents + c.returnedCents, 0)
       const remaining = agreed - charged
       if (remaining <= 0) {
         skip(proc, "covered")
@@ -1893,12 +1912,16 @@ export async function finalizeEncounter(
     })
   }
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
+  // Los materiales de sus servicios salen solos de la sede de la atención
+  // (ADR 0067): lo que no alcanza queda como faltante y nunca bloquea el cierre.
+  const materials = await discountEncounterMaterials(tx, orgId, actorUserId, row)
   await audit(tx, orgId, actorUserId, "encounter.finalized", "encounter", encounterId, {
     patientId,
     charges: charges.length,
     skippedCharges: skippedCharges.length,
     // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
     consentsUnsigned: closing.consents.length,
+    materials: materials?.items.length ?? 0,
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
   // borrador de la persona o nace uno. No se envía solo.
@@ -1911,6 +1934,7 @@ export async function finalizeEncounter(
     skippedCharges,
     budget,
     odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null,
+    materials,
     billing: {
       chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,

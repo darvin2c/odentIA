@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { clinicalProfileFor } from "./country-profiles.js"
-import { documentText, identityDocumentError, kinshipFromWords } from "./identity.js"
+import { clinicalProfileFor, supplierDocumentTypes } from "./country-profiles.js"
+import { documentText, documentTypeLabel, identityDocumentError, kinshipFromWords } from "./identity.js"
 import {
   DEFAULT_REGISTRATION_CONFIG,
   missingPersonData,
@@ -71,6 +71,11 @@ describe("contrato de registro", () => {
     expect(documentText("DNI", "12345678")).toBe("DNI 12345678")
     expect(documentText("NACIONAL", "12.345.678-5")).toBe("Documento nacional 12.345.678-5")
     expect(documentText(null, "12345678")).toBe("12345678")
+    // Los tributarios también; lo escrito a mano antes de la lista, tal cual.
+    expect(documentText("RUC", "20123456789")).toBe("RUC 20123456789")
+    expect(documentText("TRIBUTARIO", "900123456")).toBe("Documento tributario 900123456")
+    expect(documentText("NIT", "900123456")).toBe("NIT 900123456")
+    expect(documentTypeLabel("toString")).toBe("toString")
   })
   it("los errores del documento dicen qué arreglar", () => {
     expect(identityDocumentError("DNI", "456789")).toBe("El DNI tiene 8 números; faltan 2")
@@ -155,6 +160,14 @@ describe("lo de cada país en los datos de la persona", () => {
     expect(normalizePersonData({ insuranceScheme: "ESSALUD" }, peru).insuranceType).toBe("PUBLICO")
     expect(normalizePersonData({ insuranceScheme: "EPS" }, peru).insuranceType).toBe("PRIVADO")
     expect(normalizePersonData({ address: "Av. Providencia 1234" }, chile).addressCountry).toBe("CL")
+  })
+  it("a un proveedor se le ofrecen los documentos tributarios del país, los de persona que sirven a quien vende y «Otro»", () => {
+    expect(peru.taxDocumentTypes).toEqual(["RUC"])
+    // Ni el certificado de nacido vivo ni el documento extranjero identifican a quien vende.
+    expect(supplierDocumentTypes(peru)).toEqual(["RUC", "DNI", "CE", "PASAPORTE", "OTRO"])
+    // Sin perfil propio, el núcleo: un documento tributario genérico, nunca el RUC.
+    expect(supplierDocumentTypes(chile)).toEqual(["TRIBUTARIO", "NACIONAL", "PASAPORTE", "OTRO"])
+    expect(supplierDocumentTypes(clinicalProfileFor(null))).toEqual(["TRIBUTARIO", "NACIONAL", "PASAPORTE", "OTRO"])
   })
   it("fuera de Perú el registro no pregunta la procedencia", () => {
     const asksOrigin = { ...config, fields: { ...config.fields, origin: "optional" as const } }

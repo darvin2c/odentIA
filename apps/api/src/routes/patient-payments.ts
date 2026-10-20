@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getTicketReceipt, refundCredit, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -30,6 +30,19 @@ const chargeInput = z.object({
   branchId: z.uuid().nullish(),
   /** Línea aceptada de una propuesta: el cargo hereda descripción, precio acordado y promoción. */
   budgetItemId: z.uuid().nullish(),
+  /**
+   * «+ Agregar producto» (ADR 0067): el concepto toma nombre y precio de venta
+   * × cantidad, exige la sede y descuenta de su almacén al crearse.
+   */
+  productId: z.uuid({ error: "Elige el producto de la lista" }).nullish(),
+  quantity: z
+    .number({ error: "Escribe la cantidad" })
+    .int({ error: "La cantidad es un número entero" })
+    .min(1, { error: "La cantidad va de 1 a 9999" })
+    .max(9999, { error: "La cantidad va de 1 a 9999" })
+    .nullish(),
+  /** Clave del formulario de la venta: un reintento no vende dos veces. */
+  requestId: z.uuid({ error: "No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo" }).nullish(),
   description: z.string().trim().min(1).max(2000).nullish(),
   amountCents: cents.nullish(),
   currency: z.string().regex(/^[A-Z]{3}$/).nullish(),
@@ -50,6 +63,20 @@ const refundInput = z.object({
   reason: z.string().trim().min(1).max(2000),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
 }).strict()
+// «Devolver» desde un ticket (ADR 0068): qué devuelve, cómo se le paga y por qué.
+const returnInput = z.object({
+  branchId: z.uuid(),
+  lines: z.array(z.object({
+    chargeId: z.uuid(),
+    quantity: z.number().int().min(1).max(9999).optional(),
+    amountCents: cents.optional(),
+    backToStock: z.boolean().optional(),
+  }).strict()).min(1, { error: "Elige qué devuelve" }).max(50),
+  /** Con qué medio se le paga; null = queda a favor en su cuenta. */
+  paymentMethodId: z.uuid().nullable(),
+  reason: z.string().trim().min(1, { error: "Escribe el motivo de la devolución" }).max(2000),
+  requestId: z.uuid(),
+}).strict()
 export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
   // La cuenta exige finance.read; cada mutación exige además finance.write.
@@ -62,6 +89,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     "/:id/charges/*",
     "/:id/tickets/*",
     "/:id/refunds",
+    "/:id/returns/*",
     "/:id/receipts/*",
   ]) {
     app.use(path, async (c, next) => {
@@ -122,8 +150,9 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
       return { ...collected, receipt }
     })
   })
-  // Cargos de caja: concepto manual (fuera del tarifario, con o sin moneda)
-  // o cargo de una línea aceptada de la propuesta (hereda precio y promoción).
+  // Cargos de caja: concepto manual (fuera del tarifario, con o sin moneda),
+  // cargo de una línea aceptada de la propuesta (hereda precio y promoción) o
+  // producto que se vende (precio de venta × cantidad; sale de la sede).
   // Las fuentes clínicas las crea el cierre de la atención, no esta ruta.
   app.post("/:id/charges", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -133,12 +162,30 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     const parsed = chargeInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const body = parsed.data
-    if (!body.budgetItemId && (!body.description || !body.amountCents))
-      return validationError(c, [{ code: "custom", path: [], message: "Indica el concepto y el importe, o la línea aceptada", input: body } as never])
+    const problem = body.productId
+      ? body.budgetItemId
+        ? "Un producto se cobra solo, sin la línea del presupuesto"
+        : body.description || body.amountCents
+          ? "El concepto y el importe de un producto salen de su precio de venta"
+          : !body.branchId
+            ? "Elige la sede del cobro: el producto sale de su almacén"
+            : !body.requestId
+              ? "No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo"
+              : null
+      : body.quantity != null || body.requestId != null
+        ? "La cantidad solo va con un producto"
+        : !body.budgetItemId && (!body.description || !body.amountCents)
+          ? "Indica el concepto y el importe, o la línea aceptada"
+          : null
+    if (problem)
+      return validationError(c, [{ code: "custom", path: [], message: problem, input: body } as never])
     return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
       createCharge(tx, orgId, userId, params.data.id, {
         branchId: body.branchId ?? undefined,
         budgetItemId: body.budgetItemId ?? undefined,
+        productId: body.productId ?? undefined,
+        quantity: body.quantity ?? undefined,
+        requestKey: body.requestId ?? undefined,
         description: body.description ?? undefined,
         amountCents: body.amountCents ?? undefined,
         currency: body.currency ?? undefined,
@@ -161,6 +208,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
         reason: parsed.data.reason,
       })))
   })
+  // Quitar un concepto. Si es un producto, vuelve al inventario de la sede.
   app.post("/:id/charges/:chargeId/void", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
@@ -171,7 +219,9 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       voidCharge(tx, orgId, userId, params.data.id, params.data.chargeId, parsed.data)))
   })
-  // Anular cobro: revierte todo en una acción. Tras el cierre solo administración.
+  // Anular ticket: deshace la venta y el pago en una acción (ADR 0068). Tras el
+  // cierre solo administración. Los productos vuelven a su sede; los servicios
+  // hechos quedan por cobrar.
   app.post("/:id/tickets/:ticketId/void", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
@@ -184,6 +234,34 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
         ...parsed.data,
         allowPostClose: canAccess(memberRole, "finance.admin"),
       })))
+  })
+  // Qué se puede devolver de un ticket: sus conceptos como están hoy y sus medios.
+  app.get("/:id/tickets/:ticketId/returnable", async c => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({id:z.uuid(),ticketId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
+      getTicketReturnable(tx, orgId, params.data.id, params.data.ticketId)))
+  })
+  // Devolver: la venta queda en pie y la devolución la rebaja; se le paga en el
+  // mismo paso o queda a favor. Cualquier día: el dinero sale de la caja de hoy.
+  app.post("/:id/tickets/:ticketId/returns", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const params = z.object({id:z.uuid(),ticketId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = returnInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
+      returnFromTicket(tx, orgId, userId, params.data.id, params.data.ticketId, parsed.data)))
+  })
+  // Una devolución tal como se registró (para verla e imprimirla).
+  app.get("/:id/returns/:returnId", async c => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({id:z.uuid(),returnId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
+      getPaymentReturn(tx, orgId, params.data.id, params.data.returnId)))
   })
   // Devolver dinero: solo saldo a favor, sale del efectivo de la caja del día.
   app.post("/:id/refunds", async c => {

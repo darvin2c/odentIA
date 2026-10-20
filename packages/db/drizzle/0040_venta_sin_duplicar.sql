@@ -1,0 +1,2 @@
+ALTER TABLE "patient_charge" ADD COLUMN "request_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "patient_charge_org_request_key_uidx" ON "patient_charge" USING btree ("organization_id","request_key") WHERE "request_key" IS NOT NULL;

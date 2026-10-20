@@ -217,6 +217,24 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         detail: row.requestedByName ? `Lo pidió ${row.requestedByName}` : "Lo pidió una atención",
         action: "Abrir los consentimientos",
       }
+    case "inventory": {
+      const needed = row.needed > 0 ? `${plural(row.needed, "producto hace falta", "productos hacen falta")}` : null
+      const expired = row.expiredLots > 0 ? `${plural(row.expiredLots, "lote venció", "lotes vencieron")}` : null
+      const names = row.neededNames.length
+        ? `${listed(row.neededNames)}${row.needed > row.neededNames.length ? ` y ${row.needed - row.neededNames.length} más` : ""}`
+        : null
+      const firstExpired = row.expired[0]
+      return {
+        title: `Inventario de ${row.branchName}: ${listed([needed, expired].filter((part): part is string => part !== null))}`,
+        detail: joined([
+          names,
+          firstExpired
+            ? `${firstExpired.productName} venció el ${new Date(`${firstExpired.expiresAt}T12:00:00Z`).toLocaleDateString(context.locale, { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "")}`
+            : null,
+        ]),
+        action: row.needed > 0 ? "Ver qué hace falta" : "Ver lo vencido",
+      }
+    }
     case "promotion":
       return {
         title: `WhatsApp considera "${row.title}" como promoción: solo se enviará a quien aceptó novedades.`,
@@ -292,6 +310,7 @@ export function waitingKey(row: WaitingRow): string {
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
   if (row.kind === "promotion") return `promotion:${row.messageId}`
+  if (row.kind === "inventory") return `inventory:${row.branchId}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind
 }

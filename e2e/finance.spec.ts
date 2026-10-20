@@ -55,11 +55,11 @@ for (const viewport of [
     expect(cash.cashOnHandCents).toBe(20000)
     expect(cash.tickets).toBe(1)
 
-    // Anular el cobro devuelve la deuda completa y la caja a cero.
-    await page.getByRole("button", { name: "Anular este cobro" }).click()
-    const voidDrawer = surface(page, { name: "Anular cobro", exact: true })
+    // Anular el ticket (un error al cobrar) devuelve la deuda completa y la caja a cero.
+    await page.getByRole("button", { name: "Anular ticket" }).click()
+    const voidDrawer = surface(page, { name: "Anular ticket", exact: true })
     await voidDrawer.getByLabel("Motivo", { exact: true }).fill("Se cobró a la persona equivocada")
-    await voidDrawer.getByRole("button", { name: "Anular cobro", exact: true }).click()
+    await voidDrawer.getByRole("button", { name: "Anular ticket", exact: true }).click()
     await expect(page.getByRole("article", { name: /anulado/ })).toBeVisible()
     await shot("ticket-anulado")
     const afterVoid = await call<{ cashOnHandCents: number }>(

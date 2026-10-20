@@ -5,16 +5,23 @@ import {
   getService,
   getTemplate,
   listMostUsedServices,
+  listMaterialProducts,
+  listServiceMaterials,
   listServices,
   listTemplates,
+  MATERIAL_QUANTITY_MAX,
   PRICE_DISCLOSURE_BATCH,
   quickAddServices,
+  SERVICE_MATERIALS_MAX,
+  serviceMaterialSummaries,
+  setServiceMaterials,
   setServicesPriceDisclosure,
+  topServicesWithoutMaterials,
   updateService,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canAccess, orgContextOf } from "../lib/context.js"
+import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -154,6 +161,48 @@ const mostUsedQuery = z
   })
   .strict()
 
+/**
+ * Materiales de un servicio (ADR 0067): la lista entera, que reemplaza a la
+ * anterior. La cantidad va en la unidad de uso del producto, por cada vez.
+ */
+const materialsInput = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            productId: z.uuid({ error: "Elige el producto de la lista" }),
+            quantity: z
+              .number({ error: "Escribe cuánto se usa cada vez" })
+              .int({ error: "La cantidad es un número entero" })
+              .min(1, { error: `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}` })
+              .max(MATERIAL_QUANTITY_MAX, { error: `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}` }),
+          })
+          .strict(),
+      )
+      .max(SERVICE_MATERIALS_MAX, { error: `Un servicio admite hasta ${SERVICE_MATERIALS_MAX} materiales` }),
+  })
+  .strict()
+
+const materialProductsQuery = z
+  .object({
+    q: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+  })
+  .strict()
+
+const withoutMaterialsQuery = z
+  .object({
+    days: z.coerce.number().int().min(1).max(365).optional(),
+    limit: z.coerce.number().int().min(1).max(20).optional(),
+  })
+  .strict()
+
+/** Quien ve Inventario (con precios o sin ellos) ve los materiales; el costo, solo con precios. */
+function seesMaterials(role: string): boolean {
+  return canAccessAny(role, ["inventory.read", "inventory.stock"])
+}
+
 export function createServicesRoute(deps: CrmDeps) {
   const app = new Hono()
 
@@ -165,16 +214,32 @@ export function createServicesRoute(deps: CrmDeps) {
     const parsed = offersQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
-      const page = await withOrgContext(deps.db, orgId, (tx) =>
-        listServices(tx, orgId, {
+      const page = await withOrgContext(deps.db, orgId, async (tx) => {
+        const found = await listServices(tx, orgId, {
           q: parsed.data.q,
           specialtyId: parsed.data.specialtyId,
           state: parsed.data.state,
           ids: parsed.data.ids,
           cursor: parsed.data.cursor,
           limit: parsed.data.limit,
-        }),
-      )
+        })
+        // Quien ve Inventario recibe en cada fila sus materiales («3 · S/ 2.18»
+        // o «Sin materiales»); el costo, solo quien ve precios.
+        if (!seesMaterials(memberRole)) return found
+        const summaries = await serviceMaterialSummaries(
+          tx,
+          orgId,
+          found.data.map((item) => item.id),
+          { prices: canAccess(memberRole, "inventory.read") },
+        )
+        return {
+          ...found,
+          data: found.data.map((item) => ({
+            ...item,
+            materials: summaries.get(item.id) ?? { count: 0, cost: null },
+          })),
+        }
+      })
       return c.json(page)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
@@ -198,6 +263,71 @@ export function createServicesRoute(deps: CrmDeps) {
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
+  })
+
+  // «Empieza por estos 5»: los servicios más hechos del último mes que aún no
+  // tienen materiales. Es para quien los configura.
+  app.get("/without-materials", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "inventory.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"), 403)
+    }
+    const parsed = withoutMaterialsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => topServicesWithoutMaterials(tx, orgId, parsed.data)),
+    )
+  })
+
+  // «+ Agregar material»: productos activos que se usan en las atenciones.
+  // Buscar productos para un material: quien configura los servicios y quien
+  // atendió y corrige lo usado en su atención (solo nombres y unidades, sin precios).
+  app.get("/material-products", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["inventory.write", "clinical.write"])) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"), 403)
+    }
+    const parsed = materialProductsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listMaterialProducts(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Materiales de un servicio: los lee quien ve Inventario; el costo por vez,
+  // solo quien ve precios (la API no se lo entrega a nadie más).
+  app.get("/:id{[0-9a-fA-F-]+}/materials", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!seesMaterials(memberRole)) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los materiales"), 403)
+    }
+    const serviceId = z.uuid().safeParse(c.req.param("id"))
+    if (!serviceId.success) return c.json(errorBody(c, "NOT_FOUND", "Servicio no encontrado"), 404)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listServiceMaterials(tx, orgId, serviceId.data, { prices: canAccess(memberRole, "inventory.read") }),
+      ),
+    )
+  })
+
+  // Guardar los materiales (reemplaza la lista; «Copiar de otro servicio» es
+  // leer los de otro y guardarlos aquí). Es de quien lleva el inventario.
+  app.put("/:id{[0-9a-fA-F-]+}/materials", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "inventory.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar los materiales"), 403)
+    }
+    const serviceId = z.uuid().safeParse(c.req.param("id"))
+    if (!serviceId.success) return c.json(errorBody(c, "NOT_FOUND", "Servicio no encontrado"), 404)
+    const parsed = materialsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setServiceMaterials(tx, orgId, userId, serviceId.data, parsed.data.items, {
+          prices: canAccess(memberRole, "inventory.read"),
+        }),
+      ),
+    )
   })
 
   app.get("/templates", async (c) => {
