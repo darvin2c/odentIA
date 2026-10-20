@@ -3,7 +3,6 @@ import { createConfiguredChatModel, type LlmSpec } from "../llm.js"
 import { createBaselineDecisionModel } from "./baseline.js"
 import { createFakeDecisionModel } from "./fake.js"
 import { createJevDecisionModel } from "./jev.js"
-import { createOpenAiDecisionModel } from "./openai.js"
 import { DecisionError, type DecisionModel } from "./port.js"
 
 export * from "./port.js"
@@ -12,15 +11,13 @@ export * from "./knowledge.js"
 export { createBaselineDecisionModel } from "./baseline.js"
 export { createFakeDecisionModel } from "./fake.js"
 export { createJevDecisionModel } from "./jev.js"
-export { createOpenAiDecisionModel } from "./openai.js"
 
-export const DECISION_PROVIDERS = ["none", "baseline", "jev", "openai_decisions"] as const
+export const DECISION_PROVIDERS = ["none", "baseline", "jev"] as const
 export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 
 /** Credenciales de plataforma de los modelos de decisión (entorno de API y worker). */
 export interface PlatformDecisions {
   jev?: { apiKey: string; baseUrl?: string; model?: string }
-  openai?: { apiKey: string; baseUrl?: string; model?: string }
   /** Plazo total por llamada; la línea base nunca baja de `CHAT_DECISION_TIMEOUT_MS`. */
   timeoutMs?: number
 }
@@ -100,10 +97,5 @@ async function buildDecisionModel(
     case "jev":
       if (!platform.jev) throw new DecisionError("CONFIG", "La plataforma no tiene credenciales de Jev (JEV_API_KEY)")
       return createJevDecisionModel({ ...platform.jev, timeoutMs })
-    case "openai_decisions":
-      if (!platform.openai) {
-        throw new DecisionError("CONFIG", "La plataforma no tiene credenciales de OpenAI Decisions (OPENAI_DECISIONS_API_KEY)")
-      }
-      return createOpenAiDecisionModel({ ...platform.openai, timeoutMs })
   }
 }

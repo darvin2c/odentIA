@@ -43,7 +43,6 @@ export function watchDecisionKey(model: DecisionModel, onProblem: (problem: Deci
 
 const DECISION_LABEL: Record<string, string> = {
   jev: "Jev (modelo de decisión)",
-  openai_decisions: "OpenAI Decisions (modelo de decisión)",
   baseline: "Línea base (modelo de decisión)",
 }
 

@@ -2,10 +2,10 @@
  * Evaluación de un modelo de decisión sobre ejemplos propios etiquetados
  * (nunca mensajes reales de pacientes sin autorización). Uso:
  *
- *   pnpm --filter @odentia/agent eval:decisions -- --provider=fake|baseline|jev|openai_decisions (fake exige LLM_MODEL=fake) [--file=eval/decisiones-ejemplos.json]
+ *   pnpm --filter @odentia/agent eval:decisions -- --provider=fake|baseline|jev (fake exige LLM_MODEL=fake) [--file=eval/decisiones-ejemplos.json]
  *
  * Imprime acierto por pregunta y repetibilidad. Las credenciales se leen
- * del entorno (LLM_*, JEV_*, OPENAI_DECISIONS_*). El resultado es evidencia
+ * del entorno (LLM_*, JEV_*). El resultado es evidencia
  * de este conjunto, no un benchmark del proveedor.
  */
 import { readFileSync } from "node:fs"
@@ -29,8 +29,8 @@ function arg(name: string, fallback: string): string {
 
 // `fake` equivale a la línea base con LLM_MODEL=fake (modelo de decisión falso).
 const requested = arg("provider", "fake")
-if (!["fake", "baseline", "jev", "openai_decisions"].includes(requested)) {
-  throw new Error(`Proveedor desconocido: ${requested} (fake | baseline | jev | openai_decisions)`)
+if (!["fake", "baseline", "jev"].includes(requested)) {
+  throw new Error(`Proveedor desconocido: ${requested} (fake | baseline | jev)`)
 }
 if (requested === "fake" && (process.env.LLM_MODEL ?? "fake") !== "fake") {
   throw new Error("--provider=fake exige LLM_MODEL=fake; con un LLM real usa --provider=baseline")
@@ -47,9 +47,6 @@ const decision = await createDecisionModel(
   provider,
   {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
-    ...(env.OPENAI_DECISIONS_API_KEY
-      ? { openai: { apiKey: env.OPENAI_DECISIONS_API_KEY, baseUrl: env.OPENAI_DECISIONS_BASE_URL, model: env.OPENAI_DECISIONS_MODEL } }
-      : {}),
     timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000),
   },
   spec,

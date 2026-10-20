@@ -102,7 +102,7 @@ export interface AppDeps {
   registrationRemoteAddress?: RegistrationRemoteAddress
   /** Cuenta de odentIA en el proveedor del modelo (LLM_*); la organización no elige ni trae la suya. */
   llm?: PlatformLlm
-  /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
+  /** Credenciales de plataforma de los modelos de decisión (JEV_*). */
   decisions?: PlatformDecisions
   /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
   embedder?: SearchEmbedder

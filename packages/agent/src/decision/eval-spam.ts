@@ -43,7 +43,6 @@ const decision = await createDecisionModel(
   provider,
   {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
-    ...(env.OPENAI_DECISIONS_API_KEY ? { openai: { apiKey: env.OPENAI_DECISIONS_API_KEY, baseUrl: env.OPENAI_DECISIONS_BASE_URL, model: env.OPENAI_DECISIONS_MODEL } } : {}),
     timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000),
   },
   spec,

@@ -399,6 +399,13 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
   expect(Object.keys(chosenBody.data).filter((key) => /llm|model|baseurl|apikey/i.test(key))).toEqual([])
   const probe = await app.request("/agent/config/llm/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
   expect(probe.status).toBe(404)
+  // OpenAI Decisions se retiró (ADR 0047, darvin2c/odentIA#154): ya no es un proveedor que se pueda elegir.
+  const retired = await app.request("/agent/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decisionProvider: "openai_decisions" }),
+  })
+  expect(retired.status).toBe(400)
   const member = buildApp("member")
   const forbidden = await member.request("/agent/config", {
     method: "PUT",

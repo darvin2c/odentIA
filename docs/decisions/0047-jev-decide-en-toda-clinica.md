@@ -33,7 +33,7 @@ Toda clínica nacía sin modelo de decisión (`agent_config.decision_provider = 
 ## Alternativas descartadas
 
 - *Dejarlo apagado y quitar la frase de la web:* el mensaje ajeno se seguiría cobrando, también el spam, y se pierden el camino y la elección de conocimiento.
-- *OpenAI Decisions:* cuesta 2,4 veces más y su umbral de 0,9 no está medido.
+- *OpenAI Decisions:* cuesta 2,4 veces más y su umbral de 0,9 no está medido. Se retiró del código el 2026-10-20 (darvin2c/odentIA#154): ya no es un proveedor que se pueda elegir, y la migración `0049` pasa a Jev cualquier fila que lo tuviera. Quedan `none`, para apagarlo en una clínica, y `baseline`, el respaldo y la línea base de los evaluadores.
 - *Que el modelo que escribe marque lo ajeno y no se cobre:* gasta igual ~9 000 tokens por mensaje, y decidiría qué se cobra el mismo agente que cobra.
 
 ## Consecuencias
@@ -47,6 +47,6 @@ Toda clínica nacía sin modelo de decisión (`agent_config.decision_provider = 
 
 ## Referencias
 
-- `packages/services/src/agentConfig.ts` (`DEFAULTS`), `packages/db/src/schema/crm.ts`, migraciones `0007` y `0008`.
+- `packages/services/src/agentConfig.ts` (`DEFAULTS`), `packages/db/src/schema/crm.ts`, migraciones `0007`, `0008` y `0049`.
 - `packages/agent/src/decision/outage.ts`, `packages/agent/src/run.ts`, `packages/agent/src/ai-usage.ts` (`AI_PRICES`).
 - `apps/web/src/components/pricing/HowWeCharge.astro`, `apps/web/src/pages/precios.astro`.
