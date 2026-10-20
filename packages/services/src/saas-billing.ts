@@ -35,6 +35,7 @@ import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale } from "./locale.js"
 import { assertActionPricingFloor } from "./saas-actions.js"
 import { getSaasAlerts } from "./saas-terms.js"
+import { loadSaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import {
   saasAlertEmail,
   saasBillingUrl,
@@ -52,15 +53,9 @@ import { addMonth, closeSaasPeriods, overdueChargeOrgs } from "./saas-invoicing.
 /** Lo que se guarda en el aviso: el buzón de respuesta no aplica a Plan y pagos. */
 const mailParts = (mail: MailTemplate) => ({ subject: mail.subject, text: mail.text, html: mail.html })
 
-/** Días de prueba al crear la suscripción. */
-/** Prueba cuando ningún plan dice la suya (ADR 0031: 30 días). */
-export const SAAS_TRIAL_DAYS = 30
-/** Días de gracia tras el vencimiento antes de restringir. */
-export const SAAS_GRACE_DAYS = 7
-/** Prórroga máxima (días) por comprobante pendiente; acotada, no aplaza sin límite. */
-export const SAAS_PROOF_EXTENSION_DAYS = 3
-/** Veces que se puede prorrogar un mismo cargo por comprobante pendiente. */
-export const SAAS_PROOF_EXTENSION_MAX = 1
+// Prueba sin plan por defecto, días de gracia y espera por un comprobante
+// pendiente (días y veces): condiciones comerciales (ADR 0074), con la versión
+// del día en que empieza cada cosa.
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -91,8 +86,6 @@ function reason(value: string, field = "El motivo"): string {
 function addDays(base: Date, days: number): Date {
   return new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
 }
-/** Ventana comisionable: los primeros 12 meses de la clínica (D5). */
-export const SAAS_COMMISSION_MONTHS = 12
 
 export function monthKeyUTC(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`
@@ -172,13 +165,19 @@ export async function assignSaasSeller(
   return updated
 }
 
-/** Fin de la ventana comisionable de la clínica (12 meses desde el alta). */
-export function clinicCommissionCutoff(sub: {
-  trialStartedAt: Date | null
-  createdAt: Date
-}): Date {
+/**
+ * Fin de la ventana comisionable de la clínica (D5): los meses de comisión que
+ * regían cuando entró (12 al empezar), contados desde el alta.
+ */
+export async function clinicCommissionCutoff(
+  tx: Db,
+  sub: {
+    trialStartedAt: Date | null
+    createdAt: Date
+  },
+): Promise<Date> {
   const base = sub.trialStartedAt ?? sub.createdAt
-  return addMonthsUTC(base, SAAS_COMMISSION_MONTHS)
+  return addMonthsUTC(base, (await saasTermsAt(tx, base)).commissionMonths)
 }
 
 /**
@@ -739,7 +738,8 @@ async function planByCode(tx: Db, code: string): Promise<SaasPlanRow> {
 }
 
 /**
- * Alta de suscripción. `billingStart: "trial"` (14 días, trigger + relleno)
+ * Alta de suscripción. `billingStart: "trial"` (los días del plan por defecto
+ * o de las condiciones comerciales; disparador + relleno)
  * o `"now"` (activa desde hoy con el cargo del mes ya generado). La llama
  * Organizations en su transacción de alta; idempotente por organización.
  */
@@ -838,7 +838,7 @@ export async function startSaasTrial(
         .from(saasPlan)
         .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
         .limit(1)
-  const trialEndsAt = addDays(now, trialPlan?.trialDays ?? SAAS_TRIAL_DAYS)
+  const trialEndsAt = addDays(now, trialPlan?.trialDays ?? (await saasTermsAt(tx, now)).trialDays)
   const [row] = await tx
     .insert(saasSubscription)
     .values({
@@ -1017,7 +1017,7 @@ export async function resumeSaasSubscription(
     .set({
       status,
       pauseReason: null,
-      graceEndsAt: status === "gracia" ? addDays(now, SAAS_GRACE_DAYS) : current.graceEndsAt,
+      graceEndsAt: status === "gracia" ? addDays(now, (await saasTermsAt(tx, now)).graceDays) : current.graceEndsAt,
       updatedAt: now,
     })
     .where(eq(saasSubscription.organizationId, orgId))
@@ -1832,20 +1832,22 @@ export async function submitSaasReceipt(
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo registrar el comprobante")
-  // Prórroga acotada por comprobante pendiente (una vez por cargo).
+  // Prórroga acotada por comprobante pendiente (condiciones comerciales).
   const sub = await getSaasSubscription(tx, orgId)
   // Prórroga acotada solo si el comprobante cubre TODO el saldo (un parcial no
-  // aplaza) y una sola vez.
+  // aplaza) y las veces que dicen las condiciones.
+  const terms = await saasTermsAt(tx, now)
   if (
     sub &&
     !sub.isDemo &&
     amount === outstanding &&
-    sub.proofExtensionCount < SAAS_PROOF_EXTENSION_MAX
+    terms.proofExtensionDays > 0 &&
+    sub.proofExtensionCount < terms.proofExtensionMax
   ) {
     await tx
       .update(saasSubscription)
       .set({
-        proofExtensionUntil: addDays(now, SAAS_PROOF_EXTENSION_DAYS),
+        proofExtensionUntil: addDays(now, terms.proofExtensionDays),
         proofExtensionCount: sub.proofExtensionCount + 1,
         updatedAt: now,
       })
@@ -1974,12 +1976,12 @@ export async function confirmSaasPayment(
   }
   // Comisión sobre cobro confirmado (nunca demo) con la atribución CONGELADA
   // de la suscripción (D5): el cambio de vendedor o de su % no toca lo
-  // atribuido; solo comisionan los primeros 12 meses de la clínica y con
-  // atribución abierta.
+  // atribuido; solo comisionan los primeros meses de la clínica (condiciones
+  // comerciales) y con atribución abierta.
   let commissionId: string | null = null
   const sub = await getSaasSubscription(tx, orgId)
   if (sub && !sub.isDemo && sub.sellerId && sub.sellerRateBps !== null && !sub.sellerEndedAt) {
-    if (now <= clinicCommissionCutoff(sub)) {
+    if (now <= (await clinicCommissionCutoff(tx, sub))) {
       const windowDays = sub.sellerWindowDays ?? 90
       // La comisión es sobre lo cobrado sin impuesto: el IGV no es ingreso de odentIA.
       const [taxed] = row.chargeId
@@ -2781,6 +2783,8 @@ export async function tickSaasBilling(
   const mails: SaasTickMail[] = []
   const mailedKeys: Record<string, true> = {}
   const notices: SaasTickNotice[] = []
+  // Condiciones comerciales: cada plazo con la versión del día en que empezó.
+  const terms = await loadSaasTermsTimeline(tx)
   let trialsEnding = 0
   let trialsEnded = 0
   let gracesEnded = 0
@@ -2899,7 +2903,8 @@ export async function tickSaasBilling(
   for (const orgId of await endFounderGuarantees(tx, now)) await notifyOrg(tx, orgId, "saas.subscription.updated")
 
   // 1c. Llegó un cargo (ADR 0065): se avisa por correo el día que llega, con
-  // el día en que vence (7 días después). Una vez por cargo.
+  // el día en que vence (los días para pagar que regían al emitirlo). Una vez
+  // por cargo.
   const issuedCharges = await tx
     .select()
     .from(saasCharge)
@@ -2982,7 +2987,7 @@ export async function tickSaasBilling(
     )
   }
 
-  // 2. Prueba vencida → gracia 7 días.
+  // 2. Prueba vencida: con plan pasa a activa; sin plan, restringida.
   const trialsOver = await tx
     .select()
     .from(saasSubscription)
@@ -3079,19 +3084,13 @@ export async function tickSaasBilling(
   for (const sub of gracesOver) {
     gracesEnded += 1
     if (sub.proofExtensionUntil && sub.proofExtensionUntil > now) continue
-    // Con comprobante pendiente reciente se espera la confirmación admin.
-    const [pendingProof] = await tx
-      .select({ id: saasPayment.id })
+    // Con comprobante pendiente reciente se espera la confirmación admin: los
+    // días que regían cuando llegó.
+    const pendingProofs = await tx
+      .select({ createdAt: saasPayment.createdAt })
       .from(saasPayment)
-      .where(
-        and(
-          eq(saasPayment.organizationId, sub.organizationId),
-          eq(saasPayment.status, "pendiente"),
-          gte(saasPayment.createdAt, addDays(now, -SAAS_PROOF_EXTENSION_DAYS)),
-        ),
-      )
-      .limit(1)
-    if (pendingProof) continue
+      .where(and(eq(saasPayment.organizationId, sub.organizationId), eq(saasPayment.status, "pendiente")))
+    if (pendingProofs.some((proof) => addDays(proof.createdAt, terms.at(proof.createdAt).proofExtensionDays) > now)) continue
     const due = await outstandingCents(tx, sub.organizationId)
     // Sin plan no se reactiva gratis aunque no haya saldo: falta elegir plan.
     if (due <= 0 && sub.planId) {
@@ -3142,9 +3141,9 @@ export async function tickSaasBilling(
   // siendo manual con comprobante.
   const { issued: chargesEnsured } = await closeSaasPeriods(tx, now)
 
-  // 5. Cargo vencido sin pagar → gracia de 7 días antes de restringir.
+  // 5. Cargo vencido sin pagar → los días de gracia que rigen, antes de restringir.
   for (const orgId of await overdueChargeOrgs(tx, now)) {
-    const graceEndsAt = addDays(now, SAAS_GRACE_DAYS)
+    const graceEndsAt = addDays(now, terms.at(now).graceDays)
     await tx
       .update(saasSubscription)
       .set({ status: "gracia", graceEndsAt, updatedAt: now })

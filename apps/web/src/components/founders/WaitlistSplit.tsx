@@ -4,6 +4,7 @@
 // pública de la API (excepción a ADR 0046, como el Libro de Reclamaciones).
 import { AGENTS, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
 import { type SyntheticEvent, useEffect, useState } from "react"
+import { businessDays } from "../../lib/pricing"
 import { waitlistApiUrl } from "../../lib/site"
 import "./waitlist.css"
 
@@ -12,6 +13,8 @@ type Props = {
   gift: string | null
   discountPercent: number | null
   noFee: boolean
+  /** Días hábiles para responder: las condiciones comerciales que rigen. */
+  answerDays: number
 }
 
 /** Países de habla hispana primero; el código es ISO 3166-1 alfa-2 y el prefijo, E.164. */
@@ -61,7 +64,7 @@ function deviceCountry(): string {
 
 type Sent = { firstName: string; clinicName: string; phone: string; email: string; answerDays: number }
 
-export default function WaitlistSplit({ gift, discountPercent, noFee }: Props) {
+export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays }: Props) {
   const [country, setCountry] = useState("")
   // El país del dispositivo se propone al cargar (en el servidor no se sabe); se puede cambiar.
   useEffect(() => setCountry((current) => current || deviceCountry()), [])
@@ -107,7 +110,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee }: Props) {
         clinicName: body.clinicName,
         phone: body.phone,
         email: body.email,
-        answerDays: payload.data?.answerDays ?? payload.answerDays ?? 2,
+        answerDays: payload.data?.answerDays ?? payload.answerDays ?? answerDays,
       })
       window.scrollTo({ top: 0 })
     } catch {
@@ -168,7 +171,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee }: Props) {
           <div className="wl-card" aria-live="polite">
             <h2 className="wl-h">Qué sigue</h2>
             <ol className="wl-steps">
-              <li>Revisamos tu solicitud en {sent.answerDays} días hábiles.</li>
+              <li>Revisamos tu solicitud en {businessDays(sent.answerDays)}.</li>
               <li>Te escribimos por WhatsApp al {sent.phone} para una llamada corta.</li>
               <li>Te llega tu invitación por correo y abres tu clínica como Fundadora.</li>
             </ol>
@@ -180,7 +183,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee }: Props) {
         ) : (
           <form className="wl-card" onSubmit={submit} noValidate={false}>
             <h2 className="wl-h">Pide tus {gift ? <span className="gift-light">{gift}</span> : "invitación"}</h2>
-            <p className="wl-note">Mientras dure el programa, se entra por invitación. Te respondemos en 2 días hábiles.</p>
+            <p className="wl-note">Mientras dure el programa, se entra por invitación. Te respondemos en {businessDays(answerDays)}.</p>
             <div className="wl-grid">
               <div className="wl-field">
                 <label htmlFor="wl-firstName">Nombre</label>

@@ -750,6 +750,71 @@ export const saasSignupPolicy = adminSchema.table(
   ],
 )
 
+/**
+ * Condiciones comerciales (issue 167, ADR 0074): las reglas que acompañan al
+ * precio y valen para todas las clínicas. Cada cambio es una versión nueva que
+ * rige desde `effective_from`; nada se reescribe ni se borra (disparador de la
+ * 0051). Cada regla se lee con la versión del día en que empezó lo que mide.
+ * La primera versión son los valores que estaban en el código
+ * (`created_by` nulo). El rol app solo la lee.
+ */
+export const saasCommercialTerms = adminSchema.table(
+  "saas_commercial_terms",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull().defaultNow(),
+    /** Una conversación por persona en esta ventana. */
+    conversationWindowHours: integer("conversation_window_hours").notNull(),
+    /** Días entre el mensaje del Administrador y la reserva para que la cita cuente como recuperada. */
+    recoveryWindowDays: integer("recovery_window_days").notNull(),
+    /** Parte de las conversaciones del mes cuyo spam se devuelve sin revisar. */
+    reviewAutoPercent: integer("review_auto_percent").notNull(),
+    /** Días hábiles para responder una revisión de cobro. */
+    reviewAnswerDays: integer("review_answer_days").notNull(),
+    /** Días que odentIA puede leer la conversación revisada, con permiso. */
+    reviewReadDays: integer("review_read_days").notNull(),
+    paymentDays: integer("payment_days").notNull(),
+    graceDays: integer("grace_days").notNull(),
+    proofExtensionDays: integer("proof_extension_days").notNull(),
+    proofExtensionMax: integer("proof_extension_max").notNull(),
+    /** Con ciclo quincenal, a los cuántos días del tramo se cobra lo que pasó del crédito. */
+    halfCycleDays: integer("half_cycle_days").notNull(),
+    /** Prueba cuando no hay un plan por defecto. */
+    trialDays: integer("trial_days").notNull(),
+    warnPercent: integer("warn_percent").notNull(),
+    alarmPercent: integer("alarm_percent").notNull(),
+    /** Días hábiles para responder una solicitud de invitación. */
+    waitlistAnswerDays: integer("waitlist_answer_days").notNull(),
+    commissionMonths: integer("commission_months").notNull(),
+    reason: text("reason"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("saas_commercial_terms_effective_uidx").on(table.effectiveFrom),
+    check(
+      "saas_commercial_terms_limits_check",
+      sql`${table.conversationWindowHours} BETWEEN 1 AND 72
+        AND ${table.recoveryWindowDays} BETWEEN 1 AND 30
+        AND ${table.reviewAutoPercent} BETWEEN 0 AND 30
+        AND ${table.reviewAnswerDays} BETWEEN 1 AND 10
+        AND ${table.reviewReadDays} BETWEEN 1 AND 30
+        AND ${table.paymentDays} BETWEEN 1 AND 30
+        AND ${table.graceDays} BETWEEN 1 AND 30
+        AND ${table.proofExtensionDays} BETWEEN 0 AND 10
+        AND ${table.proofExtensionMax} BETWEEN 0 AND 3
+        AND ${table.halfCycleDays} BETWEEN 7 AND 21
+        AND ${table.trialDays} BETWEEN 7 AND 90
+        AND ${table.warnPercent} BETWEEN 50 AND 99
+        AND ${table.alarmPercent} BETWEEN 50 AND 99
+        AND ${table.warnPercent} < ${table.alarmPercent}
+        AND ${table.waitlistAnswerDays} BETWEEN 1 AND 10
+        AND ${table.commissionMonths} BETWEEN 1 AND 36`,
+    ),
+    check("saas_commercial_terms_reason_check", sql`${table.reason} IS NULL OR length(${table.reason}) BETWEEN 1 AND 500`),
+  ],
+)
+
 export const SAAS_WAITLIST_STATUSES = ["por_revisar", "invitada", "entro", "descartada"] as const
 export type SaasWaitlistStatus = (typeof SAAS_WAITLIST_STATUSES)[number]
 export const SAAS_WAITLIST_DENTISTS = ["1", "2-3", "4-9", "10+"] as const

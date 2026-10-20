@@ -19,6 +19,8 @@ export const caseReview = z.object({
   note: z.string().nullable(),
   requestedAt: z.string(),
   requestedByName: z.string().nullable(),
+  /** El último día para responder, con los días hábiles que regían al pedirla (condiciones comerciales). */
+  answerBy: z.string().nullable(),
   readUntil: z.string().nullable(),
   answer: z.string().nullable(),
   decidedAt: z.string().nullable(),
@@ -59,9 +61,6 @@ const CHANNEL_WORDS: Record<string, string> = {
   webchat: "Chat web",
 }
 
-/** Lo que se promete para responder (ADR 0054). */
-const ANSWER_BUSINESS_DAYS = 2
-
 const day = (iso: string) => new Intl.DateTimeFormat("es-PE", { weekday: "short", day: "numeric", month: "short" }).format(new Date(iso))
 const dayTime = (iso: string) =>
   new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso))
@@ -73,17 +72,6 @@ function money(micros: number | null, currency: string | null): string {
   } catch {
     return `${(micros / 1_000_000).toFixed(2)} ${currency ?? ""}`.trim()
   }
-}
-
-/** Dos días hábiles (lunes a viernes) desde que se pidió: el plazo que se le promete a la clínica. */
-function answerDue(iso: string): Date {
-  const due = new Date(iso)
-  let left = ANSWER_BUSINESS_DAYS
-  while (left > 0) {
-    due.setDate(due.getDate() + 1)
-    if (due.getDay() !== 0 && due.getDay() !== 6) left -= 1
-  }
-  return due
 }
 
 function speaker(message: z.infer<typeof reviewMessage>): string {
@@ -134,8 +122,10 @@ export function SupportCaseReview({
     <section aria-label="Revisión de cobro" className="flex flex-col gap-2.5 rounded-xl border px-3 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-bold">Revisión de cobro</h3>
-        {pending ? (
-          <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-bold">Responder antes del {day(answerDue(review.requestedAt).toISOString())}</span>
+        {pending && review.answerBy ? (
+          <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-bold">Responder antes del {day(review.answerBy)}</span>
+        ) : pending ? (
+          <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-bold">Por responder</span>
         ) : (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">
             {review.status === "devuelta" ? "Devuelta" : "Se mantuvo"}

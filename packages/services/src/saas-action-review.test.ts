@@ -3,12 +3,13 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { saasAction, saasActionReview, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasAction, saasActionReview, saasCharge, saasChargeLine, saasCommercialTerms, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { currentSaasPeriod, listPeriodActions } from "./saas-actions.js"
 import { decideActionReview, readReviewConversation, requestActionReview } from "./saas-action-review.js"
 import { createSaasPlan } from "./saas-billing.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { addMonth, closeSaasPeriods } from "./saas-invoicing.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -195,4 +196,18 @@ it("lo ya cobrado por encima del crédito vuelve como «Devolución por revisió
   expect(review?.creditChargeId).toBe(charges[1]!.id)
   const [coveredReview] = await ownerDb.select().from(saasActionReview).where(eq(saasActionReview.actionId, covered.id))
   expect(coveredReview?.creditChargeId).toBeNull()
+})
+
+// Va al final: cambia las condiciones comerciales para las pruebas que siguen en este archivo.
+it("el spam al instante usa la parte que rige al pedir la revisión (ADR 0074)", async () => {
+  // La administración subió el spam que se devuelve sin revisar al 20 %.
+  await ownerDb.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, reviewAutoPercent: 20, effectiveFrom: new Date(Date.now() - 1000) })
+  const { orgId, actor } = await clinic()
+  const now = Date.now()
+  const actions: Array<{ id: string; contactId: string }> = []
+  for (let i = 0; i < 10; i += 1) actions.push(await conversationAction(orgId, new Date(now - (i + 1) * 60_000)))
+  // 20 % de 10 conversaciones son 2 al instante; la tercera la revisa odentIA.
+  const results = []
+  for (const action of actions.slice(0, 3)) results.push(await run(orgId, (tx) => requestActionReview(tx, orgId, actor, { actionId: action.id, reason: "spam" })))
+  expect(results.map((result) => result.automatic)).toEqual([true, true, false])
 })

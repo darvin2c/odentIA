@@ -33,6 +33,27 @@ export interface Pricing {
   founders: (PlanPrices & { discountPercent: number | null; guaranteeMonths: number | null }) | null
   /** «invitacion»: abrir una clínica pide invitación y la web lleva a la lista de espera. */
   signupMode: "invitacion" | "abierta"
+  /** Las condiciones comerciales que se prometen (issue 167, ADR 0074): también de la administración. */
+  terms: Terms
+}
+
+export interface Terms {
+  /** Una conversación por persona en esta ventana. */
+  conversationWindowHours: number
+  /** Días entre el mensaje del agente y la reserva para que la cita cuente como recuperada. */
+  recoveryWindowDays: number
+  /** Parte de las conversaciones del mes cuyo spam se devuelve al instante. */
+  reviewAutoPercent: number
+  /** Días hábiles para responder una revisión de cobro. */
+  reviewAnswerDays: number
+  /** Con cobro quincenal, a los cuántos días del mes. */
+  halfCycleDays: number
+  /** Días de gracia antes de restringir. */
+  graceDays: number
+  /** Prueba cuando no hay un plan por defecto. */
+  trialDays: number
+  /** Días hábiles para responder una solicitud de invitación. */
+  waitlistAnswerDays: number
 }
 
 interface ApiPlan {
@@ -73,13 +94,17 @@ async function fetchPricing(): Promise<Pricing> {
     list: ApiPlan | null
     founders: (ApiPlan & { discountPercent: number | null; guaranteeMonths: number | null }) | null
     signupMode: "invitacion" | "abierta"
+    terms?: Terms
   }
+  // Sin condiciones la respuesta no sirve: la web no las inventa (se sigue con lo último leído).
+  if (!body.terms) throw new Error("precios: la API no entregó las condiciones")
   return {
     list: body.list ? planOf(body.list) : null,
     founders: body.founders
       ? { ...planOf(body.founders), discountPercent: body.founders.discountPercent, guaranteeMonths: body.founders.guaranteeMonths }
       : null,
     signupMode: body.signupMode === "abierta" ? "abierta" : "invitacion",
+    terms: body.terms,
   }
 }
 
@@ -143,8 +168,9 @@ export function money(value: number, currency: string): string {
 /** Lo de antes, para quien aún llama `usd`: todos los planes publicados hoy están en dólares. */
 export const usd = (value: number) => money(value, "USD")
 
-/**
- * Condiciones de la revisión de cobros (ADR 0054). Siguen fijas en el código
- * de la API (`saas-action-review.ts`) hasta el issue 167; cambian juntas.
- */
-export const REVIEW = { spamRefundPercent: 10, answerDays: 2 } as const
+/** «24 horas», «1 hora». */
+export const hours = (n: number) => `${n} ${n === 1 ? "hora" : "horas"}`
+/** «7 días», «1 día». */
+export const days = (n: number) => `${n} ${n === 1 ? "día" : "días"}`
+/** «2 días hábiles», «1 día hábil». */
+export const businessDays = (n: number) => `${n} ${n === 1 ? "día hábil" : "días hábiles"}`

@@ -18,7 +18,7 @@ import { agentName } from "../../lib/agent"
 import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
-import { PLAN_PATH } from "../../lib/billing"
+import { conversationRule, PLAN_PATH, type SaasTerms, useSaasTerms } from "../../lib/billing"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
@@ -43,23 +43,27 @@ import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure,
 
 /**
  * Cada línea de lo pagado con las palabras de Facturación: quién lo hizo y cuándo cuenta una. La
- * conversación que se cobra (una por persona cada 24 horas) no es la de «Conversaciones que atendió».
+ * conversación que se cobra (una por persona en la ventana de las condiciones comerciales) no es la de
+ * «Conversaciones que atendió».
  */
-const LINE: Record<AgentBilling["lines"][number]["kind"], { agent: "recepcion" | "asistente_clinico" | "administrador"; what: (count: number) => string; rule: string }> = {
+const LINE: Record<
+  AgentBilling["lines"][number]["kind"],
+  { agent: "recepcion" | "asistente_clinico" | "administrador"; what: (count: number) => string; rule: (terms: SaasTerms | undefined) => string }
+> = {
   conversacion: {
     agent: "recepcion",
     what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}`,
-    rule: "Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal",
+    rule: (terms) => (terms ? conversationRule(terms) : "Una por persona, aunque escriba diez mensajes o cambie de canal"),
   },
   consulta: {
     agent: "asistente_clinico",
     what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}`,
-    rule: "Una por atención, sin importar cuántos minutos se dicten",
+    rule: () => "Una por atención, sin importar cuántos minutos se dicten",
   },
   cita: {
     agent: "administrador",
     what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}`,
-    rule: "Cuando un paciente vuelve tras un seguimiento y asiste",
+    rule: () => "Cuando un paciente vuelve tras un seguimiento y asiste",
   },
 }
 
@@ -234,6 +238,8 @@ function Paid({
   wholeClinic: boolean
 }) {
   const receptionName = useReceptionName()
+  // Lo pagado solo llega a quien ve Facturación, el mismo que puede leer las condiciones.
+  const terms = useSaasTerms().data
   const charged = paid.charging !== "no"
   // Sin la moneda del plan no hay importe: nunca se supone una.
   const currency = paid.currency
@@ -287,7 +293,7 @@ function Paid({
             <AccountLine
               key={line.kind}
               label={`${agentName(LINE[line.kind].agent, receptionName)}: ${LINE[line.kind].what(line.count)}`}
-              hint={`${LINE[line.kind].rule}${line.unitMicros === null || !currency ? "" : ` · ${unit(line.unitMicros)} cada una`}`}
+              hint={`${LINE[line.kind].rule(terms)}${line.unitMicros === null || !currency ? "" : ` · ${unit(line.unitMicros)} cada una`}`}
               amount={money(line.amountCents)}
             />
           ))}

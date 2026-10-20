@@ -34,6 +34,10 @@ interface BillingTerms {
   guaranteedUntil: string | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
+  /** Con ciclo quincenal, a los cuántos días del tramo se cobra (condiciones comerciales). */
+  halfCycleDays: number
+  warnPercent: number
+  alarmPercent: number
   seller: { name: string } | null
   consumption: {
     currency: string | null
@@ -166,6 +170,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
   const trialAbove = plan ? (majorToCents(trialCredit, currency) ?? 0) > plan.trialCreditCents || Number(trialDays) > plan.trialDays : false
   const pending = data.negotiations.filter((item) => item.status === "pendiente")
   const count = (kind: Kind) => data.consumption.lines.find((line) => line.kind === kind)?.count ?? 0
+  const halfWords = `a los ${data.halfCycleDays} días y al cerrar el mes`
 
   return (
     <div className="flex flex-col gap-4">
@@ -174,13 +179,15 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
         {data.status === "prueba" && data.trial.startedAt
           ? `En prueba · día ${Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))} de ${data.trial.days}`
           : `Estado: ${data.status}`}
-        {data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura {data.billingCycle === "quincenal" ? "cada 15 días" : "cada mes"}
+        {data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura {data.billingCycle === "quincenal" ? halfWords : "cada mes"}
       </p>
       {data.consumption.priced ? (
         <UsageMeter
           label={data.consumption.period.credit === "prueba" ? "Saldo de prueba" : "Crédito del mes"}
           value={data.consumption.subtotalCents}
           total={data.consumption.creditCents}
+          warnAt={data.warnPercent / 100}
+          alarmAt={data.alarmPercent / 100}
           valueText={`${money(Math.min(data.consumption.subtotalCents, data.consumption.creditCents))} de ${money(data.consumption.creditCents)}`}
           description={`Lo que hicieron los agentes: ${plural(count("conversacion"), "conversación", "conversaciones")}, ${plural(count("consulta"), "consulta", "consultas")} y ${plural(count("cita"), "cita", "citas")}, por ${money(data.consumption.subtotalCents)}.`}
         />
@@ -333,12 +340,12 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Label htmlFor="org-cycle">Lo que pasa del crédito se factura</Label>
         <Select value={data.billingCycle} onValueChange={(value) => saveCycle.mutate(value as "mensual" | "quincenal")}>
-          <SelectTrigger id="org-cycle" className="w-44">
-            <SelectValue>{data.billingCycle === "quincenal" ? "Cada 15 días" : "Cada mes"}</SelectValue>
+          <SelectTrigger id="org-cycle" className="w-64">
+            <SelectValue>{data.billingCycle === "quincenal" ? `A los ${data.halfCycleDays} días y al cerrar` : "Al cerrar el mes"}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="mensual">Cada mes</SelectItem>
-            <SelectItem value="quincenal">Cada 15 días</SelectItem>
+            <SelectItem value="mensual">Al cerrar el mes</SelectItem>
+            <SelectItem value="quincenal">A los {data.halfCycleDays} días y al cerrar</SelectItem>
           </SelectContent>
         </Select>
       </div>

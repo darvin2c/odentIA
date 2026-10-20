@@ -1,9 +1,20 @@
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { saasAction, saasCharge, saasChargeLine, saasPayment, saasPlan, saasSeller, saasSellerCommission, saasSubscription } from "@odentia/db/schema/saas-billing"
+import {
+  saasAction,
+  saasCharge,
+  saasChargeLine,
+  saasCommercialTerms,
+  saasPayment,
+  saasPlan,
+  saasSeller,
+  saasSellerCommission,
+  saasSubscription,
+} from "@odentia/db/schema/saas-billing"
 import { and, asc, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { confirmSaasPayment, createSaasPlan, tickSaasBilling } from "./saas-billing.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { addMonth, closeSaasPeriods } from "./saas-invoicing.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -167,5 +178,27 @@ describe("cobranza", () => {
     expect(sub?.currentPeriodStart).toEqual(end)
     const [commission] = await ownerDb.select().from(saasSellerCommission).where(eq(saasSellerCommission.organizationId, orgId))
     expect(commission).toMatchObject({ baseCents: 2900, commissionCents: 290 })
+  })
+})
+
+// Va al final: agrega una versión de las condiciones comerciales para noviembre de 2026.
+describe("condiciones comerciales (ADR 0074)", () => {
+  it("el plazo de pago es el que rige al emitir el cargo; el día quincenal, el del inicio del tramo", async () => {
+    // El 5 de noviembre se pasa a 10 días para pagar y al cobro quincenal a los 10 días.
+    await ownerDb.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, paymentDays: 10, halfCycleDays: 10, effectiveFrom: new Date("2026-11-05T00:00:00Z") })
+    // Su tramo empezó el 3, antes del cambio: sigue cobrando a los 15 días (el 18), no a los 10 (el 13).
+    const early = await clinic({ activatedAt: new Date("2026-11-03T12:00:00Z"), currentPeriodStart: new Date("2026-11-03T12:00:00Z"), currentPeriodEnd: new Date("2026-12-03T12:00:00Z"), billingCycle: "quincenal" })
+    // Su tramo empezó el 6, después del cambio: cobra a los 10 días.
+    const late = await clinic({ activatedAt: new Date("2026-11-06T12:00:00Z"), currentPeriodStart: new Date("2026-11-06T12:00:00Z"), currentPeriodEnd: new Date("2026-12-06T12:00:00Z"), billingCycle: "quincenal" })
+    for (const orgId of [early, late]) {
+      for (let index = 0; index < 60; index++) await action(orgId, new Date(Date.UTC(2026, 10, 6, 13) + index * 60_000))
+    }
+    await closeSaasPeriods(ownerDb, new Date("2026-11-16T13:00:00Z"))
+    expect(await chargesOf(early)).toHaveLength(0)
+    const [half] = await chargesOf(late)
+    // Emitido después del cambio: 10 días para pagar.
+    expect(half?.dueAt).toEqual(new Date("2026-11-26T13:00:00Z"))
+    await closeSaasPeriods(ownerDb, new Date("2026-11-18T13:00:00Z"))
+    expect(await chargesOf(early)).toHaveLength(1)
   })
 })

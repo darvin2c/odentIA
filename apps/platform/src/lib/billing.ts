@@ -28,3 +28,37 @@ export function useClinicLine(): string {
   if (active > 0) parts.push(active === 1 ? "1 sede" : `${active} sedes`)
   return parts.join(" · ")
 }
+
+/**
+ * Las condiciones comerciales que rigen hoy (ADR 0074): plazos y porcentajes
+ * que acompañan al precio. Las escribe la administración de odentIA; ninguna
+ * pantalla las repite a mano. Solo para quien ve Facturación.
+ */
+export interface SaasTerms {
+  conversationWindowHours: number
+  recoveryWindowDays: number
+  reviewAutoPercent: number
+  reviewAnswerDays: number
+  reviewReadDays: number
+  halfCycleDays: number
+  warnPercent: number
+  alarmPercent: number
+}
+
+export function useSaasTerms() {
+  const { org } = orgRouteApi.useRouteContext()
+  return useQuery({
+    queryKey: ["billing", org.id, "terms"],
+    queryFn: () => apiFetch<{ data: SaasTerms }>(`/api/account/billing/terms?orgId=${encodeURIComponent(org.id)}`).then((res) => res.data),
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
+/** «24 horas», «1 hora». */
+export const hoursWords = (n: number) => `${n} ${n === 1 ? "hora" : "horas"}`
+/** «2 días hábiles», «1 día hábil». */
+export const businessDaysWords = (n: number) => `${n} ${n === 1 ? "día hábil" : "días hábiles"}`
+/** «Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal». */
+export const conversationRule = (terms: SaasTerms) =>
+  `Una por persona cada ${hoursWords(terms.conversationWindowHours)}, aunque escriba diez mensajes o cambie de canal`

@@ -2,7 +2,7 @@
 // «Un plan y tres precios»: el plan mensual, que vuelve como crédito, y el precio de cada resultado.
 // Mientras se entra por invitación y el plan Fundadores se publica, la tarjeta es la del Fundador:
 // sin cuota, con el regalo y cada acción con el precio de lista tachado (lienzo, tablero 4).
-import { money, shownPlan } from "../../lib/pricing"
+import { businessDays, days, hours, money, shownPlan } from "../../lib/pricing"
 import { ctaOf } from "../../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -10,6 +10,8 @@ const plan = shownPlan(pricing)
 const list = pricing.list
 const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
 const cta = ctaOf(pricing)
+// Las condiciones comerciales: de la administración, como los precios.
+const terms = pricing.terms
 const struck = (own: number | null, base: number | null | undefined) =>
   founder && own !== null && base !== null && base !== undefined && base !== own ? money(base, plan!.currency) : null
 
@@ -19,7 +21,7 @@ const actions = plan
         title: "Conversación atendida",
         price: plan.conversation,
         before: struck(plan.conversation, list?.conversation),
-        text: "Todo lo que Sofi responde a una persona en 24 horas.",
+        text: `Todo lo que Sofi responde a una persona en ${hours(terms.conversationWindowHours)}.`,
         note: "No se cobra si el agente no llegó a responder.",
         agent: { href: "/agentes/recepcion", label: "Sofi" },
       },
@@ -35,7 +37,7 @@ const actions = plan
         title: "Cita recuperada",
         price: plan.recovered,
         before: struck(plan.recovered, list?.recovered),
-        text: "Reservada en los 7 días siguientes a un mensaje del agente, y el paciente asistió.",
+        text: `Reservada en los ${days(terms.recoveryWindowDays)} siguientes a un mensaje del agente, y el paciente asistió.`,
         note: "No se cobra si no asiste. Su conversación va incluida.",
         agent: { href: "/agentes/administrador", label: "Argos" },
       },
@@ -72,7 +74,7 @@ const actions = plan
         <a class="btn btn-p cta" href={cta.href}>{cta.label}</a>
         <span class="mono trial">
           {founder
-            ? "Sin tarjeta. Se entra por invitación: te respondemos en 2 días hábiles."
+            ? `Sin tarjeta. Se entra por invitación: te respondemos en ${businessDays(terms.waitlistAnswerDays)}.`
             : <>{plan.trialDays} días gratis, con <span class="gift">{money(plan.trialCredit, plan.currency)}</span> de crédito para tus agentes.</>}
         </span>
       </div>

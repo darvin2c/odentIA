@@ -9,6 +9,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useEffect, useState } from "react"
 import { centsToMajor, formatPlanMoney, majorToCents } from "./money"
 import { useReceptionName } from "../../lib/agent-names"
+import { useSaasTerms } from "../../lib/billing"
 
 export function SpendCapDrawer({
   open,
@@ -27,6 +28,7 @@ export function SpendCapDrawer({
   onSave: (capCents: number | null) => Promise<void>
 }) {
   const receptionName = useReceptionName()
+  const terms = useSaasTerms().data
   const [text, setText] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -98,14 +100,15 @@ export function SpendCapDrawer({
           curso siguen.
         </p>
       </div>
-      {cents !== null && cents > 0 ? (
+      {cents !== null && cents > 0 && terms ? (
         <div className="rounded-lg border p-3 text-sm">
           <p className="font-medium">Te avisaremos</p>
           <p className="mt-1 text-muted-foreground">
-            Al llegar a {money(Math.round(cents * 0.75))} (75 %), en la clínica; a {money(Math.round(cents * 0.9))} (90 %), también por correo.
+            Al llegar a {money(Math.round((cents * terms.warnPercent) / 100))} ({terms.warnPercent} %), en la clínica; a{" "}
+            {money(Math.round((cents * terms.alarmPercent) / 100))} ({terms.alarmPercent} %), también por correo.
           </p>
         </div>
-      ) : (
+      ) : cents !== null && cents > 0 ? null : (
         <p className="text-xs text-muted-foreground">Déjalo vacío si no quieres tope: los agentes siguen atendiendo y cada acción se cobra con tu precio.</p>
       )}
     </FormDrawer>

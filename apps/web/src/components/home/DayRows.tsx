@@ -1,6 +1,6 @@
 // 05 · «Así se ve un día en tu cuenta»: cada cosa que hicieron los agentes, fila por fila, con su precio.
 import { useState } from "react"
-import { usd, type ValuePrices } from "../../lib/pricing"
+import { hours, usd, type ValuePrices } from "../../lib/pricing"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 const DAY = [
@@ -15,7 +15,8 @@ const DAY = [
     time: "08:12",
     agent: "Sofi",
     what: "Miguel escribió por un dolor de muela y quedó agendado a las 10:30.",
-    why: "Una conversación: todo lo que habló con Miguel en 24 horas.",
+    /** La ventana de las condiciones comerciales: llega de la administración. */
+    why: (conversationHours: number) => `Una conversación: todo lo que habló con Miguel en ${hours(conversationHours)}.`,
     price: "conversation" as const,
   },
   {
@@ -56,7 +57,7 @@ const DAY = [
   },
 ]
 
-export default function DayRows({ prices }: { prices: ValuePrices }) {
+export default function DayRows({ prices, conversationHours }: { prices: ValuePrices; conversationHours: number }) {
   const cost = (key: "conversation" | "consultation" | null) => (key ? prices[key] : 0)
   const moving = useMoving()
   const [day, setDay] = useState(7)
@@ -68,7 +69,8 @@ export default function DayRows({ prices }: { prices: ValuePrices }) {
   const rows = DAY.map((r, i) => {
     const on = i < day
     if (on) total += cost(r.price)
-    return { ...r, cls: on ? (i === day - 1 && day < 7 ? "drow on last" : "drow on") : "drow" }
+    const why = typeof r.why === "function" ? r.why(conversationHours) : r.why
+    return { ...r, why, cls: on ? (i === day - 1 && day < 7 ? "drow on last" : "drow on") : "drow" }
   })
 
   return (

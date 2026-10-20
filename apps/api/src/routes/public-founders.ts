@@ -7,7 +7,6 @@ import {
   readFounderInvitation,
   ServiceError,
   submitWaitlistRequest,
-  WAITLIST_ANSWER_DAYS,
   waitlistInputSchema,
   waitlistReceivedEmail,
 } from "@odentia/services"
@@ -120,7 +119,7 @@ export function createPublicFoundersRoute(deps: {
             firstName: parsed.data.firstName,
             clinicName: parsed.data.clinicName,
             phone: parsed.data.phone,
-            answerDays: WAITLIST_ANSWER_DAYS,
+            answerDays: result.answerDays,
             replyTo: deps.replyTo,
           }),
         })
@@ -129,7 +128,7 @@ export function createPublicFoundersRoute(deps: {
         console.error(`Fundadores: no salió la copia de la solicitud ${result.id}`)
       }
     }
-    return c.json({ ok: true, answerDays: WAITLIST_ANSWER_DAYS }, 201)
+    return c.json({ ok: true, answerDays: result.answerDays }, 201)
   })
 
   return app

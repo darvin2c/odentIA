@@ -7,13 +7,18 @@ import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
+import { SAAS_TERMS_INITIAL, saasTermsAt } from "./saas-commercial-terms.js"
 
 /* ---------- Lo que hicieron los agentes, por acción (ADR 0031) ---------- */
 
-/** Una conversación por persona en esta ventana, aunque escriba diez mensajes o cambie de canal. */
-export const CONVERSATION_WINDOW_MS = 24 * 60 * 60 * 1000
-/** Plazo entre el mensaje del Administrador y la reserva para que la cita cuente como recuperada. */
-export const RECOVERY_WINDOW_DAYS = 7
+/**
+ * Una conversación por persona en la ventana de las condiciones comerciales
+ * (`conversationWindowHours`, ADR 0074), aunque escriba diez mensajes o cambie
+ * de canal. Vale la que regía al llegar el mensaje.
+ */
+async function conversationWindowMs(tx: Db, at: Date): Promise<number> {
+  return (await saasTermsAt(tx, at)).conversationWindowHours * 60 * 60 * 1000
+}
 /**
  * Lo que escribe el Administrador y no recupera nada: los recordatorios y los
  * avisos de una cita reservada, movida o cancelada (ADR 0031). Quien los recibe
@@ -122,7 +127,8 @@ async function insertAction(
 
 /**
  * Recepción atendió con IA (la corrida respondió y llamó al modelo): una
- * conversación por persona cada 24 horas. No cuentan lo que respondió el
+ * conversación por persona en la ventana de las condiciones (24 horas al
+ * empezar). No cuentan lo que respondió el
  * equipo, la derivación sin IA, el texto fijo ni la corrida que falló: quien
  * llama solo lo pide con una corrida `ok` que llamó al modelo.
  */
@@ -144,7 +150,7 @@ export async function countConversationAction(tx: Db, orgId: string, input: { co
         eq(saasAction.organizationId, orgId),
         eq(saasAction.contactId, conv.contactId),
         eq(saasAction.kind, "conversacion"),
-        gt(saasAction.occurredAt, new Date(input.at.getTime() - CONVERSATION_WINDOW_MS)),
+        gt(saasAction.occurredAt, new Date(input.at.getTime() - (await conversationWindowMs(tx, input.at)))),
       ),
     )
     .limit(1)
@@ -221,9 +227,10 @@ interface RecoveredRow {
 
 /**
  * La regla de la cita recuperada, una sola vez: reservada por el agente (en
- * su conversación o desde su enlace) dentro de los 7 días siguientes a un
+ * su conversación o desde su enlace) dentro de los días siguientes a un
  * mensaje del Administrador a esa persona que no fue un recordatorio ni un
- * aviso de cita. Mira la cita creada después del mensaje: la que Sofi mueve
+ * aviso de cita. Los días son los de las condiciones que regían al reservar
+ * (`recovery_window_days`, ADR 0074): una reserva hecha conserva su plazo. Mira la cita creada después del mensaje: la que Sofi mueve
  * tras un «No podré ir» no es nueva y no cuenta (ADR 0031).
  */
 function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
@@ -242,7 +249,9 @@ function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
         and j.status = 'enviado'
         and j.kind not in (${sql.join(NOT_RECOVERY_KINDS.map((kind) => sql`${kind}`), sql`, `)})
         and coalesce(m.created_at, j.updated_at) <= a.created_at
-        and coalesce(m.created_at, j.updated_at) > a.created_at - make_interval(days => ${RECOVERY_WINDOW_DAYS})
+        and coalesce(m.created_at, j.updated_at) > a.created_at - make_interval(days => coalesce((
+          select t.recovery_window_days from saas_commercial_terms t
+          where t.effective_from <= a.created_at order by t.effective_from desc limit 1), ${SAAS_TERMS_INITIAL.recoveryWindowDays}))
       order by coalesce(m.created_at, j.updated_at) desc
       limit 1
     ) j on true
@@ -754,7 +763,8 @@ export function assertActionPricingFloor(plan: Parameters<typeof checkActionPric
 }
 
 /**
- * ¿Esta persona ya tiene su conversación contada en las últimas 24 horas?
+ * ¿Esta persona ya tiene su conversación contada en la ventana que rige
+ * (24 horas al empezar)?
  * Seguir atendiéndola no cuesta otra: al llegar al tope solo se cortan los
  * casos nuevos.
  */
@@ -767,7 +777,7 @@ export async function hasOpenConversationAction(tx: Db, orgId: string, contactId
         eq(saasAction.organizationId, orgId),
         eq(saasAction.contactId, contactId),
         eq(saasAction.kind, "conversacion"),
-        gt(saasAction.occurredAt, new Date(now.getTime() - CONVERSATION_WINDOW_MS)),
+        gt(saasAction.occurredAt, new Date(now.getTime() - (await conversationWindowMs(tx, now)))),
       ),
     )
     .limit(1)

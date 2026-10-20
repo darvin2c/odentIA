@@ -14,7 +14,16 @@ import type { Db } from "@odentia/db"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { saasAction, saasCharge, saasPayment, saasPaymentMethod, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import {
+  saasAction,
+  saasCharge,
+  saasCommercialTerms,
+  saasPayment,
+  saasPaymentMethod,
+  saasPlan,
+  saasSubscription,
+  saasWaitlistRequest,
+} from "@odentia/db/schema/saas-billing"
 import { and, eq, inArray } from "drizzle-orm"
 import {
   confirmSaasPayment,
@@ -27,6 +36,7 @@ import {
   submitSaasReceipt,
   upsertSaasSeller,
 } from "./saas-billing.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { invitationTokenHash } from "./saas-founders.js"
 import type { Storage } from "./storage.js"
 
@@ -113,6 +123,10 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
   await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
   await db.insert(saasPlan).values(FOUNDERS_PLAN).onConflictDoNothing({ target: saasPlan.code })
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
+  // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración
+  // 0051 ya deja la primera versión; esto solo la repone en una base sin ella.
+  const [terms] = await db.select({ id: saasCommercialTerms.id }).from(saasCommercialTerms).limit(1)
+  if (!terms) await db.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, effectiveFrom: new Date(0) })
   for (const method of FICTIONAL_METHODS) {
     await db
       .insert(saasPaymentMethod)
