@@ -177,6 +177,7 @@ import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsFinance } from "./seed-reports-finance.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
+import { seedReportsProgress } from "./seed-reports-progress.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -3671,6 +3672,10 @@ const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { org
 const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
 // Fases 5 y 6 de Reportes: dos respuestas de Argos fijadas en el Resumen y las metas del mes, con la del mes anterior.
 const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistUserId: LUIS_ID }))
+// Examen de Argos (issue 192): el avance de lo aceptado y los materiales que usaron las atenciones de los últimos 90 días.
+const reportsProgress = await db.transaction((tx) =>
+  seedReportsProgress(tx, { orgId: ORG_A, ownerUserId: ANA_ID, branchIds: [miraflores.id, sanIsidro.id] }),
+)
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3861,6 +3866,7 @@ console.log(
   `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
   `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles`,
   `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
+  `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)
