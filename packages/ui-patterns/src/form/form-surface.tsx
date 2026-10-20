@@ -4,6 +4,17 @@ import { common } from "../common.js"
 import { SurfaceShell } from "../surface.js"
 import { SubmitButton } from "./submit-button.js"
 
+/**
+ * Otra forma de guardar lo mismo («Guardar borrador» junto a «Confirmar
+ * pedido»). Va en el pie entre «Cancelar» y la acción principal, que sigue
+ * siendo la de Enter (el envío del formulario): esta es un `type="button"`.
+ */
+export interface FormSecondaryAction {
+  label: string
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
+  disabled?: boolean
+}
+
 export interface FormSurfaceProps {
   title: string
   description?: string
@@ -23,11 +34,13 @@ export interface FormSurfaceProps {
   cancelLabel?: string
   submitDisabled?: boolean
   hideSubmit?: boolean
+  /** Acción secundaria opcional del pie; se desactiva mientras se envía. */
+  secondaryAction?: FormSecondaryAction
 }
 
 /**
  * Shell del formulario: cabecera fija, cuerpo con scroll interno y acciones
- * persistentes (Cancelar + Guardar). No decide DÓNDE vive (drawer modal o
+ * persistentes (Cancelar, una secundaria opcional y Guardar). No decide DÓNDE vive (drawer modal o
  * panel lateral): eso lo aportan `FormDrawer` y `FormPanel`, que comparten este
  * shell para que el mismo formulario se vea idéntico en los dos modos. El
  * chrome común con el detalle de lectura vive en `SurfaceShell`.
@@ -48,6 +61,7 @@ export function FormSurface({
   cancelLabel = common.actions.cancel,
   submitDisabled = false,
   hideSubmit = false,
+  secondaryAction,
 }: FormSurfaceProps) {
   return (
     <SurfaceShell
@@ -70,6 +84,17 @@ export function FormSurface({
           >
             {cancelLabel}
           </Button>
+          {secondaryAction ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              onClick={secondaryAction.onClick}
+              disabled={isSubmitting || isLoading || secondaryAction.disabled}
+            >
+              {secondaryAction.label}
+            </Button>
+          ) : null}
           {!hideSubmit && (
             <SubmitButton
               type="submit"

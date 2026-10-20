@@ -1,7 +1,7 @@
 import { cn } from "@odentia/ui"
 import * as React from "react"
 import { useCloseGuard, useEscapeClose } from "../surface.js"
-import { FormSurface } from "./form-surface.js"
+import { type FormSecondaryAction, FormSurface } from "./form-surface.js"
 
 export interface FormPanelProps {
   onClose: () => void
@@ -19,6 +19,8 @@ export interface FormPanelProps {
   cancelLabel?: string
   submitDisabled?: boolean
   hideSubmit?: boolean
+  /** Acción secundaria opcional del pie, entre «Cancelar» y la principal. */
+  secondaryAction?: FormSecondaryAction
   /** Layout extra de la tarjeta (p. ej. ancho forzado). */
   className?: string
 }
@@ -50,6 +52,7 @@ export function FormPanel({
   cancelLabel,
   submitDisabled = false,
   hideSubmit = false,
+  secondaryAction,
 }: FormPanelProps) {
   const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
@@ -78,6 +81,7 @@ export function FormPanel({
         cancelLabel={cancelLabel}
         submitDisabled={submitDisabled}
         hideSubmit={hideSubmit}
+        secondaryAction={secondaryAction}
       >
         {children}
       </FormSurface>

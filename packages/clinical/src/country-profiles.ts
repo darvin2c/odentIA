@@ -40,6 +40,17 @@ export interface DocumentTypeProfile {
 }
 
 /**
+ * Documentos tributarios: con el que una empresa o una persona factura (el RUC
+ * de la SUNAT en Perú). Cada país con perfil trae el suyo; el núcleo, que no
+ * conoce el de ningún país, uno genérico («Documento tributario»).
+ */
+export const TAX_DOC_TYPES = ["TRIBUTARIO", "RUC"] as const
+export type TaxDocType = (typeof TAX_DOC_TYPES)[number]
+
+/** Tipo de documento de un proveedor: tributario o de persona. */
+export type SupplierDocType = TaxDocType | IdentityDocType
+
+/**
  * Tipo general del seguro, igual en todos los países: lo que permitirá, más
  * adelante, conectar con los seguros de cada país sin tocar la ficha de los
  * demás. Correspondencia con HL7 FHIR Coverage.type (v3 ActCode): público →
@@ -117,6 +128,8 @@ export interface ClinicalCountryProfile {
   odontogram: OdontogramStandardProfile | null
   /** Documentos que se ofrecen, en el orden de la lista. */
   documentTypes: readonly DocumentTypeProfile[]
+  /** Documentos tributarios del país (los primeros que se ofrecen a un proveedor). */
+  taxDocumentTypes: readonly TaxDocType[]
   /** Regímenes de seguro con nombre propio. */
   insuranceSchemes: readonly InsuranceScheme[]
   address: AddressProfile
@@ -183,6 +196,7 @@ const CORE_ADDRESS: AddressProfile = {
 const CORE: Omit<ClinicalCountryProfile, "country"> = {
   odontogram: null,
   documentTypes: CORE_DOCUMENTS,
+  taxDocumentTypes: ["TRIBUTARIO"],
   insuranceSchemes: [],
   address: CORE_ADDRESS,
   phone: null,
@@ -229,9 +243,9 @@ const PERU_REGIONS: readonly RegionOption[] = [
 /**
  * Perú. Fuentes: NTS 188-MINSA/DGIESP-2022 (RM 559-2022-MINSA), obligatoria en
  * todos los establecimientos, públicos, privados y mixtos (III); documentos de
- * RENIEC (DNI, CNV) y Migraciones (CE); SIS y EsSalud como seguros públicos y
- * las EPS como privados (Ley 26790); colegiatura del Colegio Odontológico del
- * Perú (COP).
+ * RENIEC (DNI, CNV) y Migraciones (CE); el RUC de la SUNAT como documento
+ * tributario; SIS y EsSalud como seguros públicos y las EPS como privados (Ley
+ * 26790); colegiatura del Colegio Odontológico del Perú (COP).
  */
 const PERU: Omit<ClinicalCountryProfile, "country"> = {
   odontogram: {
@@ -249,6 +263,7 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
     { code: "DIE", issuer: { kind: "foreign" } },
     { code: "OTRO", issuer: { kind: "any" } },
   ],
+  taxDocumentTypes: ["RUC"],
   insuranceSchemes: [
     { code: "SIS", label: "SIS", type: "PUBLICO" },
     { code: "ESSALUD", label: "EsSalud", type: "PUBLICO" },
@@ -303,6 +318,27 @@ export function documentTypeProfile(
   docType: string | null | undefined,
 ): DocumentTypeProfile | undefined {
   return profile.documentTypes.find((item) => item.code === docType)
+}
+
+/**
+ * Documentos de persona que no identifican a quien vende: el del recién
+ * nacido (CNV) y el documento de identidad extranjero (DIE), que es el del
+ * paciente que vive fuera. Un proveedor que es una persona se identifica con
+ * el documento del país, el de residente extranjero o el pasaporte.
+ */
+const NOT_FOR_SUPPLIERS: ReadonlySet<IdentityDocType> = new Set(["CNV", "DIE"])
+
+/**
+ * Los tipos de documento que se ofrecen a un proveedor, en el orden de la
+ * lista: los tributarios del país, los de persona que sirven a quien vende (en
+ * Perú DNI, carné de extranjería y pasaporte) y «Otro» al final. Es una lista
+ * cerrada: el servidor rechaza cualquier otro valor.
+ */
+export function supplierDocumentTypes(profile: ClinicalCountryProfile): readonly SupplierDocType[] {
+  const people = profile.documentTypes
+    .map((item) => item.code)
+    .filter((code) => code !== "OTRO" && !NOT_FOR_SUPPLIERS.has(code))
+  return [...profile.taxDocumentTypes, ...people, "OTRO"]
 }
 
 /** Régimen de seguro con nombre propio del país, o undefined. */

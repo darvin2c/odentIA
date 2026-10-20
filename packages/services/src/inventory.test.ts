@@ -11,14 +11,15 @@
  * - Sin precios, la respuesta no los trae.
  * - Movimientos con quién, sede y la cobertura como una sola fila.
  * - El aviso de lo que llegó va a quien lleva las compras, no a quien lo registró.
+ * - El tipo de documento del proveedor es un código de la lista del país.
  */
 import type { Db } from "@odentia/db"
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { encounter } from "@odentia/db/schema/clinical"
 import { member, user } from "@odentia/db/schema/auth"
-import { purchaseOrderLine, stockMovement } from "@odentia/db/schema/inventory"
-import { branch } from "@odentia/db/schema/org"
+import { purchaseOrderLine, stockMovement, supplier as supplierTable } from "@odentia/db/schema/inventory"
+import { branch, orgProfile } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, eq, like } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -51,6 +52,7 @@ import {
   transferStock,
   updateProduct,
   updatePurchaseOrder,
+  updateSupplier,
   writeOffExpired,
 } from "./inventory.js"
 import { defaultWarehouse } from "./inventory-stock.js"
@@ -699,4 +701,39 @@ it("los mensajes de inventario no llevan códigos internos", async () => {
     .from(stockMovement)
     .where(and(eq(stockMovement.organizationId, c.orgId), like(stockMovement.reason, "Recepción%")))
   for (const row of movements) expect(row.reason).toMatch(/^Recepción de OC-\d{4,} · lote /)
+})
+
+it("proveedor: el tipo de documento es un código de la lista del país de la clínica y el número exige su tipo", async () => {
+  const c = await clinic()
+  const create = (input: Parameters<typeof createSupplier>[3]) => c.run((tx) => createSupplier(tx, c.orgId, c.actor, input))
+  const update = (id: string, input: Parameters<typeof updateSupplier>[4]) => c.run((tx) => updateSupplier(tx, c.orgId, c.actor, id, input))
+  // Perú: RUC, DNI, carné de extranjería, pasaporte u «Otro»; se guarda el código.
+  const ruc = await create({ name: "Insumos Lima SAC", docType: "ruc", docNumber: "20111222333" })
+  expect(ruc.docType).toBe("RUC")
+  expect((await create({ name: "Juan Pérez", docType: "DNI", docNumber: "45678904" })).docType).toBe("DNI")
+  // Texto libre, el genérico del núcleo y el certificado de nacido vivo no son de la lista.
+  for (const docType of ["NIT", "TRIBUTARIO", "CNV"]) {
+    await expect(create({ name: `Con ${docType}`, docType, docNumber: "900123456" })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "El tipo de documento del proveedor tiene que ser uno de la lista: RUC, DNI, Carné de extranjería, Pasaporte u Otro",
+    })
+  }
+  await expect(create({ name: "Sin tipo", docNumber: "20999888777" })).rejects.toMatchObject({
+    code: "VALIDATION",
+    message: "Indica el tipo de documento del proveedor junto con su número",
+  })
+
+  // Al editar se mira el tipo que llega; uno antiguo que nadie cambia se conserva.
+  await expect(update(ruc.id, { docType: "NIT" })).rejects.toMatchObject({ code: "VALIDATION" })
+  await ownerDb.update(supplierTable).set({ docType: "NIT" }).where(eq(supplierTable.id, ruc.id))
+  expect((await update(ruc.id, { phone: "+5115550000" }))?.docType).toBe("NIT")
+  expect((await update(ruc.id, { docType: "OTRO" }))?.docType).toBe("OTRO")
+
+  // Un país sin perfil propio recibe el núcleo: un documento tributario genérico, nunca el RUC.
+  await ownerDb.update(orgProfile).set({ countryCode: "CL" }).where(eq(orgProfile.organizationId, c.orgId))
+  expect((await create({ name: "Dental Sur SpA", docType: "TRIBUTARIO", docNumber: "76.123.456-7" })).docType).toBe("TRIBUTARIO")
+  await expect(create({ name: "Con RUC", docType: "RUC", docNumber: "20111222334" })).rejects.toMatchObject({
+    code: "VALIDATION",
+    message: "El tipo de documento del proveedor tiene que ser uno de la lista: Documento tributario, Documento nacional, Pasaporte u Otro",
+  })
 })

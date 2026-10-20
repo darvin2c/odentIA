@@ -1,7 +1,8 @@
 /**
  * Nuevo proveedor en dos campos (tablero 13): nombre y teléfono a la vista;
  * documento, correo y dirección plegados en «Más datos». El tipo de documento
- * se elige de una lista para que «RUC» y «ruc» no cuenten como distintos.
+ * se elige de la lista del país de la clínica (`supplierDocChoices`): se guarda
+ * su código y no se escribe a mano.
  */
 import {
   Button,
@@ -18,48 +19,28 @@ import {
   toast,
 } from "@odentia/ui"
 import { FormDrawer, isValidE164, PhoneInput, regionCountry, toE164 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import * as React from "react"
 import {
   createSupplier,
-  fetchSuppliers,
   inventoryErrorMessage,
   inventoryKeys,
   type SupplierBody,
   type SupplierItem,
+  supplierDocChoices,
   updateSupplier,
 } from "../../lib/inventory"
+import { useClinicalProfile } from "../../lib/org"
 import { isAmbiguousMutationError } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
 import { Optional } from "./fields"
-import { useInventory } from "./inventory-scope"
-
-const OTHER = "__otro__"
 
 /** El teléfono guardado como lo entiende el campo (E.164), si se puede leer. */
 function phoneValue(phone: string | null | undefined): string | null {
   if (!phone) return null
   if (isValidE164(phone)) return phone
   return toE164(phone, regionCountry())
-}
-
-/**
- * Los tipos de documento que se ofrecen: el documento fiscal de la clínica
- * (así lo llama su país: RUC, NIT, RFC…) y los que ya usan sus proveedores,
- * en mayúsculas. El perfil del país todavía no trae la lista tributaria.
- */
-export function useSupplierDocTypes(): string[] {
-  const { fiscalDocType } = useInventory()
-  const suppliers = useQuery({ queryKey: inventoryKeys.suppliers(), queryFn: () => fetchSuppliers() })
-  return React.useMemo(() => {
-    const seen = new Set<string>()
-    for (const value of [fiscalDocType, ...(suppliers.data ?? []).map((item) => item.docType)]) {
-      const text = value?.trim().toLocaleUpperCase("es")
-      if (text) seen.add(text)
-    }
-    return [...seen]
-  }, [fiscalDocType, suppliers.data])
 }
 
 type FieldKey = "name" | "phone" | "doc" | "email" | "address"
@@ -84,7 +65,7 @@ export function SupplierFormDrawer({
 }) {
   const queryClient = useQueryClient()
   const ids = React.useId()
-  const docTypes = useSupplierDocTypes()
+  const profile = useClinicalProfile()
   const [initial] = React.useState(() => ({
       name: supplier?.name ?? "",
       phone: phoneValue(supplier?.phone),
@@ -94,15 +75,13 @@ export function SupplierFormDrawer({
       address: supplier?.address ?? "",
   }))
   const [values, setValues] = React.useState(initial)
-  const [otherType, setOtherType] = React.useState(false)
   const [errors, setErrors] = React.useState<Partial<Record<FieldKey, string>>>({})
   const [formError, setFormError] = React.useState<string | null>(null)
   const [moreOpen, setMoreOpen] = React.useState(Boolean(supplier?.docNumber || supplier?.email || supplier?.address))
   const set = <K extends keyof typeof initial>(key: K, value: (typeof initial)[K]) => setValues((current) => ({ ...current, [key]: value }))
   const dirty = JSON.stringify(values) !== JSON.stringify(initial)
-  // Sin tipos conocidos, o con uno que no está en la lista, se escribe.
-  const typeOptions = values.docType && !docTypes.includes(values.docType) ? [...docTypes, values.docType] : docTypes
-  const writing = otherType || typeOptions.length === 0
+  // La lista del país; un tipo antiguo que no está en ella se conserva tal cual.
+  const typeOptions = supplierDocChoices(profile, initial.docType || null)
 
   const mutation = useMutation({
     mutationFn: (body: SupplierBody) => (supplier ? updateSupplier(supplier.id, body) : createSupplier(body)),
@@ -138,7 +117,7 @@ export function SupplierFormDrawer({
     const next: SupplierBody = {
       name: values.name.trim(),
       phone: values.phone,
-      docType: values.docType.trim().toLocaleUpperCase("es") || null,
+      docType: values.docType || null,
       docNumber: values.docNumber.trim() || null,
       email: values.email.trim() || null,
       address: values.address.trim() || null,
@@ -200,47 +179,24 @@ export function SupplierFormDrawer({
             }
           />
           <CollapsibleContent className="flex flex-col gap-6">
-            <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
+            {/* Ancho para «Carné de extranjería» o «Documento tributario» sin cortarse. */}
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
               <Field data-invalid={errors.doc ? true : undefined}>
                 <FieldLabel htmlFor={`${ids}-tipo`}>Documento</FieldLabel>
-                {typeOptions.length > 0 ? (
-                  <ChoiceSelect
-                    id={`${ids}-tipo`}
-                    value={writing ? OTHER : values.docType}
-                    placeholder="Tipo"
-                    aria-invalid={Boolean(errors.doc)}
-                    onChange={(event) => {
-                      const next = event.target.value
-                      if (next === OTHER) {
-                        setOtherType(true)
-                        set("docType", "")
-                        return
-                      }
-                      setOtherType(false)
-                      set("docType", next)
-                    }}
-                  >
-                    <option value="">Sin documento</option>
-                    {typeOptions.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                    <option value={OTHER}>Otro…</option>
-                  </ChoiceSelect>
-                ) : null}
-                {writing ? (
-                  <Input
-                    id={typeOptions.length > 0 ? undefined : `${ids}-tipo`}
-                    aria-label="Tipo de documento"
-                    maxLength={20}
-                    placeholder="RUC, NIT, RFC…"
-                    value={values.docType}
-                    aria-describedby={`${ids}-tipo-ayuda`}
-                    onChange={(event) => set("docType", event.target.value)}
-                  />
-                ) : null}
-                {writing ? <FieldDescription id={`${ids}-tipo-ayuda`}>Como se llama en tu país el documento tributario.</FieldDescription> : null}
+                <ChoiceSelect
+                  id={`${ids}-tipo`}
+                  value={values.docType}
+                  placeholder="Tipo"
+                  aria-invalid={Boolean(errors.doc)}
+                  onChange={(event) => set("docType", event.target.value)}
+                >
+                  <option value="">Sin documento</option>
+                  {typeOptions.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </ChoiceSelect>
               </Field>
               <Field data-invalid={errors.doc ? true : undefined}>
                 <FieldLabel htmlFor={`${ids}-numero`}>Número</FieldLabel>

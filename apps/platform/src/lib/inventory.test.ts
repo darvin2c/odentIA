@@ -1,3 +1,4 @@
+import { clinicalProfileFor } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import {
   orderMessage,
@@ -6,6 +7,8 @@ import {
   purchaseQuantityText,
   stateBadge,
   stockText,
+  supplierDocChoices,
+  supplierDocText,
   supplierShortName,
   withArticle,
 } from "./inventory"
@@ -92,6 +95,28 @@ describe("pago de una compra", () => {
     expect(purchasePaymentState({ status: "parcialmente_recibida" }, balance, money)).toEqual({ label: "Por pagar S/ 666.00", tone: "warning" })
     expect(purchasePaymentState({ status: "confirmada" }, { ...balance, receivedCents: 0, dueCents: 0, paidCents: 20_000 }, money).label).toBe("Adelanto S/ 200.00")
     expect(purchasePaymentState({ status: "borrador" }, null, money).label).toBe("Sin confirmar")
+  })
+})
+
+describe("documento del proveedor", () => {
+  it("ofrece la lista del país con sus etiquetas y guarda el código; sin perfil propio, el núcleo", () => {
+    expect(supplierDocChoices(clinicalProfileFor("PE"))).toEqual([
+      { value: "RUC", label: "RUC" },
+      { value: "DNI", label: "DNI" },
+      { value: "CE", label: "Carné de extranjería" },
+      { value: "PASAPORTE", label: "Pasaporte" },
+      { value: "OTRO", label: "Otro" },
+    ])
+    expect(supplierDocChoices(clinicalProfileFor("CL")).map((option) => option.value)).toEqual(["TRIBUTARIO", "NACIONAL", "PASAPORTE", "OTRO"])
+    // Un tipo escrito a mano antes de la lista se conserva tal cual al editar.
+    expect(supplierDocChoices(clinicalProfileFor("PE"), "NIT").at(-1)).toEqual({ value: "NIT", label: "NIT" })
+    expect(supplierDocChoices(clinicalProfileFor("PE"), "RUC")).toHaveLength(5)
+  })
+  it("se lee con la etiqueta del tipo, nunca con su código", () => {
+    expect(supplierDocText({ docType: "CE", docNumber: "001234567" })).toBe("Carné de extranjería 001234567")
+    expect(supplierDocText({ docType: "TRIBUTARIO", docNumber: "900123456" })).toBe("Documento tributario 900123456")
+    expect(supplierDocText({ docType: "NIT", docNumber: "900123456" })).toBe("NIT 900123456")
+    expect(supplierDocText({ docType: "RUC", docNumber: null })).toBeNull()
   })
 })
 

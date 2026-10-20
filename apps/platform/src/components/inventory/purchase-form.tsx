@@ -45,6 +45,7 @@ import {
   type PurchaseLineBody,
   type PurchaseOrderView,
   stockText,
+  supplierDocText,
   supplierShortName,
   unitsText,
   updateOrder,
@@ -206,7 +207,7 @@ export function PurchaseFormDrawer({
   const supplier = (suppliers.data ?? []).find((item) => item.id === values.supplierId)
   const supplierOptions = (suppliers.data ?? [])
     .filter((item) => item.isActive || item.id === values.supplierId)
-    .map((item) => ({ id: item.id, label: item.name, detail: [item.docType, item.docNumber].filter(Boolean).join(" ") || undefined }))
+    .map((item) => ({ id: item.id, label: item.name, detail: supplierDocText(item) ?? undefined }))
   const productOptions = (products.data?.items ?? [])
     .filter((item) => item.isActive)
     .map((item) => ({ id: item.id, label: item.name, detail: `hay ${stockText(item.onHand, item)}` }))
@@ -256,7 +257,11 @@ export function PurchaseFormDrawer({
   })
   const blocked = !editing && isAmbiguousMutationError(mutation.error)
 
-  /** Enter y el botón del pie hacen la acción principal; «Guardar borrador» pasa `asDraft`. */
+  /**
+   * Enter y el botón principal del pie piden o registran la compra; la acción
+   * secundaria del pie («Guardar borrador», o «Guardar cambios» al editar) pasa
+   * `asDraft`. Con «Ya la tengo» no hay borrador.
+   */
   function submit(event: React.SyntheticEvent, asDraft = false) {
     event.preventDefault()
     if (mutation.isPending || blocked) return
@@ -322,6 +327,11 @@ export function PurchaseFormDrawer({
       submitDisabled={blocked}
       submitLabel={submitLabel}
       cancelLabel="Cancelar"
+      secondaryAction={
+        already
+          ? undefined
+          : { label: editing ? "Guardar cambios" : "Guardar borrador", onClick: (event) => submit(event, true), disabled: mutation.isPending || blocked }
+      }
       onSubmit={submit}
     >
       <FieldGroup>
@@ -459,15 +469,6 @@ export function PurchaseFormDrawer({
             </FieldContent>
           </Field>
         ) : null}
-
-        {already ? null : (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2.5">
-            <p className="text-sm text-muted-foreground">{editing ? "¿Todavía no lo pides?" : "¿La pedirás después?"}</p>
-            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={mutation.isPending || blocked} onClick={(event) => submit(event, true)}>
-              {editing ? "Guardar cambios" : "Guardar borrador"}
-            </Button>
-          </div>
-        )}
       </FieldGroup>
     </FormDrawer>
   )

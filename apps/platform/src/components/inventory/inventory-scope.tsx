@@ -56,8 +56,6 @@ export interface InventoryScope {
   timeZone: string
   /** El nombre que ven los pacientes y los proveedores. */
   clinicName: string
-  /** Cómo llama la clínica a su documento fiscal («RUC»): primera opción del documento del proveedor. */
-  fiscalDocType: string | null
   can: {
     /** Ver precios (`inventory.read`). */
     prices: boolean

@@ -200,6 +200,49 @@ describe("FormDrawer", () => {
     expect(event).toBeDefined()
   })
 
+  it("secondaryAction: va entre Cancelar y Guardar, su clic llama a onClick y no envía el formulario", async () => {
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault())
+    const onDraft = vi.fn()
+    renderDrawer({ onSubmit, submitLabel: "Confirmar pedido", secondaryAction: { label: "Guardar borrador", onClick: onDraft } })
+    await screen.findByText("Editar mesa")
+    const draft = screen.getByRole("button", { name: "Guardar borrador" }) as HTMLButtonElement
+    expect(draft.type).toBe("button")
+    const names = screen.getAllByRole("button").map((button) => button.textContent)
+    const cancelAt = names.indexOf(common.actions.cancel)
+    const draftAt = names.indexOf("Guardar borrador")
+    const submitAt = names.indexOf("Confirmar pedido")
+    expect(cancelAt).toBeGreaterThanOrEqual(0)
+    expect(cancelAt).toBeLessThan(draftAt)
+    expect(draftAt).toBeLessThan(submitAt)
+
+    fireEvent.click(draft)
+    expect(onDraft).toHaveBeenCalledTimes(1)
+    {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 20)
+      await promise
+    }
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("secondaryAction se desactiva mientras se envía o si lo pide", async () => {
+    renderDrawer({ isSubmitting: true, secondaryAction: { label: "Guardar borrador", onClick: vi.fn() } })
+    await screen.findByText("Editar mesa")
+    expect((screen.getByRole("button", { name: "Guardar borrador" }) as HTMLButtonElement).disabled).toBe(true)
+    cleanup()
+    document.body.innerHTML = ""
+    renderDrawer({ secondaryAction: { label: "Guardar borrador", onClick: vi.fn(), disabled: true } })
+    await screen.findByText("Editar mesa")
+    expect((screen.getByRole("button", { name: "Guardar borrador" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("sin secondaryAction el pie lleva solo Cancelar y Guardar", async () => {
+    renderDrawer()
+    await screen.findByText("Editar mesa")
+    const footer = screen.getByRole("button", { name: common.actions.cancel }).parentElement
+    expect(footer?.querySelectorAll("button")).toHaveLength(2)
+  })
+
   it("Esc con cambios pregunta; el Esc siguiente cierra solo la pregunta", async () => {
     const onClose = vi.fn()
     renderDrawer({ isDirty: true, onClose })

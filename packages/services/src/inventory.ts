@@ -24,7 +24,14 @@
  * no los trae: no basta con esconderlos en la pantalla.
  */
 import { canAccess, ORG_ROLES } from "@odentia/auth/permissions"
-import { findInventoryUnit, INVENTORY_UNITS, inventoryUnitByCode, quantityWords } from "@odentia/clinical"
+import {
+  documentTypeLabel,
+  findInventoryUnit,
+  INVENTORY_UNITS,
+  inventoryUnitByCode,
+  quantityWords,
+  supplierDocumentTypes,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   PURCHASE_ORDER_STATUSES,
@@ -76,7 +83,7 @@ import {
   stockBySede,
   transferUnits,
 } from "./inventory-stock.js"
-import { findOrgCurrency, findOrgLocale, formatOrgMoney, requireOrgCurrency } from "./locale.js"
+import { findOrgCurrency, findOrgLocale, formatOrgMoney, orgClinicalProfile, requireOrgCurrency } from "./locale.js"
 import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -283,18 +290,34 @@ export interface SupplierInput {
 }
 
 /**
- * El tipo de documento tributario es el del país del proveedor: lo elige quien
- * registra de la lista del país y aquí no se asume ninguno. Un número sin su
- * tipo no se guarda, porque el tipo es parte de lo que lo hace único.
+ * Un número sin su tipo no se guarda, porque el tipo es parte de lo que lo
+ * hace único.
  */
 function assertSupplierDocument(docType: string | null, docNumber: string | null): void {
   if (docNumber && !docType) throw validation("Indica el tipo de documento del proveedor junto con su número")
 }
 
+/**
+ * El tipo de documento es un código de la lista del país de la clínica
+ * (`supplierDocumentTypes`: tributarios, de persona y «Otro»), nunca texto
+ * libre: se guarda el código y la pantalla dice su etiqueta. Solo se mira lo
+ * que llega; un tipo antiguo que nadie cambia se conserva.
+ */
+async function supplierDocType(tx: Db, orgId: string, raw: string | null | undefined): Promise<string | null> {
+  const docType = textOptional(raw, "El tipo de documento", 20)?.toUpperCase() ?? null
+  if (!docType) return null
+  const allowed = supplierDocumentTypes(await orgClinicalProfile(tx, orgId))
+  if (!(allowed as readonly string[]).includes(docType)) {
+    const list = new Intl.ListFormat("es", { type: "disjunction" }).format(allowed.map(documentTypeLabel))
+    throw validation(`El tipo de documento del proveedor tiene que ser uno de la lista: ${list}`)
+  }
+  return docType
+}
+
 export async function createSupplier(tx: Db, orgId: string, actorUserId: string, input: SupplierInput) {
   const name = textRequired(input.name, "El nombre del proveedor")
   const docNumber = textOptional(input.docNumber, "El documento", 50)
-  const docType = textOptional(input.docType, "El tipo de documento", 20)
+  const docType = await supplierDocType(tx, orgId, input.docType)
   assertSupplierDocument(docType, docNumber)
   try {
     const [row] = await tx
@@ -329,7 +352,7 @@ export async function updateSupplier(
   const patch: Partial<typeof supplier.$inferInsert> = {}
   if (input.name !== undefined) patch.name = textRequired(input.name, "El nombre del proveedor")
   if (input.docNumber !== undefined) patch.docNumber = textOptional(input.docNumber, "El documento", 50)
-  if (input.docType !== undefined) patch.docType = textOptional(input.docType, "El tipo de documento", 20)
+  if (input.docType !== undefined) patch.docType = await supplierDocType(tx, orgId, input.docType)
   if (input.email !== undefined) patch.email = textOptional(input.email, "El correo", 200)
   if (input.phone !== undefined) patch.phone = textOptional(input.phone, "El teléfono", 50)
   if (input.address !== undefined) patch.address = textOptional(input.address, "La dirección")

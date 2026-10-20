@@ -4,7 +4,14 @@
  * verdad: sin `inventory.read` no viajan precios, y lo que no viaja no se
  * supone (los campos de precio son opcionales).
  */
-import { formatMoney, quantityWords } from "@odentia/clinical"
+import {
+  type ClinicalCountryProfile,
+  documentText,
+  documentTypeLabel,
+  formatMoney,
+  quantityWords,
+  supplierDocumentTypes,
+} from "@odentia/clinical"
 import { ApiError, apiFetch } from "./api"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import { isAmbiguousMutationError } from "./query-error"
@@ -812,6 +819,24 @@ export function purchasePaymentState(
 }
 
 export const PAYMENT_TONE: Record<PurchasePaymentTone, Tone> = { warning: "warn", info: "soft", success: "ok", muted: "muted" }
+
+/* ---------------- documento del proveedor ---------------- */
+
+/**
+ * Los tipos de documento de un proveedor que se ofrecen en la clínica: la
+ * lista de su país (`supplierDocumentTypes`), con su etiqueta, más el guardado
+ * si ya no se ofrece (escrito a mano antes de que hubiera lista), tal cual.
+ */
+export function supplierDocChoices(profile: ClinicalCountryProfile, stored?: string | null): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = supplierDocumentTypes(profile).map((code) => ({ value: code, label: documentTypeLabel(code) }))
+  if (stored && !options.some((option) => option.value === stored)) options.push({ value: stored, label: documentTypeLabel(stored) })
+  return options
+}
+
+/** «RUC 20123456789», con la etiqueta del tipo y nunca su código; sin número, nada. */
+export function supplierDocText(item: Pick<SupplierItem, "docType" | "docNumber">): string | null {
+  return item.docNumber ? documentText(item.docType, item.docNumber) : null
+}
 
 /* ---------------- copiar el pedido ---------------- */
 

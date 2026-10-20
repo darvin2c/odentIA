@@ -178,7 +178,6 @@ function InventoryWorkspace() {
     currency: prof?.currency ?? null,
     timeZone: prof?.timezone ?? activeOrgTimeZone(),
     clinicName: prof?.tradeName ?? "",
-    fiscalDocType: prof?.fiscalDocType ?? null,
     can: { prices: canPrices, receive: canReceive, write: canWrite, pay: canPay, finance: canFinance, clinical: canClinical, people: canPeople },
     open,
   }

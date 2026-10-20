@@ -16,6 +16,7 @@ import {
   inventoryKeys,
   moneyText,
   setSupplierActive,
+  supplierDocText,
   type SupplierItem,
 } from "../../lib/inventory"
 import { QueryErrorState } from "../../lib/query-error"
@@ -25,7 +26,7 @@ import { useInventory } from "./inventory-scope"
 /** «RUC 20123456789 · 01 555 1234»: lo que identifica al proveedor en una línea. */
 export function supplierFacts(item: SupplierItem): string {
   const phone = item.phone ? (isValidE164(item.phone) ? internationalText(item.phone) : item.phone) : null
-  return [item.docNumber ? [item.docType, item.docNumber].filter(Boolean).join(" ") : null, phone, item.email].filter(Boolean).join(" · ")
+  return [supplierDocText(item), phone, item.email].filter(Boolean).join(" · ")
 }
 
 export function SuppliersTab() {
