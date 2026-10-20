@@ -4,7 +4,7 @@
  * nada peruano. La semilla de desarrollo (peruana) no participa.
  */
 import { randomUUID } from "node:crypto"
-import { type Db, withOrgContext } from "@odentia/db"
+import { type Db, seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { odontogramEntry } from "@odentia/db/schema/clinical"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
@@ -178,9 +178,12 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   )
   const args = [c.orgId, c.dentist, andrea.id] as const
   // Una resina propia que deja una restauración, sin variante: fuera de Perú es opcional.
+  // En Colombia cada servicio lleva su código CUPS (ADR 0069): el de la obturación con resina.
+  await seedProcedureCodes(ownerDb)
   const resin = await c.run(async (tx) =>
     createService(tx, c.orgId, c.dentist, {
       name: "Resina compuesta",
+      officialCode: "232102",
       specialtyId: (await librarySpecialtyIds(tx, c.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 180000,

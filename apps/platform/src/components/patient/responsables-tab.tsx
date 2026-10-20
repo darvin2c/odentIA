@@ -10,7 +10,7 @@
  */
 
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { DatePickerButton, EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { DatePickerButton, EmptyState, FormDrawer, zonedDateOf } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -24,6 +24,7 @@ import {
   type ResponsibilityKind,
   revokeResponsibilityApi,
 } from "../../lib/clinical-journey"
+import { activeOrgTimeZone } from "../../lib/locale"
 import { usePermission } from "../../lib/crm"
 import type { PatientDocument, PatientFull } from "../../lib/patients"
 import { type PickedPerson, PersonPicker } from "../person-picker"
@@ -31,8 +32,13 @@ import { ChoiceSelect } from "../ui/choice-select"
 
 const MAX_TEXT = 2000
 
+/**
+ * Hoy en la zona de la clínica, como lo cuenta el servidor al decir si una
+ * responsabilidad está vigente: en UTC, por la noche en América ya sería mañana
+ * y lo recién asignado quedaría «No vigente» hasta el día siguiente.
+ */
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  return zonedDateOf(new Date().toISOString(), activeOrgTimeZone())
 }
 
 export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX.Element {

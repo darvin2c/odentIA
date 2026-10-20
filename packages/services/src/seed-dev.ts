@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_KIND_KEYS } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
@@ -80,7 +80,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
@@ -1734,9 +1734,12 @@ const seedOffers: Array<{
   priceDisclosure: "exacto" | "desde" | "evaluacion"
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
   leavesFinding?: { condition: string; variant?: string }
+  /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0069). */
+  officialCode: string
 }> = [
   {
     code: "EVALUACION",
+    officialCode: "D0150",
     name: "Evaluación odontológica",
     specialty: "diagnostico",
     scope: "general",
@@ -1746,6 +1749,7 @@ const seedOffers: Array<{
   },
   {
     code: "OBTURACION",
+    officialCode: "D2385",
     name: "Obturación con resina",
     specialty: "restauradora",
     scope: "tooth",
@@ -1755,6 +1759,7 @@ const seedOffers: Array<{
   },
   {
     code: "ENDODONCIA",
+    officialCode: "D3310",
     name: "Endodoncia unirradicular",
     specialty: "endodoncia",
     scope: "tooth",
@@ -1765,6 +1770,7 @@ const seedOffers: Array<{
   },
   {
     code: "CORONA",
+    officialCode: "D2740",
     name: "Corona cerámica",
     specialty: "protesis",
     scope: "tooth",
@@ -1775,6 +1781,7 @@ const seedOffers: Array<{
   },
   {
     code: "BLANQUEAMIENTO",
+    officialCode: "D9972",
     name: "Blanqueamiento dental",
     specialty: "estetica",
     scope: "arch",
@@ -1784,6 +1791,7 @@ const seedOffers: Array<{
   },
   {
     code: "LIMPIEZA",
+    officialCode: "D1110",
     name: "Limpieza dental (profilaxis)",
     specialty: "prevencion",
     scope: "general",
@@ -1793,6 +1801,7 @@ const seedOffers: Array<{
   },
   {
     code: "ORTODONCIA_CTRL",
+    officialCode: "D8670",
     name: "Control de ortodoncia",
     specialty: "ortodoncia",
     scope: "general",
@@ -1804,6 +1813,7 @@ const seedOffers: Array<{
   // La exodoncia pide sus consentimientos («Se pide para», fase 3 paso 2B).
   {
     code: "EXODONCIA",
+    officialCode: "D7176",
     name: "Exodoncia simple",
     specialty: "cirugia",
     scope: "tooth",
@@ -1814,10 +1824,10 @@ const seedOffers: Array<{
     leavesFinding: { condition: "missing_tooth" },
   },
 ]
-// Cada clínica nace con las especialidades de la biblioteca (ADR 0039): el
-// servicio apunta a la suya por id.
-const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_SPECIALTIES)
-const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_SPECIALTIES)
+// Cada clínica nace con las especialidades de su país (ADR 0039 y 0069): el
+// servicio apunta a la suya por id. Aquí se buscan por el tipo que reciben.
+const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_KIND_KEYS)
+const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_KIND_KEYS)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
 for (const { specialty, ...offer } of seedOffers) {
   catalogA.push(await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }))
@@ -1828,6 +1838,7 @@ for (const { specialty, ...offer } of seedOffers) {
 catalogA.push(
   await createService(db, ORG_A, ANA_ID, {
     code: "IMPLANTE",
+    officialCode: "D6010",
     name: "Implante dental de titanio",
     specialtyId: specialtiesA.get("implantologia"),
     scope: "tooth",
@@ -1862,14 +1873,14 @@ await db.transaction(async (tx) => {
   await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: ANA_ID, rateBps: 4000 })
   await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: LUIS_ID, rateBps: 3500 })
 })
-// Oferta oficial precisa: resina posterior de una superficie (CPMS D2391).
-// El mismo snapshot se conserva en plan, presupuesto y atención.
+// De la biblioteca: la resina posterior de una superficie (en Perú, CPMS
+// D2391). El mismo snapshot se conserva en plan, presupuesto y atención.
 const [resinaTemplate] = await db
   .select()
   .from(treatmentTemplate)
-  .where(eq(treatmentTemplate.key, "cpms:RM-550-2023-MINSA:D2391"))
+  .where(eq(treatmentTemplate.key, "resina-fotocurable-1-superficie-posterior"))
   .limit(1)
-if (!resinaTemplate) throw new Error("Falta CPMS D2391: ejecuta seed:procedures")
+if (!resinaTemplate) throw new Error("Falta la resina posterior de la biblioteca: ejecuta seed:procedures")
 const resinaCpmsA = await createService(db, ORG_A, ANA_ID, {
   templateId: resinaTemplate.id,
   code: "RESINA-CPMS",
@@ -1883,22 +1894,18 @@ await createService(db, ORG_B, CORA_ID, {
   priceCents: 18000,
   durationMin: 45,
 })
-// Consultas CPMS en el tarifario: la consulta también es una prestación con
-// tarifa (D0140); el control postoperatorio va incluido (D0171 a S/ 0).
+// Consultas de la biblioteca en el tarifario: la consulta también es una
+// prestación con tarifa (CPMS D0140); el control postoperatorio va incluido
+// (CPMS D0171 a S/ 0).
 const consultaTemplates = await db
   .select()
   .from(treatmentTemplate)
-  .where(
-    inArray(treatmentTemplate.key, [
-      "cpms:RM-550-2023-MINSA:D0140",
-      "cpms:RM-550-2023-MINSA:D0171",
-    ]),
-  )
+  .where(inArray(treatmentTemplate.key, ["consulta-odontologica-general", "reevaluacion-postoperatoria"]))
 if (consultaTemplates.length !== 2) {
-  throw new Error("Faltan consultas CPMS D0140/D0171: ejecuta seed:procedures")
+  throw new Error("Faltan las consultas de la biblioteca: ejecuta seed:procedures")
 }
 for (const tpl of consultaTemplates) {
-  const isControl = tpl.key.endsWith(":D0171")
+  const isControl = tpl.key === "reevaluacion-postoperatoria"
   const offer = {
     templateId: tpl.id,
     code: isControl ? "CONTROL-POSTOP" : "CONSULTA",
@@ -1915,8 +1922,11 @@ for (const tpl of consultaTemplates) {
 const libraryForSeed = await db
   .select({ id: treatmentTemplate.id })
   .from(treatmentTemplate)
-  .where(eq(treatmentTemplate.isActive, true))
-  .orderBy(asc(treatmentTemplate.key))
+  // Dental Smile es del Perú: sin las variantes que solo separa la norma de otro
+  // país (`coded_only`), que aquí no tienen código CPMS y no se ofrecen.
+  .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.codedOnly, false)))
+  // Primero los «más usados», como los agregaría una clínica (tablero 7b).
+  .orderBy(desc(treatmentTemplate.isCommon), asc(treatmentTemplate.key))
   .limit(140)
 const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
 const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)

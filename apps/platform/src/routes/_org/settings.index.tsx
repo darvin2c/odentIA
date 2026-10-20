@@ -1,3 +1,4 @@
+import { clinicalProfileFor, DIAGNOSIS_SYSTEM_INFO } from "@odentia/clinical"
 import {
   Button,
   Field,
@@ -28,6 +29,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
+import { capitalize } from "../../components/official-code-field"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import { useReceptionName } from "../../lib/agent-names"
@@ -41,6 +43,7 @@ import {
   type OrgProfileInput,
   REGION_DEFAULTS_STALE_MS,
   regionDefaultsKey,
+  effectiveDiagnosisSystem,
   saveOrgProfile,
   useOrgProfile,
 } from "../../lib/org"
@@ -600,6 +603,7 @@ function ProfileForm({
           </form.Field>
         </div>
         <RegionExample preview={preview} />
+        <CountryRules country={country} language={language} />
       </section>
 
       <div className="flex justify-end gap-3">
@@ -617,6 +621,51 @@ function ProfileForm({
         </SubmitButton>
       </div>
     </form>
+  )
+}
+
+/**
+ * «Normas de tu país» (tablero 6 del lienzo del issue 40): de solo lectura y
+ * sin interruptores, lo que exige el país elegido. Cada línea sale de su
+ * perfil (`clinicalProfileFor`); un país sin perfil propio dice lo del núcleo.
+ */
+function CountryRules({ country, language }: { country: string; language: string }) {
+  const saved = useOrgProfile().data
+  if (country.length !== 2) return null
+  const profile = clinicalProfileFor(country)
+  // La lista de diagnósticos guardada vale para el país guardado; otro país propone la suya.
+  const diagnosis =
+    saved?.countryCode === country
+      ? effectiveDiagnosisSystem(saved).short
+      : DIAGNOSIS_SYSTEM_INFO[profile.diagnosis.recommended].short
+  const rows: Array<[string, string]> = [
+    [
+      "Servicios",
+      profile.services
+        ? `${capitalize(profile.services.listName)}, ${profile.services.required ? "obligatoria" : "de referencia"} (${profile.services.norm})`
+        : "No hay una lista oficial: tus servicios no llevan código",
+    ],
+    [
+      "Especialidades",
+      profile.specialties.source ? `Las de su norma (${profile.specialties.source})` : "Lista general de odentIA",
+    ],
+    ["Diagnósticos", `${diagnosis} (se cambia en «Lista de diagnósticos»)`],
+    ["Odontograma", profile.odontogram ? profile.odontogram.standard : "Numeración FDI"],
+  ]
+  return (
+    <div role="group" className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2.5" aria-labelledby="org-country-rules">
+      <h3 id="org-country-rules" className="text-sm font-medium">
+        {`Normas de ${countryName(country, language)}`}
+      </h3>
+      <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   )
 }
 

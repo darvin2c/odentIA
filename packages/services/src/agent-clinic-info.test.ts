@@ -36,7 +36,7 @@ function many(count: number): AgentServiceInfo[] {
     id: `s${i}`,
     // El nombre que la clínica le da a su especialidad: el índice lo dice tal cual.
     specialty: i % 2 === 0 ? "Prótesis" : "Endodoncia",
-    specialtyKey: i % 2 === 0 ? "protesis" : "endodoncia",
+    kind: i % 2 === 0 ? "protesis" : "endodoncia",
   }))
 }
 
@@ -45,7 +45,7 @@ function service(name: string): AgentServiceInfo {
     id: `id-${name}`,
     name,
     specialty: null,
-    specialtyKey: null,
+    kind: null,
     durationMin: null,
     price: { disclosure: "exacto", priceCents: 100, currency: "PEN", evaluation: null },
   }
@@ -78,14 +78,14 @@ beforeAll(async () => {
   ])
   const [specialty] = await ownerDb
     .insert(orgSpecialty)
-    // La de la biblioteca, renombrada por la clínica: el agente dice el nombre de la clínica.
-    .values({ organizationId: ORG, key: "ortodoncia", name: "Ortodoncia y frenillos" })
+    // La del país (ADR 0069), renombrada por la clínica: el agente dice el nombre de la clínica.
+    .values({ organizationId: ORG, key: "ortodoncia_ortopedia_maxilar", name: "Ortodoncia y frenillos" })
     .returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: specialty!.id, userId: dentist })
-  // Renombrada por la clínica: las palabras de la calle siguen con la clave de la biblioteca.
+  // Renombrada por la clínica: las palabras de la calle siguen al tipo de la especialidad del país.
   const [aesthetic] = await ownerDb
     .insert(orgSpecialty)
-    .values({ organizationId: ORG, key: "estetica", name: "Sonrisa y estética" })
+    .values({ organizationId: ORG, key: "restauradora_estetica", name: "Sonrisa y estética" })
     .returning({ id: orgSpecialty.id })
   const services = await ownerDb
     .insert(serviceCatalog)
@@ -148,10 +148,10 @@ describe("lo que sabe Informar", () => {
     expect(said("Limpieza dental")).toMatch(/^S\/\s?120\.00$/)
     expect(said("Ortodoncia con brackets")).toMatch(/^desde S\/\s?2,500\.00 \(es un mínimo/)
     expect(said("Ortodoncia con brackets")).toContain("Ofrece la evaluación: Evaluación")
-    // El servicio dice la especialidad de la clínica, con su nombre y su clave de la biblioteca.
+    // El servicio dice la especialidad de la clínica, con su nombre, y el tipo de la del país.
     const ortho = services.find((s) => s.name === "Ortodoncia con brackets")!
     expect(ortho.specialty).toBe("Ortodoncia y frenillos")
-    expect(ortho.specialtyKey).toBe("ortodoncia")
+    expect(ortho.kind).toBe("ortodoncia")
     const implant = said("Implante dental")
     expect(implant).toContain("no digas ningún monto")
     expect(implant).not.toMatch(/3,000|3000/)
@@ -272,7 +272,7 @@ describe("búsqueda por significado", () => {
   it("el índice guarda solo texto descriptivo y se concilia con lo que cambia", async () => {
     await run((tx) => syncSearchItems(tx, ORG))
     const rows = await run((tx) => tx.select().from(agentSearchItem).where(eq(agentSearchItem.organizationId, ORG)))
-    expect(rows.some((row) => row.kind === "servicio" && row.text.startsWith("Servicio de la clínica: Blanqueamiento dental. Especialidad: Sonrisa y estética.") && row.text.includes("apariencia de la sonrisa"))).toBe(true)
+    expect(rows.some((row) => row.kind === "servicio" && row.text.startsWith("Servicio de la clínica: Blanqueamiento dental. Especialidad: Sonrisa y estética.") && row.text.includes("Para: curación de caries"))).toBe(true)
     // Nunca precios en el texto.
     expect(rows.every((row) => !/\d{3,}/.test(row.text))).toBe(true)
     await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, ids["Implante dental"]!))

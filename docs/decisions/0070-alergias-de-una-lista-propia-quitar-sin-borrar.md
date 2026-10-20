@@ -26,7 +26,7 @@ El aviso al recetar comparaba textos: una alergia escrita «amoxi», con otra or
 
 ## Consecuencias
 
-- Lo ya guardado se codificó cuando el texto era exactamente una sustancia de la lista, sin cambiar lo escrito (migración `0044`); lo descartado antes quedó como quitada porque «era otra cosa». Lo demás queda «sin codificar» y la tarjeta lo ofrece para elegir de la lista.
+- Lo ya guardado se codificó cuando el texto era exactamente una sustancia de la lista, sin cambiar lo escrito (migración `0046`); lo descartado antes quedó como quitada porque «era otra cosa». Lo demás queda «sin codificar» y la tarjeta lo ofrece para elegir de la lista.
 - Las alergias ya no se editan dentro del formulario conjunto de Antecedentes: se agregan y quitan una por una, y cada operación avanza la revisión del agregado.
 - Revisar si la lista propia se queda corta (nuevos materiales, alimentos) o si un país pide SNOMED CT.
 
@@ -35,4 +35,4 @@ El aviso al recetar comparaba textos: una alergia escrita «amoxi», con otra or
 - `packages/clinical/src/allergens.ts` (`ALLERGENS`, `codeAllergySubstance`, `allergyWarnings`, `HABITUAL_MEDICATIONS`).
 - `packages/services/src/allergies.ts`, `clinical.ts` (`persistPatientHealth`), `prescriptions.ts`.
 - `apps/platform/src/components/patient/allergies-card.tsx`, `clinical-panels.tsx` (receta).
-- Migraciones `0043_alergias_y_medicacion_codificadas` y `0044_alergias_y_medicacion_codificadas_datos`.
+- Migraciones `0045_alergias_y_medicacion_codificadas` y `0046_alergias_y_medicacion_codificadas_datos`.

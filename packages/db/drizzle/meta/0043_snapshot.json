@@ -1,5 +1,5 @@
 {
-  "id": "1a4d19f8-8a00-416a-9e39-d0878d37bf1e",
+  "id": "f5f4f41c-c684-4ea6-bc62-8746937ba22d",
   "prevId": "ed3be36c-0077-4b25-bda1-8ec56263f126",
   "version": "7",
   "dialect": "postgresql",
@@ -13661,18 +13661,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "allergies_reviewed_at": {
-          "name": "allergies_reviewed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "allergies_reviewed_by": {
-          "name": "allergies_reviewed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -13794,20 +13782,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "patient_allergies_reviewed_by_user_id_fk": {
-          "name": "patient_allergies_reviewed_by_user_id_fk",
-          "tableFrom": "patient",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "allergies_reviewed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "patient_person_fk": {
           "name": "patient_person_fk",
           "tableFrom": "patient",
@@ -13896,18 +13870,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "substance_system": {
-          "name": "substance_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "substance_code": {
-          "name": "substance_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "category": {
           "name": "category",
           "type": "text",
@@ -13946,37 +13908,12 @@
           "notNull": true,
           "default": "'no_confirmada'"
         },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'equipo'"
-        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
-        },
-        "removed_reason": {
-          "name": "removed_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by": {
-          "name": "removed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -14049,20 +13986,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "patient_allergy_removed_by_user_id_fk": {
-          "name": "patient_allergy_removed_by_user_id_fk",
-          "tableFrom": "patient_allergy",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "removed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "patient_allergy_created_by_user_id_fk": {
           "name": "patient_allergy_created_by_user_id_fk",
           "tableFrom": "patient_allergy",
@@ -14082,26 +14005,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "patient_allergy_substance_system_check": {
-          "name": "patient_allergy_substance_system_check",
-          "value": "\"patient_allergy\".\"substance_system\" IS NULL OR \"patient_allergy\".\"substance_system\" IN ('atc','odentia')"
-        },
-        "patient_allergy_substance_code_check": {
-          "name": "patient_allergy_substance_code_check",
-          "value": "(\"patient_allergy\".\"substance_system\" IS NULL) = (\"patient_allergy\".\"substance_code\" IS NULL)"
-        },
-        "patient_allergy_source_check": {
-          "name": "patient_allergy_source_check",
-          "value": "\"patient_allergy\".\"source\" IN ('equipo','paciente')"
-        },
-        "patient_allergy_removed_reason_check": {
-          "name": "patient_allergy_removed_reason_check",
-          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR \"patient_allergy\".\"removed_reason\" IN ('ya_no','otra_cosa','error')"
-        },
-        "patient_allergy_removed_check": {
-          "name": "patient_allergy_removed_check",
-          "value": "NOT (\"patient_allergy\".\"is_active\" AND \"patient_allergy\".\"removed_reason\" IS NOT NULL)"
-        },
         "patient_allergy_severity_check": {
           "name": "patient_allergy_severity_check",
           "value": "\"patient_allergy\".\"severity\" IN ('leve','moderada','severa','desconocida')"
@@ -16070,38 +15973,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "atc_code": {
-          "name": "atc_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "dose": {
           "name": "dose",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "dose_value": {
-          "name": "dose_value",
-          "type": "numeric(10, 3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dose_unit": {
-          "name": "dose_unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "frequency": {
           "name": "frequency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "frequency_code": {
-          "name": "frequency_code",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -16213,20 +16092,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "patient_medication_dose_unit_check": {
-          "name": "patient_medication_dose_unit_check",
-          "value": "\"patient_medication\".\"dose_unit\" IS NULL OR \"patient_medication\".\"dose_unit\" IN ('mg','g','ug','mL','[iU]','{tbl}','{cap}','{drop}','{puff}')"
-        },
-        "patient_medication_frequency_code_check": {
-          "name": "patient_medication_frequency_code_check",
-          "value": "\"patient_medication\".\"frequency_code\" IS NULL OR \"patient_medication\".\"frequency_code\" IN ('cada_8_h','cada_12_h','cada_24_h','segun_necesidad')"
-        },
-        "patient_medication_dose_check": {
-          "name": "patient_medication_dose_check",
-          "value": "(\"patient_medication\".\"dose_value\" IS NULL) = (\"patient_medication\".\"dose_unit\" IS NULL) AND (\"patient_medication\".\"dose_value\" IS NULL OR \"patient_medication\".\"dose_value\" > 0)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.patient_payment": {
@@ -18760,12 +18626,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "allergy_override_reason": {
-          "name": "allergy_override_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "prescriber_name": {
           "name": "prescriber_name",
           "type": "text",
@@ -19505,6 +19365,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "procedure_system": {
+          "name": "procedure_system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "procedure_code": {
+          "name": "procedure_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "procedure_version": {
+          "name": "procedure_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -19725,12 +19603,34 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "service_catalog_procedure_fk": {
+          "name": "service_catalog_procedure_fk",
+          "tableFrom": "service_catalog",
+          "tableTo": "procedure_code",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "procedure_system",
+            "procedure_code",
+            "procedure_version"
+          ],
+          "columnsTo": [
+            "system_key",
+            "code",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "service_catalog_procedure_check": {
+          "name": "service_catalog_procedure_check",
+          "value": "(\"service_catalog\".\"procedure_system\" IS NULL) = (\"service_catalog\".\"procedure_code\" IS NULL) AND (\"service_catalog\".\"procedure_code\" IS NULL) = (\"service_catalog\".\"procedure_version\" IS NULL) AND (\"service_catalog\".\"procedure_code\" IS NULL OR \"service_catalog\".\"template_id\" IS NULL)"
+        },
         "service_catalog_price_check": {
           "name": "service_catalog_price_check",
           "value": "\"service_catalog\".\"price_cents\" >= 0"
@@ -21556,6 +21456,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "leaves_finding": {
+          "name": "leaves_finding",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_common": {
+          "name": "is_common",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "coded_only": {
+          "name": "coded_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -21622,13 +21542,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "is_primary": {
-          "name": "is_primary",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         }
       },
       "indexes": {
@@ -21659,32 +21572,17 @@
           "method": "btree",
           "with": {}
         },
-        "treatment_template_code_template_uidx": {
-          "name": "treatment_template_code_template_uidx",
+        "treatment_template_code_list_uidx": {
+          "name": "treatment_template_code_list_uidx",
           "columns": [
             {
               "expression": "template_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "treatment_template_code_code_uidx": {
-          "name": "treatment_template_code_code_uidx",
-          "columns": [
-            {
-              "expression": "system_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             },
             {
-              "expression": "code",
+              "expression": "system_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

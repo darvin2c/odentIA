@@ -27,7 +27,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base"
 import type { AIMessage, BaseMessage } from "@langchain/core/messages"
 import { whatsappCloudApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
@@ -139,6 +139,24 @@ const QUESTIONS: Array<{ label: string; turns: string[] }> = [
  * qué pasa cuando los servicios no caben en lo que el agente lee.
  */
 const BIG_CATALOG = env.CATALOGO === "grande"
+/**
+ * En el Perú cada servicio propio lleva su código CPMS (ADR 0069). Aquí no se
+ * mide el código: basta uno vigente por tipo de tratamiento.
+ */
+const CPMS_OF_KIND: Record<string, string> = {
+  diagnostico: "D0150",
+  prevencion: "D1110",
+  restauradora: "D2391",
+  endodoncia: "D3310",
+  periodoncia: "D4341",
+  cirugia: "D7140",
+  protesis: "D2740",
+  implantologia: "D6010",
+  ortodoncia: "D8670",
+  odontopediatria: "D1351",
+  estetica: "D9972",
+  disfuncion: "D9940",
+}
 const CATALOG: Array<[string, string, string[]]> = [
   ["diagnostico", "general", ["Radiografía periapical", "Radiografía panorámica", "Radiografía bite wing", "Tomografía cone beam", "Modelos de estudio", "Fotografías clínicas", "Interconsulta"]],
   ["prevencion", "general", ["Profilaxis", "Aplicación de flúor barniz", "Aplicación de flúor gel", "Instrucción de higiene", "Destartraje supragingival"]],
@@ -329,6 +347,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       dentistUserId: specialist,
       rules: [2, 4].map((weekday) => ({ weekday, startMin: 15 * 60, endMin: 19 * 60 })),
     }))
+  await seedProcedureCodes(ownerDb)
   await inOrg(async (tx) => {
     // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
     const specialtyOf = await librarySpecialtyIds(tx, ORG, CATALOG.map(([key]) => key).concat(["diagnostico", "prevencion", "endodoncia", "estetica", "ortodoncia"]))
@@ -338,13 +357,13 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       { name: "Endodoncia (tratamiento de conducto)", specialty: "endodoncia", scope: "tooth", priceCents: 45000, durationMin: 60 },
       { name: "Blanqueamiento", specialty: "estetica", scope: "general", priceCents: 60000, durationMin: 60 },
       { name: "Control de ortodoncia", specialty: "ortodoncia", scope: "general", priceCents: 8000, durationMin: 20 },
-    ]) await createService(tx, ORG, owner, { ...service, specialtyId: specialtyOf.get(specialty) })
+    ]) await createService(tx, ORG, owner, { ...service, specialtyId: specialtyOf.get(specialty), officialCode: CPMS_OF_KIND[specialty] })
     if (BIG_CATALOG) {
       let price = 4000
       for (const [specialty, scope, names] of CATALOG) {
         for (const name of names) {
           price += 1500
-          await createService(tx, ORG, owner, { name, specialtyId: specialtyOf.get(specialty), scope, priceCents: price, durationMin: 30 })
+          await createService(tx, ORG, owner, { name, specialtyId: specialtyOf.get(specialty), scope, priceCents: price, durationMin: 30, officialCode: CPMS_OF_KIND[specialty] })
         }
       }
     }
