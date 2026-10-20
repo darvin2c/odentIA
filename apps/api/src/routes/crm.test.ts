@@ -849,7 +849,7 @@ it("sin un modelo que responda no se enciende, «Probar» no cuenta y odentIA re
   const failed = await app.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })
   expect(failed.status).toBe(409)
   const message = ((await failed.json()) as { error: { message: string } }).error.message
-  expect(message).toBe("El agente no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA.")
+  expect(message).toBe("Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA.")
   expect(await turns()).toBe(before)
   // Con un modelo que responde, la prueba sí cuenta.
   expect((await buildApp("owner").request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })).status).toBe(200)
