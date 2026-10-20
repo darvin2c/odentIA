@@ -24,10 +24,13 @@ interface ModelPrice {
 
  * - gpt-6-luna: el de la página de precios de OpenAI, leída el 2026-10-17;
  *   caché: lectura 0,1× y escritura 1,25× de la entrada. Chat Completions
- *   cobra la escritura (medido el 2026-10-17, ADR 0012). Vale también para
- *   OpenAI Decisions, que cobra los tokens de ese modelo.
- * - text-embedding-3-small, whisper-1 y gpt-4o-mini-transcribe: precios de
- *   lista de OpenAI.
+ *   cobra la escritura (medido el 2026-10-17, ADR 0012).
+ * - text-embedding-3-small y whisper-1: precios de lista de OpenAI.
+ * - gpt-4o-mini-transcribe: OpenAI lo cobra por tokens y responde con tokens
+ *   (`usage.type: "tokens"`); los USD 0,003 por minuto de su página son una
+ *   estimación y quedan por si algún día informa minutos. Entrada USD 1,25
+ *   (los tokens de audio: no tienen otro precio) y salida USD 5 por millón,
+ *   de developers.openai.com/api/docs/pricing, leída el 2026-10-20.
  * - jev-1.13.0 (modelo de decisión de toda clínica, ADR 0047): el de
  *   docs.typesafe.ai/models, leído el 2026-10-17; la salida no se cobra.
  */
@@ -37,7 +40,7 @@ export const AI_PRICES: Record<string, ModelPrice> = {
   "jev-1.13.0": { input: 0.042, output: 0 },
   "text-embedding-3-small": { input: 0.02 },
   "whisper-1": { perMinute: 0.006 },
-  "gpt-4o-mini-transcribe": { perMinute: 0.003 },
+  "gpt-4o-mini-transcribe": { input: 1.25, output: 5, perMinute: 0.003 },
 }
 
 /** Lo que reporta una llamada; los campos ausentes son los que el proveedor no entregó. */
