@@ -142,6 +142,8 @@ export function AgentBaseDrawer({
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
+      // El nombre de recepción viaja con los datos de la clínica: todas las pantallas lo dicen.
+      void queryClient.invalidateQueries({ queryKey: ["org-profile"] })
       onClose()
     },
   })
