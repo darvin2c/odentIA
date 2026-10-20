@@ -20,7 +20,8 @@ export type AdminQuestion =
 
 export type AdminAnswer =
   | { id: string; kind: "yesno"; probability: number }
-  | { id: string; kind: "choice"; choice: string; confidence: number | null }
+  /** `probabilities`: la de cada opción, si el modelo la entrega (Jev sí; el modelo de chat no). */
+  | { id: string; kind: "choice"; choice: string; confidence: number | null; probabilities?: Record<string, number> | null }
   | { id: string; kind: string }
 
 export interface AdminDecider {
@@ -239,7 +240,8 @@ export async function interpretAdminRequest(text: string, decider: AdminDecider)
 
 // ------------------------------------------------ sin modelo real ---
 
-const LINE_WORDS: Array<[AdminLineKey, RegExp]> = [
+/** De qué línea habla un texto, por palabras: también la usa Argos en Reportes para decir qué prender. */
+export const LINE_WORDS: Array<[AdminLineKey, RegExp]> = [
   ["cita_cancelada", /cancel/],
   ["seguimiento_no_asistencia", /falt|inasist|no (vino|vinieron|asist)/],
   ["presupuestos_sin_cita", /presupuesto.*(aceptad|sin cita)/],

@@ -378,7 +378,7 @@ export async function newPatientValue(tx: Db, orgId: string, end: Date, options:
 // --- De dónde vino lo cobrado -----------------------------------------------------------
 
 /** Lo cobrado del tramo por medio de pago, con la regla de Finanzas (anulaciones y devoluciones restan). */
-async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
+export async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
   const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
   const rows = await tx.execute<{ method: string; cash: boolean; cents: string }>(sql`
     select x.method, bool_or(x.cash) as cash, sum(x.cents)::text as cents from (
@@ -416,7 +416,7 @@ const TREATMENTS_SHOWN = 6
  * día que se aplicó, la parte que pasa a un concepto rebajado no vuelve a
  * contar, y lo devuelto se resta el día de la devolución.
  */
-async function collectedByTreatment(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
+export async function collectedByTreatment(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
   const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
   const rows = await tx.execute<{ name: string; cents: string }>(sql`
     with x as (

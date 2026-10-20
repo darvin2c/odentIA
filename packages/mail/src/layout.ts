@@ -49,6 +49,8 @@ export interface EmailContent {
   facts?: readonly EmailFact[]
   /** Documento largo por secciones: la Hoja de Reclamación. */
   sections?: readonly EmailSection[]
+  /** Bloques con título después de la ficha: una lista corta o un párrafo («Lo que cambió»). */
+  blocks?: readonly { title: string; items?: readonly string[]; text?: string }[]
   /** Un solo botón, al lugar donde se actúa. */
   action?: { label: string; url: string }
   /** Plazo, qué pasa si no hace nada o qué hacer si no fue la persona. */
@@ -57,6 +59,8 @@ export interface EmailContent {
   notices?: readonly string[]
   /** Por qué lo recibe: «Te escribimos porque…». */
   reason: string
+  /** Para un correo que la persona prendió para sí: el enlace para dejar de recibirlo, junto a `reason`. */
+  unsubscribe?: { label: string; url: string }
   /** Quien recibe las respuestas. */
   replyTo?: string
   /** Qué pasa si responde; por defecto, que el correo no recibe respuestas. */
@@ -295,6 +299,18 @@ export function renderEmail(content: EmailContent): MailTemplate {
     )
   }
   if (content.facts?.length) body.push(row(factsTable(content.facts), "20px 32px 0 32px"))
+  for (const block of content.blocks ?? []) {
+    body.push(
+      row(
+        `<h2 class="t1" style="margin:0 0 8px 0;${FONT}font-size:15px;line-height:20px;font-weight:bold;color:${C.tinta};">${escapeHtml(block.title)}</h2>` +
+          (block.items?.length
+            ? `<ul class="t2 cuerpo" style="margin:0;padding:0 0 0 20px;${FONT}font-size:15px;line-height:24px;color:${C.cuerpo};">${block.items.map((item) => `<li style="margin:0 0 4px 0;">${lines(item)}</li>`).join("")}</ul>`
+            : "") +
+          (block.text ? `<p class="t2 cuerpo" style="margin:0;${FONT}font-size:15px;line-height:24px;color:${C.cuerpo};">${lines(block.text)}</p>` : ""),
+        "24px 32px 0 32px",
+      ),
+    )
+  }
   if (content.sections?.length) body.push(row(sectionsHtml(content.sections), "24px 32px 0 32px"))
   if (content.action) body.push(row(button(content.action), "24px 32px 0 32px"))
   if (content.note) body.push(row(p(content.note, `font-size:14px;line-height:22px;color:${C.nota};`), "20px 32px 0 32px"))
@@ -337,7 +353,11 @@ export function renderEmail(content: EmailContent): MailTemplate {
   body.push(
     `<tr><td style="padding:28px 0 0 0;font-size:0;line-height:0;">&nbsp;</td></tr>` +
       `<tr><td class="px pie linea" style="padding:20px 32px;background-color:${C.pie};border-top:1px solid ${C.borde};border-radius:0 0 8px 8px;">` +
-      `<p class="t3" style="margin:0;${FONT}font-size:12px;line-height:18px;color:${C.suave};">${escapeHtml(reasonText)}</p>` +
+      `<p class="t3" style="margin:0;${FONT}font-size:12px;line-height:18px;color:${C.suave};">${escapeHtml(reasonText)}${
+        content.unsubscribe
+          ? ` <a class="enlace" href="${escapeHtml(content.unsubscribe.url)}" target="_blank" style="color:${C.marca};text-decoration:underline;">${escapeHtml(content.unsubscribe.label)}</a>`
+          : ""
+      }</p>` +
       `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="linea" style="margin:16px 0 0 0;border-top:1px solid ${C.borde};"><tr>` +
       `<td valign="middle" style="padding:16px 0 0 0;">${signature}</td>` +
       linkCell +
@@ -381,13 +401,18 @@ ${body.join("\n")}
     text.push("")
   }
   if (content.facts?.length) text.push(...content.facts.map((fact) => `${fact.label}: ${fact.value}`), "")
+  for (const block of content.blocks ?? []) {
+    text.push(block.title.toUpperCase(), ...(block.items ?? []).map((item) => `- ${item}`), ...(block.text ? [block.text] : []), "")
+  }
   for (const section of content.sections ?? []) {
     text.push(section.title.toUpperCase(), ...section.rows.map(([label, value]) => `${label}: ${value}`), "")
   }
   if (content.action) text.push(`${content.action.label}: ${content.action.url}`, "")
   if (content.note) text.push(content.note, "")
   if (content.notices?.length) text.push(...content.notices, "")
-  text.push("--", reasonText, links ? `odentIA · ${links.domain}` : "odentIA")
+  text.push("--", reasonText)
+  if (content.unsubscribe) text.push(`${content.unsubscribe.label}: ${content.unsubscribe.url}`)
+  text.push(links ? `odentIA · ${links.domain}` : "odentIA")
   if (links) text.push(links.links.map((link) => `${link.label}: ${link.url}`).join(" · "))
 
   return {

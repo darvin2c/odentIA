@@ -46,7 +46,7 @@ export function asAdminDecider(model: DecisionModel): AdminDecider {
       return {
         answers: result.answers.map((answer) =>
           answer.kind === "choice"
-            ? { id: answer.id, kind: "choice", choice: answer.choice, confidence: answer.confidence }
+            ? { id: answer.id, kind: "choice", choice: answer.choice, confidence: answer.confidence, probabilities: answer.probabilities }
             : answer.kind === "yesno"
               ? { id: answer.id, kind: "yesno", probability: answer.probability }
               : { id: answer.id, kind: answer.kind },

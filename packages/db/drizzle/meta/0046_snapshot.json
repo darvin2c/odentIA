@@ -1,6 +1,6 @@
 {
-  "id": "02285eec-3916-4075-bec7-52f2f82886f6",
-  "prevId": "3ff58836-223f-4e4a-b295-0bedf96a1a99",
+  "id": "4434f90c-1fb4-43b3-b693-5f0db02c540c",
+  "prevId": "c0fc16cc-3155-42f9-903b-30da883a3d15",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5619,7 +5619,7 @@
       "checkConstraints": {
         "ai_usage_origin_check": {
           "name": "ai_usage_origin_check",
-          "value": "\"ai_usage\".\"origin\" in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion','comprobacion')"
+          "value": "\"ai_usage\".\"origin\" in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion','comprobacion','reportes')"
         },
         "ai_usage_calls_check": {
           "name": "ai_usage_calls_check",
@@ -13661,18 +13661,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "allergies_reviewed_at": {
-          "name": "allergies_reviewed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "allergies_reviewed_by": {
-          "name": "allergies_reviewed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -13794,20 +13782,6 @@
           "onUpdate": "no action",
           "onDelete": "no action"
         },
-        "patient_allergies_reviewed_by_user_id_fk": {
-          "name": "patient_allergies_reviewed_by_user_id_fk",
-          "tableFrom": "patient",
-          "columnsFrom": [
-            "allergies_reviewed_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
         "patient_person_fk": {
           "name": "patient_person_fk",
           "tableFrom": "patient",
@@ -13896,18 +13870,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "substance_system": {
-          "name": "substance_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "substance_code": {
-          "name": "substance_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "category": {
           "name": "category",
           "type": "text",
@@ -13946,37 +13908,12 @@
           "notNull": true,
           "default": "'no_confirmada'"
         },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'equipo'"
-        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
-        },
-        "removed_reason": {
-          "name": "removed_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by": {
-          "name": "removed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -14049,20 +13986,6 @@
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
-        "patient_allergy_removed_by_user_id_fk": {
-          "name": "patient_allergy_removed_by_user_id_fk",
-          "tableFrom": "patient_allergy",
-          "columnsFrom": [
-            "removed_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
         "patient_allergy_created_by_user_id_fk": {
           "name": "patient_allergy_created_by_user_id_fk",
           "tableFrom": "patient_allergy",
@@ -14082,26 +14005,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "patient_allergy_substance_system_check": {
-          "name": "patient_allergy_substance_system_check",
-          "value": "\"patient_allergy\".\"substance_system\" IS NULL OR \"patient_allergy\".\"substance_system\" IN ('atc','odentia')"
-        },
-        "patient_allergy_substance_code_check": {
-          "name": "patient_allergy_substance_code_check",
-          "value": "(\"patient_allergy\".\"substance_system\" IS NULL) = (\"patient_allergy\".\"substance_code\" IS NULL)"
-        },
-        "patient_allergy_source_check": {
-          "name": "patient_allergy_source_check",
-          "value": "\"patient_allergy\".\"source\" IN ('equipo','paciente')"
-        },
-        "patient_allergy_removed_reason_check": {
-          "name": "patient_allergy_removed_reason_check",
-          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR \"patient_allergy\".\"removed_reason\" IN ('ya_no','otra_cosa','error')"
-        },
-        "patient_allergy_removed_check": {
-          "name": "patient_allergy_removed_check",
-          "value": "NOT (\"patient_allergy\".\"is_active\" AND \"patient_allergy\".\"removed_reason\" IS NOT NULL)"
-        },
         "patient_allergy_severity_check": {
           "name": "patient_allergy_severity_check",
           "value": "\"patient_allergy\".\"severity\" IN ('leve','moderada','severa','desconocida')"
@@ -16070,38 +15973,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "atc_code": {
-          "name": "atc_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "dose": {
           "name": "dose",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "dose_value": {
-          "name": "dose_value",
-          "type": "numeric(10, 3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dose_unit": {
-          "name": "dose_unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "frequency": {
           "name": "frequency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "frequency_code": {
-          "name": "frequency_code",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -16213,20 +16092,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "patient_medication_dose_unit_check": {
-          "name": "patient_medication_dose_unit_check",
-          "value": "\"patient_medication\".\"dose_unit\" IS NULL OR \"patient_medication\".\"dose_unit\" IN ('mg','g','ug','mL','[iU]','{tbl}','{cap}','{drop}','{puff}')"
-        },
-        "patient_medication_frequency_code_check": {
-          "name": "patient_medication_frequency_code_check",
-          "value": "\"patient_medication\".\"frequency_code\" IS NULL OR \"patient_medication\".\"frequency_code\" IN ('cada_8_h','cada_12_h','cada_24_h','segun_necesidad')"
-        },
-        "patient_medication_dose_check": {
-          "name": "patient_medication_dose_check",
-          "value": "(\"patient_medication\".\"dose_value\" IS NULL) = (\"patient_medication\".\"dose_unit\" IS NULL) AND (\"patient_medication\".\"dose_value\" IS NULL OR \"patient_medication\".\"dose_value\" > 0)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.patient_payment": {
@@ -18757,12 +18623,6 @@
         "valid_until": {
           "name": "valid_until",
           "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "allergy_override_reason": {
-          "name": "allergy_override_reason",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -36607,6 +36467,595 @@
         "saas_whatsapp_rate_price_check": {
           "name": "saas_whatsapp_rate_price_check",
           "value": "\"admin\".\"saas_whatsapp_rate\".\"price_micros\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.report_digest": {
+      "name": "report_digest",
+      "schema": "",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "report_digest_user_uidx": {
+          "name": "report_digest_user_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "report_digest_organization_id_organization_id_fk": {
+          "name": "report_digest_organization_id_organization_id_fk",
+          "tableFrom": "report_digest",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "report_digest_user_id_user_id_fk": {
+          "name": "report_digest_user_id_user_id_fk",
+          "tableFrom": "report_digest",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.report_digest_send": {
+      "name": "report_digest_send",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "week": {
+          "name": "week",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'reclamado'"
+        },
+        "detail": {
+          "name": "detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "report_digest_send_week_uidx": {
+          "name": "report_digest_send_week_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "week",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "report_digest_send_organization_id_organization_id_fk": {
+          "name": "report_digest_send_organization_id_organization_id_fk",
+          "tableFrom": "report_digest_send",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "report_digest_send_user_id_user_id_fk": {
+          "name": "report_digest_send_user_id_user_id_fk",
+          "tableFrom": "report_digest_send",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "report_digest_send_state_check": {
+          "name": "report_digest_send_state_check",
+          "value": "\"report_digest_send\".\"state\" in ('reclamado','enviado','incierto','omitido')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.report_goal": {
+      "name": "report_goal",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metric": {
+          "name": "metric",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_month": {
+          "name": "from_month",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "set_by": {
+          "name": "set_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "set_at": {
+          "name": "set_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "report_goal_month_uidx": {
+          "name": "report_goal_month_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "metric",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "from_month",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "report_goal_organization_id_organization_id_fk": {
+          "name": "report_goal_organization_id_organization_id_fk",
+          "tableFrom": "report_goal",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "report_goal_set_by_user_id_fk": {
+          "name": "report_goal_set_by_user_id_fk",
+          "tableFrom": "report_goal",
+          "columnsFrom": [
+            "set_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "report_goal_metric_check": {
+          "name": "report_goal_metric_check",
+          "value": "\"report_goal\".\"metric\" in ('cobrado','pacientes_nuevos')"
+        },
+        "report_goal_amount_check": {
+          "name": "report_goal_amount_check",
+          "value": "\"report_goal\".\"amount\" is null or \"report_goal\".\"amount\" > 0"
+        },
+        "report_goal_currency_check": {
+          "name": "report_goal_currency_check",
+          "value": "\"report_goal\".\"metric\" <> 'cobrado' or \"report_goal\".\"amount\" is null or \"report_goal\".\"currency\" is not null"
+        },
+        "report_goal_month_check": {
+          "name": "report_goal_month_check",
+          "value": "extract(day from \"report_goal\".\"from_month\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.report_pin": {
+      "name": "report_pin",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "figure": {
+          "name": "figure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_by": {
+          "name": "group_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'total'"
+        },
+        "focus": {
+          "name": "focus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "report_pin_question_uidx": {
+          "name": "report_pin_question_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "figure",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "group_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "focus",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "report_pin_organization_id_organization_id_fk": {
+          "name": "report_pin_organization_id_organization_id_fk",
+          "tableFrom": "report_pin",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "report_pin_created_by_user_id_fk": {
+          "name": "report_pin_created_by_user_id_fk",
+          "tableFrom": "report_pin",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.report_question": {
+      "name": "report_question",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "figure": {
+          "name": "figure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "group_by": {
+          "name": "group_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "used_model": {
+          "name": "used_model",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "report_question_org_date_idx": {
+          "name": "report_question_org_date_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "report_question_organization_id_organization_id_fk": {
+          "name": "report_question_organization_id_organization_id_fk",
+          "tableFrom": "report_question",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "report_question_user_id_user_id_fk": {
+          "name": "report_question_user_id_user_id_fk",
+          "tableFrom": "report_question",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "report_question_outcome_check": {
+          "name": "report_question_outcome_check",
+          "value": "\"report_question\".\"outcome\" in ('respondida','pregunta','no_sabe','clinico','accion','otro','no_pudo')"
         }
       },
       "isRLSEnabled": false

@@ -22,7 +22,7 @@ export type AllergyRemovalReason = (typeof ALLERGY_REMOVAL_REASONS)[number]
 export const ALLERGY_SOURCES = ["equipo", "paciente"] as const
 export type AllergySource = (typeof ALLERGY_SOURCES)[number]
 
-/** De qué lista sale el código de la sustancia: ATC de la OMS o la lista propia (ADR 0070). */
+/** De qué lista sale el código de la sustancia: ATC de la OMS o la lista propia (ADR 0072). */
 export const ALLERGEN_SYSTEMS = ["atc", "odentia"] as const
 export type AllergenSystem = (typeof ALLERGEN_SYSTEMS)[number]
 

@@ -15,7 +15,7 @@ import {
  * Pacientes). Los medicamentos y sus grupos llevan su código ATC de la OMS,
  * el mismo de la receta; lo que no es medicamento (látex, metales, materiales
  * dentales, alimentos frecuentes) va en una lista corta propia en vez de
- * SNOMED CT, que exige licencia nacional (decisión 9, ADR 0070). Lo que no
+ * SNOMED CT, que exige licencia nacional (decisión 9, ADR 0072). Lo que no
  * está en la lista se guarda como texto, «sin codificar».
  */
 

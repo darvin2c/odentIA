@@ -66,6 +66,7 @@ import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings
 import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
 import { Route as OrgSettingsTeamRouteImport } from './routes/_org/settings.team'
 import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
+import { Route as ResumenLunesBajaTokenRouteImport } from './routes/resumen-lunes.baja.$token'
 import { Route as OrgSettingsIntegrationsIndexRouteImport } from './routes/_org/settings.integrations.index'
 import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
 import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
@@ -367,6 +368,11 @@ const OrgSettingsWebchatRoute = OrgSettingsWebchatRouteImport.update({
   path: '/webchat',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const ResumenLunesBajaTokenRoute = ResumenLunesBajaTokenRouteImport.update({
+  id: '/resumen-lunes/baja/$token',
+  path: '/resumen-lunes/baja/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrgSettingsIntegrationsIndexRoute =
   OrgSettingsIntegrationsIndexRouteImport.update({
     id: '/integrations/',
@@ -483,6 +489,7 @@ export interface FileRoutesByFullPath {
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/settings/team': typeof OrgSettingsTeamRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
   '/agent/': typeof OrgAgentIndexRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
@@ -550,6 +557,7 @@ export interface FileRoutesByTo {
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/settings/team': typeof OrgSettingsTeamRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
   '/agent': typeof OrgAgentIndexRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
@@ -621,6 +629,7 @@ export interface FileRoutesById {
   '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/_org/settings/team': typeof OrgSettingsTeamRoute
   '/_org/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
   '/_org/agent/': typeof OrgAgentIndexRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
@@ -692,6 +701,7 @@ export interface FileRouteTypes {
     | '/settings/specialties'
     | '/settings/team'
     | '/settings/webchat'
+    | '/resumen-lunes/baja/$token'
     | '/agent/'
     | '/contacts/'
     | '/patients/'
@@ -759,6 +769,7 @@ export interface FileRouteTypes {
     | '/settings/specialties'
     | '/settings/team'
     | '/settings/webchat'
+    | '/resumen-lunes/baja/$token'
     | '/agent'
     | '/contacts'
     | '/patients'
@@ -829,6 +840,7 @@ export interface FileRouteTypes {
     | '/_org/settings/specialties'
     | '/_org/settings/team'
     | '/_org/settings/webchat'
+    | '/resumen-lunes/baja/$token'
     | '/_org/agent/'
     | '/_org/contacts/'
     | '/_org/patients/'
@@ -857,6 +869,7 @@ export interface RootRouteChildren {
   BajaTokenRoute: typeof BajaTokenRoute
   CTokenRoute: typeof CTokenRoute
   EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
+  ResumenLunesBajaTokenRoute: typeof ResumenLunesBajaTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1260,6 +1273,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsWebchatRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/resumen-lunes/baja/$token': {
+      id: '/resumen-lunes/baja/$token'
+      path: '/resumen-lunes/baja/$token'
+      fullPath: '/resumen-lunes/baja/$token'
+      preLoaderRoute: typeof ResumenLunesBajaTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_org/settings/integrations/': {
       id: '/_org/settings/integrations/'
       path: '/integrations'
@@ -1512,6 +1532,7 @@ const rootRouteChildren: RootRouteChildren = {
   BajaTokenRoute: BajaTokenRoute,
   CTokenRoute: CTokenRoute,
   EmbedConnectionIdRoute: EmbedConnectionIdRoute,
+  ResumenLunesBajaTokenRoute: ResumenLunesBajaTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

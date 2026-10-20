@@ -908,7 +908,7 @@ async function persistPatientHealth(
   }
   // Aplicación de diffs (todo ya validado: cualquier fallo revierte todo).
   for (const row of allergies) {
-    // Lo escrito que es exactamente una sustancia de la lista queda con su código (ADR 0070).
+    // Lo escrito que es exactamente una sustancia de la lista queda con su código (ADR 0072).
     const entry = codeAllergySubstance(row.substance)
     if (!row.id) {
       await tx.insert(patientAllergy).values({

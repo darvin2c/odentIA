@@ -57,3 +57,12 @@ export function submitAutomationLink(scope: "baja", token: string, _action: "baj
 export function personalLinkFromEmail(token: string): Promise<{ data: { token: string; url: string | null } }> {
   return publicFetch(`/api/public/automations/cita/${encodeURIComponent(token)}/enlace`, { method: "POST" })
 }
+
+/** «Dejar de recibirlo» del resumen del lunes (ADR 0071): el enlace del correo, sin sesión. */
+export function fetchReportDigestStop(token: string): Promise<{ data: { clinic: string; enabled: boolean } }> {
+  return publicFetch(`/api/public/report-digest/${encodeURIComponent(token)}`)
+}
+
+export function confirmReportDigestStop(token: string): Promise<{ data: { clinic: string; enabled: boolean } }> {
+  return publicFetch(`/api/public/report-digest/${encodeURIComponent(token)}`, { method: "POST" })
+}

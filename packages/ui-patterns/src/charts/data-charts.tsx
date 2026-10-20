@@ -320,10 +320,15 @@ export function ColumnChart({
               {reference ? (
                 <>
                   <div aria-hidden className="absolute inset-x-0 h-0.5 bg-series-2" style={{ bottom: `${percent(reference.value)}%` }} />
+                  {/* Con la línea arriba del todo, el rótulo va debajo: encima taparía lo que dice la tarjeta. */}
                   <span
                     aria-hidden
                     className="absolute left-1.5 rounded bg-card px-1 text-xs font-bold text-foreground"
-                    style={{ bottom: `calc(${percent(reference.value)}% + 4px)` }}
+                    style={
+                      percent(reference.value) > 85
+                        ? { bottom: `calc(${percent(reference.value)}% - 4px)`, transform: "translateY(100%)" }
+                        : { bottom: `calc(${percent(reference.value)}% + 4px)` }
+                    }
                   >
                     {reference.label}
                   </span>

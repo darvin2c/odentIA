@@ -62,7 +62,7 @@ export interface Patient {
 export interface Allergy {
   id: string
   substance: string
-  /** Lista y código de la sustancia (ADR 0070); sin ellos, «sin codificar». */
+  /** Lista y código de la sustancia (ADR 0072); sin ellos, «sin codificar». */
   substanceSystem?: string | null
   substanceCode?: string | null
   category?: string | null

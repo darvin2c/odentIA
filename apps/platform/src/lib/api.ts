@@ -80,6 +80,39 @@ export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
   return response.arrayBuffer()
 }
 
+/**
+ * Descarga un archivo de la API (un CSV de Reportes) con la sesión y lo
+ * guarda con el nombre que manda el servidor (`content-disposition`).
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const response = await fetch(`${API_URL}${path}`, { credentials: "include", headers: contextHeaders() })
+  if (!response.ok) {
+    let shape: ApiErrorShape = {}
+    try {
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  const disposition = response.headers.get("content-disposition") ?? ""
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName
+  const url = URL.createObjectURL(await response.blob())
+  try {
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = filename
+    anchor.rel = "noreferrer"
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    // Se libera después del clic: el navegador ya tomó el archivo.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+}
+
 /** POST multipart (adjuntos) con cookies de sesión y slug de tenant del host. */
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {

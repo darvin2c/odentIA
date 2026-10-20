@@ -407,7 +407,7 @@ export const patientAllergy = pgTable(
     /** Cómo se escribió; elegida de la lista, su nombre en la lista. Nunca se reescribe al codificarla. */
     substance: text("substance").notNull(),
     /**
-     * La sustancia en su lista (ADR 0070): ATC de la OMS para medicamentos y sus
+     * La sustancia en su lista (ADR 0072): ATC de la OMS para medicamentos y sus
      * grupos, o la lista propia de odentIA para lo demás. Sin código, «sin
      * codificar»: el aviso al recetar compara el texto.
      */

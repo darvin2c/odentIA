@@ -69,6 +69,7 @@ import { createTasksRoute } from "./routes/tasks.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
+import { createPublicReportDigestRoute } from "./routes/report-digest-public.js"
 import { createReportsRoute } from "./routes/reports.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
 
@@ -213,6 +214,8 @@ export function createApp(deps: AppDeps) {
       origin: (origin) =>
         deps.trustedOrigins.includes(origin) || tenantOrigin.test(origin) ? origin : "",
       credentials: true,
+      // El nombre de un archivo que se descarga (un CSV de Reportes, un papel en PDF) lo dice el servidor.
+      exposeHeaders: ["Content-Disposition"],
     }),
   )
 
@@ -324,6 +327,7 @@ export function createApp(deps: AppDeps) {
     }),
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
+  app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
   app.route(
     "/api/public/booking",
     createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
@@ -765,7 +769,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/fields", createFieldsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
   guarded.route("/legal", createLegalRoute(crmDeps))
-  guarded.route("/reports", createReportsRoute(crmDeps))
+  guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))

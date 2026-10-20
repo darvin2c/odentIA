@@ -1,5 +1,5 @@
 /**
- * Alergias una por una (issue 43, tablero 7 del lienzo de Pacientes, ADR 0070):
+ * Alergias una por una (issue 43, tablero 7 del lienzo de Pacientes, ADR 0072):
  * agregar con la sustancia de la lista, quitar con motivo (nunca se borra),
  * volver a ponerla, elegir de la lista lo escrito a mano y dejar constancia de
  * que se revisaron con el paciente. Cada operación avanza la revisión del
