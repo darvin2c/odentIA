@@ -9,9 +9,14 @@ export type ValueInput = {
   unansweredPct: number
   /** De esos, % que se va a otra clínica. */
   leavePct: number
-  /** Pacientes con su control vencido. */
-  overdue: number
-  /** De los controles vencidos, % que vuelve si alguien le escribe. */
+  /**
+   * Pacientes que faltaron a su cita en el mes. Argos les ofrece otro horario
+   * («Reprogramar tras una inasistencia») y la cita que reservan cuenta como
+   * recuperada. Los controles vencidos no van aquí: Argos todavía no los
+   * busca (darvin2c/odentIA#188).
+   */
+  noShows: number
+  /** De quienes faltaron, % que vuelve a reservar si alguien le escribe. */
   returnPct: number
   /** Consultas que se dictarían al mes. */
   consultations: number
@@ -26,7 +31,7 @@ export const DEFAULT_VALUE_INPUT: ValueInput = {
   writers: 300,
   unansweredPct: 40,
   leavePct: 20,
-  overdue: 60,
+  noShows: 60,
   returnPct: 15,
   consultations: 300,
   appointmentValue: 40,
@@ -37,11 +42,11 @@ export const DEFAULT_VALUE_INPUT: ValueInput = {
 /** La cuenta con los precios vigentes: la cuota más lo que pasa del crédito. */
 export function computeValue(i: ValueInput, prices: ValuePrices) {
   const lost = Math.round((((i.writers * i.unansweredPct) / 100) * i.leavePct) / 100)
-  const recovered = Math.round((i.overdue * i.returnPct) / 100)
+  const recovered = Math.round((i.noShows * i.returnPct) / 100)
   const lostNew = lost * i.appointmentValue
-  const lostControls = recovered * i.appointmentValue
+  const lostNoShows = recovered * i.appointmentValue
   const lostTime = i.teamHours * i.hourCost
-  const withoutUs = lostNew + lostControls + lostTime
+  const withoutUs = lostNew + lostNoShows + lostTime
   const conversations = i.writers * prices.conversation
   const recoveredCost = recovered * prices.recovered
   const consultations = i.consultations * prices.consultation
@@ -52,7 +57,7 @@ export function computeValue(i: ValueInput, prices: ValuePrices) {
     lost,
     recovered,
     lostNew,
-    lostControls,
+    lostNoShows,
     lostTime,
     withoutUs,
     conversations,
@@ -75,7 +80,7 @@ export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input:
     id: "pequena",
     label: "Pequeña",
     hint: "1 o 2 odontólogos",
-    input: { ...DEFAULT_VALUE_INPUT, writers: 120, overdue: 25, consultations: 120, teamHours: 25 },
+    input: { ...DEFAULT_VALUE_INPUT, writers: 120, noShows: 25, consultations: 120, teamHours: 25 },
   },
   { id: "mediana", label: "Mediana", hint: "3 a 6 odontólogos", input: DEFAULT_VALUE_INPUT },
   {
@@ -85,7 +90,7 @@ export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input:
     input: {
       ...DEFAULT_VALUE_INPUT,
       writers: 800,
-      overdue: 160,
+      noShows: 160,
       consultations: 800,
       teamHours: 160,
     },

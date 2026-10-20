@@ -20,14 +20,14 @@ describe("lo que pagas y lo que recuperas", () => {
   })
 
   it("con poco uso se paga solo el plan, que el crédito cubre", () => {
-    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 10, overdue: 0, consultations: 0 }, LIST)
+    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 10, noShows: 0, consultations: 0 }, LIST)
     expect(v.usage).toBe(5)
     expect(v.coveredByPlan).toBe(5)
     expect(v.withUs).toBe(29)
   })
 
   it("un Fundador sin cuota paga solo lo que hacen sus agentes", () => {
-    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 100, overdue: 0, consultations: 80 }, FOUNDER)
+    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 100, noShows: 0, consultations: 80 }, FOUNDER)
     expect(v.usage).toBeCloseTo(49.2)
     expect(v.coveredByPlan).toBe(0)
     expect(v.withUs).toBeCloseTo(49.2)

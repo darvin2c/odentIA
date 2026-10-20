@@ -5,6 +5,7 @@ import { channelConnection, contact, conversation } from "@odentia/db/schema/crm
 import { type SaasActionKind, saasAction, saasActionReview, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
+import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
 
 /* ---------- Lo que hicieron los agentes, por acción (ADR 0031) ---------- */
@@ -13,8 +14,12 @@ import { ServiceError } from "./errors.js"
 export const CONVERSATION_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Plazo entre el mensaje del Administrador y la reserva para que la cita cuente como recuperada. */
 export const RECOVERY_WINDOW_DAYS = 7
-/** Lo que escribe el Administrador y no recupera nada: los recordatorios. */
-const NOT_RECOVERY_KINDS = ["recordatorio_cita", "recordatorio_control"]
+/**
+ * Lo que escribe el Administrador y no recupera nada: los recordatorios y los
+ * avisos de una cita reservada, movida o cancelada (ADR 0031). Quien los recibe
+ * ya tenía su cita: si después reserva otra con Sofi, esa cita no estaba perdida.
+ */
+const NOT_RECOVERY_KINDS = ["recordatorio_cita", "recordatorio_control", ...APPOINTMENT_NOTICE_KEYS]
 /** Por dónde reservó el agente: en su conversación o desde su enlace. La que agenda el equipo no cuenta. */
 export const AGENT_SOURCES = ["agent", "enlace"]
 
@@ -217,7 +222,9 @@ interface RecoveredRow {
 /**
  * La regla de la cita recuperada, una sola vez: reservada por el agente (en
  * su conversación o desde su enlace) dentro de los 7 días siguientes a un
- * mensaje del Administrador a esa persona que no fue un recordatorio.
+ * mensaje del Administrador a esa persona que no fue un recordatorio ni un
+ * aviso de cita. Mira la cita creada después del mensaje: la que Sofi mueve
+ * tras un «No podré ir» no es nueva y no cuenta (ADR 0031).
  */
 function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
   return sql`
