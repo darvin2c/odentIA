@@ -288,6 +288,20 @@
       "when": 1792446235021,
       "tag": "0040_venta_sin_duplicar",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792462033628,
+      "tag": "0041_devolver_un_cobro",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792462037622,
+      "tag": "0042_devolver_un_cobro_reglas",
+      "breakpoints": true
     }
   ]
 }

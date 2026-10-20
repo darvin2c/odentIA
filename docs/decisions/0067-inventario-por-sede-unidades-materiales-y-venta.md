@@ -21,7 +21,7 @@ Inventario era una isla que nadie podía usar a diario:
 - **Materiales por servicio.** Se descuentan solos al cerrar la atención (`service_material` × cantidad del acto) en la sede de la atención, enlazados a la atención y al paciente. La atención nunca se bloquea. Se corrige con un ajuste enlazado; lo firmado no cambia.
 - **Se usa, se vende o las dos.** Dos casillas en lugar de un tipo excluyente. Lo que se vende tiene precio de venta.
   - En «Cobrar», «Agregar producto» crea el concepto con su producto y descuenta de la sede al crearlo.
-  - Anular el concepto lo devuelve. Anular un ticket no lo devuelve: el producto ya salió y el concepto vuelve a quedar por cobrar.
+  - Anular el concepto lo devuelve. Anular el ticket que lo pagó también: deshace la venta (ADR 0068). Si el paciente lo devuelve otro día, se usa «Devolver».
   - Cada «Agregar producto» lleva su clave (`patient_charge.request_key`): si se corta la red y se reintenta, no se vende dos veces.
 - **Recepción entra sin precios.** Tiene `inventory.stock` (ver sin precios) e `inventory.receive` (registrar lo que llegó y el uso fuera de una atención). Pedir, contar, ajustar y fijar precios siguen siendo de quien tiene `inventory.write`. A quien no ve precios, la API no los entrega.
 

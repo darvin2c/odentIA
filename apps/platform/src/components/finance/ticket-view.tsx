@@ -4,7 +4,9 @@
  * quién pagó, quién cobró, conceptos, medios y frase al pie. Es el mismo
  * contenido que el PDF del servidor, que es lo que se imprime y se envía.
  *
- * Desde aquí se imprime, se envía al paciente y se anula el cobro (con motivo).
+ * Desde aquí se imprime, se envía al paciente, se devuelve (el paciente pide su
+ * dinero o devuelve algo) y se anula el ticket (un error al cobrar), con motivo
+ * (ADR 0068).
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
 import { documentText, formatMoney } from "@odentia/clinical"
@@ -12,23 +14,30 @@ import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textare
 import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Check, Printer } from "lucide-react"
+import { Check, CreditCard, Printer } from "lucide-react"
 import { useId, useState, type ReactNode } from "react"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { useActiveBranch } from "../../lib/active-branch"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
   dayInTimezone,
   fetchPatientAccount3,
+  fetchTicketReturnable,
   formatAmountPlain,
   formatDayLongLocale,
   formatTimeShortLocale,
+  returnPdfPath,
   voidTicketApi,
   type CollectReceipt,
   type CollectTicketRow,
 } from "../../lib/finance-collect"
+import { ReturnDrawer } from "./return-drawer"
+
+/** Tarjeta (UN/CEFACT 4461): anular o devolver se hace también en su terminal. */
+const CARD_TYPE_CODE = "48"
 
 export function ticketDisplayNumber(number: number): string {
   return String(number).padStart(6, "0")
@@ -116,6 +125,7 @@ export function TicketView({
   onSent,
   onChanged,
   onDone,
+  onCollect,
   mode = "collected",
   inAccount = false,
   closedAfter = false,
@@ -138,6 +148,8 @@ export function TicketView({
   onChanged: () => void
   /** Cierra el panel: con él se ofrece «Listo». */
   onDone?: () => void
+  /** Abre «Cobrar» de esta persona: tras anular, se ofrece «Ir a Cobrar». */
+  onCollect?: () => void
   /** `collected`: recién cobrado, dice cómo quedó la deuda. `review`: ticket consultado después. */
   mode?: "collected" | "review"
   /** Ya se está en la cuenta de esta persona: no se ofrece abrirla. */
@@ -160,7 +172,11 @@ export function TicketView({
     ticketId: string
     reason: string
     reopenedCents: number
+    returnedProducts: Array<{ description: string; quantity: number }>
   } | null>(null)
+  const [returnOpen, setReturnOpen] = useState(false)
+  const [returnPdfBusy, setReturnPdfBusy] = useState<string | null>(null)
+  const sede = useActiveBranch()
 
   const snapshot = ticket.snapshot
   const currency = ticket.currency
@@ -174,7 +190,18 @@ export function TicketView({
   const justVoided = voidedHere?.ticketId === ticket.id ? voidedHere : null
   const voided = ticket.voidedAt !== null || justVoided !== null
   const voidReason = justVoided?.reason ?? ticket.voidReason
-  const canVoid = canWrite && (!closedAfter || canAdmin)
+  // Lo que hoy queda de este ticket: sus conceptos, sus medios y sus devoluciones.
+  const returnable = useQuery({
+    queryKey: ["ticket-returnable", ticket.patientId, ticket.id],
+    queryFn: () => fetchTicketReturnable(ticket.patientId, ticket.id),
+    staleTime: 15_000,
+  })
+  const returnsMade = returnable.data?.data.returns ?? []
+  const hasReturns = returnsMade.length > 0
+  const returnLines = returnable.data?.data.lines ?? []
+  const canReturn = canWrite && !voided && returnLines.some((line) => !line.blockedReason)
+  // Una devolución ya cambió la venta: el ticket deja de poder anularse.
+  const canVoid = canWrite && (!closedAfter || canAdmin) && !hasReturns
   const number = ticketDisplayNumber(ticket.ticketNumber)
 
   const person = snapshot.patient?.displayName || patientName
@@ -194,6 +221,14 @@ export function TicketView({
     0,
   )
   const stillOwed = snapshot.remainingCents ?? remainingCents
+  // Lo que deshace anular: los productos vuelven a la sede, los servicios quedan por cobrar.
+  const productLines = returnLines.filter((line) => line.kind === "producto" && line.paidCents === line.amountCents)
+  const serviceCents = returnLines
+    .filter((line) => line.kind === "servicio")
+    .reduce((sum, line) => sum + line.paidCents, 0)
+  const paidByCard = methods.some((method) => method.typeCode === CARD_TYPE_CODE)
+  const returnBranchId = sede.branchId ?? ticket.branchId
+  const returnBranchName = sede.branches.find((item) => item.id === returnBranchId)?.name ?? sedeName
 
   const issuedAt = new Date(ticket.createdAt)
   const issuedDate = Number.isNaN(issuedAt.getTime())
@@ -229,6 +264,7 @@ export function TicketView({
         ticketId: ticket.id,
         reason: reason.trim(),
         reopenedCents: result.data.reopenedCents ?? 0,
+        returnedProducts: result.data.returnedProducts ?? [],
       })
       setVoidOpen(false)
       setReason("")
@@ -270,8 +306,20 @@ export function TicketView({
     <div className="flex flex-col gap-4">
       {voided ? (
         <div role="status" className="flex flex-col gap-1 rounded-xl border border-destructive/40 bg-danger-soft px-3 py-2 text-sm">
-          <p className="font-semibold text-destructive">Cobro anulado</p>
+          <p className="font-semibold text-destructive">Ticket anulado</p>
           <p>El ticket queda marcado y no se borra.</p>
+          {justVoided && justVoided.returnedProducts.length > 0 ? (
+            <p>
+              {justVoided.returnedProducts.length === 1 ? "Volvió" : "Volvieron"} a {sedeName}:{" "}
+              {justVoided.returnedProducts.map((item) => item.description).join(" y ")}.
+            </p>
+          ) : null}
+          {justVoided && paidByCard ? <p>Anula también la operación en el terminal de la tarjeta.</p> : null}
+          {justVoided && onCollect ? (
+            <Button type="button" variant="outline" className="mt-1 min-h-10 self-start" onClick={onCollect}>
+              Ir a Cobrar
+            </Button>
+          ) : null}
           {justVoided && justVoided.reopenedCents > 0 ? (
             <p>
               Era un adelanto que ya se había usado para pagar otro concepto:{" "}
@@ -378,6 +426,27 @@ export function TicketView({
             <Row label="Vuelto" value={plain(ticket.changeCents)} />
           ) : null}
           {conceptLines.length > 0 ? <Row label="Saldo por cobrar" value={plain(stillOwed)} /> : null}
+          {returnsMade.map((item) => (
+            <div key={item.id} className="flex items-baseline justify-between gap-3">
+              <button
+                type="button"
+                className="min-w-0 break-words text-left text-primary underline-offset-4 hover:underline disabled:opacity-60"
+                disabled={returnPdfBusy !== null}
+                aria-label={`Abrir la devolución ${ticketDisplayNumber(item.number)}`}
+                onClick={() => {
+                  setReturnPdfBusy(item.id)
+                  setPrintError(null)
+                  void openServerPdf(returnPdfPath(ticket.patientId, item.id))
+                    .catch((err: unknown) => setPrintError(financeErrorMessage(err)))
+                    .finally(() => setReturnPdfBusy(null))
+                }}
+              >
+                Devolución {ticketDisplayNumber(item.number)} ·{" "}
+                {formatDayLongLocale(item.createdAt, format, zone)}
+              </button>
+              <span className="shrink-0 tabular-nums">−{plain(item.totalCents)}</span>
+            </div>
+          ))}
         </div>
         {snapshot.notice || ticketFooter ? (
           <p className="text-center text-xs text-muted-foreground">
@@ -423,13 +492,18 @@ export function TicketView({
         ) : null}
       </div>
 
-      {!voided && canWrite && !canVoid ? (
+      {!voided && canWrite && hasReturns ? (
         <p role="note" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-          La caja ya se cerró después de este cobro: solo administración puede anularlo.
+          Este ticket tiene una devolución: ya no se anula. Si devuelve algo más, usa «Devolver».
+        </p>
+      ) : !voided && canWrite && !canVoid ? (
+        <p role="note" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+          La caja ya se cerró después de este ticket: solo administración puede anularlo. Si el paciente pide su dinero,
+          usa «Devolver».
         </p>
       ) : null}
 
-      {!inAccount || (!voided && canVoid) ? (
+      {!inAccount || (!voided && (canVoid || canReturn)) ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           {!inAccount ? (
             <Link
@@ -443,27 +517,34 @@ export function TicketView({
           ) : (
             <span />
           )}
-          {!voided && canVoid ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
-              onClick={() => {
-                setReason("")
-                setError(null)
-                setVoidOpen(true)
-              }}
-            >
-              Anular este cobro
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {canReturn ? (
+              <Button type="button" variant="outline" className="min-h-10" onClick={() => setReturnOpen(true)}>
+                Devolver
+              </Button>
+            ) : null}
+            {!voided && canVoid ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-10 text-destructive hover:text-destructive"
+                onClick={() => {
+                  setReason("")
+                  setError(null)
+                  setVoidOpen(true)
+                }}
+              >
+                Anular ticket
+              </Button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
       <FormDrawer
         dock={false}
         open={voidOpen}
-        title="Anular cobro"
+        title="Anular ticket"
         headerContent={
           <div className="flex min-w-0 flex-col">
             <p className="font-heading text-lg font-semibold">Ticket {number}</p>
@@ -474,7 +555,7 @@ export function TicketView({
         }
         error={error}
         isSubmitting={voidMutation.isPending}
-        submitLabel="Anular cobro"
+        submitLabel="Anular ticket"
         cancelLabel="No anular"
         onClose={() => {
           if (!voidMutation.isPending) {
@@ -499,7 +580,25 @@ export function TicketView({
                 El ticket queda marcado como <strong className="font-semibold">anulado</strong>. No se
                 borra.
               </li>
-              {appliedToConcepts > 0 ? (
+              {returnable.data ? (
+                <>
+                  {productLines.length > 0 ? (
+                    <li>
+                      <strong className="font-semibold">
+                        {productLines.length === 1 ? "Vuelve" : "Vuelven"} a {sedeName}:{" "}
+                        {productLines.map((line) => line.description).join(" y ")}
+                      </strong>
+                      , y {productLines.length === 1 ? "sale" : "salen"} de su cuenta.
+                    </li>
+                  ) : null}
+                  {serviceCents > 0 ? (
+                    <li>
+                      Lo atendido ya se hizo: {person} vuelve a deber{" "}
+                      <strong className="font-semibold">{money(serviceCents)}</strong>.
+                    </li>
+                  ) : null}
+                </>
+              ) : appliedToConcepts > 0 ? (
                 <li>
                   {person} vuelve a deber{" "}
                   <strong className="font-semibold">{money(appliedToConcepts)}</strong>.
@@ -537,6 +636,16 @@ export function TicketView({
               {methods.length === 0 ? <li>No sale dinero de la caja.</li> : null}
             </ul>
           </div>
+          {paidByCard ? (
+            <p role="note" className="flex items-start gap-2 rounded-xl bg-warning-soft px-3 py-2 text-sm">
+              <CreditCard className="mt-0.5 size-4 shrink-0" aria-hidden />
+              Anula también la operación en el terminal de la tarjeta. Si el terminal ya cerró el día, ahí será una
+              devolución.
+            </p>
+          ) : null}
+          <p className="text-sm text-muted-foreground">
+            Anular es para un error al cobrar. Si el paciente devuelve algo o pide su dinero, usa «Devolver».
+          </p>
           <Field>
             <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
             <Textarea
@@ -554,6 +663,24 @@ export function TicketView({
           </p>
         </div>
       </FormDrawer>
+
+      {canWrite ? (
+        <ReturnDrawer
+          open={returnOpen}
+          onClose={() => setReturnOpen(false)}
+          patientId={ticket.patientId}
+          patientName={person}
+          ticketId={ticket.id}
+          ticketNumber={number}
+          branchId={returnBranchId}
+          branchName={returnBranchName}
+          locale={format}
+          onReturned={() => {
+            void returnable.refetch()
+            onChanged()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

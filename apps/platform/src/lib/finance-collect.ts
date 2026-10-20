@@ -256,6 +256,8 @@ export interface VoidTicketResult {
    * y vuelve a quedar por cobrar.
    */
   reopenedCents: number
+  /** Los productos del ticket que salieron de la cuenta y volvieron a su sede (ADR 0068). */
+  returnedProducts?: Array<{ description: string; quantity: number; branchId: string | null }>
   compensated: boolean
   account: AccountSummary
 }
@@ -283,6 +285,115 @@ export function fetchTicketReceipt(
   return apiFetch<{ data: { ticket: CollectTicketRow; closedAfter?: boolean } }>(
     `/api/patients/${patientId}/receipts/${ticketId}`,
   )
+}
+
+// --- Devolver desde un ticket (ADR 0068) ---------------------------------------
+
+/** Un concepto del ticket como está hoy, con lo que este ticket pagó de él. */
+export interface ReturnableLine {
+  chargeId: string
+  description: string
+  kind: "producto" | "servicio"
+  productName: string | null
+  /** Unidades que siguen vendidas (producto). */
+  quantity: number | null
+  amountCents: number
+  /** Lo que este ticket pagó y sigue en pie: el tope de lo que se devuelve. */
+  paidCents: number
+  /** Por qué no se puede devolver desde este ticket; nulo si se puede. */
+  blockedReason: string | null
+}
+
+export interface TicketReturnSummary {
+  id: string
+  ticketId: string
+  number: number
+  totalCents: number
+  currency: string
+  outcome: "pagado" | "a_favor"
+  methodName: string | null
+  createdAt: string
+}
+
+export interface TicketReturnable {
+  ticketId: string
+  number: number
+  currency: string
+  branchId: string
+  createdAt: string
+  voided: boolean
+  lines: ReturnableLine[]
+  methods: CollectSnapshotMethod[]
+  returns: TicketReturnSummary[]
+}
+
+export function fetchTicketReturnable(patientId: string, ticketId: string): Promise<{ data: TicketReturnable }> {
+  return apiFetch<{ data: TicketReturnable }>(`/api/patients/${patientId}/tickets/${ticketId}/returnable`)
+}
+
+export interface ReturnLineBody {
+  chargeId: string
+  quantity?: number
+  amountCents?: number
+  backToStock?: boolean
+}
+
+export interface ReturnBody {
+  branchId: string
+  lines: ReturnLineBody[]
+  /** Con qué medio se le paga; null = queda a favor en su cuenta. */
+  paymentMethodId: string | null
+  reason: string
+  requestId: string
+}
+
+/** Lo que la devolución congeló al hacerse: con esto se ve, se imprime y se envía. */
+export interface ReturnSnapshot {
+  patient: { id: string; displayName: string; docType: string | null; docNumber: string | null }
+  issuer: { userId: string; name: string }
+  branch: { id: string; name: string }
+  ticket: { id: string; number: number; createdAt: string }
+  lines: Array<{
+    chargeId: string
+    description: string
+    quantity: number | null
+    amountCents: number
+    kind: "producto" | "servicio"
+    backToStock: boolean | null
+  }>
+  payout: { kind: "pagado"; methodName: string; typeCode: string | null } | { kind: "a_favor" }
+  reason: string
+}
+
+export interface PaymentReturnRow {
+  id: string
+  patientId: string
+  ticketId: string
+  returnNumber: number
+  totalCents: number
+  currency: string
+  outcome: "pagado" | "a_favor"
+  methodName: string | null
+  methodTypeCode: string | null
+  createdAt: string
+  snapshot: ReturnSnapshot
+}
+
+export function createTicketReturnApi(
+  patientId: string,
+  ticketId: string,
+  body: ReturnBody,
+): Promise<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary } }> {
+  return apiFetch<{ data: { paymentReturn: PaymentReturnRow; duplicate: boolean; account: AccountSummary } }>(
+    `/api/patients/${patientId}/tickets/${ticketId}/returns`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+/** PDF del servidor de una devolución: el mismo que se envía. */
+export function returnPdfPath(patientId: string, returnId: string): string {
+  const params = new URLSearchParams({ documentType: "return", documentId: returnId })
+  return `/api/patients/${patientId}/financial-document-pdf?${params}`
 }
 
 export interface RefundResult {
@@ -372,6 +483,8 @@ export interface AccountCobro {
   createdAt: string
   snapshot: CollectSnapshot
   payments: AccountCobroPayment[]
+  /** Devoluciones de este ticket (ADR 0068): con alguna, ya no se anula. */
+  returns?: TicketReturnSummary[]
 }
 
 /** Pagos pre-ticket (origen histórico): solo lectura, no imprimibles. */

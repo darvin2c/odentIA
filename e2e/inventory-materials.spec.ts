@@ -118,6 +118,25 @@ test("vender desde «Cobrar»: el producto sale de la sede al agregarlo y va en 
   const ticket = page.getByRole("article", { name: /^Ticket / })
   await expect(ticket).toContainText("Enjuague bucal de prueba")
   await expect(ticket).toContainText("28.00")
+
+  // Otro día lo devuelve cerrado (ADR 0068): la venta queda, el frasco vuelve a la sede y se le paga.
+  await page.getByRole("button", { name: "Devolver", exact: true }).click()
+  const back = surface(page, { name: "Devolver", exact: true })
+  await back.getByRole("button", { name: "Uno más de Enjuague bucal de prueba" }).click()
+  await expect(back.getByRole("button", { name: "Sí, está en buen estado" })).toHaveAttribute("aria-pressed", "true")
+  await back.getByLabel("Motivo", { exact: true }).fill("Lo trajo cerrado")
+  await expect(back).toContainText("Vuelve a Sede Central: 1 Enjuague bucal de prueba.")
+  await info.attach("devolver", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await back.getByRole("button", { name: /^Devolver S\/\s*28\.00/ }).click()
+  // Registrada, el mismo cajón pasa a ser la devolución con su número.
+  const done = surface(page, { name: "Devolución N.º 000001", exact: true })
+  await expect(done.getByText("Devolución registrada")).toBeVisible()
+  await expect(done.getByRole("article", { name: /^Devolución / })).toContainText("TOTAL DEVUELTO")
+  expect(await onHand(owner, rinse.id)).toBe(2)
+  await done.getByRole("button", { name: "Listo" }).click()
+  // El ticket sigue valiendo, con la devolución anotada, y ya no se anula.
+  await expect(ticket).toContainText("Devolución 000001")
+  await expect(page.getByRole("button", { name: "Anular ticket" })).toHaveCount(0)
 })
 
 test("recepción ve lo que hay y recibe, pero no ve precios ni cambia productos", async ({ owner, fixtureDb }) => {

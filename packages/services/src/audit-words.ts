@@ -297,6 +297,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "payment.voided": say("Anuló un pago"),
   "ticket.created": say("Emitió un ticket"),
   "ticket.voided": say("Anuló un ticket"),
+  "return.created": say("Registró la devolución de un cobro"),
+  "charge.returned": say("Rebajó un cargo por una devolución"),
   "finance.expense_created": say("Registró un gasto"),
   "finance.expense_voided": say("Anuló un gasto"),
   "finance.expense_gap_dismissed": say("Dijo que un mes no tuvo un tipo de gasto"),

@@ -814,6 +814,49 @@ export async function movementsOf(
   return tx.select().from(stockMovement).where(and(...conditions)).orderBy(asc(stockMovement.createdAt))
 }
 
+/**
+ * Devuelve a la sede lo que salió con un concepto de «Cobrar» y sigue afuera
+ * (ADR 0068): `chargeId` es el concepto original, el que guarda las salidas.
+ * Cuenta lo que ya volvió en devoluciones anteriores; sin `quantity`, vuelve
+ * todo lo que queda afuera. Cada almacén recibe lo suyo, en el último lote del
+ * que salió.
+ */
+export async function returnSold(
+  tx: Db,
+  orgId: string,
+  input: { chargeId: string; quantity?: number; base: MovementBase },
+): Promise<MovementRow[]> {
+  const rows = await movementsOf(tx, orgId, { chargeId: input.chargeId })
+  const out = new Map<string, { productId: string; warehouseId: string; lotId: string | null; quantity: number }>()
+  for (const row of rows) {
+    const entry = out.get(row.warehouseId) ?? { productId: row.productId, warehouseId: row.warehouseId, lotId: null, quantity: 0 }
+    entry.quantity -= row.quantityDelta
+    if (row.quantityDelta < 0 && row.lotId) entry.lotId = row.lotId
+    out.set(row.warehouseId, entry)
+  }
+  const outside = [...out.values()].reduce((total, entry) => total + Math.max(entry.quantity, 0), 0)
+  if (input.quantity !== undefined && input.quantity > outside)
+    throw conflict("De ese producto ya volvió todo lo que salió con esta venta.")
+  let left = input.quantity ?? outside
+  const written: MovementRow[] = []
+  let step = 0
+  for (const entry of [...out.values()].reverse()) {
+    if (left <= 0) break
+    if (entry.quantity <= 0) continue
+    const take = Math.min(entry.quantity, left)
+    const result = await restoreUnits(tx, orgId, {
+      productId: entry.productId,
+      warehouseId: entry.warehouseId,
+      quantity: take,
+      preferLotId: entry.lotId,
+      base: { ...input.base, keyPrefix: `${input.base.keyPrefix}:${step++}` },
+    })
+    written.push(...result.movements)
+    left -= take
+  }
+  return written
+}
+
 /** Para pruebas y lecturas: el faltante de un producto en un almacén. */
 export async function shortageOf(tx: Db, orgId: string, productId: string, warehouseId: string): Promise<number> {
   const [row] = await tx

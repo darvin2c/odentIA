@@ -2140,6 +2140,18 @@ export const patientCharge = pgTable(
      * descuenta dos veces.
      */
     requestKey: text("request_key"),
+    /**
+     * Una devolución no reescribe el concepto: lo anula y deja otro con lo que
+     * queda (ADR 0068). Este apunta al primero de la cadena, que es el que
+     * guarda las salidas del inventario; nulo en el concepto original.
+     */
+    originalChargeId: uuid("original_charge_id"),
+    /**
+     * Lo devuelto de la cadena hasta este concepto: lo cobrado de un tratamiento
+     * es importe + devuelto, para que una devolución no deje «por generar» lo
+     * que ya se cobró.
+     */
+    returnedCents: integer("returned_cents").notNull().default(0),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -2148,6 +2160,10 @@ export const patientCharge = pgTable(
   },
   (table) => [
     uniqueIndex("patient_charge_org_id_uidx").on(table.organizationId, table.id),
+    index("patient_charge_original_idx")
+      .on(table.organizationId, table.originalChargeId)
+      .where(sql`"original_charge_id" IS NOT NULL`),
+    check("patient_charge_returned_check", sql`${table.returnedCents} >= 0`),
     uniqueIndex("patient_charge_org_request_key_uidx")
       .on(table.organizationId, table.requestKey)
       .where(sql`"request_key" IS NOT NULL`),
@@ -2218,6 +2234,13 @@ export const patientPaymentApplication = pgTable(
       .references(() => patientCharge.id),
     /** Ticket cuyo cobro originó la aplicación (nulo = histórico manual anterior). */
     ticketId: uuid("ticket_id").references(() => paymentTicket.id),
+    /**
+     * La aplicación que esta reemplaza al pasar a un concepto rebajado por una
+     * devolución (ADR 0068): lo cobrado por tratamiento cuenta solo la diferencia.
+     */
+    replacesApplicationId: uuid("replaces_application_id"),
+    /** La devolución que anuló esta aplicación: lo cobrado por tratamiento la resta el día que pasó. */
+    returnId: uuid("return_id"),
     amountCents: integer("amount_cents").notNull(),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2226,6 +2249,7 @@ export const patientPaymentApplication = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    uniqueIndex("payment_application_org_id_uidx").on(table.organizationId, table.id),
     index("payment_application_org_patient_idx").on(table.organizationId, table.patientId),
     index("payment_application_payment_idx").on(table.organizationId, table.paymentId),
     index("payment_application_charge_idx").on(table.organizationId, table.chargeId),
@@ -2247,6 +2271,8 @@ export const patientPaymentRefund = pgTable(
     amountCents: integer("amount_cents").notNull(),
     refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
     reason: text("reason").notNull(),
+    /** La devolución de un cobro que pagó este dinero (nulo: «Devolver dinero» del saldo a favor). */
+    returnId: uuid("return_id"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2305,7 +2331,59 @@ export const ticketCounter = pgTable("ticket_counter", {
     .primaryKey()
     .references(() => organization.id),
   nextNumber: integer("next_number").notNull().default(1),
+  /** Las devoluciones se numeran aparte de los tickets, también sin saltos. */
+  nextReturnNumber: integer("next_return_number").notNull().default(1),
 })
+
+/**
+ * Devolución de un cobro (ADR 0068): el paciente devuelve algo o pide su
+ * dinero otro día. La venta del ticket queda en pie y esta la rebaja; el
+ * dinero se le paga en el mismo paso o queda a favor. Inmutable, sin borrado.
+ */
+export const paymentReturn = pgTable(
+  "payment_return",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    /** El ticket del que sale: sigue valiendo, con la devolución anotada. */
+    ticketId: uuid("ticket_id").notNull(),
+    /** Sede donde se devolvió: de su caja sale el dinero. */
+    branchId: uuid("branch_id").notNull(),
+    /** Número único por organización, sin saltos (`ticket_counter.next_return_number`). */
+    returnNumber: integer("return_number").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    totalCents: integer("total_cents").notNull(),
+    /** «pagado»: se le devolvió el dinero; «a_favor»: queda en su cuenta. */
+    outcome: text("outcome").notNull(),
+    /** Medio con que se le pagó, congelado (nulo si quedó a favor). */
+    paymentMethodId: uuid("payment_method_id"),
+    methodName: text("method_name"),
+    methodTypeCode: text("method_type_code"),
+    reason: text("reason").notNull(),
+    /** Clave del formulario: un reintento devuelve la misma devolución. */
+    requestId: uuid("request_id").notNull(),
+    /** Lo que se imprime y se envía: clínica, sede, paciente, ticket, líneas y medio. */
+    snapshot: jsonb("snapshot").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("payment_return_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("payment_return_org_number_uidx").on(table.organizationId, table.returnNumber),
+    uniqueIndex("payment_return_org_request_uidx").on(table.organizationId, table.requestId),
+    index("payment_return_org_ticket_idx").on(table.organizationId, table.ticketId),
+    index("payment_return_org_patient_idx").on(table.organizationId, table.patientId),
+    check("payment_return_total_check", sql`${table.totalCents} > 0`),
+    check("payment_return_outcome_check", sql`${table.outcome} IN ('pagado','a_favor')`),
+    check(
+      "payment_return_method_check",
+      sql`(${table.outcome} = 'pagado') = (${table.methodName} IS NOT NULL) AND (${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1'))`,
+    ),
+  ],
+)
 
 
 export const patientResponsibility = pgTable(

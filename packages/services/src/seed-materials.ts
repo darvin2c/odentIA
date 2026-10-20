@@ -2,14 +2,16 @@
  * Semilla de materiales por servicio y venta desde «Cobrar» (ADR 0067): corre
  * después de la de Inventario. Deja dos servicios con sus materiales (así
  * «Empieza por estos 5» muestra el resto), la atención firmada de Rosa con sus
- * «Materiales usados» descontados y un cepillo vendido en Caja. Determinista e
- * idempotente: la purga de `seed-dev.ts` borra lo anterior.
+ * «Materiales usados» descontados, un cepillo vendido en Caja y otros dos
+ * cobrados de los que devolvió uno (ADR 0068). Determinista e idempotente: la
+ * purga de `seed-dev.ts` borra lo anterior.
  */
 import type { Db } from "@odentia/db"
 import { encounter, encounterProcedure, serviceCatalog } from "@odentia/db/schema/clinical"
 import { product } from "@odentia/db/schema/inventory"
 import { and, desc, eq, inArray, isNull } from "drizzle-orm"
-import { createCharge } from "./payments.js"
+import { listPaymentMethods } from "./payment-methods.js"
+import { collectCharge, createCharge, returnFromTicket } from "./payments.js"
 import { discountEncounterMaterials, setServiceMaterials } from "./service-materials.js"
 
 export interface SeedMaterialsInput {
@@ -84,5 +86,29 @@ export async function seedMaterialsAndSales(tx: Db, input: SeedMaterialsInput): 
     quantity: 1,
     branchId,
     requestKey: "semilla:venta-cepillo",
+  })
+
+  // Dos cepillos cobrados; otro día devolvió uno cerrado y se le pagó en efectivo:
+  // el ticket sigue valiendo con su «Devolución 000001» y el cepillo volvió a la sede.
+  const pair = await createCharge(tx, orgId, ownerUserId, patientId, {
+    productId: brush,
+    quantity: 2,
+    branchId,
+    requestKey: "semilla:venta-cepillos-devuelto-uno",
+  })
+  const cash = (await listPaymentMethods(tx, orgId)).find((method) => method.typeCode === "10")
+  if (!cash) throw new Error("Falta el efectivo en los medios de pago de la semilla")
+  const paid = await collectCharge(tx, orgId, ownerUserId, patientId, {
+    branchId,
+    chargeIds: [pair.id],
+    payments: [{ paymentMethodId: cash.id, amountCents: pair.amountCents }],
+    requestId: "50206010-0000-4000-8000-000000000201",
+  })
+  await returnFromTicket(tx, orgId, ownerUserId, patientId, paid.ticket.id, {
+    branchId,
+    lines: [{ chargeId: pair.id, quantity: 1 }],
+    paymentMethodId: cash.id,
+    reason: "Lo trajo cerrado: prefería otro modelo",
+    requestId: "50206010-0000-4000-8000-000000000202",
   })
 }

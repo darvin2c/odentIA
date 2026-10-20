@@ -481,6 +481,8 @@ async function wipeSeed(): Promise<void> {
   await db
     .delete(patientPaymentRefund)
     .where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
+  // Las devoluciones (ADR 0068) después de lo que las nombra y antes de sus tickets.
+  await db.execute(sql`delete from payment_return where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
   await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
   await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B})`)
@@ -3249,7 +3251,8 @@ const chairA = (index: number): string => {
 }
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
 const lima = (dayOffset: number, hhmm: string): string => {
-  const base = new Date()
+  // El día de Lima, no el de UTC: desde las 19:00 de Lima en UTC ya es mañana.
+  const base = new Date(Date.now() - 5 * 60 * 60 * 1000)
   base.setUTCDate(base.getUTCDate() + dayOffset)
   return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
 }

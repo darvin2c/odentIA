@@ -7,6 +7,7 @@ import {
   patientPayment,
   patientPaymentApplication,
   patientPaymentRefund,
+  paymentReturn,
   paymentTicket,
   ticketCounter,
   treatmentBudget,
@@ -37,7 +38,7 @@ import { budgetLineUnits } from "./budgets.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { clinicToday, consumeFefo, defaultWarehouse, movementsOf, returnMovements, stockBySede } from "./inventory-stock.js"
+import { clinicToday, consumeFefo, defaultWarehouse, returnSold, stockBySede } from "./inventory-stock.js"
 import { quantityWords } from "@odentia/clinical"
 import { findOrgLocale } from "./locale.js"
 import { foldedWordsMatch } from "./search-text.js"
@@ -289,7 +290,9 @@ export async function createCharge(
     // tope de visitas planificadas.
     const generated = await tx
       .select({
-        amountCents: patientCharge.amountCents,
+        // Lo cobrado de un tratamiento incluye lo devuelto (ADR 0068): una
+        // devolución no deja «por generar» lo que ya se cobró.
+        amountCents: sql<number>`${patientCharge.amountCents} + ${patientCharge.returnedCents}`.mapWith(Number),
         encounterProcedureId: patientCharge.encounterProcedureId,
       })
       .from(patientCharge)
@@ -565,22 +568,20 @@ export async function voidCharge(
     .returning()
   if (current.productId) {
     // Quitar el concepto de un producto lo devuelve: cada lote recibe lo
-    // suyo y lo que se vendió sin haber baja el faltante.
-    const sold = (await movementsOf(tx, orgId, { chargeId: id })).filter(
-      (movement) => movement.kind === "venta" && movement.quantityDelta < 0,
-    )
-    if (sold.length)
-      await returnMovements(tx, orgId, {
-        movements: sold,
-        base: {
-          kind: "devolucion",
-          reason: `Venta anulada: ${current.description}`,
-          actorUserId,
-          keyPrefix: `venta-anulada:${id}`,
-          patientId,
-          chargeId: id,
-        },
-      })
+    // suyo y lo que se vendió sin haber baja el faltante. Las salidas viven en
+    // el concepto original; lo que ya volvió en una devolución no vuelve dos veces.
+    const original = rootOfCharge(current)
+    await returnSold(tx, orgId, {
+      chargeId: original,
+      base: {
+        kind: "devolucion",
+        reason: `Venta anulada: ${current.description}`,
+        actorUserId,
+        keyPrefix: `venta-anulada:${id}`,
+        patientId,
+        chargeId: original,
+      },
+    })
   }
   await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided", {
     patientId,
@@ -1416,6 +1417,14 @@ export async function voidTicket(
     if (refunds.length)
       throw conflict("TICKET_HAS_REFUNDS", "El ticket tiene devoluciones: no se puede anular")
   }
+  // Una devolución que dejó el dinero a favor no toca los pagos, pero la venta
+  // ya cambió: el ticket deja de poder anularse igual.
+  const [returned] = await tx
+    .select({ id: paymentReturn.id })
+    .from(paymentReturn)
+    .where(and(eq(paymentReturn.organizationId, orgId), eq(paymentReturn.ticketId, ticket.id)))
+    .limit(1)
+  if (returned) throw conflict("TICKET_HAS_REFUNDS", "El ticket tiene devoluciones: no se puede anular")
   // Un cobro solo con saldo a favor no tocó la caja, pero la regla es la
   // misma: después del siguiente cierre lo anula administración.
   if (
@@ -1430,9 +1439,9 @@ export async function voidTicket(
   // Se revierte lo que este ticket aplicó (incluido el saldo a favor que usó)
   // y también lo que sus pagos cubrieron después en otros tickets: un adelanto
   // anulado no puede seguir pagando un concepto. Ese concepto vuelve a quedar
-  // por cobrar. Un producto vendido NO vuelve al inventario (ADR 0067): ya
-  // salió de la clínica y su concepto sigue en pie, por cobrar; devolverlo es
-  // anular el concepto (`voidCharge`).
+  // por cobrar. Anular deshace la venta (ADR 0068): el producto que pagó este
+  // ticket sale de la cuenta y vuelve a la sede; un servicio, ya hecho, queda
+  // por cobrar.
   const paymentIds = payments.map((p) => p.id)
   const applications = await tx
     .select()
@@ -1469,6 +1478,62 @@ export async function voidTicket(
       .where(eq(patientPayment.id, payment.id))
     await audit(tx, orgId, actorUserId, "patient_payment", payment.id, "payment.voided")
   }
+  // Los productos que pagó este ticket y ya nadie más paga: la venta se deshace.
+  const returnedProducts: Array<{ description: string; quantity: number; branchId: string | null }> = []
+  const soldHere = [...new Set(applications.filter((app) => app.ticketId === ticket.id).map((app) => app.chargeId))]
+  if (soldHere.length) {
+    const products = await tx
+      .select()
+      .from(patientCharge)
+      .where(
+        and(
+          eq(patientCharge.organizationId, orgId),
+          eq(patientCharge.patientId, patientId),
+          inArray(patientCharge.id, soldHere),
+          isNull(patientCharge.voidedAt),
+          sql`${patientCharge.productId} is not null`,
+        ),
+      )
+    const ticketLabel = `Ticket ${String(ticket.ticketNumber).padStart(6, "0")} anulado`
+    for (const charge of products) {
+      const [stillPaid] = await tx
+        .select({ id: patientPaymentApplication.id })
+        .from(patientPaymentApplication)
+        .where(
+          and(
+            eq(patientPaymentApplication.organizationId, orgId),
+            eq(patientPaymentApplication.chargeId, charge.id),
+            isNull(patientPaymentApplication.voidedAt),
+          ),
+        )
+        .limit(1)
+      if (stillPaid) continue
+      await tx
+        .update(patientCharge)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: `${ticketLabel}: ${voidReason}`, updatedAt: new Date() })
+        .where(eq(patientCharge.id, charge.id))
+      const original = rootOfCharge(charge)
+      await returnSold(tx, orgId, {
+        chargeId: original,
+        base: {
+          kind: "devolucion",
+          reason: `${ticketLabel}: ${charge.description}`,
+          actorUserId,
+          keyPrefix: `ticket-anulado:${ticket.id}:${charge.id}`,
+          patientId,
+          chargeId: original,
+        },
+      })
+      await audit(tx, orgId, actorUserId, "patient_charge", charge.id, "charge.voided", {
+        patientId,
+        description: charge.description,
+        amountCents: charge.amountCents,
+        currency: charge.currency,
+        reason: `${ticketLabel}: ${voidReason}`,
+      })
+      returnedProducts.push({ description: charge.description, quantity: charge.productQuantity ?? 1, branchId: charge.branchId })
+    }
+  }
   const [row] = await tx
     .update(paymentTicket)
     .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
@@ -1482,9 +1547,16 @@ export async function voidTicket(
     voidedApplications: applications.length,
     /** Lo que este cobro había cubierto en otros tickets y vuelve a quedar por cobrar. */
     reopenedCents,
+    /** Los productos de este ticket que salieron de la cuenta y volvieron a su sede. */
+    returnedProducts,
     compensated,
     account: await getAccountSummary(tx, orgId, patientId),
   }
+}
+
+/** El concepto original de una cadena de devoluciones: el que guarda las salidas del inventario. */
+function rootOfCharge(charge: { id: string; originalChargeId: string | null }): string {
+  return charge.originalChargeId ?? charge.id
 }
 
 // --- Devolución del saldo a favor ----------------------------------------------------------
@@ -1656,6 +1728,537 @@ export async function getRefundReceipt(
   const frozen = row?.metadata as RefundFrozen | null | undefined
   if (!frozen || frozen.patientId !== patientId) throw notFound("Constancia de devolución")
   return frozen
+}
+
+// --- Devolver: el paciente devuelve algo o pide su dinero (ADR 0068) -----------------------
+
+/** Siguiente número de devolución de la organización, sin saltos: mismo contador que los tickets. */
+async function nextReturnNumber(tx: Db, orgId: string): Promise<number> {
+  await tx.insert(ticketCounter).values({ organizationId: orgId, nextNumber: 1 }).onConflictDoNothing()
+  const [current] = await tx
+    .select()
+    .from(ticketCounter)
+    .where(eq(ticketCounter.organizationId, orgId))
+    .for("update")
+  if (!current) throw new ServiceError("INTERNAL", 500, "No se pudo numerar la devolución")
+  await tx
+    .update(ticketCounter)
+    .set({ nextReturnNumber: current.nextReturnNumber + 1 })
+    .where(eq(ticketCounter.organizationId, orgId))
+  return current.nextReturnNumber
+}
+
+/** «000001»: el número de un ticket o una devolución como se imprime. */
+function sixDigits(value: number): string {
+  return String(value).padStart(6, "0")
+}
+
+/**
+ * Lo que la devolución congela al hacerse (`payment_return.snapshot`): se
+ * imprime y se envía solo con esto. Nada vivo lo reescribe después.
+ */
+export interface ReturnFrozen {
+  /** Huella del pedido (idempotencia). */
+  request: string
+  patient: { id: string; displayName: string; docType: string | null; docNumber: string | null }
+  issuer: { userId: string; name: string }
+  clinic: TicketFrozen["clinic"]
+  branch: { id: string; name: string }
+  ticket: { id: string; number: number; createdAt: string }
+  lines: Array<{
+    /** El concepto del que se devolvió (el vivo al devolver). */
+    chargeId: string
+    description: string
+    /** Unidades devueltas de un producto (nulo en un servicio). */
+    quantity: number | null
+    amountCents: number
+    kind: "producto" | "servicio"
+    /** Producto: volvió a la sede o no (se devolvió abierto o dañado). */
+    backToStock: boolean | null
+  }>
+  payout: { kind: "pagado"; methodName: string; typeCode: string | null } | { kind: "a_favor" }
+  reason: string
+  /** Frase al pie vigente al devolver. */
+  notice: string
+}
+
+export interface ReturnableLine {
+  /** El concepto vivo hoy: tras una devolución anterior, su versión rebajada. */
+  chargeId: string
+  description: string
+  kind: "producto" | "servicio"
+  /** Nombre del producto, sin la cantidad. */
+  productName: string | null
+  /** Unidades que siguen vendidas (producto). */
+  quantity: number | null
+  /** Precio vigente del concepto. */
+  amountCents: number
+  /** Lo que este ticket pagó del concepto y sigue en pie: el tope de lo que se devuelve. */
+  paidCents: number
+  /** Por qué no se puede devolver desde este ticket; nulo si se puede. */
+  blockedReason: string | null
+}
+
+type ChargeRow = typeof patientCharge.$inferSelect
+type ApplicationRow = typeof patientPaymentApplication.$inferSelect
+
+/**
+ * Los conceptos de un ticket como están hoy, con lo que este ticket pagó de
+ * cada uno: un concepto que ya tuvo una devolución se sigue por su cadena.
+ */
+async function ticketReturnLines(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  ticket: typeof paymentTicket.$inferSelect,
+): Promise<Array<ReturnableLine & { charge: ChargeRow; applications: ApplicationRow[] }>> {
+  const frozen = ticket.snapshot as TicketFrozen
+  const ids = [...new Set((frozen.lines ?? []).map((line) => line.chargeId).filter((id): id is string => !!id))]
+  if (!ids.length) return []
+  const sold = await tx
+    .select({ id: patientCharge.id, originalChargeId: patientCharge.originalChargeId })
+    .from(patientCharge)
+    .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.patientId, patientId), inArray(patientCharge.id, ids)))
+  const order = new Map(ids.map((id, index) => [id, index]))
+  const rootOrder = new Map(sold.map((row) => [rootOfCharge(row), order.get(row.id) ?? 0]))
+  const roots = [...rootOrder.keys()]
+  if (!roots.length) return []
+  const live = await tx
+    .select()
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+        isNull(patientCharge.voidedAt),
+        or(inArray(patientCharge.id, roots), inArray(patientCharge.originalChargeId, roots)),
+      ),
+    )
+  if (!live.length) return []
+  const applications = await tx
+    .select()
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        isNull(patientPaymentApplication.voidedAt),
+        inArray(
+          patientPaymentApplication.chargeId,
+          live.map((charge) => charge.id),
+        ),
+      ),
+    )
+  const productIds = [...new Set(live.map((charge) => charge.productId).filter((id): id is string => !!id))]
+  const names = new Map<string, string>()
+  if (productIds.length) {
+    const rows = await tx
+      .select({ id: product.id, name: product.name })
+      .from(product)
+      .where(and(eq(product.organizationId, orgId), inArray(product.id, productIds)))
+    for (const row of rows) names.set(row.id, row.name)
+  }
+  return live
+    .map((charge) => {
+      const all = applications.filter((app) => app.chargeId === charge.id)
+      const paid = sum(all.filter((app) => app.ticketId === ticket.id))
+      const kind = charge.productId ? ("producto" as const) : ("servicio" as const)
+      const blockedReason =
+        paid <= 0
+          ? "Este ticket ya no paga este concepto."
+          : kind === "producto" && paid !== charge.amountCents
+            ? "Este producto no se pagó entero con este ticket: quítalo de la cuenta o anula el cobro que lo pagó."
+            : null
+      return {
+        chargeId: charge.id,
+        description: charge.description,
+        kind,
+        productName: charge.productId ? (names.get(charge.productId) ?? charge.description) : null,
+        quantity: charge.productQuantity,
+        amountCents: charge.amountCents,
+        paidCents: paid,
+        blockedReason,
+        charge,
+        applications: all,
+      }
+    })
+    .filter((line) => line.paidCents > 0)
+    .sort((a, b) => (rootOrder.get(rootOfCharge(a.charge)) ?? 0) - (rootOrder.get(rootOfCharge(b.charge)) ?? 0))
+}
+
+/** Las devoluciones de unos tickets, de la más antigua a la más nueva. */
+async function returnsOfTickets(tx: Db, orgId: string, ticketIds: string[]) {
+  if (!ticketIds.length) return []
+  return tx
+    .select({
+      id: paymentReturn.id,
+      ticketId: paymentReturn.ticketId,
+      number: paymentReturn.returnNumber,
+      totalCents: paymentReturn.totalCents,
+      currency: paymentReturn.currency,
+      outcome: paymentReturn.outcome,
+      methodName: paymentReturn.methodName,
+      createdAt: paymentReturn.createdAt,
+    })
+    .from(paymentReturn)
+    .where(and(eq(paymentReturn.organizationId, orgId), inArray(paymentReturn.ticketId, ticketIds)))
+    .orderBy(asc(paymentReturn.createdAt), asc(paymentReturn.id))
+}
+
+/**
+ * Qué se puede devolver de un ticket: sus conceptos como están hoy, con lo
+ * que pagó este ticket de cada uno, y los medios con que se pagó (el primero
+ * es el que se propone para devolver el dinero).
+ */
+export async function getTicketReturnable(tx: Db, orgId: string, patientId: string, ticketId: string) {
+  await requirePatient(tx, orgId, patientId)
+  const [ticket] = await tx
+    .select()
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.id, ticketId), eq(paymentTicket.organizationId, orgId), eq(paymentTicket.patientId, patientId)))
+  if (!ticket) throw notFound("Ticket")
+  const frozen = ticket.snapshot as TicketFrozen
+  const lines = ticket.voidedAt ? [] : await ticketReturnLines(tx, orgId, patientId, ticket)
+  return {
+    ticketId: ticket.id,
+    number: ticket.ticketNumber,
+    currency: ticket.currency,
+    branchId: ticket.branchId,
+    createdAt: ticket.createdAt,
+    voided: !!ticket.voidedAt,
+    lines: lines.map(({ charge: _charge, applications: _applications, ...line }) => line),
+    methods: (frozen.methods ?? []).map((method) => ({
+      paymentMethodId: method.paymentMethodId,
+      name: method.name,
+      typeCode: method.typeCode,
+      amountCents: method.amountCents,
+      reference: method.reference,
+    })),
+    returns: await returnsOfTickets(tx, orgId, [ticket.id]),
+  }
+}
+
+export interface ReturnLineInput {
+  /** El concepto vivo (de `getTicketReturnable`). */
+  chargeId: string
+  /** Producto: cuántas unidades devuelve. */
+  quantity?: number
+  /** Servicio: cuánto dinero devuelve. */
+  amountCents?: number
+  /** Producto: vuelve a la sede (por defecto) o no, porque se devolvió abierto o dañado. */
+  backToStock?: boolean
+}
+
+export interface ReturnTicketInput {
+  /** Sede donde se devuelve: de su caja sale el dinero. */
+  branchId: string
+  lines: ReturnLineInput[]
+  /** Con qué medio se le paga; nulo = queda a favor en su cuenta. */
+  paymentMethodId: string | null
+  reason: string
+  /** Clave del formulario: un reintento devuelve la misma devolución. */
+  requestId: string
+}
+
+/**
+ * Devuelve parte o todo lo que pagó un ticket (ADR 0068). La venta del ticket
+ * queda en pie: cada concepto se anula y lo reemplaza otro con lo que queda,
+ * con su pago; lo devuelto queda a favor y, si se le paga, sale en el mismo
+ * paso por el medio elegido. El producto vuelve a la sede si está en buen
+ * estado. Nada se reescribe hacia atrás: Reportes ve la devolución el día
+ * que pasa. Idempotente por `requestId`.
+ */
+export async function returnFromTicket(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  ticketId: string,
+  input: ReturnTicketInput,
+) {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('return:' || ${orgId} || ':' || ${input.requestId}))`,
+  )
+  await lockOrgCurrency(tx, orgId)
+  await lockAccount(tx, orgId, patientId)
+  const requestId = uuid(input.requestId, "La clave de la devolución")
+  const fingerprint = JSON.stringify({
+    ticketId,
+    branchId: input.branchId,
+    lines: [...input.lines]
+      .map((line) => ({
+        chargeId: line.chargeId,
+        quantity: line.quantity ?? null,
+        amountCents: line.amountCents ?? null,
+        backToStock: line.backToStock ?? null,
+      }))
+      .sort((a, b) => a.chargeId.localeCompare(b.chargeId)),
+    paymentMethodId: input.paymentMethodId ?? null,
+    reason: input.reason?.trim() ?? "",
+  })
+  const [replay] = await tx
+    .select()
+    .from(paymentReturn)
+    .where(and(eq(paymentReturn.organizationId, orgId), eq(paymentReturn.requestId, requestId)))
+  if (replay) {
+    if (replay.patientId !== patientId || (replay.snapshot as ReturnFrozen | null)?.request !== fingerprint)
+      throw conflict("REQUEST_ID_CONFLICT", "Esta devolución ya se registró con otros datos. Cierra y vuelve a abrir.")
+    return { paymentReturn: replay, duplicate: true as const, account: await getAccountSummary(tx, orgId, patientId) }
+  }
+  const [ticket] = await tx
+    .select()
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.id, ticketId), eq(paymentTicket.organizationId, orgId), eq(paymentTicket.patientId, patientId)))
+  if (!ticket) throw notFound("Ticket")
+  if (ticket.voidedAt) throw conflict("TICKET_VOIDED", "El ticket está anulado: no hay nada que devolver")
+  const branchRow = await requireBranch(tx, orgId, input.branchId)
+  const reasonText = reason(input.reason)
+  if (!input.lines.length) throw validation("Elige qué devuelve")
+  if (new Set(input.lines.map((line) => line.chargeId)).size !== input.lines.length)
+    throw validation("Cada concepto va una sola vez")
+  const available = new Map((await ticketReturnLines(tx, orgId, patientId, ticket)).map((line) => [line.chargeId, line]))
+  const plan = input.lines.map((line) => {
+    const found = available.get(line.chargeId)
+    if (!found) throw conflict("NOT_IN_TICKET", "Ese concepto no es de este ticket o ya cambió: vuelve a abrir la devolución")
+    if (found.blockedReason) throw conflict("NOT_RETURNABLE", found.blockedReason)
+    if (found.kind === "producto") {
+      if (line.amountCents !== undefined) throw validation("Lo que se devuelve de un producto sale de la cantidad")
+      const sold = found.quantity ?? 1
+      const quantity = line.quantity ?? 0
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > sold)
+        throw validation(`De «${found.productName}» se devuelven de 1 a ${sold}`)
+      // Todo, o la parte proporcional: el último que se devuelva lleva el redondeo.
+      const amountCents = quantity === sold ? found.amountCents : Math.round((found.amountCents * quantity) / sold)
+      return { line: found, quantity, amountCents, backToStock: line.backToStock ?? true }
+    }
+    if (line.quantity !== undefined || line.backToStock !== undefined)
+      throw validation("De un servicio se devuelve un importe")
+    const amountCents = assertPositiveCents(line.amountCents ?? 0)
+    if (amountCents > found.paidCents)
+      throw conflict("RETURN_EXCEEDS_PAID", `De «${found.description}» no se devuelve más de lo que pagó este ticket`)
+    return { line: found, quantity: null, amountCents, backToStock: null }
+  })
+  const total = sum(plan.map((item) => ({ amountCents: item.amountCents })))
+  const method = input.paymentMethodId ? await requirePaymentMethod(tx, orgId, input.paymentMethodId) : null
+  const number = await nextReturnNumber(tx, orgId)
+  const label = `Devolución ${sixDigits(number)}`
+  const [person] = await tx
+    .select({ displayName: patientPerson.displayName, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
+    .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  const [issuer] = await tx.select({ name: user.name }).from(user).where(eq(user.id, actorUserId))
+  const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))
+  if (!profile) throw orgProfileRequired()
+  const snapshot: ReturnFrozen = {
+    request: fingerprint,
+    patient: {
+      id: patientId,
+      displayName: person?.displayName ?? "",
+      docType: person?.docType ?? null,
+      docNumber: person?.docNumber ?? null,
+    },
+    issuer: { userId: actorUserId, name: issuer?.name ?? "" },
+    clinic: {
+      legalName: profile.legalName ?? "",
+      tradeName: profile.tradeName ?? null,
+      fiscalAddress: profile.fiscalAddress ?? null,
+      locale: profile.locale,
+      currency: profile.currency,
+      timezone: profile.timezone,
+    },
+    branch: { id: branchRow.id, name: branchRow.name },
+    ticket: { id: ticket.id, number: ticket.ticketNumber, createdAt: ticket.createdAt.toISOString() },
+    lines: plan.map((item) => {
+      const name = item.line.productName ?? item.line.description
+      return {
+        chargeId: item.line.chargeId,
+        description: item.line.kind === "producto" ? (item.quantity === 1 ? name : `${name} × ${item.quantity}`) : item.line.description,
+        quantity: item.quantity,
+        amountCents: item.amountCents,
+        kind: item.line.kind,
+        backToStock: item.backToStock,
+      }
+    }),
+    payout: method ? { kind: "pagado", methodName: method.name, typeCode: method.typeCode } : { kind: "a_favor" },
+    reason: reasonText,
+    notice: profile.ticketFooter,
+  }
+  const [row] = await tx
+    .insert(paymentReturn)
+    .values({
+      organizationId: orgId,
+      patientId,
+      ticketId: ticket.id,
+      branchId: branchRow.id,
+      returnNumber: number,
+      currency: ticket.currency,
+      totalCents: total,
+      outcome: method ? "pagado" : "a_favor",
+      paymentMethodId: method?.id ?? null,
+      methodName: method?.name ?? null,
+      methodTypeCode: method?.typeCode ?? null,
+      reason: reasonText,
+      requestId,
+      snapshot,
+      createdBy: actorUserId,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo registrar la devolución")
+  const now = new Date()
+  // Lo que se libera de cada pago: queda a favor, o se le paga.
+  const freed = new Map<string, number>()
+  for (const item of plan) {
+    const { charge, applications } = item.line
+    // Lo devuelto sale de lo que pagó este ticket, de lo último aplicado primero.
+    const taken = new Map<string, number>()
+    let left = item.amountCents
+    const mine = applications
+      .filter((app) => app.ticketId === ticket.id)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    for (const app of mine) {
+      if (left <= 0) break
+      const take = Math.min(app.amountCents, left)
+      taken.set(app.id, take)
+      freed.set(app.paymentId, (freed.get(app.paymentId) ?? 0) + take)
+      left -= take
+    }
+    await tx
+      .update(patientCharge)
+      .set({ voidedAt: now, voidedBy: actorUserId, voidReason: `${label}: ${reasonText}`, updatedAt: now })
+      .where(eq(patientCharge.id, charge.id))
+    for (const app of applications) {
+      await tx
+        .update(patientPaymentApplication)
+        .set({ voidedAt: now, voidedBy: actorUserId, voidReason: label, returnId: row.id })
+        .where(eq(patientPaymentApplication.id, app.id))
+    }
+    const remaining = charge.amountCents - item.amountCents
+    const original = rootOfCharge(charge)
+    if (remaining > 0) {
+      const keptQuantity =
+        item.quantity !== null && charge.productQuantity !== null ? charge.productQuantity - item.quantity : null
+      const productName = item.line.productName ?? charge.description
+      const [next] = await tx
+        .insert(patientCharge)
+        .values({
+          organizationId: orgId,
+          patientId,
+          planItemId: charge.planItemId,
+          budgetItemId: charge.budgetItemId,
+          encounterProcedureId: charge.encounterProcedureId,
+          branchId: charge.branchId,
+          promotionId: charge.promotionId,
+          promotionName: charge.promotionName,
+          editReason: charge.editReason,
+          description:
+            keptQuantity !== null ? (keptQuantity === 1 ? productName : `${productName} × ${keptQuantity}`) : charge.description,
+          amountCents: remaining,
+          currency: charge.currency,
+          dueAt: charge.dueAt,
+          notes: charge.notes,
+          productId: charge.productId,
+          productQuantity: keptQuantity,
+          originalChargeId: original,
+          returnedCents: charge.returnedCents + item.amountCents,
+          createdBy: actorUserId,
+        })
+        .returning()
+      for (const app of applications) {
+        const kept = app.amountCents - (taken.get(app.id) ?? 0)
+        if (kept <= 0) continue
+        await tx.insert(patientPaymentApplication).values({
+          organizationId: orgId,
+          patientId,
+          paymentId: app.paymentId,
+          chargeId: next.id,
+          ticketId: app.ticketId,
+          replacesApplicationId: app.id,
+          amountCents: kept,
+          createdBy: actorUserId,
+        })
+      }
+      await audit(tx, orgId, actorUserId, "patient_charge", next.id, "charge.returned", {
+        patientId,
+        returnId: row.id,
+        replaces: charge.id,
+        returnedCents: item.amountCents,
+      })
+    } else {
+      await audit(tx, orgId, actorUserId, "patient_charge", charge.id, "charge.returned", {
+        patientId,
+        returnId: row.id,
+        returnedCents: item.amountCents,
+      })
+    }
+    if (item.line.kind === "producto" && item.quantity && item.backToStock) {
+      await returnSold(tx, orgId, {
+        chargeId: original,
+        quantity: item.quantity,
+        base: {
+          kind: "devolucion",
+          reason: `${label}: ${snapshot.patient.displayName || "paciente"}`,
+          actorUserId,
+          keyPrefix: `devolucion:${row.id}:${original}`,
+          patientId,
+          chargeId: original,
+        },
+      })
+    }
+  }
+  if (method) {
+    // Se le paga en el mismo paso: lo liberado de cada pago sale por el medio elegido.
+    for (const [paymentId, amountCents] of freed) {
+      const [refund] = await tx
+        .insert(patientPaymentRefund)
+        .values({
+          organizationId: orgId,
+          patientId,
+          paymentId,
+          amountCents,
+          refundedAt: now,
+          reason: `${label}: ${reasonText}`,
+          returnId: row.id,
+          createdBy: actorUserId,
+        })
+        .returning()
+      await audit(tx, orgId, actorUserId, "patient_payment_refund", refund.id, "payment.refunded", { returnId: row.id })
+    }
+    const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, ticket.currency)
+    await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+      kind: "devolucion",
+      amountCents: total,
+      currency: ticket.currency,
+      methodName: method.name,
+      methodTypeCode: method.typeCode,
+      concept: `${label} · Ticket ${sixDigits(ticket.ticketNumber)}`,
+    })
+  }
+  await audit(tx, orgId, actorUserId, "payment_return", row.id, "return.created", {
+    patientId,
+    ticketId: ticket.id,
+    totalCents: total,
+    outcome: row.outcome,
+  })
+  await notify(tx, { orgId, kind: "payment.refunded", at: now.toISOString() })
+  return { paymentReturn: row, duplicate: false as const, account: await getAccountSummary(tx, orgId, patientId) }
+}
+
+/** Una devolución tal como se registró (lo que se imprime y se envía). Solo lectura. */
+export async function getPaymentReturn(tx: Db, orgId: string, patientId: string, returnId: string) {
+  await requirePatient(tx, orgId, patientId)
+  const [row] = await tx
+    .select()
+    .from(paymentReturn)
+    .where(
+      and(
+        eq(paymentReturn.organizationId, orgId),
+        eq(paymentReturn.patientId, patientId),
+        eq(paymentReturn.id, uuid(returnId, "La devolución")),
+      ),
+    )
+  if (!row) throw notFound("Devolución")
+  return { ...row, snapshot: row.snapshot as ReturnFrozen }
 }
 
 // --- Cuenta del paciente (tres cifras) ------------------------------------------------------
@@ -1916,6 +2519,11 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       if (!lastClosure[key]) lastClosure[key] = row.closedAt
     }
   }
+  const returnRows = await returnsOfTickets(
+    tx,
+    orgId,
+    tickets.map((ticket) => ticket.id),
+  )
   const cobros = tickets.map((ticket) => ({
     ticketId: ticket.id,
     number: ticket.ticketNumber,
@@ -1939,6 +2547,8 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       amountCents: p.amountCents,
       voidedAt: p.voidedAt,
     })),
+    /** Devoluciones de este ticket (ADR 0068): con alguna, ya no se anula. */
+    returns: returnRows.filter((item) => item.ticketId === ticket.id),
   }))
   // Historial anterior sin ticket (nunca se borra ni se inventa sede): filas
   // de solo lectura, marcadas como histórico. Solo se imprimen con evidencia.
@@ -2067,6 +2677,8 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
     orgProfile: profile ?? null,
     /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
     closedAfter: await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt),
+    /** Devoluciones de este ticket (ADR 0068). */
+    returns: await returnsOfTickets(tx, orgId, [ticket.id]),
   }
 }
 

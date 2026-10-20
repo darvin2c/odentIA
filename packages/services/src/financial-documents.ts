@@ -39,25 +39,27 @@ import { mayWriteFirst, permitsMessage } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import { budgetStateText } from "@odentia/clinical"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
+import { getPaymentReturn } from "./payments.js"
 import {
   buildBudgetSnapshot,
   buildTicketSnapshot,
   renderBudgetPdf,
+  renderReturnPdf,
   renderTicketPdf,
 } from "./financial-document-pdf.js"
 import type { Storage } from "./storage.js"
 import { requirePatient } from "./patients.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 
-export const FINANCIAL_DOCUMENT_TYPES = ["ticket", "budget"] as const
+export const FINANCIAL_DOCUMENT_TYPES = ["ticket", "budget", "return"] as const
 export type FinancialDocumentType = (typeof FINANCIAL_DOCUMENT_TYPES)[number]
 
 /** Prefijos de hilo de las respuestas de correo (contrato de los slices Email). */
 const EMAIL_THREAD_PREFIXES = ["gmail-thread:", "m365-conv:"]
 
 function assertDocumentType(value: string): FinancialDocumentType {
-  if (value === "ticket" || value === "budget") return value
-  throw validation("Documento inválido: solo ticket o budget")
+  if (value === "ticket" || value === "budget" || value === "return") return value
+  throw validation("Documento inválido: solo ticket, budget o return")
 }
 
 // --- Destinatarios ------------------------------------------------------------
@@ -218,7 +220,11 @@ function proposeMessage(
   const where = clinicName ? ` en ${clinicName}` : ""
   const own = recipient.relation === "paciente"
   const text =
-    documentType === "ticket"
+    documentType === "return"
+      ? own
+        ? `Hola, ${recipient.displayName}. Te enviamos la constancia de tu devolución${where}.`
+        : `Hola, ${recipient.displayName}. Te enviamos la constancia de la devolución de ${patientName}${where}.`
+      : documentType === "ticket"
       ? own
         ? `Hola, ${recipient.displayName}. Te enviamos el ticket de tu pago${where}. Gracias por tu visita.`
         : `Hola, ${recipient.displayName}. Te enviamos el ticket del pago de ${patientName}${where}. Gracias por tu visita.`
@@ -235,6 +241,23 @@ async function loadDocumentMeta(
   documentType: FinancialDocumentType,
   documentId: string,
 ): Promise<{ meta: DocumentMeta; preferContactId: string | null }> {
+  if (documentType === "return") {
+    const row = await getPaymentReturn(tx, orgId, patientId, documentId)
+    const [ticket] = await tx
+      .select({ payerContactId: paymentTicket.payerContactId })
+      .from(paymentTicket)
+      .where(and(eq(paymentTicket.id, row.ticketId), eq(paymentTicket.organizationId, orgId)))
+      .limit(1)
+    return {
+      meta: {
+        type: "return",
+        label: `Devolución N.º ${String(row.returnNumber).padStart(6, "0")}`,
+        statusLabel: row.outcome === "pagado" ? "Devuelto" : "Quedó a favor",
+        isDraft: false,
+      },
+      preferContactId: ticket?.payerContactId ?? null,
+    }
+  }
   if (documentType === "ticket") {
     const [ticket] = await tx
       .select()
@@ -984,7 +1007,13 @@ export async function sendFinancialDocument(
   let defaultBody: string
   let pdf: Uint8Array
   let deliveredBudget = false
-  if (documentType === "ticket") {
+  if (documentType === "return") {
+    const done = await renderReturnPdf(tx, orgId, input.patientId, input.documentId, input.paper ?? null)
+    pdf = done.bytes
+    filename = asciiFilename(done.filename)
+    subject = `Devolución N.º ${done.numberLabel} · ${done.tradeName}`
+    defaultBody = "Te enviamos la constancia de tu devolución en PDF."
+  } else if (documentType === "ticket") {
     const snap = await buildTicketSnapshot(tx, orgId, input.patientId, input.documentId)
     pdf = await renderTicketPdf(snap, input.paper ?? null)
     filename = asciiFilename(`Ticket-${snap.numberLabel}.pdf`)
@@ -1242,6 +1271,10 @@ export async function getFinancialDocumentPdf(
   actor: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const documentType = assertDocumentType(input.documentType)
+  if (documentType === "return") {
+    const done = await renderReturnPdf(tx, orgId, patientId, input.documentId, input.paper ?? null)
+    return { bytes: done.bytes, filename: asciiFilename(done.filename) }
+  }
   if (documentType === "ticket") {
     const snap = await buildTicketSnapshot(tx, orgId, patientId, input.documentId)
     return {

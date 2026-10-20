@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getTicketReceipt, refundCredit, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -63,6 +63,20 @@ const refundInput = z.object({
   reason: z.string().trim().min(1).max(2000),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
 }).strict()
+// «Devolver» desde un ticket (ADR 0068): qué devuelve, cómo se le paga y por qué.
+const returnInput = z.object({
+  branchId: z.uuid(),
+  lines: z.array(z.object({
+    chargeId: z.uuid(),
+    quantity: z.number().int().min(1).max(9999).optional(),
+    amountCents: cents.optional(),
+    backToStock: z.boolean().optional(),
+  }).strict()).min(1, { error: "Elige qué devuelve" }).max(50),
+  /** Con qué medio se le paga; null = queda a favor en su cuenta. */
+  paymentMethodId: z.uuid().nullable(),
+  reason: z.string().trim().min(1, { error: "Escribe el motivo de la devolución" }).max(2000),
+  requestId: z.uuid(),
+}).strict()
 export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
   // La cuenta exige finance.read; cada mutación exige además finance.write.
@@ -75,6 +89,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     "/:id/charges/*",
     "/:id/tickets/*",
     "/:id/refunds",
+    "/:id/returns/*",
     "/:id/receipts/*",
   ]) {
     app.use(path, async (c, next) => {
@@ -204,8 +219,9 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       voidCharge(tx, orgId, userId, params.data.id, params.data.chargeId, parsed.data)))
   })
-  // Anular cobro: revierte todo en una acción. Tras el cierre solo administración.
-  // Los productos no vuelven: sus conceptos quedan por cobrar.
+  // Anular ticket: deshace la venta y el pago en una acción (ADR 0068). Tras el
+  // cierre solo administración. Los productos vuelven a su sede; los servicios
+  // hechos quedan por cobrar.
   app.post("/:id/tickets/:ticketId/void", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
@@ -218,6 +234,34 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
         ...parsed.data,
         allowPostClose: canAccess(memberRole, "finance.admin"),
       })))
+  })
+  // Qué se puede devolver de un ticket: sus conceptos como están hoy y sus medios.
+  app.get("/:id/tickets/:ticketId/returnable", async c => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({id:z.uuid(),ticketId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
+      getTicketReturnable(tx, orgId, params.data.id, params.data.ticketId)))
+  })
+  // Devolver: la venta queda en pie y la devolución la rebaja; se le paga en el
+  // mismo paso o queda a favor. Cualquier día: el dinero sale de la caja de hoy.
+  app.post("/:id/tickets/:ticketId/returns", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const params = z.object({id:z.uuid(),ticketId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = returnInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
+      returnFromTicket(tx, orgId, userId, params.data.id, params.data.ticketId, parsed.data)))
+  })
+  // Una devolución tal como se registró (para verla e imprimirla).
+  app.get("/:id/returns/:returnId", async c => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({id:z.uuid(),returnId:z.uuid()}).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
+      getPaymentReturn(tx, orgId, params.data.id, params.data.returnId)))
   })
   // Devolver dinero: solo saldo a favor, sale del efectivo de la caja del día.
   app.post("/:id/refunds", async c => {

@@ -199,10 +199,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Finanzas",
     parent: "Gestión",
     purpose: "La caja y lo cobrado: cierres de caja, movimientos, gastos, deudas y comisiones.",
-    terms: ["caja", "cobros", "pagos", "ingresos", "gastos", "arqueo", "cierre de caja", "deudas", "cobranza", "comisiones", "a favor", "saldo", "aplicar lo que tiene a favor"],
+    terms: ["caja", "cobros", "pagos", "ingresos", "gastos", "arqueo", "cierre de caja", "deudas", "cobranza", "comisiones", "a favor", "saldo", "aplicar lo que tiene a favor", "anular ticket", "devolver", "devolución", "reembolso"],
     writePermission: "finance.write",
     faqs: [
       { q: "¿Por qué el saldo es menor que lo que debe?", a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: S/ 100 · A favor: S/ 100 · Saldo: S/ 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. En su cuenta, «Aplicar lo que tiene a favor» cancela la deuda con un clic y deja el movimiento registrado; si no alcanza, te dice lo que falta." },
+      { q: "¿Anulo el ticket o hago una devolución?", a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket." },
     ],
   },
   {
@@ -243,7 +244,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { q: "¿Cómo registro una compra que ya traje de la tienda?", a: "En Compras, «+ Compra» y elige «Ya la tengo»: queda registrada como llegada, con sus lotes, en un paso. Si la pagaste, se abre «Registrar pago» con el total puesto." },
       { q: "¿Quién puede recibir lo que llega?", a: "Recepción ve el inventario sin precios, registra lo que llegó y el uso fuera de una atención. Pedir, contar, ajustar y corregir precios son del dueño y la administración." },
       { q: "¿Cómo se descuentan los materiales de una atención?", a: "Solos, al firmarla: en Servicios y precios cada servicio dice qué usa cada vez («Materiales que usa») y sale de la sede de la atención. Si se usó otra cantidad, en la atención firmada, «Materiales usados» › «Corregir»; lo firmado no cambia." },
-      { q: "¿Cómo vendo un cepillo o un enjuague?", a: "Márcalo con «Se vende» y ponle su precio de venta. En Finanzas › «Cobrar», «Agregar producto» lo suma a la cuenta y lo descuenta de la sede al agregarlo; si lo quitas de la cuenta, vuelve." },
+      { q: "¿Cómo vendo un cepillo o un enjuague?", a: "Márcalo con «Se vende» y ponle su precio de venta. En Finanzas › «Cobrar», «Agregar producto» lo suma a la cuenta y lo descuenta de la sede al agregarlo; si lo quitas de la cuenta o anulas el ticket, vuelve. Si te lo devuelven otro día, «Devolver» en su ticket lo regresa a la sede si está en buen estado." },
     ],
   },
   {

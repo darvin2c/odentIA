@@ -1844,8 +1844,9 @@ export async function finalizeEncounter(
       continue
     }
     if (proc.planItemId) {
+      // Lo cobrado incluye lo devuelto (ADR 0068): una devolución no deja otra vez por cobrar el tratamiento.
       const active = await tx
-        .select({ amountCents: patientCharge.amountCents })
+        .select({ amountCents: patientCharge.amountCents, returnedCents: patientCharge.returnedCents })
         .from(patientCharge)
         .where(
           and(
@@ -1856,7 +1857,7 @@ export async function finalizeEncounter(
           ),
         )
       const agreed = line?.priceCents ?? proc.priceCents
-      const charged = active.reduce((sum, c) => sum + c.amountCents, 0)
+      const charged = active.reduce((sum, c) => sum + c.amountCents + c.returnedCents, 0)
       const remaining = agreed - charged
       if (remaining <= 0) {
         skip(proc, "covered")
