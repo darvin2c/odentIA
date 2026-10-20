@@ -51,7 +51,9 @@ export function PatientAvatar({
         variant="ghost"
         className="h-auto rounded-full p-0"
         aria-label={`Cambiar foto de ${name}`}
-        title={photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"}
+        title={
+          photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"
+        }
         onClick={() => setOpen(true)}
       >
         {avatar}

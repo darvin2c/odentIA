@@ -73,8 +73,8 @@ export function MedicationPicker({
           {(item: Item) => (
             <ComboboxItem key={item.key} value={item}>
               <span className="flex min-w-0 flex-col">
-                <span className="truncate">{item.dci}</span>
-                <span className="truncate text-xs text-muted-foreground">{item.detail}</span>
+                <span className="break-words">{item.dci}</span>
+                <span className="break-words text-xs text-muted-foreground">{item.detail}</span>
               </span>
             </ComboboxItem>
           )}

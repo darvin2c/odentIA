@@ -184,16 +184,14 @@ async function audit(
   metadata: Record<string, unknown>,
 ): Promise<void> {
   // Sin copiar el dato clínico: la auditoría dice qué pasó y con qué código.
-  await tx
-    .insert(auditEvent)
-    .values({
-      organizationId: orgId,
-      actorUserId,
-      action,
-      entity: "patient",
-      entityId: patientId,
-      metadata,
-    })
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action,
+    entity: "patient",
+    entityId: patientId,
+    metadata,
+  })
 }
 
 /** «Nueva alergia»: la sustancia, qué tan fuerte fue y, si se sabe, qué le pasó. */

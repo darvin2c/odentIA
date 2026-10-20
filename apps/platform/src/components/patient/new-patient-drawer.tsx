@@ -782,7 +782,12 @@ function MatchesNote({
       {rows.map((row) => (
         <Item key={row.id} variant="outline" className="rounded-2xl bg-background">
           <ItemMedia>
-            <PersonAvatar name={row.displayName} className="size-9" fallbackClassName="text-xs" decorative />
+            <PersonAvatar
+              name={row.displayName}
+              className="size-9"
+              fallbackClassName="text-xs"
+              decorative
+            />
           </ItemMedia>
           {/* Con poco ancho el botón baja a su propia fila en vez de apretar el nombre. */}
           <ItemContent className="min-w-0 basis-48">

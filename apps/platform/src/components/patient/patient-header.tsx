@@ -116,7 +116,10 @@ export function PatientClinicalStrip({
           {moreLabel} · ver antecedentes
         </Button>
       ) : more ? (
-        <Badge variant="outline" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+        <Badge
+          variant="outline"
+          className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal"
+        >
           {moreLabel}
         </Badge>
       ) : null}

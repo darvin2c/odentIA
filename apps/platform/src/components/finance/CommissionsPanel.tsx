@@ -31,7 +31,13 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { DetailDrawer, EmptyState, FormDrawer, LoadingState, PersonAvatar } from "@odentia/ui-patterns"
+import {
+  DetailDrawer,
+  EmptyState,
+  FormDrawer,
+  LoadingState,
+  PersonAvatar,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check, ChevronRight, Percent, Plus } from "lucide-react"
@@ -98,7 +104,6 @@ function mutationError(error: unknown): string {
   }
   return financeErrorMessage(error)
 }
-
 
 function countLabel(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`

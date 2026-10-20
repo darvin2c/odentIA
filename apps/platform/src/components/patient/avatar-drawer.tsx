@@ -1,4 +1,9 @@
-import { FormDrawer, ImageAdjust, type ImageAdjustValue, renderAdjustedImage } from "@odentia/ui-patterns"
+import {
+  FormDrawer,
+  ImageAdjust,
+  type ImageAdjustValue,
+  renderAdjustedImage,
+} from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { API_URL } from "../../lib/auth-client"
@@ -35,7 +40,9 @@ export function AvatarDrawer({
         body: form,
       })
       if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null
+        const body = (await response.json().catch(() => null)) as {
+          error?: { message?: string }
+        } | null
         throw new Error(body?.error?.message ?? `No se pudo guardar la foto (${response.status}).`)
       }
     },
@@ -43,6 +50,9 @@ export function AvatarDrawer({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["patient-avatar", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient", patientId] }),
+        // La página de la persona trae la clave de la foto: sin esto, la
+        // primera foto no se ve hasta recargar.
+        queryClient.invalidateQueries({ queryKey: ["person"] }),
       ])
       setValue(null)
       onOpenChange(false)
@@ -69,7 +79,9 @@ export function AvatarDrawer({
       submitLabel="Guardar"
       error={save.isError ? save.error.message : null}
     >
-      {open ? <ImageAdjust shape="person" name={name} disabled={save.isPending} onChange={setValue} /> : null}
+      {open ? (
+        <ImageAdjust shape="person" name={name} disabled={save.isPending} onChange={setValue} />
+      ) : null}
     </FormDrawer>
   )
 }

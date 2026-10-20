@@ -1,5 +1,5 @@
-import type { Db } from "@odentia/db"
 import { ADMINISTRATION_ROUTES, allergyWarnings, findMedication } from "@odentia/clinical"
+import type { Db } from "@odentia/db"
 import {
   diagnosisCatalog,
   encounter,
@@ -14,9 +14,9 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Medicamento de la receta con los datos de la Guía de la buena prescripción
@@ -172,7 +172,11 @@ export async function createPrescription(
   const conflicts = items.flatMap((item) => allergyWarnings(item.genericName, allergies))
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
   if (conflicts.length > 0 && (!input.acknowledgeAllergies || !overrideReason))
-    throw new ServiceError("ALLERGY_CONFLICT", 409, `Aviso de alergia: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`)
+    throw new ServiceError(
+      "ALLERGY_CONFLICT",
+      409,
+      `Aviso de alergia: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`,
+    )
   if (overrideReason && overrideReason.length > 500)
     throw validation("El motivo para recetar igual debe tener hasta 500 caracteres")
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
@@ -215,7 +219,11 @@ export async function createPrescription(
     entity: "prescription",
     entityId: row.id,
     // Sin copiar el motivo: la auditoría dice que se recetó igual, el motivo queda en la receta.
-    metadata: { patientId, allergyWarnings: conflicts.length, allergyOverride: Boolean(overrideReason) },
+    metadata: {
+      patientId,
+      allergyWarnings: conflicts.length,
+      allergyOverride: Boolean(overrideReason),
+    },
   })
   return { ...row, items: medications }
 }
