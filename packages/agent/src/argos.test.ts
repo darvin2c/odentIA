@@ -173,6 +173,10 @@ describe("Argos sobre las vistas", () => {
     if (answer.kind !== "no_existe") throw new Error(answer.kind)
     expect(answer.closest?.text).toBe("Lo más cercano: 1 pagos registrados.")
     expect(await lastQuestion()).toMatchObject({ outcome: "no_sabe", query: null })
+
+    // Sin consulta no hay con qué llenar un hueco: se dice lo que falta.
+    const holes = new ScriptedModel([{ tipo: "parcial", sql: "", frase: "Hay {filas} productos.", falta: "El costo de los lotes." }])
+    expect(await ask(holes, "¿Cuánto vale el inventario?")).toMatchObject({ kind: "no_existe", message: "El costo de los lotes." })
   })
 
   it("lo que es de la Ayuda u otra cosa no llama al modelo que escribe ni cuenta para el tope", async () => {

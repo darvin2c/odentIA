@@ -138,6 +138,9 @@ describe("las llaves de Argos", () => {
   it("el revisor deja pasar una lectura de las vistas y rechaza lo demás", () => {
     expect(reviewArgosQuery("select sum(importe) as total from argos.cobros where dia >= date '2026-10-01';")).toMatchObject({ ok: true })
     expect(reviewArgosQuery("with x as (select dia, count(*) n from citas group by dia) select max(n) from x")).toMatchObject({ ok: true })
+    // El FROM de extract o substring es de la función, no una vista.
+    expect(reviewArgosQuery("select extract(day from c.inicio) as d, count(*) as n from citas c where extract(dow from current_date) = 1 group by 1")).toMatchObject({ ok: true })
+    expect(reviewArgosQuery("select extract(day from now()) as d from public.patient")).toMatchObject({ ok: false })
     for (const bad of [
       "select * from public.patient",
       "select * from patient",

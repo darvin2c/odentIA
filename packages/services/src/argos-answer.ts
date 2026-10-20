@@ -24,6 +24,7 @@ export const ARGOS_WORDS = {
   tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo; las cifras de Reportes siguen a la vista.`,
   sinModelo: "Ahora no puedo leer preguntas. Las cifras de Reportes siguen a la vista; prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
+  noExiste: "Eso no está en los datos que registra odentIA.",
   ayuda: "Eso es de cómo se usa odentIA: te lo explica la Ayuda.",
   otro: "Respondo preguntas sobre los datos de la clínica: dinero, pacientes, agenda, tratamientos, presupuestos e inventario. Prueba con «¿cuánto cobramos este mes?».",
 } as const

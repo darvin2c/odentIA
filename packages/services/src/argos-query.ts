@@ -89,9 +89,11 @@ export function reviewArgosQuery(query: string): ArgosReview {
   const views = new Set<string>(ARGOS_VIEWS)
   const relation = /\b(?:from|join)\s+(?:lateral\s+)?([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)/gi
   for (const match of bare.matchAll(relation)) {
+    // `extract(day from c.inicio)` o `substring(x from 2)`: ese FROM es de la función, no nombra una vista.
+    if (insideFromCall(bare, match.index ?? 0)) continue
     const name = (match[1] ?? "").toLowerCase()
     const view = name.startsWith("argos.") ? name.slice(6) : name
-    const isCall = new RegExp(`^\\s*\\(`).test(bare.slice((match.index ?? 0) + match[0].length))
+    const isCall = /^\s*\(/.test(bare.slice((match.index ?? 0) + match[0].length))
     if (isCall && ALLOWED_CALLS.has(view)) continue
     if (name.includes(".") && !name.startsWith("argos.")) return { ok: false, reason: `Solo las vistas de Argos: ${name}` }
     if (!views.has(view) && !ctes.has(view)) return { ok: false, reason: `No es una vista de Argos: ${name}` }
@@ -103,6 +105,22 @@ export function reviewArgosQuery(query: string): ArgosReview {
     if (!ALLOWED_CALLS.has(name) && !ctes.has(name)) return { ok: false, reason: `No se permite la función «${name}»` }
   }
   return { ok: true, sql: nullsLast(text) }
+}
+
+/** Funciones de SQL que llevan FROM dentro de sus paréntesis. */
+const FROM_CALLS = new Set(["extract", "substring", "trim", "position", "overlay"])
+
+/** El FROM en `index` está dentro de los paréntesis de una de esas funciones. */
+function insideFromCall(text: string, index: number): boolean {
+  let depth = 0
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (text[at] === ")") depth += 1
+    else if (text[at] === "(") {
+      if (depth > 0) depth -= 1
+      else return FROM_CALLS.has((/([a-z_]+)\s*$/i.exec(text.slice(0, at))?.[1] ?? "").toLowerCase())
+    }
+  }
+  return false
 }
 
 export class ArgosQueryError extends Error {

@@ -51,7 +51,7 @@ const planSchema = z.object({
   sql: z.string().describe("Una sola consulta SELECT (o WITH … SELECT) sobre las vistas; vacía si tipo es no_existe."),
   frase: z
     .string()
-    .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples."),
+    .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."),
   frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin huecos)."),
   como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
   falta: z.string().describe("En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."),
@@ -78,7 +78,8 @@ Reglas:
 - Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra» o lo que ninguna vista tiene.
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
 - «Ticket promedio» es el promedio de ventas.importe (por venta), no el de los tickets de pago.
-- odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con los tickets o con lo cobrado.
+- odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado (cobros).
+- Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
 - Cuenta y agrupa a las personas por su paciente_id cuando la vista lo tenga: hay nombres repetidos.
 - Lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) no está en las vistas: tipo no_existe.
 - Si lo pedido no está en las vistas, tipo no_existe: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
@@ -338,7 +339,9 @@ export async function askArgos(
   const closest = await closestOf(plan, run, ready.zone)
   if (withoutQuery(plan)) {
     await record("no_sabe", null, true)
-    return { kind: "no_existe", message: plan.frase, missing: plan.falta.trim() || null, closest }
+    // Sin resultado no hay con qué llenar un hueco: una frase con huecos se cambia por lo que falta.
+    const message = /\{\w+\}/.test(plan.frase) ? plan.falta.trim() || ARGOS_WORDS.noExiste : plan.frase
+    return { kind: "no_existe", message, missing: plan.falta.trim() || null, closest }
   }
   if (!result) {
     await record("no_pudo", plan.sql, true)
