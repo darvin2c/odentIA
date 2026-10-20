@@ -1425,7 +1425,7 @@ await upsertAgentConfig(db, ORG_A, {
   enabled: true,
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
-  // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
+  // La voz de la clínica y una indicación por función: lo que se ve en Agente › Sofi.
   personaName: "Sofi",
   treatment: "tu",
   tone: "cercano",

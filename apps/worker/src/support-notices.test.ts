@@ -52,7 +52,7 @@ it("reclama antes de SMTP, no lleva el texto del caso y no reintenta un envío i
   expect(sent).toHaveLength(1)
   expect(sent[0]).toMatchObject({ to: "soporte@odentia.test", subject: "Caso nuevo · Clínica · Pregunta", state: "reclamado" })
   expect(sent[0]!.text).toContain("Quién: Ana Torres (propietario)")
-  expect(sent[0]!.text).toContain("Pantalla: Agente › Administrador")
+  expect(sent[0]!.text).toContain("Pantalla: Agente › Argos")
   expect(sent[0]!.html).toContain(`https://admin.odentia.test/support?caso=${kase.id}`)
   expect(sent[0]!.text).not.toContain(question)
   expect(await statesOf(kase.id)).toEqual([["caso_nuevo", "incierto"]])
