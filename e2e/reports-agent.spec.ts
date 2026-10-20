@@ -153,7 +153,7 @@ for (const width of [1440, 390]) {
     const money = page.getByRole("region", { name: "Lo que pagaste por el agente y lo cobrado en sus citas" })
     await expect(money).toContainText("USD 34.80")
     // La línea que se cobra dice la regla de Facturación: no es la cifra «Conversaciones que atendió».
-    await expect(money).toContainText("Recepción: 60 conversaciones atendidas")
+    await expect(money).toContainText("Sofi: 60 conversaciones atendidas")
     await expect(money).toContainText("Una por persona cada 24 horas")
     await expect(money).toContainText("USD 0.50 cada una")
     await expect(money).toContainText("El crédito del plan cubrió USD 29.00; USD 5.80 se cobraron aparte.")

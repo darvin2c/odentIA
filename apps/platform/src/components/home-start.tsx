@@ -1,14 +1,15 @@
 import { Badge, buttonVariants, cn } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
+import { ADMIN_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../lib/agent-names"
 import type { WorkspaceHome } from "../lib/workspace"
 
 /**
  * Los pasos de una clínica nueva; solo los recibe quien puede configurarla. El
- * de encender Recepción y el Administrador, solo quien puede encenderlos: sin
+ * de encender a Sofi y a Argos, solo quien puede encenderlos: sin
  * ellos «Recordar la cita» y los avisos de la cita no salen.
  */
-function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>) {
+function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>, receptionName = RECEPTION_DEFAULT_NAME) {
   return [
     { title: "Definir horarios", description: "Indica cuándo atiende cada profesional.", href: "/settings/availability", done: setup.availability },
     { title: "Preparar una unidad dental", description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.chairs },
@@ -16,7 +17,7 @@ function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>) {
     ...(setup.agent === undefined
       ? []
       : [{
-          title: "Encender Recepción y el Administrador",
+          title: `Encender a ${receptionName} y a ${ADMIN_NAME}`,
           description: "Sin ellos no salen los recordatorios ni los avisos de la cita, aunque «Recordar la cita» esté prendida.",
           href: "/agent/administrador",
           done: setup.agent,
@@ -37,7 +38,7 @@ export function needsSetup(data: WorkspaceHome): boolean {
 
 /** «Prepara tu primera atención»: orienta el primer uso sin convertir una jornada activa en un tutorial. */
 export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]> }) {
-  const steps = setupSteps(setup)
+  const steps = setupSteps(setup, useReceptionName())
   const next = steps.find(step => !step.done)
   if (!next) return null
   return <section aria-label="Siguiente paso" className="enter elevated rounded-xl border bg-card p-6">

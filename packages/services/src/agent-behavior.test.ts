@@ -169,7 +169,7 @@ describe("recorrido comercial directo", () => {
     // Sin responsable: es de Recepción. El historial dice que la creó el agente.
     const detail = await run((tx) => getOpportunity(tx, ORG, items[0]!.id))
     expect(detail).toMatchObject({ assignedUserId: null, moment: "interesado", conversationId })
-    expect(detail.history[0]).toMatchObject({ origin: "agente", who: "El agente" })
+    expect(detail.history[0]).toMatchObject({ origin: "agente", who: "Sofi" })
   })
 
   it("replay con la misma clave devuelve la propuesta sin reenviar el mensaje", async () => {

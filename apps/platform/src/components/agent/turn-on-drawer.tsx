@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck, LoaderCircle } from "lucide-react"
 import type { FormEvent, ReactNode } from "react"
 import { type AgentModelStatus, type AgentOverview, MODEL_CHECK_TEXT } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { AGENT_MODEL_LABEL } from "../../lib/crm"
@@ -52,7 +53,7 @@ const ACTION = "h-auto min-h-11 p-0 sm:min-h-8"
 export const AGENT_MODEL_QUERY_KEY = ["agent-model"] as const
 
 /**
- * Encender Recepción: cinco comprobaciones (lo que falta lleva a donde se
+ * Encender a Sofi: cinco comprobaciones (lo que falta lleva a donde se
  * resuelve). Lo que puede hacer lo dicen sus funciones, en la página; no hay
  * niveles que elegir (ADR 0021). El canal y el modelo impiden encender: sin
  * canal no le llega ningún mensaje y, sin un modelo que responda, cada
@@ -72,6 +73,7 @@ export function TurnOnDrawer({
   onTest: () => void
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const model = useQuery({
     queryKey: AGENT_MODEL_QUERY_KEY,
     queryFn: () => apiFetch<{ data: AgentModelStatus }>("/api/agent/model"),
@@ -135,12 +137,12 @@ export function TurnOnDrawer({
         turnOn.reset()
         onClose()
       }}
-      title="Encender Recepción"
+      title={`Encender a ${receptionName}`}
       description="Cinco comprobaciones. Lo que falta te lleva a donde se resuelve."
       onSubmit={submit}
       isSubmitting={turnOn.isPending}
       error={mutationErrorMessage(turnOn.error)}
-      submitLabel="Encender Recepción"
+      submitLabel={`Encender a ${receptionName}`}
       cancelLabel="Ahora no"
       submitDisabled={!hasChannel || !modelOk}
     >

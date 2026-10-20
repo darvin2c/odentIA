@@ -4,6 +4,7 @@ import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, 
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
 import { markReviewsCredited, pendingReviewCredits } from "./saas-action-review.js"
 import { listPeriodActions, microsToCents, netMicros, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
+import { AGENT_NAMES } from "./agent-names.js"
 
 /* ---------- Cobrar (ADR 0031, fase 4) ---------- */
 
@@ -26,9 +27,9 @@ export function addMonth(date: Date): Date {
 }
 
 const KIND_LINE: Record<SaasActionKind, (count: number) => string> = {
-  conversacion: (n) => `Recepción: ${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"} por encima del crédito`,
-  consulta: (n) => `Asistente clínico: ${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"} por encima del crédito`,
-  cita: (n) => `Administrador: ${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"} por encima del crédito`,
+  conversacion: (n) => `${AGENT_NAMES.recepcion}: ${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"} por encima del crédito`,
+  consulta: (n) => `${AGENT_NAMES.asistente_clinico}: ${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"} por encima del crédito`,
+  cita: (n) => `${AGENT_NAMES.administrador}: ${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"} por encima del crédito`,
 }
 
 /** ¿Cobra esta suscripción por acción? Activa o en gracia, con plan, no demo y con su mes empezado. */

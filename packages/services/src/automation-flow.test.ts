@@ -448,7 +448,7 @@ describe("por dónde le llega a cada persona", () => {
       title: "Llamar a No aceptó por su presupuesto",
       createdBy: "admin",
       area: "recepcion",
-      reason: "El agente no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
+      reason: "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
       patientId: refused.patientId,
       status: "open",
     })
@@ -500,7 +500,7 @@ describe("por dónde le llega a cada persona", () => {
     expect(after.find((row) => row.id === bouncedJob.id)).toMatchObject({
       outcome: "no_pudo",
       cause: "no_entregado",
-      text: "El agente no pudo escribirle: el canal no entregó el mensaje. Lo tiene el equipo de recepción.",
+      text: "Sofi no pudo escribirle: el canal no entregó el mensaje. Lo tiene el equipo de recepción.",
       fix: "Revisa su número.",
     })
     expect((await jobsOf(c)).find((job) => job.id === bouncedJob.id)).toMatchObject({ status: "fallido", lastError: "131026: número no válido" })
@@ -789,7 +789,7 @@ describe("quién lo hace: el agente, una persona o los dos", () => {
     const p = await person(c, "En pausa", { consent: ["seguimiento", "novedades"], openWindow: true })
     await dueBudget(c, p.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
-    expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "Recepción apagada" }])
+    expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "Sofi no atiende" }])
     expect(await tasksOf(c)).toHaveLength(0)
     expect(await noticesOf(c)).toHaveLength(0)
   })
@@ -963,7 +963,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: null, name, language: "es", status: "pausada", reason: "Calidad baja" }]))
     const [notice] = await noticesOf(c)
     expect(notice!.body).toBe(
-      "Motivo: Calidad baja. Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad. 2 personas lo tienen por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Administrador.",
+      "Motivo: Calidad baja. Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad. 2 personas lo tienen por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Argos.",
     )
   })
 
@@ -1071,11 +1071,11 @@ describe("pedírselo con palabras", () => {
     expect(line.draft).toMatchObject({
       creates: true,
       action: "prender",
-      summary: "La armé así: el agente Recepción le escribe 2 horas después para ofrecerle otra fecha. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción. Todavía no hace nada.",
+      summary: "La armé así: Sofi le escribe 2 horas después para ofrecerle otra fecha. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción. Todavía no hace nada.",
       message: { text: "Hola, Lucía. Se canceló la cita del lunes 12 de octubre en Clínica Sonríe. ¿Te buscamos otra fecha?", buttons: ["Sí, otra fecha", "No enviar más"] },
       unsupported: [],
     })
-    expect(line.draft!.flow.main.map((step) => step.label)).toEqual(["Una persona cancela su cita", "Espera 2 horas", "¿Puede escribirle el agente?", "Le escribe", "Lo resuelve el agente"])
+    expect(line.draft!.flow.main.map((step) => step.label)).toEqual(["Una persona cancela su cita", "Espera 2 horas", "¿Puede escribirle Sofi?", "Le escribe", "Lo resuelve Sofi"])
     // La prueba cuenta lo que pasó y por dónde llegaría hoy; no envía nada.
     expect(line.draft!.test).toMatchObject({ total: 3, title: "3 cancelaciones" })
     expect(line.draft!.test!.rows.map((row) => [row.route, row.total])).toEqual([["respuesta", 1], ["no_pudo", 2]])
@@ -1119,18 +1119,18 @@ describe("pedírselo con palabras", () => {
       summary: "Así quedaría. Mientras no guardes, sigue funcionando como estaba.",
       changes: [
         { kind: "cambio", before: "Espera al día siguiente", after: "Espera al día siguiente, 10:00" },
-        { kind: "nueva", before: null, after: "Si el agente no puede, además queda una tarea para el equipo de recepción." },
+        { kind: "nueva", before: null, after: "Si Sofi no puede, además queda una tarea para el equipo de recepción." },
       ],
       marks: { espera: "cambio", tarea: "nueva" },
     })
-    expect(line.draft!.unsupported).toEqual([expect.stringContaining("el agente Recepción no ofrece descuentos")])
+    expect(line.draft!.unsupported).toEqual([expect.stringContaining("Sofi no ofrece descuentos")])
     expect(line.draft!.flow.otherwise!.map((step) => step.label)).toEqual(["Avisa por qué y cómo habilitarlo", "Tarea de llamada", "Le toca a una persona"])
     // Sin guardar, la línea no cambió.
     expect((await rulesOf(c))[0]).toMatchObject({ id: rule.id, teamPart: false, config: {} })
     await run(c, (tx) => applyAdminDraft(tx, c.orgId, c.ownerId, "seguimiento_no_asistencia"))
     expect((await rulesOf(c))[0]).toMatchObject({ enabled: true, teamPart: true, config: { hour: 10 }, draft: null })
     const saved = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "seguimiento_no_asistencia"))
-    expect(saved).toMatchObject({ hour: 10, draft: null, description: "El agente Recepción le escribe al día siguiente, a las 10:00, para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción." })
+    expect(saved).toMatchObject({ hour: 10, draft: null, description: "Sofi le escribe al día siguiente, a las 10:00, para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción." })
     expect(saved.changes[0]!.what).toBe("prendió la tarea para el equipo y fijó la salida a las 10:00")
   })
 
@@ -1244,7 +1244,7 @@ describe("pedírselo con palabras", () => {
       ["no_pudo", 1, "Avisa por qué y cómo habilitar a cada una."],
     ])
     const byPerson = await run(c, (tx) => testAdminLine(tx, c.orgId, line, { agentPart: false, teamPart: true, days: null }))
-    expect(byPerson!.rows).toEqual([{ route: "tarea", total: 3, label: "Tarea para el equipo de recepción", detail: "El agente no escribe: lo hace una persona." }])
+    expect(byPerson!.rows).toEqual([{ route: "tarea", total: 3, label: "Tarea para el equipo de recepción", detail: "Sofi no escribe: lo hace una persona." }])
     // Las líneas que no escriben a nadie no tienen esta prueba.
     expect(await run(c, (tx) => testAdminLine(tx, c.orgId, adminLineOf("cobranza_vencida")!, { agentPart: false, teamPart: true, days: 30 }))).toBeNull()
     expect(await jobsOf(c)).toHaveLength(0)
@@ -1265,8 +1265,8 @@ describe("lo que el agente no hace queda para una persona", () => {
     // Una indicación sin tarea no sirve: el borrador prende la tarea de respaldo.
     expect(withNote.draft!.changes.map((change) => change.after)).toEqual([
       "Espera al día siguiente, 9:00",
-      "Si el agente no puede, además queda una tarea para el equipo de recepción.",
-      "La tarea para el equipo de recepción dirá: «Ofrecer 10 % si reprograma». El agente no lo dice: lo hace una persona.",
+      "Si Sofi no puede, además queda una tarea para el equipo de recepción.",
+      "La tarea para el equipo de recepción dirá: «Ofrecer 10 % si reprograma». Sofi no lo dice: lo hace una persona.",
     ])
     expect(withNote).toMatchObject({ teamPart: false, taskNote: null })
     await run(c, (tx) => applyAdminDraft(tx, c.orgId, c.ownerId, "seguimiento_no_asistencia"))
@@ -1283,7 +1283,7 @@ describe("lo que el agente no hace queda para una persona", () => {
     await run(c, (tx) => syncVisitFollowUps(tx, c.orgId, NOW))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido"])
     expect((await tasksOf(c))[0]!.reason).toBe(
-      "El agente no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes. Indicación de la clínica: Ofrecer 10 % si reprograma",
+      "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes. Indicación de la clínica: Ofrecer 10 % si reprograma",
     )
     // También se cambia a mano, sin pedirlo con palabras; vacía, se quita.
     await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, "seguimiento_no_asistencia", { taskNote: "" }))
@@ -1479,7 +1479,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     // y la tarea se da por hecha porque el agente ya le escribió.
     expect((await opportunityRow(oppId)).conversationId).toBe(p.conversationId)
     expect(await followUpTask(oppId)).toMatchObject({
-      conversationId: p.conversationId, status: "done", settledReason: "el agente le escribió para retomarla",
+      conversationId: p.conversationId, status: "done", settledReason: "Sofi le escribió para retomarla",
     })
   })
 
@@ -1535,7 +1535,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect(taskOf(ownedId)).toEqual([expect.objectContaining({
       title: "Llamar a Con responsable por Ortodoncia", assigneeUserId: c.dentistId,
       contactId: owned.contactId, status: "open",
-      reason: "El agente no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
+      reason: "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
     })])
     expect(jobs.find((job) => job.opportunityId === ownedId)?.taskId).toBe(taskOf(ownedId)[0]?.id)
     // Sin responsable, la tarea va al equipo de recepción.
@@ -1594,7 +1594,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const detail = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "seguimiento_comercial"))
     expect(detail).toMatchObject({
       actor: "agente",
-      description: "El agente Recepción le escribiría para retomar la conversación y daría la tarea por hecha. Si no puede, avisa por qué y cómo habilitarlo, y la misma tarea quedaría para quien lleva la oportunidad.",
+      description: "Sofi le escribiría para retomar la conversación y daría la tarea por hecha. Si no puede, avisa por qué y cómo habilitarlo, y la misma tarea quedaría para quien lleva la oportunidad.",
       message: { text: "Hola, Lucía. Te escribimos de Clínica Sonríe sobre tu consulta de «Ortodoncia». ¿Seguimos conversando?", buttons: ["Sí, continuemos", "No enviar más"] },
     })
     expect(detail.noticeExample).toContain("No pude escribirle a Tomás Rivas")

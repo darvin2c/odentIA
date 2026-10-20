@@ -133,36 +133,39 @@ export function createCrmNote(
   )
 }
 
-/** Etiqueta operativa del estado de atención (sin jerga técnica). */
-export function agentStateLabel(state: CrmAgentState): string {
+/**
+ * Etiqueta operativa del estado de atención (sin jerga técnica). Las
+ * conversaciones las atiende el agente de recepción: se dice su nombre.
+ */
+export function agentStateLabel(state: CrmAgentState, receptionName: string): string {
   switch (state) {
     case "agent":
-      return "La atiende el agente"
+      return `La atiende ${receptionName}`
     case "human":
       return "Con el equipo"
     case "approval":
       return "Espera al paciente"
     case "handoff":
-      return "Te lo pasó el agente"
+      return `Te lo pasó ${receptionName}`
     case "closed":
       return "Cerrada"
   }
 }
 
 /** Explicación breve del estado para recepción. */
-export function agentStateDescription(agent: CrmAgentStatus): string {
+export function agentStateDescription(agent: CrmAgentStatus, receptionName: string): string {
   if (agent.reason) return agent.reason
   switch (agent.state) {
     case "agent":
-      return "El agente responde los mensajes entrantes."
+      return `${receptionName} responde los mensajes entrantes.`
     case "human":
       return agent.enabled
-        ? "La atiende una persona: el agente no responde en este hilo."
-        : "El agente está apagado para este hilo."
+        ? `La atiende una persona: ${receptionName} no responde en este hilo.`
+        : `${receptionName} no atiende este hilo.`
     case "approval":
-      return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando la confirmación del interlocutor.`
+      return `Hay ${agent.pendingProposalIds.length} propuesta(s) de ${receptionName} esperando la confirmación del interlocutor.`
     case "handoff":
-      return "El agente te pasó este caso: falta resolverlo."
+      return `${receptionName} te pasó este caso: falta resolverlo.`
     case "closed":
       return "Si le escribes, la conversación se vuelve a abrir."
   }
@@ -172,23 +175,23 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
  * Siguientes pasos sugeridos según el estado real del agente. Solo texto
  * operativo derivado del contexto; no inventa acciones del servidor.
  */
-export function agentNextSteps(agent: CrmAgentStatus): string[] {
+export function agentNextSteps(agent: CrmAgentStatus, receptionName: string): string[] {
   switch (agent.state) {
     case "approval":
-      return ["Revisa lo que propuso el agente", "Si confirmó en el chat, registra su confirmación"]
+      return [`Revisa lo que propuso ${receptionName}`, "Si confirmó en el chat, registra su confirmación"]
     case "handoff":
       return ["Lee qué pide y lo que se le dijo", "Tómalo y responde"]
     case "human":
-      return ["Responde el mensaje pendiente", "Al terminar, resuélvela o devuélvela al agente"]
+      return ["Responde el mensaje pendiente", `Al terminar, resuélvela o devuélvesela a ${receptionName}`]
     case "agent":
       return ["Supervisa; interviene solo si el caso lo pide"]
     case "closed":
-      return ["Si escribe de nuevo, la atiende el agente"]
+      return [`Si escribe de nuevo, la atiende ${receptionName}`]
   }
 }
 
 /** Etiqueta operativa de cada fuente de la bitácora. */
-export function activityKindLabel(kind: CrmActivityItem["kind"]): string {
+export function activityKindLabel(kind: CrmActivityItem["kind"], receptionName: string): string {
   switch (kind) {
     case "message":
       return "Mensaje"
@@ -199,8 +202,8 @@ export function activityKindLabel(kind: CrmActivityItem["kind"]): string {
     case "opportunity":
       return "Oportunidad"
     case "proposal":
-      return "Propuesta del agente"
+      return `Propuesta de ${receptionName}`
     case "handoff":
-      return "Te lo pasó el agente"
+      return `Te lo pasó ${receptionName}`
   }
 }

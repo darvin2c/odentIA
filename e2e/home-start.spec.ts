@@ -86,7 +86,7 @@ for (const width of [1440, 390]) {
       await expect(primary).toBeInViewport()
       // Quien puede encenderlos ve también encender Recepción y el Administrador (fase 2.1, decisión 3).
       await expect(start.getByRole("list", { name: "Puesta en marcha" }).getByRole("listitem")).toHaveCount(4)
-      await expect(start).toContainText("Encender Recepción y el Administrador")
+      await expect(start).toContainText("Encender a Sofi y a Argos")
       await expect(page.getByRole("region", { name: "Te espera" })).toHaveCount(0)
       await expect(page.getByRole("heading", { name: "Agenda de hoy", exact: true })).toHaveCount(0)
       expect(retired).toEqual([])
@@ -112,7 +112,7 @@ for (const width of [1440, 390]) {
       }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       // Sin Recepción ni el Administrador no sale ningún recordatorio: es el último paso.
-      await expect(start.getByRole("link", { name: "Encender Recepción y el Administrador", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Encender a Sofi y a Argos", exact: true })).toBeInViewport()
       await call(page, "PUT", "/api/agent/config", owner.org.slug, { enabled: true })
       await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
@@ -145,7 +145,7 @@ for (const width of [1440, 390]) {
       const rows = waiting.getByRole("listitem")
       await expect(rows).toHaveCount(2)
       await expect(rows.nth(0)).toContainText("Interlocutor pendiente · Pide hablar con una persona")
-      await expect(rows.nth(0)).toContainText("Te lo pasó el agente")
+      await expect(rows.nth(0)).toContainText("Te lo pasó Sofi")
       await expect(rows.nth(0).getByRole("link", { name: /Revisar$/ })).toBeVisible()
       await expect(waiting).not.toContainText("espera tu aprobación")
       await expect(rows.nth(1)).toContainText("Confirmar seguimiento pendiente")

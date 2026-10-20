@@ -23,7 +23,7 @@ const vence: StripNotice = {
 const tope: StripNotice = {
   id: "tope:limite:2026-10-01",
   tone: "limite",
-  message: "Llegaste a tu tope de gasto: Recepción pasa los casos nuevos a tu equipo.",
+  message: "Llegaste a tu tope de gasto: Sofi pasa los casos nuevos a tu equipo.",
   short: "Llegaste a tu tope de gasto",
   action: { label: "Subir tope", onSelect: () => undefined },
 }

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lock, Plus, X } from "lucide-react"
 import { type FormEvent, useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { useReceptionName } from "../../lib/agent-names"
 import { channelLabel } from "../../lib/channels"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
@@ -98,6 +99,7 @@ export function PersonMemoryDrawer({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const baseId = useId()
   const [draft, setDraft] = useState("")
   const [editing, setEditing] = useState<Editing | null>(null)
@@ -203,7 +205,7 @@ export function PersonMemoryDrawer({
   return (
     <DetailDrawer
       open
-      title="Lo que recuerda el agente"
+      title={`Lo que recuerda ${receptionName}`}
       headerContent={
         <div className="flex min-w-0 flex-col gap-1">
           <p className="font-heading text-xl font-semibold tracking-tight break-words">{name}</p>

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Lock } from "lucide-react"
 import { type FormEvent, useEffect, useState } from "react"
 import { voicePreview } from "../../lib/agent"
+import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import type { AgentConfig } from "../../lib/crm"
 import { sameDraft } from "../../lib/page-draft-guard"
@@ -117,6 +118,7 @@ export function AgentBaseDrawer({
   canWrite: boolean
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [draft, setDraft] = useState<VoiceDraft>(() => toDraft(config))
   const [baseline, setBaseline] = useState<VoiceDraft>(() => toDraft(config))
   // Al abrir se parte de lo guardado: un borrador descartado no reaparece.
@@ -133,6 +135,7 @@ export function AgentBaseDrawer({
       apiFetch("/api/agent/config", {
         method: "PUT",
         body: JSON.stringify({
+          // Vacío vale Sofi: el servidor guarda su nombre por defecto.
           personaName: draft.personaName.trim() || null,
           treatment: draft.treatment,
           tone: draft.tone,
@@ -142,6 +145,8 @@ export function AgentBaseDrawer({
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
+      // El nombre de recepción viaja con los datos de la clínica: todas las pantallas lo dicen.
+      void queryClient.invalidateQueries({ queryKey: ["org-profile"] })
       onClose()
     },
   })
@@ -204,9 +209,11 @@ export function AgentBaseDrawer({
             maxLength={40}
             disabled={!canWrite}
             onChange={(event) => setDraft({ ...draft, personaName: event.target.value })}
-            placeholder="Sofi"
+            placeholder={RECEPTION_DEFAULT_NAME}
           />
-          <FieldDescription>Déjalo vacío si no quieres darle un nombre. Siempre dice que es un asistente virtual.</FieldDescription>
+          <FieldDescription>
+            El nombre de tu agente de recepción. Si lo dejas vacío, se llama {RECEPTION_DEFAULT_NAME}. Siempre dice que es un asistente virtual.
+          </FieldDescription>
         </Field>
         <Choice
           label="Trato"
@@ -255,7 +262,7 @@ export function AgentBaseDrawer({
           Encima de la base, cada agente suma lo suyo
         </h4>
         <p className="text-sm text-muted-foreground">
-          Recepción, el asistente clínico y el administrador tienen sus propias funciones y las reglas que aprendieron de tus correcciones. Eso no se
+          {receptionName}, {CLINICAL_NAME} y {ADMIN_NAME} tienen sus propias funciones y las reglas que aprendieron de tus correcciones. Eso no se
           mezcla entre ellos.
         </p>
       </section>

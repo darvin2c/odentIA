@@ -2,6 +2,7 @@ import { cn, FieldLabel, RadioGroup, RadioGroupItem, Textarea, toast } from "@od
 import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
+import { useReceptionName } from "../lib/agent-names"
 import { ApiError, apiFetch } from "../lib/api"
 import {
   BLOCK_REASON_OPTIONS,
@@ -48,6 +49,7 @@ export function conversationTarget(conversationId: string, contactName: string):
 /** «Es spam», «No es spam» y «Desbloquear»: las usan la lista y el hilo. */
 export function useContactScreenActions() {
   const refresh = useRefreshScreens()
+  const receptionName = useReceptionName()
   const notSpam = useMutation({
     retry: false,
     mutationFn: (target: Target) =>
@@ -57,7 +59,7 @@ export function useContactScreenActions() {
     onSuccess: (result) => {
       toast.success(
         result.data.agentReplies
-          ? "Listo, ya no es spam. El agente le está respondiendo."
+          ? `Listo, ya no es spam. ${receptionName} le está respondiendo.`
           : result.data.topic
             ? "Listo, ya no es spam. Quedó en «Por atender»: para responderle hace falta una plantilla."
             : "Listo, ya no es spam.",
@@ -72,7 +74,7 @@ export function useContactScreenActions() {
     onSuccess: (_result, target) => {
       // Actúa al instante: no pide confirmación (tablero 4). «Sacar de Spam» y no
       // «Deshacer»: lo devuelto y el caso de Soporte que abrió no se revierten.
-      toast(`${target.contactName} pasó a Spam. El agente ya no le responde.`, {
+      toast(`${target.contactName} pasó a Spam. ${receptionName} ya no le responde.`, {
         action: { label: "Sacar de Spam", onClick: () => notSpam.mutate(target) },
       })
       refresh()
@@ -103,11 +105,12 @@ export function UnblockDialog({
   onClose: () => void
   onConfirm: () => void
 }) {
+  const receptionName = useReceptionName()
   return (
     <ConfirmDialog
       open={target !== null}
       title={`¿Desbloquear a ${target?.contactName ?? "esta persona"}?`}
-      description="Podrá volver a escribirle a la clínica, y el agente le responderá como a cualquier persona. Queda anotado que lo desbloqueaste tú."
+      description={`Podrá volver a escribirle a la clínica, y ${receptionName} le responderá como a cualquier persona. Queda anotado que lo desbloqueaste tú.`}
       confirmLabel="Desbloquear"
       variant="default"
       pending={pending}
@@ -141,10 +144,11 @@ export function ContactScreenBanner({
   className?: string
 }) {
   const actions = useContactScreenActions()
+  const receptionName = useReceptionName()
   const [unblockTarget, setUnblockTarget] = useState<Target | null>(null)
   if (!view) return null
   if (view.screen === "spam") {
-    const words = spamNoticeWords(view)
+    const words = spamNoticeWords(view, receptionName)
     return (
       <div role="status" className={`flex flex-wrap items-center gap-2.5 border-b border-warning/40 bg-warning-soft px-3.5 py-2.5 text-[13px] ${className}`}>
         <p className="flex min-w-0 flex-1 basis-56 flex-col">
@@ -197,7 +201,7 @@ export function ContactScreenBanner({
       </>
     )
   }
-  const left = leftSpamWords(view)
+  const left = leftSpamWords(view, receptionName)
   if (!left) return null
   return (
     <div role="status" className={`flex flex-wrap items-center gap-2.5 border-b bg-muted/60 px-3.5 py-2.5 text-[13px] ${className}`}>
@@ -230,6 +234,7 @@ export function BlockPersonDialog({
   onClose: () => void
 }) {
   const refresh = useRefreshScreens()
+  const receptionName = useReceptionName()
   const reasonId = useId()
   const noteId = useId()
   const [reason, setReason] = useState("")
@@ -248,7 +253,7 @@ export function BlockPersonDialog({
         body: JSON.stringify({ reason: input.reason, note: input.note }),
       }),
     onSuccess: (_result, input) => {
-      toast.success(`${input.contactName} quedó bloqueado. Nadie le escribe y el agente no le responde.`)
+      toast.success(`${input.contactName} quedó bloqueado. Nadie le escribe y ${receptionName} no le responde.`)
       refresh()
       onClose()
     },
@@ -258,7 +263,7 @@ export function BlockPersonDialog({
     <ConfirmDialog
       open={target !== null}
       title={`¿Bloquear a ${target?.contactName ?? "esta persona"}?`}
-      description="No podrá escribirle a la clínica por WhatsApp, y el agente no le responderá en ningún canal. Nadie del equipo podrá escribirle hasta que alguien lo desbloquee. Sus mensajes y su ficha se conservan: no se borra nada."
+      description={`No podrá escribirle a la clínica por WhatsApp, y ${receptionName} no le responderá en ningún canal. Nadie del equipo podrá escribirle hasta que alguien lo desbloquee. Sus mensajes y su ficha se conservan: no se borra nada.`}
       confirmLabel="Bloquear"
       variant="destructive"
       pending={block.isPending}

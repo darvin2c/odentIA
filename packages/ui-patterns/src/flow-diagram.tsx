@@ -12,7 +12,7 @@ export interface FlowDiagramStep {
   label: string
   /** Solo en los pasos: quién lo hace. */
   actor?: FlowDiagramActor | null
-  /** «Recepción · agente», «Equipo de recepción · persona»: quién actúa, siempre con palabras. */
+  /** «Sofi · agente», «Equipo de recepción · persona»: quién actúa, siempre con palabras. */
   actorLabel?: string | null
 }
 

@@ -31,7 +31,7 @@ const n = page.blocks.length
 ---
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   {h.type === "scene" ? (
-    <AgentHero tag={h.tag} title={h.title} accent={h.accent} accentColor={h.accentColor} lead={h.lead} focus={h.focus} />
+    <AgentHero tag={h.tag} title={h.title} accent={h.accent} accentColor={h.accentColor} meaning={h.meaning} lead={h.lead} focus={h.focus} />
   ) : (
     <PageHero tag={h.tag} title={h.title} accent={h.accent} lead={h.lead} secondary={h.secondary}>
       <HeroVisual slot="visual" kind={h.visual} />

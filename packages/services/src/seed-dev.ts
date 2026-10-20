@@ -1447,7 +1447,7 @@ await upsertAgentConfig(db, ORG_A, {
   enabled: true,
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
-  // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
+  // La voz de la clínica y una indicación por función: lo que se ve en Agente › Sofi.
   personaName: "Sofi",
   treatment: "tu",
   tone: "cercano",
@@ -1460,7 +1460,7 @@ const carlosTopic = await createHandoff(db, ORG_A, null, {
   conversationId: convCarlos.id,
   reason: "Pregunta por precio de extracción y pide hablar con una persona",
   summary:
-    "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
+    "Carlos consultó el costo de una extracción de muela del juicio; Sofi no da precios inventados y derivó con prioridad alta.",
   priority: "alta",
   createdBy: "agent",
 })

@@ -236,7 +236,7 @@ it("la actividad del equipo se dice con palabras, dice quién fue y se acota por
     what: "Confirmó su cita desde el portal", who: "El paciente o su contacto",
   })
   expect((await list({ area: "ventas" })).items.find(item => item.action === "contact.updated")).toMatchObject({
-    what: "Cambió los datos de un contacto", who: "El agente",
+    what: "Cambió los datos de un contacto", who: "Sofi",
   })
   // Un registro sin frase propia se dice de forma general: el código nunca es el texto.
   const [unknown] = (await list({ action: "tema_nuevo.sin_frase" })).items

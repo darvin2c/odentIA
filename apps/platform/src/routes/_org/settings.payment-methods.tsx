@@ -17,6 +17,7 @@ import { ArrowDown, ArrowUp, Wallet } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ChoiceSelect } from "../../components/ui/choice-select"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { type OrgProfile, saveOrgPrinting, useOrgProfile } from "../../lib/org"
@@ -66,6 +67,7 @@ function typeBehavior(typeCode: string): string {
  * Apagar un medio no altera los cobros anteriores: el ticket conserva lo suyo.
  */
 function PaymentMethodsPage() {
+  const receptionName = useReceptionName()
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   const queryClient = useQueryClient()
@@ -174,7 +176,7 @@ function PaymentMethodsPage() {
             Medios de pago
           </h2>
           <p className="text-sm text-muted-foreground">
-            Caja ofrece los encendidos, en este orden, y el agente responde con esta misma lista.
+            Caja ofrece los encendidos, en este orden, y {receptionName} responde con esta misma lista.
           </p>
         </div>
         {neverLoaded ? (

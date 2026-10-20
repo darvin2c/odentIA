@@ -18,10 +18,12 @@ import {
   type LessonItem,
   lessonScopeChip,
   lessonScopeFor,
+  namedAgentRoles,
   lessonUsage,
   REVIEW_REASON_LABEL,
   type ReviewItem,
 } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, usePermission } from "../../lib/crm"
@@ -109,11 +111,12 @@ function Section({
 }
 
 function LearnedRow({ lesson, usage, action, warn = false, onOpen }: { lesson: LessonItem; usage?: { text: string; stale: boolean }; action: string; warn?: boolean; onOpen: () => void }) {
+  const receptionName = useReceptionName()
   return (
     <li className="flex min-h-13 flex-wrap items-center gap-x-2.5 gap-y-1 border-t px-4 py-2 first:border-t-0 sm:px-5">
       <span className="w-full text-xs font-bold text-muted-foreground sm:w-32 sm:shrink-0">{LESSON_KIND_LABEL[lesson.kind]}</span>
       <span className="min-w-0 flex-1 basis-56 font-semibold">{lesson.title}</span>
-      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope)}</Badge>
+      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
       {usage ? (
         <span className={cn("text-sm sm:w-32 sm:shrink-0", usage.stale ? "font-bold text-warning" : "text-muted-foreground")}>{usage.text}</span>
       ) : null}
@@ -139,6 +142,7 @@ function AgentLearnPage() {
   const canDecide = usePermission("agent.decide")
   const canWrite = usePermission("agent.write")
   const canCorrect = canDecide || canWrite
+  const receptionName = useReceptionName()
   const [agent, setAgent] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   const [lessonId, setLessonId] = useState<string | null>(null)
@@ -158,6 +162,7 @@ function AgentLearnPage() {
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
     enabled: canRead,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -304,7 +309,7 @@ function AgentLearnPage() {
             {review.length === 0 ? (
               agent !== null && data.review.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-x-3 rounded-xl border bg-card px-4 py-3 text-sm">
-                  <p className="min-w-0 flex-1 basis-48 text-muted-foreground">Nada por revisar de {agentName(agent)}.</p>
+                  <p className="min-w-0 flex-1 basis-48 text-muted-foreground">Nada por revisar de {agentName(agent, receptionName)}.</p>
                   <Button type="button" variant="link" className={LINK} onClick={() => setAgent(null)}>
                     Ver todos los agentes
                   </Button>
@@ -358,7 +363,7 @@ function AgentLearnPage() {
                             <div className="flex items-start gap-2">
                               <p className="min-w-0 flex-1 pt-2.5">
                                 <Badge variant={item.reason === "muestra" ? "secondary" : "warning"} className="h-auto min-h-5.5 whitespace-normal">
-                                  {agentName(item.agent)} · {reason.charAt(0).toLowerCase()}
+                                  {agentName(item.agent, receptionName)} · {reason.charAt(0).toLowerCase()}
                                   {reason.slice(1)}
                                 </Badge>
                               </p>
@@ -370,7 +375,7 @@ function AgentLearnPage() {
                         ) : (
                           <>
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="soft">{agentName(item.agent)}</Badge>
+                              <Badge variant="soft">{agentName(item.agent, receptionName)}</Badge>
                               <Badge variant={item.reason === "muestra" ? "secondary" : "warning"}>{reason}</Badge>
                               <span className="min-w-0 flex-1 basis-40 text-muted-foreground">
                                 {who}
@@ -452,9 +457,9 @@ function AgentLearnPage() {
                         {LESSON_KIND_LABEL[lesson.kind]}
                       </Badge>
                       <h3 className="font-heading text-base leading-snug font-bold">{lesson.title}</h3>
-                      <p className="font-bold text-primary-soft-foreground">{lessonScopeFor(lesson.scope)}</p>
+                      <p className="font-bold text-primary-soft-foreground">{lessonScopeFor(lesson.scope, receptionName)}</p>
                       <p className="flex-1">
-                        {lessonOriginText(lesson, { short: true })} {impactSummary(lesson.impact)}
+                        {lessonOriginText(lesson, receptionName, { short: true })} {impactSummary(lesson.impact)}
                       </p>
                       <Button
                         type="button"

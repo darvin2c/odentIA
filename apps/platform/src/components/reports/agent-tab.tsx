@@ -14,6 +14,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowRight, Bot } from "lucide-react"
 import { useId } from "react"
+import { agentName } from "../../lib/agent"
+import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { PLAN_PATH } from "../../lib/billing"
@@ -43,19 +45,19 @@ import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure,
  * Cada línea de lo pagado con las palabras de Facturación: quién lo hizo y cuándo cuenta una. La
  * conversación que se cobra (una por persona cada 24 horas) no es la de «Conversaciones que atendió».
  */
-const LINE: Record<AgentBilling["lines"][number]["kind"], { agent: string; what: (count: number) => string; rule: string }> = {
+const LINE: Record<AgentBilling["lines"][number]["kind"], { agent: "recepcion" | "asistente_clinico" | "administrador"; what: (count: number) => string; rule: string }> = {
   conversacion: {
-    agent: "Recepción",
+    agent: "recepcion",
     what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}`,
     rule: "Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal",
   },
   consulta: {
-    agent: "Asistente clínico",
+    agent: "asistente_clinico",
     what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}`,
     rule: "Una por atención, sin importar cuántos minutos se dicten",
   },
   cita: {
-    agent: "Administrador",
+    agent: "administrador",
     what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}`,
     rule: "Cuando un paciente vuelve tras un seguimiento y asiste",
   },
@@ -79,6 +81,7 @@ const CHANNEL_TONES = ["series-1", "series-2", "series-3"] as const
 export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void }) {
   const navigate = useNavigate()
   const canAgent = usePermission("agent.read")
+  const receptionName = useReceptionName()
   const report = useQuery({ queryKey: reportKey("agent", query), queryFn: () => fetchReport<ReportAgent>("agent", query), retry: false })
 
   if (report.isPending) return <LoadingState />
@@ -107,7 +110,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
       <EmptyState
         icon={Bot}
         title={`El agente no hizo nada ${during(period)}`}
-        description="Cuando Recepción atienda conversaciones o agende citas, o un odontólogo confirme una consulta dictada, aquí verás lo que hizo y lo cobrado en sus citas."
+        description={`Cuando ${receptionName} atienda conversaciones o agende citas, o un odontólogo confirme una consulta dictada, aquí verás lo que hizo y lo cobrado en sus citas.`}
         actionLabel={canAgent ? "Ver el agente" : undefined}
         onAction={() => void navigate({ to: "/agent" })}
       />
@@ -150,7 +153,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
           sparkLabel={`Citas recuperadas ${twelve}: ${travel(recovered.months, String)}`}
           change={change(recovered.current, recovered.previous)}
           better="up"
-          detail="Volvieron tras un mensaje del Administrador"
+          detail={`Volvieron tras un mensaje de ${ADMIN_NAME}`}
         />
         <SummaryFigure
           title="Consultas dictadas"
@@ -230,6 +233,7 @@ function Paid({
   timezone: string
   wholeClinic: boolean
 }) {
+  const receptionName = useReceptionName()
   const charged = paid.charging !== "no"
   // Sin la moneda del plan no hay importe: nunca se supone una.
   const currency = paid.currency
@@ -282,7 +286,7 @@ function Paid({
           {lines.map((line) => (
             <AccountLine
               key={line.kind}
-              label={`${LINE[line.kind].agent}: ${LINE[line.kind].what(line.count)}`}
+              label={`${agentName(LINE[line.kind].agent, receptionName)}: ${LINE[line.kind].what(line.count)}`}
               hint={`${LINE[line.kind].rule}${line.unitMicros === null || !currency ? "" : ` · ${unit(line.unitMicros)} cada una`}`}
               amount={money(line.amountCents)}
             />
@@ -393,17 +397,19 @@ function BookedChart({ data }: { data: ReportAgent }) {
 /** Cómo se respondió a quien escribió por primera vez: quién primero, a qué velocidad y por qué canal. */
 function Responses({ data, period, phrase, onOpenList }: { data: ReportAgent; period: string; phrase: string; onOpenList: (list: ReportListKey) => void }) {
   const { locale } = data
+  // Quien responde primero a quien escribe es el agente de recepción.
+  const receptionName = useReceptionName()
   const { current, previous, handedOff, byChannel } = data.responses
   const waiting = current.conversations - current.responded
   const respondedRate = rateOf(current.responded, current.conversations)
   const previousRate = rateOf(previous.responded, previous.conversations)
   const first: SharePart[] = [
-    { key: "agent", label: "El agente", value: current.byAgent, tone: "series-1" },
+    { key: "agent", label: receptionName, value: current.byAgent, tone: "series-1" },
     { key: "team", label: "El equipo", value: current.byTeam, tone: "series-2" },
     ...(waiting > 0 ? [{ key: "none", label: "Nadie todavía", value: waiting, tone: "muted" as const }] : []),
   ]
   const speeds = [
-    current.agentMedianSeconds !== null ? `del agente, en menos de ${durationLabel(current.agentMedianSeconds)}` : null,
+    current.agentMedianSeconds !== null ? `de ${receptionName}, en menos de ${durationLabel(current.agentMedianSeconds)}` : null,
     current.teamMedianSeconds !== null ? `del equipo, en menos de ${durationLabel(current.teamMedianSeconds)}` : null,
   ].filter(Boolean)
   const top = byChannel.slice(0, CHANNEL_TONES.length)

@@ -115,7 +115,7 @@ export async function modelProblemResponse(c: Context, deps: AgentModelDeps, org
   }
   const message =
     who === "agente"
-      ? "El agente no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA."
+      ? "Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA."
       : "El asistente no puede usar el modelo ahora. Ya avisamos a odentIA."
   return c.json(errorBody(c, "LLM_CONFIG", message), 409)
 }

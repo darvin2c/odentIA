@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowRight } from "lucide-react"
+import { useReceptionName } from "../../lib/agent-names"
 import type { KnowledgeSources as Sources } from "./knowledge-model"
 
 function plural(total: number, one: string, many: string): string {
@@ -12,14 +13,16 @@ function plural(total: number, one: string, many: string): string {
  * mientras no llega, la fila se muestra sin ella.
  */
 export function KnowledgeSources({ sources }: { sources: Sources | null }) {
+  // Quien dice los precios a los pacientes es el agente de recepción.
+  const receptionName = useReceptionName()
   const rows = [
     {
       to: "/services",
       title: "Servicios y precios",
       detail: sources
         ? sources.pricedServices === 0
-          ? "Ningún precio que el agente pueda decir todavía"
-          : plural(sources.pricedServices, "servicio con precio que dice el agente", "servicios con precio que dice el agente")
+          ? `Ningún precio que ${receptionName} pueda decir todavía`
+          : plural(sources.pricedServices, `servicio con precio que dice ${receptionName}`, `servicios con precio que dice ${receptionName}`)
         : null,
       action: "Se editan en Servicios",
     },

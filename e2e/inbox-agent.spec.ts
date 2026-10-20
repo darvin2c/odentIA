@@ -108,13 +108,13 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
     await expect(chip("Por atender 1")).toHaveAttribute("aria-pressed", "true")
   }
   await expect(page.getByText("2 abiertas · 1 por atender")).toBeVisible()
-  await expect(chip("Las atiende el agente 0")).toHaveAttribute("aria-pressed", "false")
+  await expect(chip("Las atiende Sofi 0")).toHaveAttribute("aria-pressed", "false")
   await expect(chip("Esperan al paciente 1")).toBeVisible()
   await expect(chip("Cerradas 0")).toBeVisible()
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   const derivedRow = page.getByRole("button").filter({ hasText: DERIVED_TEXT })
   // Cada fila dice en qué está con palabras del servidor, no solo con color; con un tema, la pregunta.
-  // El caso lo abrió una persona por la API: es un tema sin tomar, no «Te lo pasó el agente».
+  // El caso lo abrió una persona por la API: es un tema sin tomar, no «Te lo pasó Sofi».
   await expect(derivedRow).toContainText("Tema sin tomar · Ahora")
   await expect(derivedRow).toContainText(`Te toca: «${DERIVED_TEXT}»`)
   await expect(waitingRow).toHaveCount(0)
@@ -127,7 +127,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(waitingRow).toContainText("Espera al paciente · cita propuesta")
   await expect(derivedRow).toHaveCount(0)
   await expect(page).toHaveURL(/view=awaiting_patient/)
-  await chip("Las atiende el agente 0").click()
+  await chip("Las atiende Sofi 0").click()
   await expect(page).toHaveURL(/view=agent/)
   await expect(waitingRow).toHaveCount(0)
   await expect(derivedRow).toHaveCount(0)
@@ -173,7 +173,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const pending = page.getByRole("region", { name: "Te espera" })
   // Un caso, una fila: ni su tarea ni su conversación se repiten.
-  const homeCase = pending.getByRole("listitem").filter({ hasText: "Te lo pasó el agente" })
+  const homeCase = pending.getByRole("listitem").filter({ hasText: "Te lo pasó Sofi" })
   await expect(homeCase).toContainText("Pide hablar con una persona")
   await expect(pending).not.toContainText("espera tu aprobación")
   await expect(pending).not.toContainText("Cita el martes 3 de noviembre")

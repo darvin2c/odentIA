@@ -32,6 +32,7 @@ import { currentAutomationMessageOf, findMessageTemplate } from "./clinic-messag
 import { mayWriteFirstSql } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { AGENT_NAMES } from "./agent-names.js"
 
 /* ---------- Pedírselo con palabras: del pedido al borrador ---------- */
 
@@ -121,7 +122,9 @@ function effective(line: AdminLine, state: LineState, changes: AdminChanges): Au
   return out
 }
 
-const lower = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
+/** En minúscula la primera letra, salvo que empiece por el nombre de un agente («Sofi le escribe…»). */
+const AGENT_NAME_START = new RegExp(`^(${Object.values(AGENT_NAMES).join("|")})\\b`)
+const lower = (text: string) => (AGENT_NAME_START.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1))
 
 /**
  * Guarda como borrador lo que se entendió de un pedido. No prende, no apaga y
@@ -172,7 +175,7 @@ export async function saveAdminDraft(
   const real = effective(line, state, changes)
   const next = applyChanges(line, state, real)
   if (!next.agentPart && !next.teamPart) {
-    return nothing(`En «${line.name}» tiene que quedar al menos una parte: que el agente escriba o que quede una tarea para el equipo. Para que no haga nada, apágala.`, line.key)
+    return nothing(`En «${line.name}» tiene que quedar al menos una parte: que Sofi escriba o que quede una tarea para el equipo. Para que no haga nada, apágala.`, line.key)
   }
   if (Object.keys(real).length === 0) {
     const how = lower(describeLine(line, state, state.timing))
@@ -471,9 +474,9 @@ export async function testAdminLine(
   const total = rows.length
   const team = TASK_AREA_LABELS[line.team.area].team
   const all: LineTest["rows"] = [
-    { route: "respuesta", total: count.respuesta, label: "El agente, por WhatsApp, como respuesta", detail: "Escribieron en las últimas 24 horas." },
-    { route: "plantilla", total: count.plantilla, label: "El agente, por WhatsApp, con el mensaje aprobado", detail: "No escribieron en las últimas 24 horas." },
-    { route: "correo", total: count.correo, label: "El agente, por correo", detail: "No hay WhatsApp por el que llegarles y sí tienen correo." },
+    { route: "respuesta", total: count.respuesta, label: "Sofi, por WhatsApp, como respuesta", detail: "Escribieron en las últimas 24 horas." },
+    { route: "plantilla", total: count.plantilla, label: "Sofi, por WhatsApp, con el mensaje aprobado", detail: "No escribieron en las últimas 24 horas." },
+    { route: "correo", total: count.correo, label: "Sofi, por correo", detail: "No hay WhatsApp por el que llegarles y sí tienen correo." },
     {
       route: "no_pudo",
       total: count.no_pudo,
@@ -482,7 +485,7 @@ export async function testAdminLine(
         ? `Avisa por qué y cómo habilitar a cada una, y queda una tarea para ${team}.`
         : "Avisa por qué y cómo habilitar a cada una.",
     },
-    { route: "tarea", total: count.tarea, label: `Tarea para ${team}`, detail: "El agente no escribe: lo hace una persona." },
+    { route: "tarea", total: count.tarea, label: `Tarea para ${team}`, detail: "Sofi no escribe: lo hace una persona." },
   ]
   return {
     days: LINE_TEST_DAYS,
@@ -513,7 +516,7 @@ export async function reviewAdminLine(tx: Db, orgId: string, line: AdminLine, ne
     ok: true,
     text: "Respeta el permiso de cada persona y el «Horario para escribir» de Agente, con la hora de cada sede.",
   })
-  if (!runtime.receptionOn) checks.push({ ok: false, text: "Recepción está apagada: mientras siga así, esta línea no le escribe a nadie." })
+  if (!runtime.receptionOn) checks.push({ ok: false, text: "Sofi no está atendiendo: mientras siga así, esta línea no le escribe a nadie." })
   const spec = automationMessageOf(line.key)
   if (spec) {
     const [whatsapp] = await tx.execute<{ id: string }>(sql`
@@ -598,23 +601,23 @@ export async function draftViewOf(
     marks.espera = "cambio"
   }
   if (draft.changes.agentPart === true && line.agent) {
-    changes.push({ kind: "nueva", before: null, after: `El agente Recepción ${say(line.agent.does, next.timing)}.` })
+    changes.push({ kind: "nueva", before: null, after: `Sofi ${say(line.agent.does, next.timing)}.` })
     marks.puede = "nueva"
     marks.escribe = "nueva"
   }
   if (draft.changes.agentPart === false) {
-    changes.push({ kind: "quita", before: null, after: `El agente ya no le escribe: ${lower(line.team.does)}.` })
+    changes.push({ kind: "quita", before: null, after: `Sofi ya no le escribe: ${lower(line.team.does)}.` })
     marks.tarea = "cambio"
   }
   if (draft.changes.teamPart === true) {
-    changes.push({ kind: "nueva", before: null, after: next.agentPart ? `Si el agente no puede, además queda una tarea para ${team}.` : `${line.team.does}.` })
+    changes.push({ kind: "nueva", before: null, after: next.agentPart ? `Si Sofi no puede, además queda una tarea para ${team}.` : `${line.team.does}.` })
     marks.tarea = "nueva"
   }
   if (draft.changes.teamPart === false) {
-    changes.push({ kind: "quita", before: null, after: "Ya no queda una tarea para el equipo cuando el agente no puede. El aviso de por qué sigue saliendo." })
+    changes.push({ kind: "quita", before: null, after: "Ya no queda una tarea para el equipo cuando Sofi no puede. El aviso de por qué sigue saliendo." })
   }
   if (draft.changes.taskNote) {
-    changes.push({ kind: "nueva", before: null, after: `La tarea para ${team} dirá: «${draft.changes.taskNote}». El agente no lo dice: lo hace una persona.` })
+    changes.push({ kind: "nueva", before: null, after: `La tarea para ${team} dirá: «${draft.changes.taskNote}». Sofi no lo dice: lo hace una persona.` })
     marks.tarea = marks.tarea ?? "cambio"
   }
   const turnsOn = draft.changes.enabled === true

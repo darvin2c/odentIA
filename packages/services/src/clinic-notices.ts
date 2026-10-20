@@ -111,7 +111,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
               tone: "limite",
               message: noPlan
                 ? "La prueba terminó: la clínica está en solo lectura hasta que elijas un plan. No se pierde ningún dato."
-                : `La clínica está en solo lectura: falta pagar ${next ? `el cargo de ${monthOf(next.periodStart)} (${owed})` : "un cargo"}. El agente no responde.`,
+                : `La clínica está en solo lectura: falta pagar ${next ? `el cargo de ${monthOf(next.periodStart)} (${owed})` : "un cargo"}. Sofi no responde.`,
               short: noPlan ? "Solo lectura: elige un plan" : "Solo lectura: falta un pago",
               action: noPlan ? CHOOSE : PAY,
               dismiss: null,
@@ -221,7 +221,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
               id,
               topic: "tope",
               tone: "limite",
-              message: `Llegaron al tope de gasto del mes: Recepción no atiende casos nuevos; te llegan a ti. ${tellOwner}`,
+              message: `Llegaron al tope de gasto del mes: Sofi no atiende casos nuevos; te llegan a ti. ${tellOwner}`,
               short: "Tope de gasto: los casos nuevos te llegan a ti",
               action: null,
               dismiss: null,

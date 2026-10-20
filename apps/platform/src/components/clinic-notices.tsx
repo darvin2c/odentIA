@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, useNavigate, useRouterState } from "@tanstack/react-router"
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 import { apiFetch } from "../lib/api"
+import { useReceptionName, withReceptionName } from "../lib/agent-names"
 import { PLAN_PATH } from "../lib/billing"
 import { RouterLink } from "../lib/router-link"
 import type { Consumption } from "./billing/consumption"
@@ -120,6 +121,7 @@ function RaiseCapProvider({ children }: { children: ReactNode }) {
 /* ---- La franja ---- */
 
 function Strip({ userId }: { userId: string }) {
+  const receptionName = useReceptionName()
   const { org } = orgRouteApi.useRouteContext()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -161,13 +163,13 @@ function Strip({ userId }: { userId: string }) {
         return {
           id: notice.id,
           tone: notice.tone,
-          message: notice.message,
-          short: notice.short,
+          message: withReceptionName(notice.message, receptionName),
+          short: withReceptionName(notice.short, receptionName),
           action: stripAction,
           onDismiss: notice.dismiss ? () => close(notice.id) : undefined,
         }
       })
-  }, [notices.data, closed, storageKey, raiseCap, revoke, navigate, pathname])
+  }, [notices.data, closed, storageKey, raiseCap, revoke, navigate, pathname, receptionName])
 
   return <NoticeStrip notices={items} LinkComponent={RouterLink} />
 }

@@ -79,6 +79,8 @@ export type PageHeroData =
       title: string
       accent: string
       accentColor?: string
+      /** Por qué el agente se llama así: va como subtítulo en la portada de su página. */
+      meaning?: string
       lead: string
     }
   | {
@@ -106,7 +108,8 @@ export type PageData = {
   cta?: { title?: string; text?: string }
 }
 
-export const AGENT_NAMES = ["Recepción · Sofi", "Asistente clínico", "Administrador"] as const
+/** Nombres de los tres agentes (issue 183). La web siempre dice «Sofi», aunque cada clínica pueda renombrarla. */
+export const AGENT_NAMES = ["Sofi", "Clío", "Argos"] as const
 /** Colores de cada agente sobre fondo claro (para texto) y oscuro (para puntos y bordes). */
 export const AGENT_LIGHT = [
   AGENT_COLORS.recepcion.light,
@@ -123,18 +126,18 @@ export const AGENT_DARK = [
 export const LINKS: Record<string, { label: string; text: string }> = {
   "/agentes": {
     label: "Los tres agentes",
-    text: "Recepción, asistente clínico y administrador, sobre la misma historia.",
+    text: "Sofi en recepción, Clío en la consulta y Argos en lo pendiente, sobre la misma historia.",
   },
   "/agentes/recepcion": {
-    label: "Recepción",
+    label: "Sofi, tu agente de recepción",
     text: "Responde y agenda por todos tus canales, de día y de noche.",
   },
   "/agentes/asistente-clinico": {
-    label: "Asistente clínico",
+    label: "Clío, tu agente clínico",
     text: "Ordena lo que dictas en la historia. Tú confirmas.",
   },
   "/agentes/administrador": {
-    label: "Administrador",
+    label: "Argos, tu agente administrador",
     text: "Recuerda citas, avisa controles y retoma presupuestos.",
   },
   "/omnicanal": {
@@ -143,7 +146,7 @@ export const LINKS: Record<string, { label: string; text: string }> = {
   },
   "/whatsapp-para-clinicas-dentales": {
     label: "WhatsApp para clínicas",
-    text: "El número de tu clínica, atendido por tu equipo y por Recepción.",
+    text: "El número de tu clínica, atendido por tu equipo y por Sofi.",
   },
   "/agenda-odontologica": { label: "Agenda", text: "Por sede, unidad dental y profesional." },
   "/historia-clinica-y-odontograma": {
@@ -354,7 +357,7 @@ export const PAGES = {
     path: "/agentes",
     title: "IA agéntica para clínicas dentales",
     description:
-      "IA agéntica para tu clínica dental: Recepción responde y agenda por todos tus canales, el asistente clínico prepara la nota de tu dictado y el administrador trae de vuelta a tus pacientes.",
+      "IA agéntica para tu clínica dental: Sofi responde y agenda en recepción por todos tus canales, Clío prepara la nota de tu dictado y Argos, el administrador, trae de vuelta a tus pacientes.",
     crumb: "Agentes",
     hero: {
       type: "scene",
@@ -362,7 +365,7 @@ export const PAGES = {
       tag: "Agentes",
       title: "IA agéntica para tu clínica dental:",
       accent: "tres agentes alrededor de cada paciente.",
-      lead: "Recepción conversa por cualquier canal, el asistente clínico documenta la consulta y el administrador da seguimiento. Todo queda en una sola historia, y tu equipo decide.",
+      lead: "Sofi, tu agente de recepción, conversa por cualquier canal; Clío, tu agente clínico, documenta la consulta, y Argos, tu agente administrador, da seguimiento. Todo queda en una sola historia, y tu equipo decide.",
     },
     blocks: [
       {
@@ -380,21 +383,21 @@ export const PAGES = {
         items: [
           {
             agent: 0,
-            title: "Recepción",
+            title: "Tu agente de recepción",
             label: "Responde, informa y agenda a cualquier hora.",
             text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente.",
             href: "/agentes/recepcion",
           },
           {
             agent: 1,
-            title: "Asistente clínico",
+            title: "Tu agente clínico",
             label: "Prepara la nota mientras el odontólogo atiende. Solo falta su sí.",
             text: "Del dictado propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia sin la confirmación del odontólogo.",
             href: "/agentes/asistente-clinico",
           },
           {
             agent: 2,
-            title: "Administrador",
+            title: "Tu agente administrador",
             label: "Recuerda citas y trae de vuelta a los pacientes.",
             text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo.",
             href: "/agentes/administrador",
@@ -469,13 +472,14 @@ export const PAGES = {
     path: "/agentes/recepcion",
     title: "Responder el WhatsApp de tu clínica dental automático",
     description:
-      "Recepción responde el WhatsApp, Instagram, Messenger, Telegram, el chat de la web y el correo de tu clínica dental al momento, de día y de noche, y agenda con el sí del paciente.",
-    crumb: "Recepción",
+      "Sofi, tu agente de recepción, responde el WhatsApp, Instagram, Messenger, Telegram, el chat de la web y el correo de tu clínica dental al momento, de día y de noche, y agenda con el sí del paciente.",
+    crumb: "Sofi",
     parent: AGENTS_PARENT,
     hero: {
       type: "scene",
       focus: "recepcion",
-      tag: "Recepción",
+      tag: "Sofi, tu agente de recepción",
+      meaning: "De sophía, sabiduría: sabe todo de la clínica y responde con su tono, a cualquier hora.",
       title: "Responde el WhatsApp de tu clínica dental,",
       accent: "automático y a cualquier hora.",
       accentColor: AGENT_COLORS.recepcion.dark,
@@ -487,8 +491,8 @@ export const PAGES = {
         tag: "Qué hace",
         title: "Contesta al momento, de día y de noche.",
         paragraphs: [
-          "Recepción contesta al momento, de día y de noche, por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Informa precios y horarios, y agenda, mueve o cancela citas siempre con el sí del paciente. Si hace falta una persona, le pasa el caso a tu equipo con un resumen.",
-          "Tiene el nombre que tú le pongas y el tono de tu clínica: cercano, neutro o formal, de tú o de usted. Siempre dice que es un asistente virtual.",
+          "Sofi contesta al momento, de día y de noche, por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Informa precios y horarios, y agenda, mueve o cancela citas siempre con el sí del paciente. Si hace falta una persona, le pasa el caso a tu equipo con un resumen.",
+          "Se llama Sofi, o como tú le pongas, y tiene el tono de tu clínica: cercano, neutro o formal, de tú o de usted. Siempre dice que es un asistente virtual.",
         ],
         points: [
           {
@@ -552,7 +556,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Mis pacientes sabrán que hablan con un asistente?",
-        a: "Sí. Recepción siempre dice que es un asistente virtual, con el nombre que tu clínica le ponga.",
+        a: "Sí. Sofi siempre dice que es asistente virtual, con el nombre que tu clínica le ponga.",
       },
       {
         q: "¿Por qué canales responde?",
@@ -564,7 +568,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo cambiarle el nombre y el tono?",
-        a: "Sí. Le pones el nombre que quieras y eliges el tono de tu clínica: cercano, neutro o formal, de tú o de usted.",
+        a: "Sí. Viene como Sofi, pero le pones el nombre que quieras y eliges el tono de tu clínica: cercano, neutro o formal, de tú o de usted.",
       },
       FAQ_ERROR,
     ],
@@ -574,13 +578,14 @@ export const PAGES = {
     path: "/agentes/asistente-clinico",
     title: "Dictado de notas clínicas para odontólogos",
     description:
-      "Dicta la consulta y el asistente clínico propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia clínica sin la confirmación del odontólogo.",
-    crumb: "Asistente clínico",
+      "Dicta la consulta y Clío, tu agente clínico, propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia clínica sin la confirmación del odontólogo.",
+    crumb: "Clío",
     parent: AGENTS_PARENT,
     hero: {
       type: "scene",
       focus: "clinico",
-      tag: "Asistente clínico",
+      tag: "Clío, tu agente clínico",
+      meaning: "La musa de la historia: escribe la historia clínica mientras el odontólogo atiende.",
       title: "Dictado de notas clínicas para odontólogos:",
       accent: "la historia se escribe sola.",
       accentColor: AGENT_COLORS.clinico.dark,
@@ -590,7 +595,7 @@ export const PAGES = {
       {
         kind: "steps",
         tag: "Cómo funciona",
-        title: "Tú atiendes y dictas. Él ordena.",
+        title: "Tú atiendes y dictas. Clío ordena.",
         steps: [
           {
             title: "Dictas mientras atiendes",
@@ -652,7 +657,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Lo que dicto entra directo a la historia?",
-        a: "No. El asistente propone la nota, el diagnóstico, el plan y los controles, y nada entra a la historia hasta que el odontólogo lo confirma. También puede corregirlo o descartarlo.",
+        a: "No. Clío propone la nota, el diagnóstico, el plan y los controles, y nada entra a la historia hasta que el odontólogo lo confirma. También puede corregirlo o descartarlo.",
       },
       {
         q: "¿Qué códigos usa para el diagnóstico?",
@@ -660,7 +665,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo dictar el odontograma?",
-        a: "No. El asistente documenta la consulta; el odontograma lo actualizas tú en la ficha del paciente.",
+        a: "No. Clío documenta la consulta; el odontograma lo actualizas tú en la ficha del paciente.",
       },
       {
         q: "¿Quién puede ver la nota?",
@@ -673,13 +678,14 @@ export const PAGES = {
     path: "/agentes/administrador",
     title: "Recordatorios de citas y pacientes que no vuelven",
     description:
-      "El administrador recuerda cada cita, avisa a quien le toca su control, retoma los presupuestos sin respuesta y ofrece otra fecha a quien faltó, para que tus pacientes vuelvan.",
-    crumb: "Administrador",
+      "Argos, tu agente administrador, recuerda cada cita, avisa a quien le toca su control, retoma los presupuestos sin respuesta y ofrece otra fecha a quien faltó, para que tus pacientes vuelvan.",
+    crumb: "Argos",
     parent: AGENTS_PARENT,
     hero: {
       type: "scene",
       focus: "administrador",
-      tag: "Administrador",
+      tag: "Argos, tu agente administrador",
+      meaning: "El gigante de los cien ojos: ve toda la clínica y no deja a ningún paciente atrás.",
       title: "Recordatorios de citas y pacientes que vuelven:",
       accent: "nadie se olvida de su control.",
       accentColor: AGENT_COLORS.administrador.dark,
@@ -727,7 +733,7 @@ export const PAGES = {
             when: "Lunes",
             agent: 2,
             title: "Rosa Vega tiene su control de 6 meses vencido hace tres semanas.",
-            text: "El Administrador lo encuentra solo, sin que nadie revise listas.",
+            text: "Argos lo encuentra solo, sin que nadie revise listas.",
           },
           {
             when: "Lunes · 16:05",
@@ -754,7 +760,7 @@ export const PAGES = {
         title: "Que Rosa volvió y la atendieron.",
         paragraphs: [
           "Recordar y avisar es parte del servicio. Lo que se mide es la cita a la que el paciente asistió.",
-          "Cada tarea se prende o se apaga. Si apagas una, el Administrador no escribe y te deja la lista para que tu equipo decida.",
+          "Cada tarea se prende o se apaga. Si apagas una, Argos no escribe y te deja la lista para que tu equipo decida.",
         ],
         points: [
           {
@@ -932,8 +938,8 @@ export const PAGES = {
       tag: "WhatsApp",
       title: "WhatsApp Business para tu clínica dental,",
       accent: "con tu número de siempre.",
-      lead: "Conecta el número de tu clínica y atiende cada mensaje desde odentIA: Recepción contesta al momento, agenda con el sí del paciente y le pasa a tu equipo lo que necesita a una persona.",
-      secondary: { href: "/agentes/recepcion", label: "Conoce a Recepción" },
+      lead: "Conecta el número de tu clínica y atiende cada mensaje desde odentIA: Sofi, tu agente de recepción, contesta al momento, agenda con el sí del paciente y le pasa a tu equipo lo que necesita a una persona.",
+      secondary: { href: "/agentes/recepcion", label: "Conoce a Sofi" },
     },
     blocks: [
       {
@@ -946,7 +952,7 @@ export const PAGES = {
             text: "Desde tu cuenta de Meta, con pasos guiados dentro de odentIA. [Por confirmar: conexión con Meta probada]",
           },
           {
-            title: "Eliges qué hace Recepción",
+            title: "Eliges qué hace Sofi",
             text: "Responder, agendar o solo avisarle a tu equipo. Cada tarea se prende o se apaga.",
           },
           {
@@ -1032,7 +1038,7 @@ export const PAGES = {
     path: "/agenda-odontologica",
     title: "Agenda odontológica online para tu clínica",
     description:
-      "Agenda odontológica online por sede, unidad dental y profesional. Tus pacientes reservan desde su enlace, Recepción agenda por cualquier canal y el Administrador recuerda cada cita.",
+      "Agenda odontológica online por sede, unidad dental y profesional. Tus pacientes reservan desde su enlace, Sofi agenda por cualquier canal y Argos recuerda cada cita.",
     crumb: "Agenda",
     hero: {
       type: "visual",
@@ -1040,7 +1046,7 @@ export const PAGES = {
       tag: "Agenda",
       title: "Agenda odontológica online,",
       accent: "por sede, unidad dental y profesional.",
-      lead: "Cada servicio con quien lo atiende y sus horarios. Tus pacientes reservan desde su enlace, Recepción agenda por cualquier canal y el Administrador recuerda cada cita.",
+      lead: "Cada servicio con quien lo atiende y sus horarios. Tus pacientes reservan desde su enlace; Sofi, tu agente de recepción, agenda por cualquier canal, y Argos, tu agente administrador, recuerda cada cita.",
       secondary: { href: "/precios", label: "Ver los precios" },
     },
     blocks: [
@@ -1059,7 +1065,7 @@ export const PAGES = {
           },
           {
             agent: 0,
-            title: "Recepción agenda por cualquier canal",
+            title: "Sofi agenda por cualquier canal",
             text: "Agenda, mueve o cancela citas con el sí del paciente, también de noche.",
             href: "/agentes/recepcion",
           },
@@ -1071,7 +1077,7 @@ export const PAGES = {
           {
             agent: 2,
             title: "Recordatorios incluidos",
-            text: "El Administrador recuerda cada cita un día antes y tres horas antes.",
+            text: "Argos recuerda cada cita un día antes y tres horas antes.",
             href: "/agentes/administrador",
           },
           {
@@ -1104,7 +1110,7 @@ export const PAGES = {
             when: "Jueves · 07:30",
             channel: "WhatsApp",
             agent: 2,
-            title: "Tres horas antes, el Administrador le recuerda la cita.",
+            title: "Tres horas antes, Argos le recuerda la cita.",
             text: "Si la hubiera reservado con más tiempo, también le escribiría un día antes.",
           },
           { when: "Jueves · 10:30", channel: "Consulta", title: "Andrea llega a su evaluación." },
@@ -1140,11 +1146,11 @@ export const PAGES = {
       },
       {
         q: "¿Cómo se evita dar una hora que ya está ocupada?",
-        a: "Recepción y Su enlace solo ofrecen los horarios libres de quien atiende ese servicio. Si alguien toma un horario un instante antes, se pide elegir otro.",
+        a: "Sofi y Su enlace solo ofrecen los horarios libres de quien atiende ese servicio. Si alguien toma un horario un instante antes, se pide elegir otro.",
       },
       {
         q: "¿Se envían recordatorios de las citas?",
-        a: "Sí. El Administrador recuerda cada cita un día antes y tres horas antes. Es una tarea que se puede apagar.",
+        a: "Sí. Argos recuerda cada cita un día antes y tres horas antes. Es una tarea que se puede apagar.",
       },
     ],
   },
@@ -1153,7 +1159,7 @@ export const PAGES = {
     path: "/historia-clinica-y-odontograma",
     title: "Historia clínica dental y odontograma digital",
     description:
-      "Historia clínica dental con odontograma digital en notación FDI, diagnósticos codificados y cada atención en orden. El asistente clínico prepara la nota de tu dictado y tú la confirmas.",
+      "Historia clínica dental con odontograma digital en notación FDI, diagnósticos codificados y cada atención en orden. Clío, tu agente clínico, prepara la nota de tu dictado y tú la confirmas.",
     crumb: "Historia y odontograma",
     hero: {
       type: "visual",
@@ -1161,8 +1167,8 @@ export const PAGES = {
       tag: "Historia y odontograma",
       title: "Historia clínica dental y odontograma digital,",
       accent: "en una sola ficha.",
-      lead: "Odontograma con la notación internacional FDI, diagnósticos codificados y cada atención en orden. El asistente clínico prepara la nota a partir de tu dictado y tú la confirmas.",
-      secondary: { href: "/agentes/asistente-clinico", label: "Conoce al asistente clínico" },
+      lead: "Odontograma con la notación internacional FDI, diagnósticos codificados y cada atención en orden. Clío, tu agente clínico, prepara la nota a partir de tu dictado y tú la confirmas.",
+      secondary: { href: "/agentes/asistente-clinico", label: "Conoce a Clío" },
     },
     blocks: [
       {
@@ -1194,9 +1200,9 @@ export const PAGES = {
       },
       {
         kind: "sheet",
-        tag: "Con el asistente clínico",
+        tag: "Con Clío",
         title: "Dictas la consulta. Confirmas la nota.",
-        lead: "El asistente propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia sin tu sí.",
+        lead: "Clío propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia sin tu sí.",
         sheet: NOTE_CARLOS,
         note: "Ejemplo con datos inventados.",
       },
@@ -1234,7 +1240,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo dictar el odontograma?",
-        a: "No. El asistente clínico documenta la consulta a partir de tu dictado; el odontograma lo actualizas tú en la ficha.",
+        a: "No. Clío documenta la consulta a partir de tu dictado; el odontograma lo actualizas tú en la ficha.",
       },
       {
         q: "¿Quién puede ver la historia clínica?",
@@ -1251,7 +1257,7 @@ export const PAGES = {
     path: "/presupuestos-dentales",
     title: "Cómo hacer presupuestos dentales claros",
     description:
-      "Cómo hacer presupuestos dentales: arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que el Administrador retome los que quedaron sin respuesta.",
+      "Cómo hacer presupuestos dentales: arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, el administrador, retome los que quedaron sin respuesta.",
     crumb: "Presupuestos",
     hero: {
       type: "visual",
@@ -1259,8 +1265,8 @@ export const PAGES = {
       tag: "Presupuestos",
       title: "Cómo hacer presupuestos dentales:",
       accent: "claros, con hasta tres opciones.",
-      lead: "Arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que el Administrador retome los que quedaron sin respuesta.",
-      secondary: { href: "/agentes/administrador", label: "Conoce al Administrador" },
+      lead: "Arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, tu agente administrador, retome los que quedaron sin respuesta.",
+      secondary: { href: "/agentes/administrador", label: "Conoce a Argos" },
     },
     blocks: [
       {
@@ -1282,11 +1288,11 @@ export const PAGES = {
           },
           {
             title: "El paciente lo ve y responde desde Su enlace",
-            text: "Sin imprimir ni escanear. Si lo pide por un canal, Recepción se lo reenvía.",
+            text: "Sin imprimir ni escanear. Si lo pide por un canal, Sofi, tu agente de recepción, se lo reenvía.",
           },
           {
             agent: 2,
-            title: "Si no responde, el Administrador lo retoma",
+            title: "Si no responde, Argos lo retoma",
             text: "Pregunta por el presupuesto que quedó sin respuesta, sin que tu equipo lleve la cuenta.",
           },
         ],
@@ -1306,7 +1312,7 @@ export const PAGES = {
           },
           {
             title: "Seguimiento sin listas",
-            text: "Ves qué está aprobado y qué está por aceptar, y el Administrador retoma lo pendiente.",
+            text: "Ves qué está aprobado y qué está por aceptar, y Argos retoma lo pendiente.",
           },
         ],
       },
@@ -1330,7 +1336,7 @@ export const PAGES = {
       },
       {
         q: "¿Qué pasa con los presupuestos que nadie responde?",
-        a: "El Administrador pregunta por ellos. Si prefieres hacerlo tú, apagas esa tarea y los presupuestos esperan a tu equipo.",
+        a: "Argos pregunta por ellos. Si prefieres hacerlo tú, apagas esa tarea y los presupuestos esperan a tu equipo.",
       },
       {
         q: "¿De dónde salen los precios?",
@@ -1485,8 +1491,8 @@ export const PAGES = {
         steps: [
           {
             agent: 0,
-            title: "Recepción o el Administrador se lo envía",
-            text: "Por el canal donde ya conversan, cuando pide una cita o le toca su control.",
+            title: "Tus agentes se lo envían",
+            text: "Por el canal donde ya conversan: Sofi, tu agente de recepción, cuando pide una cita, y Argos, tu agente administrador, cuando le toca su control.",
           },
           {
             title: "Lo abre en el navegador",
@@ -1644,7 +1650,7 @@ export const PAGES = {
           {
             agent: 0,
             title: "Los agentes, en todas las sedes",
-            text: "Recepción ofrece los horarios de la sede que le conviene al paciente.",
+            text: "Sofi, tu agente de recepción, ofrece los horarios de la sede que le conviene al paciente.",
           },
           {
             title: "Reportes por sede o de todas",
@@ -1744,7 +1750,7 @@ export const PAGES = {
           {
             agent: 0,
             title: "Dice que es virtual",
-            text: "Recepción siempre dice que es un asistente virtual, con el nombre que tu clínica le ponga.",
+            text: "Sofi, tu agente de recepción, siempre dice que es asistente virtual, con el nombre que tu clínica le ponga.",
           },
           {
             agent: 1,

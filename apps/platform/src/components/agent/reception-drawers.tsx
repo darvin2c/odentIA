@@ -3,6 +3,7 @@ import { FormDrawer, TimeSelect } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
 import { type AgentFunction, clockToMinutes, minutesToClock } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } from "../../lib/conversation-state"
@@ -100,13 +101,17 @@ interface LimitsDraft {
 /** Qué parte de los límites se abre: cada fila de la página lleva a la suya; en teléfono, a todas. */
 export type LimitsSection = "todo" | "pasa" | "horario" | "canales" | "tope" | "cierre"
 
-const LIMITS_TITLE: Record<LimitsSection, string> = {
-  todo: "Límites de Recepción",
-  pasa: "Pasa a una persona cuando",
-  horario: "Horario de Recepción",
-  canales: "Canales de Recepción",
-  tope: "Tope diario de Recepción",
-  cierre: "Cerrar si el paciente no responde",
+/** El título de cada parte, con el nombre del agente de recepción de la clínica. */
+function limitsTitle(section: LimitsSection, receptionName: string): string {
+  const titles: Record<LimitsSection, string> = {
+    todo: `Límites de ${receptionName}`,
+    pasa: "Pasa a una persona cuando",
+    horario: `Horario de ${receptionName}`,
+    canales: `Canales de ${receptionName}`,
+    tope: `Tope diario de ${receptionName}`,
+    cierre: "Cerrar si el paciente no responde",
+  }
+  return titles[section]
 }
 
 function toLimits(config: AgentConfig): LimitsDraft {
@@ -124,7 +129,7 @@ function toLimits(config: AgentConfig): LimitsDraft {
 }
 
 /**
- * Límites de Recepción: cuándo pasa siempre a una persona, en qué canales
+ * Límites de Sofi: cuándo pasa siempre a una persona, en qué canales
  * responde, a qué horas y cuántas respuestas da al día. Fuera de ellos el hilo
  * queda para el equipo. `section` enseña solo la parte que se pidió; se guarda
  * solo lo que se ve.
@@ -142,6 +147,7 @@ export function LimitsDrawer({
   connectedChannels: string[]
 }) {
   const open = section !== null
+  const receptionName = useReceptionName()
   // Al cerrar se conserva la última parte para que el contenido no cambie mientras sale.
   const [shown, setShown] = useState<LimitsSection>(section ?? "todo")
   useEffect(() => {
@@ -200,12 +206,12 @@ export function LimitsDrawer({
         save.reset()
         onClose()
       }}
-      title={LIMITS_TITLE[shown]}
+      title={limitsTitle(shown, receptionName)}
       description={
         shown === "pasa"
           ? "Además de cuando duda, no tiene el dato o le piden hablar con alguien."
           : shown === "cierre"
-            ? "Si el paciente deja de responder, el agente se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez."
+            ? `Si el paciente deja de responder, ${receptionName} se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez.`
             : "Fuera de estos límites no responde: la conversación queda para tu equipo."
       }
       onSubmit={submit}
@@ -341,7 +347,7 @@ export function LimitsDrawer({
           <span className="text-sm text-muted-foreground">horas</span>
         </div>
         <FieldDescription id="limites-cierre-ayuda">
-          Entre 6 y 23 horas. Antes de cerrar, el agente se despide dentro del horario para escribir. Más de 23 no se puede: WhatsApp ya no deja escribirle.
+          Entre 6 y 23 horas. Antes de cerrar, {receptionName} se despide dentro del horario para escribir. Más de 23 no se puede: WhatsApp ya no deja escribirle.
         </FieldDescription>
       </Field>
       ) : null}

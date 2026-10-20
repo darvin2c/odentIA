@@ -35,6 +35,7 @@ import {
 } from "../../lib/reports"
 import { FunnelCard } from "./patients-tab"
 import { EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { ADMIN_NAME } from "../../lib/agent-names"
 
 /** Lo que se aparta de la clínica más de estos puntos lleva su marca en la tabla por profesional. */
 const APART_POINTS = 5
@@ -343,22 +344,22 @@ function Professionals({ query }: { query: ReportQuery }) {
   )
 }
 
-/** Sin el Administrador encendido no hay avisos: se dice, con su salida para quien puede encenderlo. */
+/** Sin Argos encendido no hay avisos: se dice, con su salida para quien puede encenderlo. */
 export function AdminWatch({ enabled, children }: { enabled: boolean | undefined; children: ReactNode }) {
   const canAgent = usePermission("agent.write")
   return (
-    <ReportCard title="Lo que vio el Administrador">
+    <ReportCard title={`Lo que vio ${ADMIN_NAME}`}>
       {enabled === false ? (
         <EmptyLine
           action={
             canAgent ? (
               <Link to="/agent/administrador" className="font-semibold text-primary-soft-foreground underline">
-                Encender el Administrador
+                Encender a {ADMIN_NAME}
               </Link>
             ) : undefined
           }
         >
-          El Administrador está apagado: no vigila estas cifras.
+          {ADMIN_NAME} está apagado: no vigila estas cifras.
         </EmptyLine>
       ) : (
         children

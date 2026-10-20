@@ -36,7 +36,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "objeto",
       title: "Objeto del servicio",
       blocks: [
-        "odentIA pone a disposición de la Clínica, mediante suscripción, un software para coordinar la atención de sus pacientes: agenda, historia clínica y odontograma, presupuestos, caja, comunicaciones por varios canales, reportes y tres agentes de inteligencia artificial (Recepción, Asistente clínico y Administrador).",
+        "odentIA pone a disposición de la Clínica, mediante suscripción, un software para coordinar la atención de sus pacientes: agenda, historia clínica y odontograma, presupuestos, caja, comunicaciones por varios canales, reportes y tres agentes de inteligencia artificial: Sofi (agente de recepción), Clío (agente clínico) y Argos (agente administrador).",
         "odentIA no presta servicios de salud, no diagnostica ni trata pacientes y no sustituye el criterio profesional del odontólogo. La atención clínica es responsabilidad exclusiva de la Clínica y de sus profesionales.",
       ],
     },
@@ -79,12 +79,12 @@ export function terminosFor(pricing: Pricing): LegalDoc {
               [
                 "Conversación atendida",
                 price(CONVERSATION),
-                "Cuando el agente Recepción responde a una persona; incluye todo lo que le responda en las 24 horas siguientes.",
+                "Cuando Sofi responde a una persona; incluye todo lo que le responda en las 24 horas siguientes.",
               ],
               [
                 "Consulta documentada",
                 price(CONSULTATION),
-                "Cuando el odontólogo confirma la nota propuesta por el Asistente clínico.",
+                "Cuando el odontólogo confirma la nota propuesta por Clío.",
               ],
               [
                 "Cita recuperada",
@@ -97,7 +97,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         { h: "Qué no se cobra" },
         {
           list: [
-            "Las propuestas del Asistente clínico que el odontólogo no confirma.",
+            "Las propuestas de Clío que el odontólogo no confirma.",
             "Las citas recuperadas a las que el paciente no asiste.",
             "Los mensajes que envían las personas del equipo de la Clínica sin intervención de un agente.",
             "El uso del resto del sistema (agenda, historia clínica, caja, reportes) dentro del plan.",
@@ -129,9 +129,9 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         "Los agentes son asistentes que ayudan al equipo de la Clínica; no lo sustituyen. En particular:",
         {
           list: [
-            "Recepción responde por los canales que la Clínica conecta (WhatsApp, Instagram, Messenger, Telegram, chat web y correo electrónico). Siempre se presenta como asistente virtual y deriva la conversación a una persona del equipo cuando corresponde o cuando el interlocutor lo pide.",
-            "El Asistente clínico propone notas, diagnósticos y planes de tratamiento a partir del dictado del odontólogo. Nada entra en la historia clínica sin la confirmación expresa del odontólogo, que es responsable de su contenido.",
-            "El Administrador envía recordatorios, avisos de controles y seguimiento de presupuestos según lo que la Clínica configure.",
+            "Sofi responde por los canales que la Clínica conecta (WhatsApp, Instagram, Messenger, Telegram, chat web y correo electrónico). Siempre se presenta como asistente virtual y deriva la conversación a una persona del equipo cuando corresponde o cuando el interlocutor lo pide.",
+            "Clío propone notas, diagnósticos y planes de tratamiento a partir del dictado del odontólogo. Nada entra en la historia clínica sin la confirmación expresa del odontólogo, que es responsable de su contenido.",
+            "Argos envía recordatorios, avisos de controles y seguimiento de presupuestos según lo que la Clínica configure.",
           ],
         },
         "La Clínica decide qué puede hacer cada agente y puede activar o desactivar cada capacidad en cualquier momento. odentIA elige el modelo de inteligencia artificial que usan los agentes y pone la cuenta.",

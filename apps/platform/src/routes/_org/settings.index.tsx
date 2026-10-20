@@ -32,6 +32,7 @@ import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { capitalize } from "../../components/official-code-field"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgLocale } from "../../lib/locale"
@@ -296,6 +297,7 @@ function ProfileForm({
   pending: boolean
   onSubmit: (values: ProfileValues) => Promise<unknown>
 }) {
+  const receptionName = useReceptionName()
   const queryClient = useQueryClient()
   const language = displayLanguage(useOrgLocale())
   const [initialValues, setInitialValues] = useState(values)
@@ -484,7 +486,7 @@ function ProfileForm({
                 onChange={(next) => field.handleChange(next ?? "")}
               />
               <FieldDescription id="org-emergency-phone-hint">
-                El agente lo da ante una urgencia, también fuera de horario. Si lo dejas vacío, dice que acuda al servicio de emergencias más cercano.
+                {receptionName} lo da ante una urgencia, también fuera de horario. Si lo dejas vacío, dice que acuda al servicio de emergencias más cercano.
               </FieldDescription>
             </Field>
           )}

@@ -53,13 +53,13 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Te espera" })).not.toContainText("Lo recomienda el administrador")
+  await expect(page.getByRole("region", { name: "Te espera" })).not.toContainText("Lo recomienda Argos")
 
   await gotoHydrated(page, tenant(org.slug, "/agent"))
-  const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Administrador" })
+  const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Argos" })
   await expect(row).toContainText("Apagado")
   await row.getByRole("link", { name: "Ver y encender" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Argos, tu agente administrador" })).toBeVisible()
   const preview = page.getByRole("region", { name: "Con tus datos de hoy, esto te recomendaría" })
   await expect(preview).toContainText("1 control vencido de un paciente sin cita")
   await expect(preview).toContainText("1 atención lleva más de 2 días sin firmar")
@@ -67,11 +67,11 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   const onWhileOff = page.getByRole("region", { name: "Prendidas" })
   await expect(onWhileOff.getByRole("switch")).toHaveCount(1)
   await expect(onWhileOff.getByRole("switch", { name: "Apagar: Recordar la cita" })).toBeEnabled()
-  await expect(onWhileOff).toContainText("Empiezan a hacerse solas cuando enciendas al administrador.")
+  await expect(onWhileOff).toContainText("Empiezan a hacerse solas cuando enciendas a Argos.")
   // Sin ellos no sale nada: el aviso lo dice con sus botones (fase 2.1, decisión 3).
-  const missing = page.getByRole("status").filter({ hasText: "«Recordar la cita» está prendida, pero el Administrador y Recepción están apagados" })
-  await expect(missing.getByRole("button", { name: "Encender al administrador" })).toBeVisible()
-  await expect(missing.getByRole("link", { name: "Encender Recepción" })).toBeVisible()
+  const missing = page.getByRole("status").filter({ hasText: "«Recordar la cita» está prendida, pero Argos y Sofi están apagados" })
+  await expect(missing.getByRole("button", { name: "Encender a Argos" })).toBeVisible()
+  await expect(missing.getByRole("link", { name: "Encender a Sofi" })).toBeVisible()
   await expect(preview).toContainText("Al encenderlo solo hace lo que ya está prendido.")
   // Con una línea prendida ya no dice que al encenderlo no hace nada.
   await expect(preview).not.toContainText("Al encenderlo no hace nada por su cuenta.")
@@ -80,15 +80,15 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await expect(ready.getByRole("switch")).toHaveCount(7)
   for (const item of await ready.getByRole("switch").all()) await expect(item).toBeDisabled()
   // Cada línea dice quién lo hace, con palabras. «Seguimiento sin responsable» ya no existe: la oportunidad sin responsable es de Recepción.
-  await expect(ready.getByText("Lo hace el agente")).toHaveCount(4)
+  await expect(ready.getByText("Lo hace Argos")).toHaveCount(4)
   await expect(ready.getByText("Le toca a una persona")).toHaveCount(3)
   await expect(ready).not.toContainText("Seguimiento sin responsable")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("administrador-apagado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // --- Encenderlo no prende nada más ---
-  await preview.getByRole("button", { name: "Encender al administrador" }).click()
-  await expect(page.getByRole("switch", { name: "Apagar al Administrador" })).toBeChecked()
+  await preview.getByRole("button", { name: "Encender a Argos" }).click()
+  await expect(page.getByRole("switch", { name: "Apagar a Argos" })).toBeChecked()
   const on = page.getByRole("region", { name: "Prendidas" })
   await expect(on).toContainText("Una persona tiene una cita")
   expect((await admin()).lines.filter((line) => line.enabled).map((line) => line.key)).toEqual(["recordatorio_cita"])
@@ -100,10 +100,10 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // --- Una línea abierta: su flujo, entero mientras está apagada ---
   // Las filas de la lista son hijas directas: dentro de una línea abierta hay más listas (su flujo, sus personas).
   const control = ready.locator(":scope > ul > li").filter({ hasText: "Un control se acerca" })
-  await expect(control).toContainText("Hoy sería 1 caso · el administrador te la recomienda")
+  await expect(control).toContainText("Hoy sería 1 caso · Argos te la recomienda")
   await control.getByRole("button", { name: /Un control se acerca/ }).click()
   const flow = control.getByRole("list", { name: "Avisar un control", exact: true })
-  await expect(flow.getByRole("listitem")).toHaveText([/Un control se acerca/, /Dos días antes/, /¿Puede escribirle el agente\?/, /Le avisa/, /Lo resuelve el agente/])
+  await expect(flow.getByRole("listitem")).toHaveText([/Un control se acerca/, /Dos días antes/, /¿Puede escribirle Sofi\?/, /Le avisa/, /Lo resuelve Sofi/])
   const otherwise = control.getByRole("list", { name: /Avisar un control: si la respuesta es «no»/ })
   await expect(otherwise.getByRole("listitem")).toHaveText([/Avisa por qué y cómo habilitarlo/, /Tarea de llamada/, /Le toca a una persona/])
   await expect(otherwise).toContainText("Sin interruptor: nunca termina en blanco.")
@@ -115,10 +115,10 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // Prenderla la pasa a «Prendidas», en presente, y el flujo se queda con lo que se ejecuta.
   await control.getByRole("switch", { name: "Prender: Avisar un control" }).click()
   const controlOn = on.locator(":scope > ul > li").filter({ hasText: "Un control se acerca" })
-  await expect(controlOn).toContainText("El agente Recepción le avisa para agendarlo.")
+  await expect(controlOn).toContainText("Sofi le avisa para agendarlo.")
   // Recepción, que es quien escribe, está apagada en esta clínica: la línea lo dice y la página ofrece encenderla.
-  await expect(controlOn).toContainText("En pausa: Recepción está apagada y es quien escribe.")
-  await expect(page.getByRole("status").filter({ hasText: "Recepción está apagada" }).getByRole("link", { name: "Encender Recepción" })).toBeVisible()
+  await expect(controlOn).toContainText("En pausa: Sofi no está atendiendo y es quien escribe.")
+  await expect(page.getByRole("status").filter({ hasText: "Sofi no está atendiendo" }).getByRole("link", { name: "Encender a Sofi" })).toBeVisible()
   expect(await lineOf("recordatorio_control")).toMatchObject({ enabled: true, agentPart: true, teamPart: true })
   // Sin la tarea de respaldo, el camino del «no» termina en el aviso, que no se puede apagar.
   await controlOn.getByRole("switch", { name: "Tarea para el equipo de recepción" }).click()
@@ -141,12 +141,12 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const today = page.getByRole("region", { name: "Te espera" })
   // La del control ya está prendida: no se recomienda.
-  await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda el administrador" })).toHaveCount(1)
+  await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda Argos" })).toHaveCount(1)
   const card = today.getByRole("listitem").filter({ hasText: "1 atención lleva más de 2 días sin firmar" })
   await expect(card).toContainText("le tocaría a tu equipo")
   await info.attach("inicio-administrador", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await card.getByRole("button", { name: /Ver la lista$/ }).click()
-  const drawer = sideSurface(page, { name: "Recomendación del administrador", exact: true })
+  const drawer = sideSurface(page, { name: "Recomendación de Argos", exact: true })
   await expect(drawer).toContainText("Atenciones que siguen en borrador, se abrieron hace más de 2 días y no le salen a nadie en «Te espera»")
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")
   await expect(drawer.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
@@ -172,7 +172,7 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
 
   // «Ver su flujo y prender» lleva a su página con esa línea abierta.
   await drawer.getByRole("link", { name: "Ver su flujo y prender" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Argos, tu agente administrador" })).toBeVisible()
   const unsigned = page.getByRole("region", { name: "Listas para activar" }).locator(":scope > ul > li").filter({ hasText: "Una atención lleva 2 días sin firmar" })
   await expect(unsigned.getByRole("list", { name: "Atención sin firmar", exact: true }).getByRole("listitem")).toHaveText([
     /Una atención lleva 2 días sin firmar/, /Espera 2 días/, /Tarea para firmar/, /Le toca a una persona/,
@@ -183,7 +183,7 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // Va al equipo clínico: la dueña (área administración) la ve en «Toda la clínica».
   await page.getByRole("button", { name: "Toda la clínica" }).click()
   const task = page.getByRole("row").filter({ hasText: "Revisar y firmar la atención de Mariana Soto" })
-  await expect(task).toContainText("La dejó el Administrador")
+  await expect(task).toContainText("La dejó Argos")
   await expect(task.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
   await info.attach("tareas-administrador", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -205,7 +205,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await call(page, "PUT", "/api/agent/admin/settings", org.slug, { enabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/agent/administrador"))
-  await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Argos, tu agente administrador" })).toBeVisible()
   const ask = page.getByRole("textbox", { name: "Dile qué quieres que haga" })
   const send = page.getByRole("button", { name: "Armar el cambio" })
   await expect(send).toBeDisabled()
@@ -236,7 +236,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
       }),
     }),
   )
-  await ask.fill("Cuando alguien cancele su cita, que el agente le ofrezca otra fecha")
+  await ask.fill("Cuando alguien cancele su cita, que Sofi le ofrezca otra fecha")
   await send.click()
   const down = page.getByRole("status").filter({ hasText: "Ahora no puedo leer pedidos con palabras" })
   await expect(down).toContainText("El campo vuelve a activarse solo en medio minuto.")
@@ -254,14 +254,14 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(created).toContainText("Borrador: todavía no hace nada.")
   await expect(created).toContainText("Creada por tu clínica")
   const draft = created.getByRole("region", { name: /Línea nueva/ })
-  await expect(draft).toContainText("Pediste: «Cuando alguien cancele su cita, que el agente le ofrezca otra fecha»")
-  await expect(draft).toContainText("La armé así: el agente Recepción le escribe una hora después para ofrecerle otra fecha.")
+  await expect(draft).toContainText("Pediste: «Cuando alguien cancele su cita, que Sofi le ofrezca otra fecha»")
+  await expect(draft).toContainText("La armé así: Sofi le escribe una hora después para ofrecerle otra fecha.")
   await expect(draft.getByRole("list", { name: /como quedaría$/ }).getByRole("listitem")).toHaveText([
-    /Una persona cancela su cita/, /Espera una hora/, /¿Puede escribirle el agente\?/, /Le escribe/, /Lo resuelve el agente/,
+    /Una persona cancela su cita/, /Espera una hora/, /¿Puede escribirle Sofi\?/, /Le escribe/, /Lo resuelve Sofi/,
   ])
   await expect(draft).toContainText("La probé con tus últimos 30 días: 0 cancelaciones")
   await expect(draft).toContainText("Lo que revisé")
-  await expect(draft).toContainText("Recepción está apagada: mientras siga así, esta línea no le escribe a nadie.")
+  await expect(draft).toContainText("Sofi no está atendiendo: mientras siga así, esta línea no le escribe a nadie.")
   await expect(draft).toContainText("Se canceló la cita del lunes 12 de octubre en Clínica Sonríe. ¿Te buscamos otra fecha?")
   expect((await admin()).lines.find((line) => line.key === "cita_cancelada")).toMatchObject({ enabled: false })
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -276,7 +276,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await draft.getByRole("button", { name: "Prender" }).click()
   const on = page.getByRole("region", { name: "Prendidas" })
   const live = on.locator(":scope > ul > li").filter({ hasText: "Una persona cancela su cita" })
-  await expect(live).toContainText("El agente Recepción le escribe una hora después para ofrecerle otra fecha.")
+  await expect(live).toContainText("Sofi le escribe una hora después para ofrecerle otra fecha.")
   expect((await admin()).lines.find((line) => line.key === "cita_cancelada")).toMatchObject({ enabled: true, agentPart: true })
 
   // --- Editar: dice qué cambia y lo que no se puede; sin guardar, sigue como estaba ---
@@ -286,9 +286,9 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(editing).toContainText("Así quedaría. Mientras no guardes, sigue funcionando como estaba.")
   await expect(editing).toContainText("Antes: Espera una hora")
   await expect(editing).toContainText("Ahora: Espera 3 horas")
-  await expect(editing).toContainText("Se quita: Ya no queda una tarea para el equipo cuando el agente no puede.")
+  await expect(editing).toContainText("Se quita: Ya no queda una tarea para el equipo cuando Sofi no puede.")
   await expect(editing).toContainText("Lo que pediste y no se puede")
-  await expect(editing).toContainText("el agente Recepción no ofrece descuentos")
+  await expect(editing).toContainText("Sofi no ofrece descuentos")
   await expect(live).toContainText("Tiene un cambio sin guardar: sigue funcionando como estaba.")
   expect((await admin()).lines.find((line) => line.key === "cita_cancelada")).toMatchObject({ teamPart: true })
   // Lo que el agente no hace puede quedar como indicación para la persona que reciba la tarea.
@@ -296,12 +296,12 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(editing.getByRole("button", { name: "Sí, ponlo en la tarea" })).toBeDisabled()
   await note.fill("Ofrecer 10 % si reprograma")
   await editing.getByRole("button", { name: "Sí, ponlo en la tarea" }).click()
-  await expect(editing).toContainText("Nueva: La tarea para el equipo de recepción dirá: «Ofrecer 10 % si reprograma». El agente no lo dice: lo hace una persona.")
+  await expect(editing).toContainText("Nueva: La tarea para el equipo de recepción dirá: «Ofrecer 10 % si reprograma». Sofi no lo dice: lo hace una persona.")
   // Una indicación sin tarea no sirve: la tarea de respaldo se queda.
   await expect(editing).not.toContainText("Se quita: Ya no queda una tarea")
   await info.attach("borrador-cambio", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await editing.getByRole("button", { name: "Guardar el cambio" }).click()
-  await expect(live).toContainText("El agente Recepción le escribe 3 horas después para ofrecerle otra fecha. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción.")
+  await expect(live).toContainText("Sofi le escribe 3 horas después para ofrecerle otra fecha. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción.")
   await expect(live.getByRole("spinbutton", { name: "Horas de espera" })).toHaveValue("3")
   await expect(live.getByRole("textbox", { name: "Indicación para quien reciba la tarea" })).toHaveValue("Ofrecer 10 % si reprograma")
   expect((await admin()).lines.find((line) => line.key === "cita_cancelada")).toMatchObject({ teamPart: true, taskNote: "Ofrecer 10 % si reprograma" })
@@ -387,7 +387,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   const line = page.getByRole("region", { name: "Prendidas" }).locator(":scope > ul > li").filter({ hasText: "Una persona falta a su cita" })
   await line.getByRole("combobox", { name: "A qué hora sale" }).click()
   await page.getByRole("option", { name: "10:00", exact: true }).click()
-  await expect(line).toContainText("El agente Recepción le escribe al día siguiente, a las 10:00, para reprogramar.")
+  await expect(line).toContainText("Sofi le escribe al día siguiente, a las 10:00, para reprogramar.")
   await expect(line.getByRole("list", { name: "Reprogramar tras una inasistencia", exact: true })).toContainText("Espera al día siguiente, 10:00")
   const noteField = line.getByRole("textbox", { name: "Indicación para quien reciba la tarea" })
   await noteField.fill("Ofrecerle el horario de la tarde")
@@ -405,7 +405,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
     })),
   )
   await gotoHydrated(page, tenant(org.slug, "/agent/administrador"))
-  await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Argos, tu agente administrador" })).toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "Prendida, pero casi no escribe" })).toHaveCount(0)
   expect((await admin()).permissionGaps).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)

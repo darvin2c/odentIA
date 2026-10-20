@@ -210,7 +210,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
 
   // --- Los mensajes, en dos grupos, con su estado en palabras ---
   const messages = page.getByRole("region", { name: "Mensajes", exact: true })
-  const byAgent = messages.getByRole("group", { name: "Los envía el agente" })
+  const byAgent = messages.getByRole("group", { name: "Los envía Argos" })
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
   // Uno por línea que escribe y los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
   // faltan, cambio de fecha, cancelada).

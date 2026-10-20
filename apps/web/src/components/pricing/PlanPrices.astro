@@ -19,9 +19,9 @@ const actions = plan
         title: "Conversación atendida",
         price: plan.conversation,
         before: struck(plan.conversation, list?.conversation),
-        text: "Todo lo que Recepción responde a una persona en 24 horas.",
+        text: "Todo lo que Sofi responde a una persona en 24 horas.",
         note: "No se cobra si el agente no llegó a responder.",
-        agent: { href: "/agentes/recepcion", label: "Recepción" },
+        agent: { href: "/agentes/recepcion", label: "Sofi" },
       },
       {
         title: "Consulta documentada",
@@ -29,7 +29,7 @@ const actions = plan
         before: struck(plan.consultation, list?.consultation),
         text: "Cuando el odontólogo confirma lo que dictó.",
         note: "No se cobra si descarta las sugerencias.",
-        agent: { href: "/agentes/asistente-clinico", label: "Asistente clínico" },
+        agent: { href: "/agentes/asistente-clinico", label: "Clío" },
       },
       {
         title: "Cita recuperada",
@@ -37,7 +37,7 @@ const actions = plan
         before: struck(plan.recovered, list?.recovered),
         text: "Reservada en los 7 días siguientes a un mensaje del agente, y el paciente asistió.",
         note: "No se cobra si no asiste. Su conversación va incluida.",
-        agent: { href: "/agentes/administrador", label: "Administrador" },
+        agent: { href: "/agentes/administrador", label: "Argos" },
       },
     ].filter((action) => action.price !== null)
   : []

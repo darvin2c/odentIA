@@ -178,7 +178,7 @@ export const PRIVACIDAD: LegalDoc = {
         "Cada clínica es la titular del banco de datos de sus pacientes y la responsable de su tratamiento. Ella decide qué datos carga en odentIA, con qué finalidad y durante cuánto tiempo, y debe informar a sus pacientes y obtener los consentimientos que exija la ley.",
         "Estos datos incluyen datos sensibles de salud: historia clínica, odontograma, diagnósticos, tratamientos y presupuestos, además de datos de contacto y las conversaciones mantenidas por los canales que la clínica conecta.",
         "odentIA trata esos datos como encargado del tratamiento, solo para prestar el servicio a la clínica y según sus instrucciones. Las condiciones están en el [contrato de encargo de tratamiento](/encargo-de-tratamiento).",
-        "Cuando el agente Recepción atiende a una persona, se presenta como asistente virtual de la clínica. Los mensajes de atención (citas, controles y presupuestos) forman parte del servicio de la clínica; las promociones solo se envían con el consentimiento del paciente.",
+        "Cuando Sofi, el agente de recepción, atiende a una persona, se presenta como asistente virtual de la clínica. Los mensajes de atención (citas, controles y presupuestos) forman parte del servicio de la clínica; las promociones solo se envían con el consentimiento del paciente.",
         ENTRENAMIENTO,
         "Si la clínica opera fuera del Perú, se aplica además la ley de protección de datos de su país y la clínica es responsable de cumplirla. Si atiende a personas en la Unión Europea, puede aplicarse también el Reglamento General de Protección de Datos (RGPD).",
       ],

@@ -1,17 +1,13 @@
 // Datos de la portada: los tres agentes, las siete vías por las que llega el trabajo
 // y un jueves de ejemplo con 32 trabajos, uno por pieza dental. Todo es ejemplo.
 
+/** `name` lleva el rol para cuando aparece solo; `short` es el nombre (Sofi, Clío, Argos; issue 183). */
 export type Agent = { name: string; short: string; color: string; rgb: [number, number, number] }
 
 export const AGENTS: Agent[] = [
-  { name: "Recepción · Sofi", short: "Recepción", color: "#4fc3d7", rgb: [0.31, 0.76, 0.84] },
-  {
-    name: "Asistente clínico",
-    short: "Asistente clínico",
-    color: "#a6f0d8",
-    rgb: [0.65, 0.94, 0.85],
-  },
-  { name: "Administrador", short: "Administrador", color: "#f5c46b", rgb: [0.96, 0.77, 0.42] },
+  { name: "Sofi · recepción", short: "Sofi", color: "#4fc3d7", rgb: [0.31, 0.76, 0.84] },
+  { name: "Clío · clínica", short: "Clío", color: "#a6f0d8", rgb: [0.65, 0.94, 0.85] },
+  { name: "Argos · administración", short: "Argos", color: "#f5c46b", rgb: [0.96, 0.77, 0.42] },
 ]
 
 export type Chan = { label: string; left: number; width: number; ax: number }

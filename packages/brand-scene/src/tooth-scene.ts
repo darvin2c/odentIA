@@ -1,6 +1,6 @@
 // Escena WebGL de la portada: las 32 piezas dentales en dos arcadas. Cada trabajo del jueves
 // de ejemplo enciende una pieza con el color del agente que lo hizo; el mensaje viaja del canal
-// a la pieza (o de la pieza al canal si escribe el Administrador) y una línea la une con el registro.
+// a la pieza (o de la pieza al canal si escribe Argos) y una línea la une con el registro.
 // Geometría y shaders portados tal cual del tablero aprobado (portada «D3»).
 import { AGENTS, DAY } from "./hero-data.js"
 
@@ -441,7 +441,7 @@ export class ToothScene {
       gl.drawElements(gl.TRIANGLES, g.cnt, gl.UNSIGNED_SHORT, 0)
     })
 
-    // El mensaje viaja del canal a la pieza (o, si escribe el Administrador, de la pieza al canal)
+    // El mensaje viaja del canal a la pieza (o, si escribe Argos, de la pieza al canal)
     let pr = 1,
       cx2 = 0,
       cy2 = 0

@@ -1,6 +1,7 @@
 import { ConfirmDialog } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { type ReactNode, useState } from "react"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { resolveWords } from "../../lib/conversation-state"
 import type { ResolvePreview } from "../../lib/crm"
@@ -14,7 +15,7 @@ import { invalidateAgentPanelQueries } from "../agent-panel"
  * Tareas y en «Contexto»: la misma pieza, no un texto propio por pantalla.
  */
 export function ResolvePreviewDetails({ name, preview }: { name: string; preview: ResolvePreview }) {
-  const { also } = resolveWords(name, preview)
+  const { also } = resolveWords(name, preview, useReceptionName())
   return (
     <>
       {also.length > 0 ? (
@@ -53,6 +54,7 @@ export function useCompleteTask(onCompleted: () => void): {
   dialog: ReactNode
 } {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<{ taskId: string; result: TaskResolvePreview } | null>(null)
@@ -102,7 +104,7 @@ export function useCompleteTask(onCompleted: () => void): {
     <ConfirmDialog
       open={confirming !== null}
       title="¿Dar por resuelto el caso?"
-      description={confirming ? resolveWords(name, confirming.result.preview).description : ""}
+      description={confirming ? resolveWords(name, confirming.result.preview, receptionName).description : ""}
       confirmLabel="Completar y resolver"
       variant="default"
       pending={pendingId !== null && confirming !== null}

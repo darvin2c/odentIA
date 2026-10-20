@@ -4,7 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
+import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
 import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -447,8 +447,9 @@ export function createApp(deps: AppDeps) {
         .from(orgProfile)
         .where(eq(orgProfile.organizationId, orgId))
         .limit(1)
-      // El logo de la clínica viaja con sus datos: se sube en «Datos de la clínica».
-      return found ? { ...found, logo: await getClinicLogo(tx, orgId) } : null
+      // El logo de la clínica viaja con sus datos: se sube en «Datos de la clínica». El nombre de su
+      // agente de recepción también: todas las pantallas lo dicen y vale solo para esta clínica.
+      return found ? { ...found, logo: await getClinicLogo(tx, orgId), receptionName: (await getAgentConfig(tx, orgId)).personaName } : null
     })
     return c.json({ data: row })
   })

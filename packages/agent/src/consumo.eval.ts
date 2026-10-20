@@ -1,7 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 /**
- * Prueba real de consumo del Administrador: un mes de una clínica de prueba,
+ * Prueba real de consumo de Argos (el agente administrador): un mes de una clínica de prueba,
  * sin escribirle a nadie. Uso:
  *
  *   pnpm --filter @odentia/agent eval:month
@@ -569,7 +569,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   console.log("\n=== Prueba real de consumo · un mes de una clínica de prueba ===")
   console.log(REAL ? `Modelo que escribe: ${AGENT_MODEL.modelName} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
   console.log(`Clínica: ${CLINIC.patients} pacientes, ${plan.length} citas (${outcomes.filter((item) => item.outcome === "no_asistio").length} inasistencias, ${outcomes.filter((item) => item.outcome === "cancelada").length} cancelaciones), ${CLINIC.budgets} presupuestos, ${CLINIC.controls} controles.`)
-  console.log("\n1. Lo que hizo el Administrador en el mes (lo cuenta el motor; ningún mensaje salió de la cola)")
+  console.log("\n1. Lo que hizo Argos en el mes (lo cuenta el motor; ningún mensaje salió de la cola)")
   for (const line of lines) {
     const mine = counts.filter((row) => row.kind === line.key)
     const of = (status: string) => mine.filter((row) => row.status === status).reduce((sum, row) => sum + Number(row.n), 0)
@@ -581,7 +581,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   console.log(`\n2. «¿Ya avisó algo?» (modelo de decisión): ${told.calls} llamadas, ${told.input + told.output} tokens (${perTold} por llamada); dijo que sí en ${told.yes}; sin respuesta en ${told.failed}.`)
 
   // ------------------------------ 3. una persona de cada línea responde con texto ---
-  console.log("\n3. Cuando la persona responde con texto, Recepción sigue la conversación (modelo que escribe)")
+  console.log("\n3. Cuando la persona responde con texto, Sofi sigue la conversación (modelo que escribe)")
   const measured = new Map<string, { llm: number; decision: number; turns: number; label: string }>()
   /** La primera llamada de cada conversación: con ellas se mide cuánto del sistema es igual entre personas distintas. */
   const openers: ModelCall[] = []
@@ -742,7 +742,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     console.log(`  ${title}`)
     for (const row of result.rows) console.log(row)
     console.log(`    → modelo que escribe: ${result.llm} tokens al mes`)
-    console.log(`    → modelo de decisión: ${result.decision} tokens al mes («¿ya avisó?» ${result.toldTokens}, conversaciones de Recepción ${result.decision - result.toldTokens - REQUESTS_PER_MONTH * REQUEST_TOKENS}, ${REQUESTS_PER_MONTH} pedidos con palabras ${REQUESTS_PER_MONTH * REQUEST_TOKENS})`)
+    console.log(`    → modelo de decisión: ${result.decision} tokens al mes («¿ya avisó?» ${result.toldTokens}, conversaciones de Sofi ${result.decision - result.toldTokens - REQUESTS_PER_MONTH * REQUEST_TOKENS}, ${REQUESTS_PER_MONTH} pedidos con palabras ${REQUESTS_PER_MONTH * REQUEST_TOKENS})`)
   }
   console.log("  Las líneas que solo dejan tareas al equipo y los botones «Confirmar» y «No enviar más» no gastan tokens.\n")
 }, 3_600_000)

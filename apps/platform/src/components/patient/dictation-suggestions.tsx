@@ -3,6 +3,7 @@ import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } f
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { Check, CircleAlert, X } from "lucide-react"
 import { type FormEvent, useState } from "react"
+import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
 import type { ServiceCatalogItem } from "../../lib/services"
 import {
@@ -47,7 +48,7 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
   const acting = (item: DictationSuggestion) => session.act.isPending && session.act.variables?.item.id === item.id
   return (
     <div className="flex basis-full flex-col gap-2">
-      <ul aria-label={`Sugerencias del asistente: ${DICTATION_KIND_LABEL[kind]}`} className="flex flex-col gap-2">
+      <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: ${DICTATION_KIND_LABEL[kind]}`} className="flex flex-col gap-2">
         {items.map((item) => {
           const { title, detail } = suggestionText(item)
           const ready = item.status === "lista"
@@ -232,7 +233,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
     <FormDrawer
       open
       title={title}
-      description="Sugerencia del asistente"
+      description={`Sugerencia de ${CLINICAL_NAME}`}
       onClose={session.closeEdit}
       onSubmit={submit}
       isSubmitting={session.save.isPending}

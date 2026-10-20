@@ -38,6 +38,7 @@ import {
   visitLabel,
   visitState,
 } from "../../lib/agenda"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
@@ -64,7 +65,8 @@ const CANCEL_REASONS: Array<{ id: CancelReason; label: string }> = [
 /** De dónde salió una cita que no nació en una conversación. */
 const SOURCE_WORDS: Record<string, string> = {
   enlace: "Enlace de reserva",
-  agent: "El agente, en una conversación",
+  // «Sofi» se cambia por el nombre de la clínica al mostrarlo.
+  agent: "Sofi, en una conversación",
   portal: "Portal del paciente",
 }
 
@@ -115,6 +117,7 @@ export function AppointmentDrawer({
   const [writing, setWriting] = React.useState(false)
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
+  const receptionName = useReceptionName()
   const canAttend = usePermission("clinical.write")
   const canReadClinical = usePermission("clinical.read")
   // El cajón ya muestra «Deshacer» junto a la llegada: el aviso no lo repite.
@@ -531,7 +534,7 @@ export function AppointmentDrawer({
                   <span className="flex flex-wrap items-center gap-x-2">
                     {context.origin.conversationId
                       ? `Conversación de ${channelLabel(context.origin.channel ?? "")} del ${dayShort(zonedDateOf(context.origin.at, timeZone))}`
-                      : SOURCE_WORDS[context.origin.source]}
+                      : withReceptionName(SOURCE_WORDS[context.origin.source] ?? "", receptionName)}
                     {context.origin.conversationId && canReadChats ? (
                       <Link
                         to="/inbox"

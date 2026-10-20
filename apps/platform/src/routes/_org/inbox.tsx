@@ -111,6 +111,7 @@ import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { CapReachedNotice, ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
 import { ResolvePreviewDetails } from "../../components/crm/resolve-preview"
 import { InboxApprovedMessages } from "../../components/integrations/whatsapp/inbox-approved-messages"
@@ -183,11 +184,14 @@ const CHANNEL_FILTER_OPTIONS = [
  */
 const VIEW_CHIPS = [
   { value: "attend", label: "Por atender", total: "attend" },
-  { value: "agent", label: "Las atiende el agente", total: "agent" },
+  // Su texto dice el nombre del agente de recepción de la clínica: `chipLabel`.
+  { value: "agent", label: "Las atiende", total: "agent" },
   { value: "awaiting_patient", label: "Esperan al paciente", total: "awaitingPatient" },
   { value: "closed", label: "Cerradas", total: "closed" },
 ] as const satisfies readonly { value: string; label: string; total: keyof InboxSummary }[]
 const CHIP_VIEWS: readonly string[] = VIEW_CHIPS.map((chip) => chip.value)
+const chipLabel = (chip: (typeof VIEW_CHIPS)[number], receptionName: string) =>
+  chip.value === "agent" ? `${chip.label} ${receptionName}` : chip.label
 /**
  * Spam y Bloqueados (ADR 0054): dos listas aparte, junto a las pestañas y sin
  * contar en sus totales. Spam lleva su número; Bloqueados, no: no es trabajo.
@@ -209,6 +213,7 @@ function waitingSubtitle(summary: InboxSummary | undefined): string {
 
 function InboxPage() {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const { org } = orgRouteApi.useRouteContext()
   const myUserId = useMyUserId()
   const canRead = usePermission("conversations.read")
@@ -535,7 +540,7 @@ function InboxPage() {
                   className="min-h-11 rounded-full sm:min-h-9"
                   onClick={() => listSearch.setParam("view", chip.value === DEFAULT_VIEW ? undefined : chip.value, { replace: true })}
                 >
-                  {chip.label}
+                  {chipLabel(chip, receptionName)}
                   {summary ? <span className="tabular-nums opacity-80"> {summary[chip.total]}</span> : null}
                 </Button>
               )
@@ -550,7 +555,7 @@ function InboxPage() {
               aria-pressed={sideView === "spam"}
               className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
               onClick={() => listSearch.setParam("view", sideView === "spam" ? undefined : "spam", { replace: true })}
-              title="Publicidad y envíos automáticos: el agente no los responde y no se cobran"
+              title={`Publicidad y envíos automáticos: ${receptionName} no los responde y no se cobran`}
             >
               Spam
               {summary?.spam ? <span className="tabular-nums opacity-80"> {summary.spam}</span> : null}
@@ -562,7 +567,7 @@ function InboxPage() {
               aria-pressed={sideView === "blocked"}
               className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
               onClick={() => listSearch.setParam("view", sideView === "blocked" ? undefined : "blocked", { replace: true })}
-              title="Personas bloqueadas: nadie les escribe y el agente no les responde"
+              title={`Personas bloqueadas: nadie les escribe y ${receptionName} no les responde`}
             >
               <Ban className="size-4" aria-hidden />
               <span className="sr-only sm:not-sr-only">Bloqueados</span>
@@ -930,6 +935,7 @@ function ConversationList({
   /** El vacío de Spam y Bloqueados lleva de vuelta a las pestañas. */
   onBackToTabs?: () => void
 }) {
+  const receptionName = useReceptionName()
   return (
     // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
     <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
@@ -939,8 +945,8 @@ function ConversationList({
           <span className="text-sm font-semibold">{sideView === "spam" ? "Spam · últimos 30 días" : "Bloqueados"}</span>
           <span className="text-xs text-muted-foreground">
             {sideView === "spam"
-              ? "El agente no responde lo que está aquí, y no se cobra."
-              : "Nadie les escribe y el agente no les responde. Para volver a atenderlos, desbloquéalos."}
+              ? `${receptionName} no responde lo que está aquí, y no se cobra.`
+              : `Nadie les escribe y ${receptionName} no les responde. Para volver a atenderlos, desbloquéalos.`}
           </span>
         </div>
       ) : null}
@@ -948,7 +954,7 @@ function ConversationList({
         const selected = item.id === selectedId
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
         const ChannelIcon = channelIcon(item.connection.channel)
-        const words = conversationWords({ ...item, myUserId })
+        const words = conversationWords({ ...item, myUserId, receptionName })
         // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0050).
         const topic = item.attention?.topics?.[0]
         const preview = topic
@@ -1044,7 +1050,7 @@ function ConversationList({
           title={sideView === "spam" ? "Nada en spam" : "Nadie bloqueado"}
           description={
             sideView === "spam"
-              ? "Si llega publicidad o un envío automático, el agente no lo responde y aparece aquí."
+              ? `Si llega publicidad o un envío automático, ${receptionName} no lo responde y aparece aquí.`
               : "Para bloquear a alguien que acosa o amenaza, abre su conversación y elige «Bloquear a esta persona…» en el menú ⋯."
           }
           actionLabel={onBackToTabs ? "Ver «Por atender»" : undefined}
@@ -1146,6 +1152,7 @@ function ThreadView({
   onNextTopic?: () => void
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [composer, setComposer] = useState("")
   const [older, setOlder] = useState<ChatMessage[]>([])
   const [olderCursor, setOlderCursor] = useState<string | null>(null)
@@ -1510,7 +1517,7 @@ function ThreadView({
   const threadAttention = detail.attention ?? attention
   // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
   const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
-  const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId })
+  const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId, receptionName })
   // Spam o bloqueada (ADR 0054): el aviso, el menú y la caja de texto lo leen de aquí.
   const screenView = detail.screen
   const blocked = screenView?.screen === "blocked"
@@ -1545,7 +1552,7 @@ function ThreadView({
   const busy = actionMutation.isPending
   const name = detail.contact.displayName
   const preview = previewQuery.data?.data
-  const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar") : []
+  const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar", receptionName) : []
   const previewError =
     previewQuery.error instanceof ApiError
       ? previewQuery.error.shape.message
@@ -1682,7 +1689,7 @@ function ThreadView({
       <ConfirmDialog
         open={confirming === "close"}
         title="¿Cerrar sin resolver?"
-        description={closeWithoutResolvingWords(name)}
+        description={closeWithoutResolvingWords(name, receptionName)}
         confirmLabel="Cerrar sin resolver"
         variant="default"
         pending={busy}
@@ -1797,14 +1804,14 @@ function ThreadView({
             {screenView?.screen === "spam" ? (
               <div className="mt-3 flex justify-center">
                 <p className="rounded-full border border-dashed bg-card px-3 py-1 text-center text-xs font-medium text-muted-foreground">
-                  El agente no respondió: spam
+                  {receptionName} no respondió: spam
                 </p>
               </div>
             ) : null}
             {closure ? (
               <div className="mt-3 flex justify-center">
                 <p className="rounded-full border bg-card px-3 py-1 text-center text-xs font-medium text-muted-foreground">
-                  {closureBand(closure)}
+                  {closureBand(closure, receptionName)}
                 </p>
               </div>
             ) : null}
@@ -1914,7 +1921,7 @@ function ThreadView({
             {doneTopic ? (
               <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
                 <CheckCircle2 className="size-4 text-success" aria-hidden />
-                <span className="min-w-0 flex-1">Tema resuelto. El agente sigue con lo demás.</span>
+                <span className="min-w-0 flex-1">Tema resuelto. {receptionName} sigue con lo demás.</span>
                 {onNextTopic ? (
                   <Button size="sm" className="min-h-11 sm:min-h-8" onClick={onNextTopic}>
                     Siguiente tema por atender
@@ -1925,7 +1932,7 @@ function ThreadView({
             {threadAttention?.teamLive && threadAttention.agentAttending ? (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
                 <Bot className="size-3.5 shrink-0" aria-hidden />
-                Estás conversando en vivo: el agente espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.
+                Estás conversando en vivo: {receptionName} espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.
               </p>
             ) : null}
             {canRegister && detail.missingData && !linkPasted && detail.whatsappWindow?.open !== false && !windowClosed ? (
@@ -2147,6 +2154,7 @@ function TopicBand({
 }) {
   const [first, ...rest] = topics
   const [showRest, setShowRest] = useState(false)
+  const receptionName = useReceptionName()
   if (!first) return null
   const visible = showRest ? topics : [first]
   return (
@@ -2166,7 +2174,7 @@ function TopicBand({
           <div key={topic.id} className="flex flex-col gap-1.5 text-[13px]">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className={`font-semibold ${topic.urgent ? "text-destructive" : "text-warning"}`}>
-                {mine || free ? "Te toca contestar" : topicWords(topic, myUserId)}
+                {mine || free ? "Te toca contestar" : topicWords(topic, myUserId, receptionName)}
               </span>
               <span className="text-muted-foreground">
                 {free ? (topic.urgent ? "· Ahora · nadie lo tomó" : "· nadie lo tomó") : mine ? "· lo tienes tú" : ""}
@@ -2179,7 +2187,7 @@ function TopicBand({
             </p>
             {told.length > 0 ? (
               <p className="text-xs text-muted-foreground">
-                Ya se le dijo: {told.map((item) => `${item.senderKind === "agent" ? "el agente" : "el equipo"}, «${(item.body ?? "").slice(0, 80)}»`).join(" · ")}
+                Ya se le dijo: {told.map((item) => `${item.senderKind === "agent" ? receptionName : "el equipo"}, «${(item.body ?? "").slice(0, 80)}»`).join(" · ")}
               </p>
             ) : null}
             {canWrite ? (
@@ -2326,7 +2334,8 @@ function MessageBubble({
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
-  // La línea del Administrador solo la abre quien puede ver el agente.
+  const receptionName = useReceptionName()
+  // La línea de Argos solo la abre quien puede ver el agente.
   const canOpenLine = usePermission("agent.read")
   return (
     <Message from={out ? "user" : "assistant"}>
@@ -2342,7 +2351,7 @@ function MessageBubble({
         {byAgent && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold text-primary-soft-foreground">
             <span className="flex items-center gap-1">
-              <Bot className="size-3.5" aria-hidden /> {msg.automatic ? `Automático · ${msg.automatic.name}` : "Agente"}
+              <Bot className="size-3.5" aria-hidden /> {msg.automatic ? `Automático · ${msg.automatic.name}` : receptionName}
             </span>
             {/* Un mensaje automático no es una respuesta de la conversación: dice de qué línea salió. */}
             {msg.automatic && canOpenLine ? (

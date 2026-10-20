@@ -32,7 +32,7 @@ export const Aviso: Story = {
     value: 75_000,
     total: 100_000,
     valueText: "USD 750 de USD 1.000",
-    description: "Al llegar, Recepción pasa los casos nuevos a tu equipo con un mensaje fijo.",
+    description: "Al llegar, Sofi pasa los casos nuevos a tu equipo con un mensaje fijo.",
   },
 }
 

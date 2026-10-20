@@ -854,7 +854,7 @@ export interface ClinicMessageItem {
   title: string
   /** Cuándo sale; en los que envía el agente y en «Presupuesto listo». */
   when: string | null
-  /** Línea del Administrador que lo usa; `enabled`: prendida y con «el agente le escribe». */
+  /** Línea de Argos que lo usa; `enabled`: prendida y con «el agente le escribe». */
   line: { key: string; title: string; enabled: boolean } | null
   current: MessageTextState
   /** Cambio de texto que espera a WhatsApp o que rechazó. */
@@ -916,9 +916,9 @@ function buttonDoes(def: MessageDef, button: MessageButton): string {
   }
   if (button.action === "presupuesto")
     return "Le llega el PDF del presupuesto en la conversación y puede decir ahí qué acepta."
-  if (button.asks === "cambiar") return "Recepción le busca otra fecha en la conversación."
-  if (button.asks === "reservar") return "Recepción le ofrece horarios en la conversación."
-  if (def.origin === "agente") return "Recepción sigue la conversación con la persona."
+  if (button.asks === "cambiar") return "Sofi le busca otra fecha en la conversación."
+  if (button.asks === "reservar") return "Sofi le ofrece horarios en la conversación."
+  if (def.origin === "agente") return "Sofi sigue la conversación con la persona."
   return "La persona responde y tu equipo puede escribirle con libertad durante 24 horas."
 }
 

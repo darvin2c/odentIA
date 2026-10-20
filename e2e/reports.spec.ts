@@ -188,11 +188,11 @@ for (const width of [1440, 390]) {
       await gotoHydrated(page, tenant(owner.org.slug, `/reports?tab=agenda&period=${month}`))
       // Con el administrador apagado no hay aviso.
       await expect(page.getByRole("region", { name: "Cifras de agenda" }).getByRole("region", { name: "No vinieron" })).toContainText("100 %")
-      await expect(page.getByRole("region", { name: "Aviso del administrador" })).toHaveCount(0)
+      await expect(page.getByRole("region", { name: "Aviso de Argos" })).toHaveCount(0)
 
       await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
       await page.reload()
-      const note = page.getByRole("region", { name: "Aviso del administrador" })
+      const note = page.getByRole("region", { name: "Aviso de Argos" })
       await expect(note).toContainText("La inasistencia está en 100 %.")
       // Nombra la línea que sí lo atendería, y dice que está apagada.
       await expect(note).toContainText("«Reprogramar tras una inasistencia» está apagada.")
@@ -200,19 +200,19 @@ for (const width of [1440, 390]) {
 
       // «Ver qué hacer» abre la recomendación de siempre: cómo se calculó, quiénes son y la acción.
       await note.getByRole("button", { name: "Ver qué hacer" }).click()
-      const advice = page.getByRole("region", { name: "Recomendación del administrador" }).or(page.getByRole("dialog", { name: "Recomendación del administrador" })).first()
+      const advice = page.getByRole("region", { name: "Recomendación de Argos" }).or(page.getByRole("dialog", { name: "Recomendación de Argos" })).first()
       await expect(advice.getByText("Cómo se calculó")).toBeVisible()
       await expect(advice.getByRole("link", { name: "Gabriel Núñez" })).toBeVisible()
       // Dos caminos: resolverlo esta vez o prender la línea, que dice quién lo haría.
       await expect(advice.getByRole("button", { name: "Escribirles esta vez" })).toBeVisible()
       await expect(advice.getByRole("link", { name: "Ver su flujo y prender" })).toBeVisible()
-      await expect(advice).toContainText("Lo hace el agente")
+      await expect(advice).toContainText("Lo hace Argos")
       await observe(page, info, "administrador-recomendacion")
       await page.keyboard.press("Escape")
 
       // «No recomendarla más»: el aviso se va sin recargar y la línea sigue en su página.
       await note.getByRole("button", { name: "No recomendarla más" }).click()
-      await expect(page.getByRole("region", { name: "Aviso del administrador" })).toHaveCount(0)
+      await expect(page.getByRole("region", { name: "Aviso de Argos" })).toHaveCount(0)
     })
 
     test("un mes sin movimientos lo dice y ofrece volver al mes en curso", async ({ owner }, info) => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { agendaSummary, attendedPercent, daysAgo, duplicateActions, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
-const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false }
+const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false, receptionName: "Sofi" }
 const task = (patch: Partial<Extract<WaitingRow, { kind: "task" }>>): WaitingRow => ({
   kind: "task", id: "t1", title: "Llamar a Mateo Huamán por su presupuesto", dueAt: null, due: "none",
   href: "/tasks?task=t1", mine: true, assigneeName: "Rosa", opportunityTitle: null, more: 0, ...patch,
@@ -26,7 +26,7 @@ describe("textos de «Te espera»", () => {
       createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", unclaimed: true,
     }
     expect(waitingText(row, context)).toEqual({
-      title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó el agente hace 25 min · Ahora", action: "Tomar",
+      title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min · Ahora", action: "Tomar",
     })
     expect(waitingText({ ...row, priority: "baja", unclaimed: false }, context)).toMatchObject({ action: "Ver el caso" })
     expect(waitingText({ ...row, priority: "baja" }, context).detail).toContain("Sin apuro")
@@ -155,7 +155,7 @@ describe("textos de «Te espera»", () => {
     expect(waitingText({ kind: "budgets", total: 4, oldestPresentedAt: "2026-10-03T15:00:00.000Z", items: [] }, context)).toEqual({
       title: "4 presupuestos esperan respuesta", detail: "El más antiguo se presentó hace 9 días", action: "Ver cuáles",
     })
-    expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más del agente")
+    expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más de Sofi")
     expect(waitingText({ kind: "conversations", waiting: 3, oldestAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }, context)).toMatchObject({
       detail: "La más antigua, hace 2 h", action: "Abrir Bandeja",
     })

@@ -4,7 +4,7 @@ import { useState } from "react"
 const SW = [
   {
     id: "responder",
-    agent: "Recepción",
+    agent: "Sofi",
     label: "Responder mensajes",
     on: "Responde al momento, de día y de noche.",
     off: "Los mensajes esperan a que alguien de tu equipo los vea.",
@@ -12,7 +12,7 @@ const SW = [
   },
   {
     id: "agendar",
-    agent: "Recepción",
+    agent: "Sofi",
     label: "Agendar citas",
     on: "Agenda en los horarios libres de quien atiende ese servicio, con el sí del paciente.",
     off: "Envía su enlace para que la persona elija la hora.",
@@ -20,7 +20,7 @@ const SW = [
   },
   {
     id: "recordar",
-    agent: "Administrador",
+    agent: "Argos",
     label: "Recordar la cita",
     on: "Un día antes y tres horas antes. Viene prendido.",
     off: "Nadie recibe recordatorio.",
@@ -28,7 +28,7 @@ const SW = [
   },
   {
     id: "recuperar",
-    agent: "Administrador",
+    agent: "Argos",
     label: "Avisar los controles",
     on: "Escribe a quien ya le toca su control.",
     off: "Te deja la lista y tu equipo decide a quién llamar.",
@@ -36,7 +36,7 @@ const SW = [
   },
   {
     id: "presupuestos",
-    agent: "Administrador",
+    agent: "Argos",
     label: "Retomar los presupuestos",
     on: "Pregunta por los presupuestos que quedaron sin respuesta.",
     off: "Los presupuestos esperan a tu equipo.",

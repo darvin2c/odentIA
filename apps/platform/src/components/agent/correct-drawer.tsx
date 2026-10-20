@@ -11,6 +11,7 @@ import {
   FAILURE_OPTIONS,
   type LessonItem,
 } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { mutationErrorMessage } from "../../lib/query-error"
 
@@ -59,6 +60,8 @@ export function CorrectDrawer({
 }) {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
+  const receptionName = useReceptionName()
+  const who = target?.agent ? agentName(target.agent, receptionName) : null
   const [failure, setFailure] = useState<CorrectionFailure | null>(null)
   const [text, setText] = useState("")
   useEffect(() => {
@@ -116,7 +119,7 @@ export function CorrectDrawer({
         markOk.reset()
         onClose()
       }}
-      title={target?.agent ? `Corregir una respuesta de ${agentName(target.agent)}` : "Corregir una respuesta"}
+      title={who ? `Corregir una respuesta de ${who}` : "Corregir una respuesta"}
       headerContent={
         target ? (
           <p className="font-heading text-lg leading-snug font-semibold text-foreground">{target.question || "Respuesta del agente"}</p>
@@ -134,7 +137,7 @@ export function CorrectDrawer({
         <>
           {isMobile ? (
             <section aria-label="La respuesta" className="flex flex-col gap-0.5 rounded-2xl rounded-bl-md bg-primary-soft px-3 py-2.5 text-sm">
-              <h3 className="text-xs font-bold text-primary-soft-foreground">El agente respondió</h3>
+              <h3 className="text-xs font-bold text-primary-soft-foreground">{who ?? "El agente"} respondió</h3>
               <p className="whitespace-pre-wrap">{target.reply}</p>
             </section>
           ) : (

@@ -149,13 +149,13 @@ type OrgDetail = z.infer<typeof orgDetailSchema>
 
 /** De dónde sale cada gasto de IA, en palabras (`AI_USAGE_ORIGINS`). */
 const AI_ORIGIN_LABEL: Record<string, string> = {
-  recepcion: "Recepción: conversaciones",
+  recepcion: "Sofi: conversaciones",
   probar: "Probar",
   simulacion: "Simulación desde el registro",
   vista_previa: "Vista previa de lecciones",
-  dictado: "Dictado clínico",
+  dictado: "Clío: dictado clínico",
   practica_dictado: "Práctica de dictado",
-  administrador: "Pedidos al Administrador",
+  administrador: "Pedidos a Argos",
   ya_aviso: "«¿Ya avisó algo?» antes de un seguimiento",
   vectores: "Índice de búsqueda",
   transcripcion: "Notas de voz",
