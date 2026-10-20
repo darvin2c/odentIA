@@ -206,7 +206,7 @@ export const ARGOS_FIGURE_RULES: readonly string[] = [
   "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida. deudas es solo a hoy: la deuda de meses pasados no está en las vistas.",
   "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
   "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo. Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
-  "Volvieron (retención) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses = una cita atendida en el periodo cuya cita atendida anterior fue hace más de N meses.",
+  "Volvieron (retención) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses (llevaba N meses sin venir) = una cita atendida en el periodo cuya cita atendida inmediatamente anterior, la última antes de esa, fue hace más de N meses; tener alguna cita vieja no basta.",
   "Inasistencia (no vinieron) y canceladas = citas con ese citas.estado ÷ citas del periodo con citas.ya_paso, en %.",
   "Espera en sala = mediana de citas.espera_min de las atendidas.",
   "Agenda ocupada = sum(agenda_por_dia.minutos_ocupados) ÷ sum(agenda_por_dia.minutos_disponibles), en %. Horas libres = (minutos_disponibles − minutos_ocupados) ÷ 60.",
