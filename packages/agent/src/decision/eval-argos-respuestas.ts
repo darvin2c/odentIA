@@ -120,19 +120,28 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
       }
     },
     o2: async () => {
-      const rows = await tx.execute<{ name: string; units: number; cents: string; paid: string }>(sql`
-        select pr.name, sum(c.product_quantity)::int as units, sum(c.amount_cents)::text as cents,
-          coalesce(sum((select sum(a.amount_cents) from patient_payment_application a where a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null)), 0)::text as paid
+      // «Vendido» es lo pagado (criterio 2): los productos de conceptos con pago vigente, del mes en curso (D7).
+      const paid = await tx.execute<{ name: string; units: number; cents: string }>(sql`
+        select pr.name, sum(c.product_quantity)::int as units, sum(ap.cents)::text as cents
         from patient_charge c join product pr on pr.organization_id = c.organization_id and pr.id = c.product_id
+        join lateral (select sum(a.amount_cents) as cents from patient_payment_application a
+          join patient_payment pay on pay.organization_id = a.organization_id and pay.id = a.payment_id and pay.voided_at is null
+          where a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null and pay.paid_at >= ${monthStart}::timestamptz) ap on ap.cents > 0
         where c.organization_id = ${ORG} and c.voided_at is null
-        group by 1 order by sum(c.product_quantity) desc, sum(c.amount_cents) desc, 1`)
-      const top = rows[0]
+        group by 1 order by sum(c.product_quantity) desc, sum(ap.cents) desc, 1`)
+      const charged = await tx.execute<{ name: string; units: number }>(sql`
+        select pr.name, sum(c.product_quantity)::int as units
+        from patient_charge c join product pr on pr.organization_id = c.organization_id and pr.id = c.product_id
+        where c.organization_id = ${ORG} and c.voided_at is null and c.created_at >= ${monthStart}::timestamptz
+        group by 1 order by 2 desc, 1`)
+      const top = paid[0]
       return {
         respuesta: top
-          ? `Tu producto más vendido es ${top.name}: ${top.units} vendidos por ${money(Number(top.cents))}. Le sigue ${listOf(rows.slice(1, 3).map((row) => ({ name: row.name, value: `${row.units}` })))}.`
-          : "Todavía no vendiste productos.",
-        criterio: "Productos vendidos en Caja desde siempre (no tratamientos), sin anulados y descontando lo devuelto.",
-        datos: { productos: rows },
+          ? `Este mes tu producto más vendido es ${top.name}: ${top.units} ${top.units === 1 ? "vendido y pagado" : "vendidos y pagados"} por ${money(Number(top.cents))}. ${paid.length > 1 ? `Le sigue ${listOf(paid.slice(1, 3).map((row) => ({ name: row.name, value: `${row.units}, ${money(Number(row.cents))}` })))}.` : ""}`
+          : "Este mes todavía no se pagó ningún producto.",
+        criterio: "Productos (no tratamientos) pagados este mes, sin anulados y descontando lo devuelto; por unidades y después por monto.",
+        nota: `Contando lo vendido aunque no se haya pagado: ${listOf(charged.map((row) => ({ name: row.name, value: `${row.units}` })))}.`,
+        datos: { pagado: paid, cargado: charged },
       }
     },
     o3: async () => {
@@ -244,7 +253,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
         tx.execute<{ person: string; visits: number }>(sql`
           select ${personName} as person, count(*)::int as visits from appointment a ${joinPerson(sql`a.patient_id`)}
           where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= ${since}::timestamptz and a.starts_at < ${now.toISOString()}::timestamptz
-          group by 1 order by 2 desc, 1 limit 5`)
+          group by a.patient_id, pp.display_name order by 2 desc, 1 limit 5`)
       const year = await top(new Date(now.getTime() - 365 * 86_400_000).toISOString())
       const month = await top(monthStart)
       return {
@@ -258,6 +267,8 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
       const [row] = await tx.execute<{ all: number; unbooked: number }>(sql`
         with last as (
           select a.patient_id, max(a.starts_at) as at from appointment a
+          join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+          join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active and pp.screen is null
           where a.organization_id = ${ORG} and a.status = 'atendida' group by 1)
         select count(*) filter (where at < now() - interval '90 days')::int as all,
           count(*) filter (where at < now() - interval '90 days' and not exists (
@@ -266,7 +277,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
         from last`)
       return {
         respuesta: `${row?.all ?? 0} pacientes no han vuelto en los últimos 90 días; de ellos, ${row?.unbooked ?? 0} no tienen cita por venir.`,
-        criterio: "Pacientes con al menos una cita atendida cuya última fue hace más de 90 días.",
+        criterio: "Pacientes no archivados (ni spam) con al menos una cita atendida cuya última fue hace más de 90 días.",
         datos: { row },
       }
     },

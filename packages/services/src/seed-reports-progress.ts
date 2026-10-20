@@ -13,15 +13,19 @@
  *   los últimos 90 días descontadas, cada movimiento con la fecha de su
  *   atención. La limpieza no se descuenta: el algodón que vence pronto es el
  *   de la demostración de Inventario.
+ * - Hoy: siete atenciones firmadas y cobradas en la primera sede (una queda
+ *   debiéndose), para que «¿qué se vendió más hoy?» tenga con qué responderse.
  * Determinista: el orden sale del número de presupuesto y de la hora de la
  * atención, y el azar de un generador con semilla fija. Idempotente: lo ya
  * avanzado tiene fecha de inicio y cada descuento lleva su clave.
  */
+import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { encounter, encounterProcedure, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog } from "@odentia/db/schema/clinical"
 import { product, purchaseOrder, serviceMaterial, supplier } from "@odentia/db/schema/inventory"
 import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { createPurchaseOrder, receivePurchaseOrder } from "./inventory.js"
+import { getOrgLocale } from "./locale.js"
 import { discountEncounterMaterials, setServiceMaterials } from "./service-materials.js"
 import { chunks, generator } from "./seed-reports.js"
 
@@ -231,5 +235,139 @@ export async function seedReportsProgress(tx: Db, input: ReportsProgressSeedInpu
     .select({ serviceId: serviceMaterial.serviceId })
     .from(serviceMaterial)
     .where(eq(serviceMaterial.organizationId, orgId))
-  return { progress, discounted, services: new Set(configured.map((row) => row.serviceId)).size }
+
+  const today = await seedTodaySales(tx, input)
+  return { progress, discounted, services: new Set(configured.map((row) => row.serviceId)).size, today }
+}
+
+/** Lo atendido y cobrado hoy en la primera sede: la historia termina hace dos días y la demostración casi no vende. */
+const TODAY_VISITS: Array<{ code: string; paid: boolean }> = [
+  { code: "LIMPIEZA", paid: true },
+  { code: "OBTURACION", paid: true },
+  { code: "LIMPIEZA", paid: true },
+  { code: "BLANQUEAMIENTO", paid: true },
+  { code: "LIMPIEZA", paid: true },
+  { code: "OBTURACION", paid: true },
+  { code: "EXODONCIA", paid: false },
+]
+const TODAY_MARK = "Semilla: atención de hoy."
+const TODAY_METHODS = [
+  { name: "Yape", typeCode: "68" },
+  { name: "Efectivo", typeCode: "10" },
+  { name: "Tarjeta", typeCode: "48" },
+]
+
+/**
+ * Atenciones firmadas hoy, entre el inicio del día de la clínica y ahora, con su
+ * cargo; todas se pagan al salir salvo la última, que queda debiéndose. Son de
+ * pacientes de la historia sin borrador, elegidos por nombre.
+ */
+async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<number> {
+  const { orgId, ownerUserId } = input
+  const branchId = input.branchIds[0]
+  if (!branchId) return 0
+  const [done] = await tx.execute<{ id: string }>(sql`select id from encounter where organization_id = ${orgId} and evolution = ${TODAY_MARK} limit 1`)
+  if (done) return 0
+  const { timezone, currency } = await getOrgLocale(tx, orgId)
+  const [day] = await tx.execute<{ start: Date | string }>(sql`select (date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone}) as start`)
+  const dayStart = new Date(day?.start ?? Date.now()).getTime()
+  const dentists = await tx.execute<{ userId: string; signerName: string; registration: string }>(sql`
+    select distinct on (e.dentist_user_id) e.dentist_user_id as "userId", e.signer_name as "signerName", e.signer_registration as registration
+    from encounter e
+    where e.organization_id = ${orgId} and e.branch_id = ${branchId} and e.status = 'finalizada' and e.signer_registration is not null
+    order by e.dentist_user_id, e.finalized_at desc`)
+  const patients = await tx.execute<{ id: string }>(sql`
+    select p.id from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where p.organization_id = ${orgId}
+      and exists (select 1 from appointment a where a.organization_id = p.organization_id and a.patient_id = p.id and a.status = 'atendida' and a.starts_at < now() - interval '30 days')
+      and not exists (select 1 from appointment a where a.organization_id = p.organization_id and a.patient_id = p.id and a.starts_at > now() - interval '3 days')
+      and not exists (select 1 from encounter e where e.organization_id = p.organization_id and e.patient_id = p.id and e.status = 'borrador')
+    order by pp.display_name, p.id limit ${TODAY_VISITS.length}`)
+  const services = await tx
+    .select({ id: serviceCatalog.id, code: serviceCatalog.code, name: serviceCatalog.name, priceCents: serviceCatalog.priceCents })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.code, [...new Set(TODAY_VISITS.map((visit) => visit.code))])))
+  if (dentists.length === 0 || patients.length < TODAY_VISITS.length) return 0
+  const span = Math.max(Date.now() - dayStart, 60_000)
+  let count = 0
+  for (const [index, visit] of TODAY_VISITS.entries()) {
+    const service = services.find((row) => row.code === visit.code)
+    const patientId = patients[index]?.id
+    const dentist = dentists[index % dentists.length]
+    if (!service || service.priceCents === null || !patientId || !dentist) continue
+    // Repartidas en lo que va del día: nunca en el futuro, aunque la semilla corra temprano.
+    const endedAt = new Date(dayStart + Math.round((span * (index + 1)) / (TODAY_VISITS.length + 1)))
+    const startedAt = new Date(endedAt.getTime() - 30 * 60_000)
+    const encounterId = randomUUID()
+    const procedureId = randomUUID()
+    const chargeId = randomUUID()
+    await tx.insert(encounter).values({
+      id: encounterId,
+      organizationId: orgId,
+      patientId,
+      branchId,
+      dentistUserId: dentist.userId,
+      reason: service.name,
+      evolution: TODAY_MARK,
+      startedAt,
+      signerName: dentist.signerName,
+      signerTitle: "Cirujano dentista",
+      signerRegistration: dentist.registration,
+    })
+    await tx.insert(encounterProcedure).values({
+      id: procedureId,
+      organizationId: orgId,
+      encounterId,
+      serviceId: service.id,
+      description: service.name,
+      quantity: 1,
+      priceCents: service.priceCents,
+      currency,
+      createdBy: dentist.userId,
+      createdAt: endedAt,
+    })
+    await tx.execute(sql`
+      update encounter set status = 'finalizada', ended_at = ${endedAt.toISOString()}::timestamptz, finalized_at = ${endedAt.toISOString()}::timestamptz, finalized_by = dentist_user_id
+      where organization_id = ${orgId} and id = ${encounterId}`)
+    await tx.insert(patientCharge).values({
+      id: chargeId,
+      organizationId: orgId,
+      patientId,
+      encounterProcedureId: procedureId,
+      branchId,
+      description: service.name,
+      amountCents: service.priceCents,
+      currency,
+      createdBy: dentist.userId,
+      createdAt: endedAt,
+    })
+    if (visit.paid) {
+      const paymentId = randomUUID()
+      const method = TODAY_METHODS[index % TODAY_METHODS.length] ?? TODAY_METHODS[0]
+      const paidAt = new Date(endedAt.getTime() + 5 * 60_000 > Date.now() ? endedAt.getTime() : endedAt.getTime() + 5 * 60_000)
+      await tx.insert(patientPayment).values({
+        id: paymentId,
+        organizationId: orgId,
+        patientId,
+        branchId,
+        amountCents: service.priceCents,
+        currency,
+        paidAt,
+        methodName: method?.name ?? "Efectivo",
+        methodTypeCode: method?.typeCode ?? "10",
+        createdBy: ownerUserId,
+      })
+      await tx.insert(patientPaymentApplication).values({
+        organizationId: orgId,
+        patientId,
+        paymentId,
+        chargeId,
+        amountCents: service.priceCents,
+        createdBy: ownerUserId,
+        createdAt: paidAt,
+      })
+    }
+    count += 1
+  }
+  return count
 }
