@@ -358,6 +358,13 @@
       "when": 1792531393358,
       "tag": "0050_argos_vistas_del_negocio",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792533496358,
+      "tag": "0051_argos_guarda_la_consulta",
+      "breakpoints": true
     }
   ]
 }

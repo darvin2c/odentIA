@@ -13,6 +13,7 @@ import { encounter, encounterProcedure, patientCharge } from "@odentia/db/schema
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
+import { ARGOS_CATALOG, argosViewsOf } from "./argos-catalog.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createExpense, setCommissionRate } from "./finance.js"
@@ -66,6 +67,36 @@ describe("las llaves de Argos", () => {
     await expect(raw("select count(*) from argos.agenda_base")).rejects.toThrow()
     // El rol app sigue fijando su clínica.
     expect(await withOrgContext(appDb, "org_a", async () => true)).toBe(true)
+  })
+
+  it("el catálogo que lee el modelo es el de la base: vistas, columnas en orden y llaves", async () => {
+    const columns = await ownerDb.execute<{ view: string; names: string }>(sql`
+      select table_name as view, string_agg(column_name, ',' order by ordinal_position) as names
+      from information_schema.columns where table_schema = 'argos' and table_name <> 'agenda_base' group by table_name`)
+    const described = (text: string) => {
+      // Las columnas van separadas por comas fuera de los paréntesis; cada una empieza con su nombre.
+      const names: string[] = []
+      let depth = 0
+      let current = ""
+      for (const char of `${text},`) {
+        if (char === "(") depth += 1
+        if (char === ")") depth -= 1
+        if (char === "," && depth === 0) {
+          names.push(current.trim().split(/[\s(]/)[0] ?? "")
+          current = ""
+        } else current += char
+      }
+      return names.join(",")
+    }
+    expect(Object.fromEntries([...columns].map((row) => [row.view, row.names]))).toEqual(
+      Object.fromEntries(ARGOS_CATALOG.map((view) => [view.name, described(view.columns)])),
+    )
+    for (const key of ["gestion", "recepcion", "clinico", "caja"] as const) {
+      const granted = await ownerDb.execute<{ view: string }>(sql`
+        select c.relname as view from pg_class c join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'argos' and has_table_privilege(${`argos_${key}`}, c.oid, 'select')`)
+      expect([...granted].map((row) => row.view).sort(), key).toEqual(argosViewsOf(key).map((view) => view.name).sort())
+    }
   })
 
   it("lo que no tiene valor nunca sale primero", async () => {

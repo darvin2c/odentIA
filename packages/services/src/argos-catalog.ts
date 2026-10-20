@@ -1,0 +1,228 @@
+/**
+ * Lo que el modelo de Argos sabe de las vistas del negocio (ADR 0073): qué es
+ * cada vista, sus columnas y qué llave la lee. Es la única descripción: el
+ * modelo recibe solo las vistas que lee el rol de quien pregunta, y una prueba
+ * compara este catálogo con las vistas y los permisos reales de la base
+ * (`argos-views.test.ts`). Una vista o columna nueva se describe aquí en el
+ * mismo cambio que la migración.
+ */
+
+/** La llave de base de cada rol (`argosRoleOf`), sin el prefijo `argos_`. */
+export type ArgosKey = "gestion" | "recepcion" | "clinico" | "caja"
+
+export interface ArgosView {
+  name: string
+  /** Qué es una fila y la regla de odentIA que ya trae. */
+  about: string
+  /** Columnas en orden, con lo que no se deduce del nombre. */
+  columns: string
+  keys: readonly ArgosKey[]
+}
+
+const ALL: readonly ArgosKey[] = ["gestion", "recepcion", "clinico", "caja"]
+
+export const ARGOS_CATALOG: readonly ArgosView[] = [
+  {
+    name: "ventas",
+    about:
+      "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado. «Ticket promedio» es el promedio de «importe» de estas filas.",
+    columns:
+      "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta), sede, profesional (quien atendió), promocion",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "cobros",
+    about:
+      "Cada movimiento de lo cobrado. Sumar «importe» en un periodo da LO COBRADO de la clínica: pagos menos anulaciones y devoluciones de ese periodo.",
+    columns: "momento (timestamptz), dia, tipo ('pago'|'anulacion'|'devolucion'), importe (negativo en anulación y devolución), medio (Efectivo, Yape, Tarjeta…), sede, paciente, paciente_id",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "pagos_por_venta",
+    about: "Lo pagado aplicado a cada venta: qué se pagó y de qué. Solo pagos vigentes. «Lo que más se vendió» es lo que más se pagó: se mide aquí.",
+    columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, medio",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "tickets",
+    about: "Los tickets de pago. odentIA no emite facturas ni boletas: solo tickets. Un ticket junta lo cobrado en una visita, no es una venta.",
+    columns: "numero, emitido_en (timestamptz), dia, sede, paciente, total, a_favor_usado, anulado (bool)",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "deudas",
+    about:
+      "Lo que debe cada paciente, a hoy (una fila por paciente que debe): lo cargado sin pagar menos lo que tiene a favor. «Te deben» es la suma de «saldo». Su deuda está vencida si su venta más antigua sin pagar tiene más de 30 días.",
+    columns: "paciente_id, paciente, debe, a_favor, saldo, vencida (bool), desde (date: su venta sin pagar más antigua), dias (desde entonces)",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "gastos",
+    about:
+      "Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento.",
+    columns:
+      "momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»), monto, sede",
+    keys: ["gestion", "caja"],
+  },
+  {
+    name: "comisiones",
+    about:
+      "Comisiones de los profesionales, como Finanzas › Comisiones: cada cobro de lo que atendió un profesional con su porcentaje. Cuenta al cobrar (momento del cobro).",
+    columns: "momento (timestamptz), dia, profesional, base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea), sin_pagar",
+    keys: ["gestion"],
+  },
+  {
+    name: "citas",
+    about: "Una fila por cita de la agenda.",
+    columns:
+      "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi)",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
+    name: "agenda_por_dia",
+    about:
+      "Las horas de cada profesional por día, de 400 días atrás a 60 adelante: su horario, lo disponible (horario menos bloqueos y feriados) y lo ocupado por citas no canceladas. «Agenda ocupada» = minutos_ocupados ÷ minutos_disponibles; «horas libres» = disponibles − ocupados.",
+    columns: "dia, dia_semana, sede, profesional, minutos_horario, minutos_disponibles, minutos_ocupados, horario_supuesto (bool: antes de su primer horario guardado se usa el de hoy)",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
+    name: "agenda_por_hora",
+    about: "Lo mismo por hora del día (solo las horas con algo disponible): para saber en qué horarios hay más espacio.",
+    columns: "dia, dia_semana, hora (0-23), sede, profesional, minutos_disponibles, minutos_ocupados",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
+    name: "pacientes",
+    about:
+      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion. «Activos» = atendidos en los 18 meses anteriores. «Sin venir» (dejaron de venir) = no archivados con ultima_atencion hace más de 6 meses, sin proxima_cita, sin presupuesto_esperando y sin control_pendiente.",
+    columns:
+      "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en",
+    keys: ALL,
+  },
+  {
+    name: "tratamientos_hechos",
+    about: "Lo realizado: procedimientos de atenciones firmadas, sin anulados. Sin diagnósticos ni notas.",
+    columns:
+      "fecha (timestamptz), dia, paciente, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: 'Endodoncia', 'Cirugía oral', 'Odontología general'…), cantidad, precio",
+    keys: ["gestion", "clinico"],
+  },
+  {
+    name: "planes",
+    about:
+      "Cada tratamiento indicado en los planes, con la decisión del paciente y su avance. «En proceso» = estado 'en_curso'; «no iniciado» = aceptado y aún 'pendiente' o 'programado'. No hay fecha prevista de término.",
+    columns:
+      "plan_id, paciente, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
+    keys: ["gestion", "clinico"],
+  },
+  {
+    name: "controles",
+    about: "Controles clínicos programados a los pacientes (sin el texto de las indicaciones).",
+    columns: "paciente, tipo ('tratamiento'|'mantenimiento'), vence_en (timestamptz), vence_dia, estado ('pendiente'|'programado'|'realizado'|'cancelado'), tiene_cita (bool), hecho_en",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
+    name: "presupuestos",
+    about:
+      "Un presupuesto entregado por fila; los importes son de la opción que vale (nunca sumar opciones). «Aceptaron» = estado 'aceptado' o 'parcial' sobre los entregados. Esperan respuesta los de espera_respuesta.",
+    columns:
+      "presupuesto_id, numero, paciente, presentado_en (timestamptz), presentado_dia, estado ('presentado'|'aceptado'|'parcial'|'pospuesto'|'rechazado'|'sustituido'|'cancelado'), decidido_en, profesional (quien lo armó), valor, aceptado (lo aceptado), sin_decidir (pendiente o pospuesto), espera_respuesta (bool)",
+    keys: ALL,
+  },
+  {
+    name: "lineas_presupuesto",
+    about: "Cada tratamiento de la opción que vale de un presupuesto entregado.",
+    columns:
+      "presupuesto_id, numero, paciente, presentado_en, presentado_dia, estado_presupuesto, tratamiento, decision ('aceptado'|'rechazado'|'pospuesto'|'pendiente'), importe, promocion",
+    keys: ALL,
+  },
+  {
+    name: "promociones",
+    about: "Las promociones de la clínica.",
+    columns: "nombre, inicio, fin (timestamptz o null), activa (bool), vigente_hoy (bool: activa y dentro de sus fechas)",
+    keys: ALL,
+  },
+  {
+    name: "promociones_uso",
+    about: "Cada vez que alguien usó una promoción: en un presupuesto entregado o en un cobro.",
+    columns: "promocion, paciente, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día)",
+    keys: ["gestion"],
+  },
+  {
+    name: "lotes",
+    about: "Los lotes con existencias, por sede, a hoy.",
+    columns: "producto, unidad, sede, lote, vence (date o null), cantidad, estado ('vigente'|'por_vencer': vence en 30 días o menos|'vencido'|'sin_vencimiento')",
+    keys: ["gestion", "recepcion"],
+  },
+  {
+    name: "inventario",
+    about: "Un producto activo por sede, a hoy. Sin costos.",
+    columns:
+      "producto, unidad, sede, hay (negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida",
+    keys: ["gestion", "recepcion"],
+  },
+  {
+    name: "movimientos_inventario",
+    about: "Lo que entró y salió del inventario. El consumo se registra por atención, no por procedimiento.",
+    columns:
+      "fecha (timestamptz), dia, tipo ('consumo': usado en una atención|'venta'|'ingreso': compra recibida|'ajuste'|'traslado'|'devolucion'|'cobertura'), producto, unidad, cantidad (negativa si salió), sede, profesional (en el consumo, quien atendió), paciente",
+    keys: ["gestion", "recepcion"],
+  },
+  {
+    name: "compras",
+    about: "Órdenes de compra a proveedores. Los lotes no guardan su costo: el inventario no se puede valorizar.",
+    columns: "numero, proveedor, sede, estado ('borrador'|'confirmada'|'parcialmente_recibida'|'recibida'|'cerrada'|'cancelada'), creada_en, dia, total, recibido, pagado",
+    keys: ["gestion"],
+  },
+  {
+    name: "conversaciones",
+    about: "Conversaciones con personas por los canales (sin mensajes). No hay campañas ni encuestas.",
+    columns:
+      "inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta'|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, es_paciente (bool), agente ('on'|'off'), asignada_a",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
+    name: "oportunidades",
+    about: "Ventas en curso del CRM: el interés de una persona por un servicio.",
+    columns:
+      "creada_en (timestamptz), dia, etapa (nombre del paso), momento ('interesado'|'evaluacion_agendada'|'presupuesto_enviado'|'decidio'), estado ('open'|'won'|'lost'), servicio, valor, cerrada_en, motivo_cierre ('precio'|'otra_clinica'|'no_responde'|'no_lo_necesita'|'otro'|'rechazo_presupuesto'|'acepto'|'acepto_presupuesto'), persona, responsable",
+    keys: ["gestion", "recepcion"],
+  },
+  {
+    name: "tareas",
+    about: "Tareas del equipo (sin su texto).",
+    columns: "creada_en, vence_en (timestamptz), estado ('open'|'done'|'cancelled'), area, tipo, dejada_por ('equipo'|'agent'|'admin'), responsable",
+    keys: ["gestion"],
+  },
+]
+
+/**
+ * Cómo salen las cifras de Reportes con estas vistas: la misma cuenta que la
+ * pantalla (cada una tiene su prueba de cuadre).
+ */
+export const ARGOS_FIGURE_RULES: readonly string[] = [
+  "Lo cobrado = sum(cobros.importe) del periodo.",
+  "Lo que deja (lo que ganó la clínica) = lo cobrado − sum(comisiones.comision) − sum(gastos.monto) con tipo <> 'pago_de_comisiones', del mismo periodo. Solo cuenta los gastos registrados.",
+  "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida.",
+  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo.",
+  "Inasistencia (no vinieron) y canceladas = citas con ese citas.estado ÷ citas del periodo con citas.ya_paso, en %.",
+  "Espera en sala = mediana de citas.espera_min de las atendidas.",
+  "Agenda ocupada = sum(agenda_por_dia.minutos_ocupados) ÷ sum(agenda_por_dia.minutos_disponibles), en %.",
+  "Presupuestos aceptados = presupuestos.estado 'aceptado' o 'parcial' ÷ presupuestos entregados en el periodo, en %.",
+]
+
+/** Las vistas que lee una llave. */
+export function argosViewsOf(key: ArgosKey): readonly ArgosView[] {
+  return ARGOS_CATALOG.filter((view) => view.keys.includes(key))
+}
+
+/** El catálogo en texto, para el modelo: solo las vistas de la llave y las reglas que usan solo esas vistas. */
+export function argosCatalogText(key: ArgosKey): string {
+  const views = argosViewsOf(key)
+  const names = new Set(views.map((view) => view.name))
+  const rules = ARGOS_FIGURE_RULES.filter((rule) => [...rule.matchAll(/\b([a-z_]+)\./g)].every((match) => names.has(match[1] ?? "")))
+  return [
+    "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
+    ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
+    ...(rules.length ? ["\nCifras de Reportes con estas vistas:", ...rules.map((rule) => `- ${rule}`)] : []),
+  ].join("\n")
+}

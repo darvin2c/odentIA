@@ -19,12 +19,17 @@ export const reportQuestion = pgTable("report_question", {
   /** Clave del catálogo de cifras (`REPORT_FIGURES`); nula si no eligió ninguna. */
   figure: text("figure"),
   groupBy: text("group_by"),
+  /**
+   * La consulta que corrió Argos sobre las vistas del negocio (ADR 0073,
+   * decisión D2): se guarda la consulta, nunca el texto de la pregunta.
+   */
+  query: text("query"),
   /** La pregunta pasó por el modelo de decisión: tocar una opción no cuenta para el tope. */
   usedModel: boolean("used_model").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("report_question_org_date_idx").on(table.organizationId, table.createdAt),
-  check("report_question_outcome_check", sql`${table.outcome} in ('respondida','pregunta','no_sabe','clinico','accion','otro','no_pudo')`),
+  check("report_question_outcome_check", sql`${table.outcome} in ('respondida','parcial','pregunta','no_sabe','clinico','accion','ayuda','otro','no_pudo')`),
 ])
 
 /**

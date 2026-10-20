@@ -8,48 +8,29 @@
  */
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
+import { ARGOS_CATALOG, type ArgosKey } from "./argos-catalog.js"
 
 /** La llave de base de cada rol de la aplicación. `member` no pregunta. */
-const ARGOS_ROLES: Record<string, string> = {
-  owner: "argos_gestion",
-  admin: "argos_gestion",
-  reception: "argos_recepcion",
-  dentist: "argos_clinico",
-  cashier: "argos_caja",
+const ARGOS_KEYS: Record<string, ArgosKey> = {
+  owner: "gestion",
+  admin: "gestion",
+  reception: "recepcion",
+  dentist: "clinico",
+  cashier: "caja",
 }
 
+export function argosKeyOf(memberRole: string): ArgosKey | null {
+  return ARGOS_KEYS[memberRole.trim().toLowerCase()] ?? null
+}
+
+/** El rol de base de la llave (`SET LOCAL ROLE`). */
 export function argosRoleOf(memberRole: string): string | null {
-  return ARGOS_ROLES[memberRole.trim().toLowerCase()] ?? null
+  const key = argosKeyOf(memberRole)
+  return key ? `argos_${key}` : null
 }
 
-/** Las vistas que una consulta puede nombrar (con o sin `argos.`). `agenda_base` es interna. */
-export const ARGOS_VIEWS = [
-  "ventas",
-  "cobros",
-  "pagos_por_venta",
-  "tickets",
-  "deudas",
-  "gastos",
-  "comisiones",
-  "citas",
-  "agenda_por_dia",
-  "agenda_por_hora",
-  "pacientes",
-  "tratamientos_hechos",
-  "planes",
-  "controles",
-  "presupuestos",
-  "lineas_presupuesto",
-  "promociones",
-  "promociones_uso",
-  "lotes",
-  "inventario",
-  "movimientos_inventario",
-  "compras",
-  "conversaciones",
-  "oportunidades",
-  "tareas",
-] as const
+/** Las vistas que una consulta puede nombrar (con o sin `argos.`): las del catálogo. `agenda_base` es interna. */
+export const ARGOS_VIEWS: readonly string[] = ARGOS_CATALOG.map((view) => view.name)
 
 /** Funciones y palabras que pueden ir antes de un paréntesis. */
 const ALLOWED_CALLS = new Set([
@@ -80,7 +61,7 @@ const LITERAL = /'(?:[^']|'')*'/g
  */
 function nullsLast(text: string): string {
   return text
-    .split(new RegExp(`(${LITERAL.source})`))
+    .split(/('(?:[^']|'')*')/)
     .map((part, index) => (index % 2 === 1 ? part : part.replace(/\bdesc\b(?!\s+nulls\b)/gi, "desc nulls last")))
     .join("")
 }
@@ -133,10 +114,39 @@ export class ArgosQueryError extends Error {
   }
 }
 
+/** Qué es cada columna del resultado, por su tipo en la base: así se le da formato sin adivinar. */
+export type ArgosColumnKind = "number" | "date" | "timestamp" | "boolean" | "text"
+
 export interface ArgosQueryResult {
-  rows: Array<Record<string, unknown>>
+  columns: Array<{ name: string; kind: ArgosColumnKind }>
+  /** Valores listos para JSON: números como número, `date` como `AAAA-MM-DD` y `timestamptz` en ISO. */
+  rows: Array<Record<string, string | number | boolean | null>>
   /** Había más filas que el tope: la respuesta lo dice. */
   truncated: boolean
+}
+
+/** Tipos de PostgreSQL por su oid (`pg_type`). */
+const KIND_OF_TYPE: Record<number, ArgosColumnKind> = {
+  16: "boolean",
+  20: "number",
+  21: "number",
+  23: "number",
+  700: "number",
+  701: "number",
+  1700: "number",
+  1082: "date",
+  1114: "timestamp",
+  1184: "timestamp",
+}
+
+function plainValue(value: unknown, kind: ArgosColumnKind): string | number | boolean | null {
+  if (value === null || value === undefined) return null
+  if (kind === "number") return typeof value === "number" ? value : Number(value)
+  if (kind === "boolean") return value === true || value === "t" || value === "true"
+  // Una fecha llega como la medianoche UTC de ese día: se toma su día, no se pasa a otra zona.
+  if (kind === "date") return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10)
+  if (kind === "timestamp") return value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString()
+  return typeof value === "object" ? JSON.stringify(value) : String(value)
 }
 
 /** Tope de filas y de tiempo de una consulta de Argos. */
@@ -170,8 +180,11 @@ export async function runArgosQuery(
       await tx.execute(sql.raw(`set local role ${role}`))
       await tx.execute(sql.raw(`set local statement_timeout = ${timeout}`))
       await tx.execute(sql.raw("set local search_path = argos"))
-      const rows = [...(await tx.execute<Record<string, unknown>>(sql.raw(`select * from (${review.sql}) as argos_respuesta limit ${limit + 1}`)))]
-      return { rows: rows.slice(0, limit), truncated: rows.length > limit }
+      const result = await tx.execute<Record<string, unknown>>(sql.raw(`select * from (${review.sql}) as argos_respuesta limit ${limit + 1}`))
+      const described = (result as unknown as { columns?: Array<{ name: string; type: number }> }).columns ?? []
+      const columns = described.map((column) => ({ name: column.name, kind: KIND_OF_TYPE[column.type] ?? ("text" as const) }))
+      const rows = [...result].slice(0, limit).map((row) => Object.fromEntries(columns.map((column) => [column.name, plainValue(row[column.name], column.kind)])))
+      return { columns, rows, truncated: result.length > limit }
     })
   } catch (error) {
     const cause = (error as { cause?: { code?: string; message?: string } }).cause ?? (error as { code?: string; message?: string })

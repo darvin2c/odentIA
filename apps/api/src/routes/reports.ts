@@ -7,7 +7,7 @@
  * Además: preguntarle a Argos (ADR 0070), las respuestas fijadas, las metas,
  * el resumen del lunes de cada persona y «Descargar» en CSV (ADR 0071).
  */
-import { asAdminDecider, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
+import { asAdminDecider, askArgos, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
 import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
@@ -75,6 +75,19 @@ const askInput = z.union([
   reportQuery.extend({ text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga") }).strict(),
   z.object({ query: askQuery }).strict(),
 ])
+
+/**
+ * Una pregunta al Argos de las vistas (ADR 0073). Desde Reportes llevan su
+ * periodo y su sede (D7); la anterior de la conversación va con su consulta
+ * (D3) y solo se le muestra al modelo: no se corre ni se guarda.
+ */
+const argosInput = z
+  .object({
+    text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga"),
+    screen: reportQuery.optional(),
+    previous: z.object({ text: z.string().trim().max(500), query: z.string().trim().max(4000) }).strict().nullable().optional(),
+  })
+  .strict()
 
 const pinInput = z.object({ figure: z.string().min(1).max(60), group: z.enum(FIGURE_GROUPS), focus: z.string().max(60).nullable().optional() }).strict()
 
@@ -202,6 +215,29 @@ export function createReportsRoute(deps: ReportsDeps) {
       const screen = { period: body.period, branchId: body.branchId }
       return withOrgContext(deps.db, orgId, (tx) => resolveReportQuestion(tx, orgId, userId, body.text, understood, screen, options))
     })
+  })
+
+  // --- Argos sobre las vistas del negocio (ADR 0073) -----------------------------------
+
+  /**
+   * Jev decide la fila y ChatGPT 6 escribe la consulta; corre con la llave del
+   * rol de quien pregunta. Todo lo que se paga al proveedor queda medido con el
+   * origen `reportes`.
+   */
+  app.post("/argos", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    const parsed = argosInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const body = parsed.data
+    return runService(c, 200, () =>
+      meterAiUse(deps.db, orgId, "reportes", () =>
+        askArgos(
+          deps.db,
+          { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey },
+          { orgId, userId, memberRole, text: body.text, ...(body.screen ? { screen: body.screen } : {}), previous: body.previous ?? null },
+        ),
+      ),
+    )
   })
 
   app.get("/pins", async (c) => {

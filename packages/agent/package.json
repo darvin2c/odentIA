@@ -14,6 +14,7 @@
     "eval:knowledge": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-knowledge.ts",
     "eval:admin": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-admin.ts",
     "eval:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-reports.ts",
+    "eval:argos": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-argos.ts",
     "eval:argos-respuestas": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-argos-respuestas.ts",
     "eval:off-topic": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-fuera-de-tema.ts",
     "eval:spam": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-spam.ts",
