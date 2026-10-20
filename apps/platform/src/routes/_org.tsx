@@ -60,6 +60,7 @@ import {
   useAgentPanelSummary,
 } from "../components/agent-panel"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
+import { ArgosPanel } from "../components/argos/argos-panel"
 import { HelpButton } from "../components/help-panel"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
@@ -369,6 +370,8 @@ function OrgLayout() {
               <>
                 <GlobalSearchButton />
                 <HelpButton />
+                {/* Argos no tiene botón: lo abren el buscador y Reportes. */}
+                <ArgosPanel />
                 <WorkspaceNotifications />
                 <AgentPanelButton />
               </>

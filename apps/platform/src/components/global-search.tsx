@@ -20,7 +20,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@odentia/ui/components/command"
-import { DataRefreshMarker } from "@odentia/ui-patterns"
+import { AgentMark, DataRefreshMarker } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -53,6 +53,8 @@ import {
   useState,
 } from "react"
 import { apiFetch } from "../lib/api"
+import { ADMIN_NAME } from "../lib/agent-names"
+import { type ArgosRoute, openArgos, routeArgos } from "../lib/argos"
 import { useMyRole, useMyUserId } from "../lib/crm"
 import {
   askHelp,
@@ -257,6 +259,22 @@ function GlobalSearchDialog({
     return () => clearTimeout(timer)
   }, [query])
 
+  // La fila de Argos (D1, tablero 1): cuando se deja de escribir, Jev decide si es una pregunta de los
+  // datos, de cómo se usa odentIA o algo para buscar. Solo para quien ve Reportes; Recepción, como hoy.
+  const asksArgos = canAccess(role, "reports.read")
+  const [routeText, setRouteText] = useState("")
+  useEffect(() => {
+    const timer = setTimeout(() => setRouteText(query.trim()), 600)
+    return () => clearTimeout(timer)
+  }, [query])
+  const routing = useQuery({
+    queryKey: ["argos-route", routeText],
+    queryFn: ({ signal }) => routeArgos(routeText, signal).then((body) => body.data.route),
+    enabled: asksArgos && routeText.length >= 3,
+    staleTime: 300_000,
+    retry: false,
+  })
+
   // Los tipos que esta persona puede ver; el filtro solo ofrece esos.
   const available = SEARCH_TYPES.filter((type) => {
     const permissions = SEARCH_TYPE_PERMISSIONS[type]
@@ -323,22 +341,24 @@ function GlobalSearchDialog({
 
   const text = query.trim()
   const typing = text.length >= 2
+  const route: ArgosRoute | undefined = asksArgos && routeText === text ? routing.data : undefined
+  /** Qué fila de preguntar va primero, arriba de los resultados; sin decidir o algo para buscar, al final. */
+  const askFirst = route === "negocio" ? "argos" : route === "ayuda" ? "ayuda" : null
   const data = typing ? search.data : undefined
   const screenMatches = typing
     ? screens.filter((screen) => fold(screen.label).includes(fold(text))).slice(0, 4)
     : screens.slice(0, 6)
-  // Al llegar resultados, la fila elegida es lo primero que se encontró (no la que quedó de antes).
-  const firstValue = data?.owners[0]
-    ? `dueño:${data.owners[0].key}`
-    : data?.meaning[0]
-      ? `dueño:${data.meaning[0].key}`
-      : typing
-        ? "preguntar-ayuda"
-        : recents[0]
-          ? `reciente:${recents[0].id}`
-          : screens[0]
-            ? `pantalla:${screens[0].to}`
-            : ""
+  /** La fila elegida al abrir o al llegar resultados (no la que quedó de antes). */
+  function firstRow(): string {
+    if (typing && askFirst === "argos") return "preguntar-argos"
+    if (typing && askFirst === "ayuda") return "preguntar-ayuda"
+    if (data?.owners[0]) return `dueño:${data.owners[0].key}`
+    if (data?.meaning[0]) return `dueño:${data.meaning[0].key}`
+    if (typing) return asksArgos ? "preguntar-argos" : "preguntar-ayuda"
+    if (recents[0]) return `reciente:${recents[0].id}`
+    return screens[0] ? `pantalla:${screens[0].to}` : ""
+  }
+  const firstValue = firstRow()
   const [selected, setSelected] = useState("")
   useEffect(() => setSelected(firstValue), [firstValue])
   const nothing =
@@ -350,6 +370,57 @@ function GlobalSearchDialog({
     !data?.meaning.length &&
     !screenMatches.length
   const canRegister = canAccess(role, "patients.write")
+
+  const argosRow = asksArgos ? (
+    <CommandItem
+      key="argos"
+      value="preguntar-argos"
+      onSelect={() => {
+        onClose()
+        // Con la fila ya decidida no se le pregunta otra vez a Jev: quien la eligió quiere a Argos.
+        openArgos({ question: text, ...(route ? { routed: true } : {}) })
+      }}
+      className="gap-3 px-3 py-2"
+    >
+      <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center">
+        <AgentMark size="sm" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate font-medium">{route ? `Preguntarle a ${ADMIN_NAME}: «${text}»` : `Preguntar: «${text}»`}</span>
+        <span className="text-xs text-muted-foreground">
+          {route ? "Responde con los datos de la clínica que tú puedes ver" : `Viendo si es para ${ADMIN_NAME} o para Ayuda…`}
+        </span>
+      </span>
+      <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Preguntar</CommandShortcut>
+    </CommandItem>
+  ) : null
+  const helpRow = (
+    <CommandItem
+      key="ayuda"
+      value="preguntar-ayuda"
+      onSelect={() => {
+        onClose()
+        askHelp(text)
+      }}
+      className="gap-3 px-3 py-2"
+    >
+      <span
+        aria-hidden="true"
+        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground [&_svg]:size-[18px]"
+      >
+        <CircleHelp />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate font-medium">Preguntarle a Ayuda: «{text}»</span>
+        <span className="text-xs text-muted-foreground">Te enseña a usar odentIA; no conoce cifras</span>
+      </span>
+    </CommandItem>
+  )
+  const askRows = (
+    <CommandGroup heading="Preguntar" className={askFirst ? undefined : "mt-2"}>
+      {askFirst === "ayuda" ? [helpRow, argosRow] : [argosRow, helpRow]}
+    </CommandGroup>
+  )
   const itemMeta = (item: SearchItem) =>
     [
       item.detail,
@@ -617,6 +688,8 @@ function GlobalSearchDialog({
             </>
           ) : null}
 
+          {typing && askFirst ? askRows : null}
+
           {typing && !data && search.isFetching ? (
             <div className="space-y-2 p-3" aria-hidden="true">
               {[0, 1, 2].map((row) => (
@@ -676,27 +749,7 @@ function GlobalSearchDialog({
             </div>
           ) : null}
 
-          {typing ? (
-            <CommandItem
-              value="preguntar-ayuda"
-              onSelect={() => {
-                onClose()
-                askHelp(text)
-              }}
-              className="mt-2 gap-3 px-3 py-2"
-            >
-              <span
-                aria-hidden="true"
-                className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground [&_svg]:size-[18px]"
-              >
-                <CircleHelp />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-medium">Preguntarle a Ayuda: «{text}»</span>
-                <span className="text-xs text-muted-foreground">Abre Ayuda con esta pregunta</span>
-              </span>
-            </CommandItem>
-          ) : null}
+          {typing && !askFirst ? askRows : null}
         </CommandList>
 
         <div className="flex items-center justify-between gap-4 border-t bg-muted/40 px-4 py-2 text-xs text-muted-foreground max-sm:hidden">

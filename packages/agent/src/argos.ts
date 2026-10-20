@@ -19,6 +19,7 @@ import {
   ArgosQueryError,
   argosScreen,
   fillArgosSentence,
+  formatArgosValue,
   prepareArgosQuestion,
   recordArgosQuestion,
   type ReportQuery,
@@ -285,7 +286,10 @@ export async function routeArgos(db: Db, deps: ArgosDeps, orgId: string, text: s
 
 export interface ArgosTable {
   columns: Array<{ name: string; label: string; kind: ArgosColumnKind }>
+  /** Los valores tal cual (para dibujar), con los ids que no se muestran: abren la página de la persona. */
   rows: ArgosQueryResult["rows"]
+  /** Cada celda de `columns` con el formato de la clínica, la misma de la frase: la pantalla no formatea. */
+  display: Array<Record<string, string>>
   truncated: boolean
 }
 
@@ -322,10 +326,12 @@ export type ArgosAskResult =
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
 
-function tableOf(result: ArgosQueryResult): ArgosTable {
+function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2]): ArgosTable {
   // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre.
-  const columns = result.columns.filter((column) => !isArgosIdColumn(column.name)).map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
-  return { columns, rows: result.rows, truncated: result.truncated }
+  const shownColumns = result.columns.filter((column) => !isArgosIdColumn(column.name))
+  const columns = shownColumns.map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
+  const display = result.rows.map((row) => Object.fromEntries(shownColumns.map((column) => [column.name, formatArgosValue(row[column.name] ?? null, column, zone)])))
+  return { columns, rows: result.rows, display, truncated: result.truncated }
 }
 
 export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel" | "secretsKey"> {
@@ -480,7 +486,7 @@ async function runPlan(
 /** La frase llena (o la de sin filas) y su tabla. */
 function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2]): ArgosShown {
   const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone) : { text: plan.frase_vacia, parts: [{ text: plan.frase_vacia }] }
-  return { text: filled.text, sentence: filled.parts, table: tableOf(result) }
+  return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone) }
 }
 
 /** Lo que no existe (o existe a medias) puede venir sin consulta: se responde con la frase y lo más cercano. */
@@ -499,7 +505,7 @@ async function closestOf(
     const result = await run(plan.sql_cercana)
     if (!result.rows.length || unknownArgosHoles(plan.frase_cercana, result).length) return null
     const filled = fillArgosSentence(plan.frase_cercana, result, zone)
-    return { text: filled.text, sentence: filled.parts, query: plan.sql_cercana, table: tableOf(result) }
+    return { text: filled.text, sentence: filled.parts, query: plan.sql_cercana, table: tableOf(result, zone) }
   } catch {
     return null
   }

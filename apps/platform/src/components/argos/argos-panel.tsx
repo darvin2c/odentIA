@@ -1,0 +1,567 @@
+/**
+ * Argos sobre los datos de la clínica (ADR 0073; tableros 2 a 6 del lienzo «Argos
+ * conoce la base»). Se abre desde el buscador o desde Reportes, sin botón en la
+ * cabecera, y responde al lado: columna si cabe, cajón si no y la hoja de abajo
+ * en el teléfono (`DetailDrawer`). La frase con sus cifras, el dibujo cuando
+ * ayuda, «Así lo calculé», los botones para seguir (ya corridos: no vuelven a
+ * llamar al modelo), «Fijar en Resumen», «Descargar» y «Abrir…» los entrega el
+ * servidor; aquí solo se dibujan. La conversación vive en el panel mientras dura
+ * la sesión (D4): el texto de las preguntas no se guarda (D2).
+ */
+import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, toast } from "@odentia/ui"
+import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { ArrowRight, Download, Pin, Search } from "lucide-react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
+import { ApiError } from "../../lib/api"
+import { ADMIN_NAME } from "../../lib/agent-names"
+import {
+  ARGOS_SCREEN_LINKS,
+  ASK_ARGOS_EVENT,
+  type ArgosAskEvent,
+  type ArgosResult,
+  type ArgosShown,
+  type ArgosTable,
+  askArgos,
+  downloadArgos,
+  openArgos,
+  pinArgos,
+} from "../../lib/argos"
+import { useMyRole, usePermission } from "../../lib/crm"
+import { askHelp, canOpenHref } from "../../lib/global-search"
+import { useOrgLocale } from "../../lib/locale"
+import { mutationErrorMessage } from "../../lib/query-error"
+import type { ReportQuery } from "../../lib/reports"
+import { PINS_KEY } from "../../lib/reports-ask"
+
+const DESCRIPTION = "Responde con los datos de la clínica que tú puedes ver"
+const SAMPLES = ["¿Cuánto cobramos este mes?", "¿Qué pacientes tienen saldos pendientes?", "¿Cuántas citas hay mañana?"]
+const ANSWER = "flex min-w-0 flex-col gap-3 rounded-2xl rounded-bl-md border bg-card px-3.5 py-3 text-sm"
+/** Filas de la tabla a la vista; el resto con «Ver las N». */
+const ROWS_SHOWN = 10
+
+interface Exchange {
+  id: number
+  question: string
+  screen?: ReportQuery
+  routed?: boolean
+  result: ArgosResult | null
+  error: string | null
+  /** La opción para seguir que se está viendo; null es la respuesta. */
+  option: number | null
+}
+
+function Sentence({ parts }: { parts: ArgosShown["sentence"] }) {
+  return (
+    <p className="text-[15px] leading-6">
+      {parts.map((part, index) =>
+        // biome-ignore lint/suspicious/noArrayIndexKey: las partes de una frase no cambian de orden.
+        part.strong ? <strong key={index} className="font-bold tabular-nums">{part.text}</strong> : <span key={index}>{part.text}</span>,
+      )}
+    </p>
+  )
+}
+
+type Drawing =
+  | { kind: "months"; month: ArgosTable["columns"][number]; value: ArgosTable["columns"][number] }
+  | { kind: "bars"; label: ArgosTable["columns"][number]; value: ArgosTable["columns"][number] }
+
+/**
+ * El dibujo solo cuando ayuda (tablero 3): una cifra por mes va en columnas;
+ * pocas filas con un nombre y una cifra, en barras. Lo demás, la tabla.
+ */
+function drawingOf(table: ArgosTable): Drawing | null {
+  const numbers = table.columns.filter((column) => column.kind === "number")
+  const value = numbers.find((column) => /_dinero$/.test(column.name)) ?? numbers[0]
+  if (!value || table.rows.length < 2) return null
+  const month = table.columns.find((column) => column.kind === "date" && /(^|_)mes$/.test(column.name))
+  if (month && table.rows.length <= 24) return { kind: "months", month, value }
+  const label = table.columns.find((column) => column.kind === "text")
+  return label && table.rows.length <= 12 && table.columns.length <= 4 ? { kind: "bars", label, value } : null
+}
+
+function AnswerDrawing({ table, title }: { table: ArgosTable; title: string }) {
+  const locale = useOrgLocale() ?? "es"
+  const drawing = drawingOf(table)
+  if (!drawing) return null
+  const valueAt = (index: number) => Number(table.rows[index]?.[drawing.value.name] ?? 0)
+  const textAt = (index: number, name: string) => table.display[index]?.[name] ?? ""
+  if (drawing.kind === "months") {
+    const shown = new Map(table.rows.map((_, index) => [valueAt(index), textAt(index, drawing.value.name)]))
+    return (
+      <ColumnChart
+        title={title}
+        height={140}
+        categories={table.rows.map((_, index) => {
+          const label = textAt(index, drawing.month.name)
+          return { key: String(index), label, short: label.slice(0, 3), partial: false }
+        })}
+        bars={[{ key: drawing.value.name, label: drawing.value.label, tone: "series-1", values: table.rows.map((_, index) => valueAt(index)) }]}
+        format={(value) => shown.get(value) ?? new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)}
+        axis={(value) => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value)}
+        tableHeading={drawing.month.label}
+      />
+    )
+  }
+  const others = table.columns.filter((column) => column.name !== drawing.label.name && column.name !== drawing.value.name)
+  return (
+    <BarList
+      title={title}
+      size="sm"
+      rows={table.rows.map((_, index) => {
+        const note = others.map((column) => `${column.label}: ${textAt(index, column.name)}`).join(" · ")
+        return { key: String(index), label: textAt(index, drawing.label.name), value: valueAt(index), valueText: textAt(index, drawing.value.name), ...(note ? { note } : {}) }
+      })}
+      table={{ label: drawing.label.label, value: drawing.value.label, ...(others.length ? { note: "Detalle" } : {}) }}
+    />
+  )
+}
+
+/** Adónde lleva una fila con una persona: su página, solo si quien mira puede abrirla. */
+function personHref(row: ArgosTable["rows"][number]): string | null {
+  if (typeof row.persona_id === "string") return `/people/${row.persona_id}`
+  if (typeof row.paciente_id === "string") return `/patients/${row.paciente_id}`
+  return null
+}
+
+/** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página. */
+function AnswerRows({ table }: { table: ArgosTable }) {
+  const role = useMyRole()
+  const [all, setAll] = useState(false)
+  if (drawingOf(table) || table.columns.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
+  const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
+  const [lead, ...rest] = table.columns
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="max-w-full overflow-x-auto rounded-lg border">
+        <table className="w-full text-[13px]">
+          <thead className="bg-muted/50 text-left text-muted-foreground">
+            <tr>
+              {table.columns.map((column) => (
+                <th key={column.name} scope="col" className={cn("px-2.5 py-1.5 font-semibold", column.kind === "number" && "text-right")}>
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => {
+              const href = personHref(row)
+              const display = table.display[index] ?? {}
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: las filas de una respuesta no se reordenan.
+                <tr key={index} className="border-t">
+                  <td className="px-2.5 py-1.5">
+                    {href && lead && canOpenHref(role, href) ? (
+                      <Link to={href} className="font-semibold text-primary-soft-foreground underline underline-offset-2">
+                        {display[lead.name]}
+                      </Link>
+                    ) : (
+                      (lead ? display[lead.name] : "")
+                    )}
+                  </td>
+                  {rest.map((column) => (
+                    <td key={column.name} className={cn("px-2.5 py-1.5", column.kind === "number" && "text-right tabular-nums")}>
+                      {display[column.name]}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {table.rows.length > ROWS_SHOWN ? (
+        <Button type="button" variant="link" className="h-auto self-start p-0 text-[13px]" onClick={() => setAll(!all)}>
+          {all ? "Ver menos" : `Ver las ${table.truncated ? `más de ${table.rows.length}` : table.rows.length}`}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** Una respuesta ya llena, sin sus acciones: la frase y el dibujo o la tabla. La usa también el Resumen. */
+export function ArgosShownView({ shown, title }: { shown: ArgosShown; title: string }) {
+  return (
+    <>
+      <Sentence parts={shown.sentence} />
+      <AnswerDrawing table={shown.table} title={title} />
+      <AnswerRows table={shown.table} />
+    </>
+  )
+}
+
+/** La respuesta (tablero 2): frase, dibujo o tabla, «Así lo calculé», acciones y los botones para seguir. */
+function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (option: number | null) => void }) {
+  const result = exchange.result
+  const role = useMyRole()
+  const queryClient = useQueryClient()
+  const [pinned, setPinned] = useState<Array<number | null>>([])
+  const pin = useMutation({
+    retry: false,
+    mutationFn: (option: number | null) => (result?.kind === "respuesta" ? pinArgos(result.questionId, option) : Promise.reject(new Error("sin respuesta"))),
+    onSuccess: (_data, option) => {
+      setPinned((current) => [...current, option])
+      toast.success("Fijada en el Resumen: se vuelve a calcular cada vez que lo abres")
+      return queryClient.invalidateQueries({ queryKey: PINS_KEY })
+    },
+  })
+  const download = useMutation({
+    retry: false,
+    mutationFn: (input: { option: number | null; title: string }) =>
+      result?.kind === "respuesta" ? downloadArgos(result.questionId, input.option, input.title) : Promise.resolve(),
+    onError: (error) => toast.error(mutationErrorMessage(error)),
+  })
+  if (result?.kind !== "respuesta") return null
+  const option = exchange.option === null ? null : (result.options.find((item) => item.index === exchange.option) ?? null)
+  const shown: ArgosShown = option ? option.answer : result
+  const title = option ? `${result.title} · ${option.label}` : result.title
+  const link = result.screen === "ninguna" ? null : ARGOS_SCREEN_LINKS[result.screen]
+  const isPinned = pinned.includes(exchange.option)
+  return (
+    <div className={ANSWER}>
+      {result.partial ? (
+        <Badge variant="outline" className="self-start">
+          Parcial
+        </Badge>
+      ) : null}
+      <ArgosShownView shown={shown} title={title} />
+      {result.missing ? <p className="text-[13px] text-muted-foreground">Falta: {result.missing}</p> : null}
+      {result.how ? (
+        <p className="text-[13px] text-muted-foreground">
+          <span className="font-bold text-foreground">Así lo calculé:</span> {result.how}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <SubmitButton type="button" variant="outline" className="min-h-11 sm:min-h-9" pending={pin.isPending} disabled={isPinned} onClick={() => pin.mutate(exchange.option)}>
+          <Pin aria-hidden />
+          {isPinned ? "Fijada en Resumen" : "Fijar en Resumen"}
+        </SubmitButton>
+        {shown.table.rows.length > 0 ? (
+          <SubmitButton
+            type="button"
+            variant="outline"
+            className="min-h-11 sm:min-h-9"
+            pending={download.isPending}
+            onClick={() => download.mutate({ option: exchange.option, title })}
+          >
+            <Download aria-hidden />
+            Descargar
+          </SubmitButton>
+        ) : null}
+        {link && canOpenHref(role, link.to) ? (
+          <Link to={link.to} className={cn(buttonVariants({ variant: "ghost" }), "min-h-11 text-primary-soft-foreground sm:min-h-9")}>
+            {link.label}
+          </Link>
+        ) : null}
+      </div>
+      {pin.isError ? (
+        <p role="alert" className="text-[13px] text-destructive">
+          {mutationErrorMessage(pin.error)}
+        </p>
+      ) : null}
+      {result.options.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <fieldset className="flex min-w-0 flex-wrap gap-1.5">
+            <legend className="sr-only">Seguir con</legend>
+            {result.options.map((item) => {
+              const active = exchange.option === item.index
+              return (
+                <Button
+                  key={item.index}
+                  type="button"
+                  variant={active ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={active}
+                  className="min-h-11 rounded-full sm:min-h-8"
+                  onClick={() => onOption(active ? null : item.index)}
+                >
+                  {item.label}
+                </Button>
+              )
+            })}
+          </fieldset>
+          <p className="text-[12px] text-muted-foreground">Estos botones muestran la misma pregunta con otra fecha, orden o grupo, sin volver a preguntarle a {ADMIN_NAME}.</p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Lo que dice Argos cuando no hay una respuesta con cifras (tableros 4 y 5), con su salida. */
+function ArgosReply({ exchange, onRetry, onClose }: { exchange: Exchange; onRetry: () => void; onClose: () => void }) {
+  const role = useMyRole()
+  const canAgent = usePermission("agent.write")
+  const result = exchange.result
+  if (!result || result.kind === "respuesta") return null
+  return (
+    <div className={ANSWER}>
+      <p className="text-[15px] leading-6">{result.message}</p>
+      {result.kind === "no_existe" ? (
+        <>
+          {result.missing && result.missing !== result.message ? <p className="text-[13px] text-muted-foreground">Falta: {result.missing}</p> : null}
+          {result.closest ? (
+            <div className="flex flex-col gap-2 border-t pt-2.5">
+              <p className="text-[13px] font-bold text-muted-foreground">Lo más cercano que sí tengo:</p>
+              <Sentence parts={result.closest.sentence} />
+              <AnswerDrawing table={result.closest.table} title="Lo más cercano" />
+              <AnswerRows table={result.closest.table} />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {result.kind === "apagado" ? (
+        canAgent ? (
+          <Link to="/agent/administrador" className={cn(buttonVariants({ size: "sm" }), "min-h-11 self-start sm:min-h-9")}>
+            Encender a {ADMIN_NAME}
+          </Link>
+        ) : (
+          <p className="text-[13px] text-muted-foreground">Pídeselo a quien administra la clínica.</p>
+        )
+      ) : null}
+      {result.kind === "tope" && canOpenHref(role, "/reports") ? (
+        <Link to="/reports" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 self-start sm:min-h-9")}>
+          Abrir Reportes
+        </Link>
+      ) : null}
+      {result.kind === "sin_modelo" || result.kind === "no_pudo" ? (
+        <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-9" onClick={onRetry}>
+          Intentar de nuevo
+        </Button>
+      ) : null}
+      {result.kind === "ayuda" ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11 self-start sm:min-h-9"
+          onClick={() => {
+            onClose()
+            askHelp(exchange.question)
+          }}
+        >
+          Abrir Ayuda con esta pregunta
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * El panel de Argos, montado una vez en el layout para quien ve Reportes. Lo
+ * abre el evento del buscador o del campo de Reportes (`openArgos`).
+ */
+export function ArgosPanel() {
+  const allowed = usePermission("reports.read")
+  const [open, setOpen] = useState(false)
+  const [exchanges, setExchanges] = useState<Exchange[]>([])
+  const [draft, setDraft] = useState("")
+  const next = useRef(1)
+  const end = useRef<HTMLDivElement>(null)
+  // El periodo y la sede de Reportes siguen valiendo para lo que se escribe después en el panel (D7).
+  const [screen, setScreen] = useState<ReportQuery | undefined>(undefined)
+
+  const update = (id: number, patch: Partial<Exchange>) => setExchanges((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  const ask = useMutation({
+    retry: false,
+    mutationFn: (input: { id: number; body: Parameters<typeof askArgos>[0] }) => askArgos(input.body),
+    onSuccess: (response, input) => update(input.id, { result: response.data }),
+    onError: (error, input) =>
+      update(input.id, {
+        error: error instanceof ApiError && error.status !== 500 && error.shape.message ? error.shape.message : "No pude responder ahora. Vuelve a intentarlo en un momento.",
+      }),
+  })
+
+  function push(question: string, options: { screen?: ReportQuery | undefined; routed?: boolean } = {}) {
+    const id = next.current++
+    // La anterior con respuesta viaja con su consulta, nunca con su resultado (D3).
+    const previous = [...exchanges].reverse().find((item) => item.result?.kind === "respuesta")
+    const body = {
+      text: question,
+      ...(options.screen ? { screen: options.screen } : {}),
+      previous: previous?.result?.kind === "respuesta" ? { text: previous.question, query: previous.result.query } : null,
+      ...(options.routed ? { routed: true } : {}),
+    }
+    setExchanges((current) => [...current, { id, question, ...(options.screen ? { screen: options.screen } : {}), ...(options.routed ? { routed: true } : {}), result: null, error: null, option: null }])
+    setOpen(true)
+    ask.mutate({ id, body })
+  }
+  const pushRef = useRef(push)
+  pushRef.current = push
+
+  useEffect(() => {
+    function onAsk(event: Event) {
+      const detail = (event as CustomEvent<ArgosAskEvent>).detail
+      const question = detail?.question?.trim() ?? ""
+      setScreen(detail?.screen)
+      setOpen(true)
+      if (question.length >= 3) pushRef.current(question, { screen: detail?.screen, ...(detail?.routed ? { routed: true } : {}) })
+      else setDraft(question)
+    }
+    window.addEventListener(ASK_ARGOS_EVENT, onAsk)
+    return () => window.removeEventListener(ASK_ARGOS_EVENT, onAsk)
+  }, [])
+
+  const last = exchanges[exchanges.length - 1]
+  // biome-ignore lint/correctness/useExhaustiveDependencies: baja a la última respuesta cuando llega.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" })
+  }, [last?.id, last?.result, last?.error])
+
+  if (!allowed || !open) return null
+  const pending = ask.isPending
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (text.length < 3 || pending) return
+    push(text, { screen })
+    setDraft("")
+  }
+  const retry = (exchange: Exchange) => push(exchange.question, { screen: exchange.screen, ...(exchange.routed ? { routed: true } : {}) })
+
+  return (
+    <DetailDrawer open title={ADMIN_NAME} description={DESCRIPTION} onClose={() => setOpen(false)} isSubmitting={pending}>
+      <div className="flex flex-col gap-4">
+        {exchanges.length === 0 ? (
+          <section aria-label="Prueba una pregunta" className="flex flex-col gap-1.5">
+            <h3 className="text-[13px] font-bold text-muted-foreground">Prueba una pregunta</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {SAMPLES.map((sample) => (
+                <Button key={sample} type="button" variant="outline" size="sm" className="min-h-11 rounded-full sm:min-h-8" disabled={pending} onClick={() => push(sample, { screen })}>
+                  {sample}
+                </Button>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <ol className="flex flex-col gap-4" aria-live="polite">
+            {exchanges.map((exchange) => (
+              <li key={exchange.id} className="flex flex-col gap-3">
+                <p className="max-w-[86%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm font-semibold text-primary-foreground">
+                  <span className="sr-only">Preguntaste: </span>
+                  {exchange.question}
+                </p>
+                {exchange.error ? (
+                  <div className={ANSWER}>
+                    <p role="alert" className="text-[15px] leading-6">
+                      {exchange.error}
+                    </p>
+                    <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-9" disabled={pending} onClick={() => retry(exchange)}>
+                      Intentar de nuevo
+                    </Button>
+                  </div>
+                ) : !exchange.result ? (
+                  <div role="status" className="flex flex-col gap-0.5 text-sm">
+                    <span className="font-semibold">Consultando los datos…</span>
+                    <span className="text-[13px] text-muted-foreground">Suele tardar unos segundos. Se puede seguir trabajando en la página.</span>
+                  </div>
+                ) : exchange.result.kind === "respuesta" ? (
+                  <ArgosAnswer exchange={exchange} onOption={(option) => update(exchange.id, { option })} />
+                ) : (
+                  <ArgosReply exchange={exchange} onRetry={() => retry(exchange)} onClose={() => setOpen(false)} />
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+        <div ref={end} />
+        <div className="flex flex-col gap-2 border-t pt-3.5">
+          <form onSubmit={submit}>
+            <FieldLabel htmlFor="argos-otra" className="sr-only">
+              Escribe otra pregunta
+            </FieldLabel>
+            <InputGroup className="border-input bg-card">
+              <InputGroupTextarea
+                id="argos-otra"
+                rows={1}
+                maxLength={500}
+                className="max-h-32 min-h-11"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }
+                }}
+                placeholder="Escribe otra pregunta"
+              />
+              <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+                <InputGroupButton
+                  type="submit"
+                  variant="default"
+                  size="icon-sm"
+                  className="size-11 rounded-xl sm:size-9"
+                  aria-label="Preguntar"
+                  disabled={draft.trim().length < 3 || pending}
+                  aria-busy={pending}
+                >
+                  <ArrowRight aria-hidden />
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </form>
+          <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
+        </div>
+      </div>
+    </DetailDrawer>
+  )
+}
+
+/**
+ * El campo de Reportes (D7): pregunta con el periodo y la sede de la pantalla y
+ * abre el panel. Con Argos apagado lo dice.
+ */
+export function ArgosReportField({ query, enabled }: { query: ReportQuery; enabled: boolean | undefined }) {
+  const canAgent = usePermission("agent.write")
+  const [draft, setDraft] = useState("")
+  const off = enabled === false
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (text.length < 3 || off) return
+    openArgos({ question: text, screen: query })
+    setDraft("")
+  }
+  return (
+    <div className="flex min-w-0 flex-[1_1_22rem] flex-col gap-1 sm:max-w-xl md:ml-auto">
+      <form onSubmit={submit} className="min-w-0">
+        <FieldLabel htmlFor="argos-pregunta" className="sr-only">
+          Pregúntale a {ADMIN_NAME}
+        </FieldLabel>
+        <InputGroup className={cn("border-primary bg-card", off && "border-input opacity-70")}>
+          <InputGroupAddon className="pl-2">
+            <AgentMark size="sm" />
+          </InputGroupAddon>
+          <InputGroupInput
+            id="argos-pregunta"
+            className="min-h-11"
+            maxLength={500}
+            value={draft}
+            disabled={off}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={`Pregúntale a ${ADMIN_NAME}: ¿qué se vendió más este mes?`}
+          />
+          <InputGroupAddon align="inline-end" className="pr-1.5">
+            <InputGroupButton type="submit" variant="default" size="sm" className="min-h-11 rounded-lg px-3 sm:min-h-8" disabled={off || draft.trim().length < 3}>
+              <Search aria-hidden className="sm:hidden" />
+              <span className="hidden sm:inline">Preguntar</span>
+              <span className="sr-only sm:hidden">Preguntar</span>
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
+      {off ? (
+        <p className="text-[13px] text-muted-foreground">
+          {ADMIN_NAME} está apagado: enciéndelo para preguntarle. Las cifras de Reportes no dependen de él.{" "}
+          {canAgent ? (
+            <Link to="/agent/administrador" className="font-semibold text-primary-soft-foreground underline">
+              Encender a {ADMIN_NAME}
+            </Link>
+          ) : null}
+        </p>
+      ) : null}
+    </div>
+  )
+}

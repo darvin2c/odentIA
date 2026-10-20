@@ -27,6 +27,7 @@ import {
   setGoal,
   unpinAnswer,
 } from "../../lib/reports-ask"
+import { ArgosShownView } from "../argos/argos-panel"
 import { MoneyInput } from "../finance/collect-drawer"
 import { AnswerChart } from "./ask-argos"
 import { ReportCard } from "./report-parts"
@@ -187,8 +188,9 @@ export function GoalDrawer({
 
 /**
  * Las respuestas de Argos que alguien fijó (decisión 8): hasta cuatro, las ve
- * todo el que ve Reportes y cualquiera las quita. Siguen el periodo y la sede
- * de arriba: se recalculan, no son una foto.
+ * todo el que ve Reportes y cualquiera las quita. Se recalculan, no son una
+ * foto: las de las 32 cifras siguen el periodo y la sede de arriba; las del
+ * Argos de las vistas (D5) vuelven a correr su consulta, siempre al día.
  */
 export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; argosEnabled: boolean | undefined }) {
   const queryClient = useQueryClient()
@@ -203,16 +205,17 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
     onError: (error) => toast.error(mutationErrorMessage(error)),
   })
   const list = pins.data?.data.pins ?? []
+  const asked = pins.data?.data.argos ?? []
   // Sin Argos y sin nada fijado no hay nada que mostrar ni cómo fijar.
-  if (pins.isSuccess && list.length === 0 && argosEnabled !== true) return null
-  const room = (pins.data?.data.limit ?? 4) - list.length
+  if (pins.isSuccess && list.length + asked.length === 0 && argosEnabled !== true) return null
+  const room = (pins.data?.data.limit ?? 4) - list.length - asked.length
   return (
     <section aria-labelledby="fijadas" className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <h3 id="fijadas" className="font-semibold">
           Fijadas
         </h3>
-        <p className="text-sm text-muted-foreground">Respuestas de {ADMIN_NAME} que alguien fijó. Siguen el periodo y la sede de arriba.</p>
+        <p className="text-sm text-muted-foreground">Respuestas de {ADMIN_NAME} que alguien fijó. Se vuelven a calcular cada vez que abres el Resumen.</p>
       </div>
       {pins.isPending ? (
         <LoadingState />
@@ -239,6 +242,25 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
                 <span className="text-xs text-muted-foreground">
                   Fijada por {pin.pinnedBy} el {dayText(pin.pinnedOn, pin.answer?.locale ?? "es", { day: "numeric", month: "long" })}
                   {pin.answer ? ` · ${pin.answer.scope}` : ""}
+                </span>
+                <Button type="button" variant="ghost" size="sm" className="min-h-11 text-primary-soft-foreground sm:min-h-8" disabled={remove.isPending} onClick={() => remove.mutate(pin.id)}>
+                  Quitar
+                </Button>
+              </div>
+            </ReportCard>
+          ))}
+          {asked.map((pin) => (
+            <ReportCard key={pin.id} title={pin.title}>
+              {pin.answer ? (
+                <div className="flex min-w-0 flex-col gap-2 text-sm">
+                  <ArgosShownView shown={pin.answer} title={pin.title} />
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Esta respuesta ya no se puede calcular para ti.</p>
+              )}
+              <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Fijada por {pin.pinnedBy} el {dayText(pin.pinnedOn, "es", { day: "numeric", month: "long" })}
                 </span>
                 <Button type="button" variant="ghost" size="sm" className="min-h-11 text-primary-soft-foreground sm:min-h-8" disabled={remove.isPending} onClick={() => remove.mutate(pin.id)}>
                   Quitar
