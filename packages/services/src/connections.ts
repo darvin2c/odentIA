@@ -213,6 +213,8 @@ export interface SignupOrigin {
   /** Cuenta de WhatsApp Business dueña del número. */
   accountId: string
   at: Date
+  /** Cuándo vence el permiso recién dado; nulo si el proveedor no lo dijo. */
+  tokenExpiresAt: Date | null
 }
 
 /** Canales cuya dirección de avisos se da de alta a mano en la página de Meta. */
@@ -633,6 +635,7 @@ export async function createConnection(
                   subscribedAt: null,
                   registeredAt: null,
                   problems: {},
+                  tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
                 },
               }
             : {}),
@@ -855,7 +858,11 @@ export async function changeConnectionCredentials(
         ? {
             accountExternalId: origin.accountId,
             // Lo ya hecho sigue hecho; el plazo para registrar corre desde este permiso.
-            signup: { ...row.signup, grantedAt: origin.at.toISOString() },
+            signup: {
+              ...row.signup,
+              grantedAt: origin.at.toISOString(),
+              tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
+            },
           }
         : {}),
     })

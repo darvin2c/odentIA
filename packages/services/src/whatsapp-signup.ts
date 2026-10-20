@@ -63,6 +63,8 @@ export interface SignupInput {
 /** El permiso recién canjeado y lo que Meta respondió por el número con él. */
 export interface SignupGrant {
   token: string
+  /** Cuándo vence `token`; nulo si Meta no lo dijo. */
+  expiresAt: Date | null
   wabaId: string
   phoneNumberId: string
   checked: ProviderCheck
@@ -182,8 +184,11 @@ export async function redeemWhatsAppSignup(
     throw validation("La ventana de Meta no dijo qué cuenta y qué número se eligieron.")
   }
   let token: string
+  let expiresAt: Date | null
   try {
-    token = await exchangeSignupCode(app, code, { fetch: deps.fetch })
+    const exchanged = await exchangeSignupCode(app, code, { fetch: deps.fetch })
+    token = exchanged.token
+    expiresAt = exchanged.expiresInSeconds ? new Date(Date.now() + exchanged.expiresInSeconds * 1000) : null
   } catch (error) {
     throw redeemFailure(error)
   }
@@ -206,7 +211,7 @@ export async function redeemWhatsAppSignup(
         )
       : redeemFailure(error)
   }
-  return { token, wabaId, phoneNumberId, checked }
+  return { token, expiresAt, wabaId, phoneNumberId, checked }
 }
 
 /**
@@ -226,7 +231,12 @@ export async function openWhatsAppSignup(
   options: { reconnectConnectionId?: string | undefined },
   deps: ConnectionDeps,
 ): Promise<SignupWork> {
-  const origin: SignupOrigin = { checked: grant.checked, accountId: grant.wabaId, at: new Date() }
+  const origin: SignupOrigin = {
+    checked: grant.checked,
+    accountId: grant.wabaId,
+    at: new Date(),
+    tokenExpiresAt: grant.expiresAt,
+  }
   const account = grant.checked.account ?? null
   if (options.reconnectConnectionId) {
     const id = options.reconnectConnectionId

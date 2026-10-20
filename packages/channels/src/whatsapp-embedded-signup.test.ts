@@ -42,8 +42,11 @@ function fakeMeta(answer: (call: Call) => { status?: number; body: unknown } | E
 
 describe("canjear el código", () => {
   it("pide la clave con el identificador y la clave de la app, y el código tal como llegó", async () => {
-    const meta = fakeMeta(() => ({ body: { access_token: "CLAVE-DE-LA-CLINICA", token_type: "bearer" } }))
-    expect(await exchangeSignupCode(APP, "AQB hl/+=", { fetch: meta.fetch })).toBe("CLAVE-DE-LA-CLINICA")
+    const meta = fakeMeta(() => ({ body: { access_token: "CLAVE-DE-LA-CLINICA", token_type: "bearer", expires_in: 5_184_000 } }))
+    expect(await exchangeSignupCode(APP, "AQB hl/+=", { fetch: meta.fetch })).toEqual({
+      token: "CLAVE-DE-LA-CLINICA",
+      expiresInSeconds: 5_184_000,
+    })
     expect(meta.calls).toHaveLength(1)
     const url = new URL(meta.calls[0]!.url)
     expect(meta.calls[0]!.method).toBe("GET")
@@ -59,9 +62,24 @@ describe("canjear el código", () => {
 
   it("acepta también la clave sola, que es como la muestra la documentación", async () => {
     const bare = fakeMeta(() => ({ body: "EAAJB0123456789abcdefghijZDZD" }))
-    expect(await exchangeSignupCode(APP, "c", { fetch: bare.fetch })).toBe("EAAJB0123456789abcdefghijZDZD")
+    expect(await exchangeSignupCode(APP, "c", { fetch: bare.fetch })).toEqual({
+      token: "EAAJB0123456789abcdefghijZDZD",
+      expiresInSeconds: null,
+    })
     const quoted = fakeMeta(() => ({ body: JSON.stringify("EAAJB0123456789abcdefghijZDZD") }))
-    expect(await exchangeSignupCode(APP, "c", { fetch: quoted.fetch })).toBe("EAAJB0123456789abcdefghijZDZD")
+    expect(await exchangeSignupCode(APP, "c", { fetch: quoted.fetch })).toEqual({
+      token: "EAAJB0123456789abcdefghijZDZD",
+      expiresInSeconds: null,
+    })
+  })
+
+  it("lee en cuántos segundos vence la clave, si Meta lo dice; si no, queda sin plazo", async () => {
+    const asText = fakeMeta(() => ({ body: { access_token: "CLAVE", expires_in: "5183999" } }))
+    expect((await exchangeSignupCode(APP, "c", { fetch: asText.fetch })).expiresInSeconds).toBe(5_183_999)
+    const without = fakeMeta(() => ({ body: { access_token: "CLAVE", token_type: "bearer" } }))
+    expect((await exchangeSignupCode(APP, "c", { fetch: without.fetch })).expiresInSeconds).toBeNull()
+    const zero = fakeMeta(() => ({ body: { access_token: "CLAVE", expires_in: 0 } }))
+    expect((await exchangeSignupCode(APP, "c", { fetch: zero.fetch })).expiresInSeconds).toBeNull()
   })
 
   it("un código vencido llega con el código y el motivo de Meta", async () => {

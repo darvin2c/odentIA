@@ -105,6 +105,20 @@ function succeeded(json: unknown): boolean {
 
 const base = (app: Pick<MetaPlatformApp, "graphVersion">) => `https://graph.facebook.com/${app.graphVersion}`
 
+/** La clave de la clínica y en cuántos segundos vence, si Meta lo dijo. */
+export interface SignupToken {
+  token: string
+  /** `expires_in` de la respuesta; nulo si no vino (la clave sola, como texto). */
+  expiresInSeconds: number | null
+}
+
+/** `expires_in` del Graph API: segundos, como número o como texto. */
+function expiresInOf(json: object): number | null {
+  const value = "expires_in" in json ? json.expires_in : undefined
+  const seconds = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : null
+}
+
 /**
  * Paso 1: canjea el código que devuelve la ventana de Meta por la clave de la
  * clínica («business token»). El código vive 30 segundos y sirve una vez: se
@@ -115,14 +129,15 @@ const base = (app: Pick<MetaPlatformApp, "graphVersion">) => `https://graph.face
  *
  * La documentación muestra la respuesta solo como `<BUSINESS_TOKEN>`, sin decir
  * su envoltura. Se acepta la habitual de este punto del Graph API
- * (`{ "access_token": "…" }`) y también la clave sola, como texto. Por confirmar
- * en la primera prueba real.
+ * (`{ "access_token": "…", "expires_in": … }`) y también la clave sola, como
+ * texto. Por confirmar en la primera prueba real, igual que el plazo: la
+ * configuración de «Conectar con Facebook» dice 60 días (darvin2c/odentIA#121).
  */
 export async function exchangeSignupCode(
   app: MetaPlatformApp,
   code: string,
   deps: ChannelAdapterDeps,
-): Promise<string> {
+): Promise<SignupToken> {
   const query = new URLSearchParams({ client_id: app.appId, client_secret: app.appSecret, code })
   const answer = await graph("canjear", `${base(app)}/oauth/access_token?${query.toString()}`, { method: "GET" }, deps)
   if (answer.status >= 400) throw failure("canjear", answer)
@@ -130,13 +145,13 @@ export async function exchangeSignupCode(
   if (json && typeof json === "object") {
     if ("error" in json) throw failure("canjear", answer)
     if ("access_token" in json && typeof json.access_token === "string" && json.access_token) {
-      return json.access_token
+      return { token: json.access_token, expiresInSeconds: expiresInOf(json) }
     }
   }
-  if (typeof json === "string" && json) return json
+  if (typeof json === "string" && json) return { token: json, expiresInSeconds: null }
   const plain = answer.raw.trim()
   // Una clave es una cadena opaca sin espacios; cualquier otra cosa no se toma por clave.
-  if (json === null && /^[A-Za-z0-9_\-|.]{20,}$/.test(plain)) return plain
+  if (json === null && /^[A-Za-z0-9_\-|.]{20,}$/.test(plain)) return { token: plain, expiresInSeconds: null }
   throw new MetaSignupError("canjear", answer.status, null, "Meta respondió sin la clave de la cuenta")
 }
 
