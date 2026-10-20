@@ -20,7 +20,8 @@ export interface MetaPlatformApp {
   graphVersion: string
 }
 
-export type MetaSignupStep = "canjear" | "suscribir" | "registrar"
+/** «renovar» y «revisar» son de la clave ya guardada, no del alta (darvin2c/odentIA#121). */
+export type MetaSignupStep = "canjear" | "suscribir" | "registrar" | "renovar" | "revisar"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -153,6 +154,73 @@ export async function exchangeSignupCode(
   // Una clave es una cadena opaca sin espacios; cualquier otra cosa no se toma por clave.
   if (json === null && /^[A-Za-z0-9_\-|.]{20,}$/.test(plain)) return { token: plain, expiresInSeconds: null }
   throw new MetaSignupError("canjear", answer.status, null, "Meta respondió sin la clave de la cuenta")
+}
+
+/**
+ * Renueva la clave de una clínica antes de que venza, sin la clínica: con la
+ * clave vigente y la de la app, Meta entrega otra que dura 60 días desde hoy.
+ * La anterior sigue sirviendo hasta su propio vencimiento, así que pedirla dos
+ * veces no rompe nada: la que no se guarde vence sola.
+ *
+ * «Refresh API» de las claves de usuario del sistema que vencen:
+ * `GET /oauth/access_token?grant_type=fb_exchange_token&client_id&client_secret&set_token_expires_in_60_days=true&fb_exchange_token`
+ * https://developers.facebook.com/docs/business-management-apis/system-users/install-apps-and-generate-tokens/
+ * (leída el 2026-10-20). La clave de «Conectar con Facebook» es de un usuario
+ * del sistema de la clínica (de integración comercial); Meta no dice si esta
+ * renovación vale también para esa clase: por confirmar en la primera conexión real.
+ */
+export async function refreshSignupToken(
+  app: MetaPlatformApp,
+  token: string,
+  deps: ChannelAdapterDeps,
+): Promise<SignupToken> {
+  const query = new URLSearchParams({
+    grant_type: "fb_exchange_token",
+    client_id: app.appId,
+    client_secret: app.appSecret,
+    set_token_expires_in_60_days: "true",
+    fb_exchange_token: token,
+  })
+  const answer = await graph("renovar", `${base(app)}/oauth/access_token?${query.toString()}`, { method: "GET" }, deps)
+  if (answer.status >= 400) throw failure("renovar", answer)
+  const { json } = answer
+  if (json && typeof json === "object") {
+    if ("error" in json) throw failure("renovar", answer)
+    if ("access_token" in json && typeof json.access_token === "string" && json.access_token) {
+      return { token: json.access_token, expiresInSeconds: expiresInOf(json) }
+    }
+  }
+  throw new MetaSignupError("renovar", answer.status, null, "Meta respondió sin la clave nueva")
+}
+
+/** Lo que Meta dice de una clave: si sirve y cuándo vence (nulo: no vence). */
+export interface SignupTokenState {
+  valid: boolean
+  expiresAt: Date | null
+}
+
+/**
+ * Pregunta a Meta por una clave con la clave de la app (`debug_token`): si
+ * sirve y cuándo vence. Meta pone `expires_at` en 0 en una clave que no vence
+ * (así lo muestra; la referencia no lo dice).
+ * https://developers.facebook.com/docs/graph-api/reference/debug_token/ (leída el 2026-10-20)
+ */
+export async function inspectSignupToken(
+  app: MetaPlatformApp,
+  token: string,
+  deps: ChannelAdapterDeps,
+): Promise<SignupTokenState> {
+  const query = new URLSearchParams({ input_token: token, access_token: `${app.appId}|${app.appSecret}` })
+  const answer = await graph("revisar", `${base(app)}/debug_token?${query.toString()}`, { method: "GET" }, deps)
+  if (answer.status >= 400) throw failure("revisar", answer)
+  const data = answer.json && typeof answer.json === "object" && "data" in answer.json ? answer.json.data : null
+  if (!data || typeof data !== "object") {
+    throw new MetaSignupError("revisar", answer.status, null, "Meta respondió sin los datos de la clave")
+  }
+  if (!("is_valid" in data) || data.is_valid !== true) return { valid: false, expiresAt: null }
+  const at = "expires_at" in data && typeof data.expires_at === "number" ? data.expires_at : null
+  if (at === null) throw new MetaSignupError("revisar", answer.status, null, "Meta no dijo cuándo vence la clave")
+  return { valid: true, expiresAt: at === 0 ? null : new Date(at * 1000) }
 }
 
 /**

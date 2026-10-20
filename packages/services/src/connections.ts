@@ -636,6 +636,7 @@ export async function createConnection(
                   registeredAt: null,
                   problems: {},
                   tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
+                  tokenProblem: null,
                 },
               }
             : {}),
@@ -858,10 +859,13 @@ export async function changeConnectionCredentials(
         ? {
             accountExternalId: origin.accountId,
             // Lo ya hecho sigue hecho; el plazo para registrar corre desde este permiso.
+            // Clave nueva: su vencimiento es otro y lo que falló con la anterior ya no cuenta.
             signup: {
               ...row.signup,
               grantedAt: origin.at.toISOString(),
               tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
+              tokenNeverExpires: false,
+              tokenProblem: null,
             },
           }
         : {}),

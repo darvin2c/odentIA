@@ -60,10 +60,14 @@ export interface ConnectionSignup {
   /** Qué pasó en el último intento de cada paso que sigue pendiente, en palabras. */
   problems: { suscribir?: string; registrar?: string }
   /**
-   * Cuándo vence la clave que dio Meta al entrar con Facebook (su `expires_in`).
-   * Nulo o ausente: Meta no lo dijo. Es la base del aviso antes de que venza (#121).
+   * Cuándo vence la clave que dio Meta al entrar con Facebook o al renovarla
+   * sola (#121). Nulo o ausente: aún no se sabe; el worker se lo pregunta a Meta.
    */
   tokenExpiresAt?: string | null
+  /** Meta dijo que la clave no vence: no hay nada que renovar. */
+  tokenNeverExpires?: boolean
+  /** Por qué no se pudo renovar o revisar la clave, en palabras. Se borra al lograrlo o al volver a conectar. */
+  tokenProblem?: string | null
 }
 
 export const channelConnection = pgTable(

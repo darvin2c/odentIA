@@ -17,6 +17,12 @@ const envSchema = z.object({
     .string()
     .regex(/^v\d+\.\d+$/, "Se espera la forma v25.0")
     .default("v25.0"),
+  /**
+   * La app de odentIA en Meta, las mismas de la API: con ellas el worker renueva
+   * la clave de «Conectar con Facebook» antes de que venza. Vacías: no se renueva.
+   */
+  META_APP_ID: z.string().default(""),
+  META_APP_SECRET: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**

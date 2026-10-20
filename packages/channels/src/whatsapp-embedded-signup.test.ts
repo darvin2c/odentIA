@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest"
 import { splitWhatsAppWebhook, whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
 import {
   exchangeSignupCode,
+  inspectSignupToken,
   MetaSignupError,
   newRegistrationPin,
+  refreshSignupToken,
   registerPhoneNumber,
   subscribeAppToAccount,
 } from "./whatsapp-embedded-signup.js"
@@ -105,6 +107,67 @@ describe("canjear el código", () => {
     expect(error).toMatchObject({ step: "canjear", httpStatus: 0, code: null, transient: true })
     // El motivo de la red no arrastra la clave de la app.
     expect(error.message).not.toContain("secreto-de-la-app")
+  })
+})
+
+describe("renovar la clave antes de que venza", () => {
+  it("pide otra con la vigente y la clave de la app, por 60 días, y lee cuándo vence", async () => {
+    const meta = fakeMeta(() => ({ body: { access_token: "CLAVE-NUEVA", token_type: "bearer", expires_in: 5_183_944 } }))
+    expect(await refreshSignupToken(APP, "CLAVE-VIGENTE", { fetch: meta.fetch })).toEqual({
+      token: "CLAVE-NUEVA",
+      expiresInSeconds: 5_183_944,
+    })
+    expect(meta.calls).toHaveLength(1)
+    const url = new URL(meta.calls[0]!.url)
+    expect(meta.calls[0]!.method).toBe("GET")
+    expect(`${url.origin}${url.pathname}`).toBe("https://graph.facebook.com/v25.0/oauth/access_token")
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      grant_type: "fb_exchange_token",
+      client_id: "APP1",
+      client_secret: "secreto-de-la-app",
+      set_token_expires_in_60_days: "true",
+      fb_exchange_token: "CLAVE-VIGENTE",
+    })
+    expect(meta.calls[0]!.headers).toEqual({})
+  })
+
+  it("si Meta dice que no, llega con su código; si no responde, se puede repetir", async () => {
+    const dead = fakeMeta(() => ({
+      status: 400,
+      body: { error: { message: "Error validating access token: Session has expired.", type: "OAuthException", code: 190 } },
+    }))
+    const error = (await refreshSignupToken(APP, "VIEJA", { fetch: dead.fetch }).catch((e: unknown) => e)) as MetaSignupError
+    expect(error).toBeInstanceOf(MetaSignupError)
+    expect(error).toMatchObject({ step: "renovar", code: 190, transient: false })
+    const down = fakeMeta(() => new TypeError("fetch failed"))
+    const failed = (await refreshSignupToken(APP, "VIGENTE", { fetch: down.fetch }).catch((e: unknown) => e)) as MetaSignupError
+    expect(failed).toMatchObject({ step: "renovar", transient: true })
+    const empty = fakeMeta(() => ({ body: { token_type: "bearer" } }))
+    await expect(refreshSignupToken(APP, "VIGENTE", { fetch: empty.fetch })).rejects.toMatchObject({ step: "renovar" })
+  })
+})
+
+describe("preguntar a Meta por una clave", () => {
+  it("dice cuándo vence, con la clave de la app", async () => {
+    const meta = fakeMeta(() => ({ body: { data: { app_id: "APP1", type: "SYSTEM_USER", is_valid: true, expires_at: 1_798_675_200, issued_at: 1_793_491_200 } } }))
+    expect(await inspectSignupToken(APP, "CLAVE", { fetch: meta.fetch })).toEqual({
+      valid: true,
+      expiresAt: new Date(1_798_675_200 * 1000),
+    })
+    const url = new URL(meta.calls[0]!.url)
+    expect(`${url.origin}${url.pathname}`).toBe("https://graph.facebook.com/v25.0/debug_token")
+    expect(Object.fromEntries(url.searchParams)).toEqual({ input_token: "CLAVE", access_token: "APP1|secreto-de-la-app" })
+  })
+
+  it("una clave que no vence llega sin fecha; una que ya no sirve, como no válida", async () => {
+    const never = fakeMeta(() => ({ body: { data: { is_valid: true, expires_at: 0 } } }))
+    expect(await inspectSignupToken(APP, "CLAVE", { fetch: never.fetch })).toEqual({ valid: true, expiresAt: null })
+    const dead = fakeMeta(() => ({
+      body: { data: { is_valid: false, expires_at: 1_790_000_000, error: { code: 190, message: "Session has expired" } } },
+    }))
+    expect(await inspectSignupToken(APP, "CLAVE", { fetch: dead.fetch })).toEqual({ valid: false, expiresAt: null })
+    const odd = fakeMeta(() => ({ body: { data: { is_valid: true } } }))
+    await expect(inspectSignupToken(APP, "CLAVE", { fetch: odd.fetch })).rejects.toMatchObject({ step: "revisar" })
   })
 })
 
