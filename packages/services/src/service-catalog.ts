@@ -251,7 +251,7 @@ async function assertTemplateUsable(
   }
   throw conflict(
     "TEMPLATE_UNCODED",
-    `Este tratamiento no tiene un código ${list.label} vigente: en tu país cada servicio lleva el suyo`,
+    `Este tratamiento no tiene un ${list.codeName} vigente: en tu país cada servicio lleva el suyo`,
   )
 }
 
@@ -273,11 +273,11 @@ async function assertOwnCode(
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   if (!value) {
-    if (list.required) throw validation(`Elige el código ${list.label} del servicio: en tu país es obligatorio`)
+    if (list.required) throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   const coding = await currentProcedureCode(tx, list.system, value)
-  if (!coding) throw validation(`«${value}» no es un código ${list.label} vigente`)
+  if (!coding) throw validation(`«${value}» no es un ${list.codeName} vigente`)
   return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
 
@@ -293,13 +293,13 @@ async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTem
   return row
 }
 /**
- * Detalle exacto read-only de una plantilla por id, sin exigir vigencia:
- * incluye retiradas (`isActive: false`) y sus versiones. Solo lectura para
- * fichas enlazadas (ofertas/históricos); las nuevas indicaciones siguen
- * pasando por `requireServiceForIndication` + snapshot único vigente.
+ * Detalle read-only de un tratamiento de la biblioteca por id, sin exigir
+ * vigencia (incluye retirados), para fichas enlazadas. Lleva solo el código
+ * vigente de la lista del país de la clínica (ADR 0067): nada de otro país.
  */
 export async function getTemplate(
   tx: Db,
+  orgId: string,
   templateId: string,
 ): Promise<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }> {
   const [row] = await tx
@@ -308,25 +308,9 @@ export async function getTemplate(
     .where(eq(treatmentTemplate.id, templateId))
     .limit(1)
   if (!row) throw notFound("Prestación de la biblioteca")
-  const mappings = await tx
-    .select({
-      system: treatmentTemplateCode.systemKey,
-      code: treatmentTemplateCode.code,
-      version: treatmentTemplateCode.version,
-      display: procedureCode.display,
-    })
-    .from(treatmentTemplateCode)
-    .innerJoin(
-      procedureCode,
-      and(
-        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
-        eq(treatmentTemplateCode.code, procedureCode.code),
-        eq(treatmentTemplateCode.version, procedureCode.version),
-      ),
-    )
-    .where(eq(treatmentTemplateCode.templateId, templateId))
-    .orderBy(treatmentTemplateCode.systemKey, treatmentTemplateCode.version)
-  return { ...row, codings: mappings }
+  const list = await orgServiceList(tx, orgId)
+  const coding = list ? await templateCodingIn(tx, templateId, list.system) : null
+  return { ...row, codings: coding ? [coding] : [] }
 }
 
 async function audit(
@@ -958,6 +942,13 @@ export async function updateService(
   const resolvedScope = (set.scope ?? current.scope) as string | null
   if (!resolvedScope) throw validation("Elige dónde se hace el servicio")
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
+  // Donde la lista es obligatoria, un servicio propio no se guarda sin su código
+  // (ADR 0067), tampoco si se edita otra cosa: p. ej. uno que dejó de ser «Heredada».
+  const finalTemplateId = set.templateId !== undefined ? set.templateId : current.templateId
+  const finalCode = set.procedureCode !== undefined ? set.procedureCode : current.procedureCode
+  if (list?.required && !finalTemplateId && !finalCode) {
+    throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
+  }
 
   let updated: ServiceRow | undefined
   try {

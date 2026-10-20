@@ -201,7 +201,13 @@ it("services: el código oficial de un servicio propio se busca en la lista del 
   expect(found.data.every((row) => row.system === "CPMS")).toBe(true)
   const byCode = (await (await getJson(app, "/services/official-codes?q=D2391")).json()) as typeof found
   expect(byCode.data.map((row) => row.code)).toEqual(["D2391"])
-  // Sin lista en el país no hay nada que buscar.
+  // Sin lista en el país no hay nada que buscar, ni código que guardar.
+  const noList = await buildApp("owner", "org_c").request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Con código", specialtyId: await sp("estetica", "org_c"), scope: "general", priceCents: 1, officialCode: "D9972" }),
+  })
+  expect(noList.status).toBe(400)
   expect(await (await getJson(buildApp("reception", "org_c"), "/services/official-codes?q=profilaxis")).json()).toEqual({
     data: [],
     codeList: null,
@@ -794,6 +800,26 @@ it("services: cada país ve su lista; las variantes de la CUPS solo en Colombia"
     expect.objectContaining({ system: "COLEGIO-CR", code: "12.1" }),
   ])
   expect(costaRica.data.map((row) => row.key)).not.toContain("exodoncia-de-diente-permanente-unirradicular")
+  // En el Perú una variante de la CUPS tampoco se vincula a un servicio.
+  const peruOwn = (await (await buildApp("owner").request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Exodoncia propia", specialtyId: await sp("cirugia"), scope: "tooth", priceCents: 1, officialCode: "D7140" }),
+  })).json()) as { data: ServiceItem }
+  const linked = await buildApp("owner").request(`/services/${peruOwn.data.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ templateId: await templateIdByKey("exodoncia-de-diente-permanente-unirradicular") }),
+  })
+  expect(linked.status).toBe(409)
+  // En el Perú un servicio propio sin código no se guarda al editarlo.
+  await ownerDb.execute(sql`update "service_catalog" set "procedure_system" = null, "procedure_code" = null, "procedure_version" = null where "id" = ${peruOwn.data.id}`)
+  const uncodedEdit = await buildApp("owner").request(`/services/${peruOwn.data.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ priceCents: 2 }),
+  })
+  expect(uncodedEdit.status).toBe(400)
   // Una variante no se agrega donde no tiene código.
   const variant = await templateIdByKey("exodoncia-de-diente-permanente-unirradicular")
   const refused = await buildApp("owner", "org_cr").request("/services/batch", {

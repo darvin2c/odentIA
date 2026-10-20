@@ -47,7 +47,7 @@ export function OfficialCodeField({
     return () => clearTimeout(timer)
   }, [query])
   const results = useQuery({
-    queryKey: ["services", "official-codes", debounced],
+    queryKey: ["services", "official-codes", list?.system ?? null, debounced],
     queryFn: () => fetchOfficialCodes({ q: debounced, limit: 20 }),
     enabled: list !== null && !disabled && debounced.length > 0,
     staleTime: 60_000,
@@ -56,7 +56,8 @@ export function OfficialCodeField({
 
   const items = results.data?.data ?? []
   const searching = results.isFetching || query.trim() !== debounced
-  const label = list.required ? `Código ${list.label}` : `Código ${list.label} (opcional)`
+  const named = capitalize(list.codeName)
+  const label = list.required ? named : `${named} (opcional)`
 
   return (
     <Field>
@@ -125,7 +126,7 @@ export function OfficialCodeField({
                     </ComboboxItem>
                   ))}
                 </ComboboxList>
-                <ComboboxEmpty>{`Sin resultados en la lista ${list.label}.`}</ComboboxEmpty>
+                <ComboboxEmpty>{`Sin resultados en ${list.listName}.`}</ComboboxEmpty>
               </>
             )}
           </ComboboxContent>
@@ -136,8 +137,8 @@ export function OfficialCodeField({
       ) : (
         <p className="text-xs text-muted-foreground">
           {list.required
-            ? `En tu país cada servicio lleva su código ${list.label}. Busca por nombre o por código.`
-            : `Solo si lo necesitas para reportar o cobrar con la lista ${list.label}.`}
+            ? `En tu país cada servicio lleva su ${list.codeName}. Busca por nombre o por código.`
+            : `Solo si lo necesitas para reportar o cobrar con ${list.listName}.`}
         </p>
       )}
     </Field>
@@ -146,8 +147,13 @@ export function OfficialCodeField({
 
 /** Si al servicio propio le falta el código que su país exige: la frase del campo. */
 export function missingOfficialCode(
-  list: { label: string; required: boolean } | null,
+  list: { codeName: string; required: boolean } | null,
   value: { code: string } | null,
 ): string | null {
-  return list?.required && !value ? `Elige el código ${list.label}` : null
+  return list?.required && !value ? `Elige el ${list.codeName}` : null
+}
+
+/** La primera letra en mayúscula: «código CPMS» → «Código CPMS». */
+export function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }

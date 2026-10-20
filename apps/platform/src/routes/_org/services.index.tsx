@@ -47,7 +47,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { z } from "zod"
 import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
-import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
+import { capitalize, missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
@@ -810,9 +810,25 @@ function OfferEditor({
     queryFn: async () => (offer ? (await fetchService(offer.id)).data.officialCoding : null),
   })
   const officialCoding = officialQuery.data ?? null
-  /** Un código propio que una edición nueva de la lista retiró: hay que elegir otro. */
+  /** Lo que el detalle dice del código: cargando, sin poder leerlo o el leído. */
+  const official: OfficialState = {
+    coding: officialCoding,
+    status: officialQuery.isPending && offer !== null && codeList !== null ? "pending" : officialQuery.isError ? "error" : "ready",
+  }
+  /**
+   * Un código propio que una edición nueva de la lista retiró: donde la lista
+   * es obligatoria, hay que elegir otro. Un código de otra lista (la clínica
+   * cambió de país) no es «retirado»: se pide el de la lista nueva.
+   */
   const retiredCode =
-    !isTemplate && offer?.procedureCode && officialQuery.isSuccess && !officialCoding ? offer.procedureCode : null
+    !isTemplate &&
+    codeList?.required &&
+    offer?.procedureCode &&
+    offer.procedureSystem === codeList.system &&
+    officialQuery.isSuccess &&
+    !officialCoding
+      ? offer.procedureCode
+      : null
   const initialCode = useMemo<OfficialCoding | null>(
     () => (isTemplate ? null : officialCoding),
     [isTemplate, officialCoding],
@@ -831,7 +847,7 @@ function OfferEditor({
   const codeIssue = isTemplate || (officialQuery.isError && !codeChanged)
     ? null
     : retiredCode && !officialCode
-      ? `El código ${retiredCode} ya no está vigente en la lista ${codeList?.label ?? ""}: elige otro`
+      ? `El código ${retiredCode} ya no está vigente en ${codeList?.listName ?? "la lista"}: elige otro`
       : missingOfficialCode(codeList, officialCode)
 
   /** El tratamiento de la biblioteca, por id directo (incluye retirados, solo lectura). */
@@ -946,7 +962,7 @@ function OfferEditor({
           )
         }
       />
-      {offer ? <OfferDetails offer={offer} officialCoding={isTemplate ? officialCoding : null} /> : null}
+      {offer ? <OfferDetails offer={offer} official={official} /> : null}
     </div>
   )
 
@@ -955,11 +971,11 @@ function OfferEditor({
   if (offer && !canWrite) {
     return asPanel ? (
       <DetailPanel title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} officialCoding={officialCoding} locale={orgLocale} />
+        <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
       </DetailPanel>
     ) : (
       <DetailDrawer open={open} title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} officialCoding={officialCoding} locale={orgLocale} />
+        <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
       </DetailDrawer>
     )
   }
@@ -1005,22 +1021,40 @@ function OfferEditor({
  * («Código CPMS · D0140», decisión 4 del lienzo del issue 40). Sin lista en el
  * país no se muestra.
  */
-function OfficialCodeDetail({ coding, own }: { coding: OfficialCoding | null; own: boolean }) {
+/** El código vigente del servicio y si ya se pudo leer. */
+interface OfficialState {
+  coding: OfficialCoding | null
+  status: "pending" | "error" | "ready"
+}
+
+function OfficialCodeDetail({ official, own }: { official: OfficialState; own: boolean }) {
   const list = useClinicalProfile().services
   if (!list) return null
   // Uno de la biblioteca toma el código de su tratamiento: no hay nada que elegir aquí.
   const missing = !list.required ? null : own ? "Sin código vigente: elígelo al editar" : "Sin código vigente"
-  return <DetailField label={`Código ${list.label}`}>{coding ? coding.code : missing}</DetailField>
+  return (
+    <DetailField label={capitalize(list.codeName)}>
+      {official.status === "pending" ? (
+        <Skeleton className="h-4 w-16" />
+      ) : official.status === "error" ? (
+        "No se pudo leer el código"
+      ) : official.coding ? (
+        official.coding.code
+      ) : (
+        missing
+      )}
+    </DetailField>
+  )
 }
 
 /** Detalle de lectura de una prestación, para quien no puede escribir. */
 function OfferReadOnly({
   offer,
-  officialCoding,
+  official,
   locale,
 }: {
   offer: ServiceCatalogItem
-  officialCoding: OfficialCoding | null
+  official: OfficialState
   locale: string
 }) {
   return (
@@ -1051,7 +1085,7 @@ function OfferReadOnly({
             : null}
         </DetailField>
         <DetailField label="Estado">{offer.isActive ? "Activa" : "Inactiva"}</DetailField>
-        <OfficialCodeDetail coding={officialCoding} own={offer.source === "custom"} />
+        <OfficialCodeDetail official={official} own={offer.source === "custom"} />
         <DetailField label="Código interno">{offer.code}</DetailField>
       </DetailList>
     </div>
@@ -1064,10 +1098,10 @@ function OfferReadOnly({
  */
 function OfferDetails({
   offer,
-  officialCoding,
+  official,
 }: {
   offer: ServiceCatalogItem
-  officialCoding: OfficialCoding | null
+  official: OfficialState
 }) {
   return (
     <Collapsible>
@@ -1078,7 +1112,7 @@ function OfferDetails({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2">
         <DetailList columns={1}>
-          {offer.source === "template" ? <OfficialCodeDetail coding={officialCoding} own={false} /> : null}
+          {offer.source === "template" ? <OfficialCodeDetail official={official} own={false} /> : null}
           <DetailField label="Duración">
             {offer.durationMin === null ? null : `${offer.durationMin} min`}
           </DetailField>

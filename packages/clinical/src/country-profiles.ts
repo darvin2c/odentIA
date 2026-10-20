@@ -17,7 +17,7 @@
 
 import type { DiagnosisSystemKey } from "./diagnoses.js"
 import type { MaritalStatus } from "./identity.js"
-import type { TreatmentKind } from "./treatment-templates.js"
+import { isTreatmentKind, type TreatmentKind } from "./treatment-templates.js"
 
 /** Tipos de documento de identidad. Las etiquetas valen en cualquier clínica. */
 export const IDENTITY_DOC_TYPES = ["NACIONAL", "DNI", "CE", "PASAPORTE", "CNV", "DIE", "OTRO"] as const
@@ -145,8 +145,12 @@ export interface ClinicalCountryProfile {
 export interface ServiceListProfile {
   /** La lista en el catálogo (`procedure_code_system.key`), p. ej. «CPMS». */
   system: string
-  /** Su nombre corto en pantalla: «Código CPMS», «Código CIE-9-MC». */
+  /** Su nombre corto, junto al código en la biblioteca: «CPMS D2330». */
   label: string
+  /** Cómo se dice su código en una frase: «código CPMS», «código del Colegio de Dentistas». */
+  codeName: string
+  /** Cómo se nombra la lista en una frase, con su artículo: «la lista CPMS», «el arancel FONASA». */
+  listName: string
   /**
    * Obligatoria: la norma pide que la clínica privada codifique con ella, así
    * que todo servicio lleva su código. De referencia: solo cuando lo tiene.
@@ -381,7 +385,14 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   },
   // La RM 550-2023-MINSA (art. 2) obliga a las IPRESS públicas, privadas y
   // mixtas a usar el CPMS en sus sistemas.
-  services: { system: "CPMS", label: "CPMS", required: true, norm: "RM 550-2023-MINSA" },
+  services: {
+    system: "CPMS",
+    label: "CPMS",
+    codeName: "código CPMS",
+    listName: "la lista CPMS",
+    required: true,
+    norm: "RM 550-2023-MINSA",
+  },
   specialties: PERU_SPECIALTIES,
 }
 
@@ -467,15 +478,38 @@ const CHILE_SPECIALTIES: SpecialtiesProfile = {
 const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile; specialties?: SpecialtiesProfile }> = {
   // Res. 2706 de 2025, art. 2: toda IPS, sin distinguir pública o privada.
   CO: {
-    services: { system: "CUPS", label: "CUPS", required: true, norm: "Res. 2706 de 2025" },
+    services: {
+      system: "CUPS",
+      label: "CUPS",
+      codeName: "código CUPS",
+      listName: "la lista CUPS",
+      required: true,
+      norm: "Res. 2706 de 2025",
+    },
     specialties: COLOMBIA_SPECIALTIES,
   },
   // NOM-024-SSA3-2012: el software de expediente clínico usa el catálogo de
   // procedimientos de la DGIS, también en el privado.
-  MX: { services: { system: "CIE9MC-MX", label: "CIE-9-MC", required: true, norm: "NOM-024-SSA3-2012" } },
+  MX: {
+    services: {
+      system: "CIE9MC-MX",
+      label: "CIE-9-MC",
+      codeName: "código CIE-9-MC",
+      listName: "la lista CIE-9-MC de la DGIS",
+      required: true,
+      norm: "NOM-024-SSA3-2012",
+    },
+  },
   // Solo para quien atiende con bono FONASA (Modalidad Libre Elección).
   CL: {
-    services: { system: "FONASA", label: "FONASA", required: false, norm: "Arancel MLE 2026, Res. Ex. 347/2026" },
+    services: {
+      system: "FONASA",
+      label: "FONASA",
+      codeName: "código FONASA",
+      listName: "el arancel FONASA",
+      required: false,
+      norm: "Arancel MLE 2026, Res. Ex. 347/2026",
+    },
     specialties: CHILE_SPECIALTIES,
   },
   // Lo obligatorio del tarifario del Colegio (Ley 10352, art. 5 inc. y) es el
@@ -484,13 +518,24 @@ const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile; specia
     services: {
       system: "COLEGIO-CR",
       label: "Colegio de Dentistas",
+      codeName: "código del Colegio de Dentistas",
+      listName: "el tarifario del Colegio de Dentistas",
       required: false,
       norm: "tarifas mínimas del Colegio, La Gaceta 19 de 2025",
     },
   },
   // Adaptación propia del MINSAL: el mismo número puede ser otro acto que en
   // la CIE-9-MC internacional.
-  SV: { services: { system: "CIE9MC-SV", label: "CIE-9-MC", required: false, norm: "CIE-9-MC 2024 del MINSAL" } },
+  SV: {
+    services: {
+      system: "CIE9MC-SV",
+      label: "CIE-9-MC",
+      codeName: "código CIE-9-MC",
+      listName: "la lista CIE-9-MC del MINSAL",
+      required: false,
+      norm: "CIE-9-MC 2024 del MINSAL",
+    },
+  },
 }
 
 
@@ -553,5 +598,9 @@ export function specialtyForKind(profile: ClinicalCountryProfile, kind: string):
 /** El tipo que toma un servicio propio por su especialidad (su clave), o null. */
 export function kindOfSpecialty(profile: ClinicalCountryProfile, specialtyKey: string | null | undefined): TreatmentKind | null {
   if (!specialtyKey) return null
-  return profile.specialties.list.find((item) => item.key === specialtyKey)?.kind ?? null
+  const kind = profile.specialties.list.find((item) => item.key === specialtyKey)?.kind
+  if (kind) return kind
+  // Una especialidad que la clínica conservó con la clave de un tipo de la
+  // biblioteca (las de antes de ADR 0067, p. ej. «Estética») sigue siendo ese tipo.
+  return isTreatmentKind(specialtyKey) ? specialtyKey : null
 }

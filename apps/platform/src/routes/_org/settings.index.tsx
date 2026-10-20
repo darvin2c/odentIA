@@ -29,6 +29,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
+import { capitalize } from "../../components/official-code-field"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import { ApiError } from "../../lib/api"
@@ -639,7 +640,7 @@ function CountryRules({ country, language }: { country: string; language: string
     [
       "Servicios",
       profile.services
-        ? `${profile.services.label}, ${profile.services.required ? "obligatoria" : "de referencia"} (${profile.services.norm})`
+        ? `${capitalize(profile.services.listName)}, ${profile.services.required ? "obligatoria" : "de referencia"} (${profile.services.norm})`
         : "No hay una lista oficial: tus servicios no llevan código",
     ],
     [

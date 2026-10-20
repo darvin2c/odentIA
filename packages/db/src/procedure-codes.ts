@@ -265,6 +265,19 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
         sql`select pg_advisory_xact_lock(hashtext(${"procedure-seed:" + release.systemKey}))`,
       )
     }
+    // Una lista vigente en la base que ya no está en el CSV no se retira sola:
+    // dejarla vigente en silencio o apagarla sin querer son igual de malos.
+    // Retirarla es una decisión: se hace a mano antes de sembrar.
+    const current = (await tx.execute(
+      sql`select "system_key" from "procedure_catalog_release" where "is_current"`,
+    )) as unknown as { system_key: string }[]
+    const inCsv = new Set(releases.map((r) => r.systemKey))
+    const orphan = current.find((row) => !inCsv.has(row.system_key))
+    if (orphan) {
+      throw new Error(
+        `La lista ${orphan.system_key} sigue vigente en la base pero ya no está en procedure_catalog_release.csv: retírala a mano antes de sembrar`,
+      )
+    }
     for (const s of systems) {
       await tx.execute(
         sql`insert into "procedure_code_system" ("key", "title", "publisher", "country", "license", "source_url")

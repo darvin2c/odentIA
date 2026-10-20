@@ -3,7 +3,7 @@ import { clinicalProfileFor, kindOfSpecialty, phaseForKind, specialtyForKind, TR
 
 describe("lista de servicios y especialidades de cada país (ADR 0067)", () => {
   it("Perú pide la CPMS a toda clínica; un país sin perfil no tiene lista", () => {
-    expect(clinicalProfileFor("PE").services).toEqual({ system: "CPMS", label: "CPMS", required: true, norm: "RM 550-2023-MINSA" })
+    expect(clinicalProfileFor("PE").services).toMatchObject({ system: "CPMS", label: "CPMS", codeName: "código CPMS", required: true, norm: "RM 550-2023-MINSA" })
     expect(clinicalProfileFor("UY").services).toBeNull()
     expect(clinicalProfileFor(null).services).toBeNull()
   })
@@ -46,6 +46,8 @@ describe("lista de servicios y especialidades de cada país (ADR 0067)", () => {
     expect(kindOfSpecialty(peru, "cirugia_bucal_maxilofacial")).toBe("cirugia")
     expect(phaseForKind(kindOfSpecialty(peru, "cirugia_bucal_maxilofacial"))).toBe("quirurgica")
     expect(kindOfSpecialty(peru, "estetica_facial")).toBeNull()
+    // Una especialidad conservada con la clave de un tipo de la biblioteca sigue siendo ese tipo.
+    expect(kindOfSpecialty(peru, "estetica")).toBe("estetica")
     expect(phaseForKind(null)).toBe("basica")
   })
 })

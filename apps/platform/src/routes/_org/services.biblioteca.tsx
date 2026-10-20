@@ -123,7 +123,8 @@ interface AddRow extends Draft {
   ready: boolean
 }
 
-function templateDraft(template: TreatmentTemplateItem): Draft {
+/** `listLabel`: el nombre corto de la lista del país («CPMS», «CIE-9-MC»), nunca su clave. */
+function templateDraft(template: TreatmentTemplateItem, listLabel: string | null): Draft {
   const coding = template.codings[0]
   return {
     chosen: false,
@@ -133,7 +134,7 @@ function templateDraft(template: TreatmentTemplateItem): Draft {
     durationMin: "",
     scope: template.scope,
     libraryName: template.name,
-    code: coding ? `${coding.system} ${coding.code}` : null,
+    code: coding && listLabel ? `${listLabel} ${coding.code}` : null,
   }
 }
 
@@ -316,7 +317,7 @@ function AddServicesPage() {
     if (!regional) return []
     const inView = new Set(viewTemplates.map((entry) => entry.template.id))
     const list = viewTemplates.map(({ template, concept }) =>
-      toRow(template.id, drafts[template.id] ?? templateDraft(template), regional, {
+      toRow(template.id, drafts[template.id] ?? templateDraft(template, codeList?.label ?? null), regional, {
         concept,
         owned: view === "biblioteca" && (owned?.has(template.id) ?? false),
         attempted,
@@ -331,7 +332,7 @@ function AddServicesPage() {
       }
     }
     return list
-  }, [attempted, drafts, owned, regional, view, viewTemplates])
+  }, [attempted, codeList, drafts, owned, regional, view, viewTemplates])
 
   /** Todo lo elegido, esté o no en la vista: es lo que cuenta y lo que se guarda. */
   const chosen = useMemo(
@@ -688,8 +689,8 @@ function AddServicesPage() {
       {codeList ? (
         <p className="text-xs text-muted-foreground">
           {codeList.required
-            ? `Los códigos son los de la lista ${codeList.label}, la que pide la norma de tu país (${codeList.norm}).`
-            : `Los códigos son los de la lista ${codeList.label}, de referencia en tu país (${codeList.norm}).`}
+            ? `Los códigos son los de ${codeList.listName}, la que pide la norma de tu país (${codeList.norm}).`
+            : `Los códigos son los de ${codeList.listName}, de referencia en tu país (${codeList.norm}).`}
         </p>
       ) : null}
       {view === "biblioteca" ? (
@@ -793,7 +794,7 @@ function AddServicesPage() {
               ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
                 {codeList
-                  ? `El nombre es el que verán caja y el paciente; se puede cambiar. El código ${codeList.label} se conserva.`
+                  ? `El nombre es el que verán caja y el paciente; se puede cambiar. El ${codeList.codeName} se conserva.`
                   : "El nombre es el que verán caja y el paciente; se puede cambiar."}
               </p>
               <p className="text-sm font-medium" role="status">

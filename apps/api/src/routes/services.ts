@@ -263,7 +263,7 @@ export function createServicesRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     try {
-      const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, c.req.param("id")))
+      const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, orgId, c.req.param("id")))
       return c.json({ data })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)

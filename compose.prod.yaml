@@ -47,7 +47,8 @@ services:
     # Después de migrar carga las listas de diagnósticos oficiales del repositorio
     # (la CIE-11 de la OMS) y la biblioteca de servicios con la lista de cada país
     # (la CPMS del Perú, ADR 0067): sin ella una clínica del Perú no puede crear
-    # servicios. Ambas son idempotentes: sin cambios, no escriben nada nuevo.
+    # servicios. Ambas son idempotentes: sin cambios, dejan la base igual (la
+    # biblioteca vuelve a escribir los códigos de cada edición en su transacción).
     command: ["sh", "-c", "pnpm --filter @odentia/db migrate && pnpm --filter @odentia/db seed:diagnoses && pnpm --filter @odentia/db seed:procedures"]
     env_file: *runtime-env-file
     depends_on:

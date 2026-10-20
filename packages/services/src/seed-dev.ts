@@ -1874,7 +1874,9 @@ for (const tpl of consultaTemplates) {
 const libraryForSeed = await db
   .select({ id: treatmentTemplate.id })
   .from(treatmentTemplate)
-  .where(eq(treatmentTemplate.isActive, true))
+  // Dental Smile es del Perú: sin las variantes que solo separa la norma de otro
+  // país (`coded_only`), que aquí no tienen código CPMS y no se ofrecen.
+  .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.codedOnly, false)))
   // Primero los «más usados», como los agregaría una clínica (tablero 7b).
   .orderBy(desc(treatmentTemplate.isCommon), asc(treatmentTemplate.key))
   .limit(140)

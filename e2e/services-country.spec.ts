@@ -73,7 +73,7 @@ test("Colombia: la CUPS obligatoria y las variantes que separa; nada peruano", a
   const variant = page.getByRole("row").filter({ hasText: "Exodoncia de diente permanente unirradicular" })
   await expect(variant).toContainText("CUPS 230101")
   // En Colombia la exodoncia va por raíces: no se ofrece la general ni aparece un código peruano.
-  await expect(page.getByRole("row").filter({ hasText: /^Exodoncia simple/ })).toHaveCount(0)
+  await expect(page.getByRole("row").filter({ hasText: "Exodoncia simple" })).toHaveCount(0)
   await expect(page.getByText(/CPMS/)).toHaveCount(0)
   await expect(page.getByText("Los códigos son los de la lista CUPS, la que pide la norma de tu país (Res. 2706 de 2025).")).toBeVisible()
 
