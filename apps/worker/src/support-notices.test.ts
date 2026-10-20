@@ -67,7 +67,7 @@ it("reclama antes de SMTP, no lleva el texto del caso y no reintenta un envío i
   await runSupportNoticesTick({ ownerDb, mailer, supportInbox: "soporte@odentia.test", ...urls, now })
   expect(sent).toHaveLength(2)
   expect(sent[1]).toMatchObject({ to: "ana@worker.test", subject: "Soporte de odentIA respondió tu caso", state: "reclamado" })
-  expect(sent[1]!.text).toContain("Tienes una respuesta sobre «Pregunta · Administrador». Responde desde odentIA")
+  expect(sent[1]!.text).toContain("Tienes una respuesta sobre «Pregunta · Argos». Responde desde odentIA")
   expect(sent[1]!.text).toContain("Este correo no recibe respuestas")
   expect(sent[1]!.html).toContain(`https://norte.odentia.test/home?ayuda=casos&amp;caso=${kase.id}`)
   expect(sent[1]!.text).not.toContain(answer)
