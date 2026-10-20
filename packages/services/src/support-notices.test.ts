@@ -118,7 +118,7 @@ describe("a quien preguntó", () => {
     const [notice] = await personNoticesOf(kase.id)
     expect(notice).toMatchObject({ kind: "respuesta", recipientUserId: ANA, emailState: "pendiente" })
     const claimed = await claimSupportNotice(ownerDb, notice!.id)
-    expect(claimed).toMatchObject({ to: "ana@notice.test", topic: "Administrador", caseKind: "pregunta" })
+    expect(claimed).toMatchObject({ to: "ana@notice.test", topic: "Argos", caseKind: "pregunta" })
     await completeSupportNotice(ownerDb, notice!.id, true)
     // La misma respuesta no avisa dos veces.
     await tickSupportNotices(ownerDb, new Date(t0 + 3 * SUPPORT_REPLY_NOTICE_GAP_MS))
@@ -214,7 +214,7 @@ describe("reclamo antes de SMTP", () => {
     expect(pendingBefore).toContainEqual({ id: notice!.id, inbox: true })
 
     const claimed = await claimSupportNotice(ownerDb, notice!.id)
-    expect(claimed).toMatchObject({ kind: "caso_nuevo", to: null, who: "Ana Torres", screen: "Agente › Administrador" })
+    expect(claimed).toMatchObject({ kind: "caso_nuevo", to: null, who: "Ana Torres", screen: "Agente › Argos" })
     // Reclamado antes de enviar: nadie más lo toma.
     expect(await claimSupportNotice(ownerDb, notice!.id)).toBeNull()
     expect((await noticesOf(kase.id))[0]).toMatchObject({ emailState: "reclamado" })
