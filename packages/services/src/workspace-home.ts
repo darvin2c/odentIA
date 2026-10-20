@@ -15,8 +15,10 @@
  * quien pide volver a entrar al portal), las personas a las que el agente no
  * pudo escribir, conversaciones sin responder, tareas vencidas, casos
  * «Hoy» y «Sin apuro», conversaciones que siguen abiertas con una persona a
- * cargo, la siguiente tarea con el resto resumido, los consentimientos que
- * una atención pidió y faltan publicar (para quien configura), lo que recomienda el
+ * cargo, la siguiente tarea con el resto resumido, lo que hace falta y lo
+ * vencido del inventario de cada sede (para quien pide las compras), los
+ * consentimientos que una atención pidió y faltan publicar (para quien
+ * configura), lo que recomienda el
  * administrador y, solo si él está apagado, los presupuestos que esperan
  * respuesta (encendido, esa lista es una de sus líneas y saldría dos veces).
  * Ninguna propuesta del agente espera al equipo (ADR 0023): lo que el agente no
@@ -221,8 +223,24 @@ export interface WaitingPromotion {
   title: string
 }
 
+/**
+ * El inventario de una sede pide trabajo: «Inventario de Miraflores: 3
+ * productos hacen falta y 1 lote venció», con nombres de ejemplo y «Pedir lo
+ * que falta». Una fila por sede; sale del estado y se va sola cuando ya no
+ * falta nada (`inventoryWaiting`, ADR 0067).
+ */
+export interface WaitingInventory {
+  branchId: string
+  branchName: string
+  needed: number
+  neededNames: string[]
+  expiredLots: number
+  expired: Array<{ productName: string; expiresAt: string }>
+}
+
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
+  | ({ kind: "inventory" } & WaitingInventory)
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
   | ({ kind: "promotion" } & WaitingPromotion)
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
@@ -269,6 +287,8 @@ export interface WaitingParts {
   advice: WaitingAdvice[]
   budgets: WaitingBudgets | null
   unreached?: WaitingUnreached | null
+  /** Inventario de cada sede con algo que hace falta o vencido (solo para quien pide las compras). */
+  inventory?: WaitingInventory[]
   /** Consentimientos pedidos por una atención y sin publicar (solo para quien configura). */
   consentsToPublish?: WaitingConsentToPublish[]
   /** Avisos que WhatsApp cuenta como promoción (solo para quien administra los mensajes). */
@@ -326,6 +346,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const tasksLeft = Math.max(parts.openTasks - overdue.length - (parts.nextTask ? 1 : 0), 0)
   if (parts.nextTask) rows.push({ kind: "task", ...parts.nextTask, more: tasksLeft })
   else if (tasksLeft > 0) rows.push({ kind: "more", of: "tasks", count: tasksLeft })
+
+  // El inventario de cada sede: lo que hace falta y lo vencido, para quien pide.
+  for (const item of (parts.inventory ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "inventory", ...item })
 
   // Lo que una atención no pudo hacer porque falta publicar su consentimiento.
   for (const item of (parts.consentsToPublish ?? []).slice(0, WAITING_LIMITS.otherCases))

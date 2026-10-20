@@ -469,6 +469,7 @@ export function AccountTab({
                         {formatDayLongLocale(row.createdAt, locale, timeZone)}
                       </span>
                       {row.status === "anulado" ? <Badge variant="destructive">Anulado</Badge> : null}
+                      {row.returns?.length ? <Badge variant="secondary">Con devolución</Badge> : null}
                     </p>
                     <p className="break-words text-sm text-muted-foreground">
                       {row.status === "anulado"
@@ -563,6 +564,10 @@ export function AccountTab({
             timeZone={timeZone}
             inAccount
             onDone={() => setCollect(null)}
+            onCollect={() => {
+              setCollect(null)
+              withBranch("cobrar")
+            }}
             onChanged={invalidate}
           />
         ) : null}
@@ -595,6 +600,10 @@ export function AccountTab({
               mode="review"
               inAccount
               onDone={() => setViewTicket(null)}
+              onCollect={() => {
+                setViewTicket(null)
+                withBranch("cobrar")
+              }}
               onChanged={invalidate}
             />
           )
@@ -713,8 +722,8 @@ export function AccountTab({
               onChange={setRefundAmount}
             />
             <FieldDescription>
-              Solo se devuelve lo que está a favor. Para devolver algo ya cobrado, primero se anula
-              ese cobro.
+              Solo se devuelve lo que está a favor. Para devolver algo ya cobrado, ábrelo desde su
+              ticket: «Devolver».
             </FieldDescription>
           </Field>
           <div className="flex flex-col gap-2">

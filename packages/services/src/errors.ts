@@ -27,6 +27,11 @@ export function chairNotFound(): ServiceError {
   return new ServiceError("NOT_FOUND", 404, "Unidad dental no encontrada")
 }
 
+/** La orden de compra no existe (o no es de la organización): también en femenino. */
+export function purchaseOrderNotFound(): ServiceError {
+  return new ServiceError("NOT_FOUND", 404, "Orden de compra no encontrada")
+}
+
 /** true si el error es violación de unique (Postgres 23505, incluso envuelto por Drizzle). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505"

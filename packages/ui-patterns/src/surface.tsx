@@ -103,8 +103,11 @@ export function SurfaceShell({
         </ScrollArea>
       </div>
 
+      {/* Si las acciones no caben en una fila (tres en el teléfono), bajan a
+          la siguiente en vez de cortarse; la última, la principal, queda al
+          final y a la derecha. */}
       {footer != null ? (
-        <div className="mt-auto flex shrink-0 flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="mt-auto flex shrink-0 flex-row flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           {footer}
         </div>
       ) : null}

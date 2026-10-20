@@ -372,7 +372,9 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
  * un cargo que vence pasado mañana, una clínica en solo lectura y otra en su
  * tope de gasto. Luis entra como odontólogo a la de solo lectura y a la del
  * tope, para ver el texto del resto del equipo. Sin correos. Idempotente: si
- * la clínica ya existe, solo vuelve a poner las fechas relativas a hoy.
+ * la clínica ya existe, vuelve a poner las fechas relativas a hoy y, como
+ * `seed-dev` borra y recrea a Ana y a Luis, su membresía y la aceptación del
+ * contrato (que se van con ellos).
  */
 export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string; dentistUserId: string; acceptedVersion: string }): Promise<void> {
   const now = new Date()
@@ -386,10 +388,6 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
     const [exists] = await db.select({ id: organization.id }).from(organization).where(eq(organization.id, clinic.id)).limit(1)
     if (!exists) {
       await ensureDemoOrg(db, clinic.id, clinic.name, clinic.slug)
-      await db.insert(member).values([
-        { id: `${clinic.id}-ana`, organizationId: clinic.id, userId: input.ownerUserId, role: "owner", createdAt: now },
-        ...(clinic.dentist ? [{ id: `${clinic.id}-luis`, organizationId: clinic.id, userId: input.dentistUserId, role: "dentist", createdAt: now }] : []),
-      ])
       await db.insert(orgProfile).values({
         organizationId: clinic.id,
         legalName: `${clinic.name} S.A.C.`,
@@ -401,9 +399,20 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
         diagnosisSystem: "ICD-10",
       })
       await db.insert(branch).values(clinic.branches.map((name) => ({ organizationId: clinic.id, name })))
-      await db.insert(processingAgreementAcceptance).values({ organizationId: clinic.id, version: input.acceptedVersion, acceptedBy: input.ownerUserId })
       await startSaasTrial(db, clinic.id, { planCode: "odentia-ficticio", billingStart: "now" }, now)
     }
+    // También en una clínica que ya existía: Ana y Luis se recrean en cada corrida.
+    await db
+      .insert(member)
+      .values([
+        { id: `${clinic.id}-ana`, organizationId: clinic.id, userId: input.ownerUserId, role: "owner", createdAt: now },
+        ...(clinic.dentist ? [{ id: `${clinic.id}-luis`, organizationId: clinic.id, userId: input.dentistUserId, role: "dentist", createdAt: now }] : []),
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(processingAgreementAcceptance)
+      .values({ organizationId: clinic.id, version: input.acceptedVersion, acceptedBy: input.ownerUserId })
+      .onConflictDoNothing()
   }
 
   // Un cargo que vence pasado mañana: franja ámbar para Ana, «Pagar» en el selector.

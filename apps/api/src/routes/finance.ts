@@ -28,6 +28,7 @@ import {
   getPurchasesToPay,
   listClosures,
   listExpenses,
+  listSaleProducts,
   payPurchaseOrder,
   voidExpense,
   voidMovement,
@@ -132,6 +133,25 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getCashState(tx, orgId, parsed.data)),
+    )
+  })
+
+  // «+ Agregar producto» en «Cobrar» (ADR 0067): lo que se vende, con su
+  // precio y lo que hay en la sede del cobro. Es de quien cobra; nunca el costo.
+  app.get("/sale-products", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid({ error: "Elige la sede del cobro" }),
+        q: z.string().max(200).optional(),
+        limit: z.coerce.number().int().min(1).max(50).optional(),
+      })
+      .strict()
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listSaleProducts(tx, orgId, parsed.data)),
     )
   })
 

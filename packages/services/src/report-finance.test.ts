@@ -200,7 +200,7 @@ async function purchasesClinic() {
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const store = await run((tx) => createWarehouse(tx, orgId, actor, { branchId: site!.id, name: "Almacén" }))
   const seller = await run((tx) => createSupplier(tx, orgId, actor, { name: "Dental Perú" }))
-  const item = await run((tx) => createProduct(tx, orgId, actor, { sku: "RES-A2", name: "Resina A2", kind: "insumo", unit: "jeringa", minStock: 0 }))
+  const item = await run((tx) => createProduct(tx, orgId, actor, { sku: "RES-A2", name: "Resina A2", unit: "jeringa" }))
   const order = async (quantity: number, unitCostCents: number) => {
     const created = await run((tx) =>
       createPurchaseOrder(tx, orgId, actor, { supplierId: seller.id, warehouseId: store.id, lines: [{ productId: item.id, quantity, unitCostCents }] }),
@@ -250,7 +250,7 @@ it("pagar una compra: en partes, por adelantado, de más queda a favor y lo a fa
   expect(used.balance).toMatchObject({ creditCents: 12_000, paidCents: 12_000 })
   expect(await c.credit()).toBe(0)
   // Anular el pago que dejó lo a favor ya usado no se puede: antes hay que anular ese uso.
-  const overpay = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, first.id))).payments.find((row) => row.amountCents === 77_000)!
+  const overpay = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, first.id))).payments?.find((row) => row.amountCents === 77_000)!
   await expect(c.run((tx) => voidExpense(tx, c.orgId, c.actor, overpay.id, { reason: "Error" }))).rejects.toMatchObject({
     code: "SUPPLIER_CREDIT_USED",
     message: expect.stringContaining("OC-0002"),
@@ -293,7 +293,7 @@ it("pagar una compra: un envío repetido no paga dos veces, lo recibido en parte
 
   // «Por pagar» de Inventario filtra en la consulta, antes del tope: salen las dos que deben algo.
   const due = await c.run((tx) => listPurchaseOrders(tx, c.orgId, { payment: "por_pagar" }))
-  expect(due.map((row) => row.id).sort()).toEqual([foreign.id, local.id].sort())
+  expect(due.items.map((row) => row.id).sort()).toEqual([foreign.id, local.id].sort())
 })
 
 it("cancelar una compra pagada pide qué hacer con sus pagos: anularlos o dejarlos a favor", async () => {

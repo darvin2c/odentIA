@@ -16,7 +16,9 @@ import { TimeSelect } from "@odentia/ui-patterns"
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
-import type { ClosingOdontogram, ClosingPeriodontal } from "../../lib/encounters"
+import type { ClosingMaterials, ClosingOdontogram, ClosingPeriodontal } from "../../lib/encounters"
+import { activeOrgLocale } from "../../lib/locale"
+import { closingMaterialsWords } from "../../lib/materials"
 
 /** «16, 26 y 36». */
 function teethWords(teeth: number[]): string {
@@ -73,8 +75,9 @@ function consentLine(need: ConsentNeed, who: string): { title: string; detail: s
 /**
  * Un solo cierre (decisión 3): con quién se firma, el consentimiento sin firmar
  * (firmarlo ahora o seguir sin él diciendo por qué), en clínicas de Perú el
- * odontograma que queda firmado con su momento (fase 3, paso 5), la hora de
- * fin y, después de firmar, lo que quedó por cobrar.
+ * odontograma que queda firmado con su momento (fase 3, paso 5), los
+ * materiales que salen de la sede (una línea que informa), la hora de fin y,
+ * después de firmar, lo que quedó por cobrar.
  */
 export function EncounterClosingDialog({
   open,
@@ -83,6 +86,7 @@ export function EncounterClosingDialog({
   consents,
   odontogram = null,
   periodontal = null,
+  materials = null,
   onKeepProbing,
   startedAt,
   endTime,
@@ -107,6 +111,11 @@ export function EncounterClosingDialog({
   odontogram?: ClosingOdontogram | null
   /** El periodontograma de la atención: queda fijo al firmar; a medias se firma como parcial. */
   periodontal?: ClosingPeriodontal | null
+  /**
+   * Los materiales que se descontarán de la sede al firmar (ADR 0067). Solo
+   * informa: no pide confirmar ni bloquea si no alcanzan.
+   */
+  materials?: ClosingMaterials | null
   /** «Seguir midiendo»: vuelve a la atención con el periodontograma abierto. */
   onKeepProbing?: () => void
   startedAt: string | null | undefined
@@ -183,6 +192,13 @@ export function EncounterClosingDialog({
                 <span className="text-muted-foreground">Queda fijo al firmar.</span>
               </div>
             )
+          ) : null}
+          {materials && materials.items.length > 0 ? (
+            <p className="rounded-lg border p-3">
+              <span className="font-medium">Materiales</span>
+              {" · "}
+              {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
+            </p>
           ) : null}
           {consents.map((need) => {
             const line = consentLine(need, who)

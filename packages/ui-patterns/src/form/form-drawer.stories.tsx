@@ -121,6 +121,41 @@ export const CambiosSinGuardar: Story = {
   },
 }
 
+/**
+ * Otra forma de guardar lo mismo («Guardar borrador») va en el pie, entre
+ * «Cancelar» y la principal; Enter sigue haciendo la principal. En el teléfono,
+ * si los tres no caben, la principal baja a otra fila y queda a la derecha.
+ */
+export const ConAccionSecundaria: Story = {
+  render: function SecondaryActionStory() {
+    const [saving, setSaving] = useState<"borrador" | "pedido" | null>(null)
+    const finish = (what: "borrador" | "pedido") => {
+      setSaving(what)
+      setTimeout(() => {
+        setSaving(null)
+        toast.success(what === "borrador" ? "OC-0012 quedó como borrador." : "OC-0012 quedó pedida.")
+      }, 800)
+    }
+    return (
+      <FormDrawer
+        open
+        title="Nueva compra"
+        description="Sede Miraflores"
+        submitLabel="Confirmar pedido"
+        isSubmitting={saving !== null}
+        secondaryAction={{ label: "Guardar borrador", onClick: () => finish("borrador") }}
+        onClose={noop}
+        onSubmit={(event) => {
+          event.preventDefault()
+          finish("pedido")
+        }}
+      >
+        <DemoFields />
+      </FormDrawer>
+    )
+  },
+}
+
 export const FalloDeGuardado: Story = {
   render: function FailingStory() {
     const [error, setError] = useState<string | null>(null)

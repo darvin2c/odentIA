@@ -24,6 +24,7 @@ import { isDentist, ownBudgetOf } from "./budgets.js"
 import type { ClinicalAccessResource } from "./clinical-access.js"
 import { purchaseOrderLabel } from "./finance.js"
 import { accountBalances } from "./payments.js"
+import { PURCHASE_STATUS_WORDS } from "./purchase-balance.js"
 import { personSearchCondition } from "./person-search.js"
 import {
   digitsContain,
@@ -584,7 +585,8 @@ export async function searchEverything(
   }
 
   // --- Inventario, compras y proveedores ------------------------------------
-  if (can("inventory.read") && on("inventario")) {
+  // Con precios o sin ellos (recepción, `inventory.stock`): aquí no viaja ningún precio.
+  if ((can("inventory.read") || can("inventory.stock")) && on("inventario")) {
     const order = referenceNumber(q, ["oc"])
     const suppliers = await rows(sql`
       select s.id, s.name, s.doc_number from supplier s
@@ -1008,7 +1010,7 @@ function purchaseItem(row: Row): SearchItem {
     type: "inventario",
     kind: "compra",
     title: row.order_number == null ? "Compra" : purchaseOrderLabel(num(row.order_number)),
-    detail: str(row.status),
+    detail: PURCHASE_STATUS_WORDS[String(row.status)] ?? null,
     at: iso(row.created_at),
     amount: null,
     matched: true,

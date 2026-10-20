@@ -1,7 +1,7 @@
 import { FieldLabel, Textarea, toast } from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
@@ -17,6 +17,7 @@ import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
+import { createReorderDrafts } from "../../lib/inventory"
 import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
@@ -55,6 +56,7 @@ type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 type CaseRow = Extract<WaitingRow, { kind: "case" }>
 type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
 type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
+type InventoryRow = Extract<WaitingRow, { kind: "inventory" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -109,13 +111,36 @@ function HomePage() {
       refresh()
     },
   })
+  // «Pedir lo que falta»: un borrador por proveedor con lo que hace falta en esa sede (ADR 0067);
+  // se revisan y confirman en Compras.
+  const navigate = useNavigate()
+  const canOrder = usePermission("inventory.write")
+  const reorder = useMutation({
+    mutationFn: (row: InventoryRow) => createReorderDrafts(row.branchId),
+    onSuccess: (result, row) => {
+      const drafts = result.drafts.length
+      const loose = result.withoutSupplier.length
+      toast.success(
+        drafts === 0
+          ? loose > 0
+            ? `Lo que falta en ${row.branchName} no tiene proveedor: elígelo en la compra.`
+            : `Lo que falta en ${row.branchName} ya está en un borrador.`
+          : `${drafts === 1 ? "Quedó 1 borrador" : `Quedaron ${drafts} borradores`} de compra para ${row.branchName}${loose > 0 ? `; ${loose === 1 ? "1 producto no tiene" : `${loose} productos no tienen`} proveedor` : ""}. Revísalos y confírmalos.`,
+      )
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] })
+      refresh()
+      void navigate({ to: "/inventory", search: { tab: "compras", branch: row.branchId, ver: "borradores" } })
+    },
+  })
   const busyKey = take.isPending && take.variables
     ? waitingKey(take.variables)
     : confirmRepresentative.isPending && confirmRepresentative.variables
       ? waitingKey(confirmRepresentative.variables)
       : discardRegistration.isPending && discardRegistration.variables
         ? waitingKey(discardRegistration.variables)
-        : completion.pendingId
+        : reorder.isPending && reorder.variables
+          ? waitingKey(reorder.variables)
+          : completion.pendingId
           ? `task:${completion.pendingId}`
           : null
   const busyAction = discardRegistration.isPending ? "descartar" : null
@@ -123,6 +148,7 @@ function HomePage() {
     (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ??
     (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
     (discardRegistration.error ? mutationErrorMessage(discardRegistration.error) ?? "No se pudo descartar." : null) ??
+    (reorder.error ? mutationErrorMessage(reorder.error) ?? "No se armaron los borradores de compra." : null) ??
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
@@ -182,6 +208,7 @@ function HomePage() {
               onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
               onDiscard: canDoTasks ? (row) => discardRegistration.mutate(row) : undefined,
               onReviewRegistration: canWritePatients && canDoTasks ? (row) => setHoldTask(row.id) : undefined,
+              onReorder: canOrder ? (row) => reorder.mutate(row) : undefined,
               onArrived: canWriteAppointments
                 ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
                 : undefined,

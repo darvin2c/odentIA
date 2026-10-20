@@ -41,7 +41,7 @@ import { Route as OrgAgentRecepcionRouteImport } from './routes/_org/agent.recep
 import { Route as OrgAgentRegistroRouteImport } from './routes/_org/agent.registro'
 import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
 import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
-import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/inventory.$productId'
+import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/inventory_.$productId'
 import { Route as OrgOpportunitiesOpportunityIdRouteImport } from './routes/_org/opportunities.$opportunityId'
 import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.index'
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
@@ -239,9 +239,9 @@ const OrgContactsContactIdRoute = OrgContactsContactIdRouteImport.update({
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgInventoryProductIdRoute = OrgInventoryProductIdRouteImport.update({
-  id: '/$productId',
-  path: '/$productId',
-  getParentRoute: () => OrgInventoryRoute,
+  id: '/inventory_/$productId',
+  path: '/inventory/$productId',
+  getParentRoute: () => OrgRoute,
 } as any)
 const OrgOpportunitiesOpportunityIdRoute =
   OrgOpportunitiesOpportunityIdRouteImport.update({
@@ -443,7 +443,7 @@ export interface FileRoutesByFullPath {
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
-  '/inventory': typeof OrgInventoryRouteWithChildren
+  '/inventory': typeof OrgInventoryRoute
   '/members': typeof OrgMembersRoute
   '/pipeline': typeof OrgPipelineRoute
   '/reports': typeof OrgReportsRoute
@@ -512,7 +512,7 @@ export interface FileRoutesByTo {
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
-  '/inventory': typeof OrgInventoryRouteWithChildren
+  '/inventory': typeof OrgInventoryRoute
   '/members': typeof OrgMembersRoute
   '/pipeline': typeof OrgPipelineRoute
   '/reports': typeof OrgReportsRoute
@@ -581,7 +581,7 @@ export interface FileRoutesById {
   '/_org/finance': typeof OrgFinanceRoute
   '/_org/home': typeof OrgHomeRoute
   '/_org/inbox': typeof OrgInboxRoute
-  '/_org/inventory': typeof OrgInventoryRouteWithChildren
+  '/_org/inventory': typeof OrgInventoryRoute
   '/_org/members': typeof OrgMembersRoute
   '/_org/pipeline': typeof OrgPipelineRoute
   '/_org/reports': typeof OrgReportsRoute
@@ -600,7 +600,7 @@ export interface FileRoutesById {
   '/_org/agent/recepcion': typeof OrgAgentRecepcionRoute
   '/_org/agent/registro': typeof OrgAgentRegistroRoute
   '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
-  '/_org/inventory/$productId': typeof OrgInventoryProductIdRoute
+  '/_org/inventory_/$productId': typeof OrgInventoryProductIdRoute
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/_org/people/$personId': typeof OrgPeoplePersonIdRoute
@@ -808,7 +808,7 @@ export interface FileRouteTypes {
     | '/_org/agent/recepcion'
     | '/_org/agent/registro'
     | '/_org/contacts/$contactId'
-    | '/_org/inventory/$productId'
+    | '/_org/inventory_/$productId'
     | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
     | '/_org/people/$personId'
@@ -1085,12 +1085,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgContactsContactIdRouteImport
       parentRoute: typeof OrgRoute
     }
-    '/_org/inventory/$productId': {
-      id: '/_org/inventory/$productId'
-      path: '/$productId'
+    '/_org/inventory_/$productId': {
+      id: '/_org/inventory_/$productId'
+      path: '/inventory/$productId'
       fullPath: '/inventory/$productId'
       preLoaderRoute: typeof OrgInventoryProductIdRouteImport
-      parentRoute: typeof OrgInventoryRoute
+      parentRoute: typeof OrgRoute
     }
     '/_org/opportunities/$opportunityId': {
       id: '/_org/opportunities/$opportunityId'
@@ -1340,18 +1340,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface OrgInventoryRouteChildren {
-  OrgInventoryProductIdRoute: typeof OrgInventoryProductIdRoute
-}
-
-const OrgInventoryRouteChildren: OrgInventoryRouteChildren = {
-  OrgInventoryProductIdRoute: OrgInventoryProductIdRoute,
-}
-
-const OrgInventoryRouteWithChildren = OrgInventoryRoute._addFileChildren(
-  OrgInventoryRouteChildren,
-)
-
 interface OrgServicesRouteChildren {
   OrgServicesBibliotecaRoute: typeof OrgServicesBibliotecaRoute
   OrgServicesPromotionsRoute: typeof OrgServicesPromotionsRoute
@@ -1454,7 +1442,7 @@ interface OrgRouteChildren {
   OrgFinanceRoute: typeof OrgFinanceRoute
   OrgHomeRoute: typeof OrgHomeRoute
   OrgInboxRoute: typeof OrgInboxRoute
-  OrgInventoryRoute: typeof OrgInventoryRouteWithChildren
+  OrgInventoryRoute: typeof OrgInventoryRoute
   OrgMembersRoute: typeof OrgMembersRoute
   OrgPipelineRoute: typeof OrgPipelineRoute
   OrgReportsRoute: typeof OrgReportsRoute
@@ -1470,6 +1458,7 @@ interface OrgRouteChildren {
   OrgAgentRecepcionRoute: typeof OrgAgentRecepcionRoute
   OrgAgentRegistroRoute: typeof OrgAgentRegistroRoute
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
+  OrgInventoryProductIdRoute: typeof OrgInventoryProductIdRoute
   OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
   OrgPeoplePersonIdRoute: typeof OrgPeoplePersonIdRoute
@@ -1486,7 +1475,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgFinanceRoute: OrgFinanceRoute,
   OrgHomeRoute: OrgHomeRoute,
   OrgInboxRoute: OrgInboxRoute,
-  OrgInventoryRoute: OrgInventoryRouteWithChildren,
+  OrgInventoryRoute: OrgInventoryRoute,
   OrgMembersRoute: OrgMembersRoute,
   OrgPipelineRoute: OrgPipelineRoute,
   OrgReportsRoute: OrgReportsRoute,
@@ -1502,6 +1491,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgAgentRecepcionRoute: OrgAgentRecepcionRoute,
   OrgAgentRegistroRoute: OrgAgentRegistroRoute,
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,
+  OrgInventoryProductIdRoute: OrgInventoryProductIdRoute,
   OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
   OrgPeoplePersonIdRoute: OrgPeoplePersonIdRoute,

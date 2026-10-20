@@ -57,7 +57,8 @@ export function useActiveBranch(): {
         .map(({ id, name }) => ({ id, name })),
     [query.data],
   )
-  const fromLink = get("branch")
+  // `?branch=` vacío es «sin sede elegida», no una sede.
+  const fromLink = get("branch") || undefined
   const [stored, setStored] = React.useState(readStored)
 
   // La sede a la que lleva un enlace pasa a ser la recordada.
