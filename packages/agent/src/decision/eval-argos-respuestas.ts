@@ -25,6 +25,7 @@ import {
   type FigureGroup,
   type FigureResult,
   formatFigure,
+  getAgendaReport,
   getReportList,
   getReportPromotions,
   listProducts,
@@ -535,6 +536,174 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
       }
     },
   }
+
+  // --- Reserva (eval/argos-reserva.json): preguntas que ningún ajuste vio ------------------
+  Object.assign(solve, {
+    r7: async () => {
+      const [row] = await tx.execute<{ count: number; cents: string }>(sql`
+        select count(*)::int as count, coalesce(sum(c.amount_cents), 0)::text as cents from patient_charge c
+        where c.organization_id = ${ORG} and c.voided_at is null and c.product_id is null and c.created_at >= ${monthStart}::timestamptz`)
+      const average = row && row.count > 0 ? Number(row.cents) / row.count : 0
+      return {
+        respuesta: `Este mes el ticket promedio por tratamiento es ${money(Math.round(average))} (${row?.count ?? 0} tratamientos cargados por ${money(Number(row?.cents ?? 0))}).`,
+        criterio: "Lo cargado por tratamientos del mes (sin productos ni anulados) ÷ cuántos tratamientos.",
+        nota: "Otra lectura: el promedio por tipo de tratamiento.",
+        datos: { row },
+      }
+    },
+    r14: async () => {
+      // Por tratamiento sin agrupar «Otros»: lo pagado este mes de cada uno.
+      const low = await tx.execute<{ name: string; cents: string }>(sql`
+        select ${conceptName} as name, sum(a.amount_cents)::text as cents
+        from patient_payment_application a
+        join patient_payment pay on pay.organization_id = a.organization_id and pay.id = a.payment_id and pay.voided_at is null
+        join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null and c.product_id is null
+        ${conceptJoins}
+        where a.organization_id = ${ORG} and a.voided_at is null and pay.paid_at >= ${monthStart}::timestamptz
+        group by 1 order by sum(a.amount_cents), 1 limit 3`)
+      return {
+        respuesta: `No puedo saber la rentabilidad por tratamiento: faltan el laboratorio y los gastos de cada uno. Lo que sí tengo: este mes, lo que menos cobró fue ${listOf(low.map((row) => ({ name: row.name, value: money(Number(row.cents)) })))}.`,
+        criterio: "Trampa a medias: sin costos por tratamiento no hay rentabilidad. Se ofrece lo cobrado por tratamiento este mes, de menos a más.",
+        datos: { filas: low },
+      }
+    },
+    r19: async () => {
+      const spent = await fig("gastos")
+      const commissions = await fig("comisiones")
+      return {
+        respuesta: `odentIA no emite facturas y solo conoce los gastos que registras y las comisiones. Este mes van ${show(spent)} de gastos y ${show(commissions)} de comisiones: cobrar al menos ${show(spent, (spent.total.value ?? 0) + (commissions.total.value ?? 0))} cubriría lo registrado, sin contar lo que no se anotó.`,
+        criterio: "Trampa a medias: no hay costos fijos ni facturas. Se ofrece gastos registrados + comisiones del mes como referencia.",
+        datos: { gastos: spent.total, comisiones: commissions.total },
+      }
+    },
+    r26: async () => {
+      const [row] = await tx.execute<{ median: string | null; average: string | null; gaps: number }>(sql`
+        with v as (
+          select a.patient_id, a.starts_at, lag(a.starts_at) over (partition by a.patient_id order by a.starts_at) as prev
+          from appointment a where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= now() - interval '365 days' and a.starts_at < now())
+        select percentile_cont(0.5) within group (order by extract(epoch from starts_at - prev) / 86400)::text as median,
+          avg(extract(epoch from starts_at - prev) / 86400)::text as average, count(*)::int as gaps
+        from v where prev is not null`)
+      return {
+        respuesta: `En los últimos 12 meses, entre una visita y la siguiente pasan ${Math.round(Number(row?.median ?? 0))} días (mediana); en promedio, ${Math.round(Number(row?.average ?? 0))} días.`,
+        criterio: "Días entre citas atendidas seguidas de cada paciente, últimos 12 meses (frecuencia: 12 meses, criterio 3).",
+        datos: { row },
+      }
+    },
+    r36: async () => {
+      const report = await getAgendaReport(tx, ORG, { period: "este_mes" }, now)
+      const free = new Map<string, number>()
+      for (const slot of report.map.week) {
+        const key = `${slot.weekday}|${slot.hour}`
+        free.set(key, (free.get(key) ?? 0) + Math.max(0, slot.availMin - slot.occMin))
+      }
+      const days = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+      const top = [...free.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4)
+      return {
+        respuesta: `Este mes los horarios con más espacio libre son ${listOf(
+          top.map(([key, minutes]) => {
+            const [weekday, hour] = key.split("|").map(Number) as [number, number]
+            return { name: `${days[weekday]} a las ${hour}:00`, value: `${Math.round(minutes / 60)} h libres` }
+          }),
+        )}.`,
+        criterio: "Semana tipo de Reportes › Agenda: minutos de horario menos minutos con cita, por día de la semana y hora, del mes en curso.",
+        datos: { top },
+      }
+    },
+    r45: async () => {
+      const [row] = await tx.execute<{ plans: number; items: number }>(sql`
+        with accepted as (
+          select pi.plan_id, pi.status, pi.started_at from treatment_plan_item pi
+          where pi.organization_id = ${ORG} and pi.decision_status = 'aceptado' and pi.status not in ('cancelado','reemplazado'))
+        select (select count(*) from (select plan_id from accepted group by plan_id
+            having bool_and(started_at is null and status in ('pendiente','programado'))) x)::int as plans,
+          (select count(*) from accepted where started_at is null and status in ('pendiente','programado'))::int as items`)
+      return {
+        respuesta: `${row?.plans ?? 0} planes de tratamiento tienen tratamientos aceptados y ninguno empezado (${row?.items ?? 0} tratamientos aceptados sin empezar en total).`,
+        criterio: "Planes con al menos un tratamiento aceptado y ninguno empezado, a hoy.",
+        datos: { row },
+      }
+    },
+    r52: async () => {
+      const rows = await tx.execute<{ name: string; patients: number }>(sql`
+        select u.name, count(distinct a.patient_id)::int as patients from appointment a join "user" u on u.id = a.dentist_user_id
+        where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= ${monthStart}::timestamptz and a.starts_at < now()
+        group by 1 order by 2 desc, 1`)
+      return {
+        respuesta: `Este mes: ${listOf(rows.map((row) => ({ name: row.name, value: `${row.patients} pacientes` })))}.`,
+        criterio: "Pacientes distintos con una cita atendida en el mes, por profesional.",
+        datos: { filas: rows },
+      }
+    },
+    r57: async () => {
+      const result = await fig("cobrado", "profesional")
+      const total = result.rows.reduce((sum, row) => sum + (row.value.value ?? 0), 0)
+      return {
+        respuesta: `Este mes lo cobrado se reparte así: ${listOf(result.rows.map((row) => ({ name: row.label, value: `${show(result, row.value.value)}, ${total ? Math.round(((row.value.value ?? 0) / total) * 100) : 0} %` })))}.`,
+        criterio: "Lo cobrado por profesional de Reportes (de lo que atendió cada uno), con su parte del total atribuido.",
+        datos: { filas: result.rows },
+      }
+    },
+    r62: async () => {
+      const result = await fig("aceptaron")
+      return {
+        respuesta: `Este mes se aceptó el ${show(result)} de los presupuestos (${result.total.part ?? 0} de ${result.total.whole ?? 0}).`,
+        criterio: "«Aceptaron su presupuesto» de Reportes, del mes en curso.",
+        datos: { total: result.total },
+      }
+    },
+    r71: async () => {
+      const lists = await Promise.all(
+        (["debts_age_0_30", "debts_age_31_60", "debts_age_61_90", "debts_age_90_plus"] as const).map((list) =>
+          getReportList(tx, ORG, { period: "este_mes", list, limit: 200 }, now),
+        ),
+      )
+      const rows = lists.flatMap((list) => list.rows).sort((a, b) => a.at.localeCompare(b.at))
+      const day = (iso: string) => new Intl.DateTimeFormat(scope.locale, { day: "2-digit", month: "2-digit", year: "numeric", timeZone: tz }).format(new Date(iso))
+      return {
+        respuesta: `Las deudas más antiguas son de ${listOf(rows.slice(0, 5).map((row) => ({ name: row.personName, value: `${money(row.cents)} desde el ${day(row.at)}` })))}.`,
+        criterio: "Listas de «Te deben» por antigüedad, ordenadas por el cargo sin pagar más antiguo, a hoy.",
+        datos: { primeras: rows.slice(0, 10) },
+      }
+    },
+    r78: async () => {
+      const result = await fig("como_nos_conocieron")
+      const row = result.rows.find((item) => item.key === "recomendacion" || /recomend/i.test(item.label))
+      return {
+        respuesta: `Este mes llegaron ${row?.value.value ?? 0} pacientes nuevos por recomendación${row?.value.whole ? ` (de ${row.value.whole})` : ""}.`,
+        criterio: "Pacientes nuevos del mes con «Cómo nos conoció» = recomendación.",
+        datos: { filas: result.rows },
+      }
+    },
+    r86: async () => {
+      const branches = await tx.execute<{ id: string; name: string }>(sql`select id, name from branch where organization_id = ${ORG} and is_active order by name`)
+      const found: Array<{ name: string; branch: string; quantity: number; date: string }> = []
+      for (const branch of branches) {
+        const list = await listProducts(tx, ORG, { branchId: branch.id, need: "por_vencer", now })
+        for (const item of list.items) if (item.expiring) found.push({ name: item.name, branch: branch.name, quantity: item.expiring.quantity, date: item.expiring.date })
+      }
+      return {
+        respuesta: found.length
+          ? `Vencen en los próximos 30 días: ${listOf(found.map((row) => ({ name: `${row.name} en ${row.branch}`, value: `${row.quantity} el ${row.date}` })))}.`
+          : "Ningún producto vence en los próximos 30 días.",
+        criterio: "«Por vencer» de Inventario: lotes que vencen en 30 días o menos (lo ya vencido va aparte).",
+        datos: { filas: found },
+      }
+    },
+    r93: async () => ({
+      respuesta: "odentIA no pregunta a los pacientes si recomendarían la clínica, así que no tengo ese porcentaje.",
+      criterio: "Trampa: no hay encuestas ni NPS.",
+      datos: {},
+    }),
+    r99: async () => {
+      const result = await fig("agenda_ocupada", "sede")
+      return {
+        respuesta: `Este mes la mejor ocupación es de ${listOf(result.rows.map((row) => ({ name: row.label, value: show(result, row.value.value) })))}.`,
+        criterio: "«Agenda ocupada» de Reportes por sede, del mes en curso.",
+        datos: { filas: result.rows },
+      }
+    },
+  } satisfies Record<string, () => Promise<Answer>>)
 
   const out: Array<Question & Answer> = []
   for (const question of bank.preguntas) {

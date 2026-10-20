@@ -1,0 +1,19 @@
+{
+  "descripcion": "Preguntas de reserva del examen de Argos (issue 192): del catálogo de 100 del dueño, las que no están en el examen, en orden, una de cada cinco empezando por la tercera. Sirven para medir con preguntas que ningún ajuste vio. «trampa»: odentIA no tiene el dato o lo tiene a medias.",
+  "preguntas": [
+    { "id": "r7", "texto": "¿Cuál es el ticket promedio por tratamiento?", "origen": "catalogo", "area": "dinero", "espera": "responde" },
+    { "id": "r14", "texto": "¿Cuáles son los tratamientos menos rentables?", "origen": "catalogo", "area": "dinero", "espera": "trampa", "debe": "Decir que la rentabilidad por tratamiento no se puede saber (faltan laboratorio y gastos por tratamiento) y ofrecer lo cobrado por tratamiento, marcado como parcial." },
+    { "id": "r19", "texto": "¿Cuánto tenemos que facturar para cubrir nuestros costos?", "origen": "catalogo", "area": "dinero", "espera": "trampa", "debe": "Decir que odentIA no emite facturas y que solo conoce los gastos registrados y las comisiones; ofrecer esa suma como referencia, no como punto de equilibrio." },
+    { "id": "r26", "texto": "¿Cada cuánto tiempo regresan nuestros pacientes?", "origen": "catalogo", "area": "pacientes", "espera": "responde" },
+    { "id": "r36", "texto": "¿En qué horarios tenemos más espacios disponibles?", "origen": "catalogo", "area": "agenda", "espera": "responde" },
+    { "id": "r45", "texto": "¿Cuántos planes de tratamiento no se han iniciado?", "origen": "catalogo", "area": "tratamientos", "espera": "responde" },
+    { "id": "r52", "texto": "¿Cuántos pacientes atendió cada odontólogo?", "origen": "catalogo", "area": "agenda", "espera": "responde" },
+    { "id": "r57", "texto": "¿Cómo se distribuyen los ingresos entre los odontólogos?", "origen": "catalogo", "area": "dinero", "espera": "responde" },
+    { "id": "r62", "texto": "¿Qué porcentaje de presupuestos fueron aceptados?", "origen": "catalogo", "area": "presupuestos", "espera": "responde" },
+    { "id": "r71", "texto": "¿Cuáles son las deudas más antiguas?", "origen": "catalogo", "area": "caja", "espera": "responde" },
+    { "id": "r78", "texto": "¿Cuántos pacientes llegaron por recomendaciones?", "origen": "catalogo", "area": "pacientes", "espera": "responde" },
+    { "id": "r86", "texto": "¿Qué productos están próximos a vencer?", "origen": "catalogo", "area": "inventario", "espera": "responde" },
+    { "id": "r93", "texto": "¿Qué porcentaje de pacientes recomendaría nuestra clínica?", "origen": "catalogo", "area": "pacientes", "espera": "trampa", "debe": "Decir que odentIA no tiene encuestas ni la pregunta de si recomendarían la clínica." },
+    { "id": "r99", "texto": "¿Qué sucursal tiene mejor ocupación de agenda?", "origen": "catalogo", "area": "agenda", "espera": "responde" }
+  ]
+}
