@@ -40,13 +40,13 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "pagos_por_venta",
     about: "Lo pagado aplicado a cada venta: qué se pagó y de qué. Solo pagos vigentes. «Lo que más se vendió» es lo que más se pagó: se mide aquí.",
-    columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, medio",
+    columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, paciente_id, medio",
     keys: ["gestion", "caja"],
   },
   {
     name: "tickets",
     about: "Los tickets de pago. odentIA no emite facturas ni boletas: solo tickets. Un ticket junta lo cobrado en una visita, no es una venta.",
-    columns: "numero, emitido_en (timestamptz), dia, sede, paciente, total, a_favor_usado, anulado (bool)",
+    columns: "numero, emitido_en (timestamptz), dia, sede, paciente, paciente_id, total, a_favor_usado, anulado (bool)",
     keys: ["gestion", "caja"],
   },
   {
@@ -68,7 +68,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "comisiones",
     about:
       "Comisiones de los profesionales, como Finanzas › Comisiones: cada cobro de lo que atendió un profesional con su porcentaje. Cuenta al cobrar (momento del cobro).",
-    columns: "momento (timestamptz), dia, profesional, base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea), sin_pagar",
+    columns: "momento (timestamptz), dia, profesional, sede (la del cobro), base (lo cobrado de lo que atendió), comision, pagado (lo ya pagado de esa línea), sin_pagar",
     keys: ["gestion"],
   },
   {
@@ -103,7 +103,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "tratamientos_hechos",
     about: "Lo realizado: procedimientos de atenciones firmadas, sin anulados. Sin diagnósticos ni notas.",
     columns:
-      "fecha (timestamptz), dia, paciente, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: 'Endodoncia', 'Cirugía oral', 'Odontología general'…), cantidad, precio",
+      "fecha (timestamptz), dia, paciente, paciente_id, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: 'Endodoncia', 'Cirugía oral', 'Odontología general'…), cantidad, precio",
     keys: ["gestion", "clinico"],
   },
   {
@@ -111,13 +111,13 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Cada tratamiento indicado en los planes, con la decisión del paciente y su avance. «En proceso» = estado 'en_curso'; «no iniciado» = aceptado y aún 'pendiente' o 'programado'. No hay fecha prevista de término.",
     columns:
-      "plan_id, paciente, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
+      "plan_id, paciente, paciente_id, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
     keys: ["gestion", "clinico"],
   },
   {
     name: "controles",
     about: "Controles clínicos programados a los pacientes (sin el texto de las indicaciones).",
-    columns: "paciente, tipo ('tratamiento'|'mantenimiento'), vence_en (timestamptz), vence_dia, estado ('pendiente'|'programado'|'realizado'|'cancelado'), tiene_cita (bool), hecho_en",
+    columns: "paciente, paciente_id, tipo ('tratamiento'|'mantenimiento'), vence_en (timestamptz), vence_dia, estado ('pendiente'|'programado'|'realizado'|'cancelado'), tiene_cita (bool), hecho_en",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
@@ -125,14 +125,14 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Un presupuesto entregado por fila; los importes son de la opción que vale (nunca sumar opciones). «Aceptaron» = estado 'aceptado' o 'parcial' sobre los entregados. Esperan respuesta los de espera_respuesta.",
     columns:
-      "presupuesto_id, numero, paciente, presentado_en (timestamptz), presentado_dia, estado ('presentado'|'aceptado'|'parcial'|'pospuesto'|'rechazado'|'sustituido'|'cancelado'), decidido_en, profesional (quien lo armó), valor, aceptado (lo aceptado), sin_decidir (pendiente o pospuesto), espera_respuesta (bool)",
+      "presupuesto_id, numero, paciente, paciente_id, presentado_en (timestamptz), presentado_dia, estado ('presentado'|'aceptado'|'parcial'|'pospuesto'|'rechazado'|'sustituido'|'cancelado'), decidido_en, profesional (quien lo armó), valor, aceptado (lo aceptado), sin_decidir (pendiente o pospuesto), espera_respuesta (bool)",
     keys: ALL,
   },
   {
     name: "lineas_presupuesto",
     about: "Cada tratamiento de la opción que vale de un presupuesto entregado.",
     columns:
-      "presupuesto_id, numero, paciente, presentado_en, presentado_dia, estado_presupuesto, tratamiento, decision ('aceptado'|'rechazado'|'pospuesto'|'pendiente'), importe, promocion",
+      "presupuesto_id, numero, paciente, paciente_id, presentado_en, presentado_dia, estado_presupuesto, tratamiento, decision ('aceptado'|'rechazado'|'pospuesto'|'pendiente'), importe, promocion, estado_tratamiento (cómo va ese tratamiento en el plan: 'pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'; null si no está en un plan)",
     keys: ALL,
   },
   {
@@ -144,7 +144,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "promociones_uso",
     about: "Cada vez que alguien usó una promoción: en un presupuesto entregado o en un cobro.",
-    columns: "promocion, paciente, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día)",
+    columns: "promocion, paciente, paciente_id, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día)",
     keys: ["gestion"],
   },
   {
@@ -177,14 +177,14 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "conversaciones",
     about: "Conversaciones con personas por los canales (sin mensajes). No hay campañas ni encuestas.",
     columns:
-      "inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta'|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, es_paciente (bool), agente ('on'|'off'), asignada_a",
+      "inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta'|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, persona_id (una persona puede tener varias conversaciones), paciente_id (null si aún no es paciente), es_paciente (bool), agente ('on'|'off'), asignada_a",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
     name: "oportunidades",
     about: "Ventas en curso del CRM: el interés de una persona por un servicio.",
     columns:
-      "creada_en (timestamptz), dia, etapa (nombre del paso), momento ('interesado'|'evaluacion_agendada'|'presupuesto_enviado'|'decidio'), estado ('open'|'won'|'lost'), servicio, valor, cerrada_en, motivo_cierre ('precio'|'otra_clinica'|'no_responde'|'no_lo_necesita'|'otro'|'rechazo_presupuesto'|'acepto'|'acepto_presupuesto'), persona, responsable",
+      "creada_en (timestamptz), dia, etapa (nombre del paso), momento ('interesado'|'evaluacion_agendada'|'presupuesto_enviado'|'decidio'), estado ('open'|'won'|'lost'), servicio, valor, cerrada_en, motivo_cierre ('precio'|'otra_clinica'|'no_responde'|'no_lo_necesita'|'otro'|'rechazo_presupuesto'|'acepto'|'acepto_presupuesto'), persona, persona_id, paciente_id (null si aún no es paciente), responsable",
     keys: ["gestion", "recepcion"],
   },
   {
@@ -201,13 +201,37 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
  */
 export const ARGOS_FIGURE_RULES: readonly string[] = [
   "Lo cobrado = sum(cobros.importe) del periodo.",
-  "Lo que deja (lo que ganó la clínica) = lo cobrado − sum(comisiones.comision) − sum(gastos.monto) con tipo <> 'pago_de_comisiones', del mismo periodo. Solo cuenta los gastos registrados.",
-  "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida.",
-  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo.",
+  "Lo que deja (lo que ganó la clínica) = lo cobrado − sum(comisiones.comision) − sum(gastos.monto) con tipo <> 'pago_de_comisiones', del mismo periodo. Solo cuenta los gastos registrados. Margen = lo que deja ÷ lo cobrado, en %. Por sede: cobros.sede, comisiones.sede y gastos.sede.",
+  "Gastos operativos = gastos.monto con tipo <> 'pago_de_comisiones', por categoria. Materiales (insumos) = la categoria 'Materiales', que ya incluye lo pagado de las compras (tipo 'pago_de_compra').",
+  "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida. deudas es solo a hoy: la deuda de meses pasados no está en las vistas.",
+  "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
+  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo. Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
+  "Volvieron (retención) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses = una cita atendida en el periodo cuya cita atendida anterior fue hace más de N meses.",
   "Inasistencia (no vinieron) y canceladas = citas con ese citas.estado ÷ citas del periodo con citas.ya_paso, en %.",
   "Espera en sala = mediana de citas.espera_min de las atendidas.",
-  "Agenda ocupada = sum(agenda_por_dia.minutos_ocupados) ÷ sum(agenda_por_dia.minutos_disponibles), en %.",
+  "Agenda ocupada = sum(agenda_por_dia.minutos_ocupados) ÷ sum(agenda_por_dia.minutos_disponibles), en %. Horas libres = (minutos_disponibles − minutos_ocupados) ÷ 60.",
+  "Horas clínicas de un profesional = sum(citas.duracion_min) ÷ 60 de sus citas atendidas. Su productividad = sus citas atendidas y lo cobrado de lo que atendió (pagos_por_venta.profesional).",
+  "Tratamientos realizados = sum(tratamientos_hechos.cantidad).",
+  "Vinieron a su control = controles.estado 'realizado' ÷ los controles con vence_dia en el periodo.",
   "Presupuestos aceptados = presupuestos.estado 'aceptado' o 'parcial' ÷ presupuestos entregados en el periodo, en %.",
+  "Pago parcial = una venta con ventas.pagado > 0 y saldo > 0.",
+  "Valor de un paciente según cómo nos conoció = lo pagado por cada paciente_id (sum(cobros.importe)) agrupado por pacientes.como_nos_conocio.",
+  "Personas que nos buscaron por primera vez (prospectos) = conversaciones.persona_id cuya primera conversación empezó en el periodo; agendaron = las que tienen paciente_id con alguna cita con citas.estado <> 'cancelada'.",
+]
+
+/** Lo que odentIA no registra: la respuesta lo dice y ofrece lo más cercano, nunca otra cifra como si fuera la pedida. */
+export const ARGOS_NOT_RECORDED: readonly string[] = [
+  "Facturas o boletas: solo tickets de pago.",
+  "Una fecha prevista para cada tratamiento: no se sabe cuáles están atrasados ni cuáles se abandonaron. Lo más cercano: lo aceptado que sigue sin empezar y desde cuándo, y lo suspendido o cancelado (planes).",
+  "Quién hará un tratamiento: solo quién lo indicó (planes.indicado_por).",
+  "Costos por tratamiento o por profesional (laboratorio, materiales de cada tratamiento, costos fijos): su rentabilidad no se puede saber. Lo más cercano: lo cobrado de lo que atendió menos su comisión.",
+  "Quién canceló una cita (la persona o la clínica) ni si se reprogramó.",
+  "Cuotas o tratamientos financiados.",
+  "Campañas de marketing y gasto en publicidad: tampoco el costo de conseguir un paciente.",
+  "Encuestas, satisfacción, recomendación (NPS) y quejas.",
+  "El costo de los lotes: el inventario no se puede valorizar.",
+  "El consumo de materiales por procedimiento: se registra por atención (por profesional sí).",
+  "La historia clínica: diagnósticos, enfermedades, alergias.",
 ]
 
 /** Las vistas que lee una llave. */
@@ -219,10 +243,13 @@ export function argosViewsOf(key: ArgosKey): readonly ArgosView[] {
 export function argosCatalogText(key: ArgosKey): string {
   const views = argosViewsOf(key)
   const names = new Set(views.map((view) => view.name))
-  const rules = ARGOS_FIGURE_RULES.filter((rule) => [...rule.matchAll(/\b([a-z_]+)\./g)].every((match) => names.has(match[1] ?? "")))
+  // Una regla nombra sus vistas como «vista.columna»; va solo si la llave las lee todas.
+  const rules = ARGOS_FIGURE_RULES.filter((rule) => [...rule.matchAll(/\b([a-z_]+)\.[a-z_]/g)].every((match) => names.has(match[1] ?? "")))
   return [
     "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
     ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
     ...(rules.length ? ["\nCifras de Reportes con estas vistas:", ...rules.map((rule) => `- ${rule}`)] : []),
+    "\nLo que odentIA no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
+    ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
   ].join("\n")
 }

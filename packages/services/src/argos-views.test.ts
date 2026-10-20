@@ -13,7 +13,8 @@ import { encounter, encounterProcedure, patientCharge } from "@odentia/db/schema
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { ARGOS_CATALOG, argosViewsOf } from "./argos-catalog.js"
+import { fillArgosSentence } from "./argos-answer.js"
+import { ARGOS_CATALOG, ARGOS_FIGURE_RULES, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createExpense, setCommissionRate } from "./finance.js"
@@ -97,6 +98,34 @@ describe("las llaves de Argos", () => {
         where n.nspname = 'argos' and has_table_privilege(${`argos_${key}`}, c.oid, 'select')`)
       expect([...granted].map((row) => row.view).sort(), key).toEqual(argosViewsOf(key).map((view) => view.name).sort())
     }
+  })
+
+  it("cada llave recibe las reglas de sus vistas, y solo esas", () => {
+    expect(ARGOS_FIGURE_RULES.every((rule) => argosCatalogText("gestion").includes(rule))).toBe(true)
+    const cashier = argosCatalogText("caja")
+    expect(cashier).toContain(ARGOS_FIGURE_RULES[0])
+    expect(cashier).not.toContain("comisiones.comision")
+    expect(cashier).not.toContain("\ncitas:")
+    expect(cashier).toContain("Lo que odentIA no registra")
+  })
+
+  it("la frase sale con el formato de la clínica: meses con nombre, números con su etiqueta y «y N más»", () => {
+    const zone = { locale: "es-PE", currency: "PEN", timezone: "America/Lima" }
+    const months = {
+      columns: [
+        { name: "mes", kind: "date" as const },
+        { name: "pacientes", kind: "number" as const },
+      ],
+      rows: Array.from({ length: 12 }, (_, index) => ({ mes: `2026-${String(index + 1).padStart(2, "0")}-01`, pacientes: index })),
+      truncated: false,
+    }
+    const filled = fillArgosSentence("Por mes: {lista}.", months, zone)
+    expect(filled.text).toMatch(/^Por mes: enero de 2026 \(pacientes: 0\); febrero de 2026 \(pacientes: 1\); .*octubre de 2026 \(pacientes: 9\) y 2 más\.$/)
+    const money = { columns: [{ name: "categoria", kind: "text" as const }, { name: "monto_dinero", kind: "number" as const }], rows: [{ categoria: "Alquiler", monto_dinero: 11300 }], truncated: false }
+    expect(fillArgosSentence("{lista}", money, zone).text).toMatch(/^Alquiler \(S\/\s?11,300\.00\)$/)
+    const rate = { columns: [{ name: "cobrado_pct", kind: "number" as const }], rows: [{ cobrado_pct: 88 }], truncated: false }
+    expect(fillArgosSentence("Se cobró el {cobrado_pct}% de lo cargado; {cobrado_pct} %.", rate, zone).text).toBe("Se cobró el 88 % de lo cargado; 88 %.")
+    expect(fillArgosSentence("Desde {desde}.", { columns: [{ name: "desde", kind: "date" }], rows: [{ desde: "2026-10-01" }], truncated: false }, zone).text).toBe("Desde 1 de octubre de 2026.")
   })
 
   it("lo que no tiene valor nunca sale primero", async () => {

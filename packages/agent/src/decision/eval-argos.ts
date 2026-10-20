@@ -73,9 +73,10 @@ const out: Array<Record<string, unknown>> = []
 let total = 0
 for (const question of bank.preguntas.filter((item) => !only.length || only.includes(item.id))) {
   const uses: AiUsageEntry[] = []
+  const problems: string[] = []
   const started = Date.now()
   const answer = await withAiMeter(
-    () => askArgos(db, deps, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto }),
+    () => askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto }),
     async (entries) => {
       uses.push(...entries)
     },
@@ -93,6 +94,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     como: answer.kind === "respuesta" ? answer.how : null,
     sql: answer.kind === "respuesta" ? answer.query : null,
     llamadas: writes,
+    problemas: problems,
     usd: micros / 1_000_000,
     ms: Date.now() - started,
   }
@@ -102,6 +104,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   console.log(`- Argos: ${row.argos}`)
   if (row.como) console.log(`- Cómo: ${row.como}`)
   if (row.sql) console.log(`- SQL: ${String(row.sql).replace(/\s+/g, " ")}`)
+  for (const problem of problems) console.log(`- La base rechazó: ${problem}`)
   console.log(`- ${writes} llamada(s) al modelo que escribe · USD ${row.usd.toFixed(6)} · ${row.ms} ms`)
 }
 console.log(`\n${out.length} preguntas · USD ${(total / 1_000_000).toFixed(5)} en total · USD ${(total / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta`)

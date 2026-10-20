@@ -82,17 +82,31 @@ export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResul
   return [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas" && !names.has(name))
 }
 
+/** Un id (`paciente_id`, `presupuesto_id`…) sirve para contar y agrupar: no se muestra. */
+export function isArgosIdColumn(name: string): boolean {
+  return /(^|_)id$/.test(name)
+}
+
+/** «cobrado_dinero» → «Cobrado»: el nombre de una columna dicho para la pantalla. */
+export function argosColumnLabel(name: string): string {
+  const text = name.replace(/_(dinero|pct|mes)$/, "").replace(/_/g, " ").trim()
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : name
+}
+
 /**
  * El valor con el formato de la clínica. El nombre de la columna dice qué es:
- * `_dinero` en la moneda de la clínica y `_pct` un porcentaje de 0 a 100 (así
- * se le pide al modelo); el tipo de la base dice si es fecha.
+ * `_dinero` en la moneda de la clínica, `_pct` un porcentaje de 0 a 100 y
+ * `_mes` un mes (así se le pide al modelo); el tipo de la base dice si es fecha.
  */
 export function formatArgosValue(value: string | number | boolean | null, column: ArgosQueryResult["columns"][number], zone: Pick<OrgLocale, "locale" | "currency" | "timezone">): string {
   if (value === null) return "—"
   if (column.kind === "boolean") return value ? "sí" : "no"
   if (column.kind === "date") {
     const [year, month, day] = String(value).split("-").map(Number)
-    return new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", day: "numeric", month: "long", year: "numeric" }).format(new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)))
+    const isMonth = /(^|_)mes$/.test(column.name)
+    return new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", ...(isMonth ? {} : { day: "numeric" }), month: "long", year: "numeric" }).format(
+      new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)),
+    )
   }
   if (column.kind === "timestamp")
     return new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(String(value)))
@@ -106,8 +120,12 @@ export function formatArgosValue(value: string | number | boolean | null, column
 
 /**
  * Llena la frase con el resultado: `{columna}` es el valor de la primera fila,
- * `{lista}` las primeras filas como «a (b, c); …» en el orden de la consulta y
- * `{filas}` cuántas son. Un hueco desconocido queda «—» (antes se reintenta).
+ * `{lista}` las primeras filas como «a (b, c); …» en el orden de la consulta,
+ * con «y N más» si hay más, y `{filas}` cuántas son. En la lista, un número
+ * suelto lleva el nombre de su columna («Dra. Ana Torres (citas: 65)»): el
+ * dinero y los porcentajes solos ya se entienden. Un hueco desconocido queda
+ * «—» (antes se reintenta). El «%» que el modelo escriba junto a un
+ * porcentaje se quita: el hueco ya lo trae.
  */
 export function fillArgosSentence(
   template: string,
@@ -120,21 +138,30 @@ export function fillArgosSentence(
     const column = byName.get(name)
     return column ? formatArgosValue(row[name] ?? null, column, zone) : "—"
   }
-  const list = result.rows
-    .slice(0, LIST_ROWS)
-    .map((row) => {
-      const cells = result.columns.map((column) => cell(row, column.name))
-      return cells.length > 1 ? `${cells[0]} (${cells.slice(1).join(", ")})` : (cells[0] ?? "")
-    })
-    .join("; ")
+  const [lead, ...rest] = result.columns.filter((column) => !isArgosIdColumn(column.name))
+  const selfExplained = (column: ArgosQueryResult["columns"][number]) => column.kind !== "number" || /_(dinero|pct)$/.test(column.name)
+  const labeled = !(rest.length === 1 && rest[0] && selfExplained(rest[0]))
+  const items = result.rows.slice(0, LIST_ROWS).map((row) => {
+    const head = lead ? cell(row, lead.name) : ""
+    if (!rest.length) return head
+    const details = rest.map((column) => (labeled && !selfExplained(column) ? `${argosColumnLabel(column.name).toLowerCase()}: ${cell(row, column.name)}` : cell(row, column.name)))
+    return `${head} (${details.join(", ")})`
+  })
+  const more = result.truncated ? " y más" : result.rows.length > LIST_ROWS ? ` y ${result.rows.length - LIST_ROWS} más` : ""
+  const list = `${items.join("; ")}${more}`
   const rows = result.truncated ? `más de ${result.rows.length}` : String(result.rows.length)
   const parts: ArgosSentencePart[] = []
   let last = 0
   for (const match of template.matchAll(HOLE)) {
     const name = match[1] ?? ""
-    if ((match.index ?? 0) > last) parts.push({ text: template.slice(last, match.index) })
+    const at = match.index ?? 0
+    if (at > last) parts.push({ text: template.slice(last, at) })
     parts.push({ text: name === "lista" ? list : name === "filas" ? rows : cell(first, name), strong: true })
-    last = (match.index ?? 0) + match[0].length
+    last = at + match[0].length
+    if (/_pct$/.test(name)) {
+      const repeated = /^\s?%/.exec(template.slice(last))
+      if (repeated) last += repeated[0].length
+    }
   }
   if (last < template.length) parts.push({ text: template.slice(last) })
   return { text: parts.map((part) => part.text).join(""), parts }

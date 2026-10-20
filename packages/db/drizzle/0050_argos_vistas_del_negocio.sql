@@ -89,7 +89,7 @@ LEFT JOIN public.branch b ON b.organization_id = x.organization_id AND b.id = x.
 CREATE VIEW argos.pagos_por_venta AS
 SELECT pay.paid_at AS pagado_en, (pay.paid_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, round(a.amount_cents / 100.0, 2) AS importe,
   coalesce(sep.name, spi.name, pr.name) AS concepto, CASE WHEN c.product_id IS NULL THEN 'tratamiento' ELSE 'producto' END AS tipo,
-  coalesce(c.product_quantity, ep.quantity, 1) AS cantidad, u.name AS profesional, b.name AS sede, pp.display_name AS paciente, pay.method_name AS medio
+  coalesce(c.product_quantity, ep.quantity, 1) AS cantidad, u.name AS profesional, b.name AS sede, pp.display_name AS paciente, c.patient_id AS paciente_id, pay.method_name AS medio
 FROM public.patient_payment_application a
 JOIN public.patient_payment pay ON pay.organization_id = a.organization_id AND pay.id = a.payment_id AND pay.voided_at IS NULL
 JOIN public.patient_charge c ON c.organization_id = a.organization_id AND c.id = a.charge_id AND c.voided_at IS NULL
@@ -109,7 +109,7 @@ WHERE a.voided_at IS NULL;--> statement-breakpoint
 -- Los tickets de pago (odentIA no emite facturas). Un ticket junta lo cobrado en una visita: no es una venta.
 CREATE VIEW argos.tickets AS
 SELECT t.ticket_number AS numero, t.created_at AS emitido_en, (t.created_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia,
-  b.name AS sede, pp.display_name AS paciente, round(t.total_cents / 100.0, 2) AS total, round(t.credit_applied_cents / 100.0, 2) AS a_favor_usado,
+  b.name AS sede, pp.display_name AS paciente, t.patient_id AS paciente_id, round(t.total_cents / 100.0, 2) AS total, round(t.credit_applied_cents / 100.0, 2) AS a_favor_usado,
   (t.voided_at IS NOT NULL) AS anulado
 FROM public.payment_ticket t
 JOIN public.patient p ON p.organization_id = t.organization_id AND p.id = t.patient_id
@@ -165,7 +165,7 @@ LEFT JOIN public.branch b ON b.organization_id = x.organization_id AND b.id = x.
 -- Comisiones, como Finanzas › Comisiones: cada cobro de lo que atendió un profesional con su porcentaje; lo pagado, como se pagó.
 CREATE VIEW argos.comisiones AS
 WITH live_app AS (
-  SELECT a.id, a.organization_id, a.amount_cents::bigint AS cents, a.created_at AS at, e.dentist_user_id AS user_id
+  SELECT a.id, a.organization_id, a.amount_cents::bigint AS cents, a.created_at AS at, e.dentist_user_id AS user_id, p.branch_id
   FROM public.patient_payment_application a
   JOIN public.patient_payment p ON p.organization_id = a.organization_id AND p.id = a.payment_id
   JOIN public.patient_charge c ON c.organization_id = a.organization_id AND c.id = a.charge_id
@@ -174,7 +174,7 @@ WITH live_app AS (
   WHERE a.voided_at IS NULL AND p.voided_at IS NULL AND c.voided_at IS NULL AND ep.voided_at IS NULL AND e.status = 'finalizada' AND e.voided_at IS NULL
 ), frozen AS (
   SELECT l.application_id, l.organization_id, l.base_cents::bigint AS base, l.commission_cents::bigint AS commission, l.occurred_at AS at,
-    s.professional_user_id AS user_id, (a.voided_at IS NULL AND p.voided_at IS NULL AND c.voided_at IS NULL) AS live
+    s.professional_user_id AS user_id, (a.voided_at IS NULL AND p.voided_at IS NULL AND c.voided_at IS NULL) AS live, p.branch_id
   FROM public.commission_settlement_line l
   JOIN public.commission_settlement s ON s.organization_id = l.organization_id AND s.id = l.settlement_id AND s.voided_at IS NULL
   JOIN public.patient_payment_application a ON a.organization_id = l.organization_id AND a.id = l.application_id
@@ -183,18 +183,19 @@ WITH live_app AS (
   WHERE l.kind = 'cobro' AND l.voided_at IS NULL
 ), line AS (
   SELECT f.organization_id, f.user_id, f.at, CASE WHEN f.live THEN f.base ELSE 0 END AS base, CASE WHEN f.live THEN f.commission ELSE 0 END AS commission,
-    f.commission AS paid, 0::bigint AS fresh
+    f.commission AS paid, 0::bigint AS fresh, f.branch_id
   FROM frozen f
   UNION ALL
-  SELECT la.organization_id, la.user_id, la.at, la.cents, (la.cents * coalesce(r.rate_bps, 0)) / 10000, 0, (la.cents * coalesce(r.rate_bps, 0)) / 10000
+  SELECT la.organization_id, la.user_id, la.at, la.cents, (la.cents * coalesce(r.rate_bps, 0)) / 10000, 0, (la.cents * coalesce(r.rate_bps, 0)) / 10000, la.branch_id
   FROM live_app la LEFT JOIN public.commission_rule r ON r.organization_id = la.organization_id AND r.professional_user_id = la.user_id
   WHERE NOT EXISTS (SELECT 1 FROM frozen f WHERE f.organization_id = la.organization_id AND f.application_id = la.id)
 )
-SELECT l.at AS momento, (l.at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, u.name AS profesional,
+SELECT l.at AS momento, (l.at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, u.name AS profesional, b.name AS sede,
   round(l.base / 100.0, 2) AS base, round(l.commission / 100.0, 2) AS comision, round(l.paid / 100.0, 2) AS pagado, round(l.fresh / 100.0, 2) AS sin_pagar
 FROM line l
 JOIN auth."user" u ON u.id = l.user_id
 LEFT JOIN public.org_profile op ON op.organization_id = l.organization_id
+LEFT JOIN public.branch b ON b.organization_id = l.organization_id AND b.id = l.branch_id
 -- Solo quien sigue en la clínica; EXISTS y no JOIN: una persona puede tener más de una fila de miembro.
 WHERE EXISTS (SELECT 1 FROM public.member m WHERE m.organization_id = l.organization_id AND m.user_id = l.user_id);--> statement-breakpoint
 
@@ -302,7 +303,7 @@ WHERE pp.screen IS NULL;--> statement-breakpoint
 
 -- Lo realizado: procedimientos de atenciones firmadas, sin anulados.
 CREATE VIEW argos.tratamientos_hechos AS
-SELECT e.started_at AS fecha, (e.started_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, pp.display_name AS paciente, u.name AS profesional,
+SELECT e.started_at AS fecha, (e.started_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, pp.display_name AS paciente, e.patient_id AS paciente_id, u.name AS profesional,
   b.name AS sede, s.name AS tratamiento, t.specialty AS tipo_tratamiento, os.name AS especialidad, ep.quantity AS cantidad,
   round(ep.price_cents / 100.0, 2) AS precio
 FROM public.encounter_procedure ep
@@ -319,7 +320,7 @@ WHERE ep.voided_at IS NULL;--> statement-breakpoint
 
 -- Los tratamientos indicados en los planes, con su decisión y su avance.
 CREATE VIEW argos.planes AS
-SELECT pi.plan_id, pp.display_name AS paciente, s.name AS tratamiento, os.name AS especialidad, pi.decision_status AS decision, pi.status AS estado,
+SELECT pi.plan_id, pp.display_name AS paciente, pi.patient_id AS paciente_id, s.name AS tratamiento, os.name AS especialidad, pi.decision_status AS decision, pi.status AS estado,
   pi.created_at AS indicado_en, pi.decided_at AS decidido_en, pi.started_at AS iniciado_en, pi.completed_at AS terminado_en,
   round(pi.price_cents / 100.0, 2) AS precio, pi.phase AS fase, u.name AS indicado_por
 FROM public.treatment_plan_item pi
@@ -332,7 +333,7 @@ WHERE pi.status <> 'reemplazado';--> statement-breakpoint
 
 -- Controles: cuándo vencen y si ya tienen cita (sin el texto de las indicaciones).
 CREATE VIEW argos.controles AS
-SELECT pp.display_name AS paciente, f.kind AS tipo, f.due_at AS vence_en, (f.due_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS vence_dia,
+SELECT pp.display_name AS paciente, f.patient_id AS paciente_id, f.kind AS tipo, f.due_at AS vence_en, (f.due_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS vence_dia,
   f.status AS estado, (f.appointment_id IS NOT NULL) AS tiene_cita, f.completed_at AS hecho_en
 FROM public.clinical_follow_up f
 JOIN public.patient p ON p.organization_id = f.organization_id AND p.id = f.patient_id
@@ -350,7 +351,7 @@ WITH line AS (
     WHERE o.organization_id = i.organization_id AND o.budget_id = i.budget_id
     ORDER BY (o.decision = 'elegida') DESC, o.is_recommended DESC, o.position LIMIT 1)
 )
-SELECT b.id AS presupuesto_id, b.budget_number AS numero, pp.display_name AS paciente, b.presented_at AS presentado_en,
+SELECT b.id AS presupuesto_id, b.budget_number AS numero, pp.display_name AS paciente, b.patient_id AS paciente_id, b.presented_at AS presentado_en,
   (b.presented_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS presentado_dia, b.status AS estado, b.decided_at AS decidido_en, u.name AS profesional,
   round(coalesce(sum(l.cents), 0) / 100.0, 2) AS valor,
   round(coalesce(sum(l.cents) FILTER (WHERE l.decision = 'aceptado'), 0) / 100.0, 2) AS aceptado,
@@ -364,14 +365,14 @@ LEFT JOIN public.org_profile op ON op.organization_id = b.organization_id
 LEFT JOIN line l ON l.organization_id = b.organization_id AND l.budget_id = b.id
 LEFT JOIN auth."user" u ON u.id = b.created_by
 WHERE b.status <> 'borrador' AND b.presented_at IS NOT NULL
-GROUP BY b.id, b.budget_number, pp.display_name, b.presented_at, op.timezone, b.status, b.decided_at, u.name, b.organization_id;--> statement-breakpoint
+GROUP BY b.id, b.budget_number, pp.display_name, b.patient_id, b.presented_at, op.timezone, b.status, b.decided_at, u.name, b.organization_id;--> statement-breakpoint
 
 CREATE VIEW argos.lineas_presupuesto AS
-SELECT b.id AS presupuesto_id, b.budget_number AS numero, pp.display_name AS paciente, b.presented_at AS presentado_en,
+SELECT b.id AS presupuesto_id, b.budget_number AS numero, pp.display_name AS paciente, b.patient_id AS paciente_id, b.presented_at AS presentado_en,
   (b.presented_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS presentado_dia, b.status AS estado_presupuesto,
   coalesce(s.name, i.title) AS tratamiento, i.decision,
   round(i.price_cents * (CASE WHEN i.billing_mode = 'session' THEN greatest(coalesce(i.sessions_planned, 1), 1) ELSE 1 END) / 100.0, 2) AS importe,
-  i.promotion_name AS promocion
+  i.promotion_name AS promocion, pi.status AS estado_tratamiento
 FROM public.treatment_budget b
 JOIN public.treatment_budget_item i ON i.organization_id = b.organization_id AND i.budget_id = b.id
   AND i.option_id = (SELECT o.id FROM public.treatment_budget_option o WHERE o.organization_id = b.organization_id AND o.budget_id = b.id
@@ -380,6 +381,7 @@ JOIN public.patient p ON p.organization_id = b.organization_id AND p.id = b.pati
 JOIN public.contact pp ON pp.organization_id = p.organization_id AND pp.id = p.person_id
 LEFT JOIN public.org_profile op ON op.organization_id = b.organization_id
 LEFT JOIN public.service_catalog s ON s.organization_id = i.organization_id AND s.id = i.service_id
+LEFT JOIN public.treatment_plan_item pi ON pi.organization_id = i.organization_id AND pi.id = i.plan_item_id
 WHERE b.status <> 'borrador' AND b.presented_at IS NOT NULL;--> statement-breakpoint
 
 CREATE VIEW argos.promociones AS
@@ -389,7 +391,7 @@ FROM public.promotion pr;--> statement-breakpoint
 
 -- Cada uso de una promoción (presupuesto entregado o cobro), con lo que esa persona pagó desde entonces.
 CREATE VIEW argos.promociones_uso AS
-SELECT x.promocion, pp.display_name AS paciente, x.fecha, x.aceptado, round(x.discount / 100.0, 2) AS descuento,
+SELECT x.promocion, pp.display_name AS paciente, x.patient_id AS paciente_id, x.fecha, x.aceptado, round(x.discount / 100.0, 2) AS descuento,
   NOT EXISTS (SELECT 1 FROM public.appointment a WHERE a.organization_id = x.organization_id AND a.patient_id = x.patient_id
     AND a.status = 'atendida' AND a.starts_at < x.fecha - interval '1 day') AS paciente_nuevo,
   round((coalesce((SELECT sum(pay.amount_cents) FROM public.patient_payment pay WHERE pay.organization_id = x.organization_id AND pay.patient_id = x.patient_id
@@ -480,7 +482,8 @@ LEFT JOIN public.org_profile op ON op.organization_id = po.organization_id;--> s
 
 CREATE VIEW argos.conversaciones AS
 SELECT c.created_at AS inicio, (c.created_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, cc.channel AS canal, c.status AS estado,
-  c.close_reason AS motivo_cierre, c.closed_at AS cerrada_en, c.last_message_at AS ultimo_mensaje_en, pp.display_name AS persona,
+  c.close_reason AS motivo_cierre, c.closed_at AS cerrada_en, c.last_message_at AS ultimo_mensaje_en, pp.display_name AS persona, c.contact_id AS persona_id,
+  (SELECT p.id FROM public.patient p WHERE p.organization_id = c.organization_id AND p.person_id = c.contact_id LIMIT 1) AS paciente_id,
   EXISTS (SELECT 1 FROM public.patient p WHERE p.organization_id = c.organization_id AND p.person_id = c.contact_id) AS es_paciente,
   c.agent_status AS agente, u.name AS asignada_a
 FROM public.conversation c
@@ -493,7 +496,8 @@ WHERE pp.screen IS NULL;--> statement-breakpoint
 CREATE VIEW argos.oportunidades AS
 SELECT o.created_at AS creada_en, (o.created_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, st.name AS etapa, st.moment AS momento,
   o.status AS estado, s.name AS servicio, round(o.amount_cents / 100.0, 2) AS valor, o.closed_at AS cerrada_en, o.close_reason AS motivo_cierre,
-  pp.display_name AS persona, u.name AS responsable
+  pp.display_name AS persona, o.contact_id AS persona_id,
+  (SELECT p.id FROM public.patient p WHERE p.organization_id = o.organization_id AND p.person_id = o.contact_id LIMIT 1) AS paciente_id, u.name AS responsable
 FROM public.opportunity o
 JOIN public.contact pp ON pp.organization_id = o.organization_id AND pp.id = o.contact_id
 LEFT JOIN public.pipeline_stage st ON st.organization_id = o.organization_id AND st.id = o.stage_id

@@ -9,6 +9,8 @@ import {
   type ArgosQueryResult,
   type ArgosSentencePart,
   argosCatalogText,
+  argosColumnLabel,
+  isArgosIdColumn,
   argosKeyOf,
   ArgosQueryError,
   argosScreen,
@@ -62,16 +64,24 @@ export type ArgosPlan = z.infer<typeof planSchema>
 const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental. Escribes UNA consulta de PostgreSQL de solo lectura sobre las vistas de abajo (nunca otras tablas) y una frase con huecos que odentIA llenará con el resultado. Nunca ves los datos y nunca escribes una cifra del resultado: las cifras salen solo de los huecos.
 
 Reglas:
-- Si la pregunta no dice periodo, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia («más frecuentes», «cada cuánto vuelven») mira los últimos 12 meses; dilo en «como».
-- Lo pendiente se mide a hoy, no por mes: lo que deben, los presupuestos que esperan respuesta, el inventario, las citas por venir.
-- «Lo más …» sin otra indicación se ordena por cuántas veces y después por monto.
+- Una tendencia sin periodo («¿estamos creciendo o disminuyendo?», «¿cómo vamos?»): los últimos 3 meses completos contra los 3 meses completos anteriores; el mes en curso no entra. Nómbralos en la frase.
+- Si la pregunta no dice periodo y no es una tendencia, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia («más frecuentes», «cada cuánto vuelven», «cuánto tardan») mira los últimos 12 meses.
+- Lo pendiente se mide a hoy, no por mes: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir.
+- Al comparar el mes en curso con otro mes («contra el mes anterior»), usa los mismos días de ese mes (del 1 al mismo día de hoy), nunca el mes entero.
+- «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
+- Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
+- Los paciente_id y persona_id sirven para contar y agrupar, no para mostrarlos: odentIA no los muestra en la frase.
 - Al buscar el mejor o el peor mes, el mes en curso (incompleto) no entra.
+- La frase dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». El detalle del cálculo va en «como», no en la frase.
+- Un mes en el resultado va como el primer día de ese mes (date) en una columna terminada en _mes: odentIA lo muestra «mayo de 2026». Las fechas van como date o timestamptz, nunca como texto.
+- Si la lista puede pasar de 10 filas, ordénala para que lo importante salga primero: odentIA muestra 10 y dice cuántas más hay.
+- Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra» o lo que ninguna vista tiene.
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
 - «Ticket promedio» es el promedio de ventas.importe (por venta), no el de los tickets de pago.
 - odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con los tickets o con lo cobrado.
 - Cuenta y agrupa a las personas por su paciente_id cuando la vista lo tenga: hay nombres repetidos.
 - Lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) no está en las vistas: tipo no_existe.
-- Si lo pedido no está en las vistas, tipo no_existe: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida.
+- Si lo pedido no está en las vistas, tipo no_existe: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
 - Si solo puedes responder una parte, tipo parcial: responde esa parte y di en «falta» lo que no se puede saber.
 - Nombra las columnas del resultado en español y en minúsculas: el dinero con el sufijo _dinero y los porcentajes (de 0 a 100) con el sufijo _pct; redondea los porcentajes.
 - Huecos de la frase: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él.
@@ -171,7 +181,7 @@ export async function writeArgosPlan(
     description: "Entrega la consulta y las frases de la respuesta.",
     schema: planSchema,
   })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true })
+  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0 })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
   const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([answer], { tool_choice: TOOL_NAME }) : model
   const messages = argosMessages(spec.provider, input)
@@ -245,14 +255,10 @@ export type ArgosAskResult =
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "sin_permiso"; message: string }
 
-/** «cobrado_dinero» → «Cobrado». */
-function labelOf(name: string): string {
-  const text = name.replace(/_(dinero|pct)$/, "").replace(/_/g, " ").trim()
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : name
-}
-
 function tableOf(result: ArgosQueryResult): ArgosTable {
-  return { columns: result.columns.map((column) => ({ ...column, label: labelOf(column.name) })), rows: result.rows, truncated: result.truncated }
+  // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre.
+  const columns = result.columns.filter((column) => !isArgosIdColumn(column.name)).map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
+  return { columns, rows: result.rows, truncated: result.truncated }
 }
 
 export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel" | "secretsKey"> {
@@ -260,6 +266,8 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
+  /** Cada vez que la base rechaza una consulta del modelo (para medir; el error no trae datos). */
+  onProblem?: (problem: string) => void
 }
 
 /**
@@ -298,7 +306,7 @@ export async function askArgos(
   let result: ArgosQueryResult | null = null
   try {
     plan = await writeArgosPlan(deps, ask)
-    for (let attempt = 0; attempt < 2 && !(plan.tipo === "no_existe" && !plan.sql.trim()); attempt += 1) {
+    for (let attempt = 0; attempt < 2 && !withoutQuery(plan); attempt += 1) {
       let problem: string | null = null
       try {
         result = await run(plan.sql)
@@ -310,6 +318,7 @@ export async function askArgos(
         problem = error.message
       }
       if (!problem) break
+      deps.onProblem?.(problem)
       if (attempt === 1) {
         result = null
         break
@@ -327,7 +336,7 @@ export async function askArgos(
   }
 
   const closest = await closestOf(plan, run, ready.zone)
-  if (plan.tipo === "no_existe" && !plan.sql.trim()) {
+  if (withoutQuery(plan)) {
     await record("no_sabe", null, true)
     return { kind: "no_existe", message: plan.frase, missing: plan.falta.trim() || null, closest }
   }
@@ -348,6 +357,11 @@ export async function askArgos(
     query: plan.sql,
     closest,
   }
+}
+
+/** Lo que no existe (o existe a medias) puede venir sin consulta: se responde con la frase y lo más cercano. */
+function withoutQuery(plan: ArgosPlan): boolean {
+  return plan.tipo !== "consulta" && !plan.sql.trim()
 }
 
 /** Lo más cercano que sí existe, si el modelo lo propuso y corre; si falla, no se ofrece. */

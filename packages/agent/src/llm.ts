@@ -154,9 +154,10 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
  * spec. `fake` es el modelo determinista de dev/e2e. Con `explicitCache`,
  * OpenAI guarda en su caché solo hasta lo marcado con
  * `prompt_cache_breakpoint` (el dictado); sin él, además escribe lo último de
- * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer.
+ * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer. Con
+ * `temperature` 0 la misma pregunta tiende a dar la misma respuesta (Argos).
  */
-export async function createConfiguredChatModel(spec: LlmSpec, options: { explicitCache?: boolean } = {}) {
+export async function createConfiguredChatModel(spec: LlmSpec, options: { explicitCache?: boolean; temperature?: number } = {}) {
   if (spec.provider === "fake") return new FakeChatModel({})
   const modelKwargs = {
     // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
@@ -170,6 +171,7 @@ export async function createConfiguredChatModel(spec: LlmSpec, options: { explic
     apiKey: spec.apiKey,
     timeout: spec.timeoutMs,
     maxRetries: spec.maxRetries,
+    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
     ...(Object.keys(modelKwargs).length ? { modelKwargs } : {}),
     configuration: {
       ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
