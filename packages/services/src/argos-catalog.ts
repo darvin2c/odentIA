@@ -39,7 +39,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "pagos_por_venta",
-    about: "Lo pagado aplicado a cada venta: qué se pagó y de qué. Solo pagos vigentes. «Lo que más se vendió» es lo que más se pagó: se mide aquí.",
+    about: "Lo pagado aplicado a cada venta: qué se pagó y de qué. Solo pagos vigentes. «Lo que más se vendió» es lo que más se pagó: se mide aquí. Una venta pagada en partes sale una vez por pago: las unidades vendidas se cuentan en ventas, no sumando cantidad aquí.",
     columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, paciente_id, medio",
     keys: ["gestion", "caja"],
   },

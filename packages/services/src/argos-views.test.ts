@@ -55,6 +55,13 @@ describe("las llaves de Argos", () => {
       code: "PERMISO",
     })
     await expect(runArgosQuery(appDb, { orgId: "org_a", memberRole: "member", query: "select 1" })).rejects.toBeInstanceOf(ArgosQueryError)
+    // El error que vuelve al modelo dice qué pasó sin el valor de la base: el nombre del paciente no viaja.
+    const cast = await runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: "select nombre::int as v from pacientes where nombre = 'Ana de la A'" }).catch((error: unknown) => error)
+    expect(cast).toBeInstanceOf(ArgosQueryError)
+    expect((cast as ArgosQueryError).message).not.toContain("Ana de la A")
+    expect((cast as ArgosQueryError).message).toContain("no se pudo convertir")
+    // Lo que nombra el modelo sí se le dice, para que corrija.
+    await expect(runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: "select monto from cobros" })).rejects.toThrow(/monto/)
 
     // Aunque el revisor fallara, la llave no lee tablas ni cambia de clínica.
     const raw = (statement: string) =>
@@ -141,6 +148,7 @@ describe("las llaves de Argos", () => {
     // El FROM de extract o substring es de la función, no una vista.
     expect(reviewArgosQuery("select extract(day from c.inicio) as d, count(*) as n from citas c where extract(dow from current_date) = 1 group by 1")).toMatchObject({ ok: true })
     expect(reviewArgosQuery("select extract(day from now()) as d from public.patient")).toMatchObject({ ok: false })
+    expect(reviewArgosQuery("select count(*) from citas where sede = 'Sede E'")).toMatchObject({ ok: true })
     for (const bad of [
       "select * from public.patient",
       "select * from patient",
@@ -154,6 +162,9 @@ describe("las llaves de Argos", () => {
       'select * from "citas"',
       "select * into nueva from citas",
       "update citas set estado = 'x'",
+      "select count(*) from generate_series(1, 2000000000)",
+      "select E'a' as x from citas",
+      "select U&'a' as x from citas",
     ])
       expect(reviewArgosQuery(bad), bad).toMatchObject({ ok: false })
   })

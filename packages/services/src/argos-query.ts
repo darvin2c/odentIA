@@ -32,7 +32,11 @@ export function argosRoleOf(memberRole: string): string | null {
 /** Las vistas que una consulta puede nombrar (con o sin `argos.`): las del catálogo. `agenda_base` es interna. */
 export const ARGOS_VIEWS: readonly string[] = ARGOS_CATALOG.map((view) => view.name)
 
-/** Funciones y palabras que pueden ir antes de un paréntesis. */
+/**
+ * Funciones y palabras que pueden ir antes de un paréntesis. Sin
+ * `generate_series`: no hace falta para leer las vistas y un rango enorme
+ * gastaría el tope de tiempo entero.
+ */
 const ALLOWED_CALLS = new Set([
   // Agregados y ventanas.
   "count", "sum", "avg", "min", "max", "percentile_cont", "percentile_disc", "mode", "stddev", "variance", "string_agg", "array_agg",
@@ -40,7 +44,7 @@ const ALLOWED_CALLS = new Set([
   // Números, textos y fechas.
   "round", "trunc", "abs", "ceil", "ceiling", "floor", "coalesce", "nullif", "greatest", "least", "upper", "lower", "initcap", "trim",
   "length", "concat", "concat_ws", "substring", "left", "right", "replace", "position", "split_part", "date_trunc", "date_part",
-  "extract", "to_char", "to_date", "make_date", "make_interval", "age", "now", "generate_series", "unnest", "array_length", "cardinality",
+  "extract", "to_char", "to_date", "make_date", "make_interval", "age", "now", "unnest", "array_length", "cardinality",
   // Palabras del lenguaje.
   "cast", "in", "exists", "any", "all", "some", "values", "over", "filter", "within", "as", "from", "join", "lateral", "on", "and", "or",
   "not", "using", "select", "where", "when", "then", "else", "by", "between", "is", "interval", "date", "timestamp", "timestamptz", "numeric", "int",
@@ -78,6 +82,8 @@ export function reviewArgosQuery(query: string): ArgosReview {
   if (/--|\/\*|\$/.test(text)) return { ok: false, reason: "Sin comentarios ni comillas de dólar" }
   // Los valores entre comillas simples no cuentan para lo que sigue.
   const bare = text.replace(LITERAL, "''")
+  // Las cadenas con escapes (E'…', U&'…') no siguen la regla de las comillas: no se admiten. Se mira sin los valores, para no confundir un «Sede E» escrito.
+  if (/\b[eE]'|\b[uU]&'/.test(bare)) return { ok: false, reason: "Sin cadenas con escapes (E'…' o U&'…')" }
   if ((bare.match(/'/g)?.length ?? 0) % 2 === 1) return { ok: false, reason: "Una comilla sin cerrar" }
   if (bare.includes(";")) return { ok: false, reason: "Más de una sentencia" }
   if (!/^(with|select)\b/i.test(bare)) return { ok: false, reason: "Tiene que empezar con SELECT o WITH" }
@@ -208,6 +214,30 @@ export async function runArgosQuery(
     const cause = (error as { cause?: { code?: string; message?: string } }).cause ?? (error as { code?: string; message?: string })
     if (cause?.code === "42501") throw new ArgosQueryError("PERMISO", "Eso no lo puede ver tu rol")
     if (cause?.code === "57014") throw new ArgosQueryError("TIEMPO", "La consulta tardó demasiado")
-    throw new ArgosQueryError("CONSULTA", cause?.message ?? (error instanceof Error ? error.message : String(error)))
+    throw new ArgosQueryError("CONSULTA", problemOf(cause?.code, cause?.message))
   }
+}
+
+/**
+ * El problema que se le devuelve al modelo para que corrija su consulta. Un
+ * error de datos (clase 22) puede citar un valor de la base —«invalid input
+ * syntax for type integer: "Rosa Quispe"»— y ese texto viajaría al proveedor:
+ * se dice qué pasó sin el valor. Los de la clase 42 (columna que no existe,
+ * función, sintaxis, agrupación) y 21 (una subconsulta con varias filas)
+ * nombran solo lo que escribió el modelo, y se pasan tal cual. Lo demás, sin
+ * detalle.
+ */
+function problemOf(code: string | undefined, message: string | undefined): string {
+  const data: Record<string, string> = {
+    "22P02": "un valor no se pudo convertir a ese tipo (por ejemplo, un texto a número): revisa los ::tipo y las comparaciones entre tipos",
+    "22003": "un número quedó fuera del rango de su tipo",
+    "22007": "una fecha u hora con un formato que no se reconoce",
+    "22008": "una fecha u hora fuera de rango",
+    "22012": "una división por cero: usa nullif(…, 0) en el divisor",
+    "22001": "un texto más largo que su tipo",
+  }
+  if (code && data[code]) return data[code]
+  if (code?.startsWith("22")) return "un valor no sirve para esa operación: revisa los tipos y las conversiones"
+  if ((code?.startsWith("42") || code?.startsWith("21")) && message) return message.slice(0, 300)
+  return "la consulta no se pudo correr"
 }
