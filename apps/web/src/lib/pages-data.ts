@@ -1830,7 +1830,7 @@ export const PAGES = {
     path: "/contacto",
     title: "Habla con nosotros",
     description:
-      "¿Quieres saber si odentIA le sirve a tu clínica dental? Escríbenos y te responde una persona del equipo, o pruébalo 30 días sin tarjeta.",
+      "¿Quieres saber si odentIA le sirve a tu clínica dental? Escríbenos y te responde una persona del equipo, o pruébalo sin tarjeta.",
     crumb: "Habla con nosotros",
     hero: {
       type: "visual",
@@ -1880,9 +1880,9 @@ export const PAGES = {
         a: "odentIA está hecho para clínicas de habla hispana. La moneda, la zona horaria y los documentos se configuran por clínica.",
       },
     ],
+    // Sin texto propio: la banda dice los días de prueba del plan que publica la administración.
     cta: {
       title: "¿Lo ves en tu clínica?",
-      text: "Pruébalo 30 días: tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.",
     },
   },
 } satisfies Record<string, PageData>

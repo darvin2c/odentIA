@@ -8,6 +8,7 @@ import type { Consumption } from "./consumption"
 import { formatMicros, formatPlanMoney } from "./money"
 import { agentName } from "../../lib/agent"
 import { useReceptionName, withReceptionName } from "../../lib/agent-names"
+import { conversationRule, type SaasTerms, useSaasTerms } from "../../lib/billing"
 
 export interface OfferPlan {
   code: string
@@ -26,7 +27,8 @@ const ACTIONS = [
     key: "conversationMicros" as const,
     agent: "recepcion",
     what: "Conversación atendida",
-    when: "Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal.",
+    /** La ventana de las condiciones comerciales; sin ellas todavía, la frase sin cifra. */
+    when: (terms: SaasTerms | undefined) => (terms ? `${conversationRule(terms)}.` : "Una por persona, aunque escriba diez mensajes o cambie de canal."),
     /** «Sofi» se cambia por el nombre de la clínica al mostrarlo. */
     not: "No se cobra si responde tu equipo, si se deriva sin IA o si Sofi falla.",
   },
@@ -34,14 +36,14 @@ const ACTIONS = [
     key: "consultationMicros" as const,
     agent: "asistente_clinico",
     what: "Consulta dictada y confirmada",
-    when: "Una por atención, sin importar cuántos minutos dictes.",
+    when: () => "Una por atención, sin importar cuántos minutos dictes.",
     not: "No se cobra si descartas el borrador.",
   },
   {
     key: "recoveryMicros" as const,
     agent: "administrador",
     what: "Cita recuperada",
-    when: "Cuando un paciente vuelve tras un seguimiento y asiste.",
+    when: () => "Cuando un paciente vuelve tras un seguimiento y asiste.",
     not: "No se cobran recordatorios, mensajes sin respuesta ni citas canceladas.",
   },
 ]
@@ -64,6 +66,7 @@ export function PlanOffer({
   onActivate: () => void
 }) {
   const receptionName = useReceptionName()
+  const terms = useSaasTerms().data
   const money = (cents: number) => formatPlanMoney(cents, plan.currency)
   const priced = ACTIONS.some((action) => plan[action.key] !== null)
   const returnsCredit = plan.creditCents > 0 && plan.creditCents >= plan.priceCents
@@ -115,7 +118,7 @@ export function PlanOffer({
                     <p className="text-xs text-muted-foreground">{agentName(action.agent, receptionName)}</p>
                     <p className="text-sm font-medium">{action.what}</p>
                     <p className="text-xs text-muted-foreground">
-                      {action.when} {withReceptionName(action.not, receptionName)}
+                      {action.when(terms)} {withReceptionName(action.not, receptionName)}
                     </p>
                   </div>
                   <p className="text-base font-semibold tabular-nums">{formatMicros(price, plan.currency)}</p>

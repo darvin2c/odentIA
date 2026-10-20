@@ -110,6 +110,7 @@ const pagePayload = z.object({
   counts: z.record(z.string(), z.number()),
   seats: z.object({ planId: z.string(), planName: z.string(), used: z.number(), limit: z.number().nullable() }).nullable(),
   mode: z.enum(["invitacion", "abierta"]),
+  answerDays: z.number(),
 })
 const invitePayload = z.object({ url: z.string(), expiresAt: z.string(), emailSent: z.boolean(), validDays: z.number() })
 
@@ -224,7 +225,8 @@ function WaitlistPage() {
         subtitle={
           list.data ? (
             <>
-              Clínicas que pidieron entrar. Se responde en 2 días hábiles. Alta de clínicas:{" "}
+              Clínicas que pidieron entrar. Se responde en {list.data.answerDays}{" "}
+              {list.data.answerDays === 1 ? "día hábil" : "días hábiles"}. Alta de clínicas:{" "}
               {list.data.mode === "invitacion" ? "solo con invitación" : "abierta"}
               {isAdmin ? (
                 <>
@@ -236,7 +238,7 @@ function WaitlistPage() {
               ) : null}
             </>
           ) : (
-            "Clínicas que pidieron entrar. Se responde en 2 días hábiles."
+            "Clínicas que pidieron entrar."
           )
         }
       />

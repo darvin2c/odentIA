@@ -14,6 +14,7 @@ import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, sql } from "d
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { openSupportCaseFromHelp, replyToSupportCase, setSupportCaseStatus } from "./admin-support.js"
 import { contactScreenFacts } from "./contact-screen.js"
+import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
 import { sendToSpam } from "./contact-screen-actions.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { currentSaasPeriod, listPeriodActions, microsToCents } from "./saas-actions.js"
@@ -21,8 +22,9 @@ import { currentSaasPeriod, listPeriodActions, microsToCents } from "./saas-acti
 /**
  * «Pedir revisión» de una fila de «Cada acción de tus agentes» (issue 77,
  * ADR 0054). Cualquier fila del mes en curso o del anterior se puede revisar,
- * una vez. Si era spam, se devuelve al instante hasta el 10 % de las
- * conversaciones del mes y la persona pasa a Spam; desde ahí, y en todo lo
+ * una vez. Si era spam, se devuelve al instante hasta la parte de las
+ * conversaciones del mes que dicen las condiciones comerciales (ADR 0074) y la
+ * persona pasa a Spam; desde ahí, y en todo lo
  * demás, revisa odentIA en un caso de Soporte. Devuelta antes de cobrarse, la
  * fila no se cobra; ya cobrada, sale como «Devolución por revisión» en el
  * cargo siguiente. Nada se reescribe: la revisión es una fila nueva.
@@ -30,12 +32,6 @@ import { currentSaasPeriod, listPeriodActions, microsToCents } from "./saas-acti
 
 export { SAAS_REVIEW_REASONS } from "@odentia/db/schema/saas-billing"
 
-/** Hasta qué parte de las conversaciones del mes se devuelve el spam sin revisar (decisión 6). */
-export const SAAS_REVIEW_AUTO_SHARE = 0.1
-/** Días que odentIA puede leer la conversación si la clínica lo permite (decisión 11). */
-export const SAAS_REVIEW_READ_DAYS = 7
-/** Lo que se promete para responder: días hábiles. */
-export const SAAS_REVIEW_ANSWER_DAYS = 2
 const NOTE_MAX = 1000
 const DAY = 86_400_000
 
@@ -86,11 +82,13 @@ export async function reviewablePeriods(tx: Db, orgId: string, now = new Date())
 }
 
 /**
- * ¿Cabe otra devolución automática en el tramo de esta acción? Hasta el
- * `SAAS_REVIEW_AUTO_SHARE` de sus conversaciones, redondeado hacia arriba:
- * una clínica con pocas conversaciones igual puede devolver una.
+ * ¿Cabe otra devolución automática en el tramo de esta acción? Hasta la parte
+ * de sus conversaciones que rige al pedirla (`reviewAutoPercent`), redondeada
+ * hacia arriba: una clínica con pocas conversaciones igual puede devolver una.
  */
-async function withinAutoCap(tx: Db, orgId: string, period: { start: Date; end: Date }): Promise<boolean> {
+async function withinAutoCap(tx: Db, orgId: string, period: { start: Date; end: Date }, now = new Date()): Promise<boolean> {
+  const { reviewAutoPercent } = await saasTermsAt(tx, now)
+  if (reviewAutoPercent === 0) return false
   const inPeriod = and(eq(saasAction.organizationId, orgId), gte(saasAction.occurredAt, period.start), lt(saasAction.occurredAt, period.end))
   const [conversations] = await tx.select({ n: count() }).from(saasAction).where(and(inPeriod, eq(saasAction.kind, "conversacion")))
   const [autos] = await tx
@@ -98,7 +96,7 @@ async function withinAutoCap(tx: Db, orgId: string, period: { start: Date; end: 
     .from(saasActionReview)
     .innerJoin(saasAction, eq(saasAction.id, saasActionReview.actionId))
     .where(and(inPeriod, eq(saasActionReview.organizationId, orgId), eq(saasActionReview.automatic, true)))
-  const cap = Math.ceil(SAAS_REVIEW_AUTO_SHARE * Number(conversations?.n ?? 0))
+  const cap = Math.ceil((reviewAutoPercent * Number(conversations?.n ?? 0)) / 100)
   return Number(autos?.n ?? 0) + 1 <= cap
 }
 
@@ -174,7 +172,8 @@ async function createReview(
     reason: input.reason,
     note: input.note,
     requestedByUserId: actor.userId,
-    readUntil: input.allowRead && action.conversationId ? new Date(now.getTime() + SAAS_REVIEW_READ_DAYS * DAY) : null,
+    readUntil:
+      input.allowRead && action.conversationId ? new Date(now.getTime() + (await saasTermsAt(tx, now)).reviewReadDays * DAY) : null,
     supportCaseId: kase.id,
   })
   await tx.insert(auditEvent).values({
@@ -190,8 +189,9 @@ async function createReview(
 
 /**
  * Las revisiones de una clínica van de a una (con su transacción): el tope
- * del 10 % se cuenta y se usa sin que otra pedida a la vez lo pase, y una
- * fila pedida dos veces a la vez da «Ya pediste…», no un error.
+ * del spam devuelto al instante se cuenta y se usa sin que otra pedida a la
+ * vez lo pase, y una fila pedida dos veces a la vez da «Ya pediste…», no un
+ * error.
  */
 async function lockReviews(tx: Db, orgId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`saas_review:${orgId}`}))`)
@@ -306,6 +306,8 @@ export interface StaffReviewView {
   note: string | null
   requestedAt: Date
   requestedByName: string | null
+  /** Pendiente: el último día para responder, con los días hábiles que regían al pedirla. */
+  answerBy: Date | null
   /** odentIA puede leer la conversación hasta esta fecha; nulo si no hay permiso. */
   readUntil: Date | null
   answer: string | null
@@ -344,6 +346,10 @@ export async function getReviewOfCase(db: Db, caseId: string): Promise<StaffRevi
     note: row.review.note,
     requestedAt: row.review.requestedAt,
     requestedByName: row.requester,
+    answerBy:
+      row.review.status === "pendiente"
+        ? addBusinessDays(row.review.requestedAt, (await saasTermsAt(db, row.review.requestedAt)).reviewAnswerDays)
+        : null,
     readUntil: row.review.readUntil && row.review.readUntil.getTime() > now ? row.review.readUntil : null,
     answer: row.review.answer,
     decidedAt: row.review.decidedAt,

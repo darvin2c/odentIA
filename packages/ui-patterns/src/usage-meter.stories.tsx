@@ -10,6 +10,8 @@ const meta = {
   title: "Patrones/UsageMeter",
   component: UsageMeter,
   parameters: { layout: "padded" },
+  // Los niveles de los avisos de cobro: en la aplicación los entrega el servidor.
+  args: { warnAt: 0.75, alarmAt: 0.9 },
   decorators: [(Story) => <div className="max-w-md">{Story()}</div>],
 } satisfies Meta<typeof UsageMeter>
 

@@ -1063,7 +1063,8 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   }
 
   // admin es de odentIA (ADR 0064): el rol app solo lee la lista de precios que
-  // la clínica ve al elegir plan y pagar. catalog es de solo lectura.
+  // la clínica ve al elegir plan y pagar, y las condiciones comerciales con que
+  // se cuentan sus acciones (ADR 0074). catalog es de solo lectura.
   const admin = (await ownerDb.execute(sql`
     select c.relname as "tabla",
       has_table_privilege(${APP_ROLE}, c.oid, 'insert, update, delete') as "escribe"
@@ -1073,6 +1074,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     order by 1
   `)) as unknown as { tabla: string; escribe: boolean }[]
   expect(admin).toEqual([
+    { tabla: "saas_commercial_terms", escribe: false },
     { tabla: "saas_payment_method", escribe: false },
     { tabla: "saas_plan", escribe: false },
     { tabla: "saas_whatsapp_rate", escribe: false },

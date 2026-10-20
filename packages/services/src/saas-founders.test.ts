@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
-import { saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import { saasCommercialTerms, saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { getActionPricing } from "./saas-actions.js"
 import { chooseSaasPlan, createSaasPlan } from "./saas-billing.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import {
   claimFounderInvitation,
   clearExpiredDiscounts,
@@ -115,7 +116,8 @@ describe("la lista de espera", () => {
     const first = await submitWaitlistRequest(ownerDb, request("ana@sonrisa.test"))
     expect(first.existing).toBe(false)
     const again = await submitWaitlistRequest(ownerDb, { ...request("ANA@sonrisa.test"), clinicName: "Otra" })
-    expect(again).toEqual({ id: first.id, existing: true })
+    // El plazo que se promete es el que regía cuando llegó la solicitud.
+    expect(again).toEqual({ id: first.id, existing: true, answerDays: 2 })
     const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, first.id))
     expect(row).toMatchObject({ email: "ana@sonrisa.test", phone: "+51987654321", countryCode: "PE", status: "por_revisar" })
   })
@@ -227,7 +229,7 @@ describe("precio negociado con vencimiento", () => {
     expect((await getActionPricing(ownerDb, orgId, now)).discountBps).toBe(2000)
     expect((await getActionPricing(ownerDb, orgId, new Date(endsAt.getTime() + 1))).discountBps).toBe(0)
 
-    // Se avisa desde 15 días antes, a la clínica y en Inicio de la administración.
+    // Se avisa desde 15 días antes (las condiciones de hoy), a la clínica y en Inicio de la administración.
     const alerts = await getSaasAlerts(ownerDb, orgId, now)
     expect(alerts.find((alert) => alert.family === "precio_especial")).toMatchObject({ level: "aviso", action: "ver_plan" })
     expect((await listExpiringTerms(ownerDb, now)).some((row) => row.organizationId === orgId && row.kind === "precio_especial")).toBe(true)
@@ -259,4 +261,20 @@ describe("precio negociado con vencimiento", () => {
     expect(sub?.discountBps).toBe(3000)
     expect(sub?.discountEndsAt?.getTime()).toBe(endsAt.getTime())
   })
+})
+
+// Va al final: cambia las condiciones comerciales para lo que siga en este archivo.
+it("el aviso del fin de un precio especial usa los días de las condiciones comerciales (ADR 0074)", async () => {
+  const orgId = await clinic({ planId: listPlanId, status: "activa" })
+  const now = new Date()
+  await setSaasDiscount(ownerDb, admin, orgId, { discountBps: 1500, discountEndsAt: new Date(now.getTime() + 10 * DAY) }, now)
+  const listed = async () => (await listExpiringTerms(ownerDb, now)).some((row) => row.organizationId === orgId && row.kind === "precio_especial")
+  const alerted = async () => (await getSaasAlerts(ownerDb, orgId, now)).some((alert) => alert.family === "precio_especial")
+  // Con 15 días de aviso, a 10 días del fin ya se avisa.
+  expect(await listed()).toBe(true)
+  expect(await alerted()).toBe(true)
+  // La administración baja el aviso a 5 días: todavía no.
+  await ownerDb.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, discountNoticeDays: 5, effectiveFrom: new Date(now.getTime() - 1) })
+  expect(await listed()).toBe(false)
+  expect(await alerted()).toBe(false)
 })

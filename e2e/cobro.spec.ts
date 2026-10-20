@@ -145,7 +145,8 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await shot("admin-facturacion")
   const planRow = page.getByRole("listitem").filter({ hasText: plan!.code })
   await planRow.getByRole("button", { name: "Editar" }).click()
-  await expect(page.getByText("Comprobación antes de guardar")).toBeVisible()
+  // Exacto: la nota de las condiciones comerciales también nombra esta comprobación.
+  await expect(page.getByText("Comprobación antes de guardar", { exact: true })).toBeVisible()
   await expect(page.getByText("12.5 veces su peor costo", { exact: false })).toBeVisible()
   await expect(page.getByText("margen de 86 %", { exact: false })).toBeVisible()
   await shot("admin-plan")

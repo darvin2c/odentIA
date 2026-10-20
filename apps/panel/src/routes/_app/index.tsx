@@ -30,7 +30,10 @@ const signupModeQuery = {
   queryFn: async () => {
     const res = await fetch(`${API_URL}/api/public/sign-up`)
     if (!res.ok) throw new Error(`Error ${res.status}`)
-    return z.object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta") }).passthrough().parse(await res.json())
+    return z
+      .object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta"), waitlistAnswerDays: z.number().optional() })
+      .passthrough()
+      .parse(await res.json())
   },
   staleTime: 60_000,
 }
@@ -386,6 +389,8 @@ function InvitationItem({ invitation, onRespond }: { invitation: AccountInvitati
  * El servidor tampoco deja abrir una clínica sin invitación.
  */
 function NoInvitation({ email }: { email: string }) {
+  // En cuántos días hábiles se responde: las condiciones comerciales que rigen.
+  const answerDays = useQuery(signupModeQuery).data?.waitlistAnswerDays
   return (
     <div className="flex flex-col gap-4 rounded-xl border bg-card p-6">
       <div>
@@ -395,7 +400,10 @@ function NoInvitation({ email }: { email: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
         <div>
           <p className="font-medium">Quiero usar odentIA en mi clínica</p>
-          <p className="text-sm text-muted-foreground">Pide tu invitación en la web; te respondemos en 2 días hábiles.</p>
+          <p className="text-sm text-muted-foreground">
+            Pide tu invitación en la web
+            {answerDays ? `; te respondemos en ${answerDays} ${answerDays === 1 ? "día hábil" : "días hábiles"}` : ""}.
+          </p>
         </div>
         <Button render={<a href={webUrl("/solicitar-invitacion")} />}>Solicitar invitación</Button>
       </div>

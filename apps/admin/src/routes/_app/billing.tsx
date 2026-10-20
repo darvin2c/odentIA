@@ -34,6 +34,7 @@ import { CurrencySelect, centsToMajor, majorToCents } from "../../components/bil
 import { ApiError, api } from "../../lib/api"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection, WhatsappRatesSection } from "../../components/billing-terms"
+import { CommercialTermsSection } from "../../components/commercial-terms"
 
 export const Route = createFileRoute("/_app/billing")({
   component: BillingPage,
@@ -460,6 +461,8 @@ function BillingPage() {
           </ul>
         )}
       </section>
+
+      <CommercialTermsSection />
 
       <NegotiationsSection
         organizationNames={Object.fromEntries((overview.data ?? []).map((row) => [row.organizationId, row.organizationName ?? row.organizationId]))}

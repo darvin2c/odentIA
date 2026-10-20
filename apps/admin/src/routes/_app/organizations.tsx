@@ -244,13 +244,29 @@ function OrganizationsPage() {
   }
 
   const plansSchema = z.array(
-    z.object({ code: z.string(), name: z.string(), currency: z.string(), priceCents: z.number() }),
+    z.object({
+      code: z.string(),
+      name: z.string(),
+      currency: z.string(),
+      priceCents: z.number(),
+      trialDays: z.number(),
+      isDefault: z.boolean(),
+    }),
   )
   const plansQuery = useQuery({
     queryKey: ["admin-plans"],
     enabled: isAdmin && assistedOpen,
     queryFn: async () => plansSchema.parse(await api<unknown>("/api/admin/billing/plans")),
   })
+  // La prueba del alta dura lo que dice el plan por defecto; sin él, las
+  // condiciones comerciales (la base decide igual al crear la clínica).
+  const termsQuery = useQuery({
+    queryKey: ["admin", "billing", "terms"],
+    enabled: isAdmin && assistedOpen,
+    queryFn: () => api<{ values: { trialDays: number } }>("/api/admin/billing/terms"),
+  })
+  const trialDays = plansQuery.data?.find((plan) => plan.isDefault)?.trialDays ?? termsQuery.data?.values.trialDays
+  const trialLabel = trialDays ? `Prueba de ${trialDays} días` : "Prueba"
   const plans = (plansQuery.data ?? []).map((plan) => ({
     code: plan.code,
     label: `${plan.name} · ${plan.currency} ${(plan.priceCents / 100).toFixed(2)}`,
@@ -756,12 +772,12 @@ function OrganizationsPage() {
                     <SelectTrigger id="assisted-billing">
                       <SelectValue>
                         {(selected: string) =>
-                          selected === "now" ? "Cobro desde hoy" : "Prueba 14 días"
+                          selected === "now" ? "Cobro desde hoy" : trialLabel
                         }
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="trial">Prueba 14 días</SelectItem>
+                      <SelectItem value="trial">{trialLabel}</SelectItem>
                       <SelectItem value="now">Cobro desde hoy</SelectItem>
                     </SelectContent>
                   </Select>

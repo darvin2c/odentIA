@@ -15,6 +15,7 @@ import {
 import { and, asc, desc, eq, gt, ilike, inArray, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 
 /**
@@ -31,8 +32,6 @@ import { notFound, ServiceError, validation } from "./errors.js"
 const DAY = 86_400_000
 /** La invitación vale 14 días (decisión 8); reenviarla da otros 14. */
 export const FOUNDER_INVITATION_DAYS = 14
-/** Lo que se promete para responder una solicitud: días hábiles (decisión 7). */
-export const WAITLIST_ANSWER_DAYS = 2
 
 export type { SaasSignupMode, SaasWaitlistStatus }
 export { SAAS_WAITLIST_DENTISTS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
@@ -96,6 +95,8 @@ export interface WaitlistSubmitResult {
   id: string
   /** Ya había una solicitud viva con ese correo: no se duplica ni se vuelve a escribir. */
   existing: boolean
+  /** Días hábiles que se prometen para responderla: los que regían cuando llegó. */
+  answerDays: number
 }
 
 /**
@@ -108,14 +109,17 @@ export async function submitWaitlistRequest(tx: Db, input: WaitlistInput): Promi
   const data = parsed.data
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${data.email}`}, 0))`)
   const [alive] = await tx
-    .select({ id: saasWaitlistRequest.id })
+    .select({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
     .from(saasWaitlistRequest)
     .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
     .limit(1)
-  if (alive) return { id: alive.id, existing: true }
-  const [row] = await tx.insert(saasWaitlistRequest).values(data).returning({ id: saasWaitlistRequest.id })
+  if (alive) return { id: alive.id, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
+  const [row] = await tx
+    .insert(saasWaitlistRequest)
+    .values(data)
+    .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
-  return { id: row.id, existing: false }
+  return { id: row.id, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
 }
 
 export async function markWaitlistConfirmationSent(tx: Db, id: string): Promise<void> {
@@ -147,20 +151,8 @@ export interface WaitlistRow {
   enteredAt: Date | null
   decidedByName: string | null
   createdAt: Date
-  /** Por revisar: el último instante para responder (2 días hábiles, de lunes a viernes). */
+  /** Por revisar: el último instante para responder (los días hábiles que regían al llegar, de lunes a viernes). */
   answerBy: Date | null
-}
-
-/** Suma `days` días hábiles (lunes a viernes) a `from`: el plazo que se promete en la web. */
-export function addBusinessDays(from: Date, days: number): Date {
-  const out = new Date(from.getTime())
-  let left = days
-  while (left > 0) {
-    out.setUTCDate(out.getUTCDate() + 1)
-    const weekday = out.getUTCDay()
-    if (weekday !== 0 && weekday !== 6) left -= 1
-  }
-  return out
 }
 
 export interface WaitlistFilter {
@@ -174,6 +166,8 @@ export interface WaitlistPage {
   /** Lugares del plan por invitación con tope, el que se usa al invitar. */
   seats: FounderSeats | null
   mode: SaasSignupMode
+  /** Días hábiles que se prometen hoy para responder una solicitud. */
+  answerDays: number
 }
 
 export interface FounderSeats {
@@ -245,11 +239,13 @@ export async function listWaitlist(tx: Db, filter: WaitlistFilter = {}, now = ne
   const counts = Object.fromEntries(SAAS_WAITLIST_STATUSES.map((s) => [s, 0])) as Record<SaasWaitlistStatus, number>
   for (const entry of countRows) counts[entry.status as SaasWaitlistStatus] = entry.n
   const plan = await invitationPlan(tx)
+  const timeline = await loadSaasTermsTimeline(tx)
   return {
-    rows: rows.map(({ row, planName, organizationName, decidedByName }) => toWaitlistRow(row, planName, organizationName, decidedByName)),
+    rows: rows.map(({ row, planName, organizationName, decidedByName }) => toWaitlistRow(row, planName, organizationName, decidedByName, timeline)),
     counts,
     seats: plan ? await founderSeats(tx, plan.id, now) : null,
     mode: await getSignupMode(tx),
+    answerDays: timeline.at(now).waitlistAnswerDays,
   }
 }
 
@@ -258,6 +254,7 @@ function toWaitlistRow(
   planName: string | null,
   organizationName: string | null,
   decidedByName: string | null,
+  timeline: SaasTermsTimeline,
 ): WaitlistRow {
   return {
     id: row.id,
@@ -282,7 +279,7 @@ function toWaitlistRow(
     enteredAt: row.enteredAt,
     decidedByName,
     createdAt: row.createdAt,
-    answerBy: row.status === "por_revisar" ? addBusinessDays(row.createdAt, WAITLIST_ANSWER_DAYS) : null,
+    answerBy: row.status === "por_revisar" ? addBusinessDays(row.createdAt, timeline.at(row.createdAt).waitlistAnswerDays) : null,
   }
 }
 
@@ -384,7 +381,7 @@ export async function inviteFromWaitlist(
     .where(eq(saasWaitlistRequest.id, id))
     .limit(1)
   if (!updated) throw notFound("Solicitud")
-  return { token, expiresAt, request: toWaitlistRow(updated.row, plan.name, null, null) }
+  return { token, expiresAt, request: toWaitlistRow(updated.row, plan.name, null, null, await loadSaasTermsTimeline(tx)) }
 }
 
 export async function markInvitationSent(tx: Db, id: string): Promise<void> {
@@ -611,8 +608,10 @@ export interface ExpiringTermRow {
 }
 
 export async function listExpiringTerms(tx: Db, now = new Date()): Promise<ExpiringTermRow[]> {
-  const discountHorizon = new Date(now.getTime() + 15 * DAY)
-  const guaranteeHorizon = new Date(now.getTime() + 30 * DAY)
+  // Desde cuántos días antes se avisa: las condiciones comerciales que rigen (ADR 0074).
+  const terms = await currentSaasTerms(tx, now)
+  const discountHorizon = new Date(now.getTime() + terms.discountNoticeDays * DAY)
+  const guaranteeHorizon = new Date(now.getTime() + terms.guaranteeNoticeDays * DAY)
   const rows = await tx
     .select({
       organizationId: saasSubscription.organizationId,
@@ -671,6 +670,20 @@ export interface PublicPricing {
   /** El plan por invitación (Fundadores), si se muestra en la web. */
   founders: (PublicPlanPrices & { discountPercent: number | null; guaranteeMonths: number | null }) | null
   signupMode: SaasSignupMode
+  /** Las condiciones comerciales que la web promete (ADR 0074): la web no las escribe a mano. */
+  terms: PublicSaasTerms
+}
+
+export interface PublicSaasTerms {
+  conversationWindowHours: number
+  recoveryWindowDays: number
+  reviewAutoPercent: number
+  reviewAnswerDays: number
+  halfCycleDays: number
+  graceDays: number
+  /** Prueba cuando no hay un plan por defecto. */
+  trialDays: number
+  waitlistAnswerDays: number
 }
 
 function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
@@ -708,6 +721,21 @@ export async function getPublicPricing(tx: Db): Promise<PublicPricing> {
       ? { ...publicPlan(founders), discountPercent: discountAgainst(founders, defaultPlan), guaranteeMonths: founders.guaranteeMonths }
       : null,
     signupMode: await getSignupMode(tx),
+    terms: await publicSaasTerms(tx),
+  }
+}
+
+async function publicSaasTerms(tx: Db): Promise<PublicSaasTerms> {
+  const terms = await currentSaasTerms(tx)
+  return {
+    conversationWindowHours: terms.conversationWindowHours,
+    recoveryWindowDays: terms.recoveryWindowDays,
+    reviewAutoPercent: terms.reviewAutoPercent,
+    reviewAnswerDays: terms.reviewAnswerDays,
+    halfCycleDays: terms.halfCycleDays,
+    graceDays: terms.graceDays,
+    trialDays: terms.trialDays,
+    waitlistAnswerDays: terms.waitlistAnswerDays,
   }
 }
 

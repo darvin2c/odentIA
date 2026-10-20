@@ -28,7 +28,8 @@ import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-
 import { eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { addMonths, currentMonthIn, monthStart } from "./report-periods.js"
-import { CONVERSATION_WINDOW_MS, discountedMicros } from "./saas-actions.js"
+import { discountedMicros } from "./saas-actions.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { addMonth } from "./saas-invoicing.js"
 import { seedSaasBilling } from "./seed-saas-billing.js"
 
@@ -150,7 +151,7 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   for (const reply of replies) {
     const at = asDate(reply.created_at)
     const last = lastOf.get(reply.contact_id)
-    if (last === undefined || at.getTime() - last >= CONVERSATION_WINDOW_MS) {
+    if (last === undefined || at.getTime() - last >= SAAS_TERMS_INITIAL.conversationWindowHours * 3_600_000) {
       lastOf.set(reply.contact_id, at.getTime())
       conversations.push({
         organizationId: orgId,

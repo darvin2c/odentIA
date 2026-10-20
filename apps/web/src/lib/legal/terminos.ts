@@ -1,6 +1,7 @@
 // Términos y condiciones del servicio odentIA (contrato entre odentIA y la clínica).
-// Las cifras son las del plan de lista publicado (la administración), las mismas de la página Precios.
-import { money, type Pricing } from "../pricing"
+// Las cifras son las del plan de lista publicado y las condiciones comerciales (la administración),
+// las mismas de la página Precios.
+import { days, hours, money, type Pricing } from "../pricing"
 import { contactEmail } from "../site"
 import { type LegalDoc, TITULAR } from "./types"
 
@@ -14,6 +15,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
   const CONVERSATION = list?.conversation
   const CONSULTATION = list?.consultation
   const RECOVERED = list?.recovered
+  const terms = pricing.terms
   return {
   path: "/terminos",
   title: "Términos y condiciones del servicio",
@@ -79,7 +81,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
               [
                 "Conversación atendida",
                 price(CONVERSATION),
-                "Cuando Sofi responde a una persona; incluye todo lo que le responda en las 24 horas siguientes.",
+                `Cuando Sofi responde a una persona; incluye todo lo que le responda en las ${hours(terms.conversationWindowHours)} siguientes.`,
               ],
               [
                 "Consulta documentada",
@@ -118,7 +120,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       title: "Pagos y suspensión por falta de pago",
       blocks: [
         "La Clínica paga por los medios de pago que odentIA ofrece en la aplicación [Por completar: medios de pago aceptados]. Al registrar un medio de pago, autoriza los cargos del plan y del consumo variable en las fechas de facturación.",
-        "Si un pago no se puede cobrar, odentIA avisará a la Clínica y le dará un plazo de [Por completar: días de gracia] días para regularizarlo. Vencido ese plazo, odentIA puede suspender los agentes y, después, el acceso a la cuenta, salvo la exportación de datos. La suspensión no elimina los datos y el servicio se reactiva al regularizar el pago.",
+        `Si un pago no se puede cobrar, odentIA avisará a la Clínica y le dará un plazo de ${days(terms.graceDays)} para regularizarlo. Vencido ese plazo, odentIA puede suspender los agentes y, después, el acceso a la cuenta, salvo la exportación de datos. La suspensión no elimina los datos y el servicio se reactiva al regularizar el pago.`,
         "Salvo que la ley disponga otra cosa, los importes pagados no son reembolsables, incluidos los periodos ya iniciados.",
       ],
     },

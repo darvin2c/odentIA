@@ -4,15 +4,16 @@
 // plan Fundadores publicado en la administración.
 import WaitlistSplit from "../components/founders/WaitlistSplit"
 import Base from "../layouts/Base.astro"
-import { giftOf } from "../lib/pricing"
+import { businessDays, giftOf } from "../lib/pricing"
 
 const pricing = Astro.locals.pricing
 const founder = pricing.founders
 const gift = giftOf(pricing)
+const answer = businessDays(pricing.terms.waitlistAnswerDays)
 const title = gift ? `Pide tus ${gift}: programa Fundadores` : "Solicita tu invitación"
 const description = gift
-  ? `Programa Fundadores de odentIA: los primeros ${gift} de tus agentes los pagamos nosotros. Se entra por invitación; te respondemos en 2 días hábiles.`
-  : "Programa Fundadores de odentIA: se entra por invitación; te respondemos en 2 días hábiles."
+  ? `Programa Fundadores de odentIA: los primeros ${gift} de tus agentes los pagamos nosotros. Se entra por invitación; te respondemos en ${answer}.`
+  : `Programa Fundadores de odentIA: se entra por invitación; te respondemos en ${answer}.`
 ---
 <Base title={title} description={description} header="light">
   <WaitlistSplit
@@ -20,5 +21,6 @@ const description = gift
     gift={gift}
     discountPercent={founder?.discountPercent ?? null}
     noFee={founder ? founder.plan === 0 : false}
+    answerDays={pricing.terms.waitlistAnswerDays}
   />
 </Base>
