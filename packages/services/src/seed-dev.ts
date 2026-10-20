@@ -612,6 +612,15 @@ async function wipeSeed(): Promise<void> {
   await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
   await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
+  // Las clínicas demo de los avisos (`seedClinicNoticesDemo`) quedan entre
+  // corridas, pero su contrato lo aceptó Ana: esa aceptación se va con ella y
+  // la semilla la vuelve a poner junto con su membresía (que se va en cascada).
+  await db.execute(
+    sql`delete from processing_agreement_acceptance where accepted_by in (${sql.join(
+      SEED_USERS.map((id) => sql`${id}`),
+      sql`, `,
+    )})`,
+  )
   await db.delete(user).where(inArray(user.id, SEED_USERS))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const row of previousMessages) {
