@@ -279,13 +279,21 @@ export type ReportListRow = {
 }
 
 const REPORT_LIST_LIMIT = 200
+/** Una descarga trae la lista entera hasta este tope; la pantalla, las primeras `REPORT_LIST_LIMIT`. */
+export const REPORT_LIST_DOWNLOAD_LIMIT = 5000
+
+/** Cuántas filas trae una lista: las de la pantalla, o más para descargarla, nunca sin tope. */
+export function reportListLimit(asked: number | undefined): number {
+  return Math.max(1, Math.min(asked ?? REPORT_LIST_LIMIT, REPORT_LIST_DOWNLOAD_LIMIT))
+}
 
 export async function getReportList(
   tx: Db,
   orgId: string,
-  query: ReportQuery & { list: ReportListKey },
+  query: ReportQuery & { list: ReportListKey; limit?: number },
   now: Date = new Date(),
 ) {
+  const limit = reportListLimit(query.limit)
   // Las listas de Reportes › Agente viven con sus cifras.
   if (query.list === "agent_booked" || query.list === "agent_handoffs") return getAgentReportList(tx, orgId, { ...query, list: query.list }, now)
   const scope = await reportScope(tx, orgId, query, now)
@@ -317,11 +325,11 @@ export async function getReportList(
         join "user" u on u.id=a.dentist_user_id
         where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
           ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
-        order by a.starts_at desc, a.id limit ${REPORT_LIST_LIMIT}`)),
+        order by a.starts_at desc, a.id limit ${limit}`)),
     ]
   } else if (isFinanceList(query.list)) {
     // Las listas de Reportes › Finanzas: «Te deben» por antigüedad y lo aceptado sin cita.
-    rows = (await financeListRows(tx, orgId, scope, query.list, REPORT_LIST_LIMIT, now)).map((row) => ({ ...row, at: new Date(row.at).toISOString() }))
+    rows = (await financeListRows(tx, orgId, scope, query.list, limit, now)).map((row) => ({ ...row, at: new Date(row.at).toISOString() }))
   } else if (query.list === "debts_overdue") {
     // Quién debía hace más de 30 días al cerrar el periodo: la misma consulta de la cifra.
     rows = [
@@ -333,7 +341,7 @@ export async function getReportList(
           o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
         from overdue o
         join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-        order by o.since, o.patient_id limit ${REPORT_LIST_LIMIT}`)),
+        order by o.since, o.patient_id limit ${limit}`)),
     ]
   } else {
     rows = [
@@ -348,14 +356,14 @@ export async function getReportList(
         join "user" u on u.id=v.dentist_user_id
         where v.starts_at >= ${start} and v.starts_at < ${end}
           ${scope.branch ? sql`and v.branch_id=${scope.branch.id}` : sql``}
-        order by v.starts_at desc, v.id limit ${REPORT_LIST_LIMIT}`)),
+        order by v.starts_at desc, v.id limit ${limit}`)),
     ]
   }
 
   return {
     ...reportHead(scope),
     list: query.list,
-    /** Filas que existen; la respuesta trae como mucho `REPORT_LIST_LIMIT`. */
+    /** Filas que existen; la respuesta trae como mucho `limit` (`REPORT_LIST_LIMIT` en la pantalla). */
     total: rows[0]?.total ?? 0,
     rows: rows.map(({ total: _total, cents, at: when, ...row }) => ({
       ...row,

@@ -6,6 +6,7 @@
 import { apiFetch } from "./api"
 import { channelLabel } from "./channels"
 import { monthLabel, monthName, type YearMonth } from "./commissions"
+import type { ReportGoals } from "./reports-ask"
 
 // --- Periodo ------------------------------------------------------------------------
 
@@ -373,6 +374,8 @@ export interface ReportSummary extends ReportHead {
   }
   chart: Array<ReportBucket & { cents: number; previousCents: number }>
   wholeClinic: string[]
+  /** Las metas del mes y su avance (ADR 0071); null con una sede elegida: son de toda la clínica. */
+  goals: ReportGoals | null
 }
 
 /** Resumen › Por profesional: va aparte porque es la consulta más pesada. */

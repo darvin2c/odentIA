@@ -39,7 +39,7 @@ const helpAttachments = z.object({
   version: z.string().nullable(),
 })
 type HelpAttachments = z.infer<typeof helpAttachments>
-const screenEnvelope = z.object({
+export const screenEnvelope = z.object({
   data: z.object({ title: z.string().nullable(), suggestions: z.array(z.string()), attached: helpAttachments.optional() }),
 })
 
@@ -88,7 +88,7 @@ function withDestination(text: string, where: string): ReactNode {
  * «Lo que se envía»: el texto, que la persona puede cambiar, y lo que se
  * agrega solo con los valores que el servidor guardará junto a él.
  */
-function WhatIsSent({
+export function WhatIsSent({
   id,
   label,
   value,

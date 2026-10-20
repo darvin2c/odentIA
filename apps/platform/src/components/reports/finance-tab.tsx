@@ -38,7 +38,8 @@ import {
 import { amountFromCents } from "../../lib/workspace"
 import { ExpenseFormDrawer, type ExpenseDraft, type ExpensePlace } from "../finance/expense-form-drawer"
 import { PromotionsCard, PromotionsView } from "./promotions-view"
-import { BarRows, type Better, ChangeLine, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { BarRows, type Better, ChangeLine, DownloadButton, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { downloadReportTable } from "../../lib/reports-ask"
 import { ADMIN_NAME } from "../../lib/agent-names"
 
 type Money = (cents: number) => string
@@ -211,7 +212,7 @@ function FinanceCards({ data }: { data: ReportFinance }) {
   const previousShare = rateOf(previous.commissionCents, previous.cobradoCents)
   const overdueChange = data.debts.overdueCents - data.debts.previousOverdueCents
   return (
-    <section aria-label="Cifras de finanzas" className="grid min-w-0 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+    <section aria-label="Cifras de finanzas" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
       <FinanceCard
         title="Cobrado"
         value={money(current.cobradoCents)}
@@ -701,8 +702,11 @@ function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportF
           </h3>
           <p className="text-sm text-muted-foreground">Cada profesional gana su porcentaje de lo que se cobró de lo que atendió. Lo atendido que aún no se cobra no genera comisión todavía.</p>
         </div>
-        {/* Solo cuando hay algo que pagar: sin comisiones por pagar, el botón sería ruido. */}
-        {canPay && data.payables.commissions.cents > 0 ? payLink : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {report.data && report.data.data.rows.length > 0 ? <DownloadButton onDownload={() => downloadReportTable("commissions", query)} /> : null}
+          {/* Solo cuando hay algo que pagar: sin comisiones por pagar, el botón sería ruido. */}
+          {canPay && data.payables.commissions.cents > 0 ? payLink : null}
+        </div>
       </div>
       {body()}
     </section>

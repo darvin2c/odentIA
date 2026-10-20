@@ -142,7 +142,7 @@ function buildApp(role: string, userId: string, orgId = ORG_A): Hono {
   app.route("/finance", createFinanceRoute(deps))
   app.route("/org/payment-methods", createPaymentMethodsRoute(deps))
   app.route("/commissions", createCommissionsRoute(deps))
-  app.route("/reports", createReportsRoute(deps))
+  app.route("/reports", createReportsRoute({ ...deps, llm: { fake: true } }))
   app.route("/workspace", createWorkspaceRoute(deps))
   return app
 }

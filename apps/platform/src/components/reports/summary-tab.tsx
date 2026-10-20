@@ -11,7 +11,7 @@ import { ColumnChart, EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp, Bot } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
@@ -33,8 +33,10 @@ import {
   type ReportSummary,
   spanLabel,
 } from "../../lib/reports"
+import { downloadReportTable, type ReportGoalMetric } from "../../lib/reports-ask"
 import { FunnelCard } from "./patients-tab"
-import { EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { DownloadButton, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { GoalDrawer, GoalLine, MondayDigestCard, PinnedAnswers } from "./summary-extras"
 import { ADMIN_NAME } from "../../lib/agent-names"
 
 /** Lo que se aparta de la clínica más de estos puntos lleva su marca en la tabla por profesional. */
@@ -61,8 +63,20 @@ function FooterLink({ to, children }: { to: SummaryTarget; children: ReactNode }
   )
 }
 
-export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void; advice?: ReactNode }) {
+export function SummaryTab({
+  query,
+  onOpenList,
+  advice,
+  argosEnabled,
+}: {
+  query: ReportQuery
+  onOpenList: (list: ReportListKey) => void
+  advice?: ReactNode
+  /** Argos encendido: con él se pregunta y se fija una respuesta en el Resumen. */
+  argosEnabled?: boolean
+}) {
   const report = useQuery({ queryKey: reportKey("summary", query), queryFn: () => fetchReport<ReportSummary>("summary", query), retry: false })
+  const [goalMetric, setGoalMetric] = useState<ReportGoalMetric | null>(null)
 
   if (report.isPending) return <LoadingState />
   if (report.isError)
@@ -96,7 +110,7 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <section aria-label="Las seis cifras" className="grid min-w-0 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
+      <section aria-label="Las seis cifras" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3">
         <SummaryFigure
           title="Cobrado"
           value={money(data.collected.current)}
@@ -106,6 +120,7 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
           change={data.collected.current === 0 && data.collected.previous === 0 ? undefined : relativeChange(data.collected.current, data.collected.previous, phrase, locale)}
           better="up"
           detail={data.collected.others.length > 0 ? `Además, ${data.collected.others.map((item) => formatMoney(item.current, item.currency, locale)).join(" y ")}` : undefined}
+          goal={<GoalLine metric="cobrado" goals={data.goals} currency={currency} locale={locale} onEdit={setGoalMetric} />}
           footer={<FooterLink to="finanzas">Ver en Finanzas</FooterLink>}
         />
         <SummaryFigure
@@ -116,6 +131,7 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
           sparkLabel={`Pacientes nuevos ${twelve}: ${travel(data.newPatients.months, String)}`}
           change={data.newPatients.current === 0 && data.newPatients.previous === 0 ? undefined : absoluteChange(data.newPatients.current, data.newPatients.previous, phrase, locale)}
           better="up"
+          goal={<GoalLine metric="pacientes_nuevos" goals={data.goals} currency={currency} locale={locale} onEdit={setGoalMetric} />}
           footer={data.newPatients.current > 0 ? <FooterButton onClick={() => onOpenList("new_patients")}>Ver quiénes</FooterButton> : undefined}
         />
         <SummaryFigure
@@ -188,6 +204,10 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
       </div>
 
       <Professionals query={query} />
+
+      <PinnedAnswers query={query} argosEnabled={argosEnabled} />
+      <MondayDigestCard />
+      <GoalDrawer metric={goalMetric} goals={data.goals} currency={currency} locale={locale} onClose={() => setGoalMetric(null)} />
     </div>
   )
 }
@@ -220,6 +240,9 @@ function CollectedChart({ data }: { data: ReportSummary }) {
         categories={data.chart.map((bucket) => ({ key: bucket.key, label: bucketLabel(bucket, grain, locale), short: bucketShort(bucket, grain, locale), partial: bucket.partial }))}
         bars={[{ key: "cobrado", label: "Cobrado", tone: "series-1", values: data.chart.map((bucket) => bucket.cents) }]}
         line={{ key: "antes", label: "Un año antes", values: data.chart.map((bucket) => bucket.previousCents) }}
+        {...(grain === "month" && data.goals?.cobrado
+          ? { reference: { value: data.goals.cobrado.amount, label: `Meta ${formatMoney(data.goals.cobrado.amount, currency, locale)}` } }
+          : {})}
         format={(cents) => formatMoney(cents, currency, locale)}
         axis={(cents) => compactMoney(cents, locale)}
       />
@@ -271,7 +294,7 @@ function Professionals({ query }: { query: ReportQuery }) {
   const legend = `Las flechas marcan lo que se aparta más de ${APART_POINTS} puntos de la clínica${clinicNoShow !== null ? ` (no vinieron ${clinicNoShow} %` : ""}${clinicAcceptance !== null ? `${clinicNoShow !== null ? ", " : " ("}aceptaron ${clinicAcceptance} %` : ""}${clinicBusy !== null ? `${clinicNoShow !== null || clinicAcceptance !== null ? ", " : " ("}ocupado ${clinicBusy} %` : ""}${clinicNoShow !== null || clinicAcceptance !== null || clinicBusy !== null ? ")" : ""}.`
   const amount = (cents: number): string => plainAmount(cents, currency, locale)
   return (
-    <ReportCard title="Por profesional" note={`Ordenado por lo cobrado · ${currency}`}>
+    <ReportCard title="Por profesional" note={`Ordenado por lo cobrado · ${currency}`} action={<DownloadButton onDownload={() => downloadReportTable("professionals", query)} />}>
       {/* En teléfono, una fila por profesional: la tabla no cabe sin desbordar. */}
       <ul className="flex min-w-0 flex-col divide-y sm:hidden">
         {rows.map((row) => (

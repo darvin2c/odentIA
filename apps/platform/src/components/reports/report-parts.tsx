@@ -4,9 +4,11 @@
  * son un apoyo visual: cada dato va también en texto, y mejor o peor se dice
  * con palabras y flecha, no solo con color.
  */
-import { Button, cn } from "@odentia/ui"
-import { Sparkline } from "@odentia/ui-patterns"
-import { ArrowDown, ArrowUp } from "lucide-react"
+import { Button, cn, toast } from "@odentia/ui"
+import { Sparkline, SubmitButton } from "@odentia/ui-patterns"
+import { useMutation } from "@tanstack/react-query"
+import { ArrowDown, ArrowUp, Download } from "lucide-react"
+import { mutationErrorMessage } from "../../lib/query-error"
 import { type ReactNode, useId } from "react"
 import type { Comparison } from "../../lib/reports"
 
@@ -105,6 +107,7 @@ export function SummaryFigure({
   better,
   detail,
   note,
+  goal,
   footer,
 }: {
   title: string
@@ -118,6 +121,8 @@ export function SummaryFigure({
   better: Better
   detail?: ReactNode
   note?: string
+  /** La meta del mes y su avance, o «Poner meta» (tablero 6). */
+  goal?: ReactNode
   footer?: ReactNode
 }) {
   const id = useId()
@@ -134,8 +139,23 @@ export function SummaryFigure({
       </div>
       {change !== undefined ? <ChangeLine change={change} better={better} /> : null}
       {detail ? <span className="text-[13px] text-foreground/80">{detail}</span> : null}
+      {goal}
       {footer ? <div className="mt-auto pt-1.5">{footer}</div> : null}
     </section>
+  )
+}
+
+/**
+ * «Descargar» de una lista o una tabla (decisión 11): un CSV con las mismas
+ * filas y columnas; el archivo lo arma el servidor.
+ */
+export function DownloadButton({ onDownload, label = "Descargar" }: { onDownload: () => Promise<void>; label?: string }) {
+  const download = useMutation({ retry: false, mutationFn: onDownload, onError: (error) => toast.error(mutationErrorMessage(error)) })
+  return (
+    <SubmitButton type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" pending={download.isPending} onClick={() => download.mutate()}>
+      <Download aria-hidden />
+      {label}
+    </SubmitButton>
   )
 }
 
@@ -151,23 +171,27 @@ export function FooterButton({ onClick, children }: { onClick: () => void; child
 export function ReportCard({
   title,
   note,
+  action,
   className,
   children,
 }: {
   title: string
   /** Aclaración junto al título, como «De toda la clínica». */
   note?: string
+  /** Lo que se hace con la tarjeta entera, a la derecha del título: «Descargar». */
+  action?: ReactNode
   className?: string
   children: ReactNode
 }) {
   const id = useId()
   return (
     <section aria-labelledby={id} className={cn("elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-[18px]", className)}>
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <h3 id={id} className="font-semibold">
           {title}
         </h3>
         {note ? <span className="text-[13px] text-muted-foreground">{note}</span> : null}
+        {action ? <div className="ml-auto">{action}</div> : null}
       </div>
       {children}
     </section>

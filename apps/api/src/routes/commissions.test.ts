@@ -68,7 +68,7 @@ function buildApp(role: string, userId: string): Hono {
   const app = new Hono()
   app.use("*", stubOrg(role, userId))
   app.route("/commissions", createCommissionsRoute(deps))
-  app.route("/reports", createReportsRoute(deps))
+  app.route("/reports", createReportsRoute({ ...deps, llm: { fake: true } }))
   return app
 }
 

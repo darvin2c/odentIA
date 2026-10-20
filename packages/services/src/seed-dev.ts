@@ -172,6 +172,7 @@ import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
 import { seedReports } from "./seed-reports.js"
 import { seedReportsAgent } from "./seed-reports-agent.js"
+import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsFinance } from "./seed-reports-finance.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
 import { seedRoles } from "./seed-roles.js"
@@ -468,6 +469,12 @@ async function wipeSeed(): Promise<void> {
     "professional_schedule",
     "processing_agreement_acceptance",
     "home_visit",
+    // Argos en Reportes, metas y el resumen del lunes (ADR 0070 y 0071).
+    "report_question",
+    "report_pin",
+    "report_goal",
+    "report_digest_send",
+    "report_digest",
   ]) {
     await db.execute(
       sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`,
@@ -3635,6 +3642,8 @@ await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ 
 const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
 // Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
 const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
+// Fases 5 y 6 de Reportes: dos respuestas de Argos fijadas en el Resumen y las metas del mes, con la del mes anterior.
+const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistUserId: LUIS_ID }))
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3824,6 +3833,7 @@ console.log(
 console.log(
   `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
   `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles`,
+  `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)
