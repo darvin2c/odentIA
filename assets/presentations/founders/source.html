@@ -1,0 +1,2134 @@
+<title>odentIA Fundadores</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Presentación de 15 partes sobre un escenario de 1920×1080 que se escala a la ventana.
+   Cada par muestra primero el problema de la clínica (gris, frío) y con un clic la respuesta (color de su agente).
+   Un solo aspecto oscuro, el de la web de odentIA. */
+:root {
+  --night: #0a2129;
+  --night-2: #061318;
+  --panel: #0d262f;
+  --panel-2: #0f2e38;
+  --line: rgba(143, 176, 184, 0.16);
+  --line-2: rgba(143, 176, 184, 0.3);
+  --on: #f1f5f9;
+  --on-2: #b9cfd5;
+  --on-3: #8fb0b8;
+  --grey: #5b7780;
+  --sky: #4fc3d7;
+  --mint: #a6f0d8;
+  --amber: #f5c46b;
+  --warn: #e8927c;
+  --font: "Manrope", system-ui, sans-serif;
+  --agent: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--night-2);
+  color: var(--on);
+  font-family: var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  padding-left: max(0px, env(safe-area-inset-left, 0px));
+  padding-right: max(0px, env(safe-area-inset-right, 0px));
+}
+.viewport { position: fixed; inset: 0; cursor: pointer; }
+.stage {
+  position: absolute; left: 50%; top: 50%;
+  width: 1920px; height: 1080px;
+  transform-origin: 0 0;
+  background:
+    radial-gradient(1200px 700px at 78% 30%, rgba(79,195,215,0.09), transparent 60%),
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    var(--night);
+  overflow: hidden;
+}
+.stage.cold { background:
+    radial-gradient(1200px 700px at 78% 30%, rgba(232,146,124,0.06), transparent 60%),
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    #0b1c22; }
+h1, h2, h3, p { margin: 0; }
+
+/* Partes y momentos: una parte tiene uno o más momentos (el problema, la respuesta…). */
+.slide { position: absolute; inset: 0; visibility: hidden; }
+.slide.on { visibility: visible; }
+.layer {
+  position: absolute; inset: 0;
+  padding: 116px 140px 150px;
+  display: flex; flex-direction: column; gap: 36px;
+  opacity: 0; visibility: hidden;
+  transform: translateX(80px);
+  transition: opacity .55s ease, transform .8s cubic-bezier(.2,.7,.2,1), filter .6s, visibility 0s linear .6s;
+}
+.layer.cur { opacity: 1; visibility: visible; transform: none; filter: none; transition: opacity .55s ease, transform .8s cubic-bezier(.2,.7,.2,1), filter .6s; }
+.layer.gone { transform: translateX(-80px); filter: blur(8px); }
+.layer.overlay { background: rgba(6,19,24,.78); backdrop-filter: blur(6px); justify-content: center; align-items: center; transform: none; }
+
+/* Entradas: cada pieza con su retraso (--d). */
+.layer.cur .in { animation: rise .9s cubic-bezier(.2,.7,.2,1) both; animation-delay: var(--d, 0s); }
+.layer.cur .pop { animation: pop .7s cubic-bezier(.3,1.6,.5,1) both; animation-delay: var(--d, 0s); }
+@keyframes rise { from { opacity: 0; transform: translateY(36px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes blink { 50% { opacity: .25; } }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(79,195,215,.55); } 100% { box-shadow: 0 0 0 40px rgba(79,195,215,0); } }
+
+/* Tipografía */
+.tag { font-family: var(--agent); font-size: 25px; letter-spacing: .08em; text-transform: uppercase; color: var(--sky); }
+.prob .tag { color: var(--warn); }
+.h1 { font-size: 104px; line-height: 1.02; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; }
+.h2 { font-size: 78px; line-height: 1.06; font-weight: 800; letter-spacing: -0.03em; text-wrap: balance; }
+.lead { font-size: 34px; line-height: 1.42; color: var(--on-2); text-wrap: pretty; }
+.small { font-size: 24px; line-height: 1.45; color: var(--on-3); }
+.accent { color: var(--sky); }
+.warn { color: var(--warn); }
+.gift { color: var(--amber); }
+.mono { font-family: var(--agent); }
+.num { font-variant-numeric: tabular-nums; }
+.dot { width: 14px; height: 14px; border-radius: 50%; flex: none; display: inline-block; background: currentColor; box-shadow: 0 0 14px currentColor; }
+.c-sky { color: var(--sky); } .c-mint { color: var(--mint); } .c-amber { color: var(--amber); }
+
+/* Par: texto a la izquierda, escena a la derecha. */
+.pair { display: flex; gap: 80px; align-items: center; flex: 1; min-height: 0; }
+.copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 34px; }
+.scene { width: 800px; height: 780px; flex: none; position: relative; }
+.was {
+  position: absolute; right: 140px; top: 108px; z-index: 2;
+  font-family: var(--agent); font-size: 21px; color: var(--on-3);
+  padding: 10px 18px; border-radius: 999px; border: 1px dashed var(--line-2);
+}
+.was s { text-decoration-color: var(--warn); text-decoration-thickness: 2px; }
+.hint { font-family: var(--agent); font-size: 20px; color: var(--on-3); }
+.prob .hint { animation: blink 2.4s infinite; }
+
+/* Marco */
+.brand { position: absolute; left: 140px; bottom: 54px; width: 180px; opacity: .9; z-index: 3; }
+.brand svg { width: 100%; height: auto; display: block; }
+.count { position: absolute; right: 140px; bottom: 58px; font-family: var(--agent); font-size: 22px; color: var(--on-3); letter-spacing: .06em; z-index: 3; }
+.progress { position: absolute; left: 0; bottom: 0; height: 6px; background: var(--sky); transition: width .6s cubic-bezier(.2,.7,.2,1); box-shadow: 0 0 20px var(--sky); z-index: 3; }
+
+/* Controles y guion fuera del escenario */
+.controls {
+  position: fixed; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 8px; z-index: 10;
+}
+.controls button {
+  font: 600 14px var(--font); color: var(--on); background: rgba(15,46,56,.88);
+  border: 1px solid var(--line-2); border-radius: 999px; padding: 8px 14px; cursor: pointer;
+}
+.controls button:hover { border-color: var(--sky); }
+.controls button[aria-pressed="true"] { background: var(--sky); color: #06222a; border-color: var(--sky); }
+.controls button:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.notes-panel {
+  position: fixed; z-index: 9;
+  left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  max-width: 900px; margin: 0 auto;
+  background: rgba(6,19,24,.95); border: 1px solid var(--line-2); border-radius: 14px;
+  padding: 14px 18px; font: 500 15px/1.55 var(--font); color: var(--on-2);
+  max-height: 40vh; overflow: auto;
+}
+.notes-panel b { color: var(--sky); font-family: var(--agent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.notes { display: none; }
+
+/* ===== 1 · Portada ===== */
+.cover { flex-direction: row; align-items: center; gap: 36px; padding-top: 100px; }
+.cover .copy { gap: 26px; }
+.cover .h1 { font-size: 88px; }
+.cover .big-gift { font-size: 116px; display: inline-block; text-shadow: 0 0 60px rgba(245,196,107,.35); }
+.chips { display: flex; gap: 14px; flex-wrap: wrap; }
+.chip { font-size: 24px; font-weight: 600; padding: 11px 22px; border-radius: 999px; border: 1px solid rgba(79,195,215,.4); color: var(--on-2); background: rgba(79,195,215,.06); }
+.agents-line { font-size: 34px; line-height: 1.45; color: var(--on-2); max-width: 760px; text-wrap: pretty; }
+/* Portada sin ruido: la arcada y la línea del agente que actúa; sin canales, globos, líneas ni contadores. */
+.cover .d3 .zchans, .cover .d3 .zcap, .cover .d3 .scene-svg, .cover .d3 .zout, .cover .d3 .zbar { display: none !important; }
+.cover .copy { gap: 34px; }
+.agents-line b { font-weight: 800; }
+.agent-key { display: flex; gap: 22px; flex-wrap: wrap; font-size: 22px; color: var(--on-2); }
+.agent-key span { display: flex; align-items: center; gap: 10px; }
+.agent-key i { width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+/* La escena 3D del inicio de la web (portada «D3» de @odentia/brand-scene): 840 × 680, escalada. */
+.cover-scene { width: 941px; height: 762px; position: relative; flex: none; }
+.d3 { position: absolute; left: 0; top: 0; width: 840px; height: 680px; transform: scale(1.12); transform-origin: top left; --agent-font: var(--agent); --mono: var(--agent); }
+.d3 canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; max-width: none; }
+.d3 .scene-shadow { position: absolute; left: 150px; top: 410px; width: 540px; height: 90px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0,0,0,.45), rgba(0,0,0,0)); }
+.d3 .scene-svg { position: absolute; inset: 0; width: 840px; height: 680px; max-width: none; pointer-events: none; }
+.d3 .zcap { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 2px; padding: 7px 11px; border-radius: 12px; background: rgba(8,26,32,.94); box-shadow: inset 0 0 0 1.5px var(--c), 0 10px 30px -10px rgba(0,0,0,.6); font-size: 12.5px; line-height: 1.35; color: #eef6f8; opacity: 0; pointer-events: none; will-change: transform, opacity; z-index: 2; white-space: nowrap; }
+.d3 .zcap .mono { font-size: 10.5px; letter-spacing: .04em; color: #9fb8bf; }
+.d3 .zpanel { position: absolute; left: 110px; top: 505px; width: 620px; padding: 16px 18px; border-radius: 20px; background: rgba(8,26,32,.9); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 10px; color: #f1f5f9; }
+.d3 .zrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.d3 .zwho { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14.5px; flex-wrap: wrap; }
+.d3 .zwho i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+.d3 .zmeta { font-size: 12px; color: #9fb8bf; white-space: nowrap; }
+.d3 .zbdg { font-family: var(--agent-font); font-weight: 500; font-size: 11.5px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: #cfe2e7; }
+.d3 .zbdg.to { background: #e3f4f8; color: #0b5568; }
+.d3 .ztxt { font-size: 16px; line-height: 1.45; color: #eef6f8; min-height: 23px; }
+.d3 .ztxt.n1 { animation: zpop .45s cubic-bezier(.2,.8,.2,1) both; }
+.d3 .ztxt.n2 { animation: zpop2 .45s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes zpop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes zpop2 { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.d3 .zbar { height: 4px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
+.d3 .zbar span { display: block; height: 100%; background: linear-gradient(90deg, #4fc3d7, #a6f0d8, #f5c46b); transition: width .6s ease; }
+.d3 .zout { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; color: #b9cfd5; }
+.d3 .zout b { font-family: var(--mono); font-weight: 600; font-size: 15px; color: #fff; margin-right: 4px; }
+.d3 .zchans { list-style: none; margin: 0; padding: 0; }
+.d3 .zch { position: absolute; top: 8px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 999px; font-family: var(--agent-font); font-size: 12.5px; color: #cfe7ec; background: rgba(255,255,255,.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); transition: background-color .4s ease, box-shadow .4s ease, color .4s ease; }
+.d3 .zch.cons { background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); color: #9fb8bf; }
+.d3 .zch.on { background: rgba(255,255,255,.16); color: #fff; box-shadow: inset 0 0 0 1.5px var(--c), 0 0 24px -6px var(--c); }
+.d3 .zch.a { animation: zin .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d); }
+.d3 .zch.b { animation: zin2 .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d); }
+@keyframes zin { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: none; } }
+@keyframes zin2 { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: none; } }
+.d3 .zch.on.s1::after, .d3 .zch.on.s2::after { content: ""; position: absolute; inset: -5px; border-radius: 999px; box-shadow: 0 0 0 2px var(--c); pointer-events: none; }
+.d3 .zch.on.s1::after { animation: zping .9s ease-out both; }
+.d3 .zch.on.s2::after { animation: zping2 .9s ease-out both; }
+@keyframes zping { from { opacity: .9; transform: scale(.92); } to { opacity: 0; transform: scale(1.3); } }
+@keyframes zping2 { from { opacity: .9; transform: scale(.92); } to { opacity: 0; transform: scale(1.3); } }
+
+/* ===== 2 · 22:47 ===== */
+.clock { font-family: var(--agent); font-size: 132px; font-weight: 500; letter-spacing: -0.04em; line-height: 1; color: var(--on); }
+.notifs { display: flex; flex-direction: column; gap: 14px; }
+.notif {
+  display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center;
+  padding: 18px 22px; border-radius: 18px; background: rgba(13,38,47,.75); border: 1px solid var(--line);
+  animation: rise .5s cubic-bezier(.2,.7,.2,1) both;
+}
+.notif .who { font-size: 22px; font-weight: 700; color: var(--on-2); }
+.notif .who span { font-family: var(--agent); font-weight: 500; font-size: 18px; color: var(--on-3); margin-left: 10px; }
+.notif .txt { grid-column: 1 / -1; font-size: 23px; color: var(--on-3); }
+.notif .late { font-family: var(--agent); font-size: 17px; color: var(--warn); border: 1px solid rgba(232,146,124,.5); padding: 4px 10px; border-radius: 999px; opacity: 0; transition: opacity .4s; }
+.notif.lost .late { opacity: 1; }
+.notif.lost { border-color: rgba(232,146,124,.3); }
+.lost-count { font-family: var(--agent); font-size: 24px; color: var(--warn); }
+/* 2 · La noche entera */
+.p1head { display: flex; justify-content: space-between; font-family: var(--agent); font-size: 26px; color: var(--warn); margin-bottom: 16px; }
+.p1head b { font-weight: 600; }
+.p1feed { display: flex; flex-direction: column; gap: 10px; height: 600px; overflow: hidden; }
+.p1feed .notif { padding: 12px 20px; gap: 4px 16px; flex: none; animation: p1in .35s cubic-bezier(.2,.7,.2,1) both; transition: opacity .4s; }
+.p1feed .notif .txt { font-size: 21px; }
+@keyframes p1in { from { opacity: 0; transform: translateY(-24px); } to { opacity: 1; transform: none; } }
+.notif.gone2 { opacity: .6; border-color: rgba(232,146,124,.5); }
+.notif.gone2 .late { opacity: 1; color: #fff; background: #b3402a; border-color: #b3402a; }
+.notif.gone2 .txt { text-decoration: line-through; text-decoration-color: var(--warn); }
+.p1end { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 12px; z-index: 2; }
+.p1end div { padding: 16px 22px; border-radius: 16px; background: rgba(6,19,24,.97); border: 2px solid var(--warn); font-size: 27px; line-height: 1.35; box-shadow: 0 0 50px -12px var(--warn); animation: fade .4s both; }
+.p1end b { font-family: var(--agent); font-weight: 600; color: var(--warn); }
+.p1head.ok { color: var(--sky); }
+.p1head.ok b.sky { color: var(--sky); }
+.notif.sofi { border-color: rgba(79,195,215,.35); grid-template-columns: 1fr auto; }
+.notif.sofi .late { opacity: 1; color: var(--sky); border-color: rgba(79,195,215,.5); }
+.notif.sofi .late i { display: inline-block; width: 6px; height: 6px; margin: 0 1px; border-radius: 50%; background: var(--sky); animation: blink 1s infinite; }
+.notif.sofi .late i:nth-child(2) { animation-delay: .15s; } .notif.sofi .late i:nth-child(3) { animation-delay: .3s; }
+.notif.sofi .rep { grid-column: 1 / -1; font-size: 20px; color: var(--on); padding-left: 14px; border-left: 3px solid var(--sky); animation: fade .3s both; }
+.notif.sofi .rep b { color: var(--sky); }
+.notif.sofi.done .late { color: #04252c; background: var(--sky); border-color: var(--sky); font-weight: 600; }
+.notif.sofi.urg.done .late { background: transparent; border: 1.5px solid var(--sky); color: var(--sky); }
+.r1phone { position: absolute; left: 100px; top: 0; z-index: 3; transition: opacity .6s, transform .7s cubic-bezier(.6,0,.3,1); }
+.r1phone.away { opacity: 0; transform: translateY(-40px) scale(.6); pointer-events: none; }
+.r1list { opacity: 0; transition: opacity .5s; }
+.r1list.on { opacity: 1; }
+.p1end.ok div { border-color: var(--sky); box-shadow: 0 0 50px -12px var(--sky); }
+.p1end.ok b { color: var(--sky); }
+.r1phone .msg.log { background: rgba(79,195,215,.1); color: var(--sky); border-color: rgba(79,195,215,.5); }
+/* 3 · Una persona, tres fichas */
+.p2cards { position: absolute; left: 0; top: 0; width: 800px; height: 330px; }
+.p2card { position: absolute; top: 0; width: 250px; height: 320px; box-sizing: border-box; padding: 16px 16px; border-radius: 18px; background: rgba(13,38,47,.85); border: 1.5px dashed var(--line-2); display: flex; flex-direction: column; gap: 8px; animation: p1in .4s both; }
+.p2card .nw { align-self: flex-start; font-family: var(--agent); font-size: 14px; color: var(--warn); border: 1px solid rgba(232,146,124,.6); border-radius: 999px; padding: 2px 9px; }
+.p2card b { font-size: 25px; }
+.p2card .ch { font-family: var(--agent); font-size: 15px; color: var(--on-3); }
+.p2card .it { font-size: 18px; color: var(--on-2); padding: 7px 10px; border-radius: 10px; background: rgba(6,19,24,.7); border: 1px solid var(--line); animation: pop .35s both; }
+.p2card .it.hot { color: #fff; background: rgba(179,64,42,.85); border-color: #e8927c; font-weight: 700; }
+.p2q { position: absolute; top: 140px; width: 25px; text-align: center; font: 700 26px var(--agent); color: var(--warn); animation: blink 1.2s infinite; }
+.p2alerts { position: absolute; left: 0; top: 360px; width: 800px; display: flex; flex-direction: column; gap: 10px; }
+.p2alerts div { display: flex; gap: 14px; align-items: baseline; padding: 11px 18px; border-radius: 14px; background: rgba(9,28,35,.92); border: 1px solid rgba(232,146,124,.35); font-size: 22px; line-height: 1.3; animation: p1in .35s both; }
+.p2alerts div i { font-style: normal; font-family: var(--agent); color: var(--warn); flex: none; }
+.p2alerts div.bad { border: 2px solid var(--warn); box-shadow: 0 0 40px -12px var(--warn); }
+.p2foot { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; white-space: nowrap; font-family: var(--agent); font-size: 25px; color: var(--warn); animation: fade .4s both; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.phone {
+  width: 600px; height: 780px; margin-left: auto; border-radius: 46px; background: var(--panel);
+  border: 2px solid var(--line-2); padding: 26px; display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 40px 120px rgba(0,0,0,.5);
+}
+.phone-top { display: flex; align-items: center; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.av { width: 50px; height: 50px; border-radius: 50%; background: var(--sky); color: var(--night); display: grid; place-items: center; font-weight: 800; font-size: 21px; flex: none; }
+.phone-top b { font-size: 23px; display: block; }
+.phone-top span { font-size: 17px; color: var(--on-3); font-family: var(--agent); }
+.chat { flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: flex-end; overflow: hidden; }
+.msg { max-width: 84%; font-size: 22px; line-height: 1.4; padding: 13px 17px; border-radius: 20px; animation: rise .45s cubic-bezier(.2,.7,.2,1) both; }
+.msg.them { align-self: flex-start; background: #173944; border-bottom-left-radius: 6px; }
+.msg.us { align-self: flex-end; background: var(--sky); color: #06222a; border-bottom-right-radius: 6px; }
+.msg small { display: block; font-family: var(--agent); font-size: 15px; opacity: .7; margin-top: 5px; }
+.msg.sofi { font-family: var(--agent); font-size: 20px; }
+.msg.log { align-self: center; max-width: 100%; background: rgba(166,240,216,.08); color: var(--mint); font-family: var(--agent); font-size: 18px; border: 1px dashed rgba(166,240,216,.4); border-radius: 12px; }
+.typing { align-self: flex-end; display: flex; gap: 6px; padding: 15px 19px; background: rgba(79,195,215,.25); border-radius: 20px; }
+.typing i { width: 10px; height: 10px; border-radius: 50%; background: var(--sky); animation: blink 1s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+
+/* ===== 3 · Omnicanal ===== */
+.loose { position: absolute; width: 400px; padding: 22px 24px; border-radius: 20px; background: rgba(13,38,47,.8); border: 1px dashed var(--line-2); display: flex; flex-direction: column; gap: 10px; }
+.layer.cur .loose { animation: drift 5s ease-in-out infinite alternate; animation-delay: var(--d, 0s); }
+@keyframes drift { from { transform: translate(0,0) rotate(var(--r, 0deg)); } to { transform: translate(var(--x, 12px), var(--y, -16px)) rotate(calc(var(--r, 0deg) * -1)); } }
+.loose .ch { font-family: var(--agent); font-size: 19px; color: var(--on-3); }
+.loose .q { font-size: 23px; color: var(--on-2); }
+.loose .team { font-size: 21px; color: var(--warn); font-style: italic; }
+.loose-foot { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; font-family: var(--agent); font-size: 26px; color: var(--warn); }
+
+.omni-svg { position: absolute; inset: 0; width: 1920px; height: 1080px; pointer-events: none; }
+.chan { font-family: var(--agent); fill: var(--on-2); }
+.ficha {
+  position: absolute; right: 140px; top: 300px; width: 640px; z-index: 1;
+  background: rgba(13,38,47,.94); border: 1px solid rgba(79,195,215,.35); border-radius: 28px; padding: 30px 32px;
+  display: flex; flex-direction: column; gap: 16px; box-shadow: 0 0 80px rgba(79,195,215,.15);
+}
+.ficha-head { display: flex; gap: 18px; align-items: center; }
+.ficha-head .av { width: 70px; height: 70px; font-size: 28px; background: linear-gradient(135deg, var(--sky), var(--mint)); }
+.ficha-head b { font-size: 32px; display: block; }
+.ficha-head span { font-size: 20px; color: var(--on-3); }
+.timeline { display: flex; flex-direction: column; gap: 10px; min-height: 320px; }
+.tl { display: flex; gap: 14px; align-items: baseline; font-size: 21px; color: var(--on-2); animation: rise .45s both; }
+.tl .mono { color: var(--sky); font-size: 18px; width: 140px; flex: none; }
+
+/* ===== 4 · A mano / Actúan ===== */
+.pile { position: absolute; inset: 0; }
+.task {
+  position: absolute; left: var(--x); top: var(--y); width: 430px;
+  padding: 18px 22px; border-radius: 14px; background: #1a333b; border: 1px solid var(--line-2);
+  font-size: 24px; color: var(--on-2); transform: rotate(var(--r));
+  box-shadow: 0 14px 30px rgba(0,0,0,.35);
+}
+.task::before { content: "☐  "; color: var(--warn); }
+.layer.cur .task { animation: fall .7s cubic-bezier(.3,1.3,.5,1) both; animation-delay: var(--d); }
+@keyframes fall { from { opacity: 0; transform: translateY(-600px) rotate(0deg); } to { opacity: 1; transform: rotate(var(--r)); } }
+.pile-count { position: absolute; right: 0; top: 0; font-family: var(--agent); font-size: 26px; color: var(--warn); }
+
+.agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+.agent { border-radius: 24px; padding: 26px 28px; background: rgba(13,38,47,.88); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; position: relative; overflow: hidden; }
+.agent .role { font-family: var(--agent); font-size: 18px; letter-spacing: .08em; text-transform: uppercase; color: var(--c); }
+.agent .name { font-size: 60px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--c); text-shadow: 0 0 40px color-mix(in srgb, var(--c) 35%, transparent); }
+.agent .why { font-size: 23px; color: var(--on); line-height: 1.4; }
+.agent .why i { font-style: italic; color: var(--c); }
+.agent .does { font-size: 20px; color: var(--on-3); line-height: 1.4; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 4px; }
+.agent::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--c); box-shadow: 0 0 30px var(--c); }
+.agent h3 { font-size: 34px; display: flex; gap: 14px; align-items: center; }
+.agent p { font-size: 23px; color: var(--on-2); line-height: 1.4; }
+.log-box { flex: 1; border-radius: 24px; background: rgba(6,19,24,.8); border: 1px solid var(--line); padding: 18px 30px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; }
+.act { display: grid; grid-template-columns: 100px 150px 1fr 250px; gap: 18px; align-items: baseline; font-size: 23px; padding: 9px 0; border-bottom: 1px solid var(--line); animation: rise .45s both; }
+.act:last-child { border-bottom: none; }
+.act .t { font-family: var(--agent); color: var(--on-3); font-size: 19px; }
+.act .who { font-weight: 700; display: flex; gap: 10px; align-items: center; }
+.act .to { font-family: var(--agent); font-size: 19px; color: var(--mint); text-align: right; }
+
+/* ===== 4 · Los corchetes de cada agente, en 3D ===== */
+.p4-gl { position: absolute; left: 760px; top: 0; width: 1160px; height: 1080px; }
+.p4-gl canvas { position: absolute; inset: 0; width: 1160px !important; height: 1080px !important; display: block; }
+.p4-ov { position: absolute; inset: 0; pointer-events: none; }
+.p4-fail { position: absolute; inset: 0; display: grid; place-items: center; font-size: 26px; color: var(--on-2); }
+.p4-log { position: absolute; left: 140px; top: 262px; width: 590px; display: flex; flex-direction: column; gap: 18px; }
+.p4-now { border-radius: 22px; padding: 22px 26px; background: rgba(9,28,35,.88); border: 1px solid var(--line-2); min-height: 190px; }
+.p4-now > div { animation: rise .45s both; display: flex; flex-direction: column; gap: 8px; }
+.p4-now .who { font-family: var(--agent); font-size: 18px; letter-spacing: .08em; text-transform: uppercase; color: var(--c); }
+.p4-now .name { font-size: 58px; font-weight: 800; line-height: 1; color: var(--c); letter-spacing: -0.03em; }
+.p4-now .txt { font-size: 30px; font-weight: 700; line-height: 1.25; color: var(--on); }
+.p4-now .txt b { color: var(--c); }
+.p4-now .why { font-size: 24px; line-height: 1.4; color: var(--on-2); }
+.p4-now .why i { color: var(--c); }
+.p4-pc { border-radius: 1em; background: rgba(9,28,35,.96); border: 2px solid var(--c); padding: .75em .85em; display: flex; flex-direction: column; gap: .45em; font-size: 20px; margin-top: 6px; }
+.p4-pc .ch { font-family: var(--agent); font-size: .66em; color: var(--on-3); letter-spacing: .04em; }
+.p4-pc .bub { max-width: 90%; font-size: .9em; line-height: 1.35; padding: .5em .7em; border-radius: .9em; }
+.p4-pc .bub.them { align-self: flex-start; background: #1d3f4a; color: var(--on); border-bottom-left-radius: .25em; }
+.p4-pc .bub.us { align-self: flex-end; background: var(--c); color: #06222a; border-bottom-right-radius: .25em; font-weight: 600; }
+.p4-pc .ln { display: grid; grid-template-columns: 5.4em 1fr; gap: .5em; font-size: .86em; line-height: 1.3; padding: .3em 0; border-bottom: 1px solid var(--line); }
+.p4-pc .ln b { font-family: var(--agent); font-weight: 500; font-size: .78em; color: var(--c); text-transform: uppercase; letter-spacing: .05em; }
+.p4-pc .hum { align-self: flex-start; font-size: .78em; font-weight: 700; color: #1b1712; background: #e9e4da; border-radius: .5em; padding: .3em .6em; }
+.p4-pc .big { font-size: 2.4em; font-weight: 800; line-height: 1; color: var(--c); letter-spacing: -0.02em; }
+.p4-pc .sub { font-size: .9em; color: var(--on); }
+.p4-pc .pass { font-family: var(--agent); font-size: .72em; color: var(--sky); }
+.p4-rows { display: flex; flex-direction: column; }
+.p4-row { display: grid; grid-template-columns: 92px 1fr; gap: 2px 14px; padding: 10px 0; border-bottom: 1px solid var(--line); animation: rise .45s both; }
+.p4-row .t { font-family: var(--agent); font-size: 16px; color: var(--on-3); padding-top: 4px; }
+.p4-row .w { font-size: 22px; line-height: 1.3; color: var(--on-2); }
+.p4-row .w b { color: var(--c); }
+.p4-row .to { grid-column: 2; font-family: var(--agent); font-size: 15px; color: var(--mint); }
+/* El nombre de cada agente sobre sus corchetes: grande, en su color y con brillo. */
+.p4-lab { position: absolute; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; transition: opacity .4s; }
+.p4-lab b { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: var(--c); text-shadow: 0 0 22px color-mix(in srgb, var(--c) 55%, transparent); }
+.p4-lab span { font-family: var(--agent); font-size: 16px; letter-spacing: .1em; text-transform: uppercase; color: var(--on-2); }
+.p4-lab.small { transform: translate(-50%, 0); }
+.p4-lab.small b { font-size: 24px; text-shadow: none; }
+.p4-lab.small span { font-size: 13px; color: var(--on-3); }
+.p4-lab.hide { opacity: 0; }
+.p4-chips { position: absolute; transform: translate(-50%, 0); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.p4-chip { display: flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 19px; font-weight: 700; color: var(--on); background: rgba(9,28,35,.9); border: 1.5px solid var(--c); border-radius: 999px; padding: 6px 14px; box-shadow: 0 0 20px -6px var(--c); animation: pop .45s cubic-bezier(.3,1.4,.5,1) both; }
+.p4-chip i { font-style: normal; color: var(--c); }
+.p4-pass { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font-family: var(--agent); font-size: 18px; color: var(--amber); background: rgba(9,28,35,.9); border: 1px solid rgba(245,196,107,.5); border-radius: 999px; padding: 5px 14px; animation: p4in .4s both; }
+@keyframes p4in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ===== 5 · Historia al final del día / Dictado ===== */
+.late-clock { font-family: var(--agent); font-size: 96px; color: var(--warn); line-height: 1; margin-bottom: 26px; }
+.pend { display: flex; flex-direction: column; gap: 12px; }
+.pend div { display: grid; grid-template-columns: 110px 1fr auto; gap: 18px; align-items: center; padding: 16px 22px; border-radius: 14px; background: rgba(13,38,47,.7); border: 1px solid var(--line); font-size: 23px; color: var(--on-2); }
+.pend .mono { color: var(--on-3); font-size: 19px; }
+.pend em { font-style: normal; font-family: var(--agent); font-size: 17px; color: var(--warn); border: 1px solid rgba(232,146,124,.5); padding: 3px 10px; border-radius: 999px; }
+.pend .blur { filter: blur(3px); }
+
+.dict { border-radius: 28px; background: var(--panel); border: 1px solid rgba(166,240,216,.3); padding: 28px 30px; display: flex; flex-direction: column; gap: 16px; height: 100%; box-shadow: 0 0 80px rgba(166,240,216,.08); }
+.dict-top { display: flex; align-items: center; gap: 18px; }
+.wave { display: flex; gap: 5px; align-items: center; height: 44px; }
+.wave i { width: 6px; height: 100%; border-radius: 3px; background: var(--mint); transform-origin: center; animation: wave 1s ease-in-out infinite; }
+@keyframes wave { 0%, 100% { transform: scaleY(.2); } 50% { transform: scaleY(1); } }
+.dict-top span { font-family: var(--agent); font-size: 19px; color: var(--on-3); }
+.said { font-family: var(--agent); font-size: 21px; color: var(--on-2); line-height: 1.5; min-height: 96px; border-left: 3px solid var(--mint); padding-left: 16px; }
+.blocks { display: flex; flex-direction: column; gap: 12px; }
+.blk { display: grid; grid-template-columns: 170px 1fr auto; gap: 16px; align-items: center; padding: 15px 18px; border-radius: 14px; background: rgba(6,19,24,.7); border: 1px solid var(--line); animation: rise .45s both; }
+.blk .k { font-family: var(--agent); font-size: 17px; color: var(--mint); text-transform: uppercase; letter-spacing: .06em; }
+.blk .v { font-size: 22px; color: var(--on); }
+.blk .ok { font-family: var(--agent); font-size: 17px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--on-2); transition: all .3s; }
+.blk.done .ok { background: var(--mint); color: #06222a; border-color: var(--mint); }
+
+/* ===== 6 · Administrador ===== */
+.week { display: grid; grid-template-columns: 70px repeat(5, 1fr); gap: 8px; }
+.week .d { font-family: var(--agent); font-size: 18px; color: var(--on-3); text-align: center; padding-bottom: 4px; }
+.week .h { font-family: var(--agent); font-size: 17px; color: var(--on-3); align-self: center; }
+.slot { height: 50px; border-radius: 10px; background: rgba(13,38,47,.7); border: 1px solid var(--line); font-size: 17px; display: grid; place-items: center; color: var(--on-3); }
+.slot.busy { background: #1d3a44; color: var(--on-2); }
+.slot.free { border: 1px dashed rgba(232,146,124,.5); color: var(--warn); font-family: var(--agent); }
+.layer.cur .slot.free { animation: blink 2.2s infinite; animation-delay: var(--d, 0s); }
+.slot.back { background: rgba(245,196,107,.18); border: 1px solid var(--amber); color: var(--amber); animation: pop .5s both; font-weight: 700; }
+.cold-list { margin-top: 26px; display: flex; flex-direction: column; gap: 8px; font-size: 22px; color: var(--on-3); }
+.cold-list b { color: var(--on-2); font-weight: 600; }
+
+.ask { border-radius: 24px; background: var(--panel); border: 1px solid rgba(245,196,107,.35); padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.ask label { font-family: var(--agent); font-size: 18px; color: var(--amber); }
+.ask .field { font-size: 24px; color: var(--on); padding: 14px 18px; border-radius: 12px; background: rgba(6,19,24,.8); border: 1px solid var(--line-2); min-height: 64px; }
+.ask .field::after { content: "▍"; color: var(--amber); animation: blink 1s infinite; }
+.draft { border-radius: 16px; border: 1px dashed rgba(245,196,107,.5); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; animation: rise .5s both; }
+.draft b { font-size: 26px; }
+.draft span { font-size: 21px; color: var(--on-2); }
+.draft .btns { display: flex; gap: 12px; margin-top: 6px; }
+.draft .btns i { font-style: normal; font-size: 20px; font-weight: 700; padding: 9px 20px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--on-2); }
+.draft .btns i.go { background: var(--amber); color: #2a1a00; border-color: var(--amber); }
+.draft.on .btns i.go { animation: ping 1.4s; }
+.state { font-family: var(--agent); font-size: 18px; color: var(--amber); }
+
+/* ===== 6 · La agenda con huecos ===== */
+.p6sc { position: absolute; left: 790px; top: 118px; width: 1000px; height: 840px; }
+.p6big { display: flex; align-items: baseline; gap: 16px; font-family: var(--agent); }
+.p6big b { font-size: 104px; font-weight: 600; line-height: 1; color: var(--warn); letter-spacing: -0.04em; }
+.p6big span { font-size: 24px; color: var(--on-2); max-width: 260px; line-height: 1.3; }
+.p6big.ans b { color: var(--sky); }
+.p6cal { position: absolute; left: 0; top: 70px; width: 610px; padding: 22px; border-radius: 26px; background: rgba(9,28,35,.94); border: 1px solid var(--line-2); transform: perspective(1600px) rotateY(-10deg) rotateX(8deg); transform-origin: 0 50%; box-shadow: 0 40px 100px rgba(0,0,0,.45); }
+.p6cal-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; gap: 10px; }
+.p6cal-h b { font-size: 26px; }
+.p6cal-h span { font-family: var(--agent); font-size: 16px; color: var(--on-3); }
+.p6cal-h em { position: absolute; right: 20px; top: -18px; font-style: normal; font-family: var(--agent); font-size: 18px; color: #06222a; background: var(--sky); border-radius: 999px; padding: 6px 14px; box-shadow: 0 0 24px -4px var(--sky); animation: pop .4s both; }
+.p6grid { display: grid; grid-template-columns: 62px repeat(5, 1fr); gap: 8px; }
+.p6grid .d { font-family: var(--agent); font-size: 16px; color: var(--on-3); text-align: center; }
+.p6grid .h { font-family: var(--agent); font-size: 15px; color: var(--on-3); align-self: center; }
+.p6slot { height: 74px; border-radius: 12px; display: flex; flex-direction: column; justify-content: center; padding: 0 10px; font-size: 16px; font-weight: 700; color: #1b2a2e; background: var(--ivory, #ebe6dc); transition: all .45s; position: relative; overflow: hidden; }
+.p6slot small { font-family: var(--agent); font-size: 12px; font-weight: 500; color: #5b6b6e; }
+.p6slot.empty { background: transparent; border: 2px dashed rgba(143,176,184,.35); color: var(--grey); font-family: var(--agent); font-weight: 500; align-items: center; }
+.p6slot.gone { transform: scale(.8) rotate(-4deg); opacity: 0; }
+.p6slot.hole { background: rgba(232,146,124,.08); border: 2px dashed rgba(232,146,124,.8); color: var(--warn); font-family: var(--agent); font-weight: 500; align-items: center; }
+.p6slot.back { background: color-mix(in srgb, var(--c) 22%, #0d262f); border: 2px solid var(--c); color: var(--on); box-shadow: 0 0 24px -6px var(--c); animation: pop .4s both; }
+.p6slot.back small { color: var(--c); }
+.p6drift { position: absolute; left: 670px; top: 70px; width: 260px; display: flex; flex-direction: column; gap: 12px; }
+.p6drift h3 { font-family: var(--agent); font-size: 16px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--on-3); }
+.p6pt { position: relative; display: grid; grid-template-columns: 46px 1fr; gap: 2px 12px; align-items: center; padding: 12px 14px; border-radius: 16px; background: rgba(13,38,47,.95); border: 1px solid var(--line-2); transition: filter 1.2s, opacity 1.2s, transform 1.2s, border-color .4s, box-shadow .4s; animation: rise .4s both; }
+.p6pt .av { grid-row: span 2; width: 46px; height: 46px; border-radius: 50%; background: var(--sky); color: #06222a; font-weight: 800; display: grid; place-items: center; font-size: 17px; transition: background .6s; }
+.p6pt b { font-size: 19px; }
+.p6pt span { font-family: var(--agent); font-size: 13px; color: var(--on-3); }
+.p6pt.cold { filter: grayscale(1) blur(1.2px); opacity: .38; transform: translateX(70px) scale(.94); }
+.p6pt.cold .av { background: #6f8a91; }
+.p6pt.seen { filter: none; opacity: 1; transform: none; border-color: var(--amber); box-shadow: 0 0 26px -6px var(--amber); }
+.p6pt.warm { border-color: var(--sky); box-shadow: 0 0 26px -6px var(--sky); }
+.p6pt.out { opacity: 0; }
+.p6beam { position: absolute; top: 40px; width: 8px; height: 600px; border-radius: 4px; background: linear-gradient(var(--amber), rgba(245,196,107,0)); box-shadow: 0 0 40px 8px rgba(245,196,107,.45); opacity: 0; left: 650px; }
+.p6bubble { position: absolute; z-index: 6; max-width: 380px; font-size: 21px; line-height: 1.35; padding: 12px 16px; border-radius: 18px; background: var(--sky); color: #06222a; font-weight: 600; box-shadow: 0 16px 40px rgba(0,0,0,.4); animation: pop .4s cubic-bezier(.3,1.5,.5,1) both; }
+.p6bubble small { display: block; font-family: var(--agent); font-size: 14px; font-weight: 500; opacity: .75; margin-bottom: 4px; }
+.p6seen { position: absolute; z-index: 6; font-family: var(--agent); font-size: 16px; color: #2a1a00; background: var(--amber); border-radius: 999px; padding: 4px 12px; white-space: nowrap; animation: pop .35s both; }
+.p6fly { position: absolute; z-index: 7; pointer-events: none; animation: none; }
+
+/* ===== 7 · Reportes ===== */
+.xls { font-family: var(--agent); font-size: 17px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); }
+.xls .bar { background: #1f3d2e; color: #b8d8c4; padding: 10px 16px; font-size: 18px; }
+.xls table { border-collapse: collapse; width: 100%; }
+.xls td { border: 1px solid rgba(143,176,184,.14); padding: 9px 10px; color: var(--on-3); text-align: right; background: rgba(13,38,47,.6); }
+.xls tr:first-child td { background: #1a333b; color: var(--on-2); text-align: center; }
+.xls td.hot { background: rgba(232,146,124,.18); color: var(--warn); }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.kpi { border-radius: 18px; background: var(--panel); border: 1px solid var(--line); padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; }
+.kpi .k { font-size: 18px; color: var(--on-3); }
+.kpi .v { white-space: nowrap; font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+.kpi .c { font-size: 17px; color: var(--mint); }
+.kpi .c.bad { color: var(--warn); }
+.kpi svg { width: 100%; height: 44px; margin-top: 6px; }
+.kpi path { fill: none; stroke: var(--sky); stroke-width: 3; stroke-dasharray: 400; stroke-dashoffset: 400; }
+.layer.cur .kpi path { animation: draw 1.6s ease-out forwards; animation-delay: var(--d, .6s); }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.cols { border-radius: 18px; background: var(--panel); border: 1px solid var(--line); padding: 18px 22px 12px; margin-top: 16px; }
+.cols .ttl { font-size: 19px; color: var(--on-3); margin-bottom: 10px; display: flex; justify-content: space-between; }
+.cols .bars { display: flex; align-items: flex-end; gap: 12px; height: 150px; }
+.cols .bars i { flex: 1; background: var(--sky); border-radius: 6px 6px 0 0; height: var(--h); transform-origin: bottom; opacity: .85; }
+.cols .bars i:last-child { background: transparent; border: 2px dashed var(--sky); border-bottom: none; }
+.layer.cur .cols .bars i { animation: grow .9s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(.5s + var(--i) * .06s); }
+@keyframes grow { from { transform: scaleY(0); } }
+.cols .months { display: flex; gap: 12px; font-family: var(--agent); font-size: 14px; color: var(--on-3); margin-top: 6px; }
+.cols .months span { flex: 1; text-align: center; }
+.advice { margin-top: 16px; border-radius: 18px; padding: 18px 22px; background: rgba(245,196,107,.1); border: 1px solid rgba(245,196,107,.45); display: flex; gap: 16px; align-items: center; font-size: 21px; color: var(--on); }
+.advice .btn { margin-left: auto; white-space: nowrap; font-weight: 700; color: #2a1a00; background: var(--amber); padding: 9px 18px; border-radius: 999px; font-size: 19px; }
+.ex { position: absolute; right: 0; top: -40px; font-family: var(--agent); font-size: 17px; color: var(--on-3); }
+
+/* ===== 7 · El caos del reporte y Argos ===== */
+.p7sc { position: absolute; left: 790px; top: 100px; width: 1000px; height: 870px; }
+.p7big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; font-family: var(--agent); }
+.p7big span { flex: none; }
+.p7big b { font-size: 88px; font-weight: 600; line-height: 1; color: var(--warn); letter-spacing: -0.04em; white-space: nowrap; }
+.p7big span { font-size: 22px; color: var(--on-2); max-width: 230px; line-height: 1.3; }
+.p7big.ans b { color: var(--mint); }
+.p7soon { align-self: flex-start; font-family: var(--agent); font-size: 17px; color: var(--amber); border: 1.5px dashed rgba(245,196,107,.6); border-radius: 999px; padding: 6px 14px; }
+.p7clock { position: absolute; right: 0; top: 0; z-index: 30; font-family: var(--agent); font-size: 60px; color: var(--warn); text-align: right; line-height: 1; text-shadow: 0 0 30px rgba(232,146,124,.4); }
+.p7clock small { display: block; font-size: 18px; color: var(--on-2); margin-top: 6px; }
+.p7w { position: absolute; border-radius: 12px; overflow: hidden; background: #f4f6f4; color: #2c3a33; box-shadow: 0 26px 60px rgba(0,0,0,.55); transform: rotate(var(--r, 0deg)); animation: p7in .35s cubic-bezier(.3,1.4,.5,1) both; transition: transform .7s, opacity .7s; }
+@keyframes p7in { from { opacity: 0; transform: rotate(var(--r, 0deg)) scale(.7); } to { opacity: 1; transform: rotate(var(--r, 0deg)) scale(1); } }
+.p7w .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-family: var(--agent); font-size: 14px; color: #e7f3ec; background: #1f6b45; }
+.p7w .bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.5); flex: none; }
+.p7w.web .bar { background: #3a4a52; }
+.p7w.files .bar { background: #50606a; }
+.p7w.chat .bar { background: #1d6b5c; }
+.p7w table { border-collapse: collapse; width: 100%; font-family: var(--agent); font-size: 13px; }
+.p7w td { border: 1px solid #d5ddd8; padding: 5px 7px; text-align: right; }
+.p7w tr:first-child td { background: #e4ebe6; text-align: center; font-weight: 600; }
+.p7w td.err { background: #fbe1da; color: #b3402a; font-weight: 700; animation: blink 1s infinite; }
+.p7w .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+.p7dl { display: grid; grid-template-columns: 1fr 70px; gap: 4px 10px; align-items: center; font-family: var(--agent); font-size: 13px; }
+.p7dl .pb { grid-column: 1 / -1; height: 8px; border-radius: 4px; background: #d9e1dc; overflow: hidden; }
+.p7dl .pb i { display: block; height: 100%; width: 0; background: #2f8f5e; transition: width .5s; }
+.p7dl .bad { color: #b3402a; font-weight: 700; }
+.p7dl .bad + .pb i { background: #d0603f; }
+.p7search { font-family: var(--agent); font-size: 14px; padding: 7px 10px; border-radius: 8px; border: 1px solid #c4cfc9; background: #fff; }
+.p7file { display: flex; gap: 8px; align-items: center; font-family: var(--agent); font-size: 13px; padding: 4px 6px; border-radius: 6px; }
+.p7file::before { content: ""; width: 14px; height: 16px; border-radius: 2px; background: #2f8f5e; flex: none; }
+.p7file.q { background: #fff4d6; }
+.p7msg { align-self: flex-start; max-width: 85%; font-size: 14px; padding: 7px 10px; border-radius: 10px; background: #e2efe9; }
+.p7msg.me { align-self: flex-end; background: #c9f0dc; }
+.p7note { position: absolute; width: 190px; padding: 14px; font-size: 17px; font-weight: 700; line-height: 1.3; color: #4a3b0c; background: #f7e08a; box-shadow: 0 14px 30px rgba(0,0,0,.4); transform: rotate(var(--r, 0deg)); animation: p7in .35s both; transition: transform .7s, opacity .7s; }
+.p7cp { position: absolute; z-index: 25; font-family: var(--agent); font-size: 16px; font-weight: 600; color: #fff; background: #b3402a; border-radius: 8px; padding: 4px 10px; animation: p7in .3s both; transition: transform .7s, opacity .7s; }
+.p7gone { transform: translate(var(--gx), var(--gy)) rotate(30deg) scale(.25) !important; opacity: 0 !important; }
+.p7argos { position: absolute; left: 50px; top: 60px; width: 880px; display: flex; flex-direction: column; gap: 14px; padding: 30px 42px; animation: rise .5s both; }
+.p7argos::before, .p7argos::after { content: ""; position: absolute; top: 0; bottom: 0; width: 36px; border: 8px solid var(--amber); border-radius: 6px; filter: drop-shadow(0 0 14px rgba(245,196,107,.6)); }
+.p7argos::before { left: 0; border-right: none; }
+.p7argos::after { right: 0; border-left: none; }
+.p7argos .who { display: flex; align-items: baseline; gap: 12px; }
+.p7argos .who b { font-size: 46px; font-weight: 800; color: var(--amber); letter-spacing: -0.02em; text-shadow: 0 0 24px rgba(245,196,107,.45); }
+.p7argos .who span { font-family: var(--agent); font-size: 16px; letter-spacing: .1em; text-transform: uppercase; color: var(--on-2); }
+.p7ask { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 16px; background: rgba(6,19,24,.9); border: 1.5px solid rgba(245,196,107,.5); font-size: 24px; color: var(--on); min-height: 64px; }
+.p7ask .ic { font-family: var(--agent); color: var(--amber); font-size: 18px; white-space: nowrap; }
+.p7ask .q::after { content: "▍"; color: var(--amber); animation: blink 1s infinite; }
+.p7ask .q.done::after { content: ""; }
+.p7think { display: flex; gap: 6px; padding: 6px 2px; }
+.p7think i { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); animation: blink 1s infinite; }
+.p7think i:nth-child(2) { animation-delay: .15s; } .p7think i:nth-child(3) { animation-delay: .3s; }
+.p7rep { border-radius: 18px; background: rgba(9,28,35,.96); border: 1px solid var(--line-2); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; animation: rise .5s both; }
+.p7rep .t { display: flex; justify-content: space-between; align-items: baseline; }
+.p7rep .t b { font-size: 23px; }
+.p7rep .t span { font-family: var(--agent); font-size: 15px; color: var(--on-3); }
+.p7rep .tot { font-size: 48px; font-weight: 800; letter-spacing: -0.02em; }
+.p7rep .tot small { font-size: 21px; font-weight: 600; color: var(--amber); margin-left: 12px; }
+.p7bars { display: flex; align-items: flex-end; gap: 22px; height: 170px; padding-top: 10px; }
+.p7bars div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+.p7bars i { width: 100%; border-radius: 8px 8px 0 0; background: var(--sky); height: 0; transition: height .8s cubic-bezier(.2,.7,.2,1); }
+.p7bars i.hot { background: var(--warn); }
+.p7bars span { font-family: var(--agent); font-size: 15px; color: var(--on-2); white-space: nowrap; }
+.p7say { font-size: 22px; line-height: 1.4; color: var(--on); padding: 12px 14px; border-radius: 12px; background: rgba(245,196,107,.1); border: 1px solid rgba(245,196,107,.45); display: flex; gap: 12px; align-items: center; animation: rise .45s both; }
+.p7say .go { margin-left: auto; white-space: nowrap; font-weight: 700; color: #2a1a00; background: var(--amber); padding: 8px 16px; border-radius: 999px; font-size: 18px; }
+
+/* ===== 8 · Lucía en el mostrador y el buscador ===== */
+.kbd { font-family: var(--agent); font-size: 17px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-2); color: var(--on-3); }
+.p8sc { position: absolute; left: 800px; top: 110px; width: 990px; height: 860px; }
+.p8desk { position: absolute; left: 0; top: 0; width: 990px; height: 150px; box-sizing: border-box; display: flex; align-items: center; gap: 22px; padding: 0 26px; border-radius: 20px; background: rgba(13,38,47,.92); border: 1px solid var(--line-2); z-index: 3; }
+.p8desk .av { width: 76px; height: 76px; flex: none; border-radius: 50%; background: var(--sky); color: #04252c; display: grid; place-items: center; font-size: 26px; font-weight: 800; }
+.p8desk .who { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.p8desk .l { font: 500 15px var(--agent); color: var(--on-3); letter-spacing: .04em; }
+.p8desk .bub { align-self: flex-start; font-size: 24px; line-height: 1.3; background: #e9f2f4; color: #0d2730; padding: 10px 18px; border-radius: 18px 18px 18px 4px; }
+.p8desk .bub.in { animation: rise .35s both; }
+.p8desk .p8queue { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: 230px; }
+.p8desk .p8qs { display: flex; height: 44px; padding-left: 10px; }
+.p8desk .p8qs i { width: 44px; height: 44px; border-radius: 50%; background: var(--grey); border: 3px solid #0d262f; margin-left: -10px; display: grid; place-items: center; font-style: normal; font-size: 14px; font-weight: 800; color: #0d262f; animation: pop .3s both; }
+.p8desk .ring { font: 600 15px var(--agent); color: var(--warn); animation: blink 1s infinite; }
+.p8desk .ring[hidden] { display: none; }
+.p8area { position: absolute; left: 0; top: 190px; width: 990px; height: 670px; }
+.p8w { position: absolute; width: 490px; border-radius: 12px; overflow: hidden; background: #eef2f3; color: #22343a; box-shadow: 0 26px 60px rgba(0,0,0,.5); transform: rotate(var(--r, 0deg)); animation: p8in .35s cubic-bezier(.3,1.4,.5,1) both; }
+@keyframes p8in { from { opacity: 0; transform: rotate(var(--r, 0deg)) scale(.7); } to { opacity: 1; transform: rotate(var(--r, 0deg)) scale(1); } }
+.p8w .bar { display: flex; align-items: center; gap: 8px; background: #cfd9dc; padding: 8px 12px; font: 500 15px var(--agent); color: #33464c; }
+.p8w .bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(0,0,0,.18); }
+.p8w .bar span { margin-left: 6px; }
+.p8w.xlw .bar { background: #1f6b45; color: #e7f3ec; }
+.p8w.wa .bar { background: #1f5c4d; color: #e6f4ef; }
+.p8w.xlw .bar i, .p8w.wa .bar i { background: rgba(255,255,255,.45); }
+.p8w .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 19px; }
+.p8w .sb { border: 1.5px solid #b8c6ca; border-radius: 8px; padding: 8px 12px; background: #fff; font-family: var(--agent); font-size: 19px; }
+.p8w .q:not(.done)::after { content: "▍"; color: #33464c; animation: blink 1s infinite; }
+.p8w .out { display: flex; flex-direction: column; gap: 8px; }
+.p8w .no { color: #b3402a; background: #fbe1da; border-radius: 8px; padding: 8px 12px; font-weight: 700; animation: pop .3s both, p8shake .35s .3s 2; }
+@keyframes p8shake { 0%, 100% { translate: 0 0; } 25% { translate: 4px -2px; } 75% { translate: -4px 2px; } }
+.p8w .note { font: 500 15px var(--agent); color: #5f747a; }
+.p8w .note.warn { color: #b3402a; font-weight: 600; animation: blink 1.2s infinite; }
+.p8w .pg { font-family: var(--agent); font-size: 16px; color: #5f747a; }
+.p8w .pg b { color: #22343a; }
+.p8w .hitrow { padding: 8px 12px; border-radius: 8px; background: #d9eef2; border: 1.5px solid #8fcbd6; font-weight: 700; animation: pop .3s both; }
+.p8w .filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.p8w .filters span { font: 500 15px var(--agent); border: 1.5px solid #b8c6ca; border-radius: 8px; padding: 5px 10px; background: #fff; }
+.p8w .filters span.on { border-color: #6aa6b2; background: #e2f1f4; }
+.p8w table { border-collapse: collapse; width: 100%; font-family: var(--agent); font-size: 15px; color: #22343a; }
+.p8w td { border: 1px solid #d5ddd8; padding: 5px 8px; background: #fff; }
+.p8w td:last-child { text-align: right; }
+.p8w td.err { background: #fbe1da; color: #b3402a; font-weight: 700; animation: blink 1s infinite; }
+.p8w .msgs { display: flex; flex-direction: column; gap: 8px; background: #e8e2d9; margin: -14px -16px; padding: 14px 16px; }
+.p8w .msgs .d { align-self: center; font: 500 14px var(--agent); background: #fff; border-radius: 6px; padding: 3px 10px; color: #5f747a; }
+.p8w .msgs .m { align-self: flex-start; background: #fff; border-radius: 10px; padding: 7px 12px; font-size: 17px; }
+.p8w .msgs .m.pic { font-family: var(--agent); font-size: 15px; background: #d9eef2; border: 1.5px solid #8fcbd6; animation: pop .3s both; }
+.p8w .files { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-family: var(--agent); font-size: 15px; }
+.p8w.gone { animation: none; transition: transform .7s, opacity .7s; transform: translate(var(--gx, 300px), 120px) rotate(25deg) scale(.4); opacity: 0; }
+.p8stamp { position: absolute; left: 70px; right: 70px; bottom: 6px; z-index: 4; text-align: center; background: rgba(6,19,24,.96); border: 2px solid var(--warn); border-radius: 16px; padding: 18px 24px; font-size: 27px; box-shadow: 0 0 50px -12px var(--warn); animation: fade .4s both; }
+.p8stamp b { color: var(--warn); font-family: var(--agent); }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* La ventana del buscador como en el panel: clara, con «Filtrar», «Esc», íconos por tipo, ramas y el pie de atajos. */
+.p8ck { position: absolute; left: 20px; top: 0; width: 950px; border-radius: 22px; background: #fff; color: #0f172a; font-family: var(--font); box-shadow: 0 40px 100px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06); overflow: hidden; animation: rise .45s both; }
+.p8ck svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.p8ck .in { display: flex; align-items: center; gap: 14px; padding: 16px 20px 16px 24px; border-bottom: 1px solid #e2e8f0; }
+.p8ck .in > svg { width: 28px; height: 28px; opacity: .5; flex: none; }
+.p8ck .q { flex: 1; min-width: 0; font-size: 27px; white-space: nowrap; }
+.p8ck .q:empty::before { content: "Busca una persona, una cita, un pago, un servicio…"; color: #94a3b8; }
+.p8ck .q:not(.done)::after { content: ""; display: inline-block; width: 2px; height: 30px; margin-left: 2px; vertical-align: -5px; background: #0f172a; animation: blink 1s steps(1) infinite; }
+.p8ck .flt { display: flex; align-items: center; gap: 8px; font-size: 21px; font-weight: 600; padding: 6px 12px; border-radius: 999px; }
+.p8ck .flt svg { width: 22px; height: 22px; }
+.p8ck kbd { font: 600 16px var(--font); color: #475569; background: #f1f5f9; border-radius: 6px; padding: 3px 8px; }
+.p8ck .list { padding: 6px 10px 12px; min-height: 390px; display: flex; flex-direction: column; }
+.p8ck .grp { font-size: 17px; font-weight: 600; color: #475569; padding: 12px 14px 4px; }
+.p8ck .own { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 12px; animation: rise .3s both; }
+.p8ck .own.sel { background: #eef3f7; }
+.p8ck .tile { flex: none; width: 50px; height: 50px; border-radius: 12px; display: grid; place-items: center; background: #f1f5f9; color: #0f172a; }
+.p8ck .tile svg { width: 25px; height: 25px; }
+.p8ck .tile.sm { width: 34px; height: 34px; border-radius: 8px; }
+.p8ck .tile.sm svg { width: 19px; height: 19px; }
+.p8ck .tile.persona { background: #d9eff5; color: #0b5568; }
+.p8ck .tile.dinero { background: #fdf3df; color: #7a4a00; }
+.p8ck .tile.respuesta { background: #ecf7fa; color: #0e7490; }
+.p8ck .tile.help { background: #0e7490; color: #fff; }
+.p8ck .tx { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.p8ck .t1 { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 700; white-space: nowrap; }
+.p8ck .badge { font-size: 16px; font-weight: 500; color: #475569; background: #f1f5f9; border-radius: 999px; padding: 1px 10px; }
+.p8ck .own.sel .badge { background: #fff; }
+.p8ck .t2 { font-size: 17px; color: #475569; }
+.p8ck .enter { margin-left: auto; font-size: 16px; color: #475569; white-space: nowrap; }
+.p8ck .kid { display: flex; align-items: center; gap: 12px; padding: 4px 14px 4px 40px; font-size: 21px; animation: rise .3s both; }
+.p8ck .ln { flex: none; width: 18px; height: 22px; margin-top: -20px; border-left: 2.5px solid #e2e8f0; border-bottom: 2.5px solid #e2e8f0; border-bottom-left-radius: 8px; }
+.p8ck .k { flex: none; width: 140px; font-size: 17px; font-weight: 700; color: #475569; }
+.p8ck .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p8ck .m { font-size: 17px; color: #475569; white-space: nowrap; }
+.p8ck .more { display: flex; align-items: center; gap: 12px; padding: 4px 14px 4px 40px; font-size: 17px; font-weight: 700; color: #0e7490; animation: fade .3s both; }
+.p8ck .ft { display: flex; justify-content: space-between; padding: 12px 22px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 16px; color: #475569; }
+.p8why { position: absolute; left: 20px; top: 770px; display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-radius: 14px; background: rgba(166,240,216,.1); border: 1.5px solid rgba(166,240,216,.5); font-size: 24px; color: var(--on); animation: rise .35s both; }
+.p8why b { font-family: var(--agent); font-weight: 600; color: var(--mint); white-space: nowrap; }
+
+/* ===== 9 · Todo lo de siempre ===== */
+.qs { position: absolute; inset: 0; }
+.qs span { position: absolute; left: var(--x); top: var(--y); font-size: 34px; font-weight: 700; color: var(--on-2); padding: 16px 26px; border-radius: 999px; background: rgba(13,38,47,.8); border: 1px dashed var(--line-2); }
+.layer.cur .qs span { animation: rise .7s both, bob 3s ease-in-out infinite alternate; animation-delay: var(--d), calc(var(--d) + .7s); }
+@keyframes bob { to { transform: translateY(-18px); } }
+.mosaic { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.mod { padding: 22px 22px; border-radius: 18px; background: rgba(13,38,47,.6); border: 1px solid var(--line); font-size: 25px; font-weight: 700; color: var(--grey); display: flex; align-items: center; gap: 14px; }
+.mod i { width: 12px; height: 12px; border-radius: 50%; background: var(--grey); flex: none; }
+.layer.cur .mod { animation: lit .5s both; animation-delay: calc(.4s + var(--i) * .12s); }
+@keyframes lit { to { color: var(--on); background: rgba(13,38,47,.95); border-color: rgba(79,195,215,.4); } }
+.layer.cur .mod i { animation: liti .5s both; animation-delay: calc(.4s + var(--i) * .12s); }
+@keyframes liti { to { background: var(--sky); box-shadow: 0 0 12px var(--sky); } }
+.free-line { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; }
+
+/* ===== 10 · Control ===== */
+.wild { position: absolute; inset: 0; }
+.wild .core { position: absolute; left: 300px; top: 300px; width: 200px; height: 200px; border-radius: 40px; background: #1d3640; border: 2px solid var(--line-2); display: grid; place-items: center; font-family: var(--agent); font-size: 40px; color: var(--on-2); }
+.layer.cur .wild .core { animation: shake .4s infinite; }
+@keyframes shake { 25% { transform: translate(3px,-2px) rotate(1deg); } 75% { transform: translate(-3px,2px) rotate(-1deg); } }
+.wild .act-x { position: absolute; left: var(--x); top: var(--y); font-size: 24px; font-weight: 700; color: var(--warn); padding: 12px 20px; border-radius: 12px; border: 1px solid rgba(232,146,124,.5); background: rgba(232,146,124,.08); }
+.layer.cur .wild .act-x { animation: flash 2.4s infinite; animation-delay: var(--d); }
+@keyframes flash { 0%, 100% { opacity: .25; } 15%, 40% { opacity: 1; } }
+.ctrl { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; flex: 1; align-items: start; }
+.switches { display: flex; flex-direction: column; gap: 16px; }
+.sw { display: flex; align-items: center; gap: 22px; padding: 20px 26px; border-radius: 20px; background: rgba(13,38,47,.88); border: 1px solid var(--line); font-size: 27px; }
+.sw .who { margin-left: auto; font-family: var(--agent); font-size: 20px; font-weight: 600; color: var(--c, var(--on-3)); }
+.toggle { width: 76px; height: 42px; border-radius: 999px; background: #2a4650; position: relative; flex: none; transition: background .4s; }
+.toggle::after { content: ""; position: absolute; top: 5px; left: 5px; width: 32px; height: 32px; border-radius: 50%; background: var(--on); transition: transform .4s cubic-bezier(.3,1.5,.5,1); }
+.sw.lit .toggle { background: var(--c, var(--sky)); box-shadow: 0 0 22px -4px var(--c, var(--sky)); }
+.sw.lit { border-color: color-mix(in srgb, var(--c, var(--sky)) 45%, transparent); }
+.sw.lit .toggle::after { transform: translateX(34px); }
+.promises { display: flex; flex-direction: column; gap: 30px; }
+.promise { display: flex; gap: 22px; align-items: flex-start; }
+.promise .ic { width: 54px; height: 54px; border-radius: 16px; background: rgba(79,195,215,.12); border: 1px solid rgba(79,195,215,.4); display: grid; place-items: center; flex: none; color: var(--sky); font-size: 26px; }
+.promise b { font-size: 31px; display: block; margin-bottom: 6px; }
+.promise p { font-size: 24px; color: var(--on-2); line-height: 1.4; }
+
+/* ===== 11 · Valor ===== */
+.months { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.month { border-radius: 20px; padding: 24px; background: rgba(13,38,47,.7); border: 1px solid var(--line); position: relative; height: 230px; display: flex; flex-direction: column; gap: 10px; }
+.month b { font-size: 28px; }
+.month span { font-size: 21px; color: var(--on-3); }
+.stamp { position: absolute; right: 18px; bottom: 22px; font-family: var(--agent); font-weight: 600; font-size: 22px; color: var(--warn); border: 3px solid var(--warn); padding: 8px 14px; border-radius: 8px; transform: rotate(-10deg); }
+.layer.cur .stamp { animation: stamp .45s cubic-bezier(.3,1.6,.5,1) both; animation-delay: var(--d); }
+/* 11 · La cuota llega igual: el uso baja, el cobro no */
+.p9grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.p9m { position: relative; height: 250px; box-sizing: border-box; padding: 20px 22px; border-radius: 20px; background: rgba(13,38,47,.75); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; transition: border-color .4s, box-shadow .4s; }
+.p9m.on { border-color: rgba(232,146,124,.6); box-shadow: 0 0 40px -14px var(--warn); }
+.p9m b { font-size: 28px; }
+.p9m > span { font-size: 19px; color: var(--on-3); max-width: 200px; }
+.p9use { margin-top: auto; font-family: var(--agent); font-size: 15px; color: var(--on-3); display: flex; justify-content: space-between; }
+.p9bar { height: 12px; border-radius: 6px; background: rgba(143,176,184,.15); overflow: hidden; }
+.p9bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: var(--on-3); transition: width .8s cubic-bezier(.2,.7,.2,1); }
+.p9chg { position: absolute; right: 18px; top: 18px; font-family: var(--agent); font-weight: 700; font-size: 30px; color: var(--warn); border: 3px solid var(--warn); padding: 4px 12px; border-radius: 10px; background: rgba(40,18,14,.7); transform: rotate(-8deg); animation: p9stamp .45s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes p9stamp { from { opacity: 0; transform: rotate(-8deg) scale(2.4); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }
+.p9coin, .p9tot .dl { border-radius: 50%; display: grid; place-items: center; font-family: var(--font); font-weight: 800; color: #3a1a10; background: radial-gradient(circle at 35% 30%, #ffd3c4, var(--warn) 60%, #b65a44); box-shadow: 0 0 24px rgba(232,146,124,.55); }
+.p9coin { position: absolute; z-index: 5; width: 58px; height: 58px; font-size: 32px; transition: left .9s cubic-bezier(.5,0,.3,1), top .9s cubic-bezier(.5,0,.3,1), transform .9s; }
+.p9tot { margin-top: 22px; display: flex; align-items: center; gap: 20px; padding: 18px 24px; border-radius: 20px; background: rgba(6,19,24,.95); border: 2px solid rgba(232,146,124,.6); }
+.p9tot .dl { width: 70px; height: 70px; flex: none; font-size: 40px; }
+.p9tot .dl.hit { animation: p9hit .35s; }
+@keyframes p9hit { 50% { transform: scale(1.25); } }
+.p9tot div { display: flex; flex-direction: column; gap: 2px; }
+.p9tot span { font-size: 20px; color: var(--on-3); }
+.p9tot b { font-family: var(--agent); font-size: 46px; font-weight: 600; color: var(--warn); line-height: 1.05; }
+.p9tot em { margin-left: auto; font-style: normal; text-align: right; font-size: 20px; color: var(--on-2); max-width: 220px; line-height: 1.3; }
+@keyframes stamp { from { opacity: 0; transform: rotate(-10deg) scale(2.4); } to { opacity: 1; transform: rotate(-10deg) scale(1); } }
+.results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.res { border-radius: 28px; padding: 36px 34px; background: rgba(13,38,47,.9); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; }
+.res .who { font-family: var(--agent); font-size: 20px; color: var(--c); display: flex; gap: 10px; align-items: center; }
+.res h3 { font-size: 42px; line-height: 1.1; letter-spacing: -0.02em; }
+.res p { font-size: 24px; color: var(--on-2); line-height: 1.45; }
+.res .when { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--line); font-size: 22px; color: var(--on); }
+.res .glow { position: absolute; width: 340px; height: 340px; right: -130px; top: -130px; border-radius: 50%; background: radial-gradient(var(--c), transparent 70%); opacity: .18; }
+.layer.cur .res .glow { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.3); opacity: .3; } }
+.free { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 25px; color: var(--on-2); }
+.free .chip { border-color: var(--line-2); color: var(--on-2); background: rgba(143,176,184,.06); font-size: 21px; }
+/* 11 · Respuesta: la moneda solo cae con un resultado */
+.res .demo { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 18px; background: rgba(6,19,24,.7); border: 1px solid var(--line); min-height: 170px; box-sizing: border-box; position: relative; }
+.res .demo .st { display: flex; align-items: center; gap: 10px; font-size: 21px; color: var(--on-3); opacity: .35; transition: opacity .4s, color .4s; }
+.res .demo .st i { width: 26px; height: 26px; flex: none; border-radius: 50%; border: 2px solid var(--line-2); display: grid; place-items: center; font-style: normal; font-size: 15px; color: transparent; transition: all .4s; }
+.res .demo .st.on { opacity: 1; color: var(--on); }
+.res .demo .st.on i { border-color: var(--c); background: var(--c); color: #06222a; }
+.res .demo .st.on i::after { content: "✓"; }
+.res .coin11 { position: absolute; right: 16px; bottom: 14px; display: flex; align-items: center; gap: 12px; opacity: 0; transform: translateY(-50px) scale(.6); transition: opacity .3s, transform .55s cubic-bezier(.3,1.6,.5,1); }
+.res .coin11.on { opacity: 1; transform: none; }
+.res .coin11 b { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font: 800 34px var(--font); color: #06222a; background: radial-gradient(circle at 35% 30%, #fff, var(--c) 62%); box-shadow: 0 0 30px -4px var(--c); }
+.res .coin11 span { font-family: var(--agent); font-size: 28px; font-weight: 700; color: var(--c); }
+.res.paid { border-color: color-mix(in srgb, var(--c) 55%, transparent); box-shadow: 0 0 50px -18px var(--c); }
+.res.paid .glow { opacity: .32; }
+.row .price { transition: color .4s; }
+.row.lit { background: color-mix(in srgb, var(--c) 9%, transparent); }
+.coin12 { position: absolute; z-index: 9; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font: 800 26px var(--font); color: #06222a; background: radial-gradient(circle at 35% 30%, #fff, var(--c) 62%); box-shadow: 0 0 24px -2px var(--c); pointer-events: none; transition: left .8s cubic-bezier(.5,0,.3,1), top .8s cubic-bezier(.5,0,.3,1), transform .8s; }
+.day { position: relative; }
+.row.total .price.hit { animation: p9hit .35s; }
+.day { display: flex; flex-direction: column; border-radius: 26px; background: rgba(6,19,24,.78); border: 1px solid var(--line); overflow: hidden; }
+.row { display: grid; grid-template-columns: 110px 1fr 280px 200px; gap: 24px; align-items: center; padding: 18px 34px; border-bottom: 1px solid var(--line); font-size: 25px; }
+.row .t { font-family: var(--agent); font-size: 20px; color: var(--on-3); }
+.row .what small { display: block; font-size: 19px; color: var(--on-3); margin-top: 2px; }
+.row .kind { font-family: var(--agent); font-size: 18px; display: flex; gap: 10px; align-items: center; color: var(--on-2); }
+.row .price { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+.row .price.zero { color: var(--grey); font-weight: 600; }
+.row.total { background: rgba(79,195,215,.08); border-bottom: none; font-size: 29px; }
+.row.total .price { color: var(--sky); font-size: 40px; }
+
+/* ===== 12 · Dos formas de trabajar ===== */
+.case { align-self: center; font-size: 30px; font-weight: 700; padding: 14px 30px; border-radius: 999px; background: rgba(245,196,107,.1); border: 1px solid rgba(245,196,107,.45); }
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; flex: 1; min-height: 0; }
+.side { border-radius: 26px; padding: 26px 30px; display: flex; flex-direction: column; gap: 14px; min-height: 0; position: relative; overflow: hidden; }
+.side.old { background: rgba(13,30,35,.85); border: 1px solid var(--line); }
+.side.new { background: rgba(13,38,47,.92); border: 1px solid rgba(79,195,215,.4); box-shadow: 0 0 70px rgba(79,195,215,.1); }
+.side h3 { font-family: var(--agent); font-size: 22px; letter-spacing: .06em; text-transform: uppercase; display: flex; justify-content: space-between; }
+.side.old h3 { color: var(--on-3); } .side.new h3 { color: var(--sky); }
+.steps-old { display: flex; flex-direction: column; gap: 9px; }
+.so { display: flex; gap: 14px; align-items: center; font-size: 23px; color: var(--grey); padding: 9px 14px; border-radius: 10px; transition: all .3s; }
+.so .bx { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--grey); flex: none; display: grid; place-items: center; font-size: 17px; }
+.so.now { background: rgba(232,146,124,.1); color: var(--on); }
+.so.now .bx { border-color: var(--warn); }
+.so.done { color: var(--on-3); }
+.so.done .bx { border-color: var(--on-3); background: var(--on-3); color: #0b1c22; }
+.ia-chip { margin-left: auto; font-family: var(--agent); font-size: 16px; color: var(--on-3); border: 1px solid var(--line-2); padding: 3px 10px; border-radius: 999px; opacity: 0; transition: opacity .3s; }
+.ia-chip.show { opacity: 1; }
+.queue { margin-top: auto; display: flex; justify-content: space-between; align-items: center; font-family: var(--agent); font-size: 20px; color: var(--warn); padding-top: 12px; border-top: 1px solid var(--line); }
+.queue .n { color: var(--on-3); }
+.orch { width: 100%; flex: 1; min-height: 0; display: block; }
+/* 12 · Los agentes entre corchetes se pasan los casos */
+.orch2 { position: relative; height: 270px; flex: none; overflow: hidden; }
+.ag2 { position: absolute; top: 20px; width: 220px; height: 210px; box-sizing: border-box; padding: 20px 30px; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.ag2::before, .ag2::after { content: ""; position: absolute; top: 0; bottom: 0; width: 28px; border: 8px solid var(--c); border-radius: 6px; filter: drop-shadow(0 0 12px color-mix(in srgb, var(--c) 60%, transparent)); transition: transform .22s cubic-bezier(.3,1.6,.5,1); }
+.ag2::before { left: 0; border-right: none; }
+.ag2::after { right: 0; border-left: none; }
+.ag2.grab::before { transform: translateX(16px); }
+.ag2.grab::after { transform: translateX(-16px); }
+.ag2 > b { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; color: var(--c); text-shadow: 0 0 24px color-mix(in srgb, var(--c) 50%, transparent); line-height: 1.05; }
+.ag2 > span { font-family: var(--agent); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--on-3); }
+.ag2 .glow2 { position: absolute; inset: 20px; border-radius: 50%; background: radial-gradient(var(--c), transparent 70%); opacity: 0; transition: opacity .25s; z-index: -1; }
+.ag2.grab .glow2 { opacity: .28; }
+.tok2 { position: absolute; z-index: 3; height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 18px; border-radius: 999px; background: #f1f5f9; color: #0b1c22; font-size: 20px; font-weight: 800; white-space: nowrap; box-shadow: 0 8px 30px rgba(0,0,0,.45); transition: left .42s cubic-bezier(.6,0,.3,1), top .42s cubic-bezier(.6,0,.3,1), opacity .3s, box-shadow .3s; }
+.tok2.ok { background: var(--c); box-shadow: 0 0 26px -2px var(--c); }
+.team0 b { color: var(--on); font-weight: 600; }
+.orch text { font-family: var(--agent); }
+.orch-log { display: flex; flex-direction: column; gap: 6px; min-height: 96px; flex: none; }
+.orch-log div { font-size: 20px; color: var(--on-2); display: flex; gap: 10px; align-items: center; animation: rise .4s both; }
+.orch-log .dot { width: 10px; height: 10px; }
+.team0 { margin-top: auto; display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; font-family: var(--agent); font-size: 19px; color: var(--mint); padding-top: 12px; border-top: 1px solid var(--line); }
+.thesis { text-align: center; display: flex; flex-direction: column; gap: 28px; align-items: center; }
+.thesis .h1 { font-size: 112px; }
+.thesis .h1 span { display: block; }
+
+/* ===== 13 · Fundador ===== */
+.perks { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; grid-template-rows: auto auto; gap: 22px; }
+.perk { border-radius: 24px; padding: 28px; background: rgba(13,38,47,.9); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.perk .k { font-size: 58px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--sky); }
+.perk h3 { font-size: 29px; }
+.perk p { font-size: 21px; color: var(--on-2); line-height: 1.4; }
+.perk.hero { grid-row: span 2; background: linear-gradient(160deg, rgba(245,196,107,.16), rgba(13,38,47,.92) 60%); border-color: rgba(245,196,107,.45); justify-content: flex-end; }
+.perk.hero .k { white-space: nowrap; font-size: 100px; color: var(--amber); text-shadow: 0 0 50px rgba(245,196,107,.35); }
+.perk.hero h3 { font-size: 38px; }
+.perk.next { grid-column: span 2; border-style: dashed; border-color: rgba(245,196,107,.55); }
+.perk.next .k { color: var(--amber); }
+.perk.next .k { font-size: 30px; font-family: var(--agent); font-weight: 500; letter-spacing: 0; }
+.perk.next q { font-family: var(--agent); font-size: 21px; color: var(--on); quotes: "«" "»"; }
+
+/* ===== 14 · Precio ===== */
+.prices { flex: none; display: flex; flex-direction: column; border-radius: 26px; overflow: hidden; border: 1px solid var(--line); background: rgba(6,19,24,.78); }
+.pr { display: grid; grid-template-columns: 1fr 240px 100px 300px; gap: 24px; align-items: center; padding: 16px 40px; border-bottom: 1px solid var(--line); }
+.pr:last-child { border-bottom: none; }
+.pr .what { font-size: 30px; font-weight: 700; }
+.pr .what small { display: block; font-size: 20px; font-weight: 500; color: var(--on-3); margin-top: 4px; }
+.pr .base { font-size: 32px; color: var(--on-3); text-align: right; position: relative; font-variant-numeric: tabular-nums; }
+.pr .base::after { content: ""; position: absolute; left: 20%; right: -6px; top: 52%; height: 3px; background: var(--on-3); transform: scaleX(0); transform-origin: left; }
+.layer.cur .pr .base::after { animation: strike .5s forwards; animation-delay: calc(var(--d, 0s) + .6s); }
+@keyframes strike { to { transform: scaleX(1); } }
+.pr .arrow { font-family: var(--agent); font-size: 28px; color: var(--sky); text-align: center; }
+.pr .now { font-size: 54px; font-weight: 800; color: var(--sky); text-align: right; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.pr .now.gift { color: var(--amber); }
+.pr.head { padding: 16px 40px; font-family: var(--agent); font-size: 18px; color: var(--on-3); letter-spacing: .06em; text-transform: uppercase; }
+.pr.head span:nth-child(2), .pr.head span:nth-child(4) { text-align: right; }
+.callback { display: flex; align-items: center; gap: 26px; font-size: 28px; color: var(--on-2); padding: 20px 30px; border-radius: 20px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
+.callback s { color: var(--on-3); }
+.callback b { color: var(--sky); font-size: 40px; }
+
+/* ===== 15 · Cierre ===== */
+.close { justify-content: center; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+.step { border-radius: 24px; padding: 28px 30px; background: rgba(13,38,47,.9); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.step .n { font-family: var(--agent); font-size: 21px; color: var(--sky); }
+.step b { font-size: 30px; line-height: 1.2; }
+.step p { font-size: 22px; color: var(--on-2); line-height: 1.4; }
+.cta { display: flex; align-items: center; gap: 30px; flex-wrap: wrap; }
+.cta .btn { font-size: 33px; font-weight: 800; color: #06222a; background: var(--sky); padding: 20px 44px; border-radius: 999px; }
+.layer.cur .cta .btn { animation: ping 2.4s 1.8s infinite; }
+.cta .url { font-family: var(--agent); font-size: 29px; color: var(--on-2); user-select: all; }
+
+@media (prefers-reduced-motion: reduce) {
+  .layer, .layer.cur { transition: opacity .2s; transform: none; filter: none; }
+  .layer.cur *, .layer.cur *::after, .msg, .tl, .act, .blk, .p8w, .p8ck .own, .p8ck .kid, .notif, .draft, .orch-log div { animation: none !important; }
+  .layer.cur .pr .base::after { transform: scaleX(1); }
+  .layer.cur .mod { color: var(--on); border-color: rgba(79,195,215,.4); }
+  .layer.cur .mod i { background: var(--sky); }
+  .kpi path { stroke-dashoffset: 0; }
+}
+</style>
+
+<div class="viewport" id="viewport">
+<div class="stage" id="stage" role="region" aria-roledescription="presentación" aria-label="Programa Fundadores de odentIA">
+
+<!-- ============ 1 · Portada ============ -->
+<section class="slide" aria-label="Portada">
+  <div class="layer cover" data-scene="cover">
+    <div class="copy">
+      <span class="tag in" style="--d:.1s">[ Programa Fundadores ]</span>
+      <h1 class="h1 in" style="--d:.25s">Los primeros <span class="gift big-gift num">USD 100</span> los pagamos nosotros.</h1>
+      <p class="agents-line in" style="--d:.5s">Tus agentes de IA empiezan hoy: <b class="c-sky">Sofi</b> atiende, <b class="c-mint">Clío</b> documenta y <b class="c-amber">Argos</b> vigila que nadie se quede atrás.</p>
+    </div>
+    <div class="cover-scene in" style="--d:.3s" id="coverScene">
+      <div class="d3" aria-hidden="true">
+        <div class="scene-shadow"></div>
+        <canvas id="d3cv"></canvas>
+        <svg class="scene-svg" viewBox="0 0 840 680">
+          <line id="d3in" x1="0" y1="0" x2="0" y2="0" stroke="#7fd6e4" stroke-width="1.5" stroke-dasharray="3 5" opacity="0"></line>
+          <line id="d3out" x1="0" y1="0" x2="0" y2="0" stroke="#ffffff" stroke-width="1" stroke-dasharray="2 6" opacity="0"></line>
+          <circle id="d3dot" cx="0" cy="0" r="5" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0"></circle>
+        </svg>
+        <ul class="zchans" id="d3chans"></ul>
+        <div class="zcap" id="d3cap"><span class="mono"></span><span></span></div>
+        <div class="zpanel">
+          <div class="zrow"><span class="zwho" id="d3who"></span><span class="mono zmeta" id="d3meta"></span></div>
+          <span class="ztxt" id="d3txt"></span>
+          <div class="zbar"><span id="d3bar"></span></div>
+          <div class="zout" id="d3outs"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Gracias por estar aquí. En unos doce minutos les muestro nueve problemas que viven todos los días en una clínica, cómo los resuelve odentIA y qué reciben por entrar primero. Empiezo por el final: los primeros USD 100 de sus agentes los pagamos nosotros. Y les presento a esos agentes: Sofi atiende, Clío documenta y Argos vigila que nadie se quede atrás.</aside>
+</section>
+
+<!-- ============ 2 · 22:47 ============ -->
+<section class="slide" aria-label="Mensajes fuera de horario">
+  <div class="layer prob" data-scene="notifs">
+    <span class="tag in">[ Problema 1 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <div class="clock num in" style="--d:.1s" id="p1clock">19:00</div>
+        <h2 class="h2 in" style="--d:.25s; font-size:70px">Tu clínica cerró. Tus pacientes siguen escribiendo.</h2>
+        <p class="lead in" style="--d:.45s">Toda la noche llegan preguntas, citas y urgencias. A la mañana, varios ya reservaron en otra clínica.</p>
+        <span class="small in" style="--d:.6s">Ejemplo</span>
+      </div>
+      <div class="scene">
+        <div class="p1head"><span><b id="p1n">0</b> sin responder</span><span><b id="p1gone">0</b> se fueron a otra clínica</span></div>
+        <div class="p1feed" id="notifs"></div>
+        <div class="p1end" id="p1end"></div>
+      </div>
+    </div>
+  </div>
+  <div class="layer" data-scene="chat">
+    <span class="was"><s>23 mensajes sin responder</s></span>
+    <span class="tag in" style="color:var(--sky)">[ Con odentIA · Agente Sofi ]</span>
+    <div class="pair">
+      <div class="copy">
+        <div class="clock num in" style="--d:.1s; color:var(--sky)" id="r1clock">19:00</div>
+        <h2 class="h2 in" style="--d:.25s; font-size:70px">La misma noche. <span class="c-sky">Sofi</span> le contesta a cada uno.</h2>
+        <p class="lead in" style="--d:.45s">Al momento y con horarios reales: agenda, envía precios y te pasa lo urgente. Mañana tu equipo encuentra el trabajo hecho.</p>
+        <span class="small in" style="--d:.6s">Ejemplo</span>
+      </div>
+      <div class="scene">
+        <div class="phone r1phone" id="r1phone"><div class="phone-top"><span class="av">L</span><div><b>Lucía Torres</b><span>Instagram · 19:12</span></div></div><div class="chat" id="r1chat"></div></div>
+        <div class="r1list" id="r1list"><div class="p1head ok"><span><b class="sky" id="r1n">0</b> respondidos al momento</span><span><b id="r1c">0</b> citas en tu agenda</span></div>
+        <div class="p1feed" id="chat"></div></div>
+        <div class="p1end ok" id="r1end"></div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Pregunten a la sala cuántos mensajes les llegan después de cerrar. Toda la noche escriben: precios, citas, urgencias. Cuando recepción abre, encuentra decenas sin responder y varios pacientes ya reservaron en otra clínica (las cifras son de ejemplo). Clic: la misma noche, los mismos mensajes, con Sofi, su agente de recepción. Contesta cada uno en segundos con el tono de la clínica: agenda con horarios reales, mueve citas, envía precios y presupuestos, guarda la radiografía en la ficha. Lo urgente no lo resuelve sola: se lo pasa a la doctora con el resumen. A las 8:00 el equipo encuentra todo respondido y las citas en la agenda.</aside>
+</section>
+
+<!-- ============ 3 · Omnicanal ============ -->
+<section class="slide" aria-label="Omnicanal">
+  <div class="layer prob" data-scene="p2prob">
+    <span class="tag in">[ Problema 2 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s; font-size:66px">Escribe por Instagram, sigue por WhatsApp y tu sistema cree que son tres personas.</h2>
+        <p class="lead in" style="--d:.3s">Tres fichas, tres historias a medias. Y lo importante queda justo en la que nadie abre.</p>
+        <span class="small in" style="--d:.5s">Ejemplo</span>
+      </div>
+      <div class="scene" id="p2scene"></div>
+    </div>
+  </div>
+  <div class="layer" data-scene="omni">
+    <svg class="omni-svg" viewBox="0 0 1920 1080" aria-hidden="true" id="omniSvg"></svg>
+    <span class="was"><s>3 fichas de la misma persona</s></span>
+    <span class="tag in">[ Con odentIA · Omnicanal ]</span>
+    <div class="copy" style="max-width:860px; flex:none">
+      <h2 class="h2 in" style="--d:.1s">Todos los canales.<br><span class="accent">Una sola persona.</span></h2>
+      <p class="lead in" style="--d:.3s">Lucía escribe por Instagram, confirma por WhatsApp y recibe su receta por correo. Para tu clínica es una sola ficha con una sola historia.</p>
+    </div>
+    <div class="ficha in" style="--d:.45s">
+      <div class="ficha-head"><span class="av">LT</span><div><b>Lucía Torres</b><span>Una sola ficha · una sola historia</span></div></div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </div>
+  <aside class="notes">Esto pasa todos los días: la misma persona aparece tres veces y el sistema le crea tres fichas. Le confirman la cita donde no la lee, le vuelven a preguntar el nombre, le ofrecen la promoción de paciente nuevo y la alergia queda en la ficha que la doctora no abre. Clic: en odentIA todos los canales llegan a la misma persona. La historia se arma sola, sin copiar nada a mano.</aside>
+</section>
+
+<!-- ============ 4 · Actúan ============ -->
+<section class="slide" aria-label="Tus agentes">
+  <div class="layer prob">
+    <span class="tag in">[ Problema 3 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s">Tu equipo copia, busca y pega todo el día.</h2>
+        <p class="lead in" style="--d:.3s">Pasar la cita a la agenda, buscar el presupuesto, anotar lo que se dijo. El software espera a que alguien lo haga.</p>
+      </div>
+      <div class="scene">
+        <span class="pile-count in" style="--d:2s">7 pendientes y contando</span>
+        <div class="pile">
+          <div class="task" style="--x:160px; --y:620px; --r:-2deg; --d:.2s">Pasar la cita a la agenda</div>
+          <div class="task" style="--x:200px; --y:548px; --r:3deg; --d:.4s">Buscar el presupuesto de Carla</div>
+          <div class="task" style="--x:140px; --y:476px; --r:-4deg; --d:.6s">Anotar lo que dijo por teléfono</div>
+          <div class="task" style="--x:230px; --y:404px; --r:2deg; --d:.8s">Copiar sus datos a la ficha</div>
+          <div class="task" style="--x:170px; --y:332px; --r:-3deg; --d:1s">Recordarle su control a Pedro</div>
+          <div class="task" style="--x:210px; --y:260px; --r:4deg; --d:1.2s">Avisar el cambio de cita</div>
+          <div class="task" style="--x:150px; --y:188px; --r:-1deg; --d:1.4s">Responder el correo de ayer</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="layer" data-scene="log">
+    <span class="was"><s>7 pendientes a mano</s></span>
+    <span class="tag in">[ Con odentIA · Conoce a tus agentes ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:64px">Actúan, no solo conversan.</h2>
+    <div class="p4-gl" aria-hidden="true"></div>
+    <div class="p4-ov" aria-hidden="true"></div>
+    <div class="p4-log"><div class="p4-now"></div><div class="p4-rows"></div></div>
+  </div>
+  <aside class="notes">El software de siempre guarda datos, pero alguien tiene que moverlos de un lado a otro. Clic: les presento a sus agentes, cada uno en sus corchetes y con su color. Cada nombre dice lo que hace: Sofi viene de «sabiduría» y atiende; Clío es la musa de la historia y escribe la historia clínica; Argos es el gigante de los cien ojos y ve toda la clínica. Después, la pieza de Lucía pasa de un agente a otro: los corchetes se cierran sobre ella cuando les toca, y debajo de cada uno queda lo que resolvió.</aside>
+</section>
+
+<!-- ============ 5 · Asistente clínico ============ -->
+<section class="slide" aria-label="Clío, agente clínico">
+  <div class="layer prob" data-scene="lateClock">
+    <span class="tag in">[ Problema 4 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s">La historia clínica se escribe a las 8 de la noche, con hambre y de memoria.</h2>
+        <p class="lead in" style="--d:.3s">Después de catorce pacientes, ¿qué le dijiste al de las 10:30?</p>
+      </div>
+      <div class="scene">
+        <div class="late-clock num" id="lateClock">18:00</div>
+        <div class="pend">
+          <div class="in" style="--d:.3s"><span class="mono">09:00</span><span>Mario R.</span><em>Nota pendiente</em></div>
+          <div class="in" style="--d:.45s"><span class="mono">09:40</span><span>Carla S.</span><em>Nota pendiente</em></div>
+          <div class="in" style="--d:.6s"><span class="mono">10:30</span><span class="blur">Javier C.</span><em>Nota pendiente</em></div>
+          <div class="in" style="--d:.75s"><span class="mono">11:15</span><span class="blur">Rosa M.</span><em>Nota pendiente</em></div>
+          <div class="in" style="--d:.9s"><span class="mono">12:00</span><span class="blur">Pedro R.</span><em>Nota pendiente</em></div>
+          <div class="in" style="--d:1.05s"><span class="mono">…</span><span class="blur">y nueve más</span><em>Pendientes</em></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="layer" data-scene="dictation">
+    <span class="was"><s>14 notas a las 20:00</s></span>
+    <span class="tag in" style="color:var(--mint)">[ Con odentIA · Agente Clío ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s">Dictas en la consulta. La nota queda lista para confirmar.</h2>
+        <p class="lead in" style="--d:.3s"><b class="c-mint">Clío</b> escucha y propone la nota, el diagnóstico y el plan. Nada entra a la historia sin la confirmación del odontólogo.</p>
+      </div>
+      <div class="scene">
+        <div class="dict in" style="--d:.2s">
+          <div class="dict-top"><div class="wave" aria-hidden="true"><i style="animation-delay:0s"></i><i style="animation-delay:.1s"></i><i style="animation-delay:.25s"></i><i style="animation-delay:.05s"></i><i style="animation-delay:.3s"></i><i style="animation-delay:.15s"></i><i style="animation-delay:.2s"></i><i style="animation-delay:.35s"></i></div><span>Clío escuchando · Dra. Ana · Mario R.</span></div>
+          <div class="said" id="said"></div>
+          <div class="blocks" id="blocks"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Todos los odontólogos se reconocen aquí. Clic: dictan mientras atienden y Clío propone la nota ordenada, el diagnóstico con su código y el plan. El odontólogo confirma cada parte; nada entra a la historia sin su firma.</aside>
+</section>
+
+<!-- ============ 6 · Administrador ============ -->
+<section class="slide" aria-label="Argos, agente administrador">
+  <div class="layer prob" data-scene="p6prob">
+    <span class="tag in">[ Problema 5 ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:70px">Pacientes que no vuelven y presupuestos que se enfrían.</h2>
+      <p class="lead">Nadie tiene tiempo de revisar quién faltó a su control. Las citas se caen y la agenda se queda con huecos.</p>
+      <div class="p6big"><b class="num" data-p6count>0</b><span>huecos en la agenda de esta semana</span></div>
+    </div>
+    <div class="p6sc" aria-hidden="true"></div>
+  </div>
+  <div class="layer" data-scene="p6ans">
+    <span class="was"><s>Huecos en la agenda</s></span>
+    <span class="tag in" style="color:var(--amber)">[ Con odentIA · Agente Argos ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:70px"><span class="c-amber">Argos</span> los encuentra. <span class="c-sky">Sofi</span> los trae de vuelta.</h2>
+      <p class="lead">Argos ve quién no volvió y qué presupuesto quedó en pausa. Sofi les escribe y cada uno vuelve a una fecha de la agenda.</p>
+      <div class="p6big ans"><b class="num" data-p6count>0</b><span>pacientes de vuelta en la agenda</span></div>
+      <span class="small">Ejemplo de una semana. Argos solo escribe si tú prendiste esa línea.</span>
+    </div>
+    <div class="p6sc" aria-hidden="true"></div>
+  </div>
+  <aside class="notes">Aquí está el dinero que la clínica ya ganó una vez y deja ir: la semana no está llena y encima se caen citas. Clic: Argos mira la clínica todo el día y encuentra a quien no volvió a su control o dejó un presupuesto en pausa. Sofi le escribe con un horario libre, y cada paciente vuelve a un hueco de la agenda hasta llenarla. La cita recuperada solo se cobra si el paciente asiste.</aside>
+</section>
+
+<!-- ============ 7 · Reportes ============ -->
+<section class="slide" aria-label="Reportes">
+  <div class="layer prob" data-scene="p7prob">
+    <span class="tag in">[ Problema 6 ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:66px">Fin de mes: un día entero armando un Excel que nadie entiende.</h2>
+      <p class="lead">Descargas de la agenda y de la caja, archivos que no encuentras, cifras que no cuadran. Y cuando por fin está listo, no dice qué hacer.</p>
+      <div class="p7big"><b data-p7count>0 h 00 min</b><span>armando el reporte de septiembre</span></div>
+      <span class="small">Ejemplo</span>
+    </div>
+    <div class="p7sc" aria-hidden="true"></div>
+  </div>
+  <div class="layer" data-scene="p7ans">
+    <span class="was"><s>Un día armando el Excel</s></span>
+    <span class="tag in" style="color:var(--amber)">[ Con odentIA · Agente Argos ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:70px">Le preguntas a <span class="c-amber">Argos</span>. Él arma el reporte.</h2>
+      <p class="lead">Con las cifras de tu clínica, comparadas y en palabras. Y te dice qué haría.</p>
+      <span class="p7soon">Próximamente · lo usas primero como clínica fundadora</span>
+      <div class="p7big ans"><b style="color:var(--amber)">0 h</b><span>armando reportes</span></div>
+    </div>
+    <div class="p7sc" aria-hidden="true"></div>
+  </div>
+  <aside class="notes">Pregunten quién arma los reportes de la clínica y cuánto le toma: descargar de la agenda y de la caja, buscar el archivo bueno entre cinco versiones, pedir por WhatsApp lo que falta y cuadrar cifras que no cuadran. Se va un día entero, y el Excel no dice qué hacer. Clic: con odentIA le preguntas a Argos, con palabras, y él arma el reporte con las cifras de la clínica y lo que haría. Ojo: preguntarle con palabras es lo próximo que lanzamos; las clínicas fundadoras lo usan primero. Las cifras de la pantalla son de ejemplo.</aside>
+</section>
+
+<!-- ============ 8 · Buscador ============ -->
+<section class="slide" aria-label="Buscador">
+  <div class="layer prob" data-scene="p8prob">
+    <span class="tag in">[ Problema 7 ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:66px">Lucía espera mientras la buscas en seis lugares.</h2>
+      <p class="lead">Pacientes, presupuestos, el Excel de pagos, el WhatsApp, la carpeta de radiografías. Y si no lo escribes exacto, no aparece.</p>
+      <div class="p7big"><b data-p8count>0:00</b><span>Lucía esperando en el mostrador</span></div>
+      <span class="small">Ejemplo</span>
+    </div>
+    <div class="p8sc" aria-hidden="true"></div>
+  </div>
+  <div class="layer" data-scene="p8ans">
+    <span class="was" style="top:56px"><s>7:40 buscando en seis lugares</s></span>
+    <span class="tag in">[ Con odentIA · Buscador ]</span>
+    <div class="copy in" style="--d:.1s; flex:none; width:620px">
+      <h2 class="h2" style="font-size:66px">Una búsqueda. Todo lo de Lucía en un solo lugar.</h2>
+      <p class="lead">Escribes como hablas: sin tildes y en cualquier orden. Y en servicios entiende lo que quisiste decir.</p>
+      <div class="p7big ans"><b data-p8count>0:00</b><span>y Lucía sale atendida</span></div>
+    </div>
+    <div class="p8sc" aria-hidden="true"></div>
+  </div>
+  <aside class="notes">Pregunten cuánto tarda recepción en encontrar algo de un paciente que está esperando en el mostrador: la ficha, lo que debe, el pago que mandó por WhatsApp, su radiografía. Cada cosa está en un lugar distinto, y si no lo escriben igual que como se guardó, no aparece. Si pasa 20 veces al día, son 2 h 33 min diarias y 56 horas al mes (ejemplo). Clic: con odentIA, Ctrl+K. Escribes «lucia», sin tilde, y aparece todo lo suyo debajo de su nombre: lo que debe, su comprobante, su radiografía, su cita. Y si pregunta por una limpieza, aunque en tu lista se llame «Profilaxis», la encuentra por significado. Ojo: por significado busca servicios, promociones y respuestas; a las personas las busca por letras, sin tildes y en cualquier orden.</aside>
+</section>
+
+<!-- ============ 9 · Todo lo de siempre ============ -->
+<section class="slide" aria-label="Todo lo de siempre">
+  <div class="layer prob">
+    <span class="tag in">[ Problema 8 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s">Cambiar de sistema da miedo.</h2>
+        <p class="lead in" style="--d:.3s">Todo esto suena muy bien, pero ¿qué pasa con lo que ya uso todos los días?</p>
+      </div>
+      <div class="scene">
+        <div class="qs">
+          <span style="--x:60px; --y:60px; --d:.3s">¿Y mi agenda?</span>
+          <span style="--x:340px; --y:200px; --d:.5s">¿Mi historia clínica?</span>
+          <span style="--x:20px; --y:340px; --d:.7s">¿Mi caja?</span>
+          <span style="--x:330px; --y:470px; --d:.9s">¿Mis presupuestos?</span>
+          <span style="--x:80px; --y:600px; --d:1.1s">¿Mi inventario?</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="layer">
+    <span class="was"><s>¿Y mi agenda?</s></span>
+    <span class="tag in">[ Con odentIA · El sistema completo ]</span>
+    <h2 class="h2 in" style="--d:.1s">Y todo lo de siempre, incluido.</h2>
+    <div class="mosaic">
+      <div class="mod" style="--i:0"><i></i>Agenda</div>
+      <div class="mod" style="--i:1"><i></i>Historia clínica</div>
+      <div class="mod" style="--i:2"><i></i>Odontograma</div>
+      <div class="mod" style="--i:3"><i></i>Periodontograma</div>
+      <div class="mod" style="--i:4"><i></i>Visor de tomografías</div>
+      <div class="mod" style="--i:5"><i></i>Recetas y órdenes</div>
+      <div class="mod" style="--i:6"><i></i>Consentimientos</div>
+      <div class="mod" style="--i:7"><i></i>Plan y presupuestos</div>
+      <div class="mod" style="--i:8"><i></i>Caja y cobros</div>
+      <div class="mod" style="--i:9"><i></i>Finanzas y gastos</div>
+      <div class="mod" style="--i:10"><i></i>Comisiones</div>
+      <div class="mod" style="--i:11"><i></i>Inventario y compras</div>
+      <div class="mod" style="--i:12"><i></i>Portal del paciente</div>
+      <div class="mod" style="--i:13"><i></i>Oportunidades y tareas</div>
+      <div class="mod" style="--i:14"><i></i>Reportes</div>
+      <div class="mod" style="--i:15"><i></i>Sedes, equipo y permisos</div>
+    </div>
+    <p class="free-line in" style="--d:2.4s">Sin pagar por módulos, usuarios ni sedes.</p>
+  </div>
+  <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, odentIA tiene todo lo que ya usan: agenda, historia clínica con odontograma y periodontograma, caja, inventario, comisiones y más. Y nada de esto se cobra por módulo, usuario ni sede.</aside>
+</section>
+
+<!-- ============ 10 · Control ============ -->
+<section class="slide" aria-label="Tú tienes el control">
+  <div class="layer" data-scene="switches">
+    <span class="tag in">[ Con odentIA · Control ]</span>
+    <h2 class="h2 in" style="--d:.1s">Tú decides qué puede hacer cada agente.</h2>
+    <div class="ctrl">
+      <div class="switches" id="switches">
+        <div class="sw in" style="--d:.25s; --c:var(--sky)"><span class="toggle"></span>Agendar citas<span class="who">Sofi</span></div>
+        <div class="sw in" style="--d:.35s; --c:var(--sky)"><span class="toggle"></span>Mover y cancelar citas<span class="who">Sofi</span></div>
+        <div class="sw in" style="--d:.45s; --c:var(--sky)"><span class="toggle"></span>Enviar presupuestos<span class="who">Sofi</span></div>
+        <div class="sw in" style="--d:.55s; --c:var(--amber)"><span class="toggle"></span>Avisar un control<span class="who">Argos</span></div>
+        <div class="sw in" style="--d:.65s; --c:var(--mint)"><span class="toggle"></span>Proponer la nota de la consulta<span class="who">Clío</span></div>
+      </div>
+      <div class="promises">
+        <div class="promise in" style="--d:.6s"><span class="ic">→</span><div><b>Si no sabe, te lo pasa</b><p>Con el resumen del caso: qué pidió, qué se le dijo y qué falta.</p></div></div>
+        <div class="promise in" style="--d:.8s"><span class="ic">✓</span><div><b>Lo clínico lo firma el odontólogo</b><p>El dictado solo propone. Nada entra a la historia sin su confirmación.</p></div></div>
+        <div class="promise in" style="--d:1s"><span class="ic">◷</span><div><b>Escribe solo en tu horario</b><p>Tú eliges a qué horas pueden salir los mensajes de la clínica.</p></div></div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Respondan antes de que lo pregunten: ¿y si la IA hace algo que no quiero? Cada acción es un interruptor. Lo que el agente no sabe se lo pasa a una persona con el resumen del caso, y lo clínico siempre lo firma el odontólogo.</aside>
+</section>
+
+<!-- ============ 11 · Valor ============ -->
+<section class="slide" aria-label="Solo cobramos por valor">
+  <div class="layer prob" data-scene="p9prob">
+    <span class="tag in">[ Problema 9 ]</span>
+    <div class="pair">
+      <div class="copy">
+        <h2 class="h2 in" style="--d:.1s">Pagas cada mes, aunque no pase nada.</h2>
+        <p class="lead in" style="--d:.3s">Usuarios, sedes y módulos. La cuota llega igual en un mes flojo.</p>
+        <span class="small in" style="--d:.5s">Ejemplo</span>
+      </div>
+      <div class="scene" id="p9scene"></div>
+    </div>
+  </div>
+  <div class="layer" data-scene="vals">
+    <span class="was"><s>La cuota llega igual</s></span>
+    <span class="tag in">[ Con odentIA · Enfocados en el valor ]</span>
+    <h2 class="h2 in" style="--d:.1s">Solo cobramos cuando te damos valor.</h2>
+    <div class="results">
+      <div class="res in" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span>USD 0,50</span></span></div><p>Una por persona cada 24 horas, cuando el agente la atendió de verdad.</p><span class="when">Si termina en cita recuperada, solo se cobra la cita.</span></div>
+      <div class="res in" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span>USD 0,40</span></span></div><p>Se cobra cuando el odontólogo confirma lo que propuso el dictado.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
+      <div class="res in" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>USD 4</span></span></div><p>El paciente que no iba a volver reservó después del mensaje de Sofi.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
+    </div>
+    <div class="free in" style="--d:1s"><span>Incluido, sin cobro:</span><span class="chip">Recordatorios</span><span class="chip">Avisos de cita</span><span class="chip">Tareas al equipo</span><span class="chip">Todo el sistema</span></div>
+  </div>
+  <div class="layer" data-scene="day">
+    <span class="tag in">[ Un día, fila por fila · ejemplo ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:66px">Ves cada cobro junto a lo que lo produjo.</h2>
+    <div class="day in" style="--d:.25s">
+      <div class="row in" style="--d:.45s"><span class="t">08:00</span><span class="what">Recordó su cita a 14 pacientes<small>Recordatorios por WhatsApp</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price zero">Incluido</span></div>
+      <div class="row in" style="--d:.75s"><span class="t">09:12</span><span class="what">Atendió a Lucía por Instagram y agendó su evaluación<small>Conversación atendida</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">USD 0,50</span></div>
+      <div class="row in" style="--d:1.05s"><span class="t">10:40</span><span class="what">Nota de la consulta de Mario, confirmada por la Dra. Ana<small>Consulta dictada y confirmada</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="price num">USD 0,40</span></div>
+      <div class="row in" style="--d:1.35s"><span class="t">13:05</span><span class="what">Dejó a caja la tarea de llamar por un saldo pendiente<small>Tarea al equipo</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price zero">Incluido</span></div>
+      <div class="row in" style="--d:1.65s"><span class="t">17:30</span><span class="what">Pedro llegó a su control; reservó después del mensaje de Sofi<small>Cita recuperada · el paciente asistió</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">USD 4</span></div>
+      <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">USD 4,90</span></div>
+    </div>
+  </div>
+  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: odentIA cobra tres resultados que la clínica puede ver. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
+</section>
+
+<!-- ============ 12 · Dos formas de trabajar ============ -->
+<section class="slide" aria-label="Un solo caso, dos formas de trabajar">
+  <div class="layer stay" data-scene="duo">
+    <span class="tag in">[ Por qué odentIA ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:66px">Un solo caso, dos formas de trabajar.</h2>
+    <div class="case in" style="--d:.3s">Pedro no vino a su control de los 6 meses.</div>
+    <div class="duo">
+      <div class="side old in" style="--d:.45s">
+        <h3><span>Software de registro</span><span id="oldClock">09:00</span></h3>
+        <div class="steps-old" id="stepsOld">
+          <div class="so"><span class="bx"></span>Revisar la lista de controles</div>
+          <div class="so"><span class="bx"></span>Buscar el teléfono de Pedro</div>
+          <div class="so"><span class="bx"></span>Escribirle por WhatsApp<span class="ia-chip" id="iaChip">✦ IA · sugirió un texto, cópialo</span></div>
+          <div class="so"><span class="bx"></span>Esperar y volver a mirar</div>
+          <div class="so"><span class="bx"></span>Agendar la cita</div>
+          <div class="so"><span class="bx"></span>Anotar en la ficha</div>
+        </div>
+        <div class="queue"><span id="oldSteps">Pasos de tu equipo: 0</span><span class="n" id="oldQueue">En la cola: 0 casos más</span></div>
+      </div>
+      <div class="side new in" style="--d:.55s">
+        <h3><span>odentIA</span><span>Agentes que orquestan</span></h3>
+        <div class="orch2" id="orch2" aria-hidden="true"></div>
+        <div class="orch-log" id="orchLog"></div>
+        <div class="team0"><span>Pasos de tu equipo: 0</span><span>Casos resueltos: <b id="orchDone">0</b></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="layer overlay">
+    <div class="thesis">
+      <span class="tag in">[ La diferencia ]</span>
+      <h2 class="h1 in" style="--d:.15s"><span>Ellos guardan lo que pasó.</span><span class="accent">odentIA hace que pase.</span></h2>
+    </div>
+  </div>
+  <aside class="notes">El mismo caso por los dos lados. A la izquierda, el software de registro: aunque tenga un botón de IA que sugiere un texto, alguien tiene que copiarlo, enviarlo y anotarlo, y mientras tanto la cola crece. A la derecha, Argos, Sofi y Clío, cada uno en sus corchetes, se pasan el caso de Pedro y la cita vuelve sola; mientras tanto ya resolvieron los siguientes casos, uno detrás de otro. Clic: ellos guardan lo que pasó; odentIA hace que pase.</aside>
+</section>
+
+<!-- ============ 13 · Fundador ============ -->
+<section class="slide" aria-label="Ser clínica fundadora">
+  <div class="layer" data-scene="perks">
+    <span class="tag in">[ Ser clínica fundadora ]</span>
+    <h2 class="h2 in" style="--d:.1s">Lo que recibes por entrar primero.</h2>
+    <div class="perks">
+      <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="100" data-prefix="USD ">USD 100</span><h3>Para tus agentes, de regalo</h3><p>Los primeros USD 100 de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta 90 días para usarlos.</p></div>
+      <div class="perk in" style="--d:.45s"><span class="k num" data-count="0" data-prefix="USD ">USD 0</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
+      <div class="perk in" style="--d:.6s"><span class="k num" data-count="40" data-suffix=" %">40 %</span><h3>Menos en cada acción</h3><p>Conversación, consulta y cita recuperada.</p></div>
+      <div class="perk in" style="--d:.75s"><span class="k num" data-count="12" data-suffix=" meses">12 meses</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante un año.</p></div>
+      <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
+      <div class="perk next in" style="--d:1.05s"><span class="k">Lo que viene, lo usas primero</span><p>Pregúntale a <b class="c-amber">Argos</b> con palabras y te responde con el gráfico:</p><q>¿Cuánto cobramos en septiembre por sede?</q></div>
+    </div>
+  </div>
+  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: USD 100 para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por un año. Y lo próximo que lancemos, como preguntarle a Argos con palabras, lo usan primero ustedes.</aside>
+</section>
+
+<!-- ============ 14 · Precio ============ -->
+<section class="slide" aria-label="Tu precio">
+  <div class="layer" style="gap:26px">
+    <span class="tag in">[ Tu precio ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:62px">El mismo producto, a precio de clínica fundadora.</h2>
+    <div class="prices">
+      <div class="pr head in" style="--d:.2s"><span>Qué se cobra</span><span>Precio de lista</span><span></span><span>Fundadora</span></div>
+      <div class="pr in" style="--d:.3s"><span class="what">Cuota mensual<small>De lista vuelve como crédito</small></span><span class="base">USD 29</span><span class="arrow">→</span><span class="now gift">USD 0</span></div>
+      <div class="pr in" style="--d:.5s"><span class="what">Conversación atendida<small><b class="c-sky">Sofi</b> · una por persona cada 24 horas</small></span><span class="base">USD 0,50</span><span class="arrow">→</span><span class="now" style="color:var(--sky)">USD 0,30</span></div>
+      <div class="pr in" style="--d:.7s"><span class="what">Consulta dictada y confirmada<small><b class="c-mint">Clío</b> · cuando el odontólogo confirma</small></span><span class="base">USD 0,40</span><span class="arrow">→</span><span class="now" style="color:var(--mint)">USD 0,24</span></div>
+      <div class="pr in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="base">USD 4</span><span class="arrow">→</span><span class="now" style="color:var(--amber)">USD 2,40</span></div>
+    </div>
+    <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><s>USD 4,90</s><span>→</span><b class="num">USD 2,94</b><span>como clínica fundadora.</span></div>
+    <p class="small in" style="--d:1.5s">Precios en dólares, sin impuestos. Lo que cobra Meta por WhatsApp va aparte y se muestra como estimación.</p>
+  </div>
+  <aside class="notes">Mismo producto, mismas funciones. La cuota desaparece y cada acción cuesta 40 % menos. El día que vimos hace un momento pasa de USD 4,90 a USD 2,94.</aside>
+</section>
+
+<!-- ============ 15 · Cierre ============ -->
+<section class="slide" aria-label="Cómo entrar">
+  <div class="layer close">
+    <span class="tag in">[ Cómo entrar ]</span>
+    <h2 class="h1 in" style="--d:.1s; font-size:92px">Se entra por invitación.<br><span class="accent">Los lugares son pocos.</span></h2>
+    <div class="steps">
+      <div class="step in" style="--d:.35s"><span class="n">Paso 1</span><b>Pide tus <span class="gift">USD 100</span></b><p>Llenas la solicitud con los datos de tu clínica. Toma dos minutos.</p></div>
+      <div class="step in" style="--d:.55s"><span class="n">Paso 2</span><b>Te respondemos en 2 días hábiles</b><p>Te escribimos por WhatsApp para una llamada corta.</p></div>
+      <div class="step in" style="--d:.75s"><span class="n">Paso 3</span><b>Abres tu clínica como fundadora</b><p>La invitación llega por correo y vale 14 días.</p></div>
+    </div>
+    <div class="cta in" style="--d:1s"><span class="btn">Pide tus USD 100</span><span class="url">odentia32.com/solicitar-invitacion</span></div>
+  </div>
+  <aside class="notes">Cierren con la acción: entrar es por invitación y los lugares son pocos. Llenan la solicitud, les respondemos en dos días hábiles y abren su clínica con la invitación. Gracias.</aside>
+</section>
+
+<div class="brand">%%LOGO%%</div>
+<div class="count" id="count">01 / 15</div>
+<div class="progress" id="progress"></div>
+</div>
+</div>
+
+<div class="notes-panel" id="notesPanel" hidden><b id="notesTitle">Guion</b><span id="notesText"></span></div>
+<div class="controls">
+  <button type="button" id="prev" aria-label="Anterior">←</button>
+  <button type="button" id="next" aria-label="Siguiente">→</button>
+  <button type="button" id="notesBtn" aria-pressed="false">Guion (N)</button>
+  <button type="button" id="full">Pantalla completa</button>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">%%BRACKETS%%</script>
+<script>%%SCENE%%</script>
+<script>
+(() => {
+  const stage = document.getElementById("stage");
+  const slides = [...stage.querySelectorAll(".slide")];
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const C = { sky: "#4fc3d7", mint: "#a6f0d8", amber: "#f5c46b", warn: "#e8927c" };
+  let index = 0, step = 0;
+  let timers = [], rafs = new Set(), cleanups = [];
+
+  /* ---------- Escala ---------- */
+  function fit() {
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.transform = `scale(${s}) translate(-50%, -50%)`;
+  }
+  addEventListener("resize", fit); fit();
+
+  /* ---------- Utilidades de escena ---------- */
+  const later = (fn, ms) => timers.push(setTimeout(fn, reduce ? Math.min(ms, 30) : ms));
+  function loop(fn) {
+    const id = { v: 0 };
+    const run = (now) => { if (fn(now) !== false) { id.v = requestAnimationFrame(run); } else rafs.delete(id); };
+    id.v = requestAnimationFrame(run); rafs.add(id);
+  }
+  function stopScenes() { timers.forEach(clearTimeout); timers = []; rafs.forEach(r => cancelAnimationFrame(r.v)); rafs.clear(); cleanups.splice(0).forEach(f => { try { f(); } catch (e) {} }); }
+  const el = (tag, cls, html) => { const d = document.createElement(tag); if (cls) d.className = cls; if (html !== undefined) d.innerHTML = html; return d; };
+  function typeInto(node, text, ms, done) {
+    let i = 0; node.textContent = "";
+    const t = () => { node.textContent = text.slice(0, ++i); if (i < text.length) later(t, ms); else if (done) done(); };
+    later(t, ms);
+  }
+
+  /* ---------- Navegación por partes y momentos ---------- */
+  const layersOf = (s) => [...s.querySelectorAll(":scope > .layer")];
+
+  function show(n, k, fresh) {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    const layers = layersOf(slides[n]);
+    k = Math.max(0, Math.min(layers.length - 1, k));
+    const slideChanged = n !== index || fresh;
+    slides.forEach((s, i) => { s.classList.toggle("on", i === n); s.setAttribute("aria-hidden", i === n ? "false" : "true"); });
+    const target = layers[k];
+    const newScene = target.dataset.scene;
+    if (slideChanged || newScene || k < step) stopScenes();
+    layers.forEach((l, i) => {
+      const visible = i === k || (l.classList.contains("stay") && i < k);
+      const was = l.classList.contains("cur");
+      l.classList.toggle("gone", i < k && !visible);
+      if (visible && (!was || (i === k && slideChanged))) { l.classList.remove("cur"); void l.offsetWidth; }
+      l.classList.toggle("cur", visible);
+    });
+    // Los momentos de la parte que no se ven vuelven a su lugar.
+    slides.forEach((s, i) => { if (i !== n) layersOf(s).forEach(l => l.classList.remove("cur", "gone")); });
+    const restartStay = slideChanged || k < step;
+    index = n; step = k;
+    stage.classList.toggle("cold", target.classList.contains("prob"));
+    // Escena del momento actual (o de la capa que se queda debajo, si recién se entra).
+    layers.forEach((l, i) => {
+      if (!l.dataset.scene) return;
+      if (i === k || (restartStay && l.classList.contains("stay") && i < k)) scenes[l.dataset.scene]?.(l);
+    });
+    document.getElementById("count").textContent = String(n + 1).padStart(2, "0") + " / " + String(slides.length).padStart(2, "0");
+    document.getElementById("progress").style.width = ((n + (k + 1) / layers.length) / slides.length * 100) + "%";
+    const notes = slides[n].querySelector(".notes");
+    document.getElementById("notesTitle").textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
+    document.getElementById("notesText").textContent = notes ? notes.textContent : "";
+    try { history.replaceState(null, "", "#p" + (n + 1)); } catch (e) {}
+  }
+  function next() {
+    const layers = layersOf(slides[index]);
+    if (step < layers.length - 1) show(index, step + 1);
+    else if (index < slides.length - 1) show(index + 1, 0);
+  }
+  function prev() {
+    if (step > 0) show(index, step - 1);
+    else if (index > 0) show(index - 1, layersOf(slides[index - 1]).length - 1);
+  }
+
+  /* ---------- Escenas ---------- */
+  const scenes = {};
+
+  // 1 · La portada 3D del inicio de la web («D3» de @odentia/brand-scene): cada trabajo de un jueves
+  // de ejemplo entra por un canal, un agente lo resuelve y se enciende una de las 32 piezas.
+  const OUT = [["cita", "cita agendada", "citas agendadas"], ["nota", "nota confirmada", "notas confirmadas"],
+    ["vuelta", "paciente de vuelta", "pacientes de vuelta"], ["tarea", "caso para tu equipo", "casos para tu equipo"]];
+  scenes.cover = () => {
+    const B = window.BrandScene;
+    if (!B) return;
+    const AG = B.AGENTS, CHANS = B.CHANS, D = B.DAY, dir = B.dir, via = B.via;
+    ["Sofi · agente de recepción", "Clío · agente clínico", "Argos · agente administrador"].forEach((n, i) => { if (AG[i]) AG[i].name = n; });
+    const cv = document.getElementById("d3cv"), area = document.getElementById("coverScene");
+    const live = { step: 0, hover: -1, still: reduce };
+    let hold = 0, cycle = 0;
+    const host = {
+      state: () => live, anchor: (ch) => [CHANS[ch].ax, 42], panelPt: () => [150, 505],
+      cap: document.getElementById("d3cap"), lineIn: document.getElementById("d3in"),
+      lineOut: document.getElementById("d3out"), dot: document.getElementById("d3dot"),
+    };
+    const sc = new B.ToothScene(host);
+    const raf = requestAnimationFrame(() => sc.start(cv));
+    const ul = document.getElementById("d3chans");
+    ul.innerHTML = "";
+    const lis = CHANS.map((c, i) => {
+      const li = el("li", "", c.label);
+      li.style.left = c.left + "px"; li.style.width = c.width + "px"; li.style.setProperty("--d", (0.15 + i * 0.09).toFixed(2) + "s");
+      ul.appendChild(li); return li;
+    });
+    const who = document.getElementById("d3who"), meta = document.getElementById("d3meta"), txt = document.getElementById("d3txt");
+    const bar = document.getElementById("d3bar"), outs = document.getElementById("d3outs"), cap = host.cap;
+    let lastTxt = "";
+    function render() {
+      const still = live.still, step = still ? 32 : live.step, hover = live.hover;
+      const counts = {};
+      for (let k = 0; k < step; k++) counts[D.ev[k].out] = (counts[D.ev[k].out] || 0) + 1;
+      const nEv = step > 0 && !still ? D.ev[step - 1] : null;
+      let cur, focusEv = null;
+      if (hover >= 0) {
+        const e = D.ev[D.slotOf[hover]]; focusEv = e;
+        cur = { agent: AG[e.agent].name, color: AG[e.agent].color, ch: via(e), where: e.where, meta: "La pieza que señalas · " + e.time, text: e.text, cls: "ztxt" };
+      } else if (step === 32) {
+        cur = { agent: "Tus tres agentes", color: "#ffffff", ch: "", where: "", meta: "Jueves · 32 de 32", text: "Un jueves completo de ejemplo: 32 trabajos que llegaron por siete vías y quedaron resueltos mientras tu equipo atendía.", cls: "ztxt" };
+      } else if (step === 0) {
+        cur = { agent: "Tus tres agentes", color: "#ffffff", ch: "", where: "", meta: "Jueves · 06:59", text: "Empieza el día en una clínica de ejemplo.", cls: "ztxt" };
+      } else {
+        const e = D.ev[step - 1]; focusEv = e;
+        cur = { agent: AG[e.agent].name, color: AG[e.agent].color, ch: via(e), where: e.where, meta: "Jueves · " + e.time + " · " + step + " de 32", text: e.text, cls: step % 2 ? "ztxt n1" : "ztxt n2" };
+      }
+      lis.forEach((li, i) => {
+        li.className = "zch" + (i === 6 ? " cons" : "") + (cycle % 2 ? " b" : " a") +
+          (focusEv && focusEv.ch === i ? " on" + (hover >= 0 ? "" : step % 2 ? " s1" : " s2") : "");
+        li.style.setProperty("--c", focusEv ? AG[focusEv.agent].color : "#4fc3d7");
+      });
+      who.style.setProperty("--c", cur.color);
+      who.innerHTML = "<i></i>" + cur.agent + (cur.ch ? '<span class="zbdg">' + cur.ch + "</span>" : "") + (cur.where ? '<span class="zbdg to">→ ' + cur.where + "</span>" : "");
+      meta.textContent = cur.meta;
+      if (cur.text !== lastTxt) { txt.className = cur.cls; txt.textContent = cur.text; lastTxt = cur.text; }
+      bar.style.width = ((step / 32) * 100).toFixed(1) + "%";
+      outs.innerHTML = OUT.map(([k, one, many]) => "<span><b>" + (counts[k] || 0) + "</b>" + ((counts[k] || 0) === 1 ? one : many) + "</span>").join("");
+      cap.style.setProperty("--c", nEv ? AG[nEv.agent].color : "#4fc3d7");
+      cap.children[0].textContent = nEv ? dir(nEv) : ""; cap.children[1].textContent = nEv ? nEv.msg : "";
+    }
+    render();
+    const timer = reduce ? 0 : setInterval(() => {
+      if (live.step < 32) live.step++;
+      else if (hold < 3) { hold++; return; }
+      else { live.step = 0; hold = 0; cycle++; }
+      sc.stepAt = performance.now();
+      render();
+    }, 1500);
+    const move = (e) => {
+      const r = cv.getBoundingClientRect(), k = cv.clientWidth / (r.width || 1);
+      const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
+      sc.tmx = Math.max(-1, Math.min(1, (x / cv.clientWidth) * 2 - 1));
+      sc.tmy = Math.max(-1, Math.min(1, -((y / cv.clientHeight) * 2 - 1)));
+      const step = live.still ? 32 : live.step;
+      let best = -1, bd = 26;
+      (sc.scr || []).forEach((p, i) => { const dd = Math.hypot(p[0] - x, p[1] - y); if (dd < bd && D.slotOf[i] < step) { bd = dd; best = i; } });
+      if (best !== live.hover) { live.hover = best; render(); }
+    };
+    const leave = () => { sc.tmx = 0; sc.tmy = 0; if (live.hover !== -1) { live.hover = -1; render(); } };
+    area.addEventListener("pointermove", move);
+    area.addEventListener("pointerleave", leave);
+    cleanups.push(() => {
+      cancelAnimationFrame(raf); clearInterval(timer); sc.stop();
+      area.removeEventListener("pointermove", move); area.removeEventListener("pointerleave", leave);
+    });
+  };
+
+  // 2 · Problema: la noche entera de mensajes; los que esperan se van a otra clínica.
+  const P1MSG = [
+    ["Lucía", "Instagram", "19:12", "Hola, ¿tienen cita el viernes? Me duele una muela"],
+    ["Jorge", "WhatsApp", "19:40", "¿Cuánto cuesta un blanqueamiento?"],
+    ["Ana", "Messenger", "20:05", "¿Atienden los sábados?"],
+    ["Pedro", "WhatsApp", "20:31", "Se me cayó una corona, ¿me pueden ver mañana?"],
+    ["Carla", "Instagram", "21:02", "Vi su promoción de limpieza, ¿sigue?"],
+    ["Luis", "WhatsApp", "21:26", "¿Trabajan con mi seguro?"],
+    ["Marta", "Correo", "21:50", "Quiero el presupuesto de mi hija para brackets"],
+    ["Diego", "WhatsApp", "22:13", "Me sangran las encías, ¿es grave?"],
+    ["Sofía", "Instagram", "22:47", "¿Cuánto cuestan los implantes?"],
+    ["Raúl", "Messenger", "23:05", "¿Tienen estacionamiento?"],
+    ["Elena", "WhatsApp", "23:31", "Necesito una cita urgente, tengo la cara hinchada"],
+    ["Tomás", "WhatsApp", "00:12", "¿Puedo pagar en cuotas?"],
+    ["Inés", "Instagram", "00:48", "¿Atienden niños?"],
+    ["Hugo", "WhatsApp", "01:30", "No puedo dormir del dolor"],
+    ["Paula", "Correo", "05:55", "Les envío mi radiografía"],
+    ["Rosa", "WhatsApp", "06:22", "Necesito cambiar mi cita de hoy"],
+    ["Iván", "Messenger", "06:40", "¿Abren hoy temprano?"],
+    ["Nora", "WhatsApp", "06:58", "¿Me confirman la cita de las 9?"],
+    ["Óscar", "Instagram", "07:10", "¿Hacen carillas?"],
+    ["Bea", "WhatsApp", "07:24", "¿Cuánto cuesta una endodoncia?"],
+    ["Julio", "WhatsApp", "07:38", "Llego tarde a mi cita, ¿la muevo?"],
+    ["Silvia", "Instagram", "07:49", "¿Tienen cita hoy?"],
+    ["Mateo", "WhatsApp", "07:58", "¿Me pueden atender ya?"],
+  ];
+  const P1GONE = new Set([0, 1, 3, 7, 10, 13, 16]);
+  scenes.notifs = async () => {
+    const box = document.getElementById("notifs"), clock = document.getElementById("p1clock");
+    const nEl = document.getElementById("p1n"), goneEl = document.getElementById("p1gone"), end = document.getElementById("p1end");
+    box.innerHTML = ""; end.innerHTML = ""; clock.textContent = "19:00"; nEl.textContent = "0"; goneEl.textContent = "0";
+    const cards = []; let gone = 0;
+    await p6wait(900);
+    for (let i = 0; i < P1MSG.length; i++) {
+      const [who, ch, at, txt] = P1MSG[i];
+      const n = el("div", "notif", `<span class="who">${who}<span>${ch} · ${at}</span></span><span class="late">Sin respuesta</span><span class="txt">${txt}</span>`);
+      box.prepend(n); cards.push(n); clock.textContent = at; nEl.textContent = i + 1;
+      later(() => n.classList.add("lost"), 500);
+      // El que esperó un rato ya escribió a otra clínica (todavía se ve en la lista).
+      const j = i - 3;
+      if (j >= 0 && P1GONE.has(j)) { cards[j].classList.add("gone2"); cards[j].querySelector(".late").textContent = "Reservó en otra clínica"; gone++; goneEl.textContent = gone; }
+      await p6wait(Math.max(260, 1000 - i * 55));
+    }
+    for (let j = P1MSG.length - 3; j < P1MSG.length; j++) if (P1GONE.has(j)) { gone++; goneEl.textContent = gone; }
+    await p6wait(500);
+    clock.textContent = "08:00";
+    end.appendChild(el("div", "", `<b>08:00</b> · Recepción abre: <b>${P1MSG.length} mensajes</b> sin responder. Y siguen llegando.`));
+    await p6wait(1600);
+    end.appendChild(el("div", "", `<b>${gone} pacientes</b> se fueron anoche · <b>USD 840</b> que no entraron`));
+  };
+
+  // 2 · Respuesta: los mismos mensajes; Sofi contesta cada uno y deja hecho lo que pedían.
+  const R1 = [
+    ["El viernes tengo 16:30 con la Dra. Ana. ¿Te la dejo?", "Agendó · vie 16:30", "cita"],
+    ["El blanqueamiento cuesta USD 180. ¿Quieres una evaluación?", "Precio enviado"],
+    ["Sí, los sábados de 9:00 a 13:00.", "Respondió"],
+    ["Te veo mañana a las 9:00 para revisar la corona.", "Agendó · mañana 9:00", "cita"],
+    ["Sí, la limpieza sigue a USD 25 hasta fin de mes.", "Promoción enviada"],
+    ["Trabajamos con varios seguros. ¿Cuál tienes?", "Respondió"],
+    ["Te envío el presupuesto de brackets de tu hija.", "Presupuesto enviado"],
+    ["Conviene revisarlo. Tengo mañana 10:00.", "Agendó · mañana 10:00", "cita"],
+    ["Primero una evaluación: jueves 11:00, ¿te sirve?", "Agendó · jue 11:00", "cita"],
+    ["Sí, tenemos estacionamiento gratis.", "Respondió"],
+    ["Le aviso ya a la Dra. Ana y te guardo las 8:00.", "Urgencia → Dra. Ana", "urg"],
+    ["Sí, hasta 6 cuotas sin interés.", "Respondió"],
+    ["Sí. Te propongo el sábado 10:00 para tu hijo.", "Agendó · sáb 10:00", "cita"],
+    ["Te paso con la Dra. Ana ahora mismo.", "Urgencia → Dra. Ana", "urg"],
+    ["Recibida. La guardé en tu ficha.", "Radiografía en su ficha"],
+    ["Listo, te moví a mañana 17:00.", "Movió la cita"],
+    ["Hoy abrimos a las 8:00.", "Respondió"],
+    ["Confirmada: hoy 9:00 con el Dr. Luis.", "Confirmó la cita"],
+    ["Sí. Evaluación el lunes 15:00, ¿te sirve?", "Agendó · lun 15:00", "cita"],
+    ["Desde USD 150. ¿Te agendo una evaluación?", "Precio enviado"],
+    ["Te muevo a las 10:30, sin problema.", "Movió la cita"],
+    ["Hoy tengo 12:00 o 16:00.", "Agendó · hoy 12:00", "cita"],
+    ["Te espero a las 8:30.", "Agendó · hoy 8:30", "cita"],
+  ];
+  scenes.chat = async () => {
+    const box = document.getElementById("chat"), clock = document.getElementById("r1clock");
+    const nEl = document.getElementById("r1n"), cEl = document.getElementById("r1c"), end = document.getElementById("r1end");
+    box.innerHTML = ""; end.innerHTML = ""; clock.textContent = "19:12"; nEl.textContent = "0"; cEl.textContent = "0";
+    const phone = document.getElementById("r1phone"), chat = document.getElementById("r1chat"), list = document.getElementById("r1list");
+    phone.classList.remove("away"); list.classList.remove("on"); chat.innerHTML = "";
+    const add = (cls, html) => { const d = el("div", cls, html); chat.appendChild(d); return d; };
+    await p6wait(700); add("msg them", "Hola, ¿tienen cita el viernes? Me duele una muela 😣<small>19:12</small>");
+    await p6wait(800); let t = add("typing", "<i></i><i></i><i></i>");
+    await p6wait(1300); t.remove(); add("msg us", "Hola, Lucía. Soy Sofi, de Clínica Sonrisa. El viernes tengo 10:00 o 16:30 con la Dra. Ana. ¿Cuál te queda mejor?<small>19:12</small>");
+    await p6wait(1700); add("msg them", "16:30, por favor<small>19:13</small>"); clock.textContent = "19:13";
+    await p6wait(700); t = add("typing", "<i></i><i></i><i></i>");
+    await p6wait(1100); t.remove(); add("msg us", "Listo: viernes 16:30 con la Dra. Ana. Te recuerdo un día antes.<small>19:13</small>");
+    await p6wait(900); add("msg log", "Sofi · Agendó · → Agenda, viernes 16:30");
+    await p6wait(1800);
+    phone.classList.add("away"); list.classList.add("on");
+    let done = 0, citas = 0, urg = 0;
+    await p6wait(500);
+    for (let i = 0; i < P1MSG.length; i++) {
+      const [who, ch, at, txt] = P1MSG[i], [reply, chip, kind] = R1[i];
+      const n = el("div", "notif sofi" + (kind === "urg" ? " urg" : ""), `<span class="who">${who}<span>${ch} · ${at}</span></span><span class="late">Sofi <i></i><i></i><i></i></span><span class="txt">${txt}</span>`);
+      box.prepend(n); clock.textContent = at;
+      // Ya se vio cómo conversa: en la lista queda solo lo que dejó hecho (la de Lucía, al instante).
+      const gap = i === 0 ? 500 : Math.max(260, 820 - i * 30);
+      later(() => {
+        n.querySelector(".late").textContent = "✓ " + chip; n.classList.add("done");
+        done++; nEl.textContent = done;
+        if (kind === "cita") { citas++; cEl.textContent = citas; }
+        if (kind === "urg") urg++;
+      }, i === 0 ? 60 : 180);
+      await p6wait(gap);
+    }
+    await p6wait(600);
+    clock.textContent = "08:00";
+    end.appendChild(el("div", "", `<b>08:00</b> · Recepción abre: <b>${done} de ${P1MSG.length}</b> respondidos, <b>${citas} citas</b> nuevas en la agenda.`));
+    await p6wait(1500);
+    end.appendChild(el("div", "", `<b>0 pacientes</b> se fueron a otra clínica · <b>${urg} urgencias</b> ya avisadas a la Dra. Ana`));
+  };
+
+  // 3 · Problema: la misma persona en tres fichas; cada cosa cae en una distinta.
+  scenes.p2prob = async () => {
+    const sc = document.getElementById("p2scene");
+    sc.innerHTML = '<div class="p2cards"></div><div class="p2alerts"></div>';
+    const cardsEl = sc.querySelector(".p2cards"), alerts = sc.querySelector(".p2alerts");
+    const FICHAS = [["Lucía T.", "Instagram · @lu.torres"], ["Lucia Torres", "WhatsApp · número nuevo"], ["L. Torres", "Correo · lucia.t@…"]];
+    const cards = [];
+    for (let i = 0; i < 3; i++) {
+      await p6wait(i ? 700 : 600);
+      const c = el("div", "p2card", `<span class="nw">Ficha nueva</span><b>${FICHAS[i][0]}</b><span class="ch">${FICHAS[i][1]}</span>`);
+      c.style.left = i * 275 + "px"; cardsEl.appendChild(c); cards.push(c);
+      if (i) { const q = el("div", "p2q", "≠"); q.style.left = i * 275 - 25 + "px"; cardsEl.appendChild(q); }
+    }
+    const item = (i, text, hot) => cards[i].appendChild(el("div", "it" + (hot ? " hot" : ""), text));
+    const alert = (text, bad) => alerts.appendChild(el("div", bad ? "bad" : "", `<i>✕</i><span>${text}</span>`));
+    await p6wait(800); item(0, "Presupuesto · ortodoncia");
+    await p6wait(500); item(1, "Cita · vie 16:30");
+    await p6wait(500); item(2, "Radiografía panorámica");
+    await p6wait(500); item(2, "Alergia: penicilina", true);
+    await p6wait(900); alert("La confirmación de la cita salió por Instagram. Lucía no la vio y faltó.");
+    await p6wait(1300); alert("Recepción, por cuarta vez: «¿Me recuerdas tu nombre?»");
+    await p6wait(1300); alert("Le llegó «20 % en tu primera visita». Viene hace dos años.");
+    await p6wait(1500); alert("La Dra. Ana abre «Lucía T.»: no ve la alergia a la penicilina.", true);
+    await p6wait(1300);
+    sc.appendChild(el("div", "p2foot", "3 fichas · 1 persona · su historia partida en tres"));
+  };
+
+  // 3 · Respuesta: los canales llegan a una sola ficha.
+  scenes.omni = () => {
+    const svg = document.getElementById("omniSvg"), tl = document.getElementById("timeline");
+    tl.innerHTML = "";
+    const chans = ["WhatsApp", "Instagram", "Messenger", "Telegram", "Chat web", "Correo", "En la consulta"];
+    const tx = 1140, ty = 600;
+    let html = "";
+    chans.forEach((name, i) => {
+      const cx = 200 + i * 124, cy = 960;
+      html += `<path id="op${i}" d="M${cx} ${cy - 24} C ${cx} 780, ${tx - 220} ${ty + 80}, ${tx} ${ty}" fill="none" stroke="rgba(79,195,215,.2)" stroke-width="2" stroke-dasharray="4 8"/>`;
+      html += `<rect x="${cx - 58}" y="${cy - 24}" width="116" height="42" rx="21" fill="#0f2e38" stroke="rgba(143,176,184,.35)"/><text class="chan" x="${cx}" y="${cy + 3}" text-anchor="middle" font-size="${name.length > 9 ? 14 : 17}">${name}</text>`;
+    });
+    html += `<circle id="opDot" r="10" fill="#4fc3d7" opacity="0"/>`;
+    svg.innerHTML = html;
+    const events = [[1, "Preguntó por un blanqueamiento"], [0, "Confirmó su evaluación"], [6, "Evaluación con la Dra. Ana"],
+      [5, "Recibió su presupuesto"], [0, "Aceptó el presupuesto"], [4, "Completó sus datos"], [5, "Recibió su receta"], [3, "Movió su cita al lunes"]];
+    const days = ["lun 09:14", "lun 09:20", "mar 16:30", "mar 17:02", "mié 11:45", "mié 11:50", "vie 18:10", "sáb 10:05"];
+    const dot = svg.querySelector("#opDot");
+    let e = 0;
+    function shoot() {
+      const [ch, text] = events[e % events.length], path = svg.querySelector("#op" + ch), len = path.getTotalLength();
+      const t0 = performance.now(), dur = reduce ? 1 : 1000;
+      path.setAttribute("stroke", "rgba(79,195,215,.8)");
+      loop((now) => {
+        const p = Math.min(1, (now - t0) / dur), pt = path.getPointAtLength(len * p);
+        dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y); dot.setAttribute("opacity", p < 1 ? 1 : 0);
+        if (p < 1) return true;
+        path.setAttribute("stroke", "rgba(79,195,215,.2)");
+        if (e % events.length === 0) tl.innerHTML = "";
+        tl.appendChild(el("div", "tl", `<span class="mono">${days[e % days.length]}</span><span>${text} · <span style="color:#8fb0b8">${chans[ch]}</span></span>`));
+        e++; later(shoot, 600);
+        return false;
+      });
+    }
+    later(shoot, 800);
+  };
+
+  // 4 · Respuesta: registro de acciones en vivo.
+  scenes.log = (layer) => {
+    const go = () => window.Part4 && window.Part4.start(layer);
+    if (window.Part4) go(); else addEventListener("part4-ready", go, { once: true });
+    cleanups.push(() => { removeEventListener("part4-ready", go); window.Part4 && window.Part4.stop(); });
+  };
+
+  // 5 · Problema: el reloj avanza con las notas pendientes.
+  scenes.lateClock = () => {
+    const c = document.getElementById("lateClock");
+    let m = 18 * 60;
+    const t = () => { m += 4; c.textContent = String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); if (m < 20 * 60 + 12) later(t, 60); };
+    later(t, 400);
+  };
+
+  // 5 · Respuesta: el dictado se ordena en bloques que el odontólogo confirma.
+  scenes.dictation = () => {
+    const said = document.getElementById("said"), blocks = document.getElementById("blocks");
+    said.textContent = ""; blocks.innerHTML = "";
+    const text = "Dolor al frío en la muela de abajo, lado izquierdo… pieza 36, caries profunda en oclusal… hacemos resina y control en seis meses.";
+    typeInto(said, text, 32);
+    const items = [["Motivo", "Dolor al frío, muela inferior izquierda"], ["Hallazgo", "Pieza 36 · caries profunda en oclusal"],
+      ["Diagnóstico", "CIE-10 · K02.1 · Caries de la dentina"], ["Plan", "Resina en pieza 36 · control en 6 meses"]];
+    items.forEach(([k, v], i) => later(() => {
+      const b = el("div", "blk", `<span class="k">${k}</span><span class="v">${v}</span><span class="ok">Confirmar</span>`);
+      blocks.appendChild(b);
+      later(() => { b.classList.add("done"); b.querySelector(".ok").textContent = "✓ Confirmado"; }, 2600 + (items.length - i) * 250);
+    }, 1800 + i * 700));
+  };
+
+  // 6 · La agenda de la semana: no está llena, se caen citas (problema) y los pacientes vuelven a sus huecos (respuesta).
+  const P6_DAYS = ["lun", "mar", "mié", "jue", "vie"], P6_HOURS = ["09:00", "10:00", "11:00", "12:00", "16:00"];
+  const P6_BUSY = ["Ana P.", "Luis G.", "Sara V.", "Tomás R.", "Elena C.", "Iván D.", "Nora F.", "Raúl M.", "Julia B.", "Óscar L.", "Paula N.", "Hugo S.", "Irene T.", "Marta Q.", "Sergio A.", "Laura E."];
+  // Lo que ya estaba libre y las citas que se caen (fila-columna).
+  const P6_EMPTY = ["0-2", "1-4", "2-0", "2-3", "3-1", "4-2", "4-4", "0-4", "3-3"];
+  const P6_LOST = ["0-1", "1-2", "2-4", "3-0", "4-1", "1-0"];
+  const P6_BACK = [
+    ["PR", "Pedro R.", "último control: marzo"], ["LM", "Lucía M.", "último control: febrero"], ["JC", "Javier C.", "presupuesto: 21 días"],
+    ["RM", "Rosa M.", "no vino el martes"], ["CS", "Carla S.", "último control: enero"], ["MT", "Mario T.", "presupuesto: 14 días"],
+    ["AV", "Andrea V.", "control vencido"], ["GL", "Gabriel L.", "no vino el jueves"], ["SF", "Sofía F.", "presupuesto en pausa"],
+    ["DN", "Daniel N.", "control vencido"], ["VR", "Valeria R.", "último control: abril"], ["FT", "Fernando T.", "presupuesto: 9 días"],
+    ["BM", "Beatriz M.", "control vencido"], ["EC", "Emilio C.", "no vino el lunes"], ["KP", "Karla P.", "último control: mayo"],
+  ];
+  function p6Build(layer) {
+    const sc = layer.querySelector(".p6sc");
+    sc.innerHTML = `<div class="p6cal"><div class="p6cal-h"><b>Agenda · semana del 20</b><span>Dra. Ana · Unidad dental 1</span></div><div class="p6grid"></div></div><div class="p6beam"></div><div class="p6drift"><h3>No volvieron</h3></div>`;
+    const grid = sc.querySelector(".p6grid");
+    grid.innerHTML = "<span></span>" + P6_DAYS.map(d => `<span class="d">${d}</span>`).join("");
+    const slots = {}; let k = 0;
+    P6_HOURS.forEach((h, r) => { grid.insertAdjacentHTML("beforeend", `<span class="h">${h}</span>`); P6_DAYS.forEach((d, c) => { const key = r + "-" + c, n = el("div", "p6slot"); grid.appendChild(n); const o = { n, d, h, name: null }; if (!P6_EMPTY.includes(key)) o.name = P6_BUSY[k++ % P6_BUSY.length]; slots[key] = o; }); });
+    const busy = (key) => { const o = slots[key]; o.n.className = "p6slot"; o.n.style.removeProperty("--c"); o.n.innerHTML = `${o.name}<small>${o.h} · control</small>`; };
+    const empty = (key) => { const o = slots[key]; o.n.className = "p6slot empty"; o.n.textContent = "Libre"; };
+    const hole = (key) => { const o = slots[key]; o.n.className = "p6slot hole"; o.n.textContent = "Libre"; };
+    const counter = layer.querySelector("[data-p6count]");
+    const drift = sc.querySelector(".p6drift");
+    const card = (p, cls = "") => { const c = el("div", "p6pt " + cls, `<span class="av">${p[0]}</span><b>${p[1]}</b><span>${p[2]}</span>`); drift.appendChild(c); return c; };
+    const scale = () => stage.getBoundingClientRect().width / 1920;
+    const box = (node) => { const r = node.getBoundingClientRect(), q = sc.getBoundingClientRect(), s = scale(); return { x: (r.left - q.left) / s, y: (r.top - q.top) / s, w: r.width / s, h: r.height / s }; };
+    return { sc, slots, busy, empty, hole, counter, drift, card, box, beam: sc.querySelector(".p6beam"), head: sc.querySelector(".p6cal-h") };
+  }
+  const p6wait = (ms) => new Promise(res => later(res, ms));
+  const p6anim = (ms, f) => new Promise(res => { const t0 = performance.now(), D = reduce ? 1 : ms; loop((now) => { const p = Math.min(1, (now - t0) / D); f(p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2); if (p < 1) return true; res(); return false; }); });
+
+  scenes.p6prob = async (layer) => {
+    const w = p6Build(layer);
+    Object.keys(w.slots).forEach(key => (P6_EMPTY.includes(key) ? w.empty(key) : w.busy(key)));
+    const cards = P6_BACK.slice(0, 6).map(p => w.card(p));
+    let holes = P6_EMPTY.length; w.counter.textContent = holes;
+    await p6wait(900);
+    for (let i = 0; i < P6_LOST.length; i++) {
+      const o = w.slots[P6_LOST[i]];
+      o.n.innerHTML = `${o.name}<small>${i % 2 ? "no vino" : "canceló"}</small>`;
+      await p6wait(300); o.n.classList.add("gone"); await p6wait(420);
+      w.hole(P6_LOST[i]); w.counter.textContent = ++holes;
+      cards[i].classList.add("cold");
+      await p6wait(260);
+    }
+  };
+
+  scenes.p6ans = async (layer) => {
+    const w = p6Build(layer);
+    Object.keys(w.slots).forEach(key => (P6_EMPTY.includes(key) ? w.empty(key) : P6_LOST.includes(key) ? w.hole(key) : w.busy(key)));
+    // Primero vuelven las citas que se cayeron y después se llena lo que ya estaba libre.
+    const order = [...P6_LOST, ...P6_EMPTY];
+    const queue = P6_BACK.slice();
+    let cards = queue.splice(0, 6).map(p => w.card(p, "cold"));
+    w.counter.textContent = 0;
+    await p6wait(700);
+    w.beam.style.opacity = 1;
+    await p6anim(1300, (e) => { w.beam.style.left = (650 + e * 300) + "px"; });
+    w.beam.style.opacity = 0;
+    cards.forEach(c => { c.classList.remove("cold"); c.classList.add("seen"); });
+    await p6wait(500);
+    for (let i = 0; i < order.length; i++) {
+      const c = cards.shift(), o = w.slots[order[i]], slow = i < 3;
+      const cb = w.box(c);
+      if (slow) {
+        const seen = el("span", "p6seen", "Argos lo vio"); seen.style.left = (cb.x - 10) + "px"; seen.style.top = (cb.y - 12) + "px"; w.sc.appendChild(seen);
+        await p6wait(400);
+        const bub = el("div", "p6bubble", `<small>Sofi · WhatsApp</small>Hola, ${c.querySelector("b").textContent.split(" ")[0]}. ¿Te agendo el ${o.d} a las ${o.h}?`);
+        bub.style.left = (cb.x - 400) + "px"; bub.style.top = (cb.y - 6) + "px"; w.sc.appendChild(bub);
+        c.classList.remove("seen"); c.classList.add("warm");
+        await p6wait(1100); bub.remove(); seen.remove();
+      } else { c.classList.remove("seen"); c.classList.add("warm"); }
+      // La tarjeta vuela a su hueco de la agenda.
+      const ob = w.box(o.n), f = c.cloneNode(true);
+      f.className = "p6pt warm p6fly"; f.style.left = cb.x + "px"; f.style.top = cb.y + "px"; f.style.width = cb.w + "px"; w.sc.appendChild(f);
+      c.classList.add("out");
+      const sx = cb.x, sy = cb.y, tx = ob.x + ob.w / 2 - cb.w / 2, ty = ob.y + ob.h / 2 - cb.h / 2;
+      await p6anim(slow ? 900 : 520, (e) => { f.style.left = (sx + (tx - sx) * e) + "px"; f.style.top = (sy + (ty - sy) * e - Math.sin(e * Math.PI) * 110) + "px"; f.style.transform = `scale(${1 - 0.45 * e})`; f.style.opacity = String(1 - 0.6 * e); });
+      f.remove(); c.remove();
+      const name = f.querySelector("b").textContent, why = f.querySelector("span:last-child").textContent;
+      o.n.className = "p6slot back"; o.n.style.setProperty("--c", C.sky);
+      o.n.innerHTML = `${name}<small>${o.h} · ${why.startsWith("presupuesto") ? "tratamiento" : "control"}</small>`;
+      w.counter.textContent = i + 1;
+      // Entra el siguiente paciente que Argos encontró.
+      const next = queue.shift(); if (next) { const n = w.card(next, "seen"); cards.push(n); }
+      if (!slow) await p6wait(120);
+    }
+    w.head.insertAdjacentHTML("beforeend", "<em>Semana llena ✓</em>");
+  };
+
+  // 7 · El caos de armar el reporte a mano: descargas, búsquedas, versiones, errores y el reloj.
+  const p7fmt = (m) => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+  const p7sheet = (name, seed) => {
+    const ERR = ["#¡REF!", "#N/A", "#¡DIV/0!", "#¡VALOR!"];
+    let rows = "<tr><td>Sede</td><td>Cobrado</td><td>Citas</td><td>Faltas</td></tr>";
+    for (let r = 0; r < 5; r++) rows += `<tr><td>${["Centro", "Norte", "Centro", "Norte", "Total"][r]}</td>` + [0, 1, 2].map(c => ((r * 3 + c + seed) % 4 === 0) ? `<td class="err">${ERR[(r + c + seed) % 4]}</td>` : `<td>${(1000 + ((r + 2) * (c + 5) * 137 + seed * 311) % 9000).toLocaleString("es")}</td>`).join("") + "</tr>";
+    return `<div class="bar"><i></i><i></i><i></i>${name}</div><table>${rows}</table>`;
+  };
+  scenes.p7prob = async (layer) => {
+    const sc = layer.querySelector(".p7sc"), big = layer.querySelector("[data-p7count]");
+    sc.innerHTML = "";
+    const clock = el("div", "p7clock", "vie 15:00<small>empieza el reporte</small>"); sc.appendChild(clock);
+    let m = 0, z = 1;
+    const tickTo = async (mins, ms) => { const steps = 8; for (let i = 0; i < steps; i++) { m += mins / steps; const t = 15 * 60 + Math.round(m); big.textContent = p7fmt(Math.round(m)); clock.innerHTML = `vie ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}<small>${t > 19 * 60 ? "la clínica cerró hace horas" : "armando el reporte"}</small>`; await p6wait(ms / steps); } };
+    const win = (cls, html, x, y, w, r) => { const n = el("div", "p7w " + cls, html); n.style.left = x + "px"; n.style.top = y + "px"; n.style.width = w + "px"; n.style.setProperty("--r", r + "deg"); n.style.zIndex = ++z; sc.appendChild(n); return n; };
+    // 1. Descargar de cada sistema; una descarga falla.
+    const dl = win("web", `<div class="bar"><i></i><i></i><i></i>Descargas</div><div class="body">
+      <div class="p7dl"><span>agenda_septiembre.csv</span><span>listo</span><div class="pb"><i></i></div></div>
+      <div class="p7dl"><span>caja_sede_centro.xlsx</span><span>listo</span><div class="pb"><i></i></div></div>
+      <div class="p7dl"><span class="bad">caja_sede_norte.xlsx</span><span class="bad">falló</span><div class="pb"><i></i></div></div>
+      <div class="p7dl"><span>presupuestos_export (2).csv</span><span>listo</span><div class="pb"><i></i></div></div></div>`, 10, 70, 430, -2);
+    const bars = [...dl.querySelectorAll(".pb i")];
+    for (let i = 0; i < bars.length; i++) { await p6wait(200); bars[i].style.width = i === 2 ? "38%" : "100%"; await tickTo(12, 420); }
+    // 2. Buscar el archivo bueno entre muchas versiones.
+    const fx = win("files", `<div class="bar"><i></i><i></i><i></i>Documentos › Reportes</div><div class="body"><div class="p7search">Buscar: reporte final</div>
+      <div class="p7file">reporte_final.xlsx</div><div class="p7file">reporte_final (1).xlsx</div><div class="p7file">reporte_final_v2.xlsx</div><div class="p7file">reporte_final_v2_BUENO.xlsx</div><div class="p7file q">reporte_final_v3_ahora_si.xlsx · ¿cuál era?</div></div>`, 330, 40, 400, 3);
+    await tickTo(40, 1300);
+    // 3. Las hojas se apilan, con errores.
+    const sheets = ["reporte_septiembre.xlsx", "copia_de_caja.xlsx", "reporte_sep_FINAL.xlsx", "agenda_exportada (3).csv"];
+    for (let i = 0; i < sheets.length; i++) {
+      win("", p7sheet(sheets[i], i), 120 + i * 70, 260 + i * 60, 470, (i % 2 ? 2 : -2) * (1 + i * 0.6));
+      const cp = el("div", "p7cp", i % 2 ? "Ctrl+V" : "Ctrl+C"); cp.style.left = (90 + i * 150) + "px"; cp.style.top = (230 + i * 70) + "px"; cp.style.zIndex = ++z; sc.appendChild(cp);
+      await tickTo(55, 700);
+    }
+    // 4. Pedir por WhatsApp lo que falta.
+    win("chat", `<div class="bar"><i></i><i></i><i></i>WhatsApp · Recepción</div><div class="body"><div class="p7msg me">¿Me pasas lo de caja de la sede Norte?</div><div class="p7msg">Ya te lo mandé por correo 😅</div><div class="p7msg me">No me llegó 🙃</div></div>`, 640, 300, 330, 4);
+    await tickTo(50, 1100);
+    // 5. Notas y cifras que no cuadran.
+    const notes = [["¿Por qué no cuadra con la caja?", 690, 560, -4], ["Falta sumar la sede Norte", 40, 620, 5], ["Revisar faltas de agosto", 520, 650, -3]];
+    for (const [t, x, y, r] of notes) { const n = el("div", "p7note", t); n.style.left = x + "px"; n.style.top = y + "px"; n.style.setProperty("--r", r + "deg"); n.style.zIndex = ++z; sc.appendChild(n); await tickTo(35, 600); }
+    await tickTo(57, 900);
+    clock.innerHTML = clock.innerHTML.replace(/<small>.*<\/small>/, "<small>y todavía no dice qué hacer</small>");
+  };
+
+  scenes.p7ans = async (layer) => {
+    const sc = layer.querySelector(".p7sc");
+    sc.innerHTML = "";
+    const a = el("div", "p7argos", `<div class="who"><b>Argos</b><span>agente administrador</span></div><div class="p7ask"><span class="ic">Pregúntale ›</span><span class="q"></span></div><div class="out"></div>`);
+    sc.appendChild(a);
+    const q = a.querySelector(".q"), text = "¿Cuánto cobramos en septiembre por sede?";
+    await p6wait(600);
+    for (let i = 1; i <= text.length; i++) { q.textContent = text.slice(0, i); await p6wait(38); }
+    q.classList.add("done");
+    const out = a.querySelector(".out");
+    out.innerHTML = '<div class="p7think"><i></i><i></i><i></i></div>'; await p6wait(1100);
+    out.innerHTML = `<div class="p7rep"><div class="t"><b>Cobrado en septiembre, por sede</b><span>septiembre frente a agosto</span></div><div class="tot">$ 18.420<small>8 % más que en agosto</small></div><div class="p7bars"><div><i data-h="92"></i><span>Centro · 11.200</span></div><div><i class="hot" data-h="58"></i><span>Norte · 7.220</span></div></div></div>`;
+    await p6wait(120); out.querySelectorAll(".p7bars i").forEach(i => { i.style.height = i.dataset.h + "%"; });
+    await p6wait(1200);
+    out.querySelector(".p7rep").insertAdjacentHTML("beforeend", `<div class="p7say"><span><b style="color:var(--amber)">Argos:</b> la sede Norte bajó 6 %: faltaron 9 citas y «Reprogramar tras una inasistencia» está apagada.</span><span class="go">Ver qué hacer</span></div>`);
+  };
+
+  // 8 · Lucía en el mostrador: seis lugares, la palabra exacta y el reloj; después, el buscador.
+  const p8fmt = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+  const p8type = async (node, text, ms) => { node.classList.remove("done"); node.textContent = ""; for (let i = 1; i <= text.length; i++) { node.textContent = text.slice(0, i); await p6wait(ms); } node.classList.add("done"); };
+  const p8desk = (sc, text) => {
+    sc.innerHTML = `<div class="p8desk"><span class="av">LT</span><div class="who"><span class="l">Lucía, en el mostrador</span><div class="bub in"></div></div><div class="p8queue"><span class="l">En espera</span><div class="p8qs"></div><span class="ring" hidden>☏ 2 llamadas sin contestar</span></div></div><div class="p8area"></div>`;
+    sc.querySelector(".bub").textContent = text;
+    return { bub: sc.querySelector(".bub"), qs: sc.querySelector(".p8qs"), ring: sc.querySelector(".ring"), area: sc.querySelector(".p8area") };
+  };
+  const P8Q = "¿Cuánto me falta pagar de la ortodoncia? ¿Y mi radiografía?";
+  scenes.p8prob = async (layer) => {
+    const sc = layer.querySelector(".p8sc"), big = layer.querySelector("[data-p8count]");
+    const { qs, ring, area } = p8desk(sc, P8Q);
+    let secs = 0; big.textContent = "0:00";
+    const clock = (to, ms) => { const from = secs; secs = to; return p6anim(ms, (e) => { big.textContent = p8fmt(from + (to - from) * e); }); };
+    const queue = (n) => { while (qs.children.length < n) qs.appendChild(el("i", "", ["MR", "JP", "AC"][qs.children.length])); };
+    const win = (cls, title, x, y, r, body) => { const w = el("div", "p8w " + cls, `<div class="bar"><i></i><i></i><i></i><span>${title}</span></div><div class="body">${body}</div>`); w.style.left = x + "px"; w.style.top = y + "px"; w.style.setProperty("--r", r + "deg"); area.appendChild(w); return w; };
+    await p6wait(900);
+    // Pacientes: sin la tilde no aparece, y con el apellido primero tampoco.
+    const w1 = win("", "Pacientes", 0, 0, -1.5, `<div class="sb">⌕ <span class="q"></span></div><div class="out"></div>`);
+    const q1 = w1.querySelector(".q"), o1 = w1.querySelector(".out");
+    await p6wait(350);
+    let t = clock(35, 1300); await p8type(q1, "lucia", 120);
+    o1.innerHTML = `<div class="no">Sin resultados para «lucia»</div><span class="note">Está guardada como «Lucía», con tilde.</span>`; await t; queue(1);
+    await p6wait(1100);
+    t = clock(70, 1400); await p8type(q1, "torres lucia", 70);
+    o1.innerHTML = `<div class="no">Sin resultados para «torres lucia»</div><span class="note">Está como «Lucía Torres».</span>`; await t;
+    await p6wait(1000);
+    o1.innerHTML = `<div class="pg">Revisando la lista a mano · página <b>1</b> de 38</div>`;
+    const pg = o1.querySelector("b"); t = clock(140, 1900);
+    for (let p = 2; p <= 12; p++) { await p6wait(150); pg.textContent = p; }
+    o1.insertAdjacentHTML("beforeend", `<div class="hitrow">Lucía Torres · +51 992 154 378</div>`); await t;
+    await p6wait(600);
+    // Presupuestos: otra pantalla con otros filtros.
+    const w2 = win("", "Presupuestos", 480, 24, 2, `<div class="filters"><span>Paciente ▾</span><span>Fecha ▾</span><span>Estado ▾</span><span>Sede ▾</span></div><div class="out"></div>`);
+    t = clock(205, 1900);
+    for (const f of w2.querySelectorAll(".filters span")) { await p6wait(380); f.classList.add("on"); }
+    w2.querySelector(".out").innerHTML = `<div class="hitrow">Ortodoncia fija · USD 1.800</div><span class="note">¿Y cuánto pagó? Eso está en otro lado.</span>`; await t;
+    await p6wait(800);
+    // El Excel de pagos, con el nombre escrito de otra forma.
+    const w3 = win("xlw", "pagos_2026.xlsx", 30, 230, -1, `<div class="sb">Buscar: <span class="q"></span></div><div class="out"></div>`);
+    const o3 = w3.querySelector(".out");
+    t = clock(285, 2200); await p8type(w3.querySelector(".q"), "Lucía", 120);
+    o3.innerHTML = `<div class="no">No se encontró «Lucía»</div><span class="note">La anotaron como «LUCIA TORRES».</span>`;
+    await p6wait(1000); ring.hidden = false; queue(2);
+    o3.innerHTML = `<table><tr><td>12/03</td><td>LUCIA TORRES</td><td>500</td></tr><tr><td>18/04</td><td>L. TORRES</td><td>440</td></tr><tr><td>20/05</td><td>LUCIA T.</td><td>440</td></tr><tr><td colspan="2">Debe</td><td class="err">#¡REF!</td></tr></table>`; await t;
+    await p6wait(700);
+    // WhatsApp: el voucher, tres semanas atrás.
+    const w4 = win("wa", "WhatsApp · recepción", 490, 270, 2.5, `<div class="msgs"><span class="d">hoy</span><div class="m">¿Tienen cita el sábado?</div><div class="m">Ya les transferí</div></div>`);
+    const d4 = w4.querySelector(".d"); t = clock(370, 2000);
+    for (const day of ["ayer", "hace 1 semana", "hace 2 semanas", "hace 3 semanas"]) { await p6wait(430); d4.textContent = day; }
+    w4.querySelector(".msgs").insertAdjacentHTML("beforeend", `<div class="m pic">[foto] voucher_lucia.jpg</div>`); await t;
+    await p6wait(600);
+    // La carpeta de radiografías: archivos sin el nombre de nadie.
+    const w5 = win("", "Radiografías › 2026 › marzo", 220, 420, -2.5, `<div class="files"></div><span class="note warn">¿Cuál es la de Lucía?</span>`);
+    const fl = w5.querySelector(".files"); t = clock(460, 2100);
+    for (const f of ["IMG_2231.jpg", "IMG_2232.jpg", "escaneo (4).pdf", "IMG_2240.jpg", "pano_marzo.jpg", "IMG_2241.jpg"]) { await p6wait(230); fl.insertAdjacentHTML("beforeend", `<span>▣ ${f}</span>`); }
+    await t; queue(3);
+    await p6wait(900);
+    sc.insertAdjacentHTML("beforeend", `<div class="p8stamp">Si pasa 20 veces al día: <b>2 h 33 min</b> buscando cada día · <b>56 h</b> al mes</div>`);
+  };
+
+  // Íconos de lucide, los mismos de la ventana real.
+  const P8I = {
+    search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    filter: '<path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/>',
+    persona: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+    cita: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>',
+    documento: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    dinero: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+    servicio: '<path d="m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"/><path d="M9.586 5.586A2 2 0 0 0 8.172 5H3a1 1 0 0 0-1 1v5.172a2 2 0 0 0 .586 1.414L8.29 18.29a2.426 2.426 0 0 0 3.42 0l3.58-3.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="6.5" cy="9.5" r=".5"/>',
+    respuesta: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  };
+  const p8svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${P8I[k]}</svg>`;
+  const p8tile = (k, sm, cls = k) => `<span class="tile ${cls}${sm ? " sm" : ""}">${p8svg(k)}</span>`;
+  const p8own = (k, title, badge, detail, enter, d = 0) => `<div class="own${enter ? " sel" : ""}" style="animation-delay:${d}ms">${p8tile(k, false, k === "help" ? "help" : k)}<span class="tx"><span class="t1">${title}${badge ? `<span class="badge">${badge}</span>` : ""}</span>${detail ? `<span class="t2">${detail}</span>` : ""}</span>${enter ? `<span class="enter">Enter · ${enter}</span>` : ""}</div>`;
+  const p8kid = (k, kind, title, meta, d) => `<div class="kid" style="animation-delay:${d}ms"><span class="ln"></span>${p8tile(k, true)}<span class="k">${kind}</span><span class="t">${title}</span><span class="m">${meta}</span></div>`;
+  scenes.p8ans = async (layer) => {
+    const sc = layer.querySelector(".p8sc"), big = layer.querySelector("[data-p8count]");
+    const { bub, qs, area } = p8desk(sc, P8Q);
+    ["MR", "JP", "AC"].forEach(n => qs.appendChild(el("i", "", n))); sc.querySelector(".ring").hidden = false;
+    big.textContent = "0:00";
+    const say = (text) => { bub.classList.remove("in"); void bub.offsetWidth; bub.textContent = text; bub.classList.add("in"); };
+    await p6wait(700);
+    const ck = el("div", "p8ck", `<div class="in">${p8svg("search")}<span class="q"></span><span class="flt">${p8svg("filter")}Filtrar</span><kbd>Esc</kbd></div><div class="list"></div><div class="ft"><span>↑ ↓ moverse · Enter abrir · Esc cerrar</span><span>Ctrl K abre y cierra</span></div>`);
+    area.appendChild(ck);
+    const q = ck.querySelector(".q"), list = ck.querySelector(".list");
+    const why = (html) => { sc.querySelector(".p8why")?.remove(); const n = el("div", "p8why", html); n.style.top = (190 + ck.offsetHeight + 20) + "px"; sc.appendChild(n); };
+    await p6wait(800);
+    const clock = p6anim(1100, (e) => { big.textContent = p8fmt(4 * e); });
+    await p8type(q, "lucia", 110); await clock;
+    list.innerHTML = p8own("persona", "Lucía Torres", "Paciente", "+51 992 154 378", "Abrir ficha")
+      + p8kid("dinero", "Debe", "Ortodoncia fija", "USD 420", 110)
+      + p8kid("dinero", "Comprobante", "B001-000231", "USD 440 · 20 may", 220)
+      + p8kid("documento", "Documento", "Radiografía panorámica", "12 mar", 330)
+      + p8kid("cita", "Cita", "Evaluación con la Dra. Ana", "vie 16:30", 440)
+      + `<div class="more" style="animation-delay:550ms"><span class="ln"></span>+ 3 más de Lucía Torres</div>`
+      + p8own("persona", "Lucía Méndez", "Paciente", "+51 987 410 552", "", 650);
+    why(`<b>sin tildes</b>«lucia» encuentra a «Lucía», y todo lo suyo aparece debajo de su nombre.`);
+    for (const n of [...qs.children]) { await p6wait(260); n.remove(); }
+    sc.querySelector(".ring").hidden = true;
+    await p6wait(2200);
+    say("¿Y cuánto cuesta una limpieza?");
+    await p6wait(1400);
+    list.innerHTML = ""; sc.querySelector(".p8why")?.remove();
+    await p8type(q, "limpieza", 90);
+    list.innerHTML = `<div class="grp">Por lo que quisiste decir</div>`
+      + p8own("servicio", "Profilaxis", "Servicio", "USD 35", "Abrir")
+      + p8own("respuesta", "¿Cada cuánto me hago una limpieza?", "Respuesta del agente", "La respuesta que da Sofi", "", 140)
+      + `<div style="height:10px"></div>`
+      + p8own("help", "Preguntarle a Ayuda: «limpieza»", "", "Abre Ayuda con esta pregunta", "", 280);
+    why(`<b>por significado</b>No escribiste «Profilaxis». La encontró igual.`);
+    await p6wait(2200); say("Perfecto, gracias.");
+  };
+
+  // 11 · Problema: el uso baja mes a mes y el cobro es el mismo; cada cuota cae en el total.
+  scenes.p9prob = async () => {
+    const sc = document.getElementById("p9scene");
+    const M = [["Julio", "Mes normal", 72], ["Agosto", "Vacaciones, poca agenda", 28], ["Septiembre", "Una sede cerrada por obras", 34], ["Octubre", "Nadie usó el módulo nuevo", 12]];
+    sc.innerHTML = '<div class="p9grid">' + M.map(([m, why]) => `<div class="p9m"><b>${m}</b><span>${why}</span><div class="p9use"><span>Lo que usaste</span><span class="pct">0 %</span></div><div class="p9bar"><i></i></div></div>`).join("")
+      + '</div><div class="p9tot"><span class="dl">$</span><div><span>Pagado en 4 meses</span><b>USD 0</b></div><em>Uses mucho o casi nada, pagas lo mismo.</em></div>';
+    const cards = [...sc.querySelectorAll(".p9m")], tot = sc.querySelector(".p9tot b"), dl = sc.querySelector(".p9tot .dl");
+    let paid = 0;
+    await p6wait(700);
+    for (let i = 0; i < M.length; i++) {
+      const c = cards[i]; c.classList.add("on");
+      c.querySelector(".p9bar i").style.width = M[i][2] + "%"; c.querySelector(".pct").textContent = M[i][2] + " %";
+      await p6wait(750);
+      c.appendChild(el("span", "p9chg", "−USD 150"));
+      await p6wait(400);
+      // La moneda sale del cobro del mes y cae en el total.
+      const sr = sc.getBoundingClientRect(), k = sr.width / sc.offsetWidth, cr = c.getBoundingClientRect(), dr = dl.getBoundingClientRect();
+      const coin = el("div", "p9coin", "$");
+      coin.style.left = (cr.right - sr.left) / k - 90 + "px"; coin.style.top = (cr.top - sr.top) / k + 70 + "px"; sc.appendChild(coin);
+      await p6wait(60);
+      coin.style.left = (dr.left - sr.left) / k + 6 + "px"; coin.style.top = (dr.top - sr.top) / k + 6 + "px"; coin.style.transform = "scale(.8) rotate(360deg)";
+      await p6wait(900);
+      coin.remove(); dl.classList.remove("hit"); void dl.offsetWidth; dl.classList.add("hit");
+      const from = paid; paid += 150;
+      await p6anim(400, (e) => { tot.textContent = "USD " + Math.round(from + 150 * e); });
+      c.classList.remove("on");
+      await p6wait(300);
+    }
+  };
+
+  // 10 · Respuesta: interruptores.
+  scenes.switches = (layer) => {
+    const sws = [...layer.querySelectorAll(".sw")];
+    sws.forEach(s => s.classList.remove("lit"));
+    sws.forEach((s, i) => later(() => s.classList.add("lit"), 1000 + i * 380));
+  };
+
+  // 11 · El total del día que cuenta.
+  // 11 · Cada cobro, con su moneda: los pasos se cumplen y recién ahí cae la moneda del agente.
+  scenes.vals = async (layer) => {
+    const cards = [...layer.querySelectorAll(".res")];
+    cards.forEach(c => { c.classList.remove("paid"); c.querySelectorAll(".st").forEach(x => x.classList.remove("on")); c.querySelector(".coin11").classList.remove("on"); });
+    await p6wait(1300);
+    for (const c of cards) {
+      const st = c.querySelectorAll(".st");
+      st[0].classList.add("on"); await p6wait(650);
+      st[1].classList.add("on"); await p6wait(550);
+      c.querySelector(".coin11").classList.add("on"); c.classList.add("paid");
+      await p6wait(700);
+    }
+  };
+
+  // 11 · Un día: solo las filas con resultado dejan moneda; cae en el total.
+  scenes.day = async (layer) => {
+    const out = document.getElementById("dayTotal"), day = layer.querySelector(".day");
+    const rows = [...day.querySelectorAll(".row:not(.total)")];
+    out.textContent = "USD 0,00"; day.querySelectorAll(".coin12").forEach(n => n.remove()); rows.forEach(r => r.classList.remove("lit"));
+    const fmt = (v) => "USD " + v.toFixed(2).replace(".", ",");
+    let sum = 0;
+    await p6wait(2100);
+    for (const r of rows) {
+      const price = r.querySelector(".price"), m = price.textContent.match(/[\d,]+/);
+      const dot = r.querySelector(".dot"), c = dot ? getComputedStyle(dot).color : "#4fc3d7";
+      r.style.setProperty("--c", c); r.classList.add("lit");
+      if (!m) { await p6wait(500); r.classList.remove("lit"); continue; }
+      const v = parseFloat(m[0].replace(",", ".")), dr = day.getBoundingClientRect(), k = dr.width / day.offsetWidth;
+      const pr = price.getBoundingClientRect(), tr = out.getBoundingClientRect();
+      const coin = el("div", "coin12", "$"); coin.style.setProperty("--c", c);
+      coin.style.left = (pr.right - dr.left) / k - 40 + "px"; coin.style.top = (pr.top - dr.top) / k + "px"; day.appendChild(coin);
+      await p6wait(60);
+      coin.style.left = (tr.right - dr.left) / k - 40 + "px"; coin.style.top = (tr.top - dr.top) / k + "px"; coin.style.transform = "rotate(360deg)";
+      await p6wait(820);
+      coin.remove(); out.classList.remove("hit"); void out.offsetWidth; out.classList.add("hit");
+      const from = sum; sum += v;
+      await p6anim(350, (e) => { out.textContent = fmt(from + v * e); });
+      r.classList.remove("lit");
+      await p6wait(200);
+    }
+  };
+
+  // 12 · El mismo caso: el software de registro frente a los agentes que orquestan.
+  scenes.duo = () => {
+    const olds = [...document.querySelectorAll("#stepsOld .so")], ia = document.getElementById("iaChip");
+    const clock = document.getElementById("oldClock"), stepsN = document.getElementById("oldSteps"), queue = document.getElementById("oldQueue");
+    olds.forEach(s => { s.className = "so"; s.querySelector(".bx").textContent = ""; });
+    ia.classList.remove("show"); stepsN.textContent = "Pasos de tu equipo: 0"; queue.textContent = "En la cola: 0 casos más";
+    const clocks = ["09:00", "09:20", "09:35", "10:05", "13:40", "13:55", "14:10"];
+    clock.textContent = clocks[0];
+    olds.forEach((s, i) => {
+      later(() => { s.classList.add("now"); if (i === 2) ia.classList.add("show"); }, 900 + i * 1500);
+      later(() => {
+        s.classList.remove("now"); s.classList.add("done"); s.querySelector(".bx").textContent = "✓";
+        stepsN.textContent = "Pasos de tu equipo: " + (i + 1); clock.textContent = clocks[i + 1];
+        queue.textContent = "En la cola: " + (i + 1) + (i ? " casos más" : " caso más");
+      }, 900 + i * 1500 + 1300);
+    });
+
+    // A la derecha: cada caso entra, pasa por los agentes que hacen falta y sale resuelto; detrás viene el siguiente.
+    const box = document.getElementById("orch2"), log = document.getElementById("orchLog"), doneEl = document.getElementById("orchDone");
+    log.innerHTML = ""; doneEl.textContent = "0"; box.innerHTML = "";
+    const AGS = { argos: ["Argos", "administración", C.amber, 0], sofi: ["Sofi", "recepción", C.sky, 1], clio: ["Clío", "clínica", C.mint, 2] };
+    const W = box.offsetWidth || 740, gap = (W - 3 * 220) / 2;
+    const nodes = {};
+    for (const [k, [name, role, c, i]] of Object.entries(AGS)) {
+      const n = el("div", "ag2", `<span class="glow2"></span><b>${name}</b><span>${role}</span>`); n.style.setProperty("--c", c); n.style.left = i * (220 + gap) + "px"; box.appendChild(n); nodes[k] = n;
+    }
+    const CASES = [
+      ["Pedro", [["argos", "vio que no vino a su control"], ["sofi", "le escribió y agendó el jueves 17:30"], ["clio", "dejó lista su historia para la consulta"]]],
+      ["Lucía", [["sofi", "contestó su mensaje de las 22:47 y la agendó"]]],
+      ["Mario", [["clio", "propuso su nota; la Dra. Ana la confirmó"], ["argos", "dejó programado su control de 6 meses"]]],
+      ["Rosa", [["argos", "vio su presupuesto sin respuesta"], ["sofi", "lo retomó y Rosa lo aceptó"]]],
+      ["Ana", [["sofi", "movió su cita al lunes"]]],
+      ["Jorge", [["argos", "vio un saldo pendiente"], ["sofi", "le envió el enlace de pago"]]],
+      ["Elena", [["clio", "preparó su receta para firmar"]]],
+    ];
+    const say = (k, who, what) => { const c = AGS[k][2]; log.appendChild(el("div", "", `<span class="dot" style="color:${c}"></span><b style="color:${c}; font-weight:700">${AGS[k][0]}</b><span>${who}: ${what}</span>`)); while (log.children.length > 3) log.firstChild.remove(); };
+    const at = (k, tok) => ({ left: nodes[k].offsetLeft + 110 - tok.offsetWidth / 2, top: 150 });
+    const place = (tok, p) => { tok.style.left = p.left + "px"; tok.style.top = p.top + "px"; };
+    let done = 0, idx = 0;
+    const run = async () => {
+      const [who, steps] = CASES[idx++ % CASES.length];
+      const tok = el("div", "tok2", who); box.appendChild(tok);
+      place(tok, { left: -tok.offsetWidth - 20, top: 150 });
+      await p6wait(40);
+      for (const [k, what] of steps) {
+        place(tok, at(k, tok)); await p6wait(430);
+        nodes[k].classList.add("grab"); tok.style.setProperty("--c", AGS[k][2]); tok.classList.add("ok"); say(k, who, what);
+        await p6wait(idx === 1 ? 900 : 420);
+        nodes[k].classList.remove("grab"); tok.classList.remove("ok");
+      }
+      place(tok, { left: W + 20, top: 150 }); done++; doneEl.textContent = done;
+      later(() => tok.remove(), 500);
+      // El primer caso se cuenta con calma; después fluyen rápido, uno detrás de otro.
+      later(run, idx === 1 ? 500 : 250);
+    };
+    later(run, 900);
+  };
+
+  // 13 · Cifras que suben.
+  scenes.perks = (layer) => {
+    const nums = [...layer.querySelectorAll("[data-count]")], t0 = performance.now() + (reduce ? 0 : 400);
+    loop((now) => {
+      let done = true;
+      nums.forEach((n, i) => {
+        const to = +n.dataset.count, p = Math.max(0, Math.min(1, (now - t0 - i * 150) / 1300));
+        if (p < 1) done = false;
+        n.textContent = (n.dataset.prefix || "") + Math.round(to * (1 - Math.pow(1 - p, 3))) + (n.dataset.suffix || "");
+      });
+      return !done;
+    });
+  };
+
+  /* ---------- Controles ---------- */
+  document.getElementById("next").addEventListener("click", (e) => { e.stopPropagation(); next(); });
+  document.getElementById("prev").addEventListener("click", (e) => { e.stopPropagation(); prev(); });
+  const notesBtn = document.getElementById("notesBtn"), notesPanel = document.getElementById("notesPanel");
+  const toggleNotes = () => { notesPanel.hidden = !notesPanel.hidden; notesBtn.setAttribute("aria-pressed", String(!notesPanel.hidden)); };
+  notesBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleNotes(); });
+  document.getElementById("full").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch (err) {}
+  });
+  addEventListener("keydown", (e) => {
+    if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); next(); }
+    else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); prev(); }
+    else if (e.key === "Home") show(0, 0);
+    else if (e.key === "End") show(slides.length - 1, 0);
+    else if (e.key === "n" || e.key === "N") toggleNotes();
+    else if (e.key === "f" || e.key === "F") document.getElementById("full").click();
+  });
+  document.getElementById("viewport").addEventListener("click", (e) => { (e.clientX > innerWidth * 0.3 ? next : prev)(); });
+  let sx = null;
+  addEventListener("touchstart", e => { sx = e.touches[0].clientX; }, { passive: true });
+  addEventListener("touchend", e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; if (Math.abs(dx) > 40) (dx < 0 ? next : prev)(); sx = null; });
+
+  const m = /^#p(\d+)$/.exec(location.hash);
+  show(m ? +m[1] - 1 : 0, 0, true);
+})();
+</script>
