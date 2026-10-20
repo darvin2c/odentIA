@@ -351,6 +351,13 @@
       "when": 1792520137440,
       "tag": "0049_el_modelo_de_decision_es_jev",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792531393358,
+      "tag": "0050_argos_vistas_del_negocio",
+      "breakpoints": true
     }
   ]
 }

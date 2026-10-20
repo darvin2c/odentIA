@@ -13,7 +13,7 @@ import { Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
-import { ArgosPanel, AskArgosField, useArgosConversation } from "../../components/reports/ask-argos"
+import { ArgosPanel, useArgosConversation } from "../../components/reports/ask-argos"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { AgentTab } from "../../components/reports/agent-tab"
 import { FinanceTab } from "../../components/reports/finance-tab"
@@ -186,7 +186,7 @@ function ReportsPage() {
               </ChoiceSelect>
             ) : null}
             {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
-            <AskArgosField conversation={argos} enabled={argosEnabled} />
+            {/* El campo de «Pregúntale a Argos» está oculto: el Argos de las vistas del negocio (ADR 0073) vuelve con su entrada nueva. */}
           </div>
 
           {head.isError ? (

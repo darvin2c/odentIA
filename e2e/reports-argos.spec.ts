@@ -14,7 +14,11 @@ import { gotoHydrated } from "./hydration"
  * respuesta en el Resumen, descargar, poner una meta y el resumen del lunes.
  * El modelo es el de demostración: entiende por palabras clave y no acredita a
  * ningún proveedor.
+ *
+ * El campo está oculto mientras el Argos de las vistas del negocio (ADR 0073)
+ * no tiene su entrada: sus recorridos se saltan y vuelven con ella.
  */
+const ARGOS_HIDDEN = "Campo de Argos oculto hasta su entrada nueva (ADR 0073)"
 
 async function observe(page: Page, info: TestInfo, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
@@ -60,6 +64,7 @@ async function csvOf(page: Page, click: () => Promise<void>): Promise<{ name: st
 
 for (const width of [1440, 390]) {
   test.describe(`Argos en Reportes a ${width}px`, () => {
+    test.skip(true, ARGOS_HIDDEN)
     test("pregunta, responde al lado con la cifra de la pestaña, se fija en el Resumen y se descarga", async ({ owner, fixtureDb }, info) => {
       await lastMonth(fixtureDb, owner)
       const page = owner.page
@@ -105,7 +110,7 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("lo que no sabe lo dice y ofrece enviarlo a odentIA; lo clínico no le toca", async ({ owner, fixtureDb }) => {
+test.skip("lo que no sabe lo dice y ofrece enviarlo a odentIA; lo clínico no le toca", async ({ owner, fixtureDb }) => {
   await lastMonth(fixtureDb, owner)
   const page = owner.page
   await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
@@ -124,7 +129,7 @@ test("lo que no sabe lo dice y ofrece enviarlo a odentIA; lo clínico no le toca
   await expect(panel.getByText(/Eso está en la historia clínica y no lo veo/)).toBeVisible()
 })
 
-test("con Argos apagado el campo lo dice; las cifras siguen", async ({ owner, fixtureDb }) => {
+test.skip("con Argos apagado el campo lo dice; las cifras siguen", async ({ owner, fixtureDb }) => {
   await lastMonth(fixtureDb, owner)
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
