@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { bigint, boolean, check, date, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import { bigint, boolean, check, date, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk } from "./crm.js"
 
@@ -24,6 +24,14 @@ export const reportQuestion = pgTable("report_question", {
    * decisión D2): se guarda la consulta, nunca el texto de la pregunta.
    */
   query: text("query"),
+  /**
+   * Lo que el modelo devolvió además de la consulta (`ArgosStoredPlan` de los
+   * servicios): las frases con huecos, «Así lo calculé», su título, su pantalla
+   * y las consultas para seguir. Plantillas y consultas, nunca datos ni el
+   * texto de la pregunta: con esto se fija, se descarga y se sigue sin volver
+   * a llamar al modelo.
+   */
+  plan: jsonb("plan"),
   /** La pregunta pasó por el modelo de decisión: tocar una opción no cuenta para el tope. */
   usedModel: boolean("used_model").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -34,23 +42,31 @@ export const reportQuestion = pgTable("report_question", {
 
 /**
  * Una respuesta de Argos fijada en el Resumen (decisión 8): se guarda la
- * pregunta ya entendida (cifra, agrupación y lo que se destaca), nunca la
- * imagen ni las cifras, y se recalcula con el periodo y la sede de la
- * pantalla. Hasta cuatro por clínica, compartidas por quienes ven Reportes.
+ * pregunta ya entendida, nunca la imagen ni las cifras. La de las 32 cifras
+ * (ADR 0070) guarda la cifra, la agrupación y lo que se destaca, y se
+ * recalcula con el periodo y la sede de la pantalla; la del Argos de las
+ * vistas (ADR 0073, D5) guarda su consulta y sus frases en `argos` y se
+ * vuelve a correr tal cual. Una de las dos, nunca ambas. Hasta cuatro por
+ * clínica, compartidas por quienes ven Reportes.
  */
 export const REPORT_PIN_LIMIT = 4
 
 export const reportPin = pgTable("report_pin", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
-  figure: text("figure").notNull(),
+  figure: text("figure"),
   groupBy: text("group_by").notNull().default("total"),
   /** Lo que se destaca dentro del grupo (un canal); vacío si nada. */
   focus: text("focus").notNull().default(""),
+  /** La respuesta del Argos de las vistas: consulta, frases, título y pantalla (`ArgosStoredAnswer`). */
+  argos: jsonb("argos"),
   createdBy: text("created_by").notNull().references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("report_pin_question_uidx").on(table.organizationId, table.figure, table.groupBy, table.focus),
+  // La misma consulta no se fija dos veces.
+  uniqueIndex("report_pin_argos_uidx").on(table.organizationId, sql`md5(${table.argos} ->> 'sql')`).where(sql`${table.argos} IS NOT NULL`),
+  check("report_pin_kind_check", sql`(${table.figure} IS NULL) <> (${table.argos} IS NULL)`),
 ])
 
 /**

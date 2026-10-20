@@ -15,6 +15,7 @@ import { reportQuestion } from "@odentia/db/schema/reports"
 import { and, count, eq, gte, ne } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
 import type { ArgosQueryResult } from "./argos-query.js"
+import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
 import { REPORT_DAILY_LIMIT } from "./report-ask.js"
 import { type ReportQuery, reportScope } from "./report-scope.js"
@@ -25,6 +26,7 @@ export const ARGOS_WORDS = {
   tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo.`,
   sinModelo: "Ahora no puedo leer preguntas. Prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
+  tiempo: "La consulta tardaba más de 3 segundos y la detuve. Prueba con un periodo más corto.",
   noExiste: "Eso no está en los datos que registra odentIA.",
   ayuda: "Eso es de cómo se usa odentIA: te lo explica la Ayuda.",
   otro: "Respondo preguntas sobre los datos de la clínica: dinero, pacientes, agenda, tratamientos, presupuestos e inventario. Prueba con «¿cuánto cobramos este mes?».",
@@ -53,13 +55,18 @@ export async function prepareArgosQuestion(
   return { enabled, roomLeft: Math.max(0, REPORT_DAILY_LIMIT - Number(row?.total ?? 0)), zone: await getOrgLocale(tx, orgId) }
 }
 
+/** Anota la pregunta y devuelve su id: con él se fija, se descarga y se sigue (D2, D5). */
 export async function recordArgosQuestion(
   tx: Db,
   orgId: string,
   userId: string,
-  input: { outcome: ArgosOutcome; query: string | null; usedModel: boolean },
-): Promise<void> {
-  await tx.insert(reportQuestion).values({ organizationId: orgId, userId, outcome: input.outcome, query: input.query, usedModel: input.usedModel })
+  input: { outcome: ArgosOutcome; query: string | null; usedModel: boolean; plan?: ArgosStoredPlan | null },
+): Promise<string> {
+  const [row] = await tx
+    .insert(reportQuestion)
+    .values({ organizationId: orgId, userId, outcome: input.outcome, query: input.query, usedModel: input.usedModel, plan: input.plan ?? null })
+    .returning({ id: reportQuestion.id })
+  return row?.id ?? ""
 }
 
 /**

@@ -365,6 +365,13 @@
       "when": 1792533496358,
       "tag": "0051_argos_guarda_la_consulta",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792537724187,
+      "tag": "0052_argos_sigue_fija_y_descarga",
+      "breakpoints": true
     }
   ]
 }

@@ -54,12 +54,16 @@ export {
   type ArgosClosest,
   type ArgosDeps,
   type ArgosPlan,
+  type ArgosRoute,
+  type ArgosShown,
   type ArgosTable,
   ARGOS_ROUTE_QUESTION,
   argosMessages,
   askArgos,
   demoArgosPlan,
+  routeArgos,
   routeArgosQuestion,
+  showArgosAnswer,
   writeArgosPlan,
 } from "./argos.js"
 export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"

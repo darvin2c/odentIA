@@ -12,7 +12,7 @@
  */
 import { reportPin, reportQuestion, REPORT_PIN_LIMIT } from "@odentia/db/schema/reports"
 import type { Db } from "@odentia/db"
-import { and, count, eq, gte, sql } from "drizzle-orm"
+import { and, count, eq, gte, isNotNull, sql } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
 import { adminLineOf } from "./admin-lines.js"
 import { LINE_WORDS } from "./admin-request.js"
@@ -323,7 +323,7 @@ export async function listReportPins(tx: Db, orgId: string, screen: ReportQuery,
     select p.id, p.figure, p.group_by as "groupBy", p.focus, u.name, p.created_at::text as "createdAt", op.timezone
     from report_pin p join "user" u on u.id = p.created_by
     join org_profile op on op.organization_id = p.organization_id
-    where p.organization_id = ${orgId} order by p.created_at, p.id`)
+    where p.organization_id = ${orgId} and p.figure is not null order by p.created_at, p.id`)
   const pins: PinnedAnswer[] = []
   for (const row of rows) {
     const figure = reportFigureOf(row.figure)
@@ -345,9 +345,9 @@ export async function listReportPinKeys(tx: Db, orgId: string): Promise<Array<{ 
   const rows = await tx
     .select({ id: reportPin.id, figure: reportPin.figure, group: reportPin.groupBy, focus: reportPin.focus })
     .from(reportPin)
-    .where(eq(reportPin.organizationId, orgId))
+    .where(and(eq(reportPin.organizationId, orgId), isNotNull(reportPin.figure)))
     .orderBy(reportPin.createdAt, reportPin.id)
-  return rows.map((row) => ({ id: row.id, figure: row.figure, group: row.group as FigureGroup, focus: row.focus || null }))
+  return rows.map((row) => ({ id: row.id, figure: row.figure ?? "", group: row.group as FigureGroup, focus: row.focus || null }))
 }
 
 export async function pinReportAnswer(tx: Db, orgId: string, userId: string, query: Pick<ReportAskQuery, "figure" | "group" | "focus">, billing: boolean): Promise<{ id: string }> {

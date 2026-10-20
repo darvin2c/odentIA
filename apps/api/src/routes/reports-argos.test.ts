@@ -79,6 +79,38 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
   expect(await ownerDb.select().from(aiUsage).where(eq(aiUsage.organizationId, ORG))).toEqual([])
 })
 
+it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar el texto", async () => {
+  await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
+  const asked = await ask("owner", { text: "¿Cuánto cobramos este mes?", routed: true })
+  const { data } = (await asked.json()) as { data: { kind: string; questionId: string; options: Array<{ index: number; label: string }> } }
+  expect(data).toMatchObject({ kind: "respuesta", options: [{ index: 0, label: "Por medio de pago" }] })
+
+  const app = buildApp("owner")
+  const post = (path: string, body: unknown) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const pinned = await post("/reports/argos/pins", { questionId: data.questionId, option: null })
+  expect(pinned.status).toBe(201)
+  // Fijarla otra vez devuelve la misma.
+  expect(await (await post("/reports/argos/pins", { questionId: data.questionId })).json()).toEqual(await pinned.clone().json())
+  const pins = (await (await app.request("/reports/pins?period=este_mes")).json()) as { data: { argos: Array<{ title: string; answer: { text: string } | null }> } }
+  expect(pins.data.argos).toEqual([expect.objectContaining({ title: "Lo cobrado este mes", answer: expect.objectContaining({ text: expect.stringContaining("Este mes se cobró") }) })])
+
+  const csv = await app.request(`/reports/argos/${data.questionId}/csv?option=0`)
+  expect(csv.status).toBe(200)
+  expect(csv.headers.get("content-disposition")).toMatch(/lo-cobrado-este-mes-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv/)
+  // `text()` quitaría la marca UTF-8: se miran los bytes.
+  const bytes = new Uint8Array(await csv.arrayBuffer())
+  expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+  expect(new TextDecoder().decode(bytes)).toMatch(/^Medio,Cobrado/)
+  expect((await app.request(`/reports/argos/${data.questionId}/csv?option=2`)).status).toBe(404)
+
+  expect(await (await post("/reports/argos/route", { text: "¿cuánto cobré hoy?" })).json()).toEqual({ data: { route: "negocio" } })
+  expect(await (await post("/reports/argos/route", { text: "lucia" })).json()).toEqual({ data: { route: "buscar" } })
+  expect(await (await post("/reports/argos/route", { text: "dónde configuro los horarios" })).json()).toEqual({ data: { route: "ayuda" } })
+
+  const saved = await ownerDb.select().from(reportQuestion).where(eq(reportQuestion.id, data.questionId))
+  expect(JSON.stringify(saved)).not.toContain("¿Cuánto cobramos")
+})
+
 it("solo quien ve Reportes pregunta, y el cuerpo se valida", async () => {
   for (const role of ["cashier", "reception", "dentist", "member"]) expect((await ask(role, { text: "¿Cuánto cobramos?" })).status, role).toBe(403)
   expect((await ask("owner", { text: "?" })).status).toBe(400)

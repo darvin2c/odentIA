@@ -46,7 +46,7 @@ class ScriptedModel extends BaseChatModel {
     this.calls.push(messages)
     const next = this.plans[this.calls.length - 1]
     if (!next || next instanceof Error) throw next ?? new Error("sin guion")
-    const args = { tipo: "consulta", sql: "", frase: "", frase_vacia: "", como: "", falta: "", sql_cercana: "", frase_cercana: "", ...next }
+    const args = { tipo: "consulta", sql: "", frase: "", frase_vacia: "", como: "", falta: "", sql_cercana: "", frase_cercana: "", titulo: "", pantalla: "ninguna", seguir: [], ...next }
     const message = new AIMessage({ content: "", tool_calls: [{ name: "responder", args, id: `call-${this.calls.length}`, type: "tool_call" }] })
     return { generations: [{ text: "", message }] }
   }
@@ -55,7 +55,7 @@ class ScriptedModel extends BaseChatModel {
   }
 }
 
-const decides = (choice: "negocio" | "ayuda" | "otro"): DecisionModel => ({
+const decides = (choice: "negocio" | "ayuda" | "buscar" | "otro"): DecisionModel => ({
   provider: "fake",
   reportsProbabilities: false,
   decide: async (_, questions) => ({
@@ -66,11 +66,11 @@ const decides = (choice: "negocio" | "ayuda" | "otro"): DecisionModel => ({
   }),
 })
 
-function deps(model: ScriptedModel, route: "negocio" | "ayuda" | "otro" = "negocio"): ArgosDeps {
+function deps(model: ScriptedModel, route: "negocio" | "ayuda" | "buscar" | "otro" = "negocio"): ArgosDeps {
   return { platform: { fake: true }, secretsKey: KEY, createModel: async () => model, decisionModel: decides(route) }
 }
 
-const ask = (model: ScriptedModel, text: string, memberRole = "owner", route?: "negocio" | "ayuda" | "otro") =>
+const ask = (model: ScriptedModel, text: string, memberRole = "owner", route?: "negocio" | "ayuda" | "buscar" | "otro") =>
   askArgos(appDb, deps(model, route), { orgId: ORG, userId: OWNER, memberRole, text })
 
 const lastQuestion = async () => (await ownerDb.select().from(reportQuestion).where(eq(reportQuestion.organizationId, ORG)).orderBy(sql`created_at desc`).limit(1))[0]
@@ -128,6 +128,42 @@ describe("Argos sobre las vistas", () => {
     expect(model.sent()).not.toMatch(/1[.,]?250/)
     expect(model.sent()).toContain("comisiones:")
     expect(await lastQuestion()).toMatchObject({ outcome: "respondida", query: COBRADO.sql, usedModel: true })
+  })
+
+  it("las opciones para seguir ya vienen corridas y la pregunta guarda su plan, sin el texto", async () => {
+    const model = new ScriptedModel([
+      {
+        ...COBRADO,
+        titulo: "Lo cobrado este mes",
+        pantalla: "finanzas",
+        seguir: [
+          { etiqueta: "Por medio", sql: "select medio, sum(importe) as cobrado_dinero from cobros group by medio", frase: "Por medio: {lista}.", frase_vacia: "Nada." },
+          { etiqueta: "Rota", sql: "select nada from cobros", frase: "{nada}", frase_vacia: "" },
+        ],
+      },
+    ])
+    const answer = await ask(model, "¿Cuánto cobramos este mes?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer).toMatchObject({ title: "Lo cobrado este mes", screen: "finanzas" })
+    // La que falla no se ofrece; la que corre llega lista, sin otra llamada al modelo.
+    expect(answer.options).toHaveLength(1)
+    expect(answer.options[0]).toMatchObject({ index: 0, label: "Por medio" })
+    expect(answer.options[0]?.answer.text).toMatch(/^Por medio: Efectivo \(S\/\s?1,250\.50\)\.$/)
+    expect(model.calls).toHaveLength(1)
+    const row = await lastQuestion()
+    expect(row).toMatchObject({ id: answer.questionId, query: COBRADO.sql })
+    expect(JSON.stringify(row?.plan)).not.toContain("¿Cuánto cobramos")
+    expect(row?.plan).toMatchObject({ titulo: "Lo cobrado este mes", seguir: [{ etiqueta: "Por medio" }, { etiqueta: "Rota" }] })
+  })
+
+  it("lo que el buscador ya decidió no se le pregunta otra vez a Jev; un nombre suelto también se responde", async () => {
+    const asked: string[] = []
+    const jev: DecisionModel = { ...decides("ayuda"), decide: async (text, questions) => (asked.push(text), decides("ayuda").decide(text, questions)) }
+    const model = new ScriptedModel([COBRADO, COBRADO])
+    const routed = await askArgos(appDb, { ...deps(model), decisionModel: jev }, { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cuánto cobramos?", routed: true })
+    expect(routed).toMatchObject({ kind: "respuesta" })
+    expect(asked).toEqual([])
+    expect(await ask(model, "rosa", "owner", "buscar")).toMatchObject({ kind: "respuesta" })
   })
 
   it("solo describe las vistas del rol, y la llave no deja leer lo que el rol no ve aunque el modelo lo pida", async () => {

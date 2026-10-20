@@ -7,12 +7,16 @@
  * Además: preguntarle a Argos (ADR 0070), las respuestas fijadas, las metas,
  * el resumen del lunes de cada persona y «Descargar» en CSV (ADR 0071).
  */
-import { asAdminDecider, askArgos, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
+import { asAdminDecider, askArgos, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm, routeArgos, showArgosAnswer } from "@odentia/agent"
 import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
   answerReportQuery,
+  ArgosQueryError,
+  argosAnswerCsv,
   FIGURE_GROUPS,
+  getArgosAnswer,
+  getOrgLocale,
   getAgendaReport,
   getPatientReportList,
   getReportAdvice,
@@ -30,9 +34,11 @@ import {
   interpretReportQuestion,
   isPatientReportList,
   keywordReportDecider,
+  listArgosPins,
   listReportPinKeys,
   listReportPins,
   PATIENT_REPORT_LISTS,
+  pinArgosAnswer,
   pinReportAnswer,
   prepareReportQuestion,
   recordReportQuestionFailure,
@@ -48,6 +54,7 @@ import {
   type ReportInterpretationResult,
   type ReportQuery,
   resolveReportQuestion,
+  runArgosQuery,
   ServiceError,
   setReportDigest,
   setReportGoal,
@@ -86,8 +93,15 @@ const argosInput = z
     text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga"),
     screen: reportQuery.optional(),
     previous: z.object({ text: z.string().trim().max(500), query: z.string().trim().max(4000) }).strict().nullable().optional(),
+    /** La fila ya la decidió el buscador (D1): no se paga otra vez a Jev. */
+    routed: z.boolean().optional(),
   })
   .strict()
+
+const argosRouteInput = z.object({ text: z.string().trim().min(2).max(500) }).strict()
+
+/** Una respuesta de Argos ya dada: la principal o una de las de seguir. */
+const argosAnswerRef = z.object({ questionId: z.uuid(), option: z.number().int().min(0).max(2).nullable().optional() }).strict()
 
 const pinInput = z.object({ figure: z.string().min(1).max(60), group: z.enum(FIGURE_GROUPS), focus: z.string().max(60).nullable().optional() }).strict()
 
@@ -234,10 +248,56 @@ export function createReportsRoute(deps: ReportsDeps) {
         askArgos(
           deps.db,
           { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey },
-          { orgId, userId, memberRole, text: body.text, ...(body.screen ? { screen: body.screen } : {}), previous: body.previous ?? null },
+          {
+            orgId,
+            userId,
+            memberRole,
+            text: body.text,
+            ...(body.screen ? { screen: body.screen } : {}),
+            previous: body.previous ?? null,
+            routed: body.routed === true,
+          },
         ),
       ),
     )
+  })
+
+  /** La fila del buscador (D1): Jev decide con solo el texto si es una pregunta de los datos, de la Ayuda o algo para buscar. */
+  app.post("/argos/route", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = argosRouteInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const argosDeps = { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey }
+    return runService(c, 200, async () => ({ route: await meterAiUse(deps.db, orgId, "reportes", () => routeArgos(deps.db, argosDeps, orgId, parsed.data.text)) }))
+  })
+
+  /** Fijar en el Resumen (D5): se guarda la consulta y sus frases; el Resumen la vuelve a correr cada vez. */
+  app.post("/argos/pins", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = argosAnswerRef.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, async (tx) => pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, parsed.data.questionId, parsed.data.option ?? null))),
+    )
+  })
+
+  /** Descargar (D5): la misma consulta, corrida otra vez con la llave de quien descarga. */
+  app.get("/argos/:questionId/csv", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    const raw = c.req.query("option")
+    const parsed = argosAnswerRef.safeParse({ questionId: c.req.param("questionId"), option: raw === undefined || raw === "" ? null : Number(raw) })
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return sendCsv(c, async () => {
+      const { answer, zone } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        answer: await getArgosAnswer(tx, orgId, parsed.data.questionId, parsed.data.option ?? null),
+        zone: await getOrgLocale(tx, orgId),
+      }))
+      const result = await runArgosQuery(deps.db, { orgId, memberRole, query: answer.sql }).catch((error: unknown) => {
+        throw error instanceof ArgosQueryError ? new ServiceError("ARGOS_QUERY", 409, error.message) : error
+      })
+      const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+      return argosAnswerCsv(answer.titulo, day, result)
+    })
   })
 
   app.get("/pins", async (c) => {
@@ -245,7 +305,20 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = reportQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const options = { billing: seesBilling(memberRole), can: (permission: string) => canAccess(memberRole, permission) }
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listReportPins(tx, orgId, parsed.data, options)))
+    return runService(c, 200, async () => {
+      const { figures, saved, zone } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        figures: await listReportPins(tx, orgId, parsed.data, options),
+        saved: await listArgosPins(tx, orgId),
+        zone: await getOrgLocale(tx, orgId),
+      }))
+      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, una por una.
+      const argos = []
+      for (const pin of saved) {
+        const shown = await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone })
+        argos.push({ id: pin.id, pinnedBy: pin.pinnedBy, pinnedAt: pin.pinnedAt, title: pin.answer.titulo, screen: pin.answer.pantalla, how: pin.answer.como, answer: shown })
+      }
+      return { ...figures, argos }
+    })
   })
 
   // Solo qué está fijado, sin recalcular: lo lee cada respuesta del panel.
