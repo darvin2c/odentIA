@@ -15,6 +15,7 @@ import { listConsentsToPublish } from "./clinical-forms.js"
 import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
+import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import {
   composeWaiting,
@@ -82,7 +83,10 @@ export interface WorkspaceNoticeInput {
 
 /**
  * Clases de asunto con su regla de «ya se resolvió» (`settleWorkspaceNotifications`).
- * - `producto:<id>`: el stock volvió al mínimo (o el producto se desactivó).
+ * - `producto:<id>`: avisos de stock bajo de antes (ADR 0067: la campana ya no
+ *   avisa stock bajo; lo que hace falta es la fila de Inventario de «Te
+ *   espera»). Se retira cuando ninguna sede está bajo su mínimo (o el producto
+ *   se desactivó).
  * - `orden-clinica:<id>`: la orden dejó de estar solicitada.
  * - `oportunidad:<id>`: se cerró o ya no la lleva quien recibió el aviso.
  * - `modelo-del-agente`: el agente volvió a responder después del aviso.
@@ -164,9 +168,16 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
       ${scope.subject ? sql`and n.subject = ${scope.subject}` : sql``}
       and (
         (n.subject like 'producto:%' and not exists (select 1 from product p
+          join product_minimum pm on pm.organization_id = p.organization_id and pm.product_id = p.id and pm.min_quantity > 0
           where p.organization_id = n.organization_id and p.id::text = ${subjectId("producto")} and p.is_active
-            and (select coalesce(sum(l.quantity_on_hand), 0) from product_lot l
-              where l.organization_id = p.organization_id and l.product_id = p.id) < p.min_stock))
+            -- Lo que hay en la sede: sus lotes menos lo que se usó sin haber.
+            and coalesce((select sum(l.quantity_on_hand) from product_lot l
+              join warehouse w on w.organization_id = l.organization_id and w.id = l.warehouse_id
+              where l.organization_id = p.organization_id and l.product_id = p.id and w.branch_id = pm.branch_id), 0)
+              - coalesce((select sum(s.quantity) from stock_shortage s
+              join warehouse w on w.organization_id = s.organization_id and w.id = s.warehouse_id
+              where s.organization_id = p.organization_id and s.product_id = p.id and w.branch_id = pm.branch_id), 0)
+              < pm.min_quantity))
         or (n.subject like 'orden-clinica:%' and not exists (select 1 from clinical_order o
           where o.organization_id = n.organization_id and o.id::text = ${subjectId("orden-clinica")} and o.status = 'solicitado'))
         or (n.subject like 'oportunidad:%' and not exists (select 1 from opportunity o
@@ -789,6 +800,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     // Quien administra los mensajes cambia el texto del aviso que WhatsApp pasó a promoción (ADR 0040).
     promotions: options.can?.("settings.write") ? await listRecategorizedMessages(tx, orgId) : [],
     // Quien configura publica el consentimiento que una atención pidió (paso 2B).
+    // Lo que hace falta y lo vencido de cada sede, para quien pide las compras (ADR 0067).
+    inventory: options.can?.("inventory.write") ? await inventoryWaiting(tx, orgId) : [],
     consentsToPublish: access.configure
       ? (await listConsentsToPublish(tx, orgId)).map(({ templateKey, title, requestedByName, requestedAt }) => ({
           templateKey,

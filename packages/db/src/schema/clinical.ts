@@ -2127,6 +2127,19 @@ export const patientCharge = pgTable(
     currency: char("currency", { length: 3 }).notNull(),
     dueAt: timestamp("due_at", { withTimezone: true }),
     notes: text("notes"),
+    /**
+     * Producto vendido desde «Cobrar» y cuántas unidades de uso (ADR 0067).
+     * Al crearse descuenta de la sede; anular el concepto lo devuelve. El
+     * vínculo compuesto con `product` vive en la migración de reglas.
+     */
+    productId: uuid("product_id"),
+    productQuantity: integer("product_quantity"),
+    /**
+     * Clave del formulario que creó el concepto (una venta desde «Cobrar»): un
+     * reintento tras un corte devuelve el mismo concepto y no vende ni
+     * descuenta dos veces.
+     */
+    requestKey: text("request_key"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -2134,10 +2147,18 @@ export const patientCharge = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    uniqueIndex("patient_charge_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("patient_charge_org_request_key_uidx")
+      .on(table.organizationId, table.requestKey)
+      .where(sql`"request_key" IS NOT NULL`),
     index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
     index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
     check("patient_charge_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "patient_charge_product_check",
+      sql`(${table.productId} IS NULL) = (${table.productQuantity} IS NULL) AND (${table.productQuantity} IS NULL OR ${table.productQuantity} BETWEEN 1 AND 9999)`,
+    ),
   ],
 )
 

@@ -46,7 +46,7 @@ import {
   validation,
 } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
-import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
+import { CLOSED_PURCHASE_STATUSES, type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -1133,6 +1133,14 @@ export function purchaseOrderLabel(orderNumber: number): string {
 }
 
 /**
+ * La compra ya no espera mercadería: llegó entera, se cerró con lo recibido o
+ * se canceló. Lo pagado de más queda a favor con el proveedor (ADR 0061).
+ */
+function isClosedPurchase(status: string): boolean {
+  return (CLOSED_PURCHASE_STATUSES as readonly string[]).includes(status)
+}
+
+/**
  * Bloquea la orden. Todo lo que cambia lo pagado de una compra (pagar, anular
  * un pago o un uso de lo que se tiene a favor, cancelar) bloquea primero la
  * orden y después su proveedor (`lockSupplier`), siempre en ese orden.
@@ -1251,13 +1259,15 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
   if (creditCents > 0) {
     if (creditCents > (await creditWith(tx, orgId, order.supplierId, order.currency)))
       throw conflict("SUPPLIER_CREDIT_SHORT", "No tienes tanto a favor con este proveedor")
-    if (creditCents > Math.max(0, before.orderedCents - before.paidCents))
+    // Una compra cerrada ya no espera lo que falta: vale lo que llegó.
+    const worth = isClosedPurchase(before.status) ? before.receivedCents : before.orderedCents
+    if (creditCents > Math.max(0, worth - before.paidCents))
       throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
   }
   const label = purchaseOrderLabel(before.orderNumber)
   // Sin nada recibido por pagar y con algo aún por llegar, lo que se paga es un adelanto
   // (también en una compra recibida en parte y al día).
-  const kind = before.dueCents === 0 && before.status !== "recibida" ? "Adelanto de compra" : "Pago de compra"
+  const kind = before.dueCents === 0 && !isClosedPurchase(before.status) ? "Adelanto de compra" : "Pago de compra"
   const part = before.dueCents > 0 && amountCents + creditCents < before.dueCents ? " (una parte)" : ""
   let paid: typeof expense.$inferSelect | null = null
   if (amountCents > 0) {
@@ -1339,7 +1349,7 @@ export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId
   const open = (await purchaseBalances(tx, orgId, { openOnly: true })).filter(
     (order) =>
       (!query.branchId || order.branchId === query.branchId) &&
-      (order.dueCents > 0 || (order.status !== "recibida" && order.orderedCents > order.paidCents)),
+      (order.dueCents > 0 || (!isClosedPurchase(order.status) && order.orderedCents > order.paidCents)),
   )
   const unpaid = open.filter((order) => order.dueCents > 0 && order.currency === unit)
   const oldest = unpaid.reduce<PurchaseBalance | null>(

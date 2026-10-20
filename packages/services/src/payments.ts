@@ -16,6 +16,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { cashClosure } from "@odentia/db/schema/finance"
+import { product } from "@odentia/db/schema/inventory"
 import { auditEvent } from "@odentia/db/schema/org"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { user } from "@odentia/db/schema/auth"
@@ -36,6 +37,10 @@ import { budgetLineUnits } from "./budgets.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { clinicToday, consumeFefo, defaultWarehouse, movementsOf, returnMovements, stockBySede } from "./inventory-stock.js"
+import { quantityWords } from "@odentia/clinical"
+import { findOrgLocale } from "./locale.js"
+import { foldedWordsMatch } from "./search-text.js"
 
 /** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -113,6 +118,20 @@ async function chargeRow(tx: Db, orgId: string, patientId: string, id: string) {
 }
 export interface CreateChargeInput {
   budgetItemId?: string | null
+  /**
+   * Producto que se vende desde «Cobrar» (ADR 0067): el concepto toma su
+   * nombre y su precio de venta × `quantity`, exige la sede y descuenta de su
+   * almacén principal al crearse. Sin tratamiento, atención ni importe propio.
+   */
+  productId?: string | null
+  /** Unidades de uso del producto vendidas (1 por defecto). */
+  quantity?: number | null
+  /**
+   * Clave del formulario de la venta, obligatoria con `productId`: un
+   * reintento tras un corte devuelve el mismo concepto sin vender ni
+   * descontar otra vez.
+   */
+  requestKey?: string | null
   encounterProcedureId?: string | null
   planItemId?: string | null
   /** Sede del concepto manual (los de acto/presupuesto la heredan de su fuente). */
@@ -142,6 +161,9 @@ export async function createCharge(
   await lockAccount(tx, orgId, patientId)
   if (input.budgetItemId && input.encounterProcedureId)
     throw validation("Seleccione una sola fuente del cargo")
+  if (input.productId && (input.budgetItemId || input.encounterProcedureId || input.planItemId))
+    throw validation("Un producto se cobra solo, sin tratamiento ni atención")
+  if (!input.productId && input.quantity != null) throw validation("La cantidad solo va con un producto")
   let planItemId = input.planItemId ?? null
   let description = input.description?.trim() ?? ""
   let amountCents = input.amountCents
@@ -150,6 +172,56 @@ export async function createCharge(
   let promotionId: string | null = null
   let promotionName: string | null = null
   if (branchId) await requireBranch(tx, orgId, branchId)
+  let sale: { productId: string; quantity: number; branchId: string } | null = null
+  if (input.productId) {
+    // El precio viene del producto: si hay que cambiarlo en un cobro, es la
+    // corrección con motivo de cualquier concepto (no toca lo que hay).
+    if (input.amountCents !== undefined || input.description?.trim())
+      throw validation("El importe y el concepto de un producto salen de su precio de venta: corrígelos después con motivo")
+    const quantity = input.quantity ?? 1
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9999)
+      throw validation("La cantidad va de 1 a 9999")
+    if (!branchId) throw validation("Elige la sede del cobro: el producto sale de su almacén")
+    const [item] = await tx
+      .select({
+        id: product.id,
+        name: product.name,
+        isActive: product.isActive,
+        forSale: product.forSale,
+        salePriceCents: product.salePriceCents,
+        saleCurrency: product.saleCurrency,
+      })
+      .from(product)
+      .where(and(eq(product.organizationId, orgId), eq(product.id, input.productId)))
+      .limit(1)
+    if (!item) throw notFound("Producto")
+    if (!item.isActive) throw conflict("PRODUCT_INACTIVE", `«${item.name}» está desactivado: no se puede vender`)
+    if (!item.forSale)
+      throw conflict("PRODUCT_NOT_FOR_SALE", `«${item.name}» no se vende: márcalo así en Inventario para cobrarlo`)
+    if (item.salePriceCents === null || item.salePriceCents <= 0 || !item.saleCurrency)
+      throw conflict("PRODUCT_WITHOUT_PRICE", `«${item.name}» no tiene precio de venta: ponlo en Inventario para cobrarlo`)
+    if (input.currency && input.currency !== item.saleCurrency)
+      throw conflict("CURRENCY_MISMATCH", "La moneda no coincide con el precio de venta del producto")
+    const requestKey = input.requestKey?.trim() ?? ""
+    if (!requestKey || requestKey.length > 120)
+      throw validation("No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo")
+    // El mismo formulario otra vez (un corte de red): el concepto ya existe y ya descontó.
+    const [prior] = await tx
+      .select()
+      .from(patientCharge)
+      .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.requestKey, requestKey)))
+      .limit(1)
+    if (prior) {
+      if (prior.patientId !== patientId || prior.productId !== input.productId || prior.productQuantity !== quantity)
+        throw conflict("CONFLICT", "Esta venta ya se registró con otros datos. Cierra el cobro y vuelve a abrirlo.")
+      return prior
+    }
+    // «Cepillo dental suave × 2»; con uno solo, el nombre.
+    description = quantity === 1 ? item.name : `${item.name} × ${quantity}`
+    amountCents = item.salePriceCents * quantity
+    unit = item.saleCurrency
+    sale = { productId: item.id, quantity, branchId }
+  }
   if (input.budgetItemId) {
     const [source] = await tx
       .select({ line: treatmentBudgetItem, budget: treatmentBudget })
@@ -344,12 +416,113 @@ export async function createCharge(
       currency: currency(unit),
       dueAt: input.dueAt ? instant(input.dueAt) : null,
       notes: input.notes,
+      productId: sale?.productId ?? null,
+      productQuantity: sale?.quantity ?? null,
+      requestKey: sale ? (input.requestKey?.trim() ?? null) : null,
       createdBy: actorUserId,
     })
     .returning()
-  await audit(tx, orgId, actorUserId, "patient_charge", row.id, "charge.created")
+  if (sale) {
+    // Sale de la clínica al agregarlo, aunque se pague después: del almacén
+    // principal de la sede, del lote que vence primero; si no había, queda
+    // como faltante (la venta no se bloquea).
+    const store = await defaultWarehouse(tx, orgId, sale.branchId)
+    await consumeFefo(tx, orgId, {
+      productId: sale.productId,
+      warehouseId: store.id,
+      quantity: sale.quantity,
+      allowShortage: true,
+      // Lo vencido no se vende: sale de los lotes vigentes.
+      usableOn: await clinicToday(tx, orgId),
+      base: {
+        kind: "venta",
+        reason: `Vendido a ${await patientName(tx, orgId, patientId)}`,
+        actorUserId,
+        keyPrefix: `venta:${row.id}`,
+        patientId,
+        chargeId: row.id,
+      },
+    })
+  }
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "patient_charge",
+    row.id,
+    "charge.created",
+    sale ? { patientId, productId: sale.productId, quantity: sale.quantity } : undefined,
+  )
   return row
 }
+
+/** El nombre de la persona del paciente, para el motivo de lo que se le vende. */
+async function patientName(tx: Db, orgId: string, patientId: string): Promise<string> {
+  const [row] = await tx
+    .select({ displayName: patientPerson.displayName })
+    .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  return row?.displayName ?? "un paciente"
+}
+export interface SaleProduct {
+  productId: string
+  name: string
+  /** Unidad de uso, en singular: se vende por ella («1 frasco»). */
+  unit: string
+  /** Precio de venta por unidad; null si el producto aún no tiene precio (no se puede agregar). */
+  salePriceCents: number | null
+  currency: string | null
+  /** Lo que hay en la sede del cobro (lotes − faltante; puede ser negativo). */
+  onHand: number
+  /** «4 frascos»; null si no hay: «No hay en Miraflores: quedará como faltante». */
+  onHandText: string | null
+}
+
+/**
+ * «+ Agregar producto» en «Cobrar»: productos activos que se venden, por
+ * nombre o código, con su precio de venta y lo que hay en la sede del cobro.
+ * Nunca el costo: Caja no lo ve.
+ */
+export async function listSaleProducts(
+  tx: Db,
+  orgId: string,
+  input: { branchId: string; q?: string; limit?: number },
+): Promise<{ branch: { id: string; name: string }; items: SaleProduct[] }> {
+  const site = await requireBranch(tx, orgId, input.branchId)
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50)
+  const conditions = [eq(product.organizationId, orgId), eq(product.isActive, true), eq(product.forSale, true)]
+  const q = input.q?.trim()
+  if (q) conditions.push(foldedWordsMatch([product.name, product.sku], q))
+  const rows = await tx
+    .select({
+      productId: product.id,
+      name: product.name,
+      unit: product.unit,
+      salePriceCents: product.salePriceCents,
+      currency: product.saleCurrency,
+    })
+    .from(product)
+    .where(and(...conditions))
+    .orderBy(asc(product.name), asc(product.id))
+    .limit(limit)
+  const stock = await stockBySede(tx, orgId, { branchId: site.id, productIds: rows.map((row) => row.productId) })
+  const { locale } = await findOrgLocale(tx, orgId)
+  return {
+    branch: { id: site.id, name: site.name },
+    items: rows.map((row) => {
+      const onHand = stock.get(row.productId)?.onHand ?? 0
+      return {
+        ...row,
+        salePriceCents: row.salePriceCents !== null && row.salePriceCents > 0 ? row.salePriceCents : null,
+        onHand,
+        onHandText: onHand > 0 ? quantityWords(onHand, row.unit, locale) : null,
+      }
+    }),
+  }
+}
+
 export async function voidCharge(
   tx: Db,
   orgId: string,
@@ -359,7 +532,7 @@ export async function voidCharge(
   input: { reason: string },
 ) {
   await lockAccount(tx, orgId, patientId)
-  await chargeRow(tx, orgId, patientId, id)
+  const current = await chargeRow(tx, orgId, patientId, id)
   const [application] = await tx
     .select({ id: patientPaymentApplication.id })
     .from(patientPaymentApplication)
@@ -390,6 +563,25 @@ export async function voidCharge(
       ),
     )
     .returning()
+  if (current.productId) {
+    // Quitar el concepto de un producto lo devuelve: cada lote recibe lo
+    // suyo y lo que se vendió sin haber baja el faltante.
+    const sold = (await movementsOf(tx, orgId, { chargeId: id })).filter(
+      (movement) => movement.kind === "venta" && movement.quantityDelta < 0,
+    )
+    if (sold.length)
+      await returnMovements(tx, orgId, {
+        movements: sold,
+        base: {
+          kind: "devolucion",
+          reason: `Venta anulada: ${current.description}`,
+          actorUserId,
+          keyPrefix: `venta-anulada:${id}`,
+          patientId,
+          chargeId: id,
+        },
+      })
+  }
   await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided", {
     patientId,
     description: row?.description,
@@ -1238,7 +1430,9 @@ export async function voidTicket(
   // Se revierte lo que este ticket aplicó (incluido el saldo a favor que usó)
   // y también lo que sus pagos cubrieron después en otros tickets: un adelanto
   // anulado no puede seguir pagando un concepto. Ese concepto vuelve a quedar
-  // por cobrar.
+  // por cobrar. Un producto vendido NO vuelve al inventario (ADR 0067): ya
+  // salió de la clínica y su concepto sigue en pie, por cobrar; devolverlo es
+  // anular el concepto (`voidCharge`).
   const paymentIds = payments.map((p) => p.id)
   const applications = await tx
     .select()
@@ -1488,6 +1682,9 @@ export interface AccountPending {
   branchId: string | null
   promotionId: string | null
   promotionName: string | null
+  /** Producto vendido desde «Cobrar» y cuántas unidades (ADR 0067): ya salió de la sede. */
+  productId: string | null
+  productQuantity: number | null
 }
 
 /**
@@ -1694,6 +1891,8 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         branchId: charge.branchId,
         promotionId: charge.promotionId,
         promotionName: charge.promotionName,
+        productId: charge.productId ?? null,
+        productQuantity: charge.productQuantity ?? null,
       }
     })
     .filter((row) => row.saldoCents > 0)

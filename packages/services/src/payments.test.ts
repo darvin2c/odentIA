@@ -5,17 +5,21 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
-import { patientContact } from "@odentia/db/schema/clinical"
+import { patientCharge, patientContact } from "@odentia/db/schema/clinical"
+import { product, productLot, stockMovement } from "@odentia/db/schema/inventory"
 import { and, eq, sql } from "drizzle-orm"
 import { getAgentPatientSummary } from "./agent-operations.js"
+import { defaultWarehouse, lotFor, receiveIntoLot, shortageOf } from "./inventory-stock.js"
 import {
   collectCharge,
   createCharge,
   getAccountSummary,
   getPatientAccount,
+  listSaleProducts,
   refundCredit,
   updateCharge,
   voidCharge,
+  voidTicket,
 } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -230,4 +234,140 @@ it("el saldo descuenta lo que tiene a favor, y «Aplicar» cancela la deuda con 
   expect(applied.account.byCurrency[0]).toMatchObject({ porCobrar: 4000, aFavor: 0, saldo: 4000 })
   // Lo registrado se ve en sus cobros.
   expect(applied.account.cobros.some((row) => row.ticketId === applied.ticket.id)).toBe(true)
+})
+
+it("vender un producto desde Cobrar: descuenta de la sede, deja faltante, quitar el concepto lo devuelve y anular el cobro no", async () => {
+  const f = await clinicalFixture()
+  const { cash } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  const store = await f.run((tx) => defaultWarehouse(tx, "org_a", branchId))
+  const tag = randomUUID().slice(0, 8)
+  const newProduct = async (values: Partial<typeof product.$inferInsert>) => {
+    const [row] = await ownerDb
+      .insert(product)
+      .values({ organizationId: "org_a", sku: `VTA-${randomUUID().slice(0, 8)}`, name: `Producto ${tag}`, unit: "unidad", ...values })
+      .returning()
+    return row!
+  }
+  const brush = await newProduct({
+    name: `Cepillo dental suave ${tag}`,
+    unit: "cepillo",
+    usedInCare: false,
+    forSale: true,
+    salePriceCents: 1500,
+    saleCurrency: "PEN",
+  })
+  const lot = await f.run(async (tx) => {
+    const row = await lotFor(tx, "org_a", { productId: brush.id, warehouseId: store.id, code: "C-1", actorUserId: f.actor })
+    await receiveIntoLot(tx, "org_a", {
+      lot: row,
+      quantity: 3,
+      base: { kind: "ingreso", reason: "Prueba", actorUserId: f.actor, keyPrefix: `prueba:${randomUUID()}` },
+    })
+    return row
+  })
+  const lotQuantity = async () =>
+    (await ownerDb.select({ q: productLot.quantityOnHand }).from(productLot).where(eq(productLot.id, lot.id)))[0]?.q
+
+  // «+ Agregar producto»: lo que se vende, con su precio y lo que hay en la sede; nunca el costo.
+  const found = await f.run((tx) => listSaleProducts(tx, "org_a", { branchId, q: `cepillo ${tag}` }))
+  expect(found.items).toEqual([
+    {
+      productId: brush.id,
+      name: brush.name,
+      unit: "cepillo",
+      salePriceCents: 1500,
+      currency: "PEN",
+      onHand: 3,
+      onHandText: "3 cepillos",
+    },
+  ])
+
+  // El concepto toma nombre y precio × cantidad, y sale del lote al agregarlo.
+  const saleKey = randomUUID()
+  const two = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: saleKey }))
+  expect(two).toMatchObject({
+    description: `${brush.name} × 2`,
+    amountCents: 3000,
+    currency: "PEN",
+    productId: brush.id,
+    productQuantity: 2,
+    branchId,
+  })
+  expect(await lotQuantity()).toBe(1)
+  const [sold] = await ownerDb.select().from(stockMovement).where(eq(stockMovement.chargeId, two.id))
+  expect(sold).toMatchObject({ kind: "venta", quantityDelta: -2, patientId: f.patient.id, reason: "Vendido a Paciente de prueba" })
+  // El mismo formulario otra vez (un corte de red): el mismo concepto, sin vender ni descontar de nuevo.
+  const again = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: saleKey }))
+  expect(again.id).toBe(two.id)
+  expect(await lotQuantity()).toBe(1)
+  await expect(
+    f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 3, branchId, requestKey: saleKey })),
+  ).rejects.toThrow("ya se registró con otros datos")
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 1, branchId }))).rejects.toThrow(
+    "No se pudo identificar esta venta",
+  )
+
+  // Sin lo suficiente se vende igual: lo que falta queda como faltante.
+  const more = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, quantity: 2, branchId, requestKey: randomUUID() }))
+  expect(await lotQuantity()).toBe(0)
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(1)
+  // Con uno solo, el nombre sin «× 1».
+  const one = await f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, branchId, requestKey: randomUUID() }))
+  expect(one).toMatchObject({ description: brush.name, amountCents: 1500, productQuantity: 1 })
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(2)
+
+  // Quitar el concepto lo devuelve: primero baja el faltante.
+  await f.run((tx) => voidCharge(tx, ...f.args, more.id, { reason: "Se arrepintió" }))
+  expect(await f.run((tx) => shortageOf(tx, "org_a", brush.id, store.id))).toBe(0)
+  const back = await ownerDb
+    .select()
+    .from(stockMovement)
+    .where(and(eq(stockMovement.chargeId, more.id), eq(stockMovement.kind, "devolucion")))
+  expect(back.reduce((sum, row) => sum + row.quantityDelta, 0)).toBe(2)
+
+  // La corrección con motivo sigue igual y no toca lo que hay.
+  const fixed = await f.run((tx) => updateCharge(tx, ...f.args, one.id, { amountCents: 1200, reason: "Precio de campaña" }))
+  expect(fixed.amountCents).toBe(1200)
+
+  // Anular el cobro no devuelve el producto: ya salió y el concepto vuelve a quedar por cobrar.
+  const collected = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      chargeIds: [two.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: 3000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const before = await lotQuantity()
+  await f.run((tx) => voidTicket(tx, ...f.args, collected.ticket.id, { reason: "Error de medio", allowPostClose: false }))
+  expect(await lotQuantity()).toBe(before)
+  const [still] = await ownerDb.select().from(patientCharge).where(eq(patientCharge.id, two.id))
+  expect(still?.voidedAt).toBeNull()
+  const after = await ownerDb.select().from(stockMovement).where(eq(stockMovement.chargeId, two.id))
+  expect(after).toHaveLength(1)
+
+  // Lo que no se vende, sin precio, desactivado o sin sede: error en palabras.
+  const supply = await newProduct({ name: `Guantes ${tag}`, usedInCare: true })
+  const unpriced = await newProduct({ name: `Enjuague ${tag}`, usedInCare: false, forSale: true })
+  const retired = await newProduct({ name: `Hilo ${tag}`, forSale: true, salePriceCents: 900, saleCurrency: "PEN", isActive: false })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: supply.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_NOT_FOR_SALE",
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: unpriced.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_WITHOUT_PRICE",
+    message: expect.stringContaining("no tiene precio de venta"),
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: retired.id, branchId }))).rejects.toMatchObject({
+    code: "PRODUCT_INACTIVE",
+  })
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id }))).rejects.toMatchObject({
+    code: "VALIDATION",
+  })
+  await expect(
+    f.run((tx) => createCharge(tx, ...f.args, { productId: brush.id, branchId, amountCents: 100 })),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  const listed = await f.run((tx) => listSaleProducts(tx, "org_a", { branchId, q: tag }))
+  expect(listed.items.map((item) => item.productId).sort()).toEqual([brush.id, unpriced.id].sort())
+  expect(listed.items.find((item) => item.productId === unpriced.id)).toMatchObject({ salePriceCents: null, onHandText: null })
 })

@@ -13,10 +13,11 @@ import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgCounter, treatmentBudget, treatmentBudgetItem, treatmentBudgetOption, treatmentPlan, treatmentPlanItem } from "@odentia/db/schema/clinical"
-import { product, supplier, warehouse } from "@odentia/db/schema/inventory"
+import { product, supplier } from "@odentia/db/schema/inventory"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { payPurchaseOrder, setCommissionRate } from "./finance.js"
-import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, createWarehouse, receivePurchaseOrder } from "./inventory.js"
+import { confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, receivePurchaseOrder } from "./inventory.js"
+import { defaultWarehouse } from "./inventory-stock.js"
 import { getOrgLocale } from "./locale.js"
 import { createPromotion } from "./promotions.js"
 import { addMonths, currentMonthIn, monthStart } from "./report-periods.js"
@@ -232,18 +233,9 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   // --- Compras de Inventario en cada estado de pago ---------------------------------------
   const main = input.branches[0] as { id: string; name: string }
   const second = input.branches[1] ?? main
-  const warehouseOf = async (branchId: string, name: string) => {
-    // El de ese nombre primero: la sede también tiene el gabinete de la semilla de inventario.
-    const [found] = await tx
-      .select({ id: warehouse.id })
-      .from(warehouse)
-      .where(and(eq(warehouse.organizationId, orgId), eq(warehouse.branchId, branchId)))
-      .orderBy(sql`${warehouse.name} = ${name} desc`, asc(warehouse.createdAt), asc(warehouse.id))
-      .limit(1)
-    return found?.id ?? (await createWarehouse(tx, orgId, ownerUserId, { branchId, name })).id
-  }
-  const mainWarehouse = await warehouseOf(main.id, "Almacén principal")
-  const secondWarehouse = await warehouseOf(second.id, `Almacén ${second.name.replace(/^Sede /, "")}`)
+  // Las compras llegan al almacén principal de cada sede (lo crea la base con la sede).
+  const mainWarehouse = (await defaultWarehouse(tx, orgId, main.id)).id
+  const secondWarehouse = (await defaultWarehouse(tx, orgId, second.id)).id
   const supplierOf = async (name: string, docNumber: string) => {
     const [found] = await tx.select({ id: supplier.id }).from(supplier).where(and(eq(supplier.organizationId, orgId), eq(supplier.name, name))).limit(1)
     return found?.id ?? (await createSupplier(tx, orgId, ownerUserId, { name, docType: "RUC", docNumber })).id
@@ -252,15 +244,19 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   const insumosLima = await supplierOf("Insumos Lima EIRL", "20567891234")
   const odontoSur = await supplierOf("Odonto Sur SAC", "20678912345")
   const dentalAndina = await supplierOf("Dental Andina SAC", "20123456789")
-  const productOf = async (sku: string, name: string, unit: string) => {
+  // Las cantidades de las compras van en unidades de compra (cajas); el producto dice cuántas trae cada una.
+  const productOf = async (sku: string, name: string, unit: string, purchase?: { unit: string; factor: number }) => {
     const [found] = await tx.select({ id: product.id }).from(product).where(and(eq(product.organizationId, orgId), eq(product.sku, sku))).limit(1)
-    return found?.id ?? (await createProduct(tx, orgId, ownerUserId, { sku, name, kind: "insumo", unit, minStock: 4 })).id
+    return (
+      found?.id ??
+      (await createProduct(tx, orgId, ownerUserId, { sku, name, unit, purchaseUnit: purchase?.unit ?? null, purchaseFactor: purchase?.factor ?? 1 })).id
+    )
   }
-  const resina = await productOf("PRO-RESINA-A2", "Resina compuesta A2", "jeringa 4 g")
-  const guantes = await productOf("INS-GUANTE-NITRILO", "Guantes de nitrilo", "caja x 100")
-  const acido = await productOf("INS-ACIDO-37", "Ácido grabador 37 %", "jeringa 5 ml")
-  const adhesivo = await productOf("INS-ADHESIVO-5G", "Adhesivo de 5.ª generación", "frasco 5 ml")
-  const puntas = await productOf("INS-PUNTAS-APLIC", "Puntas de aplicación", "caja x 100")
+  const resina = await productOf("PRO-RESINA-A2", "Resina compuesta A2", "jeringa")
+  const guantes = await productOf("INS-GUANTE-NITRILO", "Guantes de nitrilo", "guante", { unit: "caja", factor: 100 })
+  const acido = await productOf("INS-ACIDO-37", "Ácido grabador 37 %", "jeringa")
+  const adhesivo = await productOf("INS-ADHESIVO-5G", "Adhesivo de 5.ª generación", "frasco")
+  const puntas = await productOf("INS-PUNTAS-APLIC", "Puntas de aplicación", "punta", { unit: "caja", factor: 100 })
   const ago = (days: number, hour = 11) => new Date(now - days * DAY_MS + (hour - 12) * 3_600_000)
   type Plan = {
     key: string
@@ -322,6 +318,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
         order.id,
         plan.lines.map((line) => ({ productId: line.productId, quantity: line.received ?? line.quantity })),
         `seed:reportes:${plan.key}:${orgId}`,
+        { notify: false },
       )
       await tx.execute(sql`update stock_movement set created_at = ${ago(plan.receivedDaysAgo, 10).toISOString()}::timestamptz
         where organization_id = ${orgId} and purchase_order_id = ${order.id}`)

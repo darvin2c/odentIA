@@ -238,6 +238,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     odontogram: null,
     // Sin periodontograma en la atención, el cierre no lo menciona.
     periodontal: null,
+    // Sin sede ni servicios con materiales, no anuncia ningún descuento.
+    materials: null,
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",

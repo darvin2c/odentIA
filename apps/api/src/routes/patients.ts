@@ -22,6 +22,7 @@ import {
   addPlanItem,
   addPlanItemsBatch,
   type ClinicalAccessResource,
+  correctEncounterMaterial,
   createEncounter,
   createOdontogramAssessment,
   createTreatmentPlan,
@@ -30,6 +31,7 @@ import {
   getAnamnesisVersion,
   getEncounterClosing,
   getEncounterDetail,
+  getEncounterMaterials,
   getLatestAnamnesis,
   getOdontogram,
   getOdontogramPrint,
@@ -448,6 +450,21 @@ const finalizeInput = z
     endedAt: z.iso.datetime({ offset: true }).nullish(),
     // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
     consentSkipReason: z.string().trim().max(2000).nullish(),
+  })
+  .strict()
+/**
+ * «Fueron 4, no 2» (ADR 0067): lo que de verdad se usó de un producto en la
+ * atención firmada, en su unidad de uso, con la clave del formulario.
+ */
+const encounterMaterialInput = z
+  .object({
+    productId: z.uuid({ error: "Elige el producto" }),
+    quantity: z
+      .number({ error: "Escribe cuánto se usó" })
+      .int({ error: "Lo usado es un número entero" })
+      .min(0, { error: "Lo usado va de 0 a 9999" })
+      .max(9999, { error: "Lo usado va de 0 a 9999" }),
+    idempotencyKey: z.string().trim().min(1).max(120, { error: "La clave del formulario es demasiado larga" }),
   })
   .strict()
 // El diagnóstico se declara una vez, para la pantalla y para el dictado.
@@ -1412,6 +1429,34 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("id"),
           c.req.param("encounterId"),
           parsed.data,
+        ),
+      ),
+    )
+  })
+  // Materiales usados en la atención (ADR 0067): lo lee quien lee la atención;
+  // corrige quien atendió o quien lleva el inventario (lo decide el servicio).
+  app.get("/:id/encounters/:encounterId/materials", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const params = z.object({ id: z.uuid(), encounterId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return c.json(errorBody(c, "NOT_FOUND", "Atención no encontrada"), 404)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getEncounterMaterials(tx, orgId, userId, params.data.id, params.data.encounterId, (permission) =>
+          canAccess(memberRole, permission),
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/materials", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const params = z.object({ id: z.uuid(), encounterId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return c.json(errorBody(c, "NOT_FOUND", "Atención no encontrada"), 404)
+    const parsed = encounterMaterialInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        correctEncounterMaterial(tx, orgId, userId, params.data.id, params.data.encounterId, parsed.data, (permission) =>
+          canAccess(memberRole, permission),
         ),
       ),
     )

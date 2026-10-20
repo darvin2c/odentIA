@@ -166,6 +166,7 @@ import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
 import { seedInventory } from "./seed-inventory.js"
+import { seedMaterialsAndSales } from "./seed-materials.js"
 import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
@@ -375,6 +376,12 @@ async function wipeSeed(): Promise<void> {
     .select({ attachments: message.attachments })
     .from(message)
     .where(inArray(message.organizationId, SEED_ORGS))
+  // Un concepto vendido apunta a su producto (ADR 0067): se suelta antes de borrar
+  // los productos; el concepto se borra después con los cobros.
+  await db.execute(
+    sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
+      where organization_id in (${ORG_A}, ${ORG_B}) and product_id is not null`,
+  )
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
     // La revisión de un cobro apunta a su acción y a su caso de Soporte.
@@ -446,6 +453,10 @@ async function wipeSeed(): Promise<void> {
     "expense",
     "cash_shift",
     "stock_movement",
+    // Inventario por sede (ADR 0067): faltante, mínimos y materiales antes que sus productos.
+    "stock_shortage",
+    "product_minimum",
+    "service_material",
     "product_lot",
     "purchase_order_line",
     "purchase_order",
@@ -3432,6 +3443,8 @@ for (const seed of [
   seedClinicalForms,
   seedInventory,
   seedFinance,
+  // Después de Inventario: materiales de dos servicios, la atención de Rosa descontada y un cepillo vendido.
+  seedMaterialsAndSales,
   seedMailbox,
   seedOpportunities,
   seedPortal,

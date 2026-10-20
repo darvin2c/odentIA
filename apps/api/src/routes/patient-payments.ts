@@ -30,6 +30,19 @@ const chargeInput = z.object({
   branchId: z.uuid().nullish(),
   /** Línea aceptada de una propuesta: el cargo hereda descripción, precio acordado y promoción. */
   budgetItemId: z.uuid().nullish(),
+  /**
+   * «+ Agregar producto» (ADR 0067): el concepto toma nombre y precio de venta
+   * × cantidad, exige la sede y descuenta de su almacén al crearse.
+   */
+  productId: z.uuid({ error: "Elige el producto de la lista" }).nullish(),
+  quantity: z
+    .number({ error: "Escribe la cantidad" })
+    .int({ error: "La cantidad es un número entero" })
+    .min(1, { error: "La cantidad va de 1 a 9999" })
+    .max(9999, { error: "La cantidad va de 1 a 9999" })
+    .nullish(),
+  /** Clave del formulario de la venta: un reintento no vende dos veces. */
+  requestId: z.uuid({ error: "No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo" }).nullish(),
   description: z.string().trim().min(1).max(2000).nullish(),
   amountCents: cents.nullish(),
   currency: z.string().regex(/^[A-Z]{3}$/).nullish(),
@@ -122,8 +135,9 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
       return { ...collected, receipt }
     })
   })
-  // Cargos de caja: concepto manual (fuera del tarifario, con o sin moneda)
-  // o cargo de una línea aceptada de la propuesta (hereda precio y promoción).
+  // Cargos de caja: concepto manual (fuera del tarifario, con o sin moneda),
+  // cargo de una línea aceptada de la propuesta (hereda precio y promoción) o
+  // producto que se vende (precio de venta × cantidad; sale de la sede).
   // Las fuentes clínicas las crea el cierre de la atención, no esta ruta.
   app.post("/:id/charges", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -133,12 +147,30 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     const parsed = chargeInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const body = parsed.data
-    if (!body.budgetItemId && (!body.description || !body.amountCents))
-      return validationError(c, [{ code: "custom", path: [], message: "Indica el concepto y el importe, o la línea aceptada", input: body } as never])
+    const problem = body.productId
+      ? body.budgetItemId
+        ? "Un producto se cobra solo, sin la línea del presupuesto"
+        : body.description || body.amountCents
+          ? "El concepto y el importe de un producto salen de su precio de venta"
+          : !body.branchId
+            ? "Elige la sede del cobro: el producto sale de su almacén"
+            : !body.requestId
+              ? "No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo"
+              : null
+      : body.quantity != null || body.requestId != null
+        ? "La cantidad solo va con un producto"
+        : !body.budgetItemId && (!body.description || !body.amountCents)
+          ? "Indica el concepto y el importe, o la línea aceptada"
+          : null
+    if (problem)
+      return validationError(c, [{ code: "custom", path: [], message: problem, input: body } as never])
     return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
       createCharge(tx, orgId, userId, params.data.id, {
         branchId: body.branchId ?? undefined,
         budgetItemId: body.budgetItemId ?? undefined,
+        productId: body.productId ?? undefined,
+        quantity: body.quantity ?? undefined,
+        requestKey: body.requestId ?? undefined,
         description: body.description ?? undefined,
         amountCents: body.amountCents ?? undefined,
         currency: body.currency ?? undefined,
@@ -161,6 +193,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
         reason: parsed.data.reason,
       })))
   })
+  // Quitar un concepto. Si es un producto, vuelve al inventario de la sede.
   app.post("/:id/charges/:chargeId/void", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
@@ -172,6 +205,7 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
       voidCharge(tx, orgId, userId, params.data.id, params.data.chargeId, parsed.data)))
   })
   // Anular cobro: revierte todo en una acción. Tras el cierre solo administración.
+  // Los productos no vuelven: sus conceptos quedan por cobrar.
   app.post("/:id/tickets/:ticketId/void", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)

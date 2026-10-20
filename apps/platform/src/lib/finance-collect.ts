@@ -342,6 +342,9 @@ export interface AccountPendingItem {
   branchId: string | null
   promotionId: string | null
   promotionName: string | null
+  /** Producto vendido desde «Cobrar» y cuántas unidades: ya salió de la sede. */
+  productId?: string | null
+  productQuantity?: number | null
 }
 
 export interface AccountCobroPayment {
@@ -423,6 +426,57 @@ export function createManualChargeApi(
   body: { branchId?: string; description: string; amountCents: number; notes?: string },
 ): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>(`/api/patients/${patientId}/charges`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+/** Lo que se vende en «Cobrar» (ADR 0067), con su precio y lo que hay en la sede del cobro; nunca el costo. */
+export interface SaleProduct {
+  productId: string
+  name: string
+  /** Unidad de uso, en singular: se vende por ella («1 frasco»). */
+  unit: string
+  /** Precio de venta por unidad; null si aún no tiene (no se puede agregar). */
+  salePriceCents: number | null
+  currency: string | null
+  /** Lo que hay en la sede (lotes − faltante; puede ser negativo). */
+  onHand: number
+  /** «4 frascos»; null si no hay. */
+  onHandText: string | null
+}
+
+export function fetchSaleProducts(query: {
+  branchId: string
+  q?: string
+  limit?: number
+}): Promise<{ data: { branch: { id: string; name: string }; items: SaleProduct[] } }> {
+  const search = new URLSearchParams({ branchId: query.branchId })
+  if (query.q?.trim()) search.set("q", query.q.trim())
+  if (query.limit) search.set("limit", String(query.limit))
+  return apiFetch<{ data: { branch: { id: string; name: string }; items: SaleProduct[] } }>(
+    `/api/finance/sale-products?${search}`,
+  )
+}
+
+/** El concepto que deja un producto vendido: nombre y precio de venta × cantidad, de la sede del cobro. */
+export interface ProductCharge {
+  id: string
+  /** «Cepillo dental suave × 2». */
+  description: string
+  amountCents: number
+  currency: string
+  productId: string | null
+  productQuantity: number | null
+}
+
+/** «+ Agregar producto»: el concepto se crea y el producto sale de la sede en ese momento. */
+export function createProductChargeApi(
+  patientId: string,
+  /** `requestId`: la clave del bloque abierto; un reintento no vende dos veces. */
+  body: { productId: string; quantity: number; branchId: string; requestId: string },
+): Promise<{ data: ProductCharge }> {
+  return apiFetch<{ data: ProductCharge }>(`/api/patients/${patientId}/charges`, {
     method: "POST",
     body: JSON.stringify(body),
   })

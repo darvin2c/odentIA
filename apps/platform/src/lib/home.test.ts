@@ -124,6 +124,24 @@ describe("textos de «Te espera»", () => {
     expect(waitingKey(reentry)).toBe("portalReentry:t2")
   })
 
+  it("el inventario de una sede dice qué hace falta y qué venció, con un solo nombre por sede", () => {
+    const row: WaitingRow = {
+      kind: "inventory", branchId: "b1", branchName: "Sede Miraflores", needed: 4,
+      neededNames: ["Guantes de nitrilo", "Resina A2", "Rollos de algodón"],
+      expiredLots: 1, expired: [{ productName: "Lidocaína 2%", expiresAt: "2026-10-09" }],
+    }
+    expect(waitingText(row, context)).toEqual({
+      title: "Inventario de Sede Miraflores: 4 productos hacen falta y 1 lote venció",
+      detail: "Guantes de nitrilo, Resina A2 y Rollos de algodón y 1 más · Lidocaína 2% venció el 9 oct",
+      action: "Ver qué hace falta",
+    })
+    // Solo lo vencido: la fila lleva a lo que vence.
+    expect(waitingText({ ...row, needed: 0, neededNames: [] }, context)).toMatchObject({
+      title: "Inventario de Sede Miraflores: 1 lote venció", action: "Ver lo vencido",
+    })
+    expect(waitingKey(row)).toBe("inventory:b1")
+  })
+
   it("el día se cuenta en la zona de la clínica, no en la del navegador", () => {
     // 03:00 UTC del 12 es todavía el 11 en Lima.
     expect(daysAgo("2026-10-12T03:00:00.000Z", context)).toBe("ayer")

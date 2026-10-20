@@ -1147,21 +1147,38 @@ it("inventario: la app no borra nada y ninguna fila apunta a otra clínica", asy
     await expect(ownerDb.execute(cruce)).rejects.toMatchObject({ cause: { code: "23503" } })
   }
 
-  // La app desactiva y cancela, nunca borra: tampoco el ledger.
+  // La app desactiva y cancela, nunca borra: tampoco el ledger, los mínimos ni el faltante.
   for (const table of [
     "product",
     "product_lot",
+    "product_minimum",
     "purchase_order",
-    "purchase_order_line",
     "supplier",
     "warehouse",
     "stock_movement",
+    "stock_shortage",
   ] as const) {
     await expect(
       withOrgContext(appDb, "org_a", (tx) => tx.execute(sql`delete from ${sql.identifier(table)}`)),
       `${table}: DELETE denegado`,
     ).rejects.toMatchObject({ cause: { code: "42501" } })
   }
+  // Las líneas de una compra solo se quitan mientras es borrador (editarlo reemplaza sus productos).
+  const pedida = "1a1a1a1a-0000-4000-8000-000000000008"
+  const borrador = "1a1a1a1a-0000-4000-8000-000000000009"
+  await ownerDb.execute(sql`insert into purchase_order (id, organization_id, supplier_id, warehouse_id, order_number, currency, status) values
+    (${pedida}::uuid, 'org_a', ${proveedorA}::uuid, ${almacenA}::uuid, 9001, 'PEN', 'confirmada'),
+    (${borrador}::uuid, 'org_a', ${proveedorA}::uuid, ${almacenA}::uuid, 9002, 'PEN', 'borrador')`)
+  await ownerDb.execute(sql`insert into purchase_order_line (organization_id, order_id, product_id, quantity) values
+    ('org_a', ${pedida}::uuid, ${productoA}::uuid, 2), ('org_a', ${borrador}::uuid, ${productoA}::uuid, 3)`)
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => tx.execute(sql`delete from purchase_order_line where order_id = ${pedida}::uuid`)),
+    "purchase_order_line de una compra pedida: DELETE denegado",
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  const quitada = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from purchase_order_line where order_id = ${borrador}::uuid returning id`),
+  )
+  expect(quitada).toHaveLength(1)
   const desactivado = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(sql`update product set is_active = false where id = ${productoA}::uuid returning id`),
   )

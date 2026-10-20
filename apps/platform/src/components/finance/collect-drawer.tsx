@@ -6,18 +6,22 @@
  *
  * Un concepto se corrige en la misma lista: nuevo importe con motivo, quitarlo,
  * o la promoción vigente de su servicio (el precio lo resuelve el servidor).
+ * «+ Agregar producto» (ADR 0067) cobra algo que se vende: el concepto toma su
+ * precio de venta × la cantidad y el producto sale de la sede del cobro al
+ * agregarlo, aunque se pague después; si no había, queda como faltante.
  * Paga el paciente salvo que se elija a uno de sus responsables vigentes.
  *
  * Moneda de la clínica (prop requerida) y formato del perfil; dinero con el
  * módulo compartido `@odentia/clinical`. Nada fijo de un país.
  */
-import { documentText, formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { documentText, formatMoney, formatMoneyInput, parseMoney, unitFor } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
   cn,
   Field,
   FieldDescription,
+  FieldError,
   FieldLabel,
   Input,
   InputGroup,
@@ -27,11 +31,11 @@ import {
   RadioGroupItem,
   Skeleton,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, FormDrawer, ResourceSelect, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { MoreHorizontal, Plus, X } from "lucide-react"
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChoiceSelect } from "../ui/choice-select"
 import { useActiveBranch } from "../../lib/active-branch"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
@@ -41,20 +45,28 @@ import {
   CASH_TYPE_CODE,
   collectApi,
   createManualChargeApi,
+  createProductChargeApi,
   currencySymbol,
   editChargeConceptApi,
   fetchActivePromotions,
   fetchPatientAccount3,
   fetchPaymentMethods,
+  fetchSaleProducts,
   formatAmountPlain,
   voidChargeApi,
   type AccountPendingItem,
   type CollectResultBody,
   type PaymentMethodOption,
+  type ProductCharge,
   type PromotionItem,
   type PromotionOption,
+  type SaleProduct,
 } from "../../lib/finance-collect"
+import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { PersonPicker } from "../person-picker"
+
+/** Lo más que se vende de un producto en un concepto (el tope del servidor). */
+const SALE_QUANTITY_MAX = 9999
 
 const MAX_REASON = 2000
 const MAX_REFERENCE = 200
@@ -281,6 +293,18 @@ export function CollectDrawer({
   const [payerOpen, setPayerOpen] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [adding, setAdding] = useState<{ description: string; amountText: string } | null>(null)
+  /** «+ Agregar producto» abierto: lo elegido de lo que se vende y la cantidad escrita. */
+  // Cada vez que se abre «+ Agregar producto» lleva su clave: si se corta la red y se vuelve a
+  // tocar «Agregar», el servidor devuelve la misma venta sin descontar otra vez.
+  const [addingProduct, setAddingProduct] = useState<{ product: SaleProduct | null; quantityText: string; requestId: string } | null>(null)
+  const [productQuery, setProductQuery] = useState("")
+  /**
+   * Lo vendido en este cobro, por concepto: con esto se dice «15.00 c/u · se
+   * descuentan 2 de Sede Miraflores» bajo su línea (la cuenta no lo trae).
+   */
+  const [soldHere, setSoldHere] = useState<
+    Record<string, { quantity: number; unitPriceCents: number; branchName: string }>
+  >({})
   const [inlineError, setInlineError] = useState<{ at: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -301,6 +325,8 @@ export function CollectDrawer({
     setPayerOpen(false)
     setEditor(null)
     setAdding(null)
+    setAddingProduct(null)
+    setProductQuery("")
     setInlineError(null)
     setError(null)
   }, [])
@@ -310,6 +336,7 @@ export function CollectDrawer({
     if (!open) return
     setChosen(null)
     resetDraft()
+    setSoldHere({})
     setDirty(false)
     setRequestId(crypto.randomUUID())
   }, [open, patientId, resetDraft])
@@ -348,6 +375,16 @@ export function CollectDrawer({
     queryKey: ["active-promotions"],
     queryFn: () => fetchActivePromotions(),
     enabled: open && offersPromotions,
+  })
+  // «+ Agregar producto»: lo que se vende, con su precio y lo que hay en la
+  // sede del cobro (la misma de los conceptos). Busca en el servidor.
+  const productSearch = useDeferredValue(productQuery.trim())
+  const saleProducts = useQuery({
+    queryKey: ["sale-products", branchId, productSearch],
+    queryFn: () => fetchSaleProducts({ branchId, q: productSearch || undefined, limit: 20 }),
+    enabled: open && addingProduct !== null && Boolean(branchId),
+    placeholderData: (previous) => previous,
+    staleTime: 15_000,
   })
   const methodList = methods.data?.data ?? []
   const method = methodList.find((item) => item.id === methodId) ?? methodList[0] ?? null
@@ -408,6 +445,8 @@ export function CollectDrawer({
     onSuccess: async (result, job) => {
       setEditor(null)
       setAdding(null)
+      setAddingProduct(null)
+      setProductQuery("")
       setInlineError(null)
       setError(null)
       // El precio cambió: el importe vuelve a seguir a lo marcado.
@@ -471,7 +510,7 @@ export function CollectDrawer({
   })
 
   const busy = conceptMutation.isPending || collectMutation.isPending
-  const inlineOpen = editor !== null || adding !== null
+  const inlineOpen = editor !== null || adding !== null || addingProduct !== null
   const noMethods = methods.isSuccess && methodList.length === 0
 
   // Lo que ya sabe quien abre el cobro manda (sin parpadeo); lo demás lo trae la cuenta.
@@ -545,6 +584,8 @@ export function CollectDrawer({
   const closeInline = () => {
     setEditor(null)
     setAdding(null)
+    setAddingProduct(null)
+    setProductQuery("")
     setInlineError(null)
   }
 
@@ -593,7 +634,12 @@ export function CollectDrawer({
       target: `quitar-${chargeId}`,
       errorAt: chargeId,
       run: () => voidChargeApi(effectiveId as string, chargeId, editor.reason.trim()),
-      done: () => setSelected((current) => current.filter((id) => id !== chargeId)),
+      done: () => {
+        setSelected((current) => current.filter((id) => id !== chargeId))
+        // Si era un producto, volvió a la sede.
+        void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
+        void queryClient.invalidateQueries({ queryKey: ["inventory"] })
+      },
     })
   }
 
@@ -601,6 +647,7 @@ export function CollectDrawer({
     if (price.mode === "from") {
       // «Desde» anuncia un mínimo: el precio final lo pone quien cobra, empezando ahí.
       setAdding(null)
+      setAddingProduct(null)
       setInlineError(null)
       setEditor({
         kind: "promo",
@@ -680,6 +727,70 @@ export function CollectDrawer({
         const created = (result as { data?: { id?: string } }).data?.id
         if (created) setSelected((current) => [...current, created])
         setAdvanceMode(false)
+      },
+    })
+  }
+
+  /** Lo elegido en «+ Agregar producto», su cantidad y lo que costará (se ve, no se escribe). */
+  const chosenProduct = addingProduct?.product ?? null
+  const productQuantity = addingProduct ? parseWholeQuantity(addingProduct.quantityText, locale) : null
+  const productAmount =
+    chosenProduct && chosenProduct.salePriceCents !== null && productQuantity !== null && productQuantity > 0
+      ? chosenProduct.salePriceCents * productQuantity
+      : null
+  const productStockNote =
+    chosenProduct && chosenProduct.salePriceCents !== null
+      ? saleStockNote(chosenProduct, productQuantity ?? 1, sedeName || "esta sede")
+      : null
+  const saleDetail = (item: SaleProduct) =>
+    [
+      item.salePriceCents !== null && item.currency
+        ? formatMoney(item.salePriceCents, item.currency, locale)
+        : "Sin precio de venta",
+      item.onHandText ? `hay ${item.onHandText}` : `no hay en ${sedeName || "esta sede"}`,
+    ].join(" · ")
+
+  const addProduct = () => {
+    if (!addingProduct) return
+    if (!branchId) {
+      setInlineError({ at: "producto", message: "Elige la sede antes de agregar un producto." })
+      return
+    }
+    const product = addingProduct.product
+    if (!product) {
+      setInlineError({ at: "producto-elegir", message: "Busca y elige el producto." })
+      return
+    }
+    if (product.salePriceCents === null) return
+    const quantity = parseWholeQuantity(addingProduct.quantityText, locale)
+    if (quantity === null || quantity < 1 || quantity > SALE_QUANTITY_MAX) {
+      setInlineError({ at: "producto-cantidad", message: `La cantidad va de 1 a ${SALE_QUANTITY_MAX}, sin decimales.` })
+      return
+    }
+    const unitPriceCents = product.salePriceCents
+    conceptMutation.mutate({
+      target: "producto",
+      errorAt: "producto",
+      run: () =>
+        createProductChargeApi(effectiveId as string, {
+          productId: product.productId,
+          quantity,
+          branchId,
+          requestId: addingProduct.requestId,
+        }),
+      done: (result) => {
+        const created = (result as { data?: ProductCharge }).data
+        if (created?.id) {
+          setSelected((current) => [...current, created.id])
+          setSoldHere((current) => ({
+            ...current,
+            [created.id]: { quantity, unitPriceCents, branchName: sedeName || "la sede" },
+          }))
+        }
+        setAdvanceMode(false)
+        // Salió de la sede: lo que hay cambia en la lista y en Inventario.
+        void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
+        void queryClient.invalidateQueries({ queryKey: ["inventory"] })
       },
     })
   }
@@ -913,7 +1024,10 @@ export function CollectDrawer({
         {editor.confirmRemove ? (
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirmar quitar concepto">
             <p className="min-w-0 flex-1 basis-full text-sm sm:basis-0">
-              Se quita de la cuenta y queda en el historial. ¿Lo quitas?
+              {/* Un producto vendido vuelve a la sede de donde salió. */}
+              {item.productId && item.productQuantity
+                ? `Se quita de la cuenta y ${item.productQuantity === 1 ? "vuelve 1" : `vuelven ${item.productQuantity}`} a ${item.branchId === branchId && sedeName ? sedeName : "la sede"}. ¿Lo quitas?`
+                : "Se quita de la cuenta y queda en el historial. ¿Lo quitas?"}
             </p>
             <SubmitButton
               size="sm"
@@ -1101,6 +1215,16 @@ export function CollectDrawer({
                 <ul className="flex flex-col divide-y rounded-xl border">
                   {pending.map((item) => {
                     const checked = selected.includes(item.chargeId)
+                    // Un producto vendido: «15.00 c/u · salieron 2 de …», agregado ahora o antes.
+                    const sold =
+                      soldHere[item.chargeId] ??
+                      (item.productId && item.productQuantity
+                        ? {
+                            quantity: item.productQuantity,
+                            unitPriceCents: Math.round(item.totalCents / item.productQuantity),
+                            branchName: item.branchId === branchId && sedeName ? sedeName : "la sede",
+                          }
+                        : undefined)
                     // Con pagos aplicados el concepto ya no se corrige: se cobra lo que falta.
                     const editable = canWrite && item.paidCents === 0
                     const editing = editor?.chargeId === item.chargeId
@@ -1124,6 +1248,14 @@ export function CollectDrawer({
                                   ? `, visita ${item.visitNumber} de ${item.visitsPlanned}`
                                   : ""}
                               </span>
+                              {sold ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  {sold.quantity > 1
+                                    ? `${formatAmountPlain(sold.unitPriceCents, currency, locale)} c/u · `
+                                    : ""}
+                                  {saleDeductionWords(sold.quantity, sold.branchName)}
+                                </span>
+                              ) : null}
                               {item.paidCents > 0 ? (
                                 <span className="block text-xs text-muted-foreground">
                                   Costó {formatAmountPlain(item.totalCents, currency, locale)} · pagó{" "}
@@ -1153,6 +1285,7 @@ export function CollectDrawer({
                               onClick={() => {
                                 setInlineError(null)
                                 setAdding(null)
+                                setAddingProduct(null)
                                 setEditor(
                                   editing
                                     ? null
@@ -1260,6 +1393,125 @@ export function CollectDrawer({
                     </Button>
                   </div>
                 </div>
+              ) : addingProduct ? (
+                // «+ Agregar producto» (tablero 19): lo que se vende, con su precio
+                // y lo que hay en la sede del cobro; el importe se calcula.
+                <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+                  <Field data-invalid={inlineError?.at === "producto-elegir" || chosenProduct?.salePriceCents === null ? true : undefined}>
+                    <ResourceSelect
+                      id={`${uid}-producto`}
+                      label="Producto"
+                      value={chosenProduct?.productId ?? ""}
+                      options={(saleProducts.data?.data.items ?? []).map((item) => ({
+                        id: item.productId,
+                        label: item.name,
+                        detail: saleDetail(item),
+                      }))}
+                      onQueryChange={setProductQuery}
+                      onChange={(productId) => {
+                        const found = (saleProducts.data?.data.items ?? []).find((item) => item.productId === productId) ?? null
+                        setAddingProduct((current) => (current ? { ...current, product: found } : current))
+                        setInlineError(null)
+                      }}
+                      empty={
+                        !branchId
+                          ? "Elige la sede del cobro para ver lo que se vende."
+                          : saleProducts.isPending
+                            ? "Buscando productos…"
+                            : productSearch
+                              ? `Ningún producto a la venta coincide con «${productSearch}».`
+                              : "Aún no hay productos a la venta. Se marcan con «Se vende» en Inventario."
+                      }
+                    />
+                    {inlineError?.at === "producto-elegir" ? (
+                      <FieldError>{inlineError.message}</FieldError>
+                    ) : chosenProduct?.salePriceCents === null ? (
+                      <FieldError>Ponle precio de venta en Inventario: sin precio no se puede cobrar.</FieldError>
+                    ) : productStockNote ? (
+                      <FieldDescription role="status" className="font-medium text-warning">
+                        {productStockNote}
+                      </FieldDescription>
+                    ) : chosenProduct ? (
+                      <FieldDescription>{saleDetail(chosenProduct)}</FieldDescription>
+                    ) : (
+                      <FieldDescription>
+                        Solo lo que se vende, con su precio y lo que hay en {sedeName || "la sede del cobro"}.
+                      </FieldDescription>
+                    )}
+                  </Field>
+                  {saleProducts.isError && !saleProducts.data ? (
+                    <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+                      {financeErrorMessage(saleProducts.error)}
+                      <Button type="button" size="sm" variant="outline" onClick={() => void saleProducts.refetch()}>
+                        Reintentar
+                      </Button>
+                    </p>
+                  ) : null}
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field data-invalid={inlineError?.at === "producto-cantidad" ? true : undefined}>
+                      <FieldLabel htmlFor={`${uid}-producto-cantidad`}>
+                        Cantidad
+                        {chosenProduct ? <span className="sr-only">, en {unitFor(2, chosenProduct.unit)}</span> : null}
+                      </FieldLabel>
+                      <InputGroup>
+                        <InputGroupInput
+                          id={`${uid}-producto-cantidad`}
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className="tabular-nums"
+                          value={addingProduct.quantityText}
+                          aria-invalid={inlineError?.at === "producto-cantidad" ? true : undefined}
+                          onChange={(event) => {
+                            const quantityText = event.target.value
+                            setAddingProduct((current) => (current ? { ...current, quantityText } : current))
+                            if (inlineError?.at === "producto-cantidad") setInlineError(null)
+                          }}
+                          onKeyDown={onEnter(addProduct)}
+                        />
+                        {chosenProduct ? (
+                          <InputGroupAddon align="inline-end">{unitFor(productQuantity ?? 2, chosenProduct.unit)}</InputGroupAddon>
+                        ) : null}
+                      </InputGroup>
+                      {inlineError?.at === "producto-cantidad" ? <FieldError>{inlineError.message}</FieldError> : null}
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`${uid}-producto-importe`}>Importe</FieldLabel>
+                      <output
+                        id={`${uid}-producto-importe`}
+                        aria-live="polite"
+                        className="flex min-h-9 items-center text-base font-semibold tabular-nums"
+                      >
+                        {productAmount !== null && chosenProduct?.currency
+                          ? formatMoney(productAmount, chosenProduct.currency, locale)
+                          : "—"}
+                      </output>
+                    </Field>
+                  </div>
+                  {inlineError?.at === "producto" ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {inlineError.message}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton
+                      size="sm"
+                      pending={conceptBusy("producto")}
+                      disabled={conceptMutation.isPending || chosenProduct?.salePriceCents === null}
+                      onClick={addProduct}
+                    >
+                      Agregar
+                    </SubmitButton>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={conceptMutation.isPending}
+                      onClick={closeInline}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
               ) : canWrite ? (
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -1269,6 +1521,23 @@ export function CollectDrawer({
                     disabled={busy}
                     onClick={() => {
                       setEditor(null)
+                      setAdding(null)
+                      setInlineError(null)
+                      setProductQuery("")
+                      setAddingProduct({ product: null, quantityText: "1", requestId: crypto.randomUUID() })
+                    }}
+                  >
+                    <Plus aria-hidden />
+                    Agregar producto
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditor(null)
+                      setAddingProduct(null)
                       setInlineError(null)
                       setAdding({ description: "", amountText: "" })
                     }}

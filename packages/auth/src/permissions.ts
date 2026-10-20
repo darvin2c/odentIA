@@ -67,7 +67,9 @@ export type Permission =
   | "finance.close"
   | "finance.admin"
   | "tasks.all"
-  | "catalog.read";
+  | "catalog.read"
+  | "inventory.stock"
+  | "inventory.receive";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -84,7 +86,7 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   owner: "Puede hacer todo, también nombrar o quitar a otros propietarios.",
   admin: "Puede hacer todo en la clínica, menos nombrar o quitar propietarios.",
   reception:
-    "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve el presupuesto como lo recibe la persona, lo envía, anota su respuesta y agenda lo aceptado, sin cambiar precios. Ve las alergias del paciente y sube la tomografía que trae, pero no su historia clínica, la caja ni la configuración del agente.",
+    "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve el presupuesto como lo recibe la persona, lo envía, anota su respuesta y agenda lo aceptado, sin cambiar precios. Ve las alergias del paciente y sube la tomografía que trae. En Inventario ve lo que hay sin precios, recibe lo que llega y registra lo que se usa fuera de una atención. No ve la historia clínica, la caja ni la configuración del agente.",
   dentist: "Pacientes, historia clínica, presupuestos de lo que indicó, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
   cashier: "Ve a los pacientes, lleva la caja, registra la respuesta a los presupuestos y ve las tareas. Sin historia clínica ni agenda.",
   member: "Acceso mínimo: solo ve las tareas.",
@@ -104,6 +106,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "finance.admin",
   "tasks.all",
   "catalog.read",
+  "inventory.stock",
+  "inventory.receive",
 ];
 
 /**
@@ -133,6 +137,10 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "budgets.read",
     "budgets.send",
     "budgets.decide",
+    // Inventario sin precios (ADR 0067): ve lo que hay, recibe lo que llega y
+    // registra lo que se usa fuera de una atención. Pedir, contar y ajustar no.
+    "inventory.stock",
+    "inventory.receive",
   ],
   dentist: [
     "patients.read",
@@ -180,7 +188,9 @@ function isPermission(permission: string): permission is Permission {
     permission === "finance.close" ||
     permission === "finance.admin" ||
     permission === "tasks.all" ||
-    permission === "catalog.read"
+    permission === "catalog.read" ||
+    permission === "inventory.stock" ||
+    permission === "inventory.receive"
   ) return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;
@@ -256,7 +266,8 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/services", permissions: ["catalog.read"] },
   { prefix: "/commissions", permissions: ["commissions.read"] },
   { prefix: "/finance", permissions: ["finance.read"] },
-  { prefix: "/inventory", permissions: ["inventory.read"] },
+  // Con precios (`inventory.read`) o sin ellos (`inventory.stock`, recepción).
+  { prefix: "/inventory", permissions: ["inventory.read", "inventory.stock"] },
   { prefix: "/reports", permissions: ["reports.read"] },
   // Regla específica antes de la genérica: la auditoría vive bajo Configuración
   // pero la consulta quien tiene `audit.read`.
