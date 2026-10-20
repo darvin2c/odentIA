@@ -36,6 +36,7 @@ const createInput = z
     diagnosisSystem: z.string().max(20).nullish(),
     validUntil: z.iso.date().nullish(),
     acknowledgeAllergies: z.boolean().optional(),
+    allergyOverrideReason: z.string().max(500).nullish(),
     items: z.array(item).min(1).max(20),
   })
   .strict()

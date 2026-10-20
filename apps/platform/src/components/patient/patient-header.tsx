@@ -1,7 +1,5 @@
 import { documentText } from "@odentia/clinical"
 import {
-  Avatar,
-  AvatarFallback,
   Badge,
   Breadcrumb,
   BreadcrumbItem,
@@ -17,11 +15,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui"
-import { ConfirmDialog, useHeaderUtilities } from "@odentia/ui-patterns"
+import { ConfirmDialog, PersonAvatar, useHeaderUtilities } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle, MoreHorizontal } from "lucide-react"
 import { useState } from "react"
+import { allergyName } from "../../lib/allergies"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
@@ -47,14 +46,14 @@ export function clinicalAlerts(
     a.severity === "severa" || a.criticality === "alta"
   const severe = allergies.filter(critical).map((a) => ({
     id: a.id,
-    label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"} ${a.severity === "severa" ? "severa" : "de criticidad alta"}: ${a.substance}`,
+    label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"} ${a.severity === "severa" ? "severa" : "de criticidad alta"}: ${allergyName(a)}`,
     tone: "destructive" as const,
   }))
   const other = allergies
     .filter((a) => !critical(a))
     .map((a) => ({
       id: a.id,
-      label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${a.substance} (${label("alergia", a.severity).toLowerCase()})`,
+      label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(a)}${a.severity === "desconocida" ? "" : ` (${label("alergia", a.severity).toLowerCase()})`}`,
       tone: "secondary" as const,
     }))
   const conditions = detail.activeConditions.map((c) => ({
@@ -117,22 +116,15 @@ export function PatientClinicalStrip({
           {moreLabel} · ver antecedentes
         </Button>
       ) : more ? (
-        <Badge variant="outline" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+        <Badge
+          variant="outline"
+          className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal"
+        >
           {moreLabel}
         </Badge>
       ) : null}
     </div>
   )
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
 }
 
 /**
@@ -266,12 +258,18 @@ export function PersonHeader({
               <PatientAvatar
                 patientId={patient.id}
                 name={person.displayName}
+                givenNames={person.givenNames}
+                familyName={person.familyName}
                 storageKey={patient.avatarStorageKey}
               />
             ) : (
-              <Avatar style={{ width: 80, height: 80 }}>
-                <AvatarFallback>{initials(person.displayName)}</AvatarFallback>
-              </Avatar>
+              <PersonAvatar
+                name={person.displayName}
+                givenNames={person.givenNames}
+                familyName={person.familyName}
+                className="size-20"
+                fallbackClassName="text-2xl"
+              />
             )}
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">

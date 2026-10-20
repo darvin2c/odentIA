@@ -1,4 +1,4 @@
-import { ALLERGY_SEVERITIES, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
+import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -29,7 +29,6 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import {
-  type Allergy,
   type AnamnesisAnswers,
   type BloodGroup,
   type Condition,
@@ -45,10 +44,9 @@ import {
   savePatientHealthApi,
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
+import { AllergiesCard } from "./allergies-card"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import {
-  AllergyRows,
-  type AllergyRowValue,
   BLOOD_GROUP_LABELS,
   BloodGroupSelect,
   ConditionRows,
@@ -61,10 +59,6 @@ import {
 import { activeOrgLocale } from "../../lib/locale"
 
 type Rec = Record<string, unknown>
-
-interface AllergyDraft extends AllergyRowValue {
-  id?: string
-}
 
 interface ConditionDraft extends ConditionRowValue {
   id?: string
@@ -124,7 +118,6 @@ function isValidDateStr(value: string): boolean {
     date.getUTCDate() === d
   )
 }
-const SEVERITY_OPTIONS: readonly string[] = ALLERGY_SEVERITIES
 const STATUS_OPTIONS: readonly string[] = CONDITION_STATUSES
 
 const LEGACY_TOP_KEYS = [
@@ -179,7 +172,6 @@ const ASA_OPTIONS: Array<[string, string]> = [
 ]
 
 function buildDrafts(health: PatientHealth): {
-  allergies: AllergyDraft[]
   conditions: ConditionDraft[]
   medications: MedicationDraft[]
   review: ReviewDraft
@@ -196,19 +188,6 @@ function buildDrafts(health: PatientHealth): {
       condition: row.condition,
       diagnosisCode: row.diagnosisCode ?? "",
       diagnosisSystem: row.diagnosisSystem ?? null,
-    })),
-    allergies: health.allergies.map((a: Allergy) => ({
-      key: a.id,
-      id: a.id,
-      substance: a.substance,
-      category: a.category ?? "",
-      reaction: a.reaction ?? "",
-      severity: a.severity,
-      kind: a.kind ?? "alergia",
-      criticality: a.criticality ?? "",
-      verification: a.verification ?? "no_confirmada",
-      isActive: a.isActive,
-      persisted: true,
     })),
     conditions: health.conditions.map((c: Condition) => ({
       key: c.id,
@@ -227,8 +206,12 @@ function buildDrafts(health: PatientHealth): {
       id: m.id,
       name: m.name,
       genericName: m.genericName ?? "",
-      dose: m.dose ?? "",
-      frequency: m.frequency ?? "",
+      // Con número y unidad, lo escrito lo arma el servidor: no se muestra como «escrita antes».
+      dose: m.doseValue ? "" : (m.dose ?? ""),
+      doseValue: m.doseValue ? String(Number(m.doseValue)) : "",
+      doseUnit: m.doseUnit ?? "",
+      frequency: m.frequencyCode ? "" : (m.frequency ?? ""),
+      frequencyCode: m.frequencyCode ?? "",
       startDate: m.startDate ?? "",
       endDate: m.endDate ?? "",
       notes: m.notes ?? "",
@@ -263,7 +246,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     enabled: canRead,
   })
 
-  const [allergies, setAllergies] = useState<AllergyDraft[]>([])
   const [conditions, setConditions] = useState<ConditionDraft[]>([])
   const [medications, setMedications] = useState<MedicationDraft[]>([])
   const [review, setReview] = useState<ReviewDraft>({
@@ -296,7 +278,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   useEffect(() => {
     if (health && !dirtyRef.current) {
       const drafts = buildDrafts(health)
-      setAllergies(drafts.allergies)
       setConditions(drafts.conditions)
       setMedications(drafts.medications)
       setReview(drafts.review)
@@ -318,19 +299,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       if (!health) throw new Error("Sin datos de salud para guardar")
       return savePatientHealthApi(patientId, {
         expectedRevision: health.revision,
-        reviewStatus: review,
+        // Las alergias no viajan: se agregan y quitan una por una en su tarjeta (tablero 7).
+        reviewStatus: { ...review, allergies: health.reviewStatus.allergies },
         bloodGroup,
-        allergies: allergies.map((a) => ({
-          ...(a.id ? { id: a.id } : {}),
-          substance: a.substance.trim(),
-          category: a.category ? a.category : null,
-          reaction: a.reaction.trim() === "" ? null : a.reaction.trim(),
-          severity: a.severity || null,
-          kind: a.kind || "alergia",
-          criticality: a.criticality || null,
-          verification: a.verification || "no_confirmada",
-          isActive: a.isActive,
-        })),
         familyHistory: familyHistory
           .filter((row) => row.condition.trim() !== "")
           .map((row) => ({
@@ -355,7 +326,11 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           name: m.name.trim(),
           genericName: m.genericName?.trim() ? m.genericName.trim() : null,
           dose: m.dose.trim() === "" ? null : m.dose.trim(),
+          // Con número y unidad, el servidor escribe la dosis («500 mg»); igual la frecuencia de la lista.
+          doseValue: m.doseValue ? Number(m.doseValue.replace(",", ".")) : null,
+          doseUnit: m.doseValue ? m.doseUnit || null : null,
           frequency: m.frequency.trim() === "" ? null : m.frequency.trim(),
+          frequencyCode: m.frequencyCode || null,
           startDate: m.startDate === "" ? null : m.startDate,
           endDate: m.endDate === "" ? null : m.endDate,
           notes: m.notes.trim() === "" ? null : m.notes.trim(),
@@ -399,15 +374,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       firstId ??= id
     }
     const fid = (name: string): string => `${uid}-${name}`
-    for (const row of allergies) {
-      if (row.substance.trim() === "")
-        take(fid(`alg-sus-${row.key}`), "La sustancia es obligatoria.")
-      // Sin gravedad elegida se guarda «desconocida»: sigue siendo alerta.
-      if (row.severity !== "" && !SEVERITY_OPTIONS.includes(row.severity))
-        take(fid(`alg-sev-${row.key}`), "Gravedad inválida.")
-      if (row.reaction.trim().length > 2000)
-        take(fid(`alg-rea-${row.key}`), "Máximo 2000 caracteres.")
-    }
     for (const row of conditions) {
       if (row.name.trim() === "") take(fid(`con-nom-${row.key}`), "El nombre es obligatorio.")
       if (!STATUS_OPTIONS.includes(row.status)) take(fid(`con-est-${row.key}`), "Elige el estado.")
@@ -421,6 +387,11 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     }
     for (const row of medications) {
       if (row.name.trim() === "") take(fid(`med-nom-${row.key}`), "El nombre es obligatorio.")
+      if (row.doseValue) {
+        const value = Number(row.doseValue.replace(",", "."))
+        if (!Number.isFinite(value) || value <= 0) take(fid(`med-dos-${row.key}`), "Escribe la dosis con un número mayor que cero.")
+        else if (!row.doseUnit) take(fid(`med-uni-${row.key}`), "Elige la unidad.")
+      }
       if (row.startDate !== "" && !isValidDateStr(row.startDate))
         take(fid(`med-ini-${row.key}`), "Fecha YYYY-MM-DD válida.")
       if (row.endDate !== "" && !isValidDateStr(row.endDate))
@@ -429,13 +400,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         take(fid(`med-fin-${row.key}`), "El fin no puede ser anterior al inicio.")
       }
     }
-    const activeAlg = allergies.filter((r) => r.isActive).length
     const activeCon = conditions.filter((r) => r.status === "activa").length
     const activeMed = medications.filter((r) => r.endDate === "").length
-    if (review.allergies === "none" && activeAlg > 0)
-      take(fid("rev-alg"), "Hay alergias vigentes: no puede marcarse ausencia.")
-    if (activeAlg > 0 && review.allergies !== "recorded")
-      take(fid("rev-alg"), "Con alergias vigentes la revisión debe quedar registrada.")
     if (review.conditions === "none" && activeCon > 0)
       take(fid("rev-con"), "Hay condiciones activas: no puede marcarse ausencia.")
     if (activeCon > 0 && review.conditions !== "recorded")
@@ -556,7 +522,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             <Button type="button" onClick={() => setDrawerOpen(true)}>
               {submitLabel === "Revisar y guardar"
                 ? "Revisar antecedentes"
-                : allergies.length + conditions.length + medications.length > 0
+                : conditions.length + medications.length > 0
                   ? "Editar antecedentes"
                   : "Registrar antecedentes"}
             </Button>
@@ -595,17 +561,22 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         </p>
       ) : null}
 
+      <AllergiesCard
+        patientId={patientId}
+        patientName={patientQuery.data?.data.patient.displayName ?? "el paciente"}
+        health={health}
+      />
+
       {unasked ? (
         <EmptyState
           icon={HeartPulse}
-          title="Aún no se le preguntó"
-          description="Alergias: no preguntado. Alergias, enfermedades y medicación se registran juntas; «no preguntado» no es lo mismo que «niega»."
+          title="Aún no se le preguntó por sus enfermedades ni su medicación"
+          description="Enfermedades, medicación y la entrevista se registran juntas; «no preguntado» no es lo mismo que «niega»."
           actionLabel={canWrite ? "Registrar antecedentes" : undefined}
           onAction={canWrite ? () => setDrawerOpen(true) : undefined}
         />
       ) : (
         <AntecedentesSummary
-          allergies={allergies}
           conditions={conditions}
           medications={medications}
           review={review}
@@ -684,39 +655,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             </Field>
           </section>
 
-          <ClinicalGroupCard
-            title="Alergias"
-            review={review.allergies}
-            reviewId={fid("rev-alg")}
-            reviewError={fieldErrors[fid("rev-alg")]}
-            readOnly={saving}
-            onReview={(next) => {
-              setReview((r) => ({ ...r, allergies: next }))
-              markDirty()
-            }}
-            empty={
-              allergies.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {review.allergies === "none"
-                    ? "Ausencia confirmada en este grupo."
-                    : "Sin registros. Agrega filas o confirma la ausencia."}
-                </p>
-              ) : null
-            }
-          >
-            <AllergyRows
-              mode="clinical"
-              rows={allergies}
-              onChange={(next) => {
-                setAllergies(restoreIds(allergies, next))
-                markDirty()
-              }}
-              readOnly={saving}
-              errors={fieldErrors}
-              idPrefix={uid}
-            />
-          </ClinicalGroupCard>
-
+          {/* Las alergias se agregan y quitan una por una en su tarjeta, fuera de este formulario (tablero 7). */}
           <ClinicalGroupCard
             title="Condiciones"
             review={review.conditions}
@@ -1218,34 +1157,26 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   )
 }
 
-/** Resumen de lectura: conteos por grupo + estado de revisión. Sin formularios. */
+/**
+ * Resumen de lectura: conteos por grupo + estado de revisión. Sin formularios.
+ * Las alergias tienen su propia tarjeta arriba (`AllergiesCard`).
+ */
 function AntecedentesSummary({
-  allergies,
   conditions,
   medications,
   review,
   bloodGroup,
   pendingReview,
 }: {
-  allergies: AllergyDraft[]
   conditions: ConditionDraft[]
   medications: MedicationDraft[]
   review: ReviewDraft
   bloodGroup: BloodGroup | null
   pendingReview: boolean
 }): React.JSX.Element {
-  const activeAlg = allergies.filter((r) => r.isActive).length
   const activeCon = conditions.filter((r) => r.status === "activa").length
   const activeMed = medications.filter((r) => r.endDate === "").length
   const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
-    {
-      title: "Alergias",
-      state: review.allergies,
-      detail:
-        allergies.length === 0
-          ? "Sin registros"
-          : `${allergies.length} registro(s) · ${activeAlg} vigente(s)`,
-    },
     {
       title: "Condiciones",
       state: review.conditions,
@@ -1264,7 +1195,7 @@ function AntecedentesSummary({
     },
   ]
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
         <span className="font-heading text-sm font-medium">Grupo sanguíneo</span>
         <span className="text-sm text-muted-foreground">

@@ -902,3 +902,30 @@ it("el periodontograma es parte de la clínica y su lectura queda en la bitácor
   const invalid = await buildApp("dentist").request(`/patients/${patientId}/periodontal/compare?before=x&after=y`, { method: "GET" })
   expect(invalid.status).toBe(400)
 })
+
+it("las alergias se agregan y se quitan una por una, solo quien escribe en la historia", async () => {
+  // Una persona nueva: las otras pruebas ya le pusieron alergias a la del archivo.
+  const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Alergias" }))
+  const post = (role: string, path: string, body?: unknown) =>
+    buildApp(role).request(`/patients/${fresh.id}/health/allergies${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  // Recepción ve las alergias activas (`clinical.alerts`), pero no las cambia.
+  expect((await post("reception", "", { substance: "Látex", severity: "leve" })).status).toBe(403)
+  const added = await post("dentist", "", { substanceSystem: "atc", substanceCode: "J01C", severity: "severa" })
+  expect(added.status).toBe(201)
+  const allergy = ((await added.json()) as { data: { id: string; substance: string } }).data
+  expect(allergy.substance).toBe("Penicilinas (grupo)")
+  expect((await post("dentist", "", { substance: "penicilina" })).status).toBe(409)
+  expect((await post("reception", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(403)
+  expect((await post("dentist", `/${allergy.id}/remove`, { reason: "otro" })).status).toBe(400)
+  expect((await post("dentist", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(200)
+  expect((await post("dentist", `/${allergy.id}/restore`)).status).toBe(200)
+  const reviewed = await post("dentist", "/reviewed")
+  expect(reviewed.status).toBe(200)
+  const health = await buildApp("dentist").request(`/patients/${fresh.id}/health`, { method: "GET" })
+  const data = ((await health.json()) as { data: { allergyReviewDue: boolean; allergiesReviewedBy: string } }).data
+  expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
+})

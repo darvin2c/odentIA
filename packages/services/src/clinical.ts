@@ -6,6 +6,14 @@ import {
   type BloodGroup,
   type ClosingOdontogramPurpose,
   closingOdontogramPurpose,
+  codeAllergySubstance,
+  DOSE_UNITS,
+  type DoseUnit,
+  doseText,
+  findHabitualMedication,
+  MEDICATION_FREQUENCIES,
+  MEDICATION_FREQUENCY_LABELS,
+  type MedicationFrequency,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
@@ -54,6 +62,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -186,8 +195,13 @@ export interface HealthMedicationInput {
   name: string
   /** Principio activo (denominación común internacional); opcional. */
   genericName?: string | null
+  /** La dosis escrita; con número y unidad UCUM se escribe sola («500 mg»). */
   dose?: string | null
+  doseValue?: number | null
+  doseUnit?: string | null
+  /** La frecuencia escrita; elegida de la lista (`MEDICATION_FREQUENCIES`), se escribe sola. */
   frequency?: string | null
+  frequencyCode?: string | null
   startDate?: string | null
   endDate?: string | null
   notes?: string | null
@@ -202,7 +216,12 @@ export interface HealthReviewStatusInput {
 export interface SavePatientHealthInput {
   expectedRevision: number
   reviewStatus: HealthReviewStatusInput
-  allergies: HealthAllergyInput[]
+  /**
+   * Sin enviarlas, las alergias quedan como están (y su revisión también): se
+   * agregan y se quitan una por una (`allergies.ts`, tablero 7). Enviadas, van
+   * completas con sus IDs, como el resto del agregado.
+   */
+  allergies?: HealthAllergyInput[]
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
@@ -226,6 +245,10 @@ export interface PatientHealth {
   reviewedAt: Date | null
   reviewedBy: string | null
   reviewStatus: { allergies: string; conditions: string; medications: string }
+  /** Quién revisó las alergias con el paciente y cuándo; pasados 6 meses toca preguntarle otra vez. */
+  allergiesReviewedAt: Date | null
+  allergiesReviewedBy: string | null
+  allergyReviewDue: boolean
   allergies: HealthAllergyRow[]
   conditions: HealthConditionRow[]
   medications: HealthMedicationRow[]
@@ -339,8 +362,12 @@ interface ValidatedMedication {
   id: string | null
   name: string
   genericName: string | null
+  atcCode: string | null
   dose: string | null
+  doseValue: string | null
+  doseUnit: string | null
   frequency: string | null
+  frequencyCode: string | null
   startDate: string | null
   endDate: string | null
   notes: string | null
@@ -393,14 +420,45 @@ function validateConditionRow(input: HealthConditionInput): ValidatedCondition {
 
 function validateMedicationRow(input: HealthMedicationInput): ValidatedMedication {
   const name = assertText(input.name, 200, "name", true) as string
-  const dose = assertText(input.dose, 200, "dose", false)
-  const frequency = assertText(input.frequency, 200, "frequency", false)
+  const genericName = assertText(input.genericName, 200, "genericName", false)
+  // La DCI de la lista lleva su código ATC, el mismo de la receta; lo escrito a mano, ninguno.
+  const atcCode = findHabitualMedication(genericName ?? name)?.atc ?? null
+  const doseUnit = input.doseUnit?.trim() || null
+  const doseValue = input.doseValue ?? null
+  if ((doseValue === null) !== (doseUnit === null))
+    throw validation("La dosis lleva número y unidad, o ninguno de los dos")
+  if (doseUnit && !(DOSE_UNITS as readonly string[]).includes(doseUnit)) throw validation("Elige la unidad de la lista")
+  if (doseValue !== null && (!Number.isFinite(doseValue) || doseValue <= 0 || doseValue >= 10_000_000))
+    throw validation("La dosis debe ser un número mayor que cero")
+  const frequencyCode = input.frequencyCode?.trim() || null
+  if (frequencyCode && !(MEDICATION_FREQUENCIES as readonly string[]).includes(frequencyCode))
+    throw validation("Elige la frecuencia de la lista")
+  // Lo escrito acompaña siempre a lo estructurado, para leerlo igual que antes.
+  const dose =
+    doseValue !== null && doseUnit
+      ? doseText(doseValue, doseUnit as DoseUnit)
+      : assertText(input.dose, 200, "dose", false)
+  const frequency = frequencyCode
+    ? MEDICATION_FREQUENCY_LABELS[frequencyCode as MedicationFrequency]
+    : assertText(input.frequency, 200, "frequency", false)
   const startDate = assertDateStr(input.startDate, "startDate")
   const endDate = assertDateStr(input.endDate, "endDate")
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  const genericName = assertText(input.genericName, 200, "genericName", false)
-  return { id: input.id ?? null, name, genericName, dose, frequency, startDate, endDate, notes }
+  return {
+    id: input.id ?? null,
+    name,
+    genericName,
+    atcCode,
+    dose,
+    doseValue: doseValue === null ? null : String(doseValue),
+    doseUnit,
+    frequency,
+    frequencyCode,
+    startDate,
+    endDate,
+    notes,
+  }
 }
 export async function getPatientHealth(
   tx: Db,
@@ -416,6 +474,8 @@ export async function getPatientHealth(
       asaClass: patient.asaClass,
       reviewedAt: patient.healthReviewedAt,
       reviewedBy: patient.healthReviewedBy,
+      allergiesReviewedAt: patient.allergiesReviewedAt,
+      allergiesReviewedBy: patient.allergiesReviewedBy,
     })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -482,6 +542,9 @@ export async function getPatientHealth(
       conditions: stateOf(reviewStatus["conditions"]),
       medications: stateOf(reviewStatus["medications"]),
     },
+    allergiesReviewedAt: header.allergiesReviewedAt,
+    allergiesReviewedBy: header.allergiesReviewedBy,
+    allergyReviewDue: allergyReviewDue(header.allergiesReviewedAt),
     allergies,
     conditions,
     medications,
@@ -628,17 +691,25 @@ export async function addDeclaredAllergies(
   }
   if (fresh.length === 0) return 0
   await tx.insert(patientAllergy).values(
-    fresh.map((item) => ({
-      organizationId: orgId,
-      patientId,
-      substance: item.substance,
-      reaction: item.reaction,
-      severity: "desconocida",
-      kind: "alergia",
-      verification: "no_confirmada",
-      isActive: true,
-      createdBy: actorUserId,
-    })),
+    fresh.map((item) => {
+      // Lo que escribió el paciente queda con su código si es exactamente una sustancia de la lista.
+      const entry = codeAllergySubstance(item.substance)
+      return {
+        organizationId: orgId,
+        patientId,
+        substance: item.substance,
+        substanceSystem: entry?.system ?? null,
+        substanceCode: entry?.code ?? null,
+        category: entry?.category ?? null,
+        reaction: item.reaction,
+        severity: "desconocida",
+        kind: "alergia",
+        verification: "no_confirmada",
+        source: "paciente",
+        isActive: true,
+        createdBy: actorUserId,
+      }
+    }),
   )
   const reviewStatus = { ...((locked.reviewStatus ?? {}) as Record<string, unknown>) }
   await tx
@@ -717,15 +788,24 @@ async function persistPatientHealth(
         "La declaración inicial requiere una ficha nueva sin antecedentes",
       )
   }
+  // Sin alergias en el envío, no se tocan: van una por una (`allergies.ts`).
+  const sendsAllergies = input.allergies !== undefined
   if (
-    !Array.isArray(input.allergies) ||
+    (sendsAllergies && !Array.isArray(input.allergies)) ||
     !Array.isArray(input.conditions) ||
     !Array.isArray(input.medications)
   ) {
     throw validation("allergies, conditions y medications deben ser arreglos completos")
   }
-  const reviewStatus = assertReviewStatus(input.reviewStatus)
-  const allergies = input.allergies.map(validateAllergyRow)
+  const sentReviewStatus = assertReviewStatus(input.reviewStatus)
+  const storedReview = (locked.reviewStatus ?? {}) as Record<string, unknown>
+  const reviewStatus = sendsAllergies
+    ? sentReviewStatus
+    : {
+        ...sentReviewStatus,
+        allergies: storedReview.allergies === "none" || storedReview.allergies === "recorded" ? storedReview.allergies : "unknown",
+      }
+  const allergies = (input.allergies ?? []).map(validateAllergyRow)
   const conditions = input.conditions.map(validateConditionRow)
   const medications = input.medications.map(validateMedicationRow)
   // La omisión de un ID persistido es 400: evita el borrado accidental.
@@ -753,7 +833,7 @@ async function persistPatientHealth(
       ),
   ])
   const knownIds = new Set([
-    ...persistedAllergies.map((r) => r.id),
+    ...(sendsAllergies ? persistedAllergies.map((r) => r.id) : []),
     ...persistedConditions.map((r) => r.id),
     ...persistedMeds.map((r) => r.id),
   ])
@@ -765,7 +845,7 @@ async function persistPatientHealth(
     if (!knownIds.has(row.id)) throw notFound("Registro de salud")
   }
   for (const [rows, persisted, name] of [
-    [allergies, persistedAllergies, "alergias"],
+    [allergies, sendsAllergies ? persistedAllergies : [], "alergias"],
     [conditions, persistedConditions, "condiciones"],
     [medications, persistedMeds, "medicamentos"],
   ] as const) {
@@ -789,7 +869,7 @@ async function persistPatientHealth(
       throw validation(`${name}: con registros activos la revisión debe ser registrada`)
     }
   }
-  checkGroup(reviewStatus.allergies, activeAllergies, "alergias")
+  if (sendsAllergies) checkGroup(reviewStatus.allergies, activeAllergies, "alergias")
   checkGroup(reviewStatus.conditions, activeConditions, "condiciones")
   checkGroup(reviewStatus.medications, activeMeds, "medicamentos")
   // Entrevista: solo si cambió; versión esperada estricta (0 si no había).
@@ -828,17 +908,22 @@ async function persistPatientHealth(
   }
   // Aplicación de diffs (todo ya validado: cualquier fallo revierte todo).
   for (const row of allergies) {
+    // Lo escrito que es exactamente una sustancia de la lista queda con su código (ADR 0072).
+    const entry = codeAllergySubstance(row.substance)
     if (!row.id) {
       await tx.insert(patientAllergy).values({
         organizationId: orgId,
         patientId,
         substance: row.substance,
-        category: row.category,
+        substanceSystem: entry?.system ?? null,
+        substanceCode: entry?.code ?? null,
+        category: row.category ?? entry?.category ?? null,
         reaction: row.reaction,
         severity: row.severity,
         kind: row.kind,
         criticality: row.criticality,
         verification: row.verification,
+        source: context.kind === "declaration" ? "paciente" : "equipo",
         isActive: row.isActive,
         createdBy: actorUserId,
       })
@@ -847,6 +932,9 @@ async function persistPatientHealth(
         .update(patientAllergy)
         .set({
           substance: row.substance,
+          // El código cambia solo si cambió lo escrito: el elegido de la lista se conserva.
+          substanceSystem: sql`case when ${patientAllergy.substance} = ${row.substance} then ${patientAllergy.substanceSystem} else ${entry?.system ?? null}::text end`,
+          substanceCode: sql`case when ${patientAllergy.substance} = ${row.substance} then ${patientAllergy.substanceCode} else ${entry?.code ?? null}::text end`,
           category: row.category,
           reaction: row.reaction,
           severity: row.severity,
@@ -854,6 +942,13 @@ async function persistPatientHealth(
           criticality: row.criticality,
           verification: row.verification,
           isActive: row.isActive,
+          // Vigente no tiene motivo de quitada; archivarla aquí la quita sin motivo.
+          ...(row.isActive
+            ? { removedReason: null, removedAt: null, removedBy: null }
+            : {
+                removedAt: sql`coalesce(${patientAllergy.removedAt}, now())`,
+                removedBy: sql`coalesce(${patientAllergy.removedBy}, ${actorUserId}::text)`,
+              }),
           updatedAt: new Date(),
         })
         .where(
@@ -908,8 +1003,12 @@ async function persistPatientHealth(
         patientId,
         name: row.name,
         genericName: row.genericName,
+        atcCode: row.atcCode,
         dose: row.dose,
+        doseValue: row.doseValue,
+        doseUnit: row.doseUnit,
         frequency: row.frequency,
+        frequencyCode: row.frequencyCode,
         startDate: row.startDate,
         endDate: row.endDate,
         notes: row.notes,
@@ -921,8 +1020,12 @@ async function persistPatientHealth(
         .set({
           name: row.name,
           genericName: row.genericName,
+          atcCode: row.atcCode,
           dose: row.dose,
+          doseValue: row.doseValue,
+          doseUnit: row.doseUnit,
           frequency: row.frequency,
+          frequencyCode: row.frequencyCode,
           startDate: row.startDate,
           endDate: row.endDate,
           notes: row.notes,

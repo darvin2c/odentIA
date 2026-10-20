@@ -83,6 +83,7 @@ import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
+import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
 import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
 import {
@@ -97,6 +98,7 @@ import {
 } from "./budgets.js"
 import {
   addClinicalNote,
+  addDeclaredAllergies,
   addOdontogramEntries,
   correctDocumentContext,
   createOdontogramAssessment,
@@ -1627,8 +1629,9 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
   ],
+  // Con su DCI de la lista (queda con su ATC), la dosis con número y unidad y la frecuencia de la lista.
   medications: [
-    { name: "Cozaar", genericName: "Losartán", dose: "50 mg", frequency: "1 vez al día" },
+    { name: "Cozaar", genericName: "losartán", doseValue: 50, doseUnit: "mg", frequencyCode: "cada_24_h" },
   ],
   anamnesis: {
     expectedVersion: 0,
@@ -1671,7 +1674,10 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
       name: m.name,
       genericName: m.genericName,
       dose: m.dose,
+      doseValue: m.doseValue ? Number(m.doseValue) : null,
+      doseUnit: m.doseUnit,
       frequency: m.frequency,
+      frequencyCode: m.frequencyCode,
     })),
     {
       name: "Aspirina",
@@ -1701,6 +1707,26 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
     },
   },
 })
+// Alergias de Rosa como en el tablero 7: «Penicilina» ya quedó con su grupo
+// ATC; el látex lo declaró ella en su formulario; «amoxi» quedó escrita a mano
+// (sin codificar, para «Elegir de la lista»); el ibuprofeno se quitó porque
+// «era otra cosa». La última revisión fue hace 8 meses: la atención pide
+// preguntarle por alergias nuevas.
+await addDeclaredAllergies(db, ORG_A, ANA_ID, rosaPatientId, [{ substance: "Látex", reaction: "Ronchas con los guantes" }], {
+  entity: "seed",
+  entityId: "seed-rosa-alergias",
+})
+await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, { substance: "amoxi", severity: "moderada" })
+const rosaIbuprofen = await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
+  substance: "Ibuprofeno",
+  severity: "leve",
+  reaction: "Le cae mal al estómago",
+})
+await removePatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, rosaIbuprofen.id, "otra_cosa")
+await db
+  .update(patient)
+  .set({ allergiesReviewedAt: sql`now() - interval '8 months'`, allergiesReviewedBy: ANA_ID })
+  .where(eq(patient.id, rosaPatientId))
 // Catálogo base en ambas orgs (precios de ejemplo se administran aquí; el plan
 // solo congela desde el servicio elegido, nunca montos manuales).
 const seedOffers: Array<{
@@ -2476,9 +2502,10 @@ await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
     },
   ],
 })
-// Se emitió confirmando el aviso de alergia por error y se anula: queda la traza.
+// Se emitió pese al aviso de alergia, con su motivo, y se anula: queda la traza.
 const recetaAnulada = await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
   acknowledgeAllergies: true,
+  allergyOverrideReason: "Dijo que la tolera; se revisará con ella",
   items: [
     {
       genericName: "amoxicilina",

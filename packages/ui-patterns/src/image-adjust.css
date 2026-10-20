@@ -1,0 +1,6 @@
+/*
+ * Estilos del recorte libre del logo (`ImageAdjust` con `shape="logo"`).
+ * Se cargan desde la hoja de la app y no desde el componente: el paquete
+ * también lo leen e2e y Node, que no entienden un `import` de CSS.
+ */
+@import "react-image-crop/dist/ReactCrop.css";

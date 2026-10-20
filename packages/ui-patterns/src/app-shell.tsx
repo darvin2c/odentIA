@@ -1,7 +1,4 @@
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +32,7 @@ import {
 import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
 import { RiSideBarLine } from "@remixicon/react"
 import * as React from "react"
+import { PersonAvatar } from "./person-avatar.js"
 import { type ThemeMode, ThemeTabs, useTheme } from "./theme.js"
 // ----- Types -----
 /**
@@ -62,7 +60,14 @@ export type AppShellNavGroup = {
 
 export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup
 
-export type AppShellUser = { name: string; email?: string; avatarUrl?: string }
+export type AppShellUser = {
+  name: string
+  email?: string
+  avatarUrl?: string | null
+  /** Nombres y apellidos por separado: las iniciales del avatar salen exactas. */
+  givenNames?: string | null
+  familyName?: string | null
+}
 
 /**
  * Ítem del menú de usuario. `to` navega dentro de la app con el link del router;
@@ -430,7 +435,6 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     defaultValue: defaultTheme,
     onChange: onThemeChange,
   })
-  const initial = user.name?.trim().charAt(0).toUpperCase() || "U"
   const activeTo = resolveActiveTo(pathname, [
     ...items.flatMap((entry) => (isGroup(entry) ? entry.children : [entry])),
     ...(footerItems ?? []),
@@ -507,12 +511,15 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
                 aria-label={`Menú de ${user.name || "usuario"}`}
                 className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <Avatar className="size-8">
-                  {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
-                  <AvatarFallback className="bg-foreground font-semibold text-background">
-                    {initial}
-                  </AvatarFallback>
-                </Avatar>
+                <PersonAvatar
+                  name={user.name}
+                  givenNames={user.givenNames}
+                  familyName={user.familyName}
+                  src={user.avatarUrl}
+                  className="size-8"
+                  fallbackClassName="text-xs"
+                  decorative
+                />
                 <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
                   <p className="truncate text-sm font-medium text-sidebar-foreground">
                     {user.name}

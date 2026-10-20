@@ -1,10 +1,4 @@
 import {
-  Attachment,
-  AttachmentAction,
-  AttachmentContent,
-  AttachmentDescription,
-  AttachmentMedia,
-  AttachmentTitle,
   Badge,
   Button,
   Field,
@@ -21,14 +15,18 @@ import {
   ErrorState,
   FormDrawer,
   fieldErrorMessages,
+  ImageAdjust,
+  type ImageAdjustValue,
   PageHeader,
   PageShell,
+  PersonAvatar,
+  renderAdjustedImage,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { Monitor, Smartphone, XIcon } from "lucide-react"
-import { useRef, useState } from "react"
+import { Monitor, Smartphone } from "lucide-react"
+import { useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient } from "../../lib/auth-client"
@@ -65,25 +63,73 @@ const emailSchema = z.object({
   email: z.string().email("Correo inválido"),
 })
 
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024
-
-function avatarKindLabel(mime: string): string | null {
-  if (mime === "image/png") return "PNG"
-  if (mime === "image/jpeg") return "JPG"
-  if (mime === "image/webp") return "WebP"
-  return null
-}
-
-function formatAvatarSize(bytes: number): string {
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`
-}
-
-interface AvatarUpload {
-  name: string
-  meta: string
-  objectUrl: string
-  status: "uploading" | "error"
-  message?: string
+/**
+ * La foto de Mi perfil con «Ajustar imagen» (tablero 6): se encuadra y se sube
+ * ya recortada. «Cancelar» deja la anterior; guardar la pone en la cuenta y
+ * desde ahí la ven la barra lateral de cada clínica y este perfil.
+ */
+function ProfilePhotoDrawer({ open, name, onClose }: { open: boolean; name: string; onClose: () => void }) {
+  const [value, setValue] = useState<ImageAdjustValue | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const close = () => {
+    if (saving) return
+    setValue(null)
+    setError(null)
+    onClose()
+  }
+  async function save() {
+    if (!value) return
+    setSaving(true)
+    setError(null)
+    try {
+      const { blob, ext } = await renderAdjustedImage(value)
+      const formData = new FormData()
+      formData.append("file", blob, `avatar.${ext}`)
+      const res = await fetch(`${API_URL}/api/uploads/avatar`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
+        setError(body?.error?.message ?? common.errors.generic)
+        return
+      }
+      const { data } = (await res.json()) as { data: { url: string } }
+      const { error: updateError } = await authClient.updateUser({ image: data.url })
+      if (updateError) {
+        setError(common.errors.generic)
+        return
+      }
+      setValue(null)
+      toast.success("Foto actualizada")
+      onClose()
+    } catch {
+      setError(common.errors.generic)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <FormDrawer
+      open={open}
+      onClose={close}
+      title="Tu foto"
+      description="Elige un archivo, arrástralo o toma la foto, y encuádrala antes de guardar."
+      onSubmit={(event) => {
+        event.preventDefault()
+        void save()
+      }}
+      isDirty={value !== null}
+      isSubmitting={saving}
+      submitDisabled={!value}
+      submitLabel="Guardar"
+      error={error}
+    >
+      {open ? <ImageAdjust shape="person" name={name} disabled={saving} onChange={setValue} /> : null}
+    </FormDrawer>
+  )
 }
 
 function ProfilePage() {
@@ -91,19 +137,21 @@ function ProfilePage() {
   const { edit } = useSearch({ from: "/_app/profile" })
   const navigate = useNavigate()
   const live = authClient.useSession().data?.user
+  // La foto sale de la cuenta (`image`), la misma que ve la barra lateral.
   const user = live
     ? {
         name: live.name,
         firstName: live.firstName ?? "",
         lastName: live.lastName ?? "",
         email: live.email,
+        avatarUrl: live.image ?? null,
       }
     : {
         name: session.name,
         firstName: session.firstName,
         lastName: session.lastName,
         email: session.email,
-        avatarUrl: undefined as string | undefined,
+        avatarUrl: session.image,
       }
 
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -117,96 +165,29 @@ function ProfilePage() {
     void navigate({ to: "/profile", search: {}, replace: true })
   }
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [upload, setUpload] = useState<AvatarUpload | null>(null)
-
-  async function handleAvatarFile(file: File | undefined) {
-    if (!file) return
-    const kind = avatarKindLabel(file.type)
-    if (!kind) {
-      setUpload({
-        name: file.name,
-        meta: "",
-        objectUrl: URL.createObjectURL(file),
-        status: "error",
-        message: "Solo se admiten PNG, JPG o WebP",
-      })
-      if (fileInputRef.current) fileInputRef.current.value = ""
-      return
-    }
-    if (file.size > AVATAR_MAX_BYTES) {
-      setUpload({
-        name: file.name,
-        meta: `${kind} · ${formatAvatarSize(file.size)}`,
-        objectUrl: URL.createObjectURL(file),
-        status: "error",
-        message: "La imagen no puede superar 2 MB",
-      })
-      if (fileInputRef.current) fileInputRef.current.value = ""
-      return
-    }
-    const objectUrl = URL.createObjectURL(file)
-    setUpload({
-      name: file.name,
-      meta: `${kind} · ${formatAvatarSize(file.size)}`,
-      objectUrl,
-      status: "uploading",
-    })
-    try {
-      const formData = new FormData()
-      formData.append("file", file)
-      const res = await fetch(`${API_URL}/api/uploads/avatar`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: { message?: string }
-        } | null
-        setUpload((prev) =>
-          prev
-            ? { ...prev, status: "error", message: body?.error?.message ?? common.errors.generic }
-            : prev,
-        )
-        return
-      }
-      const { data } = (await res.json()) as { data: { url: string } }
-      const { error: updateError } = await authClient.updateUser({ image: data.url })
-      if (updateError) {
-        setUpload((prev) =>
-          prev ? { ...prev, status: "error", message: common.errors.generic } : prev,
-        )
-        return
-      }
-      URL.revokeObjectURL(objectUrl)
-      setUpload(null)
-      toast.success("Foto actualizada")
-    } catch {
-      setUpload((prev) =>
-        prev ? { ...prev, status: "error", message: common.errors.generic } : prev,
-      )
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ""
-    }
-  }
+  const [photoOpen, setPhotoOpen] = useState(false)
+  const [removing, setRemoving] = useState(false)
 
   async function handleRemovePhoto() {
+    setRemoving(true)
     const { error: updateError } = await authClient.updateUser({ image: null })
+    setRemoving(false)
     if (updateError) {
       toast.error(common.errors.generic)
       return
     }
-    toast.success("Foto eliminada")
+    toast.success("Foto quitada")
   }
 
-  const initial = user.name.trim().charAt(0).toUpperCase() || "U"
-  const avatar = user.avatarUrl ? (
-    <img src={user.avatarUrl} alt={user.name} className="size-16 rounded-full object-cover" />
-  ) : (
-    <div className="flex size-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
-      {initial}
-    </div>
+  const avatar = (
+    <PersonAvatar
+      name={user.name}
+      givenNames={user.firstName}
+      familyName={user.lastName}
+      src={user.avatarUrl}
+      className="size-16"
+      fallbackClassName="text-lg"
+    />
   )
 
   return (
@@ -224,54 +205,24 @@ function ProfilePage() {
               <p className="truncate text-sm font-medium">{user.name}</p>
               <p className="truncate text-sm text-muted-foreground">{user.email}</p>
             </div>
-            <div className="ml-auto flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Cambiar foto
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setPhotoOpen(true)}>
+                {user.avatarUrl ? "Cambiar foto" : "Subir foto"}
               </Button>
               {user.avatarUrl ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
+                  disabled={removing}
                   onClick={() => void handleRemovePhoto()}
                 >
-                  Quitar
+                  {removing ? "Quitando…" : "Quitar foto"}
                 </Button>
               ) : null}
             </div>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={(event) => void handleAvatarFile(event.target.files?.[0])}
-          />
-          {upload ? (
-            <Attachment state={upload.status} className="mt-4">
-              <AttachmentMedia variant="image">
-                <img src={upload.objectUrl} alt={upload.name} />
-              </AttachmentMedia>
-              <AttachmentContent>
-                <AttachmentTitle>{upload.name}</AttachmentTitle>
-                <AttachmentDescription>
-                  {upload.status === "error"
-                    ? (upload.message ?? common.errors.generic)
-                    : upload.meta}
-                </AttachmentDescription>
-              </AttachmentContent>
-              {upload.status === "error" ? (
-                <AttachmentAction aria-label="Descartar" onClick={() => setUpload(null)}>
-                  <XIcon />
-                </AttachmentAction>
-              ) : null}
-            </Attachment>
-          ) : null}
+          <ProfilePhotoDrawer open={photoOpen} name={user.name} onClose={() => setPhotoOpen(false)} />
           <Separator className="my-2" />
           <div className="flex items-center justify-between py-3">
             <div>

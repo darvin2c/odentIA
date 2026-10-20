@@ -330,6 +330,20 @@
       "when": 1792513565688,
       "tag": "0046_argos_reportes_metas_y_lunes_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792516998930,
+      "tag": "0047_alergias_y_medicacion_codificadas",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792517001372,
+      "tag": "0048_alergias_y_medicacion_codificadas_datos",
+      "breakpoints": true
     }
   ]
 }

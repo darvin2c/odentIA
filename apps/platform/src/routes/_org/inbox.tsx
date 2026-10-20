@@ -59,6 +59,7 @@ import {
   LoadingState,
   PageHeader,
   PageShell,
+  personInitials,
   RowActions,
   SideDockScopeProvider,
   SpeechInput,
@@ -952,7 +953,7 @@ function ConversationList({
       ) : null}
       {items.map((item) => {
         const selected = item.id === selectedId
-        const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
+        const initials = personInitials(item.contact.displayName)
         const ChannelIcon = channelIcon(item.connection.channel)
         const words = conversationWords({ ...item, myUserId, receptionName })
         // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0050).

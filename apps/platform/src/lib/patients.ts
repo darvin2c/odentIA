@@ -62,13 +62,22 @@ export interface Patient {
 export interface Allergy {
   id: string
   substance: string
+  /** Lista y código de la sustancia (ADR 0072); sin ellos, «sin codificar». */
+  substanceSystem?: string | null
+  substanceCode?: string | null
   category?: string | null
   reaction?: string | null
   severity: string
   kind?: string
   criticality?: string | null
   verification?: string
+  /** Quién la dijo: el equipo o el paciente en su formulario. */
+  source?: string
   isActive: boolean
+  removedReason?: string | null
+  removedAt?: string | null
+  removedBy?: string | null
+  createdBy?: string | null
   createdAt?: string
 }
 
@@ -89,8 +98,13 @@ export interface Medication {
   id: string
   name: string
   genericName?: string | null
+  atcCode?: string | null
   dose?: string | null
+  /** Número y unidad UCUM de la dosis, cuando se eligieron (la base devuelve el número como texto). */
+  doseValue?: string | null
+  doseUnit?: string | null
   frequency?: string | null
+  frequencyCode?: string | null
   startDate?: string | null
   endDate?: string | null
   notes?: string | null
@@ -150,7 +164,10 @@ export interface HealthMedicationInput {
   name: string
   genericName?: string | null
   dose?: string | null
+  doseValue?: number | null
+  doseUnit?: string | null
   frequency?: string | null
+  frequencyCode?: string | null
   startDate?: string | null
   endDate?: string | null
 }
@@ -158,7 +175,8 @@ export interface HealthMedicationInput {
 export interface SaveHealthInput {
   expectedRevision: number
   reviewStatus: HealthReviewStatus
-  allergies: HealthAllergyInput[]
+  /** Sin enviarlas quedan como están: se agregan y quitan una por una. */
+  allergies?: HealthAllergyInput[]
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   bloodGroup?: BloodGroup | null
@@ -178,6 +196,10 @@ export interface PatientHealth {
   familyHistory?: Array<FamilyHistoryItem & { id: string }>
   reviewedAt: string | null
   reviewedBy: string | null
+  /** Quién revisó las alergias con el paciente y cuándo; `allergyReviewDue` lo calcula el servidor (6 meses). */
+  allergiesReviewedAt?: string | null
+  allergiesReviewedBy?: string | null
+  allergyReviewDue?: boolean
   latestAnamnesis: {
     id: string
     version: number
@@ -977,4 +999,51 @@ export function filiationGapsText(gaps: ReadonlyArray<Pick<MissingPersonDatum, "
   ]
   const text = words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
   return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : ""
+}
+
+/* ---- Alergias una por una (issue 43, tablero 7; las reglas son del servidor) ---- */
+
+export interface AllergyAddInput {
+  substance?: string | null
+  substanceSystem?: string | null
+  substanceCode?: string | null
+  severity?: string | null
+  reaction?: string | null
+}
+
+export function addAllergyApi(patientId: string, body: AllergyAddInput): Promise<{ data: Allergy }> {
+  return apiFetch<{ data: Allergy }>(`/api/patients/${patientId}/health/allergies`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function removeAllergyApi(patientId: string, allergyId: string, reason: string): Promise<{ data: Allergy }> {
+  return apiFetch<{ data: Allergy }>(`/api/patients/${patientId}/health/allergies/${allergyId}/remove`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function restoreAllergyApi(patientId: string, allergyId: string): Promise<{ data: Allergy }> {
+  return apiFetch<{ data: Allergy }>(`/api/patients/${patientId}/health/allergies/${allergyId}/restore`, {
+    method: "POST",
+  })
+}
+
+export function codeAllergyApi(
+  patientId: string,
+  allergyId: string,
+  body: { substanceSystem: string; substanceCode: string },
+): Promise<{ data: Allergy }> {
+  return apiFetch<{ data: Allergy }>(`/api/patients/${patientId}/health/allergies/${allergyId}/code`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function markAllergiesReviewedApi(patientId: string): Promise<{ data: { reviewedAt: string } }> {
+  return apiFetch<{ data: { reviewedAt: string } }>(`/api/patients/${patientId}/health/allergies/reviewed`, {
+    method: "POST",
+  })
 }

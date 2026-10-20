@@ -9,6 +9,8 @@ export interface SessionInfo {
   name: string
   firstName: string
   lastName: string
+  /** Foto subida en Mi perfil; sin ella, las iniciales. */
+  image: string | null
   emailVerified: boolean
 }
 
@@ -36,6 +38,7 @@ export async function requireSession(next?: string): Promise<SessionInfo> {
     name: data.user.name,
     firstName: data.user.firstName ?? "",
     lastName: data.user.lastName ?? "",
+    image: data.user.image ?? null,
     emailVerified: data.user.emailVerified,
   }
 }

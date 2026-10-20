@@ -9,8 +9,8 @@ describe("saludo de entrar", () => {
     expect(greeting(new Date(2026, 9, 17, 4, 59))).toBe("Buenas noches")
   })
 
-  it("iniciales del nombre y del último apellido", () => {
-    expect(initials("Carmen Ruiz Paredes")).toBe("CP")
+  it("iniciales del nombre y del primer apellido, como el avatar", () => {
+    expect(initials("Carmen Ruiz Paredes")).toBe("CR")
     expect(initials("Carmen")).toBe("C")
   })
 })

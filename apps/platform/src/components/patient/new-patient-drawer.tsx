@@ -32,6 +32,7 @@ import {
   FormDrawer,
   internationalText,
   normalizeCountry,
+  PersonAvatar,
   PhoneInput,
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -146,11 +147,6 @@ function initialDraft(target: NewPatientTarget): Draft {
     return { ...EMPTY, givenNames, surnames: rest.join(" ") }
   }
   return EMPTY
-}
-
-function initials(name: string): string {
-  const words = name.split(/\s+/).filter((word) => word && !/^(de|del|la|las|los|y)$/i.test(word))
-  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase() || "·"
 }
 
 function personLine(row: PersonListItem): string {
@@ -786,9 +782,12 @@ function MatchesNote({
       {rows.map((row) => (
         <Item key={row.id} variant="outline" className="rounded-2xl bg-background">
           <ItemMedia>
-            <span className="flex size-9 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-foreground">
-              {initials(row.displayName)}
-            </span>
+            <PersonAvatar
+              name={row.displayName}
+              className="size-9"
+              fallbackClassName="text-xs"
+              decorative
+            />
           </ItemMedia>
           {/* Con poco ancho el botón baja a su propia fila en vez de apretar el nombre. */}
           <ItemContent className="min-w-0 basis-48">

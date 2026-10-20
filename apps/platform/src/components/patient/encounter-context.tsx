@@ -11,7 +11,9 @@ import {
 } from "../../lib/clinical-forms"
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
+import { allergyTitle } from "../../lib/allergies"
 import { type Encounter, fetchPatientHealth, type PatientFull } from "../../lib/patients"
+import { AllergyReviewNotice } from "./allergies-card"
 
 /** Respuesta en palabras: «Sí», la lista unida o el texto tal cual. */
 function answerText(value: unknown): string {
@@ -105,11 +107,42 @@ export function DeclaredQuestionnaireNotice({
                 ))}
               </dl>
             ) : null}
-            <p className="text-xs text-muted-foreground">Entra como «declarado», sin pisar lo ya confirmado.</p>
+            <p className="text-xs text-muted-foreground">
+              Las alergias que escribió pasan a su lista y avisan al recetar; lo ya registrado no cambia.
+            </p>
           </section>
         )
       })}
     </div>
+  )
+}
+
+/**
+ * Sus alergias, al abrir la atención (tablero 7): si nunca se revisaron o pasaron
+ * 6 meses, pide preguntarle por alergias nuevas con «Sin cambios» y «Agregar
+ * alergia». Solo para quien lleva la atención.
+ */
+export function EncounterAllergyReview({
+  patientId,
+  patient,
+  disabled,
+}: {
+  patientId: string
+  patient: PatientFull
+  disabled: boolean
+}): React.JSX.Element | null {
+  const health = useQuery({
+    queryKey: ["patient-health", patientId],
+    queryFn: () => fetchPatientHealth(patientId),
+  })
+  if (!health.data) return null
+  return (
+    <AllergyReviewNotice
+      patientId={patientId}
+      patientName={patient.patient.displayName}
+      health={health.data.data}
+      disabled={disabled}
+    />
   )
 }
 
@@ -153,9 +186,9 @@ export function EncounterContextBody({
           <ul className="flex flex-col gap-1">
             {allergies.map((allergy) => (
               <li key={allergy.id}>
-                <strong>{allergy.substance}</strong>
+                <strong>{allergyTitle(allergy)}</strong>
                 {allergy.reaction ? ` · ${allergy.reaction}` : ""}
-                {allergy.verification === "no_confirmada" ? " · declarada, por confirmar" : ""}
+                {allergy.source === "paciente" ? " · la declaró el paciente" : ""}
               </li>
             ))}
           </ul>

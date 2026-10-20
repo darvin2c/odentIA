@@ -13,8 +13,6 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { formatMoney } from "@odentia/clinical"
 import {
-  Avatar,
-  AvatarFallback,
   Badge,
   Button,
   cn,
@@ -33,7 +31,13 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { DetailDrawer, EmptyState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import {
+  DetailDrawer,
+  EmptyState,
+  FormDrawer,
+  LoadingState,
+  PersonAvatar,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check, ChevronRight, Percent, Plus } from "lucide-react"
@@ -99,16 +103,6 @@ function mutationError(error: unknown): string {
     return "No pudimos confirmar si se guardó. Revisa cómo quedó antes de volver a intentarlo, para no registrarlo dos veces."
   }
   return financeErrorMessage(error)
-}
-
-/** Iniciales sin el tratamiento: «Dra. Ana Torres» → «AT». */
-function initials(name: string): string {
-  const words = name
-    .replace(/^(dra?|doctora?)\.?\s+/i, "")
-    .split(/\s+/)
-    .filter(Boolean)
-  const text = `${words[0]?.charAt(0) ?? ""}${words[1]?.charAt(0) ?? ""}`.toUpperCase()
-  return text || "?"
 }
 
 function countLabel(count: number, one: string, many: string): string {
@@ -219,9 +213,7 @@ export function CommissionsAdminPanel({
                     className="h-auto w-full min-w-0 justify-start gap-3 rounded-none px-4 py-3 text-left font-normal whitespace-normal aria-[current=true]:bg-muted"
                     onClick={() => onSelect(row.professionalUserId)}
                   >
-                    <Avatar aria-hidden>
-                      <AvatarFallback>{initials(name)}</AvatarFallback>
-                    </Avatar>
+                    <PersonAvatar name={name} fallbackClassName="text-xs" decorative />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate font-medium text-foreground">{name}</span>
                       <span className="text-sm text-muted-foreground">

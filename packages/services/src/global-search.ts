@@ -1128,6 +1128,7 @@ function channelLabel(channel: string | null): string | null {
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     messenger: "Messenger",
+    telegram: "Telegram",
     email: "Correo",
     webchat: "Chat de la web",
   }

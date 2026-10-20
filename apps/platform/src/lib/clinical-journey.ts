@@ -287,6 +287,8 @@ export interface Prescription {
   issuedAt: string
   cancelledAt: string | null
   cancelReason: string | null
+  /** Por qué se recetó pese al aviso de alergia (decisión 10). */
+  allergyOverrideReason?: string | null
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
@@ -358,6 +360,8 @@ export function createPrescriptionApi(
     diagnosisSystem?: string | null
     validUntil?: string | null
     acknowledgeAllergies?: boolean
+    /** Con aviso de alergia, por qué se receta igual: queda en la receta. */
+    allergyOverrideReason?: string | null
     items: PrescriptionMedicationBody[]
   },
 ): Promise<{ data: Prescription }> {

@@ -4,6 +4,7 @@ import { internationalText } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import {
@@ -292,7 +293,7 @@ export function PersonSummary({
             <Fact label="Alergias">
               {allergies.length === 0
                 ? "Sin alergias registradas"
-                : allergies.map((allergy) => allergy.substance).join(", ")}
+                : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>
           ) : null}
           {canAppointments && !clinical ? (

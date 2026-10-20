@@ -552,7 +552,7 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   ).rejects.toMatchObject({ status: 409 })
 })
 
-it("la alergia declarada en el cuestionario pasa a antecedentes sin confirmar y la receta avisa", async () => {
+it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del paciente y la receta avisa", async () => {
   const patient = await run((tx) => createPatient(tx, "org_a", ACTOR, { displayName: "Lucía Declara" }))
   // Látex ya lo confirmó un profesional: lo declarado no lo repite ni lo cambia.
   await run((tx) =>
@@ -607,6 +607,10 @@ it("la alergia declarada en el cuestionario pasa a antecedentes sin confirmar y 
     expect.arrayContaining([
       expect.objectContaining({
         substance: "Penicilina",
+        // La dijo el paciente y es exactamente una sustancia de la lista: queda con su grupo ATC.
+        source: "paciente",
+        substanceSystem: "atc",
+        substanceCode: "J01C",
         reaction: "ronchas en la piel",
         verification: "no_confirmada",
         severity: "desconocida",
@@ -628,7 +632,8 @@ it("la alergia declarada en el cuestionario pasa a antecedentes sin confirmar y 
   )
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, again.id))
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(2)
-  // Al escribir amoxicilina, la receta avisa la penicilina y dice que es declarada.
+  // Al escribir amoxicilina, la receta avisa la penicilina por su grupo, como cualquier
+  // otra alergia: no hay «por confirmar» (tablero 7, versión 4).
   await expect(
     run((tx) =>
       createPrescription(tx, "org_a", ACTOR, patient.id, {
@@ -645,5 +650,8 @@ it("la alergia declarada en el cuestionario pasa a antecedentes sin confirmar y 
         ],
       }),
     ),
-  ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT", message: expect.stringMatching(/Penicilina, declarada y por confirmar/) })
+  ).rejects.toMatchObject({
+    code: "ALLERGY_CONFLICT",
+    message: expect.stringMatching(/Amoxicilina: alergia a penicilinas\. Es del mismo grupo/),
+  })
 })

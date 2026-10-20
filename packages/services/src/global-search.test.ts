@@ -181,7 +181,11 @@ describe("buscar sin tildes y con su dueño", () => {
   it("lo que dicen los mensajes aparece debajo de quien lo escribió", async () => {
     const result = await as("reception", "blanqueamiento")
     const lead = result.owners.find((o) => o.id === leadPersonId)
-    expect(lead?.items[0]).toMatchObject({ kind: "mensaje", type: "conversacion" })
+    expect(lead?.items[0]).toMatchObject({
+      kind: "mensaje",
+      type: "conversacion",
+      detail: "Telegram",
+    })
     expect(lead?.items[0]?.title).toContain("blanqueamiento")
   })
 
