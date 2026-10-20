@@ -10,9 +10,10 @@ import {
   subscribeAppToAccount,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
+import { member } from "@odentia/db/schema/auth"
 import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, isNotNull } from "drizzle-orm"
+import { and, eq, inArray, isNotNull } from "drizzle-orm"
 import {
   changeConnectionCredentials,
   completeConnectionAccount,
@@ -26,7 +27,10 @@ import {
   type SignupStep,
 } from "./connections.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { getOrgLocale } from "./locale.js"
+import { reportAutomaticCase } from "./model-outage.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
+import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
  * «Conectar con Facebook» (Embedded Signup de Meta, versión 4): la clínica entra
@@ -420,6 +424,8 @@ export interface SignupTokenDue {
   orgId: string
   connectionId: string
   action: SignupTokenAction
+  /** Cuándo vence la clave, si se sabe. */
+  expiresAt: string | null
 }
 
 /**
@@ -440,7 +446,7 @@ export async function listSignupTokensDue(ownerDb: Db, now: Date): Promise<Signu
   const due: SignupTokenDue[] = []
   for (const row of rows) {
     const action = row.signup ? signupTokenAction(row.signup, now) : null
-    if (action) due.push({ orgId: row.orgId, connectionId: row.id, action })
+    if (action) due.push({ orgId: row.orgId, connectionId: row.id, action, expiresAt: row.signup?.tokenExpiresAt ?? null })
   }
   return due
 }
@@ -505,6 +511,8 @@ export async function noteSignupTokenState(
     .update(channelConnection)
     .set({ signup, updatedAt: new Date() })
     .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+  if (state.valid) await settleWorkspaceNotifications(tx, orgId, { subject: tokenSubject(connectionId) })
+  else await notifySignupTokenProblem(tx, orgId, connectionId, signup)
 }
 
 /**
@@ -542,6 +550,7 @@ export async function saveRenewedSignupToken(
     entityId: connectionId,
     metadata: { expiresAt: signup.tokenExpiresAt ?? null, neverExpires: signup.tokenNeverExpires ?? false },
   })
+  await settleWorkspaceNotifications(tx, orgId, { subject: tokenSubject(connectionId) })
   return true
 }
 
@@ -569,8 +578,87 @@ export async function noteSignupTokenProblem(
 ): Promise<void> {
   const locked = await lockSignupWithToken(tx, orgId, connectionId, secretsKey, token)
   if (!locked) return
+  const signup: ConnectionSignup = { ...locked.signup, tokenProblem: problem }
   await tx
     .update(channelConnection)
-    .set({ signup: { ...locked.signup, tokenProblem: problem }, updatedAt: new Date() })
+    .set({ signup, updatedAt: new Date() })
     .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+  await notifySignupTokenProblem(tx, orgId, connectionId, signup)
+}
+
+/** Asunto del aviso de la campana: se retira solo cuando la clave ya no tiene problema. */
+const tokenSubject = (connectionId: string) => `clave-meta:${connectionId}`
+
+/** La pantalla donde se vuelve a conectar. */
+const WHATSAPP_SETTINGS_HREF = "/settings/integrations/whatsapp"
+
+/**
+ * Avisa en la campana a quien administra las integraciones (dueño y
+ * administradores: `settings.write`) que la clave no se pudo renovar. No
+ * nombra claves ni lo que dijo Meta: eso va al caso de Soporte. Un aviso por
+ * conexión, que se pone al día si cambia (de «no se pudo renovar» a «dejó de
+ * servir») y se retira solo cuando se renueva o se vuelve a conectar.
+ */
+async function notifySignupTokenProblem(tx: Db, orgId: string, connectionId: string, signup: ConnectionSignup): Promise<void> {
+  const admins = await tx
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
+    .limit(20)
+  if (admins.length === 0) return
+  const dead = signup.tokenProblem === SIGNUP_TOKEN_DEAD
+  const zone = await getOrgLocale(tx, orgId)
+  const until = signup.tokenExpiresAt
+    ? new Date(signup.tokenExpiresAt).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long" })
+    : null
+  const notice = dead
+    ? {
+        title: "La conexión de WhatsApp con Meta dejó de servir",
+        body: "Los mensajes de WhatsApp no pueden salir. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp. Ya avisamos a odentIA.",
+      }
+    : until
+      ? {
+          title: "WhatsApp no pudo renovar su conexión con Meta",
+          body: `La conexión vence el ${until}. odentIA lo sigue intentando y ya está avisado. Si llega esa fecha sin renovarse, vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.`,
+        }
+      : {
+          title: "WhatsApp no pudo revisar su conexión con Meta",
+          body: "odentIA no pudo comprobar cuándo vence la conexión y ya está avisado. Si los mensajes dejan de salir, vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
+        }
+  for (const { userId } of admins) {
+    await upsertWorkspaceNotification(tx, orgId, {
+      userId,
+      dedupeKey: `${tokenSubject(connectionId)}:${userId}`,
+      ...notice,
+      href: WHATSAPP_SETTINGS_HREF,
+      permission: "settings.write",
+      subject: tokenSubject(connectionId),
+    })
+  }
+}
+
+/** Lo que Soporte de odentIA necesita para ayudar: qué dijo Meta y cuándo vence. */
+export interface SignupTokenFailure {
+  orgId: string
+  connectionId: string
+  /** Código de Meta, o la clase del problema si Meta no dio uno. */
+  code: string
+  detail: string
+  expiresAt: string | null
+}
+
+/**
+ * Abre o amplía el caso automático «Clave de Meta sin renovar» en Soporte: uno
+ * por motivo, con cada clínica afectada. Si Meta no acepta la renovación para
+ * ninguna clínica, es un solo caso con todas.
+ */
+export async function reportSignupTokenFailure(ownerDb: Db, failure: SignupTokenFailure): Promise<{ caseId: string; created: boolean }> {
+  return reportAutomaticCase(ownerDb, {
+    dedupeKey: `clave-meta-sin-renovar:${failure.code}`,
+    title: "Clave de Meta sin renovar",
+    orgId: failure.orgId,
+    note: `WhatsApp (conexión ${failure.connectionId}${failure.expiresAt ? `, vence ${failure.expiresAt}` : ""}): ${failure.detail}`,
+    detail: `Meta (${failure.code}): ${failure.detail}`,
+    screen: WHATSAPP_SETTINGS_HREF,
+  })
 }

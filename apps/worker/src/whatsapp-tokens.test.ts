@@ -1,12 +1,43 @@
+import { withOrgContext } from "@odentia/db"
+import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
+import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
 import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm"
-import { decryptConfig, describeAuditEvent, encryptJson } from "@odentia/services"
-import { and, eq } from "drizzle-orm"
-import { expect, it } from "vitest"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
+import { decryptConfig, describeAuditEvent, encryptJson, listWorkspaceNotifications } from "@odentia/services"
+import { and, eq, like } from "drizzle-orm"
+import { beforeAll, expect, it } from "vitest"
 import { runSignupTokenTick } from "./whatsapp-tokens.js"
 import { appDb, KEY, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
+
+beforeAll(async () => {
+  // Quien administra las integraciones (la dueña) y alguien de recepción, que no las administra.
+  await ownerDb.insert(user).values([
+    { id: "w-duena", name: "Ana Torres", email: "ana@tokens.test", emailVerified: true },
+    { id: "w-recepcion", name: "Luis Prado", email: "luis@tokens.test", emailVerified: true },
+  ])
+  await ownerDb.insert(member).values([
+    { id: "m-duena", userId: "w-duena", organizationId: "org_a", role: "owner", createdAt: new Date() },
+    { id: "m-recepcion", userId: "w-recepcion", organizationId: "org_a", role: "reception", createdAt: new Date() },
+  ])
+})
+
+/** Los avisos de la campana sobre la clave de una conexión, de quien los recibió. */
+async function noticesOf(connectionId: string) {
+  return ownerDb
+    .select({ userId: workspaceNotification.userId, title: workspaceNotification.title, body: workspaceNotification.body, href: workspaceNotification.href, permission: workspaceNotification.permission, resolvedAt: workspaceNotification.resolvedAt })
+    .from(workspaceNotification)
+    .where(eq(workspaceNotification.subject, `clave-meta:${connectionId}`))
+}
+
+/** Los casos automáticos «Clave de Meta sin renovar» con sus mensajes. */
+async function supportCases() {
+  const cases = await ownerDb.select().from(supportCase).where(like(supportCase.dedupeKey, "clave-meta-sin-renovar:%"))
+  const messages = await ownerDb.select({ caseId: supportMessage.caseId, body: supportMessage.body }).from(supportMessage)
+  return cases.map((row) => ({ ...row, lines: messages.filter((m) => m.caseId === row.id).map((m) => m.body) }))
+}
 
 const APP = { appId: "APP1", appSecret: "secreto-de-la-app", graphVersion: "v25.0" }
 const DAY = 86_400_000
@@ -114,6 +145,10 @@ it("renueva sola la clave que vence pronto, pregunta la que no se sabe y deja in
     area: "configuracion",
   })
 
+  // Lo que sale bien no avisa ni abre casos.
+  expect(await noticesOf(soon)).toEqual([])
+  expect(await supportCases()).toEqual([])
+
   // A la vuelta siguiente ya no toca ninguna: la renovada dura 60 días.
   const again = fakeMeta(now)
   expect(await runSignupTokenTick(ownerDb, appDb, { app: APP, secretsKey: KEY, fetch: again.fetch, now })).toEqual({ checked: 0, renewed: 0, errors: [] })
@@ -144,6 +179,35 @@ it("si Meta no la renueva, anota el motivo, conserva la clave y lo vuelve a inte
   })
   // Meta no respondió: nada que anotar, se repite en la vuelta siguiente.
   expect((await stateOf(silent)).signup.tokenProblem).toBeUndefined()
+  expect(await noticesOf(silent)).toEqual([])
+
+  // La campana avisa a la dueña, no a recepción, sin lo que dijo Meta y con la fecha en que vence.
+  expect(await noticesOf(refused)).toEqual([
+    {
+      userId: "w-duena",
+      title: "WhatsApp no pudo renovar su conexión con Meta",
+      body: "La conexión vence el 23 de octubre. odentIA lo sigue intentando y ya está avisado. Si llega esa fecha sin renovarse, vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
+      href: "/settings/integrations/whatsapp",
+      permission: "settings.write",
+      resolvedAt: null,
+    },
+  ])
+  // Soporte de odentIA recibe el caso con lo que dijo Meta; la clínica no lo ve (sin organización).
+  const [kase] = await supportCases()
+  expect(kase).toMatchObject({
+    organizationId: null,
+    openedBy: null,
+    question: "Clave de Meta sin renovar · Clínica",
+    detail: "Meta (100): Unsupported request",
+    screen: "/settings/integrations/whatsapp",
+    dedupeKey: "clave-meta-sin-renovar:100",
+  })
+  expect(kase!.lines).toHaveLength(1)
+  expect(kase!.lines[0]).toContain("Clínica [org_a] · WhatsApp (conexión")
+  // Reintentar con el mismo motivo no repite el aviso ni el caso.
+  await runSignupTokenTick(ownerDb, appDb, { app: APP, secretsKey: KEY, fetch: meta.fetch, now })
+  expect(await noticesOf(refused)).toHaveLength(1)
+  expect((await supportCases())[0]!.lines).toHaveLength(1)
 
   // Medio día después Meta sí la renueva: el motivo se borra.
   const later = new Date(now.getTime() + DAY / 2)
@@ -152,6 +216,10 @@ it("si Meta no la renueva, anota el motivo, conserva la clave y lo vuelve a inte
   expect(fixed.calls.sort()).toEqual(["renovar E-VIGENTE", "renovar J-VIGENTE"])
   expect(await stateOf(refused)).toMatchObject({ token: "E-NUEVA", signup: { tokenProblem: null } })
   expect((await stateOf(silent)).token).toBe("J-NUEVA")
+  // Renovada, el aviso se retira solo: ya no está en la campana de la dueña.
+  expect((await noticesOf(refused))[0]!.resolvedAt).not.toBeNull()
+  const bell = await withOrgContext(appDb, "org_a", (tx) => listWorkspaceNotifications(tx, "org_a", "w-duena", ["settings.write"]))
+  expect(bell.items.map((item) => item.title)).not.toContain("WhatsApp no pudo renovar su conexión con Meta")
 })
 
 it("una clave vencida que Meta ya no acepta queda anotada y no se insiste; si la clínica vuelve a conectar mientras tanto, manda la suya", async () => {
@@ -175,6 +243,18 @@ it("una clave vencida que Meta ya no acepta queda anotada y no se insiste; si la
     signup: { tokenProblem: "La clave que dio Meta ya no sirve: venció o la retiraron. Vuelve a conectar con Facebook para que los mensajes sigan saliendo." },
   })
   expect((await stateOf(raced)).token).toBe("L-DE-LA-CLINICA")
+  expect(await noticesOf(dead)).toMatchObject([
+    {
+      userId: "w-duena",
+      title: "La conexión de WhatsApp con Meta dejó de servir",
+      body: "Los mensajes de WhatsApp no pueden salir. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp. Ya avisamos a odentIA.",
+    },
+  ])
+  expect((await supportCases()).find((row) => row.dedupeKey === "clave-meta-sin-renovar:no-valida")).toMatchObject({
+    question: "Clave de Meta sin renovar · Clínica",
+  })
+  // La reconexión que ganó no deja aviso.
+  expect(await noticesOf(raced)).toEqual([])
 
   const again = fakeMeta(now)
   await runSignupTokenTick(ownerDb, appDb, { app: APP, secretsKey: KEY, fetch: again.fetch, now })

@@ -15,6 +15,8 @@ La configuración de Meta que usa el botón (plantilla «Configuración de regis
 - **Si alguien volvió a conectar mientras tanto, gana la clave nueva.** La renovada solo se guarda si la conexión sigue teniendo la clave con que se pidió.
 - **Si Meta dice que no:**
   - el motivo queda anotado en la conexión (`signup.tokenProblem`);
+  - la campana avisa a quien administra las integraciones (dueño y administradores, `settings.write`), sin lo técnico y con la fecha en que vence. El aviso se retira solo cuando la clave se renueva o se vuelve a conectar;
+  - Soporte de odentIA recibe el caso automático «Clave de Meta sin renovar», con lo que dijo Meta. Es uno por motivo, con cada clínica afectada, como «Modelo sin responder»;
   - se reintenta mientras la clave siga vigente;
   - si Meta ya no acepta la clave, no se insiste: solo volver a conectar la repone.
 - **Cada renovación queda en la actividad de la clínica** como algo automático, sin la clave.
@@ -31,13 +33,13 @@ La configuración de Meta que usa el botón (plantilla «Configuración de regis
 - **Beneficio:** la clínica conecta una sola vez.
 - **Sacrificio:** el worker tiene una vuelta más y necesita `META_APP_ID` y `META_APP_SECRET`.
 - **Por confirmar en la primera conexión real:** Meta documenta esta renovación para las claves de usuario del sistema, pero no dice si vale para la clave de integración comercial que da el botón. Si la rechaza, el motivo queda anotado 15 días antes del vencimiento. En ese caso se cambia a la vía con `business_management` o a una configuración sin vencimiento.
-- **Pendiente de decidir:** cómo se le dice a la clínica que la renovación no salió.
 
 ## Referencias
 
 - `packages/channels/src/whatsapp-embedded-signup.ts` (`refreshSignupToken`, `inspectSignupToken`).
 - `packages/services/src/whatsapp-signup.ts` (`signupTokenAction`, `saveRenewedSignupToken`).
 - `apps/worker/src/whatsapp-tokens.ts`.
+- `packages/services/src/model-outage.ts` (`reportAutomaticCase`) y `workspace.ts` (asunto `clave-meta`).
 - Documentación de Meta leída el 2026-10-20:
   - [Install Apps, Generate, Refresh, and Revoke Tokens](https://developers.facebook.com/docs/business-management-apis/system-users/install-apps-and-generate-tokens/) (usuarios del sistema);
   - [Facebook Login for Business](https://developers.facebook.com/docs/facebook-login/facebook-login-for-business) (gestión de claves de integración comercial);
