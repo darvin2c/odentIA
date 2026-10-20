@@ -15,7 +15,7 @@ import {
   serviceCatalog,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -121,7 +121,7 @@ async function activeServices(tx: Db, orgId: string): Promise<ServiceOption[]> {
   return tx
     .select({ id: serviceCatalog.id, name: serviceCatalog.name, priceCents: serviceCatalog.priceCents, currency: serviceCatalog.currency, scope: serviceCatalog.scope })
     .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy")))
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
     .orderBy(asc(serviceCatalog.name))
     .limit(500)
 }

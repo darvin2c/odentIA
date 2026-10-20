@@ -1,6 +1,6 @@
 import {
   assertTreatmentSite,
-  phaseForSpecialty,
+  phaseForKind,
   TREATMENT_PHASES,
   TREATMENT_SCOPES,
   type TreatmentPhase,
@@ -27,7 +27,8 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
-import { serviceSpecialtyOf } from "./specialties.js"
+import { serviceKindOf } from "./specialties.js"
+import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { drawTreatedFinding } from "./treated-findings.js"
 
@@ -703,10 +704,10 @@ export async function addPlanItem(
   )
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
-  const codings = await resolveServiceCodings(tx, service)
+  const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
-    assertPhase(input.phase) ?? phaseForSpecialty((await serviceSpecialtyOf(tx, orgId, service.specialtyId))?.key)
+    assertPhase(input.phase) ?? phaseForKind(await serviceKindOf(tx, orgId, service))
   const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
   const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
@@ -800,9 +801,9 @@ export async function addPlanItemsBatch(
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   if (service.priceCents === null)
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
-  const codings = await resolveServiceCodings(tx, service)
+  const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   const rows: PlanItemRow[] = []
-  const phase = phaseForSpecialty((await serviceSpecialtyOf(tx, orgId, service.specialtyId))?.key)
+  const phase = phaseForKind(await serviceKindOf(tx, orgId, service))
   let sortOrder = await nextSortOrder(tx, orgId, plan.id)
   for (const tooth of teeth) {
     const [row] = await tx
@@ -938,7 +939,7 @@ export async function updatePlanItem(
       // Cambio de servicio = nueva indicación: re-congela el snapshot exacto
       // vigente; los históricos (presupuestos presentados/decididos,
       // atenciones) nunca se mutan.
-      set.codings = await resolveServiceCodings(tx, service)
+      set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
       fields.push("serviceId")
     }
   }

@@ -2,7 +2,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { agentSearchItem, type SearchItemKind } from "@odentia/db/schema/agent"
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
-import type { TreatmentSpecialty } from "@odentia/clinical"
+import type { TreatmentKind } from "@odentia/clinical"
 import { listAgentPromotions, listAgentProfessionals, listAgentServices } from "./agent-clinic-info.js"
 import { listActiveKnowledge } from "./knowledge.js"
 
@@ -34,12 +34,12 @@ const EMBED_BATCH = 64
 export const SEARCH_MAX_DISTANCE = 0.65
 
 /**
- * Palabras con que la gente nombra cada especialidad. Solo van al índice, para
- * que «matar el nervio» encuentre una endodoncia; el agente nunca las dice como
- * dato. Las claves son las de la biblioteca (`LIBRARY_SPECIALTIES`), que la
- * especialidad de la clínica conserva aunque la renombre (ADR 0039).
+ * Palabras con que la gente nombra cada tipo de tratamiento. Solo van al
+ * índice, para que «matar el nervio» encuentre una endodoncia; el agente nunca
+ * las dice como dato. Van con el tipo del servicio (ADR 0069), que no cambia
+ * aunque la clínica renombre su especialidad.
  */
-const SPECIALTY_WORDS: Record<TreatmentSpecialty, string> = {
+const KIND_WORDS: Record<TreatmentKind, string> = {
   diagnostico: "revisión, chequeo, evaluación, radiografía",
   prevencion: "limpieza, prevenir caries, flúor",
   restauradora: "curación de caries, empaste, resina",
@@ -57,8 +57,8 @@ const SPECIALTY_WORDS: Record<TreatmentSpecialty, string> = {
 }
 
 /** Qué es cada cosa, dicho en el texto del índice: así «¿tienen alguna promo?» encuentra las promociones. */
-function serviceText(name: string, specialty: string | null, specialtyKey: string | null): string {
-  const words = specialtyKey ? SPECIALTY_WORDS[specialtyKey as TreatmentSpecialty] : undefined
+function serviceText(name: string, specialty: string | null, kind: TreatmentKind | null): string {
+  const words = kind ? KIND_WORDS[kind] : undefined
   return `Servicio de la clínica: ${name}.${specialty ? ` Especialidad: ${specialty}.` : ""}${words ? ` Para: ${words}.` : ""}`
 }
 
@@ -75,7 +75,7 @@ export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedIt
   const professionals = await listAgentProfessionals(tx, orgId)
   const answers = await listActiveKnowledge(tx, orgId)
   return [
-    ...services.map((s) => ({ kind: "servicio" as const, refId: s.id, text: serviceText(s.name, s.specialty, s.specialtyKey) })),
+    ...services.map((s) => ({ kind: "servicio" as const, refId: s.id, text: serviceText(s.name, s.specialty, s.kind) })),
     ...promotions.map((p) => ({
       kind: "promocion" as const,
       refId: p.id,

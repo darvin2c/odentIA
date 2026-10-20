@@ -52,24 +52,30 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     const [coverage] = await db.execute<{
       expected: number
       available: number
-      exact: boolean
+      library: number
+      uncoded: number
     }>(sql`
-      select r.expected_count as expected, count(t.id)::int as available,
-        bool_and(t.name=c.display) as exact
-      from procedure_catalog_release r
-      join procedure_code c on c.system_key=r.system_key and c.version=r.version
-      join treatment_template_code m on m.system_key=c.system_key and m.code=c.code and m.version=c.version
-      join treatment_template t on t.id=m.template_id
-      where r.is_current and c.is_active and t.is_active group by r.expected_count`)
-    expect(coverage).toEqual({ expected: 505, available: 505, exact: true })
-    // Simula una actualización posterior: la edición instalada pasa a histórica.
+      select r.expected_count as expected,
+        (select count(*)::int from procedure_code c
+          where c.system_key=r.system_key and c.version=r.version and c.is_active) as available,
+        (select count(*)::int from treatment_template t where t.is_active and not t.coded_only) as library,
+        (select count(*)::int from treatment_template t where t.is_active and not t.coded_only and not exists (
+          select 1 from treatment_template_code m where m.template_id=t.id
+            and m.system_key=r.system_key and m.version=r.version)) as uncoded
+      from procedure_catalog_release r where r.is_current and r.system_key = 'CPMS'`)
+    // La lista oficial entra entera; la biblioteca es la de consultorio y cada
+    // tratamiento lleva su código CPMS, salvo las variantes de la norma de otro
+    // país (`coded_only`), que en el Perú no se ofrecen (ADR 0069).
+    expect(coverage).toMatchObject({ expected: 505, available: 505, uncoded: 0 })
+    expect(Number(Reflect.get(coverage!, "library"))).toBeGreaterThan(300)
+    // Simula una actualización posterior de la CPMS: la edición instalada pasa a histórica.
     await db.transaction(async (tx) => {
-      await tx.execute(sql`update procedure_catalog_release set is_current=false`)
+      await tx.execute(sql`update procedure_catalog_release set is_current=false where system_key='CPMS'`)
       await tx.execute(sql`insert into procedure_catalog_release
         (system_key,version,scope,source_url,source_sha256,expected_count,is_current)
         select system_key,'edicion-posterior-prueba',scope,source_url,source_sha256,expected_count,true
         from procedure_catalog_release where version='RM-550-2023-MINSA'`)
-      await tx.execute(sql`update procedure_code set is_active=false`)
+      await tx.execute(sql`update procedure_code set is_active=false where system_key='CPMS'`)
       await tx.execute(sql`update treatment_template set is_active=false`)
     })
     const retired = await snapshot()
@@ -77,9 +83,9 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     expect(await snapshot()).toBe(retired)
     // Los vínculos exactos retirados siguen resolubles para lectura histórica.
     const [preserved] = await db.execute<{ count: number }>(
-      sql`select count(*)::int as count from treatment_template_code`,
+      sql`select count(*)::int as count from treatment_template_code where system_key = 'CPMS'`,
     )
-    expect(preserved?.count).toBe(505)
+    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")))
   } finally {
     await Reflect.get(db, "$client").end()
     await container.stop()

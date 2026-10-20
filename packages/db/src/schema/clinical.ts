@@ -1142,17 +1142,32 @@ export const procedureCatalogRelease = catalogSchema.table(
   ],
 )
 
-/** Biblioteca global de prestaciones (solo lectura para el rol app, como diagnosis_code). */
+/**
+ * Biblioteca de odentIA (ADR 0069): tratamientos de consultorio con nombre
+ * propio, iguales en todos los países. Global y de solo lectura para el rol
+ * app. `kind` es el tipo de tratamiento (uso interno: fase del plan, palabras
+ * del agente y qué especialidad del país lo recibe); la columna se sigue
+ * llamando `specialty`. `leavesFinding` es lo que deja dibujado en la pieza y
+ * `isCommon` lo pone en «Más usados». El precio nunca vive aquí.
+ */
 export const treatmentTemplate = catalogSchema.table(
   "treatment_template",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     key: text("key").notNull(),
     name: text("name").notNull(),
-    specialty: text("specialty").notNull(),
+    kind: text("specialty").notNull(),
     scope: text("scope").notNull(),
     surfaceCountMin: integer("surface_count_min"),
     surfaceCountMax: integer("surface_count_max"),
+    leavesFinding: jsonb("leaves_finding").$type<{ condition: string; variant?: string }>(),
+    isCommon: boolean("is_common").notNull().default(false),
+    /**
+     * Variante que separa la norma de un país (p. ej. la exodoncia por número
+     * de raíces de la CUPS): se ofrece solo donde la lista del país le da un
+     * código, para no repetir el tratamiento general en los demás.
+     */
+    codedOnly: boolean("coded_only").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
   },
@@ -1160,13 +1175,11 @@ export const treatmentTemplate = catalogSchema.table(
 )
 
 /**
- * Proyección 1:1 plantilla ↔ código oficial (global, SIN org_id, SIN RLS).
- * Cada plantilla es la proyección de UN código oficial (key
- * `cpms:<version>:<code>`) y cada código tiene UNA plantilla: los únicos
- * garantizan que ninguna plantilla tenga mappings múltiples ni ningún código
- * dos plantillas. Sin equivalencias aproximadas ni denominaciones inventadas:
- * el nombre de la plantilla es la denominación oficial íntegra.
- * El precio nunca vive aquí: solo en `service_catalog`/presupuestos.
+ * El código de un tratamiento en la lista de cada país (ADR 0069): uno por
+ * lista y edición. Es el código de la lista que incluye al tratamiento: el
+ * exacto si la lista es fina; si es gruesa, el que la norma usa para él, así
+ * que varios tratamientos pueden compartir uno. Nunca un código inventado ni
+ * de otro país. Global, SIN org_id, SIN RLS.
  */
 export const treatmentTemplateCode = catalogSchema.table(
   "treatment_template_code",
@@ -1177,7 +1190,6 @@ export const treatmentTemplateCode = catalogSchema.table(
     systemKey: text("system_key").notNull(),
     code: text("code").notNull(),
     version: text("version").notNull(),
-    isPrimary: boolean("is_primary").notNull().default(true),
   },
   (table) => [
     primaryKey({ columns: [table.templateId, table.systemKey, table.code, table.version] }),
@@ -1186,16 +1198,14 @@ export const treatmentTemplateCode = catalogSchema.table(
       foreignColumns: [procedureCode.systemKey, procedureCode.code, procedureCode.version],
     }),
     index("treatment_template_code_reverse_idx").on(table.systemKey, table.code, table.version),
-    uniqueIndex("treatment_template_code_template_uidx").on(table.templateId),
-    uniqueIndex("treatment_template_code_code_uidx").on(table.systemKey, table.code, table.version),
+    uniqueIndex("treatment_template_code_list_uidx").on(table.templateId, table.systemKey, table.version),
   ],
 )
 
 /**
  * Especialidad de la clínica (p. ej. «Endodoncia»): la única lista de
- * especialidades (ADR 0039). Nace con las de la biblioteca
- * (`LIBRARY_SPECIALTIES`, misma clave) y la clínica la renombra, archiva o
- * amplía. El servicio apunta a una; quien la atiende va en
+ * especialidades (ADR 0039). Nace con las del perfil de su país (ADR 0069) y
+ * la clínica la renombra, archiva o amplía. El servicio apunta a una; quien la atiende va en
  * `professional_specialty`.
  */
 export const orgSpecialty = pgTable(
@@ -1225,7 +1235,16 @@ export const serviceCatalog = pgTable(
     organizationId: orgFk("organization_id"),
     templateId: uuid("template_id").references(() => treatmentTemplate.id),
     source: text("source").notNull().default("custom"),
+    /** Código interno de la clínica (opcional), distinto del código oficial. */
     code: text("code"),
+    /**
+     * Código oficial de un servicio propio en la lista del país (ADR 0069):
+     * obligatorio donde la lista lo es. Uno de la biblioteca lo toma de su
+     * tratamiento y deja estas columnas vacías.
+     */
+    procedureSystem: text("procedure_system"),
+    procedureCode: text("procedure_code"),
+    procedureVersion: text("procedure_version"),
     name: text("name").notNull(),
     /**
      * La especialidad de la clínica, una sola (decisión 3 de la fase 4). La
@@ -1269,6 +1288,15 @@ export const serviceCatalog = pgTable(
       foreignColumns: [orgSpecialty.organizationId, orgSpecialty.id],
     }),
     index("service_catalog_template_idx").on(table.templateId),
+    foreignKey({
+      name: "service_catalog_procedure_fk",
+      columns: [table.procedureSystem, table.procedureCode, table.procedureVersion],
+      foreignColumns: [procedureCode.systemKey, procedureCode.code, procedureCode.version],
+    }),
+    check(
+      "service_catalog_procedure_check",
+      sql`(${table.procedureSystem} IS NULL) = (${table.procedureCode} IS NULL) AND (${table.procedureCode} IS NULL) = (${table.procedureVersion} IS NULL) AND (${table.procedureCode} IS NULL OR ${table.templateId} IS NULL)`,
+    ),
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
     check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
     check("service_catalog_price_disclosure_check", sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`),

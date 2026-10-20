@@ -1,4 +1,4 @@
-import { formatMoneyInput, parseMoney, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { formatMoneyInput, parseMoney, TREATMENT_KINDS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -37,12 +37,13 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Library, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
+import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { useOrgProfile } from "../../lib/org"
+import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
@@ -51,12 +52,12 @@ import {
   fetchMostUsedServices,
   fetchServices,
   fetchTreatmentTemplates,
+  type OfficialCoding,
   PRICE_DISCLOSURE_OPTIONS,
   type PriceDisclosure,
   type QuickAddServiceBody,
   quickAddServicesApi,
   SERVICE_PLACE_OPTIONS,
-  type TreatmentTemplateCatalog,
   type TreatmentTemplateItem,
 } from "../../lib/services"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
@@ -101,17 +102,17 @@ interface Draft {
   price: string
   billingMode: BillingMode
   durationMin: string
-  specialty: string
   scope: string
-  /** Denominación y código de la biblioteca; `null` en un servicio propio. */
-  officialName: string | null
+  /** El nombre en la biblioteca, para nombrar la fila mientras se cambia el propio. */
+  libraryName: string
+  /** Su código en la lista del país («CPMS D2330»); null donde no hay lista. */
   code: string | null
 }
 
 /** Fila de la tabla: el servicio con lo elegido y lo que le falta para guardarse. */
 interface AddRow extends Draft {
   key: string
-  /** Concepto de «Más usados» del que salió, si aplica. */
+  /** Tipo de tratamiento de «Más usados» del que salió, si aplica. */
   concept: string | null
   /** Ya está en el tarifario de la clínica: no se elige otra vez. */
   owned: boolean
@@ -123,17 +124,18 @@ interface AddRow extends Draft {
   ready: boolean
 }
 
-function templateDraft(template: TreatmentTemplateItem): Draft {
+/** `listLabel`: el nombre corto de la lista del país («CPMS», «CIE-9-MC»), nunca su clave. */
+function templateDraft(template: TreatmentTemplateItem, listLabel: string | null): Draft {
+  const coding = template.codings[0]
   return {
     chosen: false,
     name: template.name,
     price: "",
     billingMode: "treatment",
     durationMin: "",
-    specialty: template.specialty,
     scope: template.scope,
-    officialName: template.codings[0]?.display ?? template.name,
-    code: template.codings[0]?.code ?? null,
+    libraryName: template.name,
+    code: coding && listLabel ? `${listLabel} ${coding.code}` : null,
   }
 }
 
@@ -144,9 +146,8 @@ function draftOf(row: AddRow): Draft {
     price: row.price,
     billingMode: row.billingMode,
     durationMin: row.durationMin,
-    specialty: row.specialty,
     scope: row.scope,
-    officialName: row.officialName,
+    libraryName: row.libraryName,
     code: row.code,
   }
 }
@@ -235,18 +236,16 @@ function AddServicesPage() {
   const navigate = useNavigate()
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
-  const specialtyFilter = listSearch.get("especialidad") ?? "todas"
+  const kindFilter = listSearch.get("tipo") ?? "todos"
   const cursor = listSearch.get("cursor")
-  // La biblioteca clasifica con sus claves; el filtro las nombra como las llama la clínica (ADR 0039).
-  const clinicSpecialties = useClinicSpecialties({ enabled: canViewLibrary }).data?.data ?? []
+  // La biblioteca se ordena por tipo de tratamiento (ADR 0069): no son las especialidades de la clínica.
   const libraryFilterOptions = [
-    { value: "todas", label: "Todas" },
-    ...TREATMENT_SPECIALTIES.map((key) => ({
-      value: key,
-      label: clinicSpecialties.find((item) => item.key === key)?.name ?? key,
-    })),
+    { value: "todos", label: "Todos" },
+    ...TREATMENT_KINDS.map((kind) => ({ value: kind.key, label: kind.name })),
   ]
-  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
+  /** La lista de servicios del país: el código de cada tratamiento es el suyo; sin lista, ninguno. */
+  const codeList = useClinicalProfile().services
+  const hasFilters = search.trim() !== "" || kindFilter !== "todos"
   /** «Más usados» es el punto de partida de quien agrega; buscar o filtrar va a la biblioteca. */
   const view: View =
     canIncorporate && !hasFilters && listSearch.get("vista") !== "biblioteca"
@@ -281,12 +280,12 @@ function AddServicesPage() {
   })
 
   const libraryQuery = useQuery({
-    queryKey: ["services", "biblioteca", search, specialtyFilter, cursor],
+    queryKey: ["services", "biblioteca", search, kindFilter, cursor],
     enabled: canViewLibrary && view === "biblioteca",
     queryFn: () =>
       fetchTreatmentTemplates({
         q: search.trim() || undefined,
-        specialty: specialtyFilter === "todas" ? undefined : specialtyFilter,
+        kind: kindFilter === "todos" ? undefined : kindFilter,
         cursor: cursor ?? undefined,
         limit: PAGE_LIMIT,
       }),
@@ -302,10 +301,9 @@ function AddServicesPage() {
   const activeQuery = view === "mas-usados" ? mostUsedQuery : libraryQuery
   const nextCursor = libraryQuery.data?.nextCursor ?? null
   const total = libraryQuery.data?.total ?? 0
-  const catalog: TreatmentTemplateCatalog | null = libraryQuery.data?.catalog ?? null
   const pageNumber = previousCursors.length + 1
 
-  /** Plantillas de la vista, con el concepto del que salen en «Más usados». */
+  /** Tratamientos de la vista, con el tipo del que salen en «Más usados». */
   const viewTemplates = useMemo<Array<{ template: TreatmentTemplateItem; concept: string | null }>>(
     () =>
       view === "mas-usados"
@@ -321,7 +319,7 @@ function AddServicesPage() {
     if (!regional) return []
     const inView = new Set(viewTemplates.map((entry) => entry.template.id))
     const list = viewTemplates.map(({ template, concept }) =>
-      toRow(template.id, drafts[template.id] ?? templateDraft(template), regional, {
+      toRow(template.id, drafts[template.id] ?? templateDraft(template, codeList?.label ?? null), regional, {
         concept,
         owned: view === "biblioteca" && (owned?.has(template.id) ?? false),
         attempted,
@@ -336,7 +334,7 @@ function AddServicesPage() {
       }
     }
     return list
-  }, [attempted, drafts, owned, regional, view, viewTemplates])
+  }, [attempted, codeList, drafts, owned, regional, view, viewTemplates])
 
   /** Todo lo elegido, esté o no en la vista: es lo que cuenta y lo que se guarda. */
   const chosen = useMemo(
@@ -437,7 +435,7 @@ function AddServicesPage() {
     setPreviousCursors([])
     listSearch.setParams(
       next === "mas-usados"
-        ? { vista: undefined, q: undefined, especialidad: undefined, cursor: undefined }
+        ? { vista: undefined, q: undefined, tipo: undefined, cursor: undefined }
         : { vista: "biblioteca", cursor: undefined },
     )
   }
@@ -453,7 +451,7 @@ function AddServicesPage() {
   const columns = useMemo<ColumnDef<AddRow>[]>(() => {
     const serviceColumn: ColumnDef<AddRow> = {
       id: "servicio",
-      header: canIncorporate ? "Servicio, con el nombre que usará la clínica" : "Procedimiento",
+      header: canIncorporate ? "Servicio, con el nombre que usará la clínica" : "Tratamiento",
       meta: { view: { role: "title" } },
       cell: ({ row }) => (
         <ServiceCell
@@ -690,24 +688,17 @@ function AddServicesPage() {
   ) : (
     <div className="flex min-w-0 flex-col gap-3">
       <DataTable table={table} isFetching={activeQuery.isFetching && !activeQuery.isPending} />
+      {codeList ? (
+        <p className="text-xs text-muted-foreground">
+          {codeList.required
+            ? `Los códigos son los de ${codeList.listName}, la que pide la norma de tu país (${codeList.norm}).`
+            : `Los códigos son los de ${codeList.listName}, de referencia en tu país (${codeList.norm}).`}
+        </p>
+      ) : null}
       {view === "biblioteca" ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
             Página {pageNumber} · {total} con este filtro
-            {catalog ? (
-              <>
-                {" · "}Biblioteca {catalog.system}, edición {catalog.version}:{" "}
-                {catalog.availableCount} de {catalog.expectedCount} procedimientos ·{" "}
-                <a
-                  href={catalog.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  Ver fuente oficial
-                </a>
-              </>
-            ) : null}
           </p>
           <div className="flex gap-2">
             <Button
@@ -760,14 +751,14 @@ function AddServicesPage() {
           <FilterBar
             filters={[
               {
-                key: "especialidad",
-                label: "Especialidad",
+                key: "tipo",
+                label: "Tipo",
                 type: "select",
                 options: libraryFilterOptions,
               },
             ]}
             sortOptions={[]}
-            resetKeys={["q", "especialidad"]}
+            resetKeys={["q", "tipo"]}
             searchPlaceholder="Buscar en la biblioteca"
           />
           {canIncorporate ? (
@@ -804,8 +795,9 @@ function AddServicesPage() {
                 </div>
               ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
-                El nombre es el que verán caja y el paciente; se puede cambiar. El código oficial se
-                conserva.
+                {codeList
+                  ? `El nombre es el que verán caja y el paciente; se puede cambiar. El ${codeList.codeName} se conserva.`
+                  : "El nombre es el que verán caja y el paciente; se puede cambiar."}
               </p>
               <p className="text-sm font-medium" role="status">
                 {ready.length === 1 ? "1 listo" : `${ready.length} listos`}
@@ -852,7 +844,7 @@ function ServiceCell({
   disabled: boolean
   onName: (name: string) => void
 }) {
-  const official = [row.concept, row.code, row.officialName].filter(Boolean).join(" · ")
+  const official = [row.concept, row.code].filter(Boolean).join(" · ")
   return (
     // `whitespace-normal` y tope de ancho: las celdas son `nowrap` y una
     // denominación oficial larga empujaría el precio fuera de la pantalla.
@@ -861,7 +853,7 @@ function ServiceCell({
         <>
           <Input
             className="w-full min-w-48"
-            aria-label={`Nombre que usará la clínica para ${row.officialName ?? row.name}`}
+            aria-label={`Nombre que usará la clínica para ${row.libraryName}`}
             aria-invalid={row.nameIssue !== null || undefined}
             maxLength={200}
             disabled={disabled}
@@ -873,7 +865,9 @@ function ServiceCell({
       ) : (
         <span className="font-medium break-words">{row.name}</span>
       )}
-      <span className="text-xs font-normal break-words text-muted-foreground">{official}</span>
+      {official ? (
+        <span className="text-xs font-normal break-words text-muted-foreground">{official}</span>
+      ) : null}
     </span>
   )
 }
@@ -912,10 +906,14 @@ function OwnServiceDrawer({
   // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
   const [leavesCondition, setLeavesCondition] = useState("")
   const [leavesVariant, setLeavesVariant] = useState("")
+  // El código de la lista del país (tablero 3): obligatorio, opcional o sin campo.
+  const codeList = useClinicalProfile().services
+  const [officialCode, setOfficialCode] = useState<OfficialCoding | null>(null)
   const [submitted, setSubmitted] = useState(false)
 
   const nameIssue = checkName(name)
   const specialtyIssue = specialtyId ? null : "Elige la especialidad"
+  const codeIssue = missingOfficialCode(codeList, officialCode)
   const priceCheck = checkPrice(price, regional)
   const priceIssue =
     priceCheck.state === "invalid"
@@ -932,7 +930,8 @@ function OwnServiceDrawer({
     billingMode !== "treatment" ||
     price !== "" ||
     durationMin !== "" ||
-    leavesCondition !== ""
+    leavesCondition !== "" ||
+    officialCode !== null
 
   const saveMutation = useMutation({
     mutationFn: (priceCents: number) =>
@@ -944,6 +943,7 @@ function OwnServiceDrawer({
         billingMode,
         durationMin: duration.minutes,
         leavesFinding: leavesFindingBody(leavesCondition, leavesVariant),
+        officialCode: officialCode?.code ?? null,
       }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
@@ -955,7 +955,7 @@ function OwnServiceDrawer({
   const submit = (event: FormEvent) => {
     event.preventDefault()
     setSubmitted(true)
-    if (nameIssue || specialtyIssue || durationIssue || priceCheck.state !== "ok") return
+    if (nameIssue || specialtyIssue || codeIssue || durationIssue || priceCheck.state !== "ok") return
     saveMutation.mutate(priceCheck.cents)
   }
 
@@ -982,6 +982,11 @@ function OwnServiceDrawer({
         />
         {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
       </Field>
+      <OfficialCodeField
+        value={officialCode}
+        onChange={setOfficialCode}
+        error={submitted ? codeIssue : null}
+      />
       <Field>
         <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
         <ChoiceSelect

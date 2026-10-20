@@ -439,7 +439,6 @@ export async function listSpecialtiesOverview(tx: Db, orgId: string): Promise<Sp
       and(
         eq(serviceCatalog.organizationId, orgId),
         eq(serviceCatalog.isActive, true),
-        sql`${serviceCatalog.source} <> 'legacy'`,
       ),
     )
     .groupBy(serviceCatalog.specialtyId)

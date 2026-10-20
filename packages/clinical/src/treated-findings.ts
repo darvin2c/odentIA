@@ -5,11 +5,12 @@
  * exodoncia, una pieza ausente. Solo se registra lo observado tras el acto
  * (NTS 188, 5.8): nunca lo planificado.
  *
- * odentIA lo deja puesto en los servicios de su biblioteca con la
- * correspondencia código → hallazgo de abajo, solo para los procedimientos
- * que dejan algo claro en una pieza; en un servicio propio se elige al crearlo
- * o editarlo. Lo que es por arcada o por tramo (prótesis, puentes) no se
- * dibuja solo: se registra en la atención.
+ * odentIA lo deja puesto en cada tratamiento de su biblioteca
+ * (`treatment_template.leaves_finding`, ADR 0069), solo en los que dejan algo
+ * claro en una pieza; en un servicio propio se elige al crearlo o editarlo.
+ * Lo que es por arcada o por tramo (prótesis, puentes) no se dibuja solo: se
+ * registra en la atención. La corona temporal tampoco: pide escribir su
+ * material.
  */
 import { isValidTooth, surfacesForTooth } from "./anatomy.js"
 import { findingDefinition } from "./catalog.js"
@@ -41,73 +42,6 @@ export type TreatmentResultCondition = (typeof TREATMENT_RESULT_CONDITIONS)[numb
 
 export function isTreatmentResultCondition(value: unknown): value is TreatmentResultCondition {
   return typeof value === "string" && (TREATMENT_RESULT_CONDITIONS as readonly string[]).includes(value)
-}
-
-const RESIN: LeavesFinding = { condition: "definitive_restoration", variant: "resin" }
-const AMALGAM: LeavesFinding = { condition: "definitive_restoration", variant: "amalgam" }
-const IONOMER: LeavesFinding = { condition: "definitive_restoration", variant: "glass_ionomer" }
-const ROOT_CANAL: LeavesFinding = { condition: "root_canal_treatment", variant: "root_canal" }
-const PULPECTOMY: LeavesFinding = { condition: "root_canal_treatment", variant: "pulpectomy" }
-/** La causa (por caries u otra) no la dice el procedimiento: se deduce al completarlo. */
-const EXTRACTION: LeavesFinding = { condition: "missing_tooth" }
-
-function each(codes: readonly string[], leaves: LeavesFinding): Array<[string, LeavesFinding]> {
-  return codes.map((code) => [`CPMS:${code}`, leaves])
-}
-
-/**
- * Correspondencia de la biblioteca (CPMS, RM-550-2023-MINSA) con lo que cada
- * procedimiento deja en la pieza. Solo lo inequívoco: las restauraciones por
- * superficies con su material, las coronas cuyo material dice el nombre, el
- * espigo-muñón, la pulpotomía, la pulpectomía, el tratamiento de conductos
- * terminado, el implante y la exodoncia. Lo incompleto (sin obturación
- * final), lo provisional que pide escribir el material y lo que es de toda la
- * corona sin caras no entra.
- */
-export const LEAVES_BY_PROCEDURE: Readonly<Record<string, LeavesFinding>> = Object.fromEntries([
-  ...each(["D2140", "D2150", "D2160", "D2161"], AMALGAM),
-  ...each(
-    [
-      "D2330",
-      "D2331",
-      "D2332",
-      "D2335",
-      "D2385",
-      "D2386",
-      "D2391",
-      "D2392",
-      "D2393",
-      "D2394",
-      "E2336",
-      "E2337",
-      "E2338",
-      "E2339",
-      "E2340",
-      "E2341",
-      "E2342",
-      "E2343",
-    ],
-    RESIN,
-  ),
-  ...each(["E2395", "E2396", "E2397", "E2398", "E2399", "E2400"], IONOMER),
-  ["CPMS:D2740", { condition: "crown", variant: "metal_free" }],
-  ["CPMS:D2751", { condition: "crown", variant: "metal_ceramic" }],
-  ...each(["D2791", "D2794", "D2930", "D2931"], { condition: "crown", variant: "metal" }),
-  ["CPMS:D2952", { condition: "post_and_core" }],
-  ["CPMS:D3220", { condition: "pulpotomy" }],
-  ...each(["D3230", "D3240"], PULPECTOMY),
-  ...each(["D3310", "D3320", "D3330", "E3319", "E3321", "E3322", "D3346", "D3347", "D3348"], ROOT_CANAL),
-  ...each(["D6010", "D6040", "D6050"], { condition: "implant" }),
-  ...each(
-    ["D7111", "D7140", "D7176", "D7210", "D7220", "D7230", "D7240", "D7241", "D7250", "E7251"],
-    EXTRACTION,
-  ),
-])
-
-/** Lo que deja en la pieza un procedimiento de la biblioteca, o null si no deja nada claro. */
-export function leavesFindingForProcedure(system: string, code: string): LeavesFinding | null {
-  const key = `${system}:${code}`
-  return Object.hasOwn(LEAVES_BY_PROCEDURE, key) ? { ...LEAVES_BY_PROCEDURE[key]! } : null
 }
 
 /**
