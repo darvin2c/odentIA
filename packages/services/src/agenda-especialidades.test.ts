@@ -1,4 +1,4 @@
-import { withOrgContext } from "@odentia/db"
+import { seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -51,6 +51,8 @@ const at = (minutes: number) => zonedTimeToUtc(tuesday, minutes, ZONE).toISOStri
 beforeAll(async () => {
   tuesday = nextTuesday()
   await insertOrg(ownerDb, ORG, "agenda-esp")
+  // En el Perú cada servicio propio lleva su código CPMS (ADR 0067).
+  await seedProcedureCodes(ownerDb)
   const branches = await ownerDb
     .insert(branch)
     .values([
@@ -109,6 +111,7 @@ beforeAll(async () => {
         scope: "tooth",
         priceCents: 45000,
         durationMin: 60,
+        officialCode: "D3310",
       })
     ).id
     generalServiceId = (
@@ -118,6 +121,7 @@ beforeAll(async () => {
         scope: "general",
         priceCents: 5000,
         durationMin: 30,
+        officialCode: "D0150",
       })
     ).id
   })

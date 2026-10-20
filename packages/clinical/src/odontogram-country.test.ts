@@ -4,8 +4,6 @@ import {
   clinicalProfileFor,
   closingOdontogramPurpose,
   findingLeftByTreatment,
-  LEAVES_BY_PROCEDURE,
-  leavesFindingForProcedure,
   validateFinding,
   validateLeavesFinding,
 } from "./index.js"
@@ -33,9 +31,8 @@ describe("variante del hallazgo según el país", () => {
 
 describe("lo tratado queda dibujado", () => {
   it("la resina deja una restauración de resina en buen estado en sus caras", () => {
-    const leaves = leavesFindingForProcedure("CPMS", "D2391")
-    expect(leaves).toEqual({ condition: "definitive_restoration", variant: "resin" })
-    const finding = findingLeftByTreatment(leaves!, { toothNumber: 16, surfaces: ["occlusal"] }, PERU)
+    const leaves = { condition: "definitive_restoration", variant: "resin" }
+    const finding = findingLeftByTreatment(leaves, { toothNumber: 16, surfaces: ["occlusal"] }, PERU)
     expect(finding).toMatchObject({
       toothNumber: 16,
       condition: "definitive_restoration",
@@ -43,11 +40,11 @@ describe("lo tratado queda dibujado", () => {
       details: { variant: "resin", quality: "good" },
     })
     // Sin caras no hay dónde dibujarla.
-    expect(findingLeftByTreatment(leaves!, { toothNumber: 16, surfaces: [] }, PERU)).toBeNull()
+    expect(findingLeftByTreatment(leaves, { toothNumber: 16, surfaces: [] }, PERU)).toBeNull()
   })
 
   it("la exodoncia en Perú deduce la causa (DEX o DAO); fuera de Perú no la inventa", () => {
-    const leaves = leavesFindingForProcedure("CPMS", "D7140")!
+    const leaves = { condition: "missing_tooth" }
     const byCaries = findingLeftByTreatment(
       leaves,
       { toothNumber: 36 },
@@ -62,11 +59,9 @@ describe("lo tratado queda dibujado", () => {
     expect(abroad?.details?.variant).toBeUndefined()
   })
 
-  it("cada procedimiento de la correspondencia deja un hallazgo válido en Perú", () => {
-    for (const [key, leaves] of Object.entries(LEAVES_BY_PROCEDURE)) {
-      const finding = findingLeftByTreatment(leaves, { toothNumber: 36, surfaces: ["occlusal"] }, PERU)
-      expect(finding, key).not.toBeNull()
-    }
+  it("la corona temporal no se dibuja sola: pide escribir su material", () => {
+    expect(findingLeftByTreatment({ condition: "temporary_crown" }, { toothNumber: 11 }, PERU)).toBeNull()
+    expect(validateLeavesFinding({ condition: "temporary_crown" }, { scope: "tooth", ...PERU })).toHaveLength(1)
   })
 
   it("al configurar un servicio, en Perú se pide la variante y lo que va en caras exige superficies", () => {

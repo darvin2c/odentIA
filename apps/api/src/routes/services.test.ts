@@ -1,7 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, seedProcedureCodes } from "@odentia/db"
-import { secretsKeyFromEnv } from "@odentia/services"
+import { librarySpecialtyIds, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
@@ -105,9 +105,8 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
-  // Catálogo oficial real (mismo seed que dev/CI): la biblioteca y la
-  // proyección 1:1 plantilla↔código son prerrequisito de /services/templates
-  // y de las ofertas derivadas de plantilla.
+  // Catálogo real (mismo seed que dev/CI): la biblioteca de odentIA y el
+  // código CPMS de cada tratamiento, que en el Perú lleva todo servicio.
   await seedProcedureCodes(ownerDb)
 }, 180_000)
 
@@ -120,6 +119,7 @@ interface ServiceItem {
   templateId: string | null
   source: string
   code: string | null
+  procedureCode?: string | null
   name: string
   specialtyId: string | null
   specialtyName?: string | null
@@ -134,21 +134,20 @@ async function getJson(app: Hono, path: string): Promise<Response> {
   return app.request(path, { method: "GET" })
 }
 
-// Plantillas de la biblioteca oficial vigente (RM-550-2023-MINSA): el ámbito
-// y la especialidad se heredan del catálogo 1:1, no de un fixture propio.
-const PREVENCION_KEY = "cpms:RM-550-2023-MINSA:D1110" // Profilaxis dental
-const RESTAURADORA_KEY = "cpms:RM-550-2023-MINSA:D2391" // Resina, 1 superficie
+// Tratamientos de la biblioteca de odentIA (ADR 0067): el ámbito y el tipo se
+// heredan de ella; el código, de la lista del país (CPMS D1110 y D2391).
+const PREVENCION_KEY = "profilaxis"
+const RESTAURADORA_KEY = "resina-fotocurable-1-superficie-posterior"
 
 /**
- * La especialidad de la clínica con esa clave (ADR 0039): las organizaciones
- * de la prueba se crean a mano, así que nace aquí si falta.
+ * La especialidad de la clínica que recibe ese tipo de tratamiento según su
+ * país (ADR 0039 y 0067): las organizaciones de la prueba se crean a mano,
+ * así que nacen aquí si faltan.
  */
-async function sp(key: string, orgId = "org_a"): Promise<string> {
-  const rows = (await ownerDb.execute(
-    sql`insert into "org_specialty" ("organization_id", "key", "name") values (${orgId}, ${key}, ${key})
-      on conflict ("organization_id", "key") do update set "key" = excluded."key" returning "id"`,
-  )) as unknown as Array<{ id: string }>
-  return rows[0]!.id
+async function sp(kind: string, orgId = "org_a"): Promise<string> {
+  const id = (await librarySpecialtyIds(ownerDb, orgId, [kind])).get(kind)
+  if (!id) throw new Error(`sin especialidad para ${kind} en ${orgId}`)
+  return id
 }
 
 async function templateIdByKey(key: string): Promise<string> {
@@ -164,21 +163,50 @@ it("services: leer un tarifario vacío no crea ofertas (recepción; member 403)"
   const res = await getJson(app, "/services")
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ data: [], nextCursor: null, total: 0 })
-  const legacy = await getJson(app, "/services?state=legacy")
-  expect(await legacy.json()).toEqual({ data: [], nextCursor: null, total: 0 })
+  // «Heredada» ya no existe.
+  expect((await getJson(app, "/services?state=legacy")).status).toBe(400)
   const member = buildApp("member")
   expect((await getJson(member, "/services")).status).toBe(403)
 })
 
-it("services: biblioteca global sin precios y con filtro (recepción; member 403)", async () => {
+it("services: biblioteca sin precios, por tipo y con el código del país (recepción; member 403)", async () => {
   const app = buildApp("reception")
-  const res = await getJson(app, "/services/templates?specialty=prevencion")
+  const res = await getJson(app, "/services/templates?kind=prevencion&limit=100")
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { data: Array<{ key: string }> }
-  expect(body.data.map((row) => row.key)).toContain(PREVENCION_KEY)
+  const body = (await res.json()) as {
+    data: Array<{ key: string; kind: string; codings: Array<{ code: string }> }>
+    codeList: { system: string; required: boolean } | null
+  }
+  expect(body.codeList).toEqual({ system: "CPMS", required: true })
+  expect(body.data.find((row) => row.key === PREVENCION_KEY)?.codings.map((c) => c.code)).toEqual(["D1110"])
+  expect(body.data.every((row) => row.kind === "prevencion" && row.codings.length === 1)).toBe(true)
   expect(body.data.every((row) => !("priceCents" in row))).toBe(true)
+  // Fuera de un país con lista, la misma biblioteca sin códigos.
+  const chile = (await (await getJson(buildApp("reception", "org_c"), "/services/templates?kind=prevencion&limit=100")).json()) as typeof body
+  expect(chile.codeList).toBeNull()
+  expect(chile.data.map((row) => row.key)).toContain(PREVENCION_KEY)
+  expect(chile.data.every((row) => row.codings.length === 0)).toBe(true)
   const member = buildApp("member")
-  expect((await getJson(member, "/services/templates?specialty=prevencion")).status).toBe(403)
+  expect((await getJson(member, "/services/templates?kind=prevencion")).status).toBe(403)
+})
+
+it("services: el código oficial de un servicio propio se busca en la lista del país", async () => {
+  const app = buildApp("reception")
+  const found = (await (await getJson(app, "/services/official-codes?q=profilaxis")).json()) as {
+    data: Array<{ system: string; code: string; display: string }>
+    codeList: { system: string; required: boolean } | null
+  }
+  expect(found.codeList).toEqual({ system: "CPMS", required: true })
+  expect(found.data.map((row) => row.code)).toContain("D1110")
+  expect(found.data.every((row) => row.system === "CPMS")).toBe(true)
+  const byCode = (await (await getJson(app, "/services/official-codes?q=D2391")).json()) as typeof found
+  expect(byCode.data.map((row) => row.code)).toEqual(["D2391"])
+  // Sin lista en el país no hay nada que buscar.
+  expect(await (await getJson(buildApp("reception", "org_c"), "/services/official-codes?q=profilaxis")).json()).toEqual({
+    data: [],
+    codeList: null,
+  })
+  expect((await getJson(buildApp("member"), "/services/official-codes")).status).toBe(403)
 })
 
 it("services: POST crea y PATCH edita con owner/admin; member 403", async () => {
@@ -192,13 +220,22 @@ it("services: POST crea y PATCH edita con owner/admin; member 403", async () => 
       specialtyId: await sp("estetica"),
       scope: "tooth",
       priceCents: 150000,
+      officialCode: "D2960",
     }),
   })
   expect(created.status).toBe(201)
   const createdBody = (await created.json()) as { data: ServiceItem }
   expect(createdBody.data.code).toBe("CAR-01")
+  expect(createdBody.data.procedureCode).toBe("D2960")
   expect(createdBody.data.source).toBe("custom")
   expect(createdBody.data.currency).toBe("PEN")
+  // En el Perú un servicio propio sin código CPMS no se crea.
+  const uncoded = await owner.request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Sin código", specialtyId: await sp("estetica"), scope: "tooth", priceCents: 1 }),
+  })
+  expect(uncoded.status).toBe(400)
 
   const patched = await owner.request(`/services/${createdBody.data.id}`, {
     method: "PATCH",
@@ -237,7 +274,7 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
   // La especialidad de la clínica con la clave de la plantilla.
   expect(body.data.specialtyId).toBe(await sp("prevencion"))
   expect(body.data.scope).toBe("general")
-  expect(body.data.name).toBe("Profilaxis dental")
+  expect(body.data.name).toBe("Profilaxis")
 
   const contradict = await app.request(`/services/${body.data.id}`, {
     method: "PATCH",
@@ -294,8 +331,8 @@ it("services: «Cómo dice el precio» se elige al agregar y se cambia para vari
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       items: [
-        { kind: "custom", name: "Férula de descarga propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 25000 },
-        { kind: "custom", name: "Guarda nocturna propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 30000 },
+        { kind: "custom", name: "Férula de descarga propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 25000, officialCode: "D9940" },
+        { kind: "custom", name: "Guarda nocturna propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 30000, officialCode: "D9940" },
       ],
       priceDisclosure: "exacto",
     }),
@@ -335,6 +372,7 @@ it("services: state filtra activas e inactivas", async () => {
       specialtyId: await sp("cirugia"),
       scope: "general",
       priceCents: 0,
+      officialCode: "D7140",
     }),
   })
   expect(created.status).toBe(201)
@@ -370,6 +408,7 @@ it("services: aislamiento por org y moneda desde el perfil", async () => {
       specialtyId: await sp("cirugia", "org_b"),
       scope: "general",
       priceCents: 5000,
+      officialCode: "D7140",
     }),
   })
   expect(created.status).toBe(201)
@@ -402,37 +441,29 @@ async function mostUsed(app: Hono): Promise<MostUsedConcept[]> {
   return ((await res.json()) as { data: MostUsedConcept[] }).data
 }
 
-it("services: «Más usados» sugiere por concepto a una clínica sin servicios", async () => {
+it("services: «Más usados» sugiere por tipo a una clínica sin servicios", async () => {
   const app = buildApp("owner", "org_c")
   expect(await (await getJson(app, "/services")).json()).toEqual({ data: [], nextCursor: null, total: 0 })
 
-  const concepts = await mostUsed(app)
-  // Conceptos generales, no códigos: la biblioteca disponible los resuelve.
-  expect(concepts.map((concept) => concept.key)).toEqual(
-    expect.arrayContaining([
-      "consulta",
-      "radiografia",
-      "profilaxis",
-      "resina",
-      "endodoncia",
-      "exodoncia",
-      "corona",
-    ]),
+  const kinds = await mostUsed(app)
+  // Los tratamientos que odentIA marcó como más usados, agrupados por tipo.
+  expect(kinds.map((kind) => kind.key)).toEqual(
+    expect.arrayContaining(["diagnostico", "prevencion", "restauradora", "endodoncia", "cirugia", "protesis"]),
   )
-  for (const concept of concepts) {
-    expect(concept.label).not.toBe("")
-    expect(concept.templates.length).toBeGreaterThanOrEqual(1)
-    expect(concept.templates.length).toBeLessThanOrEqual(3)
-    // Sin precios propuestos y con su código oficial único.
-    expect(concept.templates.every((tpl) => !("priceCents" in tpl))).toBe(true)
-    expect(concept.templates.every((tpl) => tpl.codings.length === 1)).toBe(true)
+  for (const kind of kinds) {
+    expect(kind.label).not.toBe("")
+    expect(kind.templates.length).toBeGreaterThanOrEqual(1)
+    expect(kind.templates.length).toBeLessThanOrEqual(10)
+    expect(kind.templates.every((tpl) => !("priceCents" in tpl))).toBe(true)
+    // En Chile aún no hay lista cargada: sin código.
+    expect(kind.templates.every((tpl) => tpl.codings.length === 0)).toBe(true)
   }
-  const ids = concepts.flatMap((concept) => concept.templates.map((tpl) => tpl.id))
+  const ids = kinds.flatMap((kind) => kind.templates.map((tpl) => tpl.id))
   expect(new Set(ids).size).toBe(ids.length)
-  const profilaxis = concepts.find((concept) => concept.key === "profilaxis")
-  expect(profilaxis?.templates.map((tpl) => tpl.key)).toContain(PREVENCION_KEY)
-  // «Limpieza» no trae la limpieza de una prótesis: el concepto acota su área.
-  expect(profilaxis?.templates.every((tpl) => !/pr[oó]tesis/i.test(tpl.name))).toBe(true)
+  expect(kinds.find((kind) => kind.key === "prevencion")?.templates.map((tpl) => tpl.key)).toContain(PREVENCION_KEY)
+  // En el Perú, cada uno con su código CPMS.
+  const peru = await mostUsed(buildApp("owner", "org_a"))
+  expect(peru.flatMap((kind) => kind.templates).every((tpl) => tpl.codings.length === 1)).toBe(true)
 
   // Lo lee quien ve el tarifario; el mínimo seguro no.
   expect((await getJson(buildApp("reception", "org_c"), "/services/most-used")).status).toBe(200)
@@ -444,7 +475,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
   const app = buildApp("owner", "org_c")
   const before = await mostUsed(app)
   const profilaxisId = await templateIdByKey(PREVENCION_KEY)
-  const resina = before.find((concept) => concept.key === "resina")
+  const resina = before.find((kind) => kind.key === "restauradora")
   const resinaIds = resina?.templates.map((tpl) => tpl.id) ?? []
   expect(resinaIds.length).toBeGreaterThan(0)
 
@@ -503,7 +534,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
   expect(afterIds).not.toContain(profilaxisId)
   for (const id of resinaIds) expect(afterIds).not.toContain(id)
   // El concepto sigue ofreciendo lo que la biblioteca aún tiene sin incorporar.
-  expect(after.find((concept) => concept.key === "resina")?.templates.length ?? 0).toBeGreaterThan(0)
+  expect(after.find((kind) => kind.key === "restauradora")).toBeUndefined()
   // Lo incorporado es de cada organización: otra clínica sigue viendo lo que
   // ella misma no tiene, aunque esta ya lo haya agregado.
   const otherApp = buildApp("owner", "org_a")
@@ -526,7 +557,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
 it("services: la carga rápida es todo o nada", async () => {
   const app = buildApp("owner", "org_c")
   const before = ((await (await getJson(app, "/services")).json()) as { data: ServiceItem[] }).data
-  const corona = (await mostUsed(app)).find((concept) => concept.key === "corona")
+  const corona = (await mostUsed(app)).find((kind) => kind.key === "protesis")
   const templateId = corona?.templates[0]?.id
   expect(templateId).toBeDefined()
   const failed = await app.request("/services/batch", {
@@ -552,14 +583,15 @@ it("services: la carga rápida es todo o nada", async () => {
   expect(member.status).toBe(403)
 })
 
-it("services: sin biblioteca vigente «Más usados» queda vacío", async () => {
-  // Un país sin biblioteca importada: la clínica arma su tarifario con servicios propios.
+it("services: sin la edición vigente de la lista obligatoria, «Más usados» queda vacío", async () => {
+  // En el Perú no se ofrece un tratamiento sin su código; en Chile, sin lista, sí.
   const current = (await ownerDb.execute(
     sql`update "procedure_catalog_release" set "is_current" = false where "is_current" returning "system_key", "version"`,
   )) as unknown as Array<{ system_key: string; version: string }>
   expect(current.length).toBeGreaterThan(0)
   try {
-    expect(await mostUsed(buildApp("owner", "org_c"))).toEqual([])
+    expect(await mostUsed(buildApp("owner", "org_a"))).toEqual([])
+    expect((await mostUsed(buildApp("owner", "org_c"))).length).toBeGreaterThan(0)
   } finally {
     for (const release of current) {
       await ownerDb.execute(
@@ -568,7 +600,7 @@ it("services: sin biblioteca vigente «Más usados» queda vacío", async () => 
       )
     }
   }
-  expect((await mostUsed(buildApp("owner", "org_c"))).length).toBeGreaterThan(0)
+  expect((await mostUsed(buildApp("owner", "org_a"))).length).toBeGreaterThan(0)
 })
 
 it("services: sin región configurada no se pone precio a un servicio", async () => {
@@ -608,6 +640,7 @@ it("services: código duplicado responde 409 DUPLICATE_CODE", async () => {
     specialtyId: await sp("cirugia"),
     scope: "general",
     priceCents: 100,
+    officialCode: "D7140",
   }
   const first = await app.request("/services", {
     method: "POST",
@@ -635,9 +668,10 @@ it("services: con más de 100 servicios la lista pagina y dice el total; lo eleg
   )
   const endo = await sp("endodoncia", "org_e")
   const general = await sp("general", "org_e")
+  // Servicios propios cargados a mano, con su código CPMS.
   await ownerDb.execute(sql`
-    insert into "service_catalog" ("organization_id", "source", "name", "specialty_id", "scope", "price_cents", "currency", "is_active")
-    select 'org_e', 'custom', 'Servicio ' || lpad(n::text, 3, '0'), case when n <= 6 then ${endo}::uuid else ${general}::uuid end, 'general', 1000, 'PEN', n <> 106
+    insert into "service_catalog" ("organization_id", "source", "name", "specialty_id", "scope", "price_cents", "currency", "is_active", "procedure_system", "procedure_code", "procedure_version")
+    select 'org_e', 'custom', 'Servicio ' || lpad(n::text, 3, '0'), case when n <= 6 then ${endo}::uuid else ${general}::uuid end, 'general', 1000, 'PEN', n <> 106, 'CPMS', 'D0150', 'RM-550-2023-MINSA'
     from generate_series(1, 106) as n`)
   const app = buildApp("reception", "org_e")
   const first = (await (await getJson(app, "/services?limit=100")).json()) as {
@@ -661,7 +695,7 @@ it("services: con más de 100 servicios la lista pagina y dice el total; lo eleg
   // Filtrado por la especialidad de la clínica, con su nombre en cada fila.
   const byEndo = (await (await getJson(app, `/services?specialtyId=${endo}`)).json()) as { data: ServiceItem[]; total: number }
   expect(byEndo.total).toBe(6)
-  expect(byEndo.data.every((row) => row.specialtyId === endo && row.specialtyName === "endodoncia")).toBe(true)
+  expect(byEndo.data.every((row) => row.specialtyId === endo && row.specialtyName === "Endodoncia")).toBe(true)
   // Lo ya elegido se nombra aunque no esté en la primera página ni siga activo.
   const all = [...first.data, ...second.data]
   const last = all.find((row) => row.name === "Servicio 105")!
@@ -672,7 +706,10 @@ it("services: con más de 100 servicios la lista pagina y dice el total; lo eleg
   expect(named.data.map((row) => row.name).sort()).toEqual(["Servicio 105", "Servicio 106"])
   const one = await getJson(app, `/services/${last.id}`)
   expect(one.status).toBe(200)
-  expect(((await one.json()) as { data: ServiceItem }).data).toMatchObject({ name: "Servicio 105", specialtyName: "general" })
+  expect(((await one.json()) as { data: ServiceItem }).data).toMatchObject({
+    name: "Servicio 105",
+    specialtyName: "Odontología general",
+  })
   // Otra clínica no lo ve.
   expect((await getJson(buildApp("owner", "org_a"), `/services/${last.id}`)).status).toBe(404)
   expect((await getJson(app, "/services?ids=no-es-un-id")).status).toBe(400)
@@ -681,12 +718,13 @@ it("services: con más de 100 servicios la lista pagina y dice el total; lo eleg
 it("services: cada servicio tiene una sola especialidad de la clínica, también el de la biblioteca", async () => {
   const app = buildApp("owner")
   const tpl = await templateIdByKey(RESTAURADORA_KEY)
-  // De la biblioteca: la especialidad de la clínica con la clave de la plantilla.
+  // De la biblioteca: la especialidad de la clínica que recibe su tipo.
   const listed = (await (await getJson(app, "/services?limit=100")).json()) as { data: ServiceItem[] }
   const fromLibrary = listed.data.find((row) => row.templateId === tpl)!
   expect(fromLibrary.specialtyId).toBe(await sp("restauradora"))
   // La clínica la cambia en el formulario del servicio: una sola, la nueva.
-  const estetica = await sp("estetica")
+  // Otra especialidad del país (en el Perú, la estética va con la restauradora).
+  const estetica = await sp("protesis")
   const moved = await app.request(`/services/${fromLibrary.id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },

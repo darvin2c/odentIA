@@ -1,18 +1,20 @@
 /**
  * Contratos de prestaciones y validación del sitio clínico.
- * La biblioteca oficial se importa por sistema, código y edición en la base
- * de datos; los nombres comerciales y precios pertenecen a cada clínica.
+ * La biblioteca es de odentIA: tratamientos de consultorio con nombre propio,
+ * y por debajo el código de la lista de cada país (ADR 0067). Los nombres
+ * comerciales y los precios pertenecen a cada clínica.
  */
 import { isValidTooth, surfacesForTooth } from "./anatomy.js"
 
 /**
- * Especialidades de la biblioteca: la clave con que clasifica sus
- * prestaciones y el nombre con que nace la especialidad de cada clínica
- * (`org_specialty`, con la misma clave). La clínica puede renombrarlas,
- * archivarlas o agregar otras: lo que se muestra es siempre su nombre, nunca
- * este (ADR 0039).
+ * Tipos de tratamiento de la biblioteca (ADR 0067): ordenan la biblioteca,
+ * proponen la fase del plan, guardan las palabras de la calle del agente y
+ * dicen qué especialidad del país recibe cada tratamiento. Son de uso
+ * interno: la clínica ve y edita la especialidad, nunca el tipo. Antes eran
+ * las especialidades con que nacía la clínica (ADR 0039); ahora las
+ * especialidades salen del perfil del país.
  */
-export const LIBRARY_SPECIALTIES = [
+export const TREATMENT_KINDS = [
   { key: "diagnostico", name: "Diagnóstico" },
   { key: "prevencion", name: "Prevención" },
   { key: "restauradora", name: "Restauradora" },
@@ -26,11 +28,20 @@ export const LIBRARY_SPECIALTIES = [
   { key: "estetica", name: "Estética" },
   { key: "disfuncion", name: "Disfunción" },
   { key: "anestesia", name: "Anestesia y sedación" },
-  { key: "general", name: "Servicios odontológicos generales" },
+  { key: "general", name: "Servicios generales" },
 ] as const
-export type TreatmentSpecialty = (typeof LIBRARY_SPECIALTIES)[number]["key"]
-/** Las claves de la biblioteca, en su orden. */
-export const TREATMENT_SPECIALTIES: readonly TreatmentSpecialty[] = LIBRARY_SPECIALTIES.map((item) => item.key)
+export type TreatmentKind = (typeof TREATMENT_KINDS)[number]["key"]
+/** Las claves de los tipos, en su orden. */
+export const TREATMENT_KIND_KEYS: readonly TreatmentKind[] = TREATMENT_KINDS.map((item) => item.key)
+
+export function isTreatmentKind(value: unknown): value is TreatmentKind {
+  return typeof value === "string" && (TREATMENT_KIND_KEYS as readonly string[]).includes(value)
+}
+
+/** El nombre de un tipo, para agrupar la biblioteca. */
+export function treatmentKindName(kind: TreatmentKind): string {
+  return TREATMENT_KINDS.find((item) => item.key === kind)!.name
+}
 
 /**
  * Fases del plan de tratamiento odontológico, en el orden en que se ejecutan:
@@ -55,11 +66,12 @@ export const TREATMENT_PHASE_LABELS: Record<TreatmentPhase, string> = {
 }
 
 /**
- * Fase propuesta por la especialidad del servicio; el clínico la cambia. La
- * urgencia nunca se infiere: es un juicio sobre el paciente, no sobre el acto.
+ * Fase propuesta por el tipo de tratamiento del servicio; el clínico la
+ * cambia. Sin tipo, la básica. La urgencia nunca se infiere: es un juicio
+ * sobre el paciente, no sobre el acto.
  */
-export function phaseForSpecialty(specialty: string | null | undefined): TreatmentPhase {
-  switch (specialty) {
+export function phaseForKind(kind: string | null | undefined): TreatmentPhase {
+  switch (kind) {
     case "cirugia":
     case "implantologia":
       return "quirurgica"

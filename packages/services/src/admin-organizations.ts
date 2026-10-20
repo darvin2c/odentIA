@@ -33,7 +33,7 @@ import { ServiceError } from "./errors.js"
 // ---------------------------------------------------------------------------
 
 import { initialOrgRegion } from "./organization-profile.js"
-import { ensureLibrarySpecialties } from "./specialties.js"
+import { ensureClinicSpecialties } from "./specialties.js"
 import { type OrganizationBillingSummary, usageMonthBounds } from "./saas-billing.js"
 import { type AiCostByOrigin, getAiCostByOrigin } from "./ai-usage.js"
 
@@ -770,8 +770,8 @@ export async function createAssistedOrganization(
     locale: region.locale,
     diagnosisSystem: region.diagnosisSystem,
   })
-  // La clínica nace con las especialidades de la biblioteca (ADR 0039).
-  await ensureLibrarySpecialties(tx, organizationId)
+  // La clínica nace con las especialidades de su país (ADR 0039 y 0067).
+  await ensureClinicSpecialties(tx, organizationId)
   if (loaders.startTrial) {
     await loaders.startTrial(tx, organizationId, {
       planCode: input.planCode,

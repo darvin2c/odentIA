@@ -1,3 +1,4 @@
+import { clinicalProfileFor } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { procedureCode, procedureCodeSystem, treatmentTemplate } from "@odentia/db/schema/clinical"
@@ -17,6 +18,8 @@ setupTestDb()
 
 const ACTOR = "u-coding-tests"
 const VERSION = "RM-550-2023-MINSA"
+// Las clínicas de prueba son del Perú: la CPMS es obligatoria (ADR 0067).
+const LIST = clinicalProfileFor("PE").services
 
 async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
   await ownerDb
@@ -78,15 +81,15 @@ async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
     .insert(treatmentTemplate)
     .values([
       {
-        key: "prevencion:aplicacion-topica-de-fluor-test",
+        key: "aplicacion-topica-de-fluor-test",
         name: "Aplicación tópica de flúor (test)",
-        specialty: "prevencion",
+        kind: "prevencion",
         scope: "general",
       },
       {
-        key: "restauradora:resina-una-superficie-test",
+        key: "resina-una-superficie-test",
         name: "Resina de una superficie (test)",
-        specialty: "restauradora",
+        kind: "restauradora",
         scope: "surfaces",
         surfaceCountMin: 1,
         surfaceCountMax: 1,
@@ -95,21 +98,21 @@ async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
     .onConflictDoNothing()
   const templates = await ownerDb.execute<{ id: string; key: string }>(
     sql`select "id", "key" from "treatment_template"
-        where "key" in ('prevencion:aplicacion-topica-de-fluor-test', 'restauradora:resina-una-superficie-test')`,
+        where "key" in ('aplicacion-topica-de-fluor-test', 'resina-una-superficie-test')`,
   )
   const byKey = new Map(
     (templates as unknown as { id: string; key: string }[]).map((t) => [t.key, t.id]),
   )
-  const fluorId = byKey.get("prevencion:aplicacion-topica-de-fluor-test")!
-  const resinaId = byKey.get("restauradora:resina-una-superficie-test")!
+  const fluorId = byKey.get("aplicacion-topica-de-fluor-test")!
+  const resinaId = byKey.get("resina-una-superficie-test")!
   expect(fluorId).toBeTruthy()
   expect(resinaId).toBeTruthy()
-  // Proyección 1:1: cada plantilla vigente proyecta UN único código oficial.
+  // Un código por tratamiento en cada edición de una lista.
   await ownerDb.execute(
-    sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version", "is_primary")
-        values (${fluorId}, 'CPMS', 'D1208', ${VERSION}, true),
-               (${resinaId}, 'CPMS', 'D2330', ${VERSION}, true)
-        on conflict ("template_id", "system_key", "code", "version") do nothing`,
+    sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")
+        values (${fluorId}, 'CPMS', 'D1208', ${VERSION}),
+               (${resinaId}, 'CPMS', 'D2330', ${VERSION})
+        on conflict ("template_id", "system_key", "version") do nothing`,
   )
   await seedRelease()
   return { fluorId, resinaId }
@@ -155,38 +158,38 @@ async function setupCase(displayName: string) {
   return { fluorId, resinaId, fluorService, resinaService, patient, draft, plan }
 }
 
-it("biblioteca vigente: paginada y por código con total y availableCount global", async () => {
+it("biblioteca del país: paginada, con el código de su lista y filtrada por tipo", async () => {
   await seedGlobals()
-  const first = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, { limit: 1 }))
+  const first = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, "org_a", { limit: 1 }))
   expect(first.total).toBe(2)
   expect(first.data).toHaveLength(1)
   expect(first.nextCursor).toBeTruthy()
-  expect(first.catalog).toMatchObject({ system: "CPMS", version: VERSION, availableCount: 2 })
+  expect(first.codeList).toEqual({ system: "CPMS", required: true })
   expect(first.data[0]?.codings).toHaveLength(1)
   const second = await withOrgContext(appDb, "org_a", (tx) =>
-    listTemplates(tx, { limit: 1, cursor: first.nextCursor! }),
+    listTemplates(tx, "org_a", { limit: 1, cursor: first.nextCursor! }),
   )
   expect(second.data).toHaveLength(1)
   expect(second.data[0]?.id).not.toBe(first.data[0]?.id)
-  expect(second.catalog?.availableCount).toBe(2)
-  // Búsqueda por código oficial: filtra el total pero no el disponible global.
-  const byCode = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, { q: "D1208" }))
+  // Búsqueda por código oficial.
+  const byCode = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, "org_a", { q: "D1208" }))
   expect(byCode.total).toBe(1)
   expect(byCode.data.map((t) => t.codings[0]?.code)).toEqual(["D1208"])
-  expect(byCode.catalog?.availableCount).toBe(2)
-  // Filtro por especialidad: el total respeta el filtro, el disponible es global.
-  const bySpecialty = await withOrgContext(appDb, "org_a", (tx) =>
-    listTemplates(tx, { specialty: "prevencion" }),
+  // Filtro por tipo de tratamiento.
+  const byKind = await withOrgContext(appDb, "org_a", (tx) =>
+    listTemplates(tx, "org_a", { kind: "prevencion" }),
   )
-  expect(bySpecialty.total).toBe(1)
-  expect(bySpecialty.data.map((t) => t.codings[0]?.code)).toEqual(["D1208"])
-  expect(bySpecialty.catalog?.availableCount).toBe(2)
+  expect(byKind.total).toBe(1)
+  expect(byKind.data.map((t) => t.codings[0]?.code)).toEqual(["D1208"])
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, "org_a", { kind: "inventado" })),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
 })
 
 it("el ítem del plan congela el snapshot exacto y no sigue al catálogo", async () => {
   const { resinaService, patient, draft, plan } = await setupCase("Snapshot Congelado")
   const snapshot = await withOrgContext(appDb, "org_a", (tx) =>
-    resolveServiceCodings(tx, resinaService),
+    resolveServiceCodings(tx, LIST, resinaService),
   )
   expect(snapshot.map((c) => c.code)).toEqual(["D2330"])
   const item = await withOrgContext(appDb, "org_a", (tx) =>
@@ -218,16 +221,29 @@ it("el ítem del plan congela el snapshot exacto y no sigue al catálogo", async
   )
 })
 
-it("la oferta propia sin plantilla congela lista vacía", async () => {
-  await seedGlobals()
-  const service = await withOrgContext(appDb, "org_a", async (tx) =>
-    createService(tx, "org_a", ACTOR, {
-      name: "Limpieza especial propia",
-      specialtyId: (await librarySpecialtyIds(tx, "org_a", ["prevencion"])).get("prevencion")!,
-      scope: "general",
-      priceCents: 12000,
-    }),
+it("un servicio propio lleva el código que elige la clínica y lo congela", async () => {
+  const { fluorId } = await seedGlobals()
+  const specialtyId = await withOrgContext(appDb, "org_a", async (tx) =>
+    (await librarySpecialtyIds(tx, "org_a", ["prevencion"])).get("prevencion")!,
   )
+  const own = { name: "Limpieza especial propia", specialtyId, scope: "general", priceCents: 12000 }
+  // En el Perú la lista es obligatoria: sin código o con uno que no está, no se crea.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => createService(tx, "org_a", ACTOR, own)),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      createService(tx, "org_a", ACTOR, { ...own, officialCode: "D9999" }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  const service = await withOrgContext(appDb, "org_a", (tx) =>
+    createService(tx, "org_a", ACTOR, { ...own, officialCode: "d1206" }),
+  )
+  expect(service).toMatchObject({
+    procedureSystem: "CPMS",
+    procedureCode: "D1206",
+    procedureVersion: VERSION,
+  })
   const patient = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Oferta Propia" }),
   )
@@ -247,7 +263,15 @@ it("la oferta propia sin plantilla congela lista vacía", async () => {
       sourceEncounterId: draft.id,
     }),
   )
-  expect(item.codings).toEqual([])
+  expect(item.codings).toEqual([
+    { system: "CPMS", code: "D1206", version: VERSION, display: "Aplicación de flúor barniz" },
+  ])
+  // Uno de la biblioteca toma el código de su tratamiento: no admite otro.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      createService(tx, "org_a", ACTOR, { templateId: fluorId, officialCode: "D1206", priceCents: 1 }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
 })
 
 it("presupuesto y atención heredan el snapshot exacto del ítem", async () => {
@@ -344,12 +368,12 @@ it("cambio de servicio recodifica la nueva indicación; el presentado es inmutab
   ).rejects.toMatchObject({ code: "ITEM_CLOSED" })
 })
 
-it("segunda equivalencia viola el constraint único (una plantilla, un código)", async () => {
+it("un segundo código de la misma lista viola el constraint único", async () => {
   const { resinaId } = await seedGlobals()
   const error = await ownerDb
     .execute(
-      sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version", "is_primary")
-          values (${resinaId}, 'CPMS', 'D2391', ${VERSION}, false)`,
+      sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")
+          values (${resinaId}, 'CPMS', 'D2391', ${VERSION})`,
     )
     .then(
       () => null,
@@ -359,34 +383,27 @@ it("segunda equivalencia viola el constraint único (una plantilla, un código)"
   expect(isUniqueViolation(error)).toBe(true)
 })
 
-it("nueva indicación rechaza plantilla retirada o sin mapping", async () => {
-  const { resinaId, resinaService, patient, draft, plan } = await setupCase("Rechazo")
-  // Biblioteca retirada: plantilla inactiva.
+it("la biblioteca no agrega un tratamiento retirado ni uno sin código en la lista", async () => {
+  const { resinaId } = await seedGlobals()
   await ownerDb.execute(
     sql`update "treatment_template" set "is_active" = false where "id" = ${resinaId}`,
   )
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      addPlanItem(tx, "org_a", ACTOR, patient.id, {
-        serviceId: resinaService.id,
-        planId: plan.id,
-        sourceEncounterId: draft.id,
-        toothNumber: 36,
-        surfaces: ["occlusal"],
-      }),
+      createService(tx, "org_a", ACTOR, { templateId: resinaId, priceCents: 5000 }),
     ),
   ).rejects.toMatchObject({ code: "TEMPLATE_INACTIVE" })
   await ownerDb.execute(
     sql`update "treatment_template" set "is_active" = true where "id" = ${resinaId}`,
   )
-  // Plantilla activa sin mapping: no es proyección oficial, se rechaza.
+  // Activo pero sin código CPMS: en el Perú no se ofrece ni se agrega.
   await ownerDb.execute(
     sql`insert into "treatment_template" ("key", "name", "specialty", "scope")
-        values ('prevencion:huerfana-test', 'Huerfana de prueba', 'prevencion', 'general')
+        values ('huerfana-test', 'Huérfana de prueba', 'prevencion', 'general')
         on conflict ("key") do nothing`,
   )
   const orphans = await ownerDb.execute<{ id: string }>(
-    sql`select "id" from "treatment_template" where "key" = 'prevencion:huerfana-test'`,
+    sql`select "id" from "treatment_template" where "key" = 'huerfana-test'`,
   )
   const orphanId = (orphans as unknown as Array<{ id: string }>)[0]?.id
   expect(orphanId).toBeTruthy()
@@ -394,31 +411,36 @@ it("nueva indicación rechaza plantilla retirada o sin mapping", async () => {
     withOrgContext(appDb, "org_a", (tx) =>
       createService(tx, "org_a", ACTOR, { templateId: orphanId, priceCents: 5000 }),
     ),
-  ).rejects.toMatchObject({ code: "TEMPLATE_INACTIVE" })
-  await ownerDb.execute(
-    sql`delete from "treatment_template" where "key" = 'prevencion:huerfana-test'`,
-  )
+  ).rejects.toMatchObject({ code: "TEMPLATE_UNCODED" })
+  const listed = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, "org_a", {}))
+  expect(listed.data.map((t) => t.key)).not.toContain("huerfana-test")
+  await ownerDb.execute(sql`delete from "treatment_template" where "key" = 'huerfana-test'`)
 })
 
-it("release retirada: biblioteca vacía y nueva indicación rechazada", async () => {
+it("edición retirada: biblioteca vacía y la indicación sigue, sin código", async () => {
   const { resinaService, patient, draft, plan } = await setupCase("Release Retirada")
   await ownerDb.execute(
     sql`update "procedure_catalog_release" set "is_current" = false
         where "system_key" = 'CPMS' and "version" = ${VERSION}`,
   )
-  const empty = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, {}))
-  expect(empty).toMatchObject({ data: [], nextCursor: null, total: 0, catalog: null })
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      addPlanItem(tx, "org_a", ACTOR, patient.id, {
-        serviceId: resinaService.id,
-        planId: plan.id,
-        sourceEncounterId: draft.id,
-        toothNumber: 36,
-        surfaces: ["occlusal"],
-      }),
-    ),
-  ).rejects.toMatchObject({ code: "TEMPLATE_INACTIVE" })
+  const empty = await withOrgContext(appDb, "org_a", (tx) => listTemplates(tx, "org_a", {}))
+  expect(empty).toMatchObject({
+    data: [],
+    nextCursor: null,
+    total: 0,
+    codeList: { system: "CPMS", required: true },
+  })
+  // La consulta no se detiene: se indica sin código y Servicios lo avisa.
+  const item = await withOrgContext(appDb, "org_a", (tx) =>
+    addPlanItem(tx, "org_a", ACTOR, patient.id, {
+      serviceId: resinaService.id,
+      planId: plan.id,
+      sourceEncounterId: draft.id,
+      toothNumber: 36,
+      surfaces: ["occlusal"],
+    }),
+  )
+  expect(item.codings).toEqual([])
   await ownerDb.execute(
     sql`update "procedure_catalog_release" set "is_current" = true
         where "system_key" = 'CPMS' and "version" = ${VERSION}`,

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { LEAVES_BY_PROCEDURE, validateLeavesFinding } from "@odentia/clinical"
+import { validateLeavesFinding } from "@odentia/clinical"
 import { user } from "@odentia/db/schema/auth"
 import {
   encounter,
@@ -33,7 +33,7 @@ import { librarySpecialtyIds } from "./specialties.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
-import { withOrgContext } from "@odentia/db"
+import { seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
@@ -224,9 +224,12 @@ it("«Firmar odontograma» firma con el perfil, solo para pedidos y reingreso, y
 it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", async () => {
   const f = await attending("org_a")
   const draft = await f.open()
+  // En el Perú cada servicio propio lleva su código CPMS (ADR 0067).
+  await seedProcedureCodes(ownerDb)
   const resin = await f.run(async (tx) =>
     createService(tx, f.orgId, f.actor, {
       name: "Resina compuesta",
+      officialCode: "D2391",
       specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 18000,
@@ -238,6 +241,7 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
     f.run(async (tx) =>
       createService(tx, f.orgId, f.actor, {
         name: "Corona",
+        officialCode: "D2740",
         specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
         scope: "tooth",
         priceCents: 50000,
@@ -389,15 +393,16 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
   expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, draft))).toHaveLength(1)
 })
 
-it("la correspondencia de la biblioteca solo usa procedimientos que existen con un ámbito que encaja", () => {
-  const rows = readFileSync(new URL("../../db/seeds/treatment_templates_cpms.csv", import.meta.url), "utf8")
+it("lo que deja cada tratamiento de la biblioteca encaja con su ámbito y es un hallazgo completo", () => {
+  const rows = readFileSync(new URL("../../db/seeds/biblioteca.csv", import.meta.url), "utf8")
     .trim()
     .split(/\r?\n/)
     .slice(1)
-    .map((line) => line.split(","))
-  const scopes = new Map(rows.map((cols) => [`${cols[5]}:${cols[6]}`, cols[2]]))
-  for (const [key, leaves] of Object.entries(LEAVES_BY_PROCEDURE)) {
-    expect(scopes.has(key), key).toBe(true)
-    expect(validateLeavesFinding(leaves, { scope: scopes.get(key), strictVariants: true }), key).toEqual([])
+    .map((line) => line.split(",", 8))
+  const leaving = rows.filter((cols) => cols[5])
+  expect(leaving.length).toBeGreaterThan(0)
+  for (const [key, , scope, , , condition, variant] of leaving) {
+    const leaves = variant ? { condition: condition!, variant } : { condition: condition! }
+    expect(validateLeavesFinding(leaves, { scope, strictVariants: true }), key).toEqual([])
   }
 })

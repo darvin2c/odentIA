@@ -12,7 +12,7 @@ import {
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, gt, inArray, ne, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { branchNotFound, notFound, validation } from "./errors.js"
@@ -687,7 +687,7 @@ export async function getKnowledgeDataSources(tx: Db, orgId: string): Promise<Kn
       priced: sql<number>`count(*) filter (where ${serviceCatalog.priceCents} > 0 and ${serviceCatalog.priceDisclosure} in ('exacto', 'desde'))::int`,
     })
     .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy")))
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
   const [branches] = await tx
     .select({ total: count() })
     .from(branch)

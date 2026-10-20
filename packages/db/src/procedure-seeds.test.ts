@@ -1,4 +1,4 @@
-import { TREATMENT_SCOPES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/clinical"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"
@@ -7,8 +7,8 @@ import { expect, it } from "vitest"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
-// atrapan antes del merge, sin base de datos, y concilian la cobertura 1:1
-// con la edición oficial (release.expected_count).
+// atrapan antes del merge, sin base de datos, y concilian la cobertura de la
+// lista oficial (release.expected_count) y la biblioteca de odentIA (ADR 0067).
 const here = dirname(fileURLToPath(import.meta.url))
 const utf8 = new TextDecoder("utf-8", { fatal: true })
 
@@ -33,7 +33,8 @@ function linesOf(file: string, header: string): string[] {
 const FILES = [
   "procedure_code_systems.csv",
   "procedure_codes_cpms.csv",
-  "treatment_templates_cpms.csv",
+  "biblioteca.csv",
+  "biblioteca_codigos.csv",
   "procedure_catalog_release.csv",
   "cpms_scope_provenance.csv",
 ]
@@ -80,53 +81,70 @@ it("release de una fila con sha válido y expected_count que concilia todo", () 
   )
   expect(
     linesOf(
-      "treatment_templates_cpms.csv",
-      "template_key,specialty,scope,surface_count_min,surface_count_max,system_key,code,version,name",
-    ).length,
-  ).toBe(expected)
-  expect(
-    linesOf(
       "cpms_scope_provenance.csv",
       "code,n_oficial,grupo,seccion,subseccion,nombre_subseccion,denominacion",
     ).length,
   ).toBe(expected)
 })
 
-it("cada código oficial del ámbito tiene plantilla 1:1 sin duplicados ni faltantes", () => {
-  const codeLines = linesOf("procedure_codes_cpms.csv", "system_key,code,version,display")
-  const codes = codeLines.map((l) => {
-    const [system, code, version, display] = head(l, 4)
-    expect(system).toBe("CPMS")
-    expect(version).toBe("RM-550-2023-MINSA")
-    expect(code).not.toBe("")
-    expect(display).not.toBe("")
-    return code!
-  })
-  expect(new Set(codes).size).toBe(codes.length)
+const LIBRARY_HEADER =
+  "key,kind,scope,surface_count_min,surface_count_max,leaves_condition,leaves_variant,common,name"
 
-  const tplLines = linesOf(
-    "treatment_templates_cpms.csv",
-    "template_key,specialty,scope,surface_count_min,surface_count_max,system_key,code,version,name",
-  )
-  const tplCodes = tplLines.map((l) => {
-    const [key, specialty, scope, minRaw, maxRaw, system, code, version, name] = head(l, 9)
-    expect(key).toBe(`cpms:${version}:${code}`)
+it("la biblioteca es de consultorio: claves y nombres únicos, ámbito y lo que deja coherentes", () => {
+  const rows = linesOf("biblioteca.csv", LIBRARY_HEADER).map((l) => head(l, 9))
+  const keys = rows.map(([key]) => key!)
+  expect(new Set(keys).size).toBe(keys.length)
+  expect(new Set(rows.map((row) => row[8]!.toLowerCase())).size).toBe(rows.length)
+  for (const [key, kind, scope, minRaw, maxRaw, condition, variant, common, name] of rows) {
+    expect(key).toMatch(/^[a-z0-9-]+$/)
+    expect(TREATMENT_KIND_KEYS).toContain(kind)
     expect(TREATMENT_SCOPES).toContain(scope)
-    expect(TREATMENT_SPECIALTIES).toContain(specialty)
+    expect(["true", "false"]).toContain(common)
     expect(name).not.toBe("")
     if (scope === "surfaces") {
-      expect(minRaw).not.toBe("")
-      expect(maxRaw).not.toBe("")
+      expect(Number(minRaw)).toBeGreaterThanOrEqual(1)
+      expect(Number(maxRaw)).toBeGreaterThanOrEqual(Number(minRaw))
     } else {
       expect(minRaw).toBe("")
       expect(maxRaw).toBe("")
     }
+    if (condition) {
+      const leaves = variant ? { condition, variant } : { condition }
+      expect(validateLeavesFinding(leaves, { scope, strictVariants: false }), key).toEqual([])
+    } else {
+      expect(variant).toBe("")
+    }
+  }
+  // Lo que no hace un consultorio quedó fuera.
+  const names = rows.map((row) => row[8]!)
+  expect(names).not.toContain("Examen dental post morten")
+  expect(names.some((name) => name.includes("Cultivo viral"))).toBe(false)
+  // «Más usados» es un punto de partida, no la lista entera.
+  const common = rows.filter((row) => row[7] === "true").length
+  expect(common).toBeGreaterThanOrEqual(20)
+  expect(common).toBeLessThanOrEqual(40)
+})
+
+it("cada tratamiento de la biblioteca tiene su código CPMS, que existe en la edición vigente", () => {
+  const codes = new Set(
+    linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map((l) => {
+      const [system, code, version, display] = head(l, 4)
+      expect(system).toBe("CPMS")
+      expect(version).toBe("RM-550-2023-MINSA")
+      expect(display).not.toBe("")
+      return code!
+    }),
+  )
+  const keys = linesOf("biblioteca.csv", LIBRARY_HEADER).map((l) => head(l, 9)[0]!)
+  const mapped = linesOf("biblioteca_codigos.csv", "template_key,system_key,code,version").map((l) => {
+    const [key, system, code, version] = head(l, 4)
     expect(system).toBe("CPMS")
-    return code!
+    expect(version).toBe("RM-550-2023-MINSA")
+    expect(codes.has(code!), `código inexistente: ${code}`).toBe(true)
+    return key!
   })
-  expect(new Set(tplLines).size).toBe(tplLines.length)
-  // Mapping único en ambos sentidos: mismos códigos, sin faltantes ni extras.
-  expect([...tplCodes].sort()).toEqual([...codes].sort())
+  // En Perú la lista es obligatoria: todo tratamiento lleva uno, y solo uno.
+  expect([...mapped].sort()).toEqual([...keys].sort())
 })
 
 it("procedencia cubre cada código con su denominación oficial", () => {
@@ -162,7 +180,7 @@ it("ámbito conciliado: incluye A/C oficiales y excluye el fuera de ámbito", ()
   expect(codes.has("15849"), "15849 es §1.2.1, fuera del ámbito odontológico").toBe(false)
 })
 
-it("denominaciones íntegras y D2391 con scope surfaces 1", () => {
+it("la lista oficial conserva sus denominaciones y la biblioteca tiene nombres propios", () => {
   const byCode = new Map(
     linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map((l) => {
       const [, code, , display] = head(l, 4)
@@ -171,19 +189,23 @@ it("denominaciones íntegras y D2391 con scope surfaces 1", () => {
   )
   expect(byCode.get("D0170")).toContain("centrada en el problema")
   expect(byCode.get("D2335")).toContain("ángulo incisal")
-  const tplByCode = new Map(
-    linesOf(
-      "treatment_templates_cpms.csv",
-      "template_key,specialty,scope,surface_count_min,surface_count_max,system_key,code,version,name",
-    ).map((l) => {
-      const [key, , scope, minRaw, maxRaw, , code, , name] = head(l, 9)
-      return [code, { key, scope, minRaw, maxRaw, name }] as const
+  // En la biblioteca, D2391 es la resina posterior de una superficie, con nombre propio.
+  const keyOf = new Map(
+    linesOf("biblioteca_codigos.csv", "template_key,system_key,code,version").map((l) => {
+      const [key, , code] = head(l, 4)
+      return [code, key] as const
     }),
   )
-  const d2391 = tplByCode.get("D2391")!
-  expect(d2391.key).toBe("cpms:RM-550-2023-MINSA:D2391")
-  expect(d2391.scope).toBe("surfaces")
-  expect(d2391.minRaw).toBe("1")
-  expect(d2391.maxRaw).toBe("1")
-  expect(d2391.name).toBe(byCode.get("D2391"))
+  const library = new Map(
+    linesOf("biblioteca.csv", LIBRARY_HEADER).map((l) => {
+      const [key, , scope, minRaw, maxRaw, condition, variant, , name] = head(l, 9)
+      return [key, { scope, minRaw, maxRaw, condition, variant, name }] as const
+    }),
+  )
+  const d2391 = library.get(keyOf.get("D2391")!)!
+  expect(d2391).toMatchObject({ scope: "surfaces", minRaw: "1", maxRaw: "1", condition: "definitive_restoration", variant: "resin" })
+  expect(d2391.name).toBe("Resina fotocurable, 1 superficie, posterior")
+  expect(d2391.name).not.toBe(byCode.get("D2391"))
+  // El sellante se dibuja en las caras: va por superficies (revisión del tablero 7b).
+  expect(library.get(keyOf.get("D1351")!)).toMatchObject({ scope: "surfaces", condition: "sealant" })
 })

@@ -1,50 +1,67 @@
-import { LIBRARY_SPECIALTIES } from "@odentia/clinical"
+import { kindOfSpecialty, specialtyForKind, type TreatmentKind } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { professionalSchedule } from "@odentia/db/schema/availability"
-import { orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
+import { orgSpecialty, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { validation } from "./errors.js"
+import { orgClinicalProfile } from "./locale.js"
 
 /**
- * Una sola lista de especialidades, la de la clínica (ADR 0039, decisiones 1
- * a 3 de la fase 4). Nace con las de la biblioteca y la misma clave; el
- * servicio apunta a una por id, y la agenda ofrece el servicio a quien la
- * atiende. Toda función recibe un `tx` ya dentro de `withOrgContext`.
+ * Una sola lista de especialidades, la de la clínica (ADR 0039). Nace con las
+ * del perfil de su país (ADR 0067): en Perú, las del DS 023-2020-SA que
+ * atienden pacientes; sin perfil, la lista del núcleo. El servicio apunta a
+ * una por id, y la agenda ofrece el servicio a quien la atiende. Toda función
+ * recibe un `tx` ya dentro de `withOrgContext`.
  */
 
 /**
- * Las especialidades de la biblioteca que le faltan a la clínica, con su
- * nombre inicial. No toca las que ya tiene (renombradas o archivadas): solo
- * agrega las claves que faltan. Se llama al crear la organización.
+ * Las especialidades del país que le faltan a la clínica, con su nombre
+ * inicial. No toca las que ya tiene (renombradas o archivadas): solo agrega
+ * las claves que faltan. Se llama al crear la clínica.
  */
-export async function ensureLibrarySpecialties(tx: Db, orgId: string): Promise<void> {
+export async function ensureClinicSpecialties(tx: Db, orgId: string): Promise<void> {
+  const { specialties } = await orgClinicalProfile(tx, orgId)
   await tx
     .insert(orgSpecialty)
-    .values(LIBRARY_SPECIALTIES.map((item) => ({ organizationId: orgId, key: item.key, name: item.name })))
+    .values(specialties.list.map((item) => ({ organizationId: orgId, key: item.key, name: item.name })))
     .onConflictDoNothing({ target: [orgSpecialty.organizationId, orgSpecialty.key] })
 }
 
 /**
- * La especialidad de la clínica con esa clave de la biblioteca: así se
+ * La especialidad de la clínica que recibe cada tipo de la biblioteca: así se
  * resuelve un servicio que se agrega desde la biblioteca. Si la clínica aún
  * no la tiene, nace con su nombre inicial; si la archivó, se usa igual (el
- * servicio sigue diciendo su especialidad).
+ * servicio sigue diciendo su especialidad). Devuelve tipo → id.
  */
-export async function librarySpecialtyIds(tx: Db, orgId: string, keys: readonly string[]): Promise<Map<string, string>> {
-  const wanted = [...new Set(keys)]
+export async function librarySpecialtyIds(tx: Db, orgId: string, kinds: readonly string[]): Promise<Map<string, string>> {
+  const wanted = [...new Set(kinds)]
   if (wanted.length === 0) return new Map()
+  const profile = await orgClinicalProfile(tx, orgId)
+  const keyOfKind = new Map<string, string>()
+  for (const kind of wanted) {
+    const owner = specialtyForKind(profile, kind)
+    if (owner) keyOfKind.set(kind, owner.key)
+  }
+  const keys = [...new Set(keyOfKind.values())]
+  if (keys.length === 0) return new Map()
   const read = () =>
     tx
       .select({ id: orgSpecialty.id, key: orgSpecialty.key })
       .from(orgSpecialty)
-      .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.key, wanted)))
+      .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.key, keys)))
   let rows = await read()
-  if (rows.length < wanted.length) {
-    await ensureLibrarySpecialties(tx, orgId)
+  if (rows.length < keys.length) {
+    await ensureClinicSpecialties(tx, orgId)
     rows = await read()
   }
-  return new Map(rows.map((row) => [row.key, row.id]))
+  const idOfKey = new Map(rows.map((row) => [row.key, row.id]))
+  const out = new Map<string, string>()
+  for (const [kind, key] of keyOfKind) {
+    const id = idOfKey.get(key)
+    if (id) out.set(kind, id)
+  }
+  return out
 }
 
 /** Especialidad de esta clínica; una de otra clínica o inexistente es un dato inválido (400). */
@@ -61,19 +78,32 @@ export async function requireOrgSpecialtyId(tx: Db, orgId: string, specialtyId: 
   return row.id
 }
 
-/** Nombre y clave de la especialidad de un servicio (para la fase del plan y lo que lee el agente). */
-export async function serviceSpecialtyOf(
+/**
+ * El tipo de tratamiento de un servicio (ADR 0067), para la fase del plan y
+ * las palabras del agente: el de su tratamiento si viene de la biblioteca; si
+ * es propio, el de su especialidad del país; null con una especialidad que
+ * creó la clínica o sin especialidad.
+ */
+export async function serviceKindOf(
   tx: Db,
   orgId: string,
-  specialtyId: string | null,
-): Promise<{ key: string; name: string } | null> {
-  if (!specialtyId) return null
+  service: { templateId: string | null; specialtyId: string | null },
+): Promise<TreatmentKind | null> {
+  if (service.templateId) {
+    const [row] = await tx
+      .select({ kind: treatmentTemplate.kind })
+      .from(treatmentTemplate)
+      .where(eq(treatmentTemplate.id, service.templateId))
+      .limit(1)
+    if (row) return row.kind as TreatmentKind
+  }
+  if (!service.specialtyId) return null
   const [row] = await tx
-    .select({ key: orgSpecialty.key, name: orgSpecialty.name })
+    .select({ key: orgSpecialty.key })
     .from(orgSpecialty)
-    .where(and(eq(orgSpecialty.organizationId, orgId), eq(orgSpecialty.id, specialtyId)))
+    .where(and(eq(orgSpecialty.organizationId, orgId), eq(orgSpecialty.id, service.specialtyId)))
     .limit(1)
-  return row ?? null
+  return kindOfSpecialty(await orgClinicalProfile(tx, orgId), row?.key)
 }
 
 /** A quién ofrece la agenda un servicio en una sede, si la regla aplica. */

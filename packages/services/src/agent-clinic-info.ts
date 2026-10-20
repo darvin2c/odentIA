@@ -1,14 +1,15 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
-import { orgSpecialty, type PriceDisclosure, serviceCatalog } from "@odentia/db/schema/clinical"
+import { kindOfSpecialty, type TreatmentKind } from "@odentia/clinical"
+import { orgSpecialty, type PriceDisclosure, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
 import { normalizeForSearch } from "./knowledge.js"
-import { formatOrgMoney, type OrgLocale } from "./locale.js"
+import { formatOrgMoney, orgClinicalProfile, type OrgLocale } from "./locale.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
 
 /**
@@ -54,8 +55,12 @@ export interface AgentServiceInfo {
   name: string
   /** La especialidad de la clínica, con su nombre (ADR 0039). */
   specialty: string | null
-  /** Su clave de la biblioteca: las palabras de la calle del índice van con ella. */
-  specialtyKey: string | null
+  /**
+   * Su tipo de tratamiento (ADR 0067): el de su tratamiento de la biblioteca o
+   * el de su especialidad del país. Las palabras de la calle del índice van
+   * con él; null con una especialidad que creó la clínica.
+   */
+  kind: TreatmentKind | null
   durationMin: number | null
   price: AgentPrice
 }
@@ -262,7 +267,6 @@ export async function listAgentServices(
   const conditions = [
     eq(serviceCatalog.organizationId, orgId),
     eq(serviceCatalog.isActive, true),
-    ne(serviceCatalog.source, "legacy"),
   ]
   if (options.ids) conditions.push(inArray(serviceCatalog.id, options.ids))
   const query = tx
@@ -271,6 +275,7 @@ export async function listAgentServices(
       name: serviceCatalog.name,
       specialty: orgSpecialty.name,
       specialtyKey: orgSpecialty.key,
+      templateKind: treatmentTemplate.kind,
       durationMin: serviceCatalog.durationMin,
       priceCents: serviceCatalog.priceCents,
       currency: serviceCatalog.currency,
@@ -286,6 +291,7 @@ export async function listAgentServices(
       orgSpecialty,
       and(eq(orgSpecialty.organizationId, serviceCatalog.organizationId), eq(orgSpecialty.id, serviceCatalog.specialtyId)),
     )
+    .leftJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
     .leftJoin(
       evaluationService,
       and(eq(evaluationService.id, serviceCatalog.evaluationServiceId), eq(evaluationService.organizationId, orgId)),
@@ -293,11 +299,12 @@ export async function listAgentServices(
     .where(and(...conditions))
     .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
   const rows = options.limit ? await query.limit(options.limit) : await query
+  const profile = await orgClinicalProfile(tx, orgId)
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
     specialty: row.specialty,
-    specialtyKey: row.specialtyKey,
+    kind: (row.templateKind as TreatmentKind | null) ?? kindOfSpecialty(profile, row.specialtyKey),
     durationMin: row.durationMin,
     price: {
       disclosure: row.disclosure as PriceDisclosure,

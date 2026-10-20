@@ -5,7 +5,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -528,8 +528,8 @@ export function createApp(deps: AppDeps) {
       })
       // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
       if (!current) await turnOnNewClinicLines(tx, orgId, userId)
-      // Y nace con las especialidades de la biblioteca, que puede renombrar (ADR 0039).
-      if (!current) await ensureLibrarySpecialties(tx, orgId)
+      // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0067).
+      if (!current) await ensureClinicSpecialties(tx, orgId)
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,

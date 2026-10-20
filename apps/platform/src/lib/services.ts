@@ -6,7 +6,7 @@ import { amountFromCents } from "./workspace"
 export interface ServiceCatalogItem {
   id: string
   templateId: string | null
-  source: "template" | "custom" | "legacy"
+  source: "template" | "custom"
   code: string | null
   name: string
   /** La especialidad de la clínica (una sola, ADR 0039). */
@@ -26,7 +26,27 @@ export interface ServiceCatalogItem {
   evaluationServiceId: string | null
   /** Qué deja en la pieza al completarse (lo tratado queda dibujado); null = nada. */
   leavesFinding: LeavesFindingBody | null
+  /** Código propio en la lista del país (ADR 0067); uno de la biblioteca usa el de su tratamiento. */
+  procedureSystem: string | null
+  procedureCode: string | null
   isActive: boolean
+}
+
+/** Un código de la lista oficial del país, con su texto oficial. */
+export interface OfficialCoding {
+  system: string
+  code: string
+  version: string
+  display: string
+}
+
+/**
+ * La lista de servicios del país de la clínica (ADR 0067): «CPMS», obligatoria
+ * en el Perú; null donde el país no tiene una cargada.
+ */
+export interface ServiceCodeList {
+  system: string
+  required: boolean
 }
 
 /** Lo que un servicio deja en la pieza: el hallazgo y, si corresponde, su variante. */
@@ -35,28 +55,20 @@ export interface LeavesFindingBody {
   variant?: string
 }
 
-/** Prestación de la biblioteca global (contrato GET /api/services/templates). */
+/** Un tratamiento de la biblioteca de odentIA (contrato GET /api/services/templates). */
 export interface TreatmentTemplateItem {
   id: string
   key: string
   name: string
-  specialty: string
+  /** Tipo de tratamiento: agrupa la biblioteca (uso interno). */
+  kind: string
   scope: "general" | "tooth" | "surfaces" | "quadrant" | "arch"
   surfaceCountMin: number | null
   surfaceCountMax: number | null
-  /** Proyección 1:1 de un código oficial de la biblioteca: el primario primero. */
-  codings: Array<{ system: string; code: string; version: string; display: string }>
-}
-
-/** Edición oficial vigente de la biblioteca (null si no hay edición importada). */
-export interface TreatmentTemplateCatalog {
-  system: string
-  version: string
-  scope: string
-  sourceUrl: string
-  sourceSha256: string
-  expectedCount: number
-  availableCount: number
+  leavesFinding: LeavesFindingBody | null
+  isCommon: boolean
+  /** Su código en la lista del país: uno, o ninguno donde no hay lista. */
+  codings: OfficialCoding[]
 }
 
 export const TREATMENT_SCOPE_LABELS: Record<string, string> = {
@@ -100,7 +112,7 @@ export interface ServicesQuery {
   q?: string
   /** Especialidad de la clínica (id). */
   specialtyId?: string
-  state?: "active" | "inactive" | "legacy"
+  state?: "active" | "inactive"
   /** Solo estos servicios, en cualquier estado: para nombrar lo ya elegido. */
   ids?: string[]
   cursor?: string
@@ -108,11 +120,11 @@ export interface ServicesQuery {
 }
 
 function toSearch(
-  params: ServicesQuery | { q?: string; specialty?: string; cursor?: string; limit?: number },
+  params: ServicesQuery | { q?: string; kind?: string; cursor?: string; limit?: number },
 ): string {
   const search = new URLSearchParams()
   if (params.q) search.set("q", params.q)
-  if ("specialty" in params && params.specialty) search.set("specialty", params.specialty)
+  if ("kind" in params && params.kind) search.set("kind", params.kind)
   if ("specialtyId" in params && params.specialtyId) search.set("specialtyId", params.specialtyId)
   if ("ids" in params && params.ids?.length) search.set("ids", params.ids.join(","))
   if ("state" in params && params.state) search.set("state", params.state)
@@ -134,32 +146,47 @@ export function fetchServices(query: ServicesQuery = {}): Promise<ServicesPage> 
   return apiFetch<ServicesPage>(`/api/services${toSearch(query)}`)
 }
 
-/** Un servicio por id, en cualquier estado: el que llega elegido aunque no esté en la primera página. */
-export function fetchService(id: string): Promise<{ data: ServiceCatalogItem }> {
-  return apiFetch<{ data: ServiceCatalogItem }>(`/api/services/${encodeURIComponent(id)}`)
+/**
+ * Un servicio por id, en cualquier estado: el que llega elegido aunque no esté
+ * en la primera página. `officialCoding` es su código vigente en la lista del
+ * país (null sin lista, sin código o con uno retirado).
+ */
+export function fetchService(
+  id: string,
+): Promise<{ data: ServiceCatalogItem & { officialCoding: OfficialCoding | null } }> {
+  return apiFetch<{ data: ServiceCatalogItem & { officialCoding: OfficialCoding | null } }>(
+    `/api/services/${encodeURIComponent(id)}`,
+  )
 }
 
-/** Lista la biblioteca global de prestaciones (sin precios). */
-export function fetchTreatmentTemplates(
-  query: { q?: string; specialty?: string; cursor?: string; limit?: number } = {},
-): Promise<{
+/** Una página de la biblioteca, con la lista de códigos del país. */
+export interface TreatmentTemplatesPage {
   data: TreatmentTemplateItem[]
   nextCursor: string | null
   total: number
-  catalog: TreatmentTemplateCatalog | null
-}> {
-  return apiFetch<{
-    data: TreatmentTemplateItem[]
-    nextCursor: string | null
-    total: number
-    catalog: TreatmentTemplateCatalog | null
-  }>(`/api/services/templates${toSearch(query)}`)
+  codeList: ServiceCodeList | null
+}
+
+/** La biblioteca de odentIA como la ve la clínica: con el código de su país, sin precios. */
+export function fetchTreatmentTemplates(
+  query: { q?: string; kind?: string; cursor?: string; limit?: number } = {},
+): Promise<TreatmentTemplatesPage> {
+  return apiFetch<TreatmentTemplatesPage>(`/api/services/templates${toSearch(query)}`)
 }
 
 /**
- * Obtiene una plantilla por ID (solo lectura, incluye retiradas).
- * Los mapeos llegan con el primario primero: se usa `codings[0]`.
+ * El buscador del código oficial de un servicio propio, por nombre o por
+ * código; sin lista en el país, vacío con `codeList: null`.
  */
+export function fetchOfficialCodes(
+  query: { q?: string; limit?: number } = {},
+): Promise<{ data: OfficialCoding[]; codeList: ServiceCodeList | null }> {
+  return apiFetch<{ data: OfficialCoding[]; codeList: ServiceCodeList | null }>(
+    `/api/services/official-codes${toSearch(query)}`,
+  )
+}
+
+/** Un tratamiento de la biblioteca por id (solo lectura, incluye retirados). */
 export function fetchTreatmentTemplate(id: string): Promise<{ data: TreatmentTemplateItem }> {
   return apiFetch<{ data: TreatmentTemplateItem }>(
     `/api/services/templates/${encodeURIComponent(id)}`,
@@ -180,6 +207,8 @@ export interface CreateServiceBody {
   priceDisclosure?: PriceDisclosure | null
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null
+  /** Código del servicio propio en la lista del país. */
+  officialCode?: string | null
   isActive?: boolean
 }
 
@@ -203,6 +232,7 @@ export interface UpdateServiceBody {
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null
+  officialCode?: string | null
   isActive?: boolean
 }
 
@@ -265,7 +295,7 @@ export interface TemplateServiceBody {
   durationMin?: number | null
 }
 
-/** Servicio propio de la clínica, sin código oficial. */
+/** Servicio propio de la clínica, con el código que elige en la lista de su país. */
 export interface CustomServiceBody {
   kind: "custom"
   name: string
@@ -276,6 +306,7 @@ export interface CustomServiceBody {
   billingMode?: BillingMode | null
   durationMin?: number | null
   leavesFinding?: LeavesFindingBody | null
+  officialCode?: string | null
 }
 
 export type QuickAddServiceBody = TemplateServiceBody | CustomServiceBody
@@ -312,7 +343,7 @@ export function setServicesPriceDisclosureApi(
   })
 }
 
-/** Concepto de «Más usados» con las plantillas de la biblioteca que lo resuelven. */
+/** Un tipo de tratamiento de «Más usados» con sus tratamientos de la biblioteca. */
 export interface MostUsedConcept {
   key: string
   label: string
@@ -320,9 +351,8 @@ export interface MostUsedConcept {
 }
 
 /**
- * Punto de partida de una clínica nueva: conceptos generales (consulta,
- * limpieza, resina…) resueltos contra la biblioteca disponible, sin lo que la
- * clínica ya tiene. Vacío si no hay biblioteca.
+ * Punto de partida de una clínica nueva: los tratamientos que odentIA marcó
+ * como más usados, por tipo y sin lo que la clínica ya tiene.
  */
 export function fetchMostUsedServices(): Promise<{ data: MostUsedConcept[] }> {
   return apiFetch<{ data: MostUsedConcept[] }>("/api/services/most-used")

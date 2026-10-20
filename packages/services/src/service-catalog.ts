@@ -1,11 +1,12 @@
 import {
+  isTreatmentKind,
   type LeavesFinding,
-  leavesFindingForProcedure,
-  TREATMENT_SCOPES,
-  TREATMENT_SPECIALTIES,
   type ProcedureCodingSnapshot,
+  type ServiceListProfile,
+  TREATMENT_KINDS,
+  TREATMENT_SCOPES,
+  type TreatmentKind,
   type TreatmentScope,
-  type TreatmentSpecialty,
   validateLeavesFinding,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -13,22 +14,19 @@ import {
   orgSpecialty,
   PRICE_DISCLOSURES,
   type PriceDisclosure,
+  procedureCatalogRelease,
   procedureCode,
   serviceCatalog,
   treatmentTemplate,
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
-import {
-  currentCatalogRelease,
-  resolveSingleTemplateCoding,
-  type CatalogRelease,
-} from "./procedure-codings.js"
+import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn } from "./procedure-codings.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -40,7 +38,7 @@ export type ServiceListItem = ServiceRow & { specialtyName: string | null }
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect
 
 
-export const SERVICE_STATES = ["active", "inactive", "legacy"] as const
+export const SERVICE_STATES = ["active", "inactive"] as const
 
 const MAX_LIMIT = 100
 const DEFAULT_LIMIT = 30
@@ -91,13 +89,11 @@ function assertName(name: string | null | undefined): string {
   return value
 }
 
-/** Clave de especialidad de la biblioteca: solo filtra la biblioteca, nunca el tarifario. */
-function assertLibrarySpecialty(specialty: string | null | undefined): TreatmentSpecialty {
-  const value = (specialty ?? "").trim().toLowerCase()
-  if (!(TREATMENT_SPECIALTIES as readonly string[]).includes(value)) {
-    throw validation("specialty inválida: usa una especialidad de la biblioteca")
-  }
-  return value as TreatmentSpecialty
+/** Tipo de tratamiento: solo filtra la biblioteca, nunca el tarifario. */
+function assertKind(kind: string | null | undefined): TreatmentKind {
+  const value = (kind ?? "").trim().toLowerCase()
+  if (!isTreatmentKind(value)) throw validation("Tipo de tratamiento inválido")
+  return value
 }
 
 /** La especialidad de la clínica para un servicio propio: obligatoria. */
@@ -144,7 +140,7 @@ async function assertEvaluationService(
   if (!evaluationServiceId) return null
   if (evaluationServiceId === selfId) throw validation("Un servicio no puede ser su propia evaluación")
   const evaluation = await requireService(tx, orgId, evaluationServiceId)
-  if (!evaluation.isActive || evaluation.source === "legacy") {
+  if (!evaluation.isActive) {
     throw validation("La evaluación debe ser un servicio activo")
   }
   return evaluation.id
@@ -219,19 +215,61 @@ async function assertLeavesFinding(
 }
 
 /**
- * Lo que deja un servicio de la biblioteca, según su código oficial
- * (`LEAVES_BY_PROCEDURE`): odentIA lo deja puesto; null si el procedimiento no
- * deja nada claro o no encaja con el ámbito de la plantilla.
+ * Lo que deja un servicio de la biblioteca: lo que odentIA puso en su
+ * tratamiento (`treatment_template.leaves_finding`, ADR 0067); null si no
+ * deja nada claro o no encaja con el ámbito.
  */
-function libraryLeavesFinding(
-  codings: readonly ProcedureCodingSnapshot[],
-  scope: string | null | undefined,
-): LeavesFinding | null {
-  const coding = codings[0]
-  const leaves = coding ? leavesFindingForProcedure(coding.system, coding.code) : null
+function libraryLeavesFinding(template: TreatmentTemplateRow): LeavesFinding | null {
+  const leaves = template.leavesFinding
   if (!leaves) return null
   // La variante se exige al configurar a mano; aquí basta con que encaje en la pieza.
-  return validateLeavesFinding(leaves, { scope, strictVariants: false }).length === 0 ? leaves : null
+  return validateLeavesFinding(leaves, { scope: template.scope, strictVariants: false }).length === 0
+    ? { ...leaves }
+    : null
+}
+
+/** La lista de servicios del país de la clínica (ADR 0067), o null. */
+async function orgServiceList(tx: Db, orgId: string): Promise<ServiceListProfile | null> {
+  return (await orgClinicalProfile(tx, orgId)).services
+}
+
+/**
+ * Donde la lista es obligatoria, un tratamiento sin código en ella no se
+ * ofrece ni se agrega (decisión 2 del lienzo del issue 40).
+ */
+async function assertTemplateUsable(tx: Db, list: ServiceListProfile | null, templateId: string): Promise<void> {
+  if (!list?.required) return
+  if (await templateCodingIn(tx, templateId, list.system)) return
+  throw conflict(
+    "TEMPLATE_UNCODED",
+    `Este tratamiento no tiene un código ${list.system} vigente: en tu país cada servicio lleva el suyo`,
+  )
+}
+
+/**
+ * El código oficial que elige la clínica para un servicio propio (ADR 0067):
+ * obligatorio donde la lista lo es, opcional donde es de referencia, y nada
+ * sin lista. `undefined` = no se toca.
+ */
+async function assertOwnCode(
+  tx: Db,
+  list: ServiceListProfile | null,
+  code: string | null | undefined,
+  options: { creating: boolean },
+): Promise<{ procedureSystem: string | null; procedureCode: string | null; procedureVersion: string | null } | undefined> {
+  const value = code?.trim().toUpperCase() || null
+  if (code === undefined && !options.creating) return undefined
+  if (!list) {
+    if (value) throw validation("En tu país los servicios no llevan código oficial")
+    return { procedureSystem: null, procedureCode: null, procedureVersion: null }
+  }
+  if (!value) {
+    if (list.required) throw validation(`Elige el código ${list.system} del servicio: en tu país es obligatorio`)
+    return { procedureSystem: null, procedureCode: null, procedureVersion: null }
+  }
+  const coding = await currentProcedureCode(tx, list.system, value)
+  if (!coding) throw validation(`«${value}» no es un código ${list.system} vigente`)
+  return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
 
 async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
@@ -278,7 +316,7 @@ export async function getTemplate(
       ),
     )
     .where(eq(treatmentTemplateCode.templateId, templateId))
-    .orderBy(desc(treatmentTemplateCode.isPrimary), treatmentTemplateCode.systemKey)
+    .orderBy(treatmentTemplateCode.systemKey, treatmentTemplateCode.version)
   return { ...row, codings: mappings }
 }
 
@@ -302,139 +340,166 @@ async function audit(
 
 export interface ListTemplatesQuery {
   q?: string
-  specialty?: string
+  /** Tipo de tratamiento. */
+  kind?: string
   cursor?: string
   limit?: number
 }
 
-export interface TemplateCatalogInfo {
+/** La lista de servicios que ve la clínica en la biblioteca: la de su país, o null. */
+export interface TemplateCodeList {
   system: string
-  version: string
-  scope: string
-  sourceUrl: string
-  sourceSha256: string
-  expectedCount: number
-  availableCount: number
+  required: boolean
 }
 
+export type LibraryTemplate = TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }
+
+const templateColumns = {
+  id: treatmentTemplate.id,
+  key: treatmentTemplate.key,
+  name: treatmentTemplate.name,
+  kind: treatmentTemplate.kind,
+  scope: treatmentTemplate.scope,
+  surfaceCountMin: treatmentTemplate.surfaceCountMin,
+  surfaceCountMax: treatmentTemplate.surfaceCountMax,
+  leavesFinding: treatmentTemplate.leavesFinding,
+  isCommon: treatmentTemplate.isCommon,
+  isActive: treatmentTemplate.isActive,
+  version: treatmentTemplate.version,
+}
+
+/**
+ * Los tratamientos de la biblioteca con el código de la lista del país:
+ * `left join` donde la lista es de referencia (sin código, igual se ofrece),
+ * `inner join` donde es obligatoria y sin unir nada donde no hay lista.
+ */
+function libraryQuery(tx: Db, list: ServiceListProfile | null, release: { version: string } | null) {
+  const columns = {
+    ...templateColumns,
+    code: procedureCode.code,
+    codeVersion: procedureCode.version,
+    display: procedureCode.display,
+  }
+  if (!list || !release) {
+    return tx
+      .select({ ...templateColumns, code: sql<string | null>`null`, codeVersion: sql<string | null>`null`, display: sql<string | null>`null` })
+      .from(treatmentTemplate)
+      .$dynamic()
+  }
+  const codeOn = and(
+    eq(treatmentTemplateCode.templateId, treatmentTemplate.id),
+    eq(treatmentTemplateCode.systemKey, list.system),
+    eq(treatmentTemplateCode.version, release.version),
+  )
+  const officialOn = and(
+    eq(procedureCode.systemKey, treatmentTemplateCode.systemKey),
+    eq(procedureCode.code, treatmentTemplateCode.code),
+    eq(procedureCode.version, treatmentTemplateCode.version),
+    eq(procedureCode.isActive, true),
+  )
+  const base = tx.select(columns).from(treatmentTemplate)
+  return list.required
+    ? base.innerJoin(treatmentTemplateCode, codeOn).innerJoin(procedureCode, officialOn).$dynamic()
+    : base.leftJoin(treatmentTemplateCode, codeOn).leftJoin(procedureCode, officialOn).$dynamic()
+}
+
+type LibraryRow = TreatmentTemplateRow & { code: string | null; codeVersion: string | null; display: string | null }
+
+function toLibraryTemplate(row: LibraryRow, list: ServiceListProfile | null): LibraryTemplate {
+  const { code, codeVersion, display, ...template } = row
+  return {
+    ...template,
+    codings: list && code && codeVersion && display ? [{ system: list.system, code, version: codeVersion, display }] : [],
+  }
+}
+
+/**
+ * La biblioteca como la ve la clínica (ADR 0067): todos los tratamientos de
+ * consultorio, con el código de la lista de su país si tiene una. Donde la
+ * lista es obligatoria, solo los que tienen código en ella.
+ */
 export async function listTemplates(
   tx: Db,
+  orgId: string,
   query: ListTemplatesQuery,
 ): Promise<{
-  data: Array<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }>
+  data: LibraryTemplate[]
   nextCursor: string | null
   total: number
-  catalog: TemplateCatalogInfo | null
+  codeList: TemplateCodeList | null
 }> {
   const limit = clampLimit(query.limit)
   const after = decodeCursor(query.cursor)
-  const release: CatalogRelease | null = await currentCatalogRelease(tx)
-  if (!release) return { data: [], nextCursor: null, total: 0, catalog: null }
-  const baseConditions = [
-    eq(treatmentTemplate.isActive, true),
-    eq(treatmentTemplateCode.isPrimary, true),
-    eq(procedureCode.systemKey, release.system),
-    eq(procedureCode.version, release.version),
-    eq(procedureCode.isActive, true),
-  ]
-  const availableWhere = and(...baseConditions)
-  if (query.specialty) {
-    baseConditions.push(eq(treatmentTemplate.specialty, assertLibrarySpecialty(query.specialty)))
-  }
+  const list = await orgServiceList(tx, orgId)
+  const release = list ? await currentCatalogRelease(tx, list.system) : null
+  // Una lista obligatoria sin edición cargada no deja ofrecer nada.
+  if (list?.required && !release) return { data: [], nextCursor: null, total: 0, codeList: { system: list.system, required: true } }
+  const conditions = [eq(treatmentTemplate.isActive, true)]
+  if (query.kind) conditions.push(eq(treatmentTemplate.kind, assertKind(query.kind)))
   const q = query.q?.trim()
-  const searchCond = q
-    ? foldedWordsMatch([treatmentTemplate.name, treatmentTemplate.key, procedureCode.code, procedureCode.display], q)
-    : undefined
-  const filteredWhere = searchCond ? and(...baseConditions, searchCond) : and(...baseConditions)
-  const totalRows = await tx
-    .select({ total: sql<number>`count(*)::int` })
-    .from(treatmentTemplate)
-    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
-    .innerJoin(
-      procedureCode,
-      and(
-        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
-        eq(treatmentTemplateCode.code, procedureCode.code),
-        eq(treatmentTemplateCode.version, procedureCode.version),
-      ),
-    )
-    .where(filteredWhere)
-  const total = totalRows[0]?.total ?? 0
-  const availableRows = await tx
-    .select({ availableCount: sql<number>`count(*)::int` })
-    .from(treatmentTemplate)
-    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
-    .innerJoin(
-      procedureCode,
-      and(
-        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
-        eq(treatmentTemplateCode.code, procedureCode.code),
-        eq(treatmentTemplateCode.version, procedureCode.version),
-      ),
-    )
-    .where(availableWhere)
-  const availableCount = availableRows[0]?.availableCount ?? 0
-  const cursorCond = after
-    ? sql`("treatment_template"."name", "treatment_template"."id") > (${after.name}, ${after.id})`
-    : undefined
-  const pageWhere = cursorCond ? and(filteredWhere, cursorCond) : filteredWhere
-  const rows = await tx
-    .select({
-      id: treatmentTemplate.id,
-      key: treatmentTemplate.key,
-      name: treatmentTemplate.name,
-      specialty: treatmentTemplate.specialty,
-      scope: treatmentTemplate.scope,
-      surfaceCountMin: treatmentTemplate.surfaceCountMin,
-      surfaceCountMax: treatmentTemplate.surfaceCountMax,
-      isActive: treatmentTemplate.isActive,
-      version: treatmentTemplate.version,
-      code: procedureCode.code,
-      codeVersion: procedureCode.version,
-      display: procedureCode.display,
-    })
-    .from(treatmentTemplate)
-    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
-    .innerJoin(
-      procedureCode,
-      and(
-        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
-        eq(treatmentTemplateCode.code, procedureCode.code),
-        eq(treatmentTemplateCode.version, procedureCode.version),
-      ),
-    )
-    .where(pageWhere)
+  if (q) {
+    const fields = list && release ? [treatmentTemplate.name, procedureCode.code] : [treatmentTemplate.name]
+    conditions.push(foldedWordsMatch(fields, q))
+  }
+  // La biblioteca es corta (unos 400 tratamientos): se cuenta lo que coincide.
+  const total = (await libraryQuery(tx, list, release).where(and(...conditions))).length
+  if (after) {
+    conditions.push(sql`("treatment_template"."name", "treatment_template"."id") > (${after.name}, ${after.id})`)
+  }
+  const rows = (await libraryQuery(tx, list, release)
+    .where(and(...conditions))
     .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))
-    .limit(limit + 1)
+    .limit(limit + 1)) as LibraryRow[]
   const page = rows.slice(0, limit)
   const last = page[page.length - 1]
   return {
-    data: page.map((row) => ({
-      id: row.id,
-      key: row.key,
-      name: row.name,
-      specialty: row.specialty,
-      scope: row.scope,
-      surfaceCountMin: row.surfaceCountMin,
-      surfaceCountMax: row.surfaceCountMax,
-      isActive: row.isActive,
-      version: row.version,
-      codings: [
-        { system: release.system, code: row.code, version: row.codeVersion, display: row.display },
-      ],
-    })),
+    data: page.map((row) => toLibraryTemplate(row, list)),
     nextCursor: rows.length > limit && last ? encodeCursor(last.name, last.id) : null,
     total,
-    catalog: {
-      system: release.system,
-      version: release.version,
-      scope: release.scope,
-      sourceUrl: release.sourceUrl,
-      sourceSha256: release.sourceSha256,
-      expectedCount: release.expectedCount,
-      availableCount,
-    },
+    codeList: list ? { system: list.system, required: list.required } : null,
   }
+}
+
+/**
+ * El buscador del código oficial de un servicio propio (decisión 3 del
+ * lienzo del issue 40): la edición vigente de la lista del país, por nombre o
+ * por código, sin tildes. Sin lista, nada.
+ */
+export async function searchOfficialCodes(
+  tx: Db,
+  orgId: string,
+  query: { q?: string; limit?: number },
+): Promise<{ data: ProcedureCodingSnapshot[]; codeList: TemplateCodeList | null }> {
+  const list = await orgServiceList(tx, orgId)
+  if (!list) return { data: [], codeList: null }
+  const limit = Math.min(clampLimit(query.limit), 20)
+  const q = query.q?.trim()
+  const rows = await tx
+    .select({
+      system: procedureCode.systemKey,
+      code: procedureCode.code,
+      version: procedureCode.version,
+      display: procedureCode.display,
+    })
+    .from(procedureCode)
+    .innerJoin(
+      procedureCatalogRelease,
+      and(
+        eq(procedureCatalogRelease.systemKey, procedureCode.systemKey),
+        eq(procedureCatalogRelease.version, procedureCode.version),
+      ),
+    )
+    .where(
+      and(
+        eq(procedureCode.systemKey, list.system),
+        eq(procedureCode.isActive, true),
+        eq(procedureCatalogRelease.isCurrent, true),
+        q ? foldedWordsMatch([procedureCode.code, procedureCode.display], q) : undefined,
+      ),
+    )
+    .orderBy(asc(procedureCode.code))
+    .limit(limit)
+  return { data: rows, codeList: { system: list.system, required: list.required } }
 }
 
 export interface ListServicesQuery {
@@ -469,6 +534,9 @@ const serviceListColumns = {
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
   leavesFinding: serviceCatalog.leavesFinding,
+  procedureSystem: serviceCatalog.procedureSystem,
+  procedureCode: serviceCatalog.procedureCode,
+  procedureVersion: serviceCatalog.procedureVersion,
   isActive: serviceCatalog.isActive,
   createdAt: serviceCatalog.createdAt,
   updatedAt: serviceCatalog.updatedAt,
@@ -507,15 +575,9 @@ export async function listServices(
   } else {
     const state = query.state ?? "active"
     if (!(SERVICE_STATES as readonly string[]).includes(state)) {
-      throw validation("state debe ser active|inactive|legacy")
+      throw validation("state debe ser active|inactive")
     }
-    if (state === "active") {
-      conditions.push(eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy"))
-    } else if (state === "inactive") {
-      conditions.push(eq(serviceCatalog.isActive, false), ne(serviceCatalog.source, "legacy"))
-    } else {
-      conditions.push(eq(serviceCatalog.source, "legacy"))
-    }
+    conditions.push(eq(serviceCatalog.isActive, state === "active"))
   }
   const q = query.q?.trim()
   if (q) {
@@ -546,8 +608,15 @@ export async function listServices(
   }
 }
 
-/** Un servicio de la clínica, en cualquier estado, con el nombre de su especialidad. */
-export async function getService(tx: Db, orgId: string, serviceId: string): Promise<ServiceListItem> {
+/**
+ * Un servicio de la clínica, en cualquier estado, con el nombre de su
+ * especialidad y su código oficial en la lista de su país (ADR 0067).
+ */
+export async function getService(
+  tx: Db,
+  orgId: string,
+  serviceId: string,
+): Promise<ServiceListItem & { officialCoding: ProcedureCodingSnapshot | null }> {
   if (!UUID_SHAPE.test(serviceId)) throw notFound("Servicio del catálogo")
   const [row] = await tx
     .select(serviceListColumns)
@@ -556,7 +625,7 @@ export async function getService(tx: Db, orgId: string, serviceId: string): Prom
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, serviceId)))
     .limit(1)
   if (!row) throw notFound("Servicio del catálogo")
-  return row
+  return { ...row, officialCoding: await serviceCoding(tx, await orgServiceList(tx, orgId), row) }
 }
 
 export async function requireService(
@@ -574,10 +643,8 @@ export async function requireService(
 }
 
 /**
- * Oferta utilizable para una nueva indicación: activa, no legado, con tarifa
- * explícita y proyección oficial vigente (409 SERVICE_INACTIVE /
- * SERVICE_UNPRICED / TEMPLATE_INACTIVE / CODING_AMBIGUOUS en caso contrario).
- * Las ofertas propias (`custom`, sin plantilla) conservan snapshot `[]`.
+ * Oferta utilizable para una nueva indicación: activa y con tarifa explícita
+ * (409 SERVICE_INACTIVE). Su código lo congela `resolveServiceCodings`.
  */
 export async function requireServiceForIndication(
   tx: Db,
@@ -585,11 +652,8 @@ export async function requireServiceForIndication(
   serviceId: string,
 ): Promise<ServiceRow> {
   const row = await requireService(tx, orgId, serviceId)
-  if (!row.isActive || row.source === "legacy") {
+  if (!row.isActive) {
     throw conflict("SERVICE_INACTIVE", "La prestación no está disponible para nuevas indicaciones")
-  }
-  if (row.templateId) {
-    await resolveSingleTemplateCoding(tx, row.templateId)
   }
   return row
 }
@@ -613,9 +677,15 @@ export interface CreateServiceInput {
   evaluationServiceId?: string | null
   /**
    * Qué deja en la pieza al completarse; `null` = nada. De la biblioteca, si
-   * no se indica, el que odentIA tiene para su código oficial.
+   * no se indica, el que odentIA puso en su tratamiento.
    */
   leavesFinding?: LeavesFinding | null
+  /**
+   * Código oficial de un servicio propio en la lista del país (ADR 0067):
+   * obligatorio donde la lista lo es. Uno de la biblioteca toma el de su
+   * tratamiento y no lo admite.
+   */
+  officialCode?: string | null
   isActive?: boolean
 }
 
@@ -629,13 +699,15 @@ export async function createService(
   // columna no tiene valor por defecto).
   const currency = assertCurrency(input.currency ?? (await orgCurrency(tx, orgId)))
   let values: typeof serviceCatalog.$inferInsert
+  const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
-    const codings = await resolveSingleTemplateCoding(tx, tpl.id)
+    await assertTemplateUsable(tx, list, tpl.id)
+    if (input.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
     const specialtyId = input.specialtyId
       ? await requireOrgSpecialtyId(tx, orgId, input.specialtyId)
-      : ((await librarySpecialtyIds(tx, orgId, [tpl.specialty])).get(tpl.specialty) ?? null)
+      : ((await librarySpecialtyIds(tx, orgId, [tpl.kind])).get(tpl.kind) ?? null)
     if (input.scope !== undefined && input.scope !== null && input.scope !== tpl.scope) {
       throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
     }
@@ -655,7 +727,7 @@ export async function createService(
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
       leavesFinding:
         input.leavesFinding === undefined
-          ? libraryLeavesFinding(codings, tpl.scope)
+          ? libraryLeavesFinding(tpl)
           : await assertLeavesFinding(tx, orgId, input.leavesFinding, tpl.scope),
       isActive: input.isActive ?? true,
     }
@@ -676,6 +748,7 @@ export async function createService(
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
       leavesFinding: await assertLeavesFinding(tx, orgId, input.leavesFinding, scope),
+      ...(await assertOwnCode(tx, list, input.officialCode, { creating: true })),
       isActive: input.isActive ?? true,
     }
   }
@@ -692,6 +765,7 @@ export async function createService(
     source: row.source,
     templateId: row.templateId,
     code: row.code,
+    officialCode: row.procedureCode,
     priceCents: row.priceCents,
     currency: row.currency,
   })
@@ -713,6 +787,8 @@ export interface UpdateServicePatch {
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
   leavesFinding?: LeavesFinding | null
+  /** Código oficial de un servicio propio; `null` = sin código (solo donde no es obligatorio). */
+  officialCode?: string | null
   isActive?: boolean
 }
 
@@ -726,6 +802,7 @@ export async function updateService(
   const current = await requireService(tx, orgId, serviceId)
   const set: Partial<typeof serviceCatalog.$inferInsert> = {}
   const fields: string[] = []
+  const list = await orgServiceList(tx, orgId)
 
   if (patch.templateId !== undefined) {
     if (patch.templateId === null) {
@@ -746,15 +823,34 @@ export async function updateService(
       set.name = name
       set.specialtyId = specialtyId
       set.scope = scope
+      // Al independizarse guarda su propio código: el que elige la clínica o,
+      // si no elige, el que tenía su tratamiento (o el suyo, si ya era propio).
+      const inherited = !list
+        ? null
+        : current.templateId
+          ? ((await templateCodingIn(tx, current.templateId, list.system))?.code ?? null)
+          : current.procedureSystem === list.system
+            ? current.procedureCode
+            : null
+      Object.assign(
+        set,
+        await assertOwnCode(tx, list, patch.officialCode !== undefined ? patch.officialCode : inherited, {
+          creating: true,
+        }),
+      )
       fields.push("templateId:null")
     } else {
       const tpl = await requireTemplate(tx, patch.templateId)
-      const codings = await resolveSingleTemplateCoding(tx, tpl.id)
-      // Vincular la biblioteca trae lo que su código deja en la pieza.
+      await assertTemplateUsable(tx, list, tpl.id)
+      if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
+      // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
       if (patch.leavesFinding === undefined) {
-        set.leavesFinding = libraryLeavesFinding(codings, tpl.scope)
+        set.leavesFinding = libraryLeavesFinding(tpl)
         fields.push("leavesFinding")
       }
+      set.procedureSystem = null
+      set.procedureCode = null
+      set.procedureVersion = null
       if (patch.scope !== undefined && patch.scope !== tpl.scope) {
         throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
       }
@@ -764,7 +860,7 @@ export async function updateService(
       set.specialtyId =
         patch.specialtyId !== undefined
           ? await assertServiceSpecialty(tx, orgId, patch.specialtyId)
-          : ((await librarySpecialtyIds(tx, orgId, [tpl.specialty])).get(tpl.specialty) ?? current.specialtyId)
+          : ((await librarySpecialtyIds(tx, orgId, [tpl.kind])).get(tpl.kind) ?? current.specialtyId)
       set.scope = tpl.scope
       if (patch.name !== undefined) set.name = assertName(patch.name)
       fields.push("templateId")
@@ -789,6 +885,13 @@ export async function updateService(
   if (patch.code !== undefined) {
     set.code = normalizeCode(patch.code)
     fields.push("code")
+  }
+  if (patch.officialCode !== undefined && patch.templateId === undefined) {
+    if ((set.source ?? current.source) === "template") {
+      throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
+    }
+    Object.assign(set, await assertOwnCode(tx, list, patch.officialCode, { creating: false }))
+    fields.push("officialCode")
   }
   if (patch.priceCents !== undefined) {
     set.priceCents = assertPrice(patch.priceCents)
@@ -831,19 +934,8 @@ export async function updateService(
     await assertLeavesFinding(tx, orgId, current.leavesFinding, set.scope)
   }
 
-  const resolvedSource = (set.source ?? current.source) as string
   const resolvedScope = (set.scope ?? current.scope) as string | null
-  const resolvedActive = set.isActive ?? current.isActive
-  if (resolvedSource === "legacy") {
-    if (resolvedActive) {
-      throw conflict(
-        "LEGACY_MUST_RESOLVE",
-        "La prestación heredada debe vincularse a una plantilla o confirmarse como propia antes de reactivarse",
-      )
-    }
-  } else if (!resolvedScope) {
-    throw validation("scope es obligatorio fuera del legado")
-  }
+  if (!resolvedScope) throw validation("Elige dónde se hace el servicio")
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
 
   let updated: ServiceRow | undefined
@@ -906,11 +998,11 @@ export async function fromTemplates(
     .from(treatmentTemplate)
     .where(inArray(treatmentTemplate.id, ids))
   if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
-  const codingsOf = new Map<string, ProcedureCodingSnapshot[]>()
+  const list = await orgServiceList(tx, orgId)
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
-    codingsOf.set(tpl.id, await resolveSingleTemplateCoding(tx, tpl.id))
+    await assertTemplateUsable(tx, list, tpl.id)
   }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
@@ -926,11 +1018,11 @@ export async function fromTemplates(
   const ownedIds = new Set(owned.map((row) => row.templateId))
   // Moneda explícita de la clínica: la columna no tiene valor por defecto.
   const currency = await orgCurrency(tx, orgId)
-  // Cada prestación va a la especialidad de la clínica con la clave de la biblioteca.
+  // Cada tratamiento va a la especialidad del país que recibe su tipo.
   const specialtyOf = await librarySpecialtyIds(
     tx,
     orgId,
-    templates.map((tpl) => tpl.specialty),
+    templates.map((tpl) => tpl.kind),
   )
   const created: ServiceRow[] = []
   for (const item of items) {
@@ -945,7 +1037,7 @@ export async function fromTemplates(
         source: "template",
         code: null,
         name: item.name?.trim() ? assertName(item.name) : tpl.name,
-        specialtyId: specialtyOf.get(tpl.specialty) ?? null,
+        specialtyId: specialtyOf.get(tpl.kind) ?? null,
         scope: tpl.scope,
         priceCents: assertPrice(item.priceCents),
         currency,
@@ -953,7 +1045,7 @@ export async function fromTemplates(
         billingMode: assertBillingMode(item.billingMode),
         priceDisclosure,
         // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
-        leavesFinding: libraryLeavesFinding(codingsOf.get(tpl.id) ?? [], tpl.scope),
+        leavesFinding: libraryLeavesFinding(tpl),
         isActive: true,
       })
       .returning()
@@ -971,7 +1063,7 @@ export async function fromTemplates(
   return { created, existing: owned }
 }
 
-/** Servicio propio dentro de la carga rápida: sin plantilla ni código oficial. */
+/** Servicio propio dentro de la carga rápida: sin tratamiento de la biblioteca. */
 export interface CustomServiceItem {
   name: string
   /** Especialidad de la clínica. */
@@ -983,6 +1075,8 @@ export interface CustomServiceItem {
   durationMin?: number | null
   /** Qué deja en la pieza al completarse; sin indicarlo, nada. */
   leavesFinding?: LeavesFinding | null
+  /** Código oficial en la lista del país; obligatorio donde la lista lo es. */
+  officialCode?: string | null
 }
 
 export type QuickAddServiceItem =
@@ -1032,6 +1126,7 @@ export async function quickAddServices(
         durationMin: item.durationMin,
         priceDisclosure: options.priceDisclosure,
         leavesFinding: item.leavesFinding ?? null,
+        officialCode: item.officialCode ?? null,
         isActive: true,
       }),
     )
@@ -1074,164 +1169,35 @@ export async function setServicesPriceDisclosure(
   return { updated: ids.length }
 }
 
-/**
- * Concepto de «Más usados»: lo que casi toda clínica ofrece, dicho con
- * vocabulario clínico general y no con el código de un catálogo. `phrases` va
- * en orden de preferencia; una frase casa cuando el nombre de la plantilla
- * contiene todas sus raíces (sin tildes ni mayúsculas). `specialties` acota el
- * área, para que «limpieza» no traiga la limpieza de una prótesis.
- */
-export interface StarterConcept {
-  key: string
-  label: string
-  phrases: readonly (readonly [string, ...string[]])[]
-  specialties?: readonly TreatmentSpecialty[]
-}
-
-export const STARTER_CONCEPTS: readonly StarterConcept[] = [
-  {
-    key: "consulta",
-    label: "Consulta",
-    phrases: [["consulta"], ["evaluacion"]],
-    specialties: ["diagnostico", "general"],
-  },
-  {
-    key: "radiografia",
-    label: "Radiografía",
-    phrases: [["radiograf"]],
-    specialties: ["diagnostico"],
-  },
-  {
-    key: "profilaxis",
-    label: "Limpieza (profilaxis)",
-    phrases: [["profilaxis"], ["limpieza"], ["destartraje"]],
-    specialties: ["prevencion", "periodoncia"],
-  },
-  { key: "fluor", label: "Flúor", phrases: [["fluor"]], specialties: ["prevencion"] },
-  {
-    key: "sellante",
-    label: "Sellante",
-    phrases: [["sellante"]],
-    specialties: ["prevencion", "restauradora", "odontopediatria"],
-  },
-  {
-    key: "resina",
-    label: "Resina",
-    phrases: [["restauracion", "resina"], ["resina"]],
-    specialties: ["restauradora"],
-  },
-  {
-    key: "endodoncia",
-    label: "Endodoncia",
-    phrases: [["endodon"], ["conducto"]],
-    specialties: ["endodoncia"],
-  },
-  {
-    key: "exodoncia",
-    label: "Extracción (exodoncia)",
-    phrases: [["exodoncia"], ["extraccion"]],
-    specialties: ["cirugia"],
-  },
-  { key: "corona", label: "Corona", phrases: [["corona"]], specialties: ["protesis"] },
-  {
-    key: "implante",
-    label: "Implante",
-    phrases: [["implante"]],
-    specialties: ["implantologia"],
-  },
-  {
-    key: "ortodoncia",
-    label: "Ortodoncia y controles",
-    phrases: [["control", "ortodon"], ["ortodon"]],
-    specialties: ["ortodoncia"],
-  },
-  { key: "blanqueamiento", label: "Blanqueamiento", phrases: [["blanqueamiento"]] },
-]
-
-/**
- * Pares para `translate()`: la biblioteca escribe «Restauracion» y
- * «Radiografía». Incluye las mayúsculas porque `lower()` solo las convierte si
- * la base tiene una configuración regional que las conozca.
- */
-const FOLD_FROM = "áàäâãéèëêíìïîóòöôõúùüûñçÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ"
-const FOLD_TO = "aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc"
-
-/** Minúsculas y sin tildes, igual que el filtro de la consulta. */
-function foldText(text: string): string {
-  return text
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-}
-
-export type LibraryTemplate = TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }
-
 export interface StarterSuggestion {
-  key: string
+  /** Tipo de tratamiento: agrupa la lista. */
+  key: TreatmentKind
   label: string
   templates: LibraryTemplate[]
 }
 
 /**
- * «Más usados»: punto de partida para una clínica que aún no tiene tarifario.
- * Resuelve cada concepto contra la biblioteca disponible para la clínica (la
- * misma que lista `listTemplates`) y devuelve, por concepto, las plantillas que
- * casan y que la clínica todavía no incorporó. Un concepto que la biblioteca no
- * tiene —o que ya está entero en el tarifario— no aparece; sin biblioteca la
- * lista queda vacía y la clínica crea sus servicios propios.
+ * «Más usados»: punto de partida para una clínica que aún no tiene tarifario
+ * (ADR 0067). Son los tratamientos que odentIA marcó en su biblioteca
+ * (`is_common`), por tipo y en el orden de los tipos, con el código del país y
+ * sin los que la clínica ya agregó. Donde la lista es obligatoria, solo los
+ * que tienen código en ella.
  */
 export async function listMostUsedServices(
   tx: Db,
   orgId: string,
   options: { perConcept?: number } = {},
 ): Promise<StarterSuggestion[]> {
-  const perConcept = options.perConcept ?? 3
-  if (!Number.isInteger(perConcept) || perConcept < 1 || perConcept > 10) {
-    throw validation("perConcept debe ser un entero entre 1 y 10")
+  const perKind = options.perConcept ?? 10
+  if (!Number.isInteger(perKind) || perKind < 1 || perKind > 20) {
+    throw validation("perConcept debe ser un entero entre 1 y 20")
   }
-  const release = await currentCatalogRelease(tx)
-  if (!release) return []
-  // Toda frase exige su primera raíz: basta con ella para acotar en la base.
-  const stems = [
-    ...new Set(STARTER_CONCEPTS.flatMap((concept) => concept.phrases.map((phrase) => phrase[0]))),
-  ]
-  const folded = sql`translate(lower(${treatmentTemplate.name}), ${FOLD_FROM}, ${FOLD_TO})`
-  const rows = await tx
-    .select({
-      id: treatmentTemplate.id,
-      key: treatmentTemplate.key,
-      name: treatmentTemplate.name,
-      specialty: treatmentTemplate.specialty,
-      scope: treatmentTemplate.scope,
-      surfaceCountMin: treatmentTemplate.surfaceCountMin,
-      surfaceCountMax: treatmentTemplate.surfaceCountMax,
-      isActive: treatmentTemplate.isActive,
-      version: treatmentTemplate.version,
-      code: procedureCode.code,
-      codeVersion: procedureCode.version,
-      display: procedureCode.display,
-    })
-    .from(treatmentTemplate)
-    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
-    .innerJoin(
-      procedureCode,
-      and(
-        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
-        eq(treatmentTemplateCode.code, procedureCode.code),
-        eq(treatmentTemplateCode.version, procedureCode.version),
-      ),
-    )
-    .where(
-      and(
-        eq(treatmentTemplate.isActive, true),
-        eq(treatmentTemplateCode.isPrimary, true),
-        eq(procedureCode.systemKey, release.system),
-        eq(procedureCode.version, release.version),
-        eq(procedureCode.isActive, true),
-        or(...stems.map((stem) => sql`${folded} like ${`%${stem}%`}`)),
-      ),
-    )
-    .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))
+  const list = await orgServiceList(tx, orgId)
+  const release = list ? await currentCatalogRelease(tx, list.system) : null
+  if (list?.required && !release) return []
+  const rows = (await libraryQuery(tx, list, release)
+    .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.isCommon, true)))
+    .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))) as LibraryRow[]
   if (rows.length === 0) return []
   const owned = await tx
     .select({ templateId: serviceCatalog.templateId })
@@ -1247,64 +1213,13 @@ export async function listMostUsedServices(
       ),
     )
   const ownedIds = new Set(owned.map((row) => row.templateId))
-  const candidates = rows
-    .filter((row) => !ownedIds.has(row.id))
-    .map((row) => ({ row, text: foldText(row.name) }))
-
-  // Una plantilla pertenece a un solo concepto: el primero que la reclama.
-  const taken = new Set<string>()
   const suggestions: StarterSuggestion[] = []
-  for (const concept of STARTER_CONCEPTS) {
-    const ranked: Array<{ row: (typeof rows)[number]; phrase: number; at: number }> = []
-    for (const candidate of candidates) {
-      if (taken.has(candidate.row.id)) continue
-      if (
-        concept.specialties &&
-        !(concept.specialties as readonly string[]).includes(candidate.row.specialty)
-      ) {
-        continue
-      }
-      const phrase = concept.phrases.findIndex((phraseStems) =>
-        phraseStems.every((stem) => candidate.text.includes(stem)),
-      )
-      const phraseStems = concept.phrases[phrase]
-      if (!phraseStems) continue
-      const at = Math.min(...phraseStems.map((stem) => candidate.text.indexOf(stem)))
-      ranked.push({ row: candidate.row, phrase, at })
-    }
-    // Primero la frase preferida, luego el nombre que empieza por el concepto y
-    // el más corto: la denominación general antes que sus variantes.
-    ranked.sort(
-      (a, b) =>
-        a.phrase - b.phrase ||
-        a.at - b.at ||
-        a.row.name.length - b.row.name.length ||
-        a.row.name.localeCompare(b.row.name) ||
-        a.row.id.localeCompare(b.row.id),
-    )
-    const chosen = ranked.slice(0, perConcept)
-    if (chosen.length === 0) continue
-    for (const pick of chosen) taken.add(pick.row.id)
-    suggestions.push({
-      key: concept.key,
-      label: concept.label,
-      templates: chosen.map(({ row }) => ({
-        id: row.id,
-        key: row.key,
-        name: row.name,
-        specialty: row.specialty,
-        scope: row.scope,
-        surfaceCountMin: row.surfaceCountMin,
-        surfaceCountMax: row.surfaceCountMax,
-        isActive: row.isActive,
-        version: row.version,
-        codings: [
-          { system: release.system, code: row.code, version: row.codeVersion, display: row.display },
-        ],
-      })),
-    })
+  for (const kind of TREATMENT_KINDS) {
+    const templates = rows
+      .filter((row) => row.kind === kind.key && !ownedIds.has(row.id))
+      .slice(0, perKind)
+      .map((row) => toLibraryTemplate(row, list))
+    if (templates.length > 0) suggestions.push({ key: kind.key, label: kind.name, templates })
   }
   return suggestions
 }
-
-

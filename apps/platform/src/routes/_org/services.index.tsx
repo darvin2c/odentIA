@@ -9,7 +9,6 @@ import {
   FieldError as UiFieldError,
   FieldLabel,
   Input,
-  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -48,12 +47,13 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { z } from "zod"
 import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
+import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
-import { specialtyNameByKey, useClinicSpecialties } from "../../lib/clinical-forms"
+import { useClinicSpecialties } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
-import { useOrgProfile } from "../../lib/org"
+import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
@@ -64,9 +64,10 @@ import {
   type PriceDisclosure,
   createServiceApi,
   setServicesPriceDisclosureApi,
+  fetchService,
   fetchServices,
   fetchTreatmentTemplate,
-  fetchTreatmentTemplates,
+  type OfficialCoding,
   type ServiceCatalogItem,
   SERVICE_PLACE_OPTIONS,
   TREATMENT_SCOPE_LABELS,
@@ -93,7 +94,6 @@ const orgRouteApi = getRouteApi("/_org")
 const STATE_OPTIONS = [
   { value: "active", label: "Activas" },
   { value: "inactive", label: "Inactivas" },
-  { value: "legacy", label: "Pendientes de revisar" },
 ]
 
 const TARIFARIO_SORT_OPTIONS = [
@@ -105,11 +105,6 @@ const TARIFARIO_SORT_OPTIONS = [
 const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
   { value: "treatment", label: BILLING_MODE_LABELS.treatment },
   { value: "session", label: BILLING_MODE_LABELS.session },
-]
-
-const RESOLVE_OPTIONS: ReadonlyArray<{ value: "plantilla" | "propia"; label: string }> = [
-  { value: "plantilla", label: "Vincular a la biblioteca" },
-  { value: "propia", label: "Confirmar como propia" },
 ]
 
 function stateLabel(state: string): string {
@@ -183,7 +178,7 @@ function TarifarioPage() {
       fetchServices({
         q: search.trim() || undefined,
         specialtyId: specialtyFilter === "todas" ? undefined : specialtyFilter,
-        state: estadoFilter as "active" | "inactive" | "legacy",
+        state: estadoFilter === "inactive" ? "inactive" : "active",
         limit: TARIFARIO_PAGE,
         cursor: pageParam ?? undefined,
       }),
@@ -219,17 +214,15 @@ function TarifarioPage() {
   const groups = useMemo(() => {
     const map = new Map<string, { label: string; rows: ServiceCatalogItem[] }>()
     for (const row of sortedRows) {
-      const key = row.source === "legacy" ? "legacy" : (row.specialtyId ?? "sin-especialidad")
-      const label =
-        key === "legacy" ? "Pendientes de revisar" : (row.specialtyName ?? "Sin especialidad")
-      const group = map.get(key) ?? { label, rows: [] }
+      const key = row.specialtyId ?? "sin-especialidad"
+      const group = map.get(key) ?? { label: row.specialtyName ?? "Sin especialidad", rows: [] }
       group.rows.push(row)
       map.set(key, group)
     }
-    return [...map.entries()].sort(([a, x], [b, y]) =>
-      a === "legacy" ? 1 : b === "legacy" ? -1 : x.label.localeCompare(y.label, "es"),
-    )
+    return [...map.entries()].sort(([, x], [, y]) => x.label.localeCompare(y.label, "es"))
   }, [sortedRows])
+  /** «Código interno» solo es columna si la clínica usa alguno (decisión 4 del lienzo del issue 40). */
+  const usesInternalCode = rows.some((row) => row.code)
 
   const disclosureMutation = useMutation({
     mutationFn: (priceDisclosure: PriceDisclosure) => setServicesPriceDisclosureApi(selected, priceDisclosure),
@@ -327,29 +320,27 @@ function TarifarioPage() {
           // tabla y empujaría precio y estado fuera del panel.
           <span className="flex min-w-0 max-w-72 flex-col whitespace-normal">
             <span className="font-medium break-words">{row.original.name}</span>
-            {row.original.source === "template" ? (
-              <span className="text-xs text-muted-foreground">De la biblioteca</span>
-            ) : row.original.source === "legacy" ? (
-              <span className="text-xs text-muted-foreground">Heredada · pendiente de revisar</span>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                Propia de la clínica · sin código oficial
-              </span>
-            )}
+            <span className="text-xs text-muted-foreground">
+              {row.original.source === "template" ? "De la biblioteca" : "Propio de la clínica"}
+            </span>
           </span>
         ),
       },
-      {
-        accessorKey: "code",
-        header: "Código interno",
-        meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.code ? (
-            <span className="font-mono">{row.original.code}</span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          ),
-      },
+      ...(usesInternalCode
+        ? [
+            {
+              accessorKey: "code",
+              header: "Código interno",
+              meta: { view: { primary: true } },
+              cell: ({ row }) =>
+                row.original.code ? (
+                  <span className="font-mono">{row.original.code}</span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                ),
+            } satisfies ColumnDef<ServiceCatalogItem>,
+          ]
+        : []),
       {
         accessorKey: "scope",
         header: "Ámbito",
@@ -394,28 +385,24 @@ function TarifarioPage() {
                   label: "Ver y editar",
                   onSelect: () => openOffer(row.original),
                 },
-                ...(row.original.source === "legacy"
-                  ? []
-                  : [
-                      row.original.isActive
-                        ? {
-                            key: "deactivate",
-                            label: "Desactivar",
-                            tone: "danger" as const,
-                            onSelect: () => setToggling(row.original),
-                          }
-                        : {
-                            key: "reactivate",
-                            label: "Reactivar",
-                            onSelect: () => setToggling(row.original),
-                          },
-                    ]),
+                row.original.isActive
+                  ? {
+                      key: "deactivate",
+                      label: "Desactivar",
+                      tone: "danger" as const,
+                      onSelect: () => setToggling(row.original),
+                    }
+                  : {
+                      key: "reactivate",
+                      label: "Reactivar",
+                      onSelect: () => setToggling(row.original),
+                    },
               ]}
             />
           ) : null,
       },
     ],
-    [canManage, openOffer, profileLocale, selected],
+    [canManage, openOffer, profileLocale, selected, usesInternalCode],
   )
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
@@ -774,13 +761,7 @@ function useOfferForm(
 type OfferForm = ReturnType<typeof useOfferForm>
 
 function sourceLabel(offer: ServiceCatalogItem): string {
-  if (offer.source === "legacy") return "Heredada"
-  return offer.source === "custom" ? "Prestación de la clínica" : "De la biblioteca"
-}
-
-/** Código oficial de la plantilla vinculada: se lee, nunca se edita aquí. */
-function officialCodingLabel(coding: TreatmentTemplateItem["codings"][number]): string {
-  return `${coding.code} (${coding.system} · edición ${coding.version})`
+  return offer.source === "custom" ? "Propio de la clínica" : "De la biblioteca"
 }
 
 interface OfferEditorProps {
@@ -812,19 +793,48 @@ function OfferEditor({
   orgLocale,
 }: OfferEditorProps) {
   const queryClient = useQueryClient()
-  const [resolveMode, setResolveMode] = useState<"plantilla" | "propia">("plantilla")
   /** La tarifa se escribe y lee con la moneda y el formato de la clínica. */
   const currency = offer?.currency ?? orgCurrency
   const templateId = offer?.templateId ?? null
   const isTemplate = offer?.source === "template"
-  const isLegacy = offer?.source === "legacy"
-  /** Vincular una plantilla no se envía desde el formulario: cada fila vincula al instante. */
-  const pickingTemplate = isLegacy && resolveMode === "plantilla"
+  const codeList = useClinicalProfile().services
 
   /**
-   * Plantilla vinculada por ID directo (incluye retiradas en solo lectura).
-   * Los mapeos llegan con el primario primero: se usa `codings[0]`.
+   * El código vigente del servicio en la lista del país (ADR 0067): el de su
+   * tratamiento si es de la biblioteca, el que eligió la clínica si es propio.
    */
+  const officialQuery = useQuery({
+    // Clave propia: `["services", "one", id]` guarda el servicio entero (ServiceSelect, la Agenda).
+    queryKey: ["services", "official", offer?.id ?? null],
+    enabled: offer !== null && codeList !== null,
+    queryFn: async () => (offer ? (await fetchService(offer.id)).data.officialCoding : null),
+  })
+  const officialCoding = officialQuery.data ?? null
+  /** Un código propio que una edición nueva de la lista retiró: hay que elegir otro. */
+  const retiredCode =
+    !isTemplate && offer?.procedureCode && officialQuery.isSuccess && !officialCoding ? offer.procedureCode : null
+  const initialCode = useMemo<OfficialCoding | null>(
+    () => (isTemplate ? null : officialCoding),
+    [isTemplate, officialCoding],
+  )
+  const [officialCode, setOfficialCode] = useState<OfficialCoding | null>(initialCode)
+  const [codeTouched, setCodeTouched] = useState(false)
+  // Cada apertura arranca prístina, como el formulario: lo guardado y sin avisos.
+  useEffect(() => {
+    if (!open) return
+    setOfficialCode(initialCode)
+    setCodeTouched(false)
+  }, [open, initialCode])
+  /** Si no se pudo leer el código guardado, no se envía: guardar no lo pisa. */
+  const codeChanged = (officialCode?.code ?? null) !== (initialCode?.code ?? null)
+  // Sin leer el código guardado no se exige otro: guardar no lo envía (`codeChanged`).
+  const codeIssue = isTemplate || (officialQuery.isError && !codeChanged)
+    ? null
+    : retiredCode && !officialCode
+      ? `El código ${retiredCode} ya no está vigente en la ${codeList?.system ?? "lista"}: elige otro`
+      : missingOfficialCode(codeList, officialCode)
+
+  /** El tratamiento de la biblioteca, por id directo (incluye retirados, solo lectura). */
   const linkedTemplateQuery = useQuery({
     queryKey: ["services", "templates", "linked", templateId],
     enabled: templateId !== null,
@@ -841,7 +851,6 @@ function OfferEditor({
   })
   const linkedTemplate = templateId ? (linkedTemplateQuery.data ?? null) : null
   const templateName = linkedTemplate?.name ?? null
-  const linkedCoding = linkedTemplate?.codings[0] ?? null
 
   const saveMutation = useMutation({
     mutationFn: (values: OfferFormValues) => {
@@ -856,16 +865,17 @@ function OfferEditor({
         // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
         leavesFinding: leavesFindingBody(values.leavesCondition, values.leavesVariant),
       }
+      // El código del país lo elige solo un servicio propio; sin lista no viaja, y al
+      // editar solo viaja si cambió.
+      const code = codeList && (!offer || codeChanged) ? { officialCode: officialCode?.code ?? null } : {}
       if (!offer) {
-        return createServiceApi({ ...body, specialtyId: values.specialtyId, scope: values.scope })
+        return createServiceApi({ ...body, ...code, specialtyId: values.specialtyId, scope: values.scope })
       }
       return updateServiceApi(offer.id, {
         ...body,
         // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
         ...(values.specialtyId ? { specialtyId: values.specialtyId } : {}),
-        ...(isTemplate ? {} : { scope: values.scope }),
-        // Confirmar una heredada como propia la desvincula y la deja activa.
-        ...(isLegacy ? { templateId: null, isActive: true } : {}),
+        ...(isTemplate ? {} : { scope: values.scope, ...code }),
       })
     },
     onSuccess: async () => {
@@ -885,7 +895,8 @@ function OfferEditor({
   }, orgLocale)
   // Suscripción explícita: la página no se entera de los cambios de meta del
   // formulario por sí sola, y el cierre protegido necesita saber si hay cambios.
-  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
+  const formDirty = useStore(form.store, (state) => !state.isDefaultValue)
+  const isDirty = formDirty || codeChanged
 
   const headerContent = (
     <div className="flex flex-col gap-1">
@@ -898,63 +909,44 @@ function OfferEditor({
             <Badge variant="outline">{sourceLabel(offer)}</Badge>
           </>
         ) : (
-          <Badge variant="outline">Prestación de la clínica</Badge>
+          <Badge variant="outline">Propio de la clínica</Badge>
         )}
       </div>
       {isTemplate && offer && templateName && templateName !== offer.name ? (
         <p className="text-xs text-muted-foreground">Variante de «{templateName}»</p>
-      ) : null}
-      {isTemplate ? (
-        linkedCoding ? (
-          <p className="text-xs text-muted-foreground">
-            Código oficial {linkedCoding.system}{" "}
-            <span className="font-mono">{linkedCoding.code}</span>
-            {" · "}edición {linkedCoding.version} · «{linkedCoding.display}». El precio y el nombre
-            comercial de esta oferta son propios de la clínica y no alteran el código oficial.
-          </p>
-        ) : linkedTemplateQuery.isPending ? (
-          <Skeleton className="h-3 w-56" />
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Oferta vinculada a la biblioteca; el código oficial se consulta en la biblioteca.
-          </p>
-        )
-      ) : null}
-      {offer?.source === "custom" ? (
-        <p className="text-xs text-muted-foreground">
-          Prestación propia de la clínica, sin código oficial asociado.
-        </p>
       ) : null}
     </div>
   )
 
   const fields = (
     <div className="flex flex-col gap-4">
-      {isLegacy ? (
-        <LegacyNote>
-          <RadioChips
-            aria-label="Cómo resolverla"
-            value={resolveMode}
-            options={RESOLVE_OPTIONS}
-            onChange={setResolveMode}
-          />
-          {pickingTemplate && offer ? (
-            <LegacyTemplatePicker offer={offer} onLinked={onClose} />
-          ) : null}
-        </LegacyNote>
-      ) : null}
-      {pickingTemplate ? null : (
-        <>
-          <OfferFields
-            form={form}
-            offer={offer}
-            allowSpecialtyScope={!isTemplate}
-            currency={currency}
-            locale={orgLocale}
-          />
-          {offer ? <OfferDetails offer={offer} linkedCoding={linkedCoding} /> : null}
-        </>
-      )}
+      <OfferFields
+        form={form}
+        offer={offer}
+        allowSpecialtyScope={!isTemplate}
+        currency={currency}
+        locale={orgLocale}
+        officialCodeField={
+          isTemplate ? null : (
+            <OfficialCodeField
+              value={officialCode}
+              onChange={(next) => {
+                setOfficialCode(next)
+                setCodeTouched(true)
+              }}
+              error={
+                officialQuery.isError && !codeTouched
+                  ? "No se pudo leer el código guardado. Si no lo cambias, se conserva."
+                  : codeTouched || retiredCode
+                    ? codeIssue
+                    : null
+              }
+              disabled={offer !== null && officialQuery.isPending && codeList !== null}
+            />
+          )
+        }
+      />
+      {offer ? <OfferDetails offer={offer} officialCoding={isTemplate ? officialCoding : null} /> : null}
     </div>
   )
 
@@ -963,11 +955,11 @@ function OfferEditor({
   if (offer && !canWrite) {
     return asPanel ? (
       <DetailPanel title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} locale={orgLocale} />
+        <OfferReadOnly offer={offer} officialCoding={officialCoding} locale={orgLocale} />
       </DetailPanel>
     ) : (
       <DetailDrawer open={open} title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} locale={orgLocale} />
+        <OfferReadOnly offer={offer} officialCoding={officialCoding} locale={orgLocale} />
       </DetailDrawer>
     )
   }
@@ -980,15 +972,15 @@ function OfferEditor({
     headerContent,
     isDirty,
     isSubmitting: saveMutation.isPending,
-    submitLabel: !offer
-      ? "Guardar y activar"
-      : isLegacy
-        ? "Confirmar y reactivar"
-        : common.actions.save,
-    hideSubmit: pickingTemplate,
+    submitLabel: offer ? common.actions.save : "Guardar y activar",
     onSubmit: (event: FormEvent) => {
       event.preventDefault()
-      if (pickingTemplate) return
+      setCodeTouched(true)
+      // Donde la lista es obligatoria, un servicio propio no se guarda sin su código.
+      if (codeIssue) {
+        void form.validateAllFields("submit")
+        return
+      }
       void form.handleSubmit()
     },
     onClose,
@@ -1008,40 +1000,32 @@ function OfferEditor({
   )
 }
 
-/** Aviso de la prestación heredada: sin resolver no sirve para nuevas indicaciones. */
-function LegacyNote({ children }: { children?: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-dashed p-3" role="note">
-      <p className="text-sm">
-        Prestación heredada del catálogo anterior: conserva nombre, código y precio como registro
-        previo. Vincúlala a la biblioteca o confírmala como propia antes de reactivarla; no se usa
-        para nuevas indicaciones hasta entonces.
-      </p>
-      {children}
-    </div>
-  )
+/**
+ * El código del servicio en la lista del país, como un dato más del detalle
+ * («Código CPMS · D0140», decisión 4 del lienzo del issue 40). Sin lista en el
+ * país no se muestra.
+ */
+function OfficialCodeDetail({ coding, own }: { coding: OfficialCoding | null; own: boolean }) {
+  const list = useClinicalProfile().services
+  if (!list) return null
+  // Uno de la biblioteca toma el código de su tratamiento: no hay nada que elegir aquí.
+  const missing = !list.required ? null : own ? "Sin código vigente: elígelo al editar" : "Sin código vigente"
+  return <DetailField label={`Código ${list.system}`}>{coding ? coding.code : missing}</DetailField>
 }
 
 /** Detalle de lectura de una prestación, para quien no puede escribir. */
 function OfferReadOnly({
   offer,
-  linkedCoding,
+  officialCoding,
   locale,
 }: {
   offer: ServiceCatalogItem
-  linkedCoding: TreatmentTemplateItem["codings"][number] | null
+  officialCoding: OfficialCoding | null
   locale: string
 }) {
   return (
     <div className="flex flex-col gap-4">
-      {offer.source === "legacy" ? <LegacyNote /> : null}
       <DetailList>
-        <DetailField label="Código interno">{offer.code}</DetailField>
-        {offer.source === "template" ? (
-          <DetailField label="Código oficial">
-            {linkedCoding ? officialCodingLabel(linkedCoding) : "Ver en la biblioteca"}
-          </DetailField>
-        ) : null}
         <DetailField label={`Precio (${offer.currency})`}>
           {formatMoney(offer.priceCents, offer.currency, locale)}
         </DetailField>
@@ -1067,18 +1051,23 @@ function OfferReadOnly({
             : null}
         </DetailField>
         <DetailField label="Estado">{offer.isActive ? "Activa" : "Inactiva"}</DetailField>
+        <OfficialCodeDetail coding={officialCoding} own={offer.source === "custom"} />
+        <DetailField label="Código interno">{offer.code}</DetailField>
       </DetailList>
     </div>
   )
 }
 
-/** Datos que el formulario no edita, plegados para no cargar la tarjeta. */
+/**
+ * Datos que el formulario no edita, plegados para no cargar la tarjeta. El
+ * código del país de uno de la biblioteca viene de su tratamiento y no se cambia.
+ */
 function OfferDetails({
   offer,
-  linkedCoding,
+  officialCoding,
 }: {
   offer: ServiceCatalogItem
-  linkedCoding: TreatmentTemplateItem["codings"][number] | null
+  officialCoding: OfficialCoding | null
 }) {
   return (
     <Collapsible>
@@ -1089,12 +1078,7 @@ function OfferDetails({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2">
         <DetailList columns={1}>
-          <DetailField label="Código interno">{offer.code}</DetailField>
-          {offer.source === "template" ? (
-            <DetailField label="Código oficial">
-              {linkedCoding ? officialCodingLabel(linkedCoding) : "Ver en la biblioteca"}
-            </DetailField>
-          ) : null}
+          {offer.source === "template" ? <OfficialCodeDetail coding={officialCoding} own={false} /> : null}
           <DetailField label="Duración">
             {offer.durationMin === null ? null : `${offer.durationMin} min`}
           </DetailField>
@@ -1115,6 +1099,7 @@ function OfferFields({
   allowSpecialtyScope,
   currency,
   locale,
+  officialCodeField,
 }: {
   form: OfferForm
   /** Oferta editada; `null` es el alta de una prestación propia. */
@@ -1124,6 +1109,8 @@ function OfferFields({
   currency: string
   /** Formato de la clínica para escribir el importe. */
   locale: string
+  /** El código del país de un servicio propio, debajo del nombre (tablero 3). */
+  officialCodeField: ReactNode
 }) {
   const isTemplate = offer?.source === "template"
   const idPrefix = offer?.id ?? "nueva"
@@ -1143,6 +1130,7 @@ function OfferFields({
           </Field>
         )}
       </form.Field>
+      {officialCodeField}
       <div className="grid grid-cols-2 gap-3">
         <OfferSpecialtyField form={form} idPrefix={idPrefix} current={offer} />
         {allowSpecialtyScope ? (
@@ -1245,11 +1233,7 @@ function OfferFields({
               onBlur={field.handleBlur}
             />
             <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
-            {isTemplate ? (
-              <p className="text-xs text-muted-foreground">
-                Solo uso interno de la clínica. El código oficial de la biblioteca no se edita aquí.
-              </p>
-            ) : null}
+            <p className="text-xs text-muted-foreground">Solo para uso interno de la clínica.</p>
           </Field>
         )}
       </form.Field>
@@ -1337,165 +1321,6 @@ function OfferLeavesFinding({
         form.setFieldValue("leavesVariant", nextVariant)
       }}
     />
-  )
-}
-
-/**
- * Vinculación de una prestación heredada: elegir plantilla la desvincula del
- * origen anterior y la reactiva. La mutación vive aquí porque vincular exige
- * una oferta, y en el formulario la oferta puede ser el alta de una nueva.
- */
-function LegacyTemplatePicker({
-  offer,
-  onLinked,
-}: {
-  offer: ServiceCatalogItem
-  onLinked: () => void
-}) {
-  const queryClient = useQueryClient()
-  const linkMutation = useMutation({
-    mutationFn: (templateId: string) => updateServiceApi(offer.id, { templateId, isActive: true }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["services"] })
-      toast.success("Prestación vinculada y reactivada")
-      onLinked()
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
-      )
-    },
-  })
-
-  return (
-    <LegacyTemplateLink
-      pending={linkMutation.isPending}
-      onSelect={(id) => linkMutation.mutate(id)}
-    />
-  )
-}
-
-function LegacyTemplateLink({
-  pending,
-  onSelect,
-}: {
-  pending: boolean
-  onSelect: (id: string) => void
-}) {
-  const [q, setQ] = useState("")
-  const [cursor, setCursor] = useState<string | undefined>(undefined)
-  const [previousCursors, setPreviousCursors] = useState<string[]>([])
-  const search = q.trim()
-  /** Cambiar la búsqueda vuelve a la primera página del listado de plantillas. */
-  const searchTemplates = (value: string) => {
-    setQ(value)
-    setCursor(undefined)
-    setPreviousCursors([])
-  }
-  const specialties = useClinicSpecialties().data?.data ?? []
-  const templatesQuery = useQuery({
-    queryKey: ["services", "templates", "link", search, cursor],
-    queryFn: () => fetchTreatmentTemplates({ q: search || undefined, limit: 10, cursor }),
-    staleTime: 60_000,
-  })
-  const rows = templatesQuery.data?.data ?? []
-  const total = templatesQuery.data?.total ?? rows.length
-  const catalog = templatesQuery.data?.catalog ?? null
-  const nextCursor = templatesQuery.data?.nextCursor ?? null
-  const goNext = () => {
-    if (!nextCursor) return
-    setPreviousCursors((stack) => [...stack, cursor ?? ""])
-    setCursor(nextCursor)
-  }
-  const goPrevious = () => {
-    const copy = [...previousCursors]
-    const previous = copy.pop()
-    setPreviousCursors(copy)
-    setCursor(previous || undefined)
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      <Input
-        value={q}
-        onChange={(event) => searchTemplates(event.target.value)}
-        placeholder="Buscar por código o nombre…"
-        aria-label="Buscar plantilla por código o nombre"
-      />
-      {catalog ? (
-        <p className="text-xs text-muted-foreground">
-          {catalog.system} · edición {catalog.version}
-        </p>
-      ) : null}
-      {templatesQuery.isPending ? (
-        <LoadingState />
-      ) : templatesQuery.isError ? (
-        <ErrorState
-          message="No se pudo cargar la biblioteca"
-          onRetry={() => void templatesQuery.refetch()}
-        />
-      ) : (
-        <>
-          <ScrollArea className="flex max-h-48 flex-col">
-            <ul className="flex flex-col gap-1">
-              {rows.map((tpl) => {
-                const coding = tpl.codings[0]
-                return (
-                  <li key={tpl.id}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto w-full justify-start py-2 text-left"
-                      disabled={pending}
-                      onClick={() => onSelect(tpl.id)}
-                    >
-                      <span className="flex min-w-0 flex-col items-start">
-                        <span className="font-medium break-words">{tpl.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {coding ? (
-                            <>
-                              <span className="font-mono">{coding.code}</span> ·{" "}
-                            </>
-                          ) : null}
-                          {specialtyNameByKey(specialties, tpl.specialty)} ·{" "}
-                          {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
-                        </span>
-                      </span>
-                    </Button>
-                  </li>
-                )
-              })}
-              {rows.length === 0 ? (
-                <li className="text-sm text-muted-foreground">Sin resultados.</li>
-              ) : null}
-            </ul>
-          </ScrollArea>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">{total} resultado(s) con este filtro</p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={previousCursors.length === 0 || templatesQuery.isFetching}
-                onClick={goPrevious}
-              >
-                {common.filters.previous}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!nextCursor || templatesQuery.isFetching}
-                onClick={goNext}
-              >
-                {common.filters.next}
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
   )
 }
 

@@ -63,6 +63,7 @@ import {
 } from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
+import { orgClinicalProfile } from "./locale.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -1223,7 +1224,7 @@ export async function addEncounterProcedure(
     quadrant = input.quadrant ?? null
     arch = input.arch ?? null
     // Oferta oficial: un único snapshot exacto con su versión; propia: [].
-    codings = await resolveServiceCodings(tx, service)
+    codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
     // El costo viaja con el acto desde el tarifario vigente.
     priceCents = service.priceCents
     currency = service.currency

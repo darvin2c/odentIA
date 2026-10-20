@@ -253,6 +253,20 @@
       "when": 1792429381146,
       "tag": "0035_buscador_sin_tildes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792456269801,
+      "tag": "0036_biblioteca_por_pais",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792456325604,
+      "tag": "0037_biblioteca_por_pais_reglas",
+      "breakpoints": true
     }
   ]
 }

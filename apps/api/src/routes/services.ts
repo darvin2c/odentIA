@@ -9,6 +9,7 @@ import {
   listTemplates,
   PRICE_DISCLOSURE_BATCH,
   quickAddServices,
+  searchOfficialCodes,
   setServicesPriceDisclosure,
   updateService,
 } from "@odentia/services"
@@ -24,7 +25,8 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
 const templatesQuery = z
   .object({
     q: z.string().max(200).optional(),
-    specialty: z.string().max(40).optional(),
+    /** Tipo de tratamiento (uso interno de la biblioteca). */
+    kind: z.string().max(40).optional(),
     cursor: z.string().max(500).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
   })
@@ -35,7 +37,7 @@ const offersQuery = z
     q: z.string().max(200).optional(),
     /** Especialidad de la clínica (id). */
     specialtyId: z.string().uuid().optional(),
-    state: z.enum(["active", "inactive", "legacy"]).optional(),
+    state: z.enum(["active", "inactive"]).optional(),
     /** Solo estos servicios, en cualquier estado (separados por coma): nombrar lo ya elegido. */
     ids: z
       .string()
@@ -61,6 +63,19 @@ const leavesFindingInput = z
   .strict()
   .transform(({ condition, variant }) => (variant ? { condition, variant } : { condition }))
 
+/**
+ * Código de la lista oficial del país para un servicio propio (ADR 0067). El
+ * servicio decide si se pide, si es opcional o si no cabe.
+ */
+const officialCodeInput = z.string().trim().max(40).nullish()
+
+const officialCodesQuery = z
+  .object({
+    q: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(20).optional(),
+  })
+  .strict()
+
 const createInput = z
   .object({
     templateId: z.string().uuid().nullish(),
@@ -78,6 +93,7 @@ const createInput = z
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
     evaluationServiceId: z.string().uuid().nullish(),
     leavesFinding: leavesFindingInput.nullish(),
+    officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -99,6 +115,7 @@ const patchInput = z
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
     evaluationServiceId: z.string().uuid().nullish(),
     leavesFinding: leavesFindingInput.nullish(),
+    officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -129,6 +146,7 @@ const batchInput = z
               billingMode: z.enum(["treatment", "session"]).nullish(),
               durationMin: z.number().int().min(1).max(1440).nullish(),
               leavesFinding: leavesFindingInput.nullish(),
+              officialCode: officialCodeInput,
             })
             .strict(),
         ]),
@@ -209,13 +227,30 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const page = await withOrgContext(deps.db, orgId, (tx) =>
-        listTemplates(tx, {
+        listTemplates(tx, orgId, {
           q: parsed.data.q,
-          specialty: parsed.data.specialty,
+          kind: parsed.data.kind,
           cursor: parsed.data.cursor,
           limit: parsed.data.limit,
         }),
       )
+      return c.json(page)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
+  // El buscador del código oficial de un servicio propio: la lista del país de
+  // la clínica en su edición vigente; sin lista, vacío y `codeList: null`.
+  app.get("/official-codes", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "catalog.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
+    }
+    const parsed = officialCodesQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const page = await withOrgContext(deps.db, orgId, (tx) => searchOfficialCodes(tx, orgId, parsed.data))
       return c.json(page)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
@@ -297,6 +332,7 @@ export function createServicesRoute(deps: CrmDeps) {
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,
+          officialCode: parsed.data.officialCode,
           isActive: parsed.data.isActive,
         }),
       ),
@@ -325,6 +361,7 @@ export function createServicesRoute(deps: CrmDeps) {
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,
+          officialCode: parsed.data.officialCode,
           isActive: parsed.data.isActive,
         }),
       ),

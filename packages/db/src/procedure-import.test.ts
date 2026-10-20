@@ -52,16 +52,21 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     const [coverage] = await db.execute<{
       expected: number
       available: number
-      exact: boolean
+      library: number
+      uncoded: number
     }>(sql`
-      select r.expected_count as expected, count(t.id)::int as available,
-        bool_and(t.name=c.display) as exact
-      from procedure_catalog_release r
-      join procedure_code c on c.system_key=r.system_key and c.version=r.version
-      join treatment_template_code m on m.system_key=c.system_key and m.code=c.code and m.version=c.version
-      join treatment_template t on t.id=m.template_id
-      where r.is_current and c.is_active and t.is_active group by r.expected_count`)
-    expect(coverage).toEqual({ expected: 505, available: 505, exact: true })
+      select r.expected_count as expected,
+        (select count(*)::int from procedure_code c
+          where c.system_key=r.system_key and c.version=r.version and c.is_active) as available,
+        (select count(*)::int from treatment_template t where t.is_active) as library,
+        (select count(*)::int from treatment_template t where t.is_active and not exists (
+          select 1 from treatment_template_code m where m.template_id=t.id
+            and m.system_key=r.system_key and m.version=r.version)) as uncoded
+      from procedure_catalog_release r where r.is_current`)
+    // La lista oficial entra entera; la biblioteca es la de consultorio y cada
+    // tratamiento lleva su código CPMS (ADR 0067).
+    expect(coverage).toMatchObject({ expected: 505, available: 505, uncoded: 0 })
+    expect(Number(Reflect.get(coverage!, "library"))).toBeGreaterThan(300)
     // Simula una actualización posterior: la edición instalada pasa a histórica.
     await db.transaction(async (tx) => {
       await tx.execute(sql`update procedure_catalog_release set is_current=false`)
@@ -79,7 +84,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     const [preserved] = await db.execute<{ count: number }>(
       sql`select count(*)::int as count from treatment_template_code`,
     )
-    expect(preserved?.count).toBe(505)
+    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")))
   } finally {
     await Reflect.get(db, "$client").end()
     await container.stop()

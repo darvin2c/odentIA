@@ -1,23 +1,27 @@
 /**
- * Siembra la biblioteca oficial odontológica del CPMS (RM-550-2023-MINSA)
- * como proyección 1:1: cada código oficial del ámbito (secciones 1.3+2.7)
- * produce una prestación con key `cpms:<version>:<code>` y nombre oficial
- * íntegro, con un único mapping por plantilla y por código.
+ * Siembra el catálogo de servicios (ADR 0067): las listas oficiales de cada
+ * país y la biblioteca de odentIA con el código de cada tratamiento en ellas.
  *
- * Fuente: seeds/*.csv regenerados con `pnpm --filter @odentia/db import:cpms`
- * desde el XLSX oficial (SHA-256 verificado). Este seed NO lee el XLSX.
+ * - Listas oficiales: hoy la CPMS (RM-550-2023-MINSA), con sus 505 códigos
+ *   odontológicos tal cual y su procedencia. Los CSV salen de
+ *   `pnpm --filter @odentia/db import:cpms` desde el XLSX oficial (SHA-256
+ *   verificado). Este seed NO lee el XLSX.
+ * - Biblioteca: `seeds/biblioteca.csv`, tratamientos de consultorio con nombre
+ *   propio, tipo, ámbito, lo que dejan en la pieza y si van en «Más usados»;
+ *   `seeds/biblioteca_codigos.csv`, el código de cada uno en cada lista.
  *
  * Atómico e idempotente: todo corre en una transacción; valida fuente, datos
  * y cobertura (fail closed) y revierte ante cualquier desvío. No reactiva
  * versiones anteriores: solo desactiva (ediciones no vigentes, códigos fuera
- * del ámbito como 15849, plantillas internas previas). Los históricos
- * (snapshots en planes/presupuestos/atenciones) no se tocan.
+ * del ámbito, tratamientos que ya no están en la biblioteca, como las
+ * plantillas `cpms:` de antes). Los históricos (snapshots en planes,
+ * presupuestos y atenciones) no se tocan.
  *
  * Orden en CLI: `pnpm --filter @odentia/db migrate` → `seed:diagnoses` →
  * `seed:procedures`. Rol owner (bypasea RLS; el rol app solo lee). Los tests
  * lo invocan directo para no divergir del catálogo real.
  */
-import { TREATMENT_SCOPES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/clinical"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"
@@ -119,43 +123,53 @@ function loadLibrary() {
     },
   )
 
-  // --- Plantillas 1:1 (name al final: puede contener comas) ---
+  // --- Biblioteca (name al final: puede contener comas) ---
   const SCOPES: ReadonlySet<string> = new Set(TREATMENT_SCOPES)
-  const SPECIALTIES: ReadonlySet<string> = new Set(TREATMENT_SPECIALTIES)
+  const KINDS: ReadonlySet<string> = new Set(TREATMENT_KIND_KEYS)
   const templates = strictLines(
-    "treatment_templates_cpms.csv",
-    "template_key,specialty,scope,surface_count_min,surface_count_max,system_key,code,version,name",
+    "biblioteca.csv",
+    "key,kind,scope,surface_count_min,surface_count_max,leaves_condition,leaves_variant,common,name",
   ).map((line) => {
-    const [key, specialty, scope, minRaw, maxRaw, systemKey, code, version, name] = splitHead(
-      line,
-      9,
-    )
+    const [key, kind, scope, minRaw, maxRaw, condition, variant, common, name] = splitHead(line, 9)
     const min = minRaw === "" ? null : Number(minRaw)
     const max = maxRaw === "" ? null : Number(maxRaw)
     if (
       !key ||
-      !SPECIALTIES.has(specialty!) ||
+      !/^[a-z0-9-]+$/.test(key) ||
+      !KINDS.has(kind!) ||
       !SCOPES.has(scope!) ||
-      !systemKey ||
-      !code ||
-      !version ||
       !name ||
+      (common !== "true" && common !== "false") ||
       (minRaw !== "" && !Number.isInteger(min)) ||
       (maxRaw !== "" && !Number.isInteger(max))
     ) {
-      throw new Error(`Línea inválida en treatment_templates_cpms.csv: ${line}`)
+      throw new Error(`Línea inválida en biblioteca.csv: ${line}`)
     }
-    if (key !== `cpms:${version}:${code}`) {
-      throw new Error(`Key no proyecta 1:1 el código oficial: ${line}`)
-    }
-    if (scope === "surfaces" && (min === null || max === null)) {
-      throw new Error(`Scope surfaces sin conteo: ${line}`)
+    if (scope === "surfaces" && (min === null || max === null || min < 1 || min > max)) {
+      throw new Error(`Scope surfaces sin conteo válido: ${line}`)
     }
     if (scope !== "surfaces" && (min !== null || max !== null)) {
       throw new Error(`Conteo fuera de scope surfaces: ${line}`)
     }
-    return { key, specialty, scope: scope!, min, max, systemKey, code, version, name }
+    if (!condition && variant) throw new Error(`Variante sin hallazgo: ${line}`)
+    const leaves = condition ? (variant ? { condition, variant } : { condition }) : null
+    // Lo que deja en la pieza encaja con el ámbito; la variante, si va, existe.
+    if (leaves && validateLeavesFinding(leaves, { scope, strictVariants: false }).length > 0) {
+      throw new Error(`Lo que deja en la pieza no encaja: ${line}`)
+    }
+    return { key, kind: kind!, scope: scope!, min, max, leaves, common: common === "true", name }
   })
+
+  // --- Código de cada tratamiento en cada lista ---
+  const mappings = strictLines("biblioteca_codigos.csv", "template_key,system_key,code,version").map(
+    (line) => {
+      const [templateKey, systemKey, code, version] = splitHead(line, 4)
+      if (!templateKey || !systemKey || !code || !version) {
+        throw new Error(`Línea inválida en biblioteca_codigos.csv: ${line}`)
+      }
+      return { templateKey, systemKey, code, version }
+    },
+  )
 
   // --- Procedencia (conciliación; denominación al final) ---
   const provenance = strictLines(
@@ -175,24 +189,32 @@ function loadLibrary() {
       `Cobertura: ${codes.length} códigos frente a expected_count=${release.expectedCount}`,
     )
   }
-  if (templates.length !== release.expectedCount || provenance.length !== release.expectedCount) {
-    throw new Error("Cobertura: plantillas o procedencia no concilian con expected_count")
+  if (provenance.length !== release.expectedCount) {
+    throw new Error("Cobertura: la procedencia no concilia con expected_count")
   }
   if (new Set(codes.map((c) => `${c.systemKey}:${c.code}:${c.version}`)).size !== codes.length) {
     throw new Error("Códigos duplicados en procedure_codes_cpms.csv")
   }
   if (new Set(templates.map((t) => t.key)).size !== templates.length) {
-    throw new Error("Plantillas duplicadas en treatment_templates_cpms.csv")
+    throw new Error("Tratamientos duplicados en biblioteca.csv")
+  }
+  if (new Set(templates.map((t) => t.name.toLowerCase())).size !== templates.length) {
+    throw new Error("Nombres repetidos en biblioteca.csv")
   }
   const codeByKey = new Map(codes.map((c) => [`${c.systemKey}:${c.code}:${c.version}`, c]))
-  for (const t of templates) {
-    const code = codeByKey.get(`${t.systemKey}:${t.code}:${t.version}`)
-    if (!code) throw new Error(`Plantilla sin código en catálogo: ${t.key}`)
-    if (code.display !== t.name)
-      throw new Error(`Nombre distinto a la denominación oficial: ${t.key}`)
-    if (t.systemKey !== release.systemKey || t.version !== release.version) {
-      throw new Error(`Plantilla fuera de la edición vigente: ${t.key}`)
+  const templateKeys = new Set(templates.map((t) => t.key))
+  const perList = new Set<string>()
+  for (const m of mappings) {
+    if (!templateKeys.has(m.templateKey)) throw new Error(`Código de un tratamiento que no está: ${m.templateKey}`)
+    if (!codeByKey.has(`${m.systemKey}:${m.code}:${m.version}`)) {
+      throw new Error(`Código inexistente en la lista: ${m.systemKey} ${m.code} ${m.version}`)
     }
+    if (m.systemKey !== release.systemKey || m.version !== release.version) {
+      throw new Error(`Código fuera de la edición vigente: ${m.templateKey}`)
+    }
+    const list = `${m.templateKey}:${m.systemKey}:${m.version}`
+    if (perList.has(list)) throw new Error(`Dos códigos de la misma lista para ${m.templateKey}`)
+    perList.add(list)
   }
   const provByCode = new Map(provenance.map((p) => [p.code, p.display]))
   for (const c of codes) {
@@ -204,12 +226,12 @@ function loadLibrary() {
     }
   }
 
-  return { systems, release, codes, templates }
+  return { systems, release, codes, templates, mappings }
 }
 
 /** Siembra idempotente del catálogo oficial sobre una conexión owner. */
 export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResult> {
-  const { systems, release, codes, templates } = loadLibrary()
+  const { systems, release, codes, templates, mappings } = loadLibrary()
   const scopeKeys = templates.map((t) => t.key)
   const scopeCodes = codes.map((c) => c.code)
 
@@ -285,49 +307,46 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
     )
 
     for (const t of templates) {
+      const leaves = t.leaves ? JSON.stringify(t.leaves) : null
       await tx.execute(
         sql`insert into "treatment_template"
-        ("key", "name", "specialty", "scope", "surface_count_min", "surface_count_max", "is_active", "version")
-        values (${t.key}, ${t.name}, ${t.specialty}, ${t.scope}, ${t.min}, ${t.max}, true, 1)
+        ("key", "name", "specialty", "scope", "surface_count_min", "surface_count_max", "leaves_finding", "is_common", "is_active", "version")
+        values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, ${t.min}, ${t.max}, ${leaves}::jsonb, ${t.common}, true, 1)
         on conflict ("key") do update set
           "name" = excluded."name",
           "specialty" = excluded."specialty",
           "scope" = excluded."scope",
           "surface_count_min" = excluded."surface_count_min",
           "surface_count_max" = excluded."surface_count_max",
+          "leaves_finding" = excluded."leaves_finding",
+          "is_common" = excluded."is_common",
           "is_active" = true,
           "version" = "treatment_template"."version" + (
             ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope",
-             "treatment_template"."surface_count_min", "treatment_template"."surface_count_max")
+             "treatment_template"."surface_count_min", "treatment_template"."surface_count_max",
+             "treatment_template"."leaves_finding")
             IS DISTINCT FROM
             (excluded."name", excluded."specialty", excluded."scope",
-             excluded."surface_count_min", excluded."surface_count_max")
+             excluded."surface_count_min", excluded."surface_count_max", excluded."leaves_finding")
           )::int`,
       )
     }
-    // Plantillas internas previas y versiones CPMS retiradas quedan inactivas; las
-    // filas se conservan. No toca otros sistemas: solo claves internas (un `:`) y
-    // las propias `cpms:`.
+    // Lo que ya no está en la biblioteca (las plantillas `cpms:` de antes)
+    // queda inactivo; las filas se conservan para los servicios que las usan.
     await tx.execute(
-      sql`update "treatment_template" set "is_active" = false
-        where ${notInArray(sql`"key"`, scopeKeys)}
-          and ("key" not like '%:%:%' or "key" like 'cpms:%')`,
+      sql`update "treatment_template" set "is_active" = false where ${notInArray(sql`"key"`, scopeKeys)}`,
     )
-    // Mappings 1:1 por upsert, sin borrar: los de versiones oficiales retiradas se
-    // conservan para detalle de lectura y referencias de ofertas; solo se
-    // desactivan plantillas y códigos. El único por plantilla impide divergencias
-    // (una fila distinta para la misma plantilla falla y revierte).
-    for (const t of templates) {
-      const found = await tx.execute(
-        sql`select "id" from "treatment_template" where "key" = ${t.key} limit 1`,
-      )
-      const templateId = (found as unknown as { id: string }[])[0]?.id
-      if (!templateId) throw new Error(`Plantilla no sembrada: ${t.key}`)
+    // El código de cada tratamiento en esta edición se reemplaza entero: un
+    // cambio de código en el CSV no deja el viejo. Otras ediciones y listas no
+    // se tocan.
+    await tx.execute(
+      sql`delete from "treatment_template_code"
+        where "system_key" = ${release.systemKey} and "version" = ${release.version}`,
+    )
+    for (const m of mappings) {
       await tx.execute(
-        sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version", "is_primary")
-          values (${templateId}, ${t.systemKey}, ${t.code}, ${t.version}, true)
-          on conflict ("template_id", "system_key", "code", "version") do update set
-            "is_primary" = true`,
+        sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")
+          select "id", ${m.systemKey}, ${m.code}, ${m.version} from "treatment_template" where "key" = ${m.templateKey}`,
       )
     }
 
@@ -339,17 +358,20 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
       select 'templates', count(*)::text from "treatment_template"
         where ${inArray(sql`"key"`, scopeKeys)} and "is_active"
       union all
-      select 'mappings', count(*)::text from "treatment_template_code" where
-        "template_id" in (select "id" from "treatment_template" where ${inArray(sql`"key"`, scopeKeys)})`)) as unknown as {
+      select 'mappings', count(*)::text from "treatment_template_code"
+        where "system_key" = ${release.systemKey} and "version" = ${release.version}`)) as unknown as {
       kind: string
       count: string
     }[]
     const got = new Map(checks.map((r) => [r.kind, Number(r.count)]))
-    for (const kind of ["codes", "templates", "mappings"]) {
-      if (got.get(kind) !== release.expectedCount) {
-        throw new Error(
-          `Conciliación falló (${kind}): ${got.get(kind)} frente a ${release.expectedCount}`,
-        )
+    const expected = new Map([
+      ["codes", release.expectedCount],
+      ["templates", templates.length],
+      ["mappings", mappings.length],
+    ])
+    for (const [kind, count] of expected) {
+      if (got.get(kind) !== count) {
+        throw new Error(`Conciliación falló (${kind}): ${got.get(kind)} frente a ${count}`)
       }
     }
   })
