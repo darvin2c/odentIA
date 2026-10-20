@@ -15,6 +15,7 @@ import {
 } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { conversationStatusLabel } from "../../lib/glossary"
+import { useReceptionName } from "../../lib/agent-names"
 import { useOrgProfile } from "../../lib/org"
 import {
   appointmentWhen,
@@ -100,6 +101,7 @@ export function PersonSummary({
 }) {
   const patientId = person.patient?.id ?? null
   const can = useCan()
+  const receptionName = useReceptionName()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
   // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
   const receivesTomography = can("clinical.receive") && !can("clinical.read")
@@ -338,7 +340,7 @@ export function PersonSummary({
                 "Consultando…"
               ) : lastConversation ? (
                 <>
-                  {conversationStatusLabel(lastConversation.status, lastConversation.closure)}
+                  {conversationStatusLabel(lastConversation.status, lastConversation.closure, receptionName)}
                   {lastConversation.lastMessageAt
                     ? ` · ${timeAgo(lastConversation.lastMessageAt)}`
                     : ""}

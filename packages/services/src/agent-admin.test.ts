@@ -147,7 +147,7 @@ describe("su página", () => {
     // Apagada: se dice en condicional, y con cuántos casos empezaría hoy.
     expect(noShowLine).toMatchObject({
       trigger: "Una persona falta a su cita",
-      description: "El agente Recepción le escribiría al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y quedaría una tarea para el equipo de recepción.",
+      description: "Sofi le escribiría al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y quedaría una tarea para el equipo de recepción.",
       enabled: false, hasAgent: true, agentPart: true, teamPart: true, todayCases: 0, recommended: false, week: null,
     })
     expect(page.lines.find((line) => line.key === "cobranza_vencida")).toMatchObject({
@@ -163,18 +163,18 @@ describe("su página", () => {
     const on = await change({ enabled: true })
     expect(on).toMatchObject({
       enabled: true, actor: "agente", week: "Esta semana: todavía nada", paused: null,
-      description: "El agente Recepción le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción.",
+      description: "Sofi le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción.",
     })
     expect(on.since).not.toBeNull()
     // El flujo dibuja solo lo que se ejecuta; el aviso de «no pude» no depende de ningún interruptor.
-    expect(on.flow.main.map((step) => step.label)).toEqual(["Una persona falta a su cita", "Espera al día siguiente", "¿Puede escribirle el agente?", "Le escribe", "Lo resuelve el agente"])
+    expect(on.flow.main.map((step) => step.label)).toEqual(["Una persona falta a su cita", "Espera al día siguiente", "¿Puede escribirle Sofi?", "Le escribe", "Lo resuelve Sofi"])
     expect(on.flow.otherwise?.map((step) => [step.label, step.always])).toEqual([["Avisa por qué y cómo habilitarlo", true], ["Tarea de llamada", false], ["Le toca a una persona", false]])
     expect(on.message).toEqual({
       text: "Hola, Lucía. No pudimos verte en la cita del lunes 12 de octubre en Clínica Sonríe. ¿Te buscamos otro horario?",
       buttons: ["Sí, otro horario", "No enviar más"],
     })
     const noTask = await change({ teamPart: false })
-    expect(noTask.description).toBe("El agente Recepción le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo.")
+    expect(noTask.description).toBe("Sofi le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo.")
     expect(noTask.flow.otherwise?.map((step) => step.label)).toEqual(["Avisa por qué y cómo habilitarlo", "Queda avisado"])
     // «Mejor que a quien falta lo llame una persona»: sin el agente, la línea le toca al equipo.
     const byPerson = await change({ teamPart: true, agentPart: false })
@@ -203,7 +203,7 @@ describe("su página", () => {
     expect(flow.otherwise).toBeNull()
     expect(flow.main.map((step) => [step.label, step.actorLabel])).toEqual([
       ["Una atención lleva 2 días sin firmar", null],
-      ["Espera 2 días", "Administrador · agente"],
+      ["Espera 2 días", "Argos · agente"],
       ["Tarea para firmar", "Equipo clínico · persona"],
       ["Le toca a una persona", null],
     ])
@@ -469,7 +469,7 @@ describe("a quién no pudo escribirle", () => {
       ["Pedro Lara", "Reprogramar tras una inasistencia", "no_pudo"],
       ["Tomás Rivas", "Reprogramar tras una inasistencia", "no_pudo"],
     ])
-    expect(unreached.people[0]?.text).toBe("El agente no pudo escribirle: pidió no recibir este tipo de mensaje. Lo tiene el equipo de recepción.")
+    expect(unreached.people[0]?.text).toBe("Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Lo tiene el equipo de recepción.")
     expect(await tasksOf(c)).toHaveLength(2)
     // Quien no ve la agenda no ve a esas personas.
     expect(await run(c, (tx) => getAdminUnreached(tx, c.orgId, (permission) => permission === "finance.read"))).toEqual({ total: 0, byCause: [], people: [] })
@@ -515,7 +515,7 @@ describe("propone cambiar o apagar la línea que no sirve", () => {
       })),
     )
     const line = (await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((item) => item.key === "seguimiento_presupuesto")!
-    expect(line.suggestion).toBe("En 30 días el agente no pudo escribirle a 10 de 10 personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.")
+    expect(line.suggestion).toBe("En 30 días Sofi no pudo escribirle a 10 de 10 personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.")
     expect(line.enabled).toBe(true)
   })
 })

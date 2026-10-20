@@ -40,6 +40,7 @@ import { OpportunityPanel } from "./opportunity-panel"
 import { TaskDrawer } from "./task-drawer"
 import { PersonLink } from "../person-link"
 import { activeOrgLocale } from "../../lib/locale"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { amountFromCents } from "../../lib/workspace"
 import { PhoneMatchPrompt } from "./phone-match"
 
@@ -101,6 +102,7 @@ export function ContactWorkspace({
   onDraftChange,
 }: ContactWorkspaceProps) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const canRead = usePermission("crm.read")
   const canWriteNote = usePermission("crm.write")
   const canWriteConv = usePermission("conversations.write")
@@ -281,7 +283,7 @@ export function ContactWorkspace({
     onRefreshRef.current?.()
   }, [queryClient, contactId])
 
-  // «Tomar», «Devolver al agente» y «Resolver» viven solo en la cabecera del
+  // «Tomar», «Devolver a Sofi» y «Resolver» viven solo en la cabecera del
   // hilo, con una sola regla: «Contexto» no los repite.
 
   // La confirmación del interlocutor registra evidencia real por /confirm. Un
@@ -525,16 +527,16 @@ export function ContactWorkspace({
           <div className="flex flex-col gap-2 rounded-md border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Bot className="size-4 text-muted-foreground" aria-hidden />
-              <Badge variant="secondary">{agentStateLabel(agent.state)}</Badge>
+              <Badge variant="secondary">{agentStateLabel(agent.state, receptionName)}</Badge>
               {pendingIds.length > 0 && (
                 <span className="text-xs text-muted-foreground">
                   {pendingIds.length === 1 ? "1 cita espera el sí del paciente" : `${pendingIds.length} citas esperan el sí del paciente`}
                 </span>
               )}
             </div>
-            <p className="text-sm text-muted-foreground">{agentStateDescription(agent)}</p>
+            <p className="text-sm text-muted-foreground">{agentStateDescription(agent, receptionName)}</p>
             <ul className="flex flex-col gap-1">
-              {agentNextSteps(agent).map((step) => (
+              {agentNextSteps(agent, receptionName).map((step) => (
                 <li key={step} className="flex items-center gap-1.5 text-sm">
                   <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {step}
@@ -542,7 +544,7 @@ export function ContactWorkspace({
               ))}
             </ul>
             <Button variant="link" size="sm" className="h-auto min-h-11 w-fit p-0 sm:min-h-8" onClick={() => setMemoryOpen(true)}>
-              Lo que recuerda el agente
+              Lo que recuerda {receptionName}
             </Button>
             {/* Lo que espera el sí del interlocutor: el equipo solo registra una
                 confirmación que ya dio en el chat (agent.decide más el dominio del
@@ -1086,10 +1088,11 @@ export function ContactWorkspace({
 }
 
 function ActivityRow({ item }: { item: CrmActivityItem }) {
+  const receptionName = useReceptionName()
   return (
     <li className="flex flex-col gap-1 rounded-md border p-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="secondary">{activityKindLabel(item.kind)}</Badge>
+        <Badge variant="secondary">{activityKindLabel(item.kind, receptionName)}</Badge>
         <span className="text-xs text-muted-foreground">{timeAgo(item.at)}</span>
         {item.channel && (
           <span className="text-xs text-muted-foreground">· {channelLabel(item.channel)}</span>
@@ -1101,8 +1104,8 @@ function ActivityRow({ item }: { item: CrmActivityItem }) {
           <span className="text-xs text-muted-foreground">· {ACTIVITY_STATUS_LABEL[item.status] ?? "Estado registrado"}</span>
         )}
       </div>
-      <p className="text-sm font-medium">{item.title}</p>
-      {item.body && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.body}</p>}
+      <p className="text-sm font-medium">{withReceptionName(item.title, receptionName)}</p>
+      {item.body && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{withReceptionName(item.body, receptionName)}</p>}
       <div className="flex flex-wrap gap-3">
         {item.conversationId && (
           <Link

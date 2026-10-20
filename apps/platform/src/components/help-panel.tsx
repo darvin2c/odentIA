@@ -6,6 +6,7 @@ import { ArrowRight, CircleHelp } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
+import { useReceptionName, withReceptionName } from "../lib/agent-names"
 import { ASK_HELP_EVENT } from "../lib/global-search"
 import { mutationErrorMessage } from "../lib/query-error"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
@@ -155,6 +156,7 @@ function WhatIsSent({
  * a odentIA.
  */
 export function HelpButton() {
+  const receptionName = useReceptionName()
   const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const searchStr = useRouterState({ select: (state) => state.location.searchStr })
@@ -304,7 +306,7 @@ export function HelpButton() {
                     {exchange.reply.kind === "guia"
                       ? exchange.reply.answers.map((answer) => (
                           <div key={answer.topicId} className={ANSWER}>
-                            <p className="whitespace-pre-wrap">{withDestination(answer.text, answer.where)}</p>
+                            <p className="whitespace-pre-wrap">{withDestination(withReceptionName(answer.text, receptionName), answer.where)}</p>
                             {answer.restriction ? <p>{answer.restriction}</p> : null}
                             {answer.path ? (
                               <Link

@@ -16,6 +16,7 @@ import {
   previewCounts,
   previewSummary,
 } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { mutationErrorMessage } from "../../lib/query-error"
 import { SURFACE_ACTIONS } from "./correct-drawer"
@@ -54,12 +55,12 @@ function dayOf(iso: string, now = new Date()): string {
  * quién, cuándo, de qué agente era la respuesta y quién la recibió. `short`
  * deja solo el origen y el día, para la tarjeta de la lista.
  */
-export function lessonOriginText(lesson: LessonItem, options: { short?: boolean } = {}): string {
+export function lessonOriginText(lesson: LessonItem, receptionName: string, options: { short?: boolean } = {}): string {
   const day = dayOf(lesson.createdAt)
   // «de hoy», «de ayer», «del martes».
   const ofDay = day.startsWith("el ") ? `del ${day.slice(3)}` : `de ${day}`
   const who = lesson.proposedByName
-  const agent = agentName(lesson.agent)
+  const agent = agentName(lesson.agent, receptionName)
   const received = lesson.contactName ? `, la que recibió ${lesson.contactName}` : ""
   if (lesson.origin === "respuesta_buena") {
     if (options.short) return `De una respuesta que tu equipo dio por buena, ${day}.`
@@ -238,10 +239,11 @@ function LessonTest({
 }
 
 function Chips({ lesson }: { lesson: LessonItem }) {
+  const receptionName = useReceptionName()
   return (
     <>
       <Badge variant="secondary">{LESSON_KIND_LABEL[lesson.kind]}</Badge>
-      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope)}</Badge>
+      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
     </>
   )
 }
@@ -379,6 +381,7 @@ function Block({ id, title, children }: { id: string; title: string; children: R
  */
 export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string | null; canWrite: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const isMobile = useIsMobile()
   const [editing, setEditing] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
@@ -532,7 +535,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
               </div>
 
               <Block id="leccion-origen" title="De dónde sale">
-                <p>{lessonOriginText(lesson)}</p>
+                <p>{lessonOriginText(lesson, receptionName)}</p>
                 {lesson.approvedByName && lesson.approvedAt ? (
                   <p className="text-muted-foreground">
                     La aprobó {lesson.approvedByName} el {new Date(lesson.approvedAt).toLocaleDateString("es", { day: "numeric", month: "long" })}.
@@ -543,7 +546,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
 
               <Block id="leccion-alcance" title="A quién se aplica">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope)}</Badge>
+                  <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
                   <p className="min-w-0 flex-1 basis-48 text-muted-foreground">{SCOPE_WHY[lesson.kind]}</p>
                 </div>
               </Block>

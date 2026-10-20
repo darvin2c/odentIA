@@ -18,6 +18,8 @@ import { AGENT_OF, PriceWithDiscount, type SaasActionKind } from "../../componen
 import { formatMicros } from "../../components/billing/money"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { PersonLink } from "../../components/person-link"
+import { agentName } from "../../lib/agent"
+import { ADMIN_NAME, CLINICAL_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { PLAN_PATH, useClinicLine } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
@@ -133,6 +135,7 @@ function ActionsPage() {
   const { org } = orgRouteApi.useRouteContext()
   const organizationId = org.id
   const clinicLine = useClinicLine()
+  const receptionName = useReceptionName()
   const [filter, setFilter] = useState<Filter>("todo")
   const [period, setPeriod] = useState<Period>("actual")
   const [offset, setOffset] = useState(0)
@@ -175,7 +178,7 @@ function ActionsPage() {
           return (
             <span className="block min-w-48 whitespace-normal">
               <span className="block text-xs text-muted-foreground">
-                {AGENT_OF[row.original.kind].agent}
+                {agentName(AGENT_OF[row.original.kind].agent, receptionName)}
                 {channel ? ` · ${channel}` : ""}
               </span>
               {row.original.detail}
@@ -270,7 +273,7 @@ function ActionsPage() {
         },
       },
     ],
-    [],
+    [receptionName],
   )
   const table = useReactTable({ data: actions.data?.items ?? [], columns, getCoreRowModel: getCoreRowModel() })
   const total = actions.data?.total ?? 0
@@ -296,9 +299,9 @@ function ActionsPage() {
         >
           <TabsList aria-label="Qué mostrar">
             <TabsTrigger value="todo">Todo</TabsTrigger>
-            <TabsTrigger value="conversacion">Recepción</TabsTrigger>
-            <TabsTrigger value="consulta">Asistente clínico</TabsTrigger>
-            <TabsTrigger value="cita">Administrador</TabsTrigger>
+            <TabsTrigger value="conversacion">{receptionName}</TabsTrigger>
+            <TabsTrigger value="consulta">{CLINICAL_NAME}</TabsTrigger>
+            <TabsTrigger value="cita">{ADMIN_NAME}</TabsTrigger>
             {period === "actual" ? (
               <TabsTrigger value="esperando">Esperando que asista{actions.data?.pending ? ` (${actions.data.pending})` : ""}</TabsTrigger>
             ) : null}

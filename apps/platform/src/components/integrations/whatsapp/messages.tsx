@@ -2,6 +2,7 @@ import { Badge, Button, cn, Skeleton } from "@odentia/ui"
 import { EmptyState, ErrorState } from "@odentia/ui-patterns"
 import { ChevronRight, MessageSquareText, Plus, RefreshCw } from "lucide-react"
 import { type RefObject, useId } from "react"
+import { ADMIN_NAME } from "../../../lib/agent-names"
 import { type ClinicMessage, messageGroups, messageRow, messagesSummary, type StatusTone } from "../../../lib/whatsapp"
 
 const STATUS_BADGE = { ok: "soft", waiting: "warning", danger: "destructive", off: "secondary" } as const
@@ -199,8 +200,8 @@ export function WhatsAppMessages({
       ) : groups && items && items.length > 0 ? (
         <>
           <Group
-            title="Los envía el agente"
-            note="Vienen escritos y puedes cambiarles el texto. Salen solos cuando su línea del Administrador está prendida."
+            title={`Los envía ${ADMIN_NAME}`}
+            note={`Vienen escritos y puedes cambiarles el texto. Salen solos cuando su línea de ${ADMIN_NAME} está prendida.`}
             items={groups.agent}
             openId={openId}
             since={since}

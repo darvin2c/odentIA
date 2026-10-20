@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { type AdminDraft, type AdminLineDetail, type AdminRequestResult, adminLineKey, refreshAdmin } from "../../lib/admin"
+import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { mutationErrorMessage } from "../../lib/query-error"
 import { adminFlowToDiagram } from "./admin-line"
@@ -12,20 +13,22 @@ import { adminFlowToDiagram } from "./admin-line"
 /** Con el modelo caído el campo se desactiva y vuelve solo pasado este tiempo. */
 const RETRY_AFTER_MS = 30_000
 
-const EXAMPLES = [
-  "Cuando alguien cancele su cita, que el agente le ofrezca otra fecha",
+/** Quien escribe es el agente de recepción: el ejemplo dice su nombre en esta clínica. */
+const examples = (receptionName: string) => [
+  `Cuando alguien cancele su cita, que ${receptionName} le ofrezca otra fecha`,
   "Cuando alguien falte a su cita, que salga a las 10 y que además llame una persona si no puede",
   "Apaga la de saldos vencidos",
 ]
 
 /**
- * «Dile qué quieres que haga»: pedirle algo al Administrador con palabras. Lo
+ * «Dile qué quieres que haga»: pedirle algo a Argos con palabras. Lo
  * que entiende queda como borrador en su línea y se abre ahí; no prende ni
  * cambia nada. Lo que no reconoce o no se puede, lo dice.
  */
 export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => void }) {
   const uid = useId()
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [text, setText] = useState("")
   const [toDelete, setToDelete] = useState<string | null>(null)
   const [down, setDown] = useState(false)
@@ -35,7 +38,7 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
     mutationFn: (request: string) =>
       apiFetch("/api/help/requests", {
         method: "POST",
-        body: JSON.stringify({ question: request.slice(0, 500), screen: "/agent/administrador", kind: "pregunta", detail: "Pedido al Administrador que todavía no sabe hacer" }),
+        body: JSON.stringify({ question: request.slice(0, 500), screen: "/agent/administrador", kind: "pregunta", detail: `Pedido a ${ADMIN_NAME} que todavía no sabe hacer` }),
       }),
     // La misma lista de «Tus casos con soporte» en Ayuda: el caso aparece enseguida.
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["support-cases"] }),
@@ -89,7 +92,7 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
             maxLength={600}
             disabled={down || ask.isPending}
             value={text}
-            placeholder="Por ejemplo: cuando alguien cancele su cita, que el agente le ofrezca otra fecha"
+            placeholder={`Por ejemplo: cuando alguien cancele su cita, que ${receptionName} le ofrezca otra fecha`}
             onChange={(event) => {
               setText(event.target.value)
               if (ask.data || ask.isError) ask.reset()
@@ -103,7 +106,7 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
         {text.trim().length === 0 && !down ? (
           <div className="flex min-w-0 flex-col gap-1.5">
             <p className="text-xs font-semibold text-muted-foreground">Por ejemplo</p>
-            {EXAMPLES.map((example) => (
+            {examples(receptionName).map((example) => (
               <Button
                 key={example}
                 type="button"
@@ -234,6 +237,7 @@ export function AdminDraftBlock({
   const uid = useId()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const receptionName = useReceptionName()
   const done = () => refreshAdmin(queryClient)
   const apply = useMutation({
     retry: false,
@@ -398,7 +402,7 @@ export function AdminDraftBlock({
           <Field>
             <FieldLabel htmlFor={`${uid}-indicacion`}>Lo que sí puedo: dejarlo como indicación en la tarea</FieldLabel>
             <FieldDescription>
-              La lee la persona de {draft.taskNote.team} que reciba la tarea, para que lo haga ella. El agente no lo dice ni lo ofrece.
+              La lee la persona de {draft.taskNote.team} que reciba la tarea, para que lo haga ella. {receptionName} no lo dice ni lo ofrece.
             </FieldDescription>
             <Input
               id={`${uid}-indicacion`}
@@ -440,7 +444,7 @@ export function AdminDraftBlock({
           <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" disabled={busy} onClick={() => discard.mutate()}>
             {discard.isPending ? "Descartando…" : words.discard}
           </Button>
-          {blocked ? <span className="text-sm text-muted-foreground">Enciende primero al administrador.</span> : null}
+          {blocked ? <span className="text-sm text-muted-foreground">Enciende primero a {ADMIN_NAME}.</span> : null}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">Lo decide quien administra el agente.</p>

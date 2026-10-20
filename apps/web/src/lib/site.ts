@@ -38,9 +38,9 @@ export const footerGroups: { title: string; links: NavLink[] }[] = [
     title: "Agentes",
     links: [
       { href: "/agentes", label: "Los tres agentes" },
-      { href: "/agentes/recepcion", label: "Recepción" },
-      { href: "/agentes/asistente-clinico", label: "Asistente clínico" },
-      { href: "/agentes/administrador", label: "Administrador" },
+      { href: "/agentes/recepcion", label: "Sofi · recepción" },
+      { href: "/agentes/asistente-clinico", label: "Clío · clínica" },
+      { href: "/agentes/administrador", label: "Argos · administración" },
     ],
   },
   {

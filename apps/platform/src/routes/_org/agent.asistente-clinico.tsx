@@ -4,7 +4,8 @@ import { ErrorState, LoadingState, PageHeader, PageShell, SubmitButton } from "@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
-import type { AgentRoles } from "../../lib/agent"
+import { type AgentRoles, namedAgentRoles } from "../../lib/agent"
+import { AGENT_NAME_REASONS, CLINICAL_NAME, useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -42,6 +43,7 @@ function ClinicalAssistantPage() {
   const queryClient = useQueryClient()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
+  const receptionName = useReceptionName()
   const [practice, setPractice] = useState("")
 
   const configQuery = useQuery({
@@ -52,6 +54,7 @@ function ClinicalAssistantPage() {
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
     enabled: canRead,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -85,8 +88,8 @@ function ClinicalAssistantPage() {
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader
-        title="Asistente clínico"
-        subtitle={role?.audience}
+        title={`${CLINICAL_NAME}, tu agente clínico`}
+        subtitle={AGENT_NAME_REASONS.asistente_clinico}
         actions={
           config && canWrite ? (
             <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
@@ -95,7 +98,7 @@ function ClinicalAssistantPage() {
                 id="asistente-clinico-encendido"
                 checked={on}
                 disabled={toggle.isPending}
-                aria-label={on ? "Apagar el Asistente clínico" : "Encender el Asistente clínico"}
+                aria-label={on ? `Apagar a ${CLINICAL_NAME}` : `Encender a ${CLINICAL_NAME}`}
                 onCheckedChange={(next) => toggle.mutate(next)}
               />
             </label>
@@ -110,7 +113,7 @@ function ClinicalAssistantPage() {
       {role ? <p className="-mt-2 max-w-prose text-sm">{role.role}</p> : null}
 
       {configQuery.isPending || rolesQuery.isPending ? (
-        <LoadingState message="Cargando al Asistente clínico…" />
+        <LoadingState message={`Cargando a ${CLINICAL_NAME}…`} />
       ) : configQuery.isError || !config || !role ? (
         <QueryErrorState error={configQuery.error ?? rolesQuery.error} onRetry={() => void configQuery.refetch()} />
       ) : (

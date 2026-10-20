@@ -91,13 +91,15 @@ export function label(domain: GlossaryDomain, code: string | null | undefined): 
  */
 export function conversationStatusLabel(
   status: string,
-  closure?: { reason: string; byName: string | null } | null,
+  closure: { reason: string; byName: string | null } | null | undefined,
+  /** Quien atiende las conversaciones: el agente de recepción de la clínica. */
+  receptionName: string,
 ): string {
   const base = label("conversacion", status)
   if (status !== "closed" || !closure) return base
   if (closure.reason === "equipo" && closure.byName) return `${base} · resuelta por ${closure.byName}`
   if (closure.reason === "manual" && closure.byName) return `${base} · por ${closure.byName}`
-  if (closure.reason === "resuelta") return `${base} · resuelta por el agente`
+  if (closure.reason === "resuelta") return `${base} · resuelta por ${receptionName}`
   const reason = label("cierre", closure.reason)
   return `${base} · ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`
 }

@@ -20,6 +20,7 @@ import {
   spanLabel,
 } from "../../lib/reports"
 import { during } from "./report-parts"
+import { ADMIN_NAME } from "../../lib/agent-names"
 
 /** Filas a la vista antes de «Mostrar las otras». */
 const PREVIEW = 8
@@ -202,7 +203,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Te deben hace más de 30 días",
     noun: { one: "persona", many: "personas" },
     how: (period, list) =>
-      `${owedAt(period, list)}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
+      `${owedAt(period, list)}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» de ${ADMIN_NAME}.`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,

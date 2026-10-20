@@ -56,6 +56,7 @@ import {
 } from "../../components/service-materials"
 import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { specialtyNameByKey, useClinicSpecialties } from "../../lib/clinical-forms"
 import { useCan, usePermission } from "../../lib/crm"
@@ -148,6 +149,7 @@ type EditorTarget = { kind: "offer"; id: string; focus?: "materiales" } | { kind
  * la tarifa; por debajo del corte, ese mismo formulario se abre como drawer.
  */
 function TarifarioPage() {
+  const receptionName = useReceptionName()
   const { org } = orgRouteApi.useRouteContext()
   const canManage = usePermission("settings.write")
   const canViewTariff =
@@ -270,8 +272,8 @@ function TarifarioPage() {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
       toast.success(
         updated === 1
-          ? `Listo: el agente dice ese precio como «${label}».`
-          : `Listo: el agente dice esos ${updated} precios como «${label}».`,
+          ? `Listo: ${receptionName} dice ese precio como «${label}».`
+          : `Listo: ${receptionName} dice esos ${updated} precios como «${label}».`,
       )
     },
     onError: (error) => {
@@ -694,7 +696,7 @@ function TarifarioPage() {
               disabled={disclosureMutation.isPending}
               onValueChange={(value) => disclosureMutation.mutate(value as PriceDisclosure)}
             >
-              <SelectTrigger className="min-h-11 w-auto" aria-label="Cómo dice el precio el agente">
+              <SelectTrigger className="min-h-11 w-auto" aria-label={`Cómo dice el precio ${receptionName}`}>
                 <SelectValue placeholder="Cómo dice el precio" />
               </SelectTrigger>
               <SelectContent>
@@ -1295,6 +1297,7 @@ function OfferReadOnly({
   linkedCoding: TreatmentTemplateItem["codings"][number] | null
   locale: string
 }) {
+  const receptionName = useReceptionName()
   return (
     <div className="flex flex-col gap-4">
       {offer.source === "legacy" ? <LegacyNote /> : null}
@@ -1309,7 +1312,7 @@ function OfferReadOnly({
           {formatMoney(offer.priceCents, offer.currency, locale)}
         </DetailField>
         <DetailField label="Se cobra">{BILLING_MODE_LABELS[offer.billingMode]}</DetailField>
-        <DetailField label="Cómo dice el precio el agente">
+        <DetailField label={`Cómo dice el precio ${receptionName}`}>
           {PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === offer.priceDisclosure)?.label}
         </DetailField>
         <DetailField label="Duración">
@@ -1768,11 +1771,12 @@ function LegacyTemplateLink({
  * con evaluación» se elige qué evaluación ofrece.
  */
 function PriceDisclosureFields({ form, idPrefix, offerId }: { form: OfferForm; idPrefix: string; offerId: string | null }) {
+  const receptionName = useReceptionName()
   const disclosure = useStore(form.store, (state) => state.values.priceDisclosure)
   return (
     <fieldset className="flex flex-col gap-3 rounded-xl border p-3">
       <legend id={`${idPrefix}-precio-agente`} className="px-1 text-sm font-semibold">
-        Cómo dice el precio el agente
+        Cómo dice el precio {receptionName}
       </legend>
       <form.Field name="priceDisclosure">
         {(field) => (

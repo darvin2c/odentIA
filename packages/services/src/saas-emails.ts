@@ -149,7 +149,7 @@ export function saasRestrictionSoonEmail(input: { clinic: string; amounts: reado
     title: "Mañana tu clínica pasa a solo lectura",
     band: { tone: "vencido", text: "Último día para registrar el pago" },
     paragraphs: [
-      `El cargo de ${input.clinic} sigue sin pagar. Si hoy no se registra el comprobante, mañana el equipo podrá ver todo, pero no guardar, y el agente no responderá.`,
+      `El cargo de ${input.clinic} sigue sin pagar. Si hoy no se registra el comprobante, mañana el equipo podrá ver todo, pero no guardar, y Sofi no responderá.`,
     ],
     facts: input.amounts.map((value) => ({ label: "Monto pendiente", value })),
     ...action("Registrar mi comprobante", input.url),

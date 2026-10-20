@@ -115,11 +115,11 @@ type ProviderProblem = ReturnType<typeof describeProviderProblem>
 function handoffReasonFor(problem: ProviderProblem): string {
   switch (problem.code) {
     case "DAILY_LIMIT":
-      return "El agente alcanzó su tope diario de corridas"
+      return "Sofi alcanzó su tope diario de corridas"
     case "PROVIDER_QUOTA":
-      return "El proveedor del modelo del agente no tiene saldo o cuota; ya avisamos a odentIA"
+      return "El proveedor del modelo de Sofi no tiene saldo o cuota; ya avisamos a odentIA"
     default:
-      return "El agente no puede usar el modelo ahora; ya avisamos a odentIA"
+      return "Sofi no puede usar el modelo ahora; ya avisamos a odentIA"
   }
 }
 

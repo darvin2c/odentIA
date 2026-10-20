@@ -6,6 +6,8 @@
 import { Button } from "@odentia/ui"
 import type { Consumption } from "./consumption"
 import { formatMicros, formatPlanMoney } from "./money"
+import { agentName } from "../../lib/agent"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 
 export interface OfferPlan {
   code: string
@@ -22,21 +24,22 @@ export interface OfferPlan {
 const ACTIONS = [
   {
     key: "conversationMicros" as const,
-    agent: "Recepción",
+    agent: "recepcion",
     what: "Conversación atendida",
     when: "Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal.",
-    not: "No se cobra si responde tu equipo, si se deriva sin IA o si el agente falla.",
+    /** «Sofi» se cambia por el nombre de la clínica al mostrarlo. */
+    not: "No se cobra si responde tu equipo, si se deriva sin IA o si Sofi falla.",
   },
   {
     key: "consultationMicros" as const,
-    agent: "Asistente clínico",
+    agent: "asistente_clinico",
     what: "Consulta dictada y confirmada",
     when: "Una por atención, sin importar cuántos minutos dictes.",
     not: "No se cobra si descartas el borrador.",
   },
   {
     key: "recoveryMicros" as const,
-    agent: "Administrador",
+    agent: "administrador",
     what: "Cita recuperada",
     when: "Cuando un paciente vuelve tras un seguimiento y asiste.",
     not: "No se cobran recordatorios, mensajes sin respuesta ni citas canceladas.",
@@ -60,6 +63,7 @@ export function PlanOffer({
   busy: boolean
   onActivate: () => void
 }) {
+  const receptionName = useReceptionName()
   const money = (cents: number) => formatPlanMoney(cents, plan.currency)
   const priced = ACTIONS.some((action) => plan[action.key] !== null)
   const returnsCredit = plan.creditCents > 0 && plan.creditCents >= plan.priceCents
@@ -108,10 +112,10 @@ export function PlanOffer({
               return (
                 <li key={action.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
                   <div className="min-w-0 flex-1 basis-60">
-                    <p className="text-xs text-muted-foreground">{action.agent}</p>
+                    <p className="text-xs text-muted-foreground">{agentName(action.agent, receptionName)}</p>
                     <p className="text-sm font-medium">{action.what}</p>
                     <p className="text-xs text-muted-foreground">
-                      {action.when} {action.not}
+                      {action.when} {withReceptionName(action.not, receptionName)}
                     </p>
                   </div>
                   <p className="text-base font-semibold tabular-nums">{formatMicros(price, plan.currency)}</p>

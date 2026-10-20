@@ -39,6 +39,7 @@ import { amountFromCents } from "../../lib/workspace"
 import { ExpenseFormDrawer, type ExpenseDraft, type ExpensePlace } from "../finance/expense-form-drawer"
 import { PromotionsCard, PromotionsView } from "./promotions-view"
 import { BarRows, type Better, ChangeLine, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { ADMIN_NAME } from "../../lib/agent-names"
 
 type Money = (cents: number) => string
 
@@ -681,7 +682,7 @@ function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportF
               <Bot className="size-3.5" />
             </span>
             <span>
-              <strong>El Administrador:</strong> de lo que atendió {worst.row.name} aún no se cobran {money(worst.row.unpaidCents)} ({worst.share} %; en la clínica, {clinicUnpaid} %). Su comisión de eso llegará cuando se cobre.
+              <strong>{ADMIN_NAME}:</strong> de lo que atendió {worst.row.name} aún no se cobran {money(worst.row.unpaidCents)} ({worst.share} %; en la clínica, {clinicUnpaid} %). Su comisión de eso llegará cuando se cobre.
             </span>
           </p>
         ) : null}
@@ -879,7 +880,7 @@ function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (l
           <strong>
             {data.upcoming.unbooked.patients} {data.upcoming.unbooked.patients === 1 ? "no tiene" : "no tienen"} cita: {money(data.upcoming.unbooked.cents)}
           </strong>
-          <span className="text-[13px]">«Presupuesto aceptado sin cita» del Administrador deja una tarea a recepción para llamarlos.</span>
+          <span className="text-[13px]">«Presupuesto aceptado sin cita» de {ADMIN_NAME} deja una tarea a recepción para llamarlos.</span>
           <Button type="button" size="sm" className="self-start" onClick={() => onOpenList("upcoming_unbooked")}>
             Ver {data.upcoming.unbooked.patients === 1 ? "quién" : `los ${data.upcoming.unbooked.patients}`}
           </Button>

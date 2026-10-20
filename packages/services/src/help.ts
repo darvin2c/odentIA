@@ -18,6 +18,7 @@ import {
   matchHelpTopics,
 } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
+import { receptionName } from "./agent-names.js"
 
 /* ---------- Ayuda de odentIA: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
@@ -113,8 +114,8 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
     if (channels === 0) out.push({ text: "No hay ningún canal conectado: no pueden llegar ni salir mensajes.", ...at("canales") })
   }
   if (topic.id === "agente" || topic.id === "bandeja") {
-    const [cfg] = await tx.select({ enabled: agentConfig.enabled }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-    if (topic.id === "agente" && !cfg?.enabled) out.push({ text: "Recepción está apagado: el agente no responde hasta que lo enciendas.", ...at("agente") })
+    const [cfg] = await tx.select({ enabled: agentConfig.enabled, personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
+    if (topic.id === "agente" && !cfg?.enabled) out.push({ text: `${receptionName(cfg?.personaName)} está apagada: no responde hasta que la enciendas.`, ...at("agente") })
   }
   return out
 }

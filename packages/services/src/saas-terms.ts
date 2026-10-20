@@ -397,7 +397,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         title: level === "limite" ? "Tope alcanzado" : level === "alarma" ? "Alarma" : "Aviso",
         message:
           level === "limite"
-            ? "Llegaste a tu tope de gasto: Recepción pasa los casos nuevos a tu equipo con un mensaje fijo. El dictado y las citas en curso siguen."
+            ? "Llegaste a tu tope de gasto: Sofi pasa los casos nuevos a tu equipo con un mensaje fijo. El dictado y las citas en curso siguen."
             : `Los agentes llevan ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)} este mes.${reachesThisPeriod ? ` A este ritmo llegas el ${fmtDay(reachesThisPeriod)}.` : ""}`,
         short:
           level === "limite"
@@ -451,7 +451,7 @@ export const SAAS_GUARANTEE_NOTICE_DAYS = 30
 export interface AgentSpendGate {
   /** Se usó todo el saldo de prueba: los agentes se pausan. */
   trialExhausted: boolean
-  /** Se llegó al tope del mes: Recepción pasa los casos nuevos al equipo. */
+  /** Se llegó al tope del mes: Sofi pasa los casos nuevos al equipo. */
   capReached: boolean
 }
 
@@ -464,7 +464,7 @@ export async function getAgentSpendGate(tx: Db, orgId: string, now = new Date())
   }
 }
 
-/** Para el dictado y el Administrador: con el saldo de prueba agotado los agentes no trabajan. */
+/** Para el dictado (Clío) y Argos: con el saldo de prueba agotado los agentes no trabajan. */
 export async function assertAgentsNotPaused(tx: Db, orgId: string): Promise<void> {
   const gate = await getAgentSpendGate(tx, orgId)
   if (gate.trialExhausted) {

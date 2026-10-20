@@ -2,6 +2,7 @@ import type { Db } from "@odentia/db"
 import { agentConfig } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
+import { RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
 import { AGENT_ROLES, switchableFunctions } from "./agent-roles.js"
 import { ServiceError, validation } from "./errors.js"
 
@@ -20,7 +21,8 @@ export interface AgentConfig {
   /** Asistente clínico: dictado en la atención. */
   clinicalAssistantEnabled: boolean
   /** La voz de la clínica: nombre con que se presenta, trato, tono, emojis y quiénes son. */
-  personaName: string | null
+  /** Sin nombre elegido es Sofi (`receptionName`): el nombre vale solo para esta clínica. */
+  personaName: string
   treatment: AgentTreatment | null
   tone: AgentTone
   emojis: AgentEmojis
@@ -70,7 +72,7 @@ const DEFAULTS = {
   replyCheckEnabled: true,
   decisionRoutingEnabled: true,
   clinicalAssistantEnabled: false,
-  personaName: null as string | null,
+  personaName: RECEPTION_DEFAULT_NAME,
   treatment: null as AgentTreatment | null,
   tone: "cercano" as AgentTone,
   emojis: "no" as AgentEmojis,
@@ -96,7 +98,7 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     replyCheckEnabled: row.replyCheckEnabled,
     decisionRoutingEnabled: row.decisionRoutingEnabled,
     clinicalAssistantEnabled: row.clinicalAssistantEnabled,
-    personaName: row.personaName,
+    personaName: receptionName(row.personaName),
     treatment: (AGENT_TREATMENTS as readonly string[]).includes(row.treatment ?? "") ? (row.treatment as AgentTreatment) : null,
     tone: (AGENT_TONES as readonly string[]).includes(row.tone) ? (row.tone as AgentTone) : "cercano",
     emojis: row.emojis === "pocos" ? "pocos" : "no",
@@ -158,7 +160,7 @@ export interface UpsertAgentConfigOpts {
   modelCheck?: AgentModelCheck
 }
 
-/** Encender Recepción con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
+/** Encender a Sofi con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
 export const MODEL_NOT_RESPONDING = "MODEL_NOT_RESPONDING"
 
 /** Guarda la configuración; cada cambio queda auditado con quién y cuándo. */
@@ -230,7 +232,7 @@ export async function upsertAgentConfig(
     .limit(1)
   if (input.enabled === true && opts.modelCheck) {
     if (!(await opts.modelCheck()).responds) {
-      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Recepción no se puede encender. Ya avisamos a odentIA.")
+      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a odentIA.")
     }
   }
   if (input.activeFromMin !== undefined || input.activeUntilMin !== undefined) {

@@ -42,6 +42,7 @@ import { BadgePercent, Plus } from "lucide-react"
 import { type FormEvent, useId, useMemo, useRef, useState } from "react"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
@@ -175,6 +176,7 @@ function moneyText(promotion: PromotionWithMetrics, locale: string): string | nu
  * solo quien ve dinero recibe cuánto se usaron y cobraron.
  */
 function PromotionsPage() {
+  const receptionName = useReceptionName()
   const canConfigure = usePermission("settings.write")
   const canView = canConfigure || usePermission("catalog.read")
   const navigate = useNavigate()
@@ -271,7 +273,7 @@ function PromotionsPage() {
   const header = (
     <PageHeader
       title="Promociones"
-      subtitle="Un nombre, unas fechas y el precio de cada servicio. Caja y el agente las leen de aquí."
+      subtitle={`Un nombre, unas fechas y el precio de cada servicio. Caja y ${receptionName} las leen de aquí.`}
       actions={
         canConfigure && regional ? (
           <Button type="button" className="min-h-11" onClick={() => open(null)}>
@@ -524,6 +526,7 @@ function PromotionForm({
   regional: Regional
   onClose: () => void
 }) {
+  const receptionName = useReceptionName()
   const id = useId()
   const queryClient = useQueryClient()
   const { locale, timeZone } = regional
@@ -805,10 +808,10 @@ function PromotionForm({
                   </InputGroup>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span aria-hidden className="text-muted-foreground">El agente lo dice</span>
+                  <span aria-hidden className="text-muted-foreground">{receptionName} lo dice</span>
                   <ChoiceSelect
                     className="w-auto min-w-48"
-                    aria-label={`Cómo dice el agente el precio de ${row.serviceName}`}
+                    aria-label={`Cómo dice ${receptionName} el precio de ${row.serviceName}`}
                     value={row.disclosure}
                     onChange={(event) => setRow(row.serviceId, { disclosure: event.target.value as PriceDisclosure })}
                   >

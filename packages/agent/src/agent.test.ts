@@ -585,7 +585,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
         .from(agentHandoff)
         .where(eq(agentHandoff.conversationId, first.conversationId)),
     )
-    expect(handoff?.reason).toBe("El agente no puede usar el modelo ahora; ya avisamos a odentIA")
+    expect(handoff?.reason).toBe("Sofi no puede usar el modelo ahora; ya avisamos a odentIA")
     expect(handoff?.summary).not.toContain("Incorrect API key")
     // Segunda conversación el mismo día: otra derivación, pero un solo aviso.
     const second = await ingestText("tg:ag-401-b", "evt-ag-401-b", "Buenas")
@@ -599,8 +599,8 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     // Las derivaciones generan sus propios avisos; el del proveedor es uno solo, sin claves ni variables, y lleva a Recepción.
     expect(notices).toEqual([
       {
-        title: "El agente no puede usar el modelo",
-        body: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+        title: "Sofi no puede usar el modelo",
+        body: "Sofi no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
         href: "/agent/recepcion",
       },
     ])
@@ -633,7 +633,7 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
       tx
         .select({ title: workspaceNotification.title })
         .from(workspaceNotification)
-        .where(and(eq(workspaceNotification.href, "/agent/recepcion"), eq(workspaceNotification.title, "El agente no puede usar el modelo"))),
+        .where(and(eq(workspaceNotification.href, "/agent/recepcion"), eq(workspaceNotification.title, "Sofi no puede usar el modelo"))),
     )
     expect(notices.length).toBeGreaterThan(0)
   } finally {
@@ -1929,7 +1929,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
   }
 })
 
-it("la voz de la clínica entra en el prompt solo cuando se configura", async () => {
+it("la voz de la clínica entra en el prompt solo cuando se configura; el nombre, siempre (Sofi por defecto)", async () => {
   const promptOf = async (thread: string, eventId: string) => {
     const { conversationId, messageId } = await ingestText(thread, eventId, "Hola")
     const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola." }, `e-${eventId}`))
@@ -1939,17 +1939,17 @@ it("la voz de la clínica entra en el prompt solo cuando se configura", async ()
   const plain = await promptOf("tg:voz-0", "evt-voz-0")
   expect(plain).toContain("Tono cercano y profesional")
   expect(plain).toContain("Responde solo con datos reales. Si no tiene el dato, lo dice.")
-  expect(plain).not.toContain("Te presentas como")
+  expect(plain).toContain("Te presentas como Sofi, asistente virtual de la clínica.")
   expect(plain).not.toContain("Tratas de")
   expect(plain).toContain("No uses emojis.")
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", {
-      personaName: "Sofi", treatment: "usted", tone: "formal", emojis: "pocos",
+      personaName: "Vale", treatment: "usted", tone: "formal", emojis: "pocos",
       about: "Clínica familiar con dos sedes. No presionamos para vender tratamientos.",
     }))
   try {
     const voiced = await promptOf("tg:voz-1", "evt-voz-1")
-    expect(voiced).toContain("Te presentas como Sofi, asistente virtual de la clínica.")
+    expect(voiced).toContain("Te presentas como Vale, asistente virtual de la clínica.")
     expect(voiced).toContain("Tratas de usted al interlocutor.")
     expect(voiced).toContain("Tono formal y respetuoso")
     expect(voiced).toContain("Sobre la clínica: Clínica familiar con dos sedes.")

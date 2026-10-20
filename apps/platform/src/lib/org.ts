@@ -40,6 +40,8 @@ export interface OrgProfile {
   logo?: string | null
   /** Teléfono para urgencias (E.164); null si no lo registró. */
   emergencyPhone?: string | null
+  /** El nombre del agente de recepción en esta clínica (Sofi si no eligió otro). */
+  receptionName?: string
 }
 
 /**

@@ -281,7 +281,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   const brief = surface(page, { name: "Resumen del caso" })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
-  await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Qué pide", "Lo que ya se sabe", "Lo que ya hizo el agente", "Lo que falta"])
+  await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Qué pide", "Lo que ya se sabe", "Lo que ya hizo Sofi", "Lo que falta"])
   await expect(brief).toContainText("Que la atiendan hoy: tiene la cara hinchada desde anoche.")
   // Sus mensajes quedan a un toque, en orden.
   await brief.getByRole("button", { name: "Ver sus 3 mensajes" }).click()
@@ -310,7 +310,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   const waiting = page.getByRole("region", { name: /^Te espera/ })
   const caseRow = waiting.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
   await expect(caseRow).toHaveCount(1)
-  await expect(caseRow).toContainText("Te lo pasó el agente")
+  await expect(caseRow).toContainText("Te lo pasó Sofi")
   // El plazo se dice con palabra además de color: prioridad alta es «Ahora».
   await expect(caseRow).toContainText("Ahora")
   const takeButton = caseRow.getByRole("button", { name: /^Tomar/ })

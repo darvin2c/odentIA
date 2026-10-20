@@ -104,7 +104,7 @@ function withMeta(data: Record<string, unknown>, meta: SuggestionMeta): Record<s
 export async function requireClinicalAssistant(tx: Db, orgId: string): Promise<void> {
   const cfg = await getAgentConfig(tx, orgId)
   if (!cfg.clinicalAssistantEnabled) {
-    throw new ServiceError("CLINICAL_ASSISTANT_OFF", 409, "El asistente clínico está apagado en esta clínica")
+    throw new ServiceError("CLINICAL_ASSISTANT_OFF", 409, "Clío está apagada en esta clínica")
   }
 }
 

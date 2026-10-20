@@ -9,12 +9,12 @@ describe("glosario", () => {
     expect(label("conversacion", "open")).toBe("Abierta")
   })
   it("una conversación está abierta o cerrada, y cerrada dice por qué", () => {
-    expect(conversationStatusLabel("open", null)).toBe("Abierta")
-    expect(conversationStatusLabel("closed", null)).toBe("Cerrada")
-    expect(conversationStatusLabel("closed", { reason: "sin_respuesta", byName: null })).toBe("Cerrada · sin respuesta del paciente")
-    expect(conversationStatusLabel("closed", { reason: "resuelta", byName: null })).toBe("Cerrada · resuelta por el agente")
-    expect(conversationStatusLabel("closed", { reason: "equipo", byName: "Rosa" })).toBe("Cerrada · resuelta por Rosa")
-    expect(conversationStatusLabel("closed", { reason: "manual", byName: "Luis" })).toBe("Cerrada · por Luis")
+    expect(conversationStatusLabel("open", null, "Sofi")).toBe("Abierta")
+    expect(conversationStatusLabel("closed", null, "Sofi")).toBe("Cerrada")
+    expect(conversationStatusLabel("closed", { reason: "sin_respuesta", byName: null }, "Sofi")).toBe("Cerrada · sin respuesta del paciente")
+    expect(conversationStatusLabel("closed", { reason: "resuelta", byName: null }, "Sofi")).toBe("Cerrada · resuelta por Sofi")
+    expect(conversationStatusLabel("closed", { reason: "equipo", byName: "Rosa" }, "Sofi")).toBe("Cerrada · resuelta por Rosa")
+    expect(conversationStatusLabel("closed", { reason: "manual", byName: "Luis" }, "Sofi")).toBe("Cerrada · por Luis")
   })
   it("nunca muestra un código crudo con guiones bajos", () => {
     expect(label("formulario", "en_revision")).toBe("En revision")

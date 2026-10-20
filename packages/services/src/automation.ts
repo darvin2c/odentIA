@@ -279,7 +279,7 @@ export async function setLine(
   let enabled = input.enabled ?? was.enabled
   if (!agentPart && !teamPart) {
     if (input.enabled === true) {
-      throw validation("Elige al menos una parte: que el agente escriba o que quede una tarea para el equipo")
+      throw validation("Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
     }
     enabled = false
   }
@@ -1861,6 +1861,8 @@ function settledWords(reason: string | undefined, name: string | null): string {
   if (reason === "Ya tiene otra cita reservada" || reason === "Ya tiene una cita reservada") return `${who} ya tiene otra cita reservada`
   if (reason === "Ya pagó lo que debía") return `${who} ya pagó lo que debía`
   const text = reason ?? "ya no hacía falta"
+  // Un nombre de agente se queda con su mayúscula: «Sofi le escribió…».
+  if (/^(Sofi|Clío|Argos)\b/.test(text)) return text
   return text.charAt(0).toLowerCase() + text.slice(1)
 }
 
@@ -2044,8 +2046,8 @@ export async function deliverJob(
 
   // Un aviso de cita es solo un mensaje: sin «el agente le escribe» no queda nada.
   if (isAppointmentNotice(job.kind) && !rule.agentPart) {
-    await close([job.id], "cancelado", "El agente no escribe en esta línea")
-    return { jobId: job.id, outcome: "cancelado", detail: "El agente no escribe en esta línea" }
+    await close([job.id], "cancelado", "Sofi no escribe en esta línea")
+    return { jobId: job.id, outcome: "cancelado", detail: "Sofi no escribe en esta línea" }
   }
   // Si el recordatorio de la misma cita sale ahora (o acaba de salir), ese mensaje ya dice la fecha.
   if (isAppointmentNotice(job.kind) && job.kind !== "aviso_cita_cancelada" && job.appointmentId) {
@@ -2098,8 +2100,8 @@ export async function deliverJob(
   if (!runtime.receptionOn) {
     // Recepción es quien escribe: con ella apagada no sale nada, y lo que quedó
     // atrás no se envía al volver a encenderla.
-    await close([job.id], "cancelado", "Recepción apagada")
-    return { jobId: job.id, outcome: "cancelado", detail: "Recepción apagada" }
+    await close([job.id], "cancelado", "Sofi no atiende")
+    return { jobId: job.id, outcome: "cancelado", detail: "Sofi no atiende" }
   }
   /** Casos que salen en este mismo mensaje; al menos, el reclamado. */
   let group: JobRow[] = [job]
@@ -2140,7 +2142,7 @@ export async function deliverJob(
       const words = CAUSE_WORDS[cause]
       for (const item of group) {
         const taskId = await leaveTask(tx, orgId, item, {
-          reason: `El agente no pudo escribirle: ${words.one}. ${words.fix}`,
+          reason: `Sofi no pudo escribirle: ${words.one}. ${words.fix}`,
           note: lineConfigOf(rule.config).taskNote,
           dueAt: await reminderDue(tx, orgId, item),
           timeZone: tz,
@@ -2358,7 +2360,7 @@ export async function deliverJob(
     // El agente ya le escribió: la tarea de la oportunidad se da por hecha.
     if (job.kind === "seguimiento_comercial") {
       const { taskId } = jobPayloadOf(job.payload)
-      if (taskId) await settleTask(tx, orgId, taskId, "el agente le escribió para retomarla")
+      if (taskId) await settleTask(tx, orgId, taskId, "Sofi le escribió para retomarla")
     }
     await tx
       .update(automationJob)
@@ -2439,7 +2441,7 @@ export async function reconcileDeliveries(tx: Db, orgId: string, now: Date): Pro
     const rule = rules.get(job.ruleId)
     if (rule?.teamPart && !job.taskId && !isAppointmentNotice(job.kind)) {
       const taskId = await leaveTask(tx, orgId, job, {
-        reason: `El agente no pudo escribirle: ${words.one}. ${words.fix}`,
+        reason: `Sofi no pudo escribirle: ${words.one}. ${words.fix}`,
         dueAt: await reminderDue(tx, orgId, job),
         timeZone: jobPayloadOf(job.payload).timeZone ?? timeZone,
         now,
@@ -3433,7 +3435,7 @@ export async function applyTemplateUpdates(
           and j.scheduled_for <= now() + interval '24 hours'`)
       const n = Number(soon?.n ?? 0)
       if (n > 0) {
-        body += ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Administrador.`
+        body += ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Argos.`
       }
     }
     await upsertWorkspaceNotification(tx, orgId, {

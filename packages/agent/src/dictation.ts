@@ -21,7 +21,7 @@ import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "./llm.j
 import type { AgentRuntime } from "./run.js"
 
 /**
- * Asistente clínico: convierte lo que el odontólogo dicta en sugerencias para
+ * Clío, el asistente clínico: convierte lo que el odontólogo dicta en sugerencias para
  * la atención. No guarda nada ni decide nada: devuelve borradores de registros
  * que el servicio valida y que solo entran a la historia si el odontólogo los
  * confirma. El esquema de lo que puede llenar sale de la declaración de campos

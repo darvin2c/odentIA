@@ -225,7 +225,7 @@ export interface TaskItem {
   createdAt?: string
   updatedAt?: string
   /**
-   * Es la tarea de un caso que pasó el agente («Te lo pasó el agente»), con su
+   * Es la tarea de un caso que pasó el agente («Te lo pasó Sofi»), con su
    * urgencia. Completarla puede resolver la conversación: antes se muestra lo
    * mismo que «Resolver» (`useCompleteTask`).
    */

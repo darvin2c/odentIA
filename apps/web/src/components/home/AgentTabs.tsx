@@ -1,5 +1,5 @@
-// 02 · Agéntica: los tres agentes en pestañas. Recepción conversa y agenda (con selector de tono),
-// el Asistente clínico arma la nota a partir del dictado y el Administrador trae de vuelta a Rosa.
+// 02 · Agéntica: los tres agentes en pestañas. Sofi conversa y agenda (con selector de tono),
+// Clío arma la nota a partir del dictado y Argos trae de vuelta a Rosa.
 // Las tres pestañas quedan en el HTML generado; solo se ve la elegida.
 import { useEffect, useRef, useState } from "react"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
@@ -12,20 +12,20 @@ type Emojis = "no" | "pocos"
 const TABS: { id: Tab; label: string; sub: string; href: string }[] = [
   {
     id: "rec",
-    label: "Recepción",
-    sub: "Responde, informa y agenda a cualquier hora.",
+    label: "Sofi",
+    sub: "Tu agente de recepción. Responde, informa y agenda a cualquier hora.",
     href: "/agentes/recepcion",
   },
   {
     id: "cli",
-    label: "Asistente clínico",
-    sub: "Prepara la nota mientras el odontólogo atiende. Solo falta su sí.",
+    label: "Clío",
+    sub: "Tu agente clínico. Prepara la nota mientras el odontólogo atiende. Solo falta su sí.",
     href: "/agentes/asistente-clinico",
   },
   {
     id: "adm",
-    label: "Administrador",
-    sub: "Recuerda citas y trae de vuelta a los pacientes.",
+    label: "Argos",
+    sub: "Tu agente administrador. Recuerda citas y trae de vuelta a los pacientes.",
     href: "/agentes/administrador",
   },
 ]
@@ -46,7 +46,7 @@ const ADM = [
   {
     when: "Lunes",
     title: "Rosa Vega tiene su control de 6 meses vencido hace tres semanas.",
-    sub: "El Administrador lo encuentra solo, sin que nadie revise listas.",
+    sub: "Argos lo encuentra solo, sin que nadie revise listas.",
   },
   {
     when: "Lunes · 16:05",
@@ -85,7 +85,7 @@ export default function AgentTabs() {
   const [adm, setAdm] = useState(END.adm)
   const n = useRef(0)
 
-  // Al aparecer, la conversación de Recepción empieza desde el primer mensaje.
+  // Al aparecer, la conversación de Sofi empieza desde el primer mensaje.
   useEffect(() => {
     if (!prefersReducedMotion()) setChat(0)
   }, [])
@@ -217,7 +217,7 @@ export default function AgentTabs() {
       </fieldset>
 
       <div className="ag-body">
-        {/* Recepción */}
+        {/* Sofi */}
         <div className="ag-panel" hidden={tab !== "rec"}>
           <div className="ag-grid">
             <div className="chatbox">
@@ -304,13 +304,13 @@ export default function AgentTabs() {
               </div>
               <div className="ag-copy">
                 <p className="d-only">
-                  <strong>Recepción</strong> contesta al momento, de día y de noche, por WhatsApp,
+                  <strong>Sofi</strong>, tu agente de recepción, contesta al momento, de día y de noche, por WhatsApp,
                   Instagram, Messenger, Telegram, el chat de tu web y el correo. Informa precios y
                   horarios, y agenda, mueve o cancela citas siempre con el sí del paciente. Si hace
                   falta una persona, le pasa el caso a tu equipo con un resumen.
                 </p>
                 <p className="d-only">
-                  Tiene el nombre que tú le pongas y el tono de tu clínica: cercano, neutro o
+                  Se llama Sofi, o como tú le pongas, y tiene el tono de tu clínica: cercano, neutro o
                   formal, de tú o de usted, con o sin emojis. Con «Pocos» pone uno como mucho y
                   nunca cuando hablan de dolor, urgencias, pagos o reclamos. Siempre dice que es un
                   asistente virtual.
@@ -320,14 +320,14 @@ export default function AgentTabs() {
                   paciente.
                 </p>
                 <a className="ag-link" href="/agentes/recepcion">
-                  Conoce a Recepción <span aria-hidden="true">→</span>
+                  Conoce a Sofi <span aria-hidden="true">→</span>
                 </a>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Asistente clínico */}
+        {/* Clío */}
         <div className="ag-panel" hidden={tab !== "cli"}>
           <div className="ag-grid">
             <div className="dict">
@@ -423,13 +423,13 @@ export default function AgentTabs() {
                 Prepara la nota mientras el odontólogo atiende. Nada entra en la historia sin su sí.
               </p>
               <a className="ag-link" href="/agentes/asistente-clinico">
-                Conoce al Asistente clínico <span aria-hidden="true">→</span>
+                Conoce a Clío <span aria-hidden="true">→</span>
               </a>
             </div>
           </div>
         </div>
 
-        {/* Administrador */}
+        {/* Argos */}
         <div className="ag-panel" hidden={tab !== "adm"}>
           <div className="ag-grid">
             <div className="card admc">
@@ -468,7 +468,7 @@ export default function AgentTabs() {
               </div>
               <div className="ag-copy">
                 <p className="d-only">
-                  <strong>Administrador</strong> recuerda cada cita un día antes y tres horas antes,
+                  <strong>Argos</strong>, tu agente administrador, recuerda cada cita un día antes y tres horas antes,
                   avisa los controles, retoma los presupuestos sin respuesta y ofrece otra fecha a
                   quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo.
                 </p>
@@ -476,7 +476,7 @@ export default function AgentTabs() {
                   Recuerda citas, avisa controles y retoma presupuestos. Recordar no se cobra.
                 </p>
                 <a className="ag-link" href="/agentes/administrador">
-                  Conoce al Administrador <span aria-hidden="true">→</span>
+                  Conoce a Argos <span aria-hidden="true">→</span>
                 </a>
               </div>
             </div>

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { ANSWER_CHECK_LABEL, type SandboxResult, type SandboxState, type TestCaseItem } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { mutationErrorMessage } from "../../lib/query-error"
 
@@ -44,6 +45,7 @@ export function AgentSandbox({
   onLeaveScreen?: () => void
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [turns, setTurns] = useState<Turn[]>([])
   const [state, setState] = useState<SandboxState | undefined>(undefined)
   const [draft, setDraft] = useState("")
@@ -156,7 +158,7 @@ export function AgentSandbox({
             variant="ghost"
             size="icon"
             className="-ml-2 size-11 shrink-0 sm:hidden"
-            aria-label="Volver a Recepción"
+            aria-label={`Volver a ${receptionName}`}
             onClick={onLeaveScreen}
           >
             <ArrowLeft aria-hidden />
@@ -221,7 +223,7 @@ export function AgentSandbox({
             </li>
           ))}
           <li ref={endRef} aria-hidden={!send.isPending}>
-            {send.isPending ? <DataRefreshMarker message="El agente está respondiendo…" /> : null}
+            {send.isPending ? <DataRefreshMarker message={`${receptionName} está respondiendo…`} /> : null}
           </li>
         </ol>
       )}
@@ -311,11 +313,12 @@ export function AgentSandbox({
 function TurnDetail({ result }: { result: SandboxResult }) {
   const nothing =
     result.did.length === 0 && result.basis.length === 0 && result.checks.length === 0 && result.waiting.length === 0
+  const receptionName = useReceptionName()
   return (
     <div className="flex w-full max-w-[88%] flex-col gap-2 rounded-xl border bg-card p-3 text-sm">
       {!result.replied && !result.handedOff ? (
         <p role="status" className="font-medium text-destructive">
-          El agente no llegó a enviar esta respuesta: en una conversación real el paciente no la recibiría.
+          {receptionName} no llegó a enviar esta respuesta: en una conversación real el paciente no la recibiría.
         </p>
       ) : null}
       {result.handedOff ? <p className="font-semibold">Pasaría el caso a una persona de tu equipo.</p> : null}

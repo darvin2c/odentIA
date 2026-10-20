@@ -16,7 +16,7 @@ export interface PageNoticeProps {
 
 /**
  * Aviso de una pantalla: con el nivel, lo que pasa y la acción que lo
- * resuelve, dentro de la pantalla donde importa («Recepción está apagada» en
+ * resuelve, dentro de la pantalla donde importa («Sofi está apagada» en
  * la Bandeja, lo pendiente de un registro en la administración). Lo que afecta
  * a toda la clínica va en la franja (`NoticeStrip`), no aquí (ADR 0065).
  * `alarma` y `limite` se anuncian como alerta.

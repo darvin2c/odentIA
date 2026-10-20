@@ -9,6 +9,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { useReceptionName } from "../../lib/agent-names"
 
 /**
  * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
@@ -33,6 +34,7 @@ function AwaitingAnswerPage() {
   const canConversations = usePermission("conversations.write")
   const canAgenda = usePermission("appointments.write")
   const canConfirm = canDecide && canConversations && canAgenda
+  const receptionName = useReceptionName()
   /** Lo que pasó con la última «Confirmó por teléfono», dicho junto a su fila. */
   const [outcome, setOutcome] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const query = useQuery({
@@ -63,7 +65,7 @@ function AwaitingAnswerPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader title="Agente" subtitle="Las citas que el agente propuso y esperan la respuesta de la persona." />
+      <PageHeader title="Agente" subtitle={`Las citas que ${receptionName} propuso y esperan la respuesta de la persona.`} />
       <AgentTabs />
       {!canRead ? (
         <EmptyState title="Sin acceso" description="No tienes acceso a las citas que esperan respuesta. Pídelo a quien administra la clínica." />
@@ -88,7 +90,7 @@ function AwaitingAnswerPage() {
             </div>
           ) : data.items.length === 0 ? (
             <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-              Ninguna cita espera respuesta. Cuando el agente le proponga una a alguien, la ves aquí.
+              Ninguna cita espera respuesta. Cuando {receptionName} le proponga una a alguien, la ves aquí.
             </p>
           ) : (
             <>

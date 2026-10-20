@@ -1,7 +1,7 @@
 import { ADMIN_LINES, type AdminLine, type AdminLineKey, adminLineOf, CUSTOM_LINES, say } from "./admin-lines.js"
 
 /**
- * Pedirle algo al Administrador con palabras. El modelo solo **entiende**: de
+ * Pedirle algo a Argos con palabras. El modelo solo **entiende**: de
  * qué línea se habla y qué se quiere hacer con ella, eligiendo entre opciones
  * cerradas. Lo demás es código: los números y las horas del pedido se leen del
  * texto con reglas, y el resultado es un cambio sobre piezas que el sistema ya
@@ -155,7 +155,7 @@ export function adminQuestions(lines: readonly AdminLine[] = [...ADMIN_LINES, ..
 }
 
 export const OUT_OF_REACH =
-  "Cambiar lo que dice el mensaje, ofrecer descuentos o escribir a otras personas no se puede desde aquí: fuera de las 24 horas WhatsApp solo deja el texto que aprobó, y el agente Recepción no ofrece descuentos."
+  "Cambiar lo que dice el mensaje, ofrecer descuentos o escribir a otras personas no se puede desde aquí: fuera de las 24 horas WhatsApp solo deja el texto que aprobó, y Sofi no ofrece descuentos."
 
 function choice(answers: AdminAnswer[], id: string): { value: string; confidence: number } | null {
   const found = answers.find((answer) => answer.id === id && answer.kind === "choice")

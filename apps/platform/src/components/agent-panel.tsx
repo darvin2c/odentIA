@@ -47,6 +47,7 @@ import {
   type AgentPanelSummary,
   type AgentProposal,
 } from "../lib/agent"
+import { useReceptionName } from "../lib/agent-names"
 import { ApiError, apiFetch } from "../lib/api"
 import { channelLabel } from "../lib/channels"
 import { usePermission } from "../lib/crm"
@@ -634,6 +635,7 @@ const TOUCH_SM = "min-h-11 sm:min-h-8"
  */
 function AwaitingTab({ when }: { when: WhenFormatter }) {
   const openConversationId = useOpenConversationId()
+  const receptionName = useReceptionName()
   const query = useQuery({
     queryKey: ["agent-panel-proposals"],
     queryFn: () =>
@@ -655,7 +657,7 @@ function AwaitingTab({ when }: { when: WhenFormatter }) {
     return (
       <EmptyState
         title="Nada espera al paciente"
-        description="Cuando el agente proponga una cita en una conversación, espera aquí el sí del paciente."
+        description={`Cuando ${receptionName} proponga una cita en una conversación, espera aquí el sí del paciente.`}
       />
     )
   return (
@@ -730,6 +732,7 @@ export function canTakeCase(handoff: Pick<AgentHandoff, "conversationId">, canCo
 
 function HandoffsTab({ when }: { when: WhenFormatter }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const canTasks = usePermission("tasks.write")
   const canConversations = usePermission("conversations.write")
   const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
@@ -769,7 +772,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
       {handoffs.length === 0 ? (
         <EmptyState
           title="Ningún caso del agente espera"
-          description="Lo que el agente te pase espera aquí y en «Te espera» hasta que alguien lo tome y lo resuelva."
+          description={`Lo que ${receptionName} te pase espera aquí y en «Te espera» hasta que alguien lo tome y lo resuelva.`}
         />
       ) : null}
       <ul className="flex flex-col gap-3">

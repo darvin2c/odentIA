@@ -44,9 +44,12 @@ describe("el resultado de probar una lección", () => {
 
 describe("alcance de una lección", () => {
   it("la clínica entera o el agente, sin «Solo»", () => {
-    expect(lessonScopeChip("clinica")).toBe("Toda la clínica")
-    expect(lessonScopeChip("recepcion")).toBe("Recepción")
-    expect(lessonScopeFor("clinica")).toBe("Para toda la clínica")
-    expect(lessonScopeFor("recepcion")).toBe("Solo para Recepción")
+    expect(lessonScopeChip("clinica", "Sofi")).toBe("Toda la clínica")
+    expect(lessonScopeChip("recepcion", "Sofi")).toBe("Sofi")
+    expect(lessonScopeChip("recepcion", "Ana")).toBe("Ana")
+    expect(lessonScopeChip("administrador", "Ana")).toBe("Argos")
+    expect(lessonScopeFor("clinica", "Sofi")).toBe("Para toda la clínica")
+    expect(lessonScopeFor("recepcion", "Sofi")).toBe("Solo para Sofi")
+    expect(lessonScopeFor("asistente_clinico", "Sofi")).toBe("Solo para Clío")
   })
 })

@@ -258,6 +258,8 @@ async function resolveAgentState(
   caps: CrmCapabilities,
 ): Promise<CrmAgentState> {
   const cfg = await getAgentConfig(tx, orgId)
+  // El nombre del agente de recepción de esta clínica (Sofi, o el que eligió).
+  const sofi = cfg.personaName
   let convRow: typeof conversation.$inferSelect | null = null
   if (conversationIdOpt !== null) {
     assertUuid(conversationIdOpt, "Conversación inválida")
@@ -284,7 +286,7 @@ async function resolveAgentState(
       state: "human",
       enabled: cfg.enabled,
       conversationId: null,
-      reason: cfg.enabled ? "Sin conversación vinculada" : "Agente desactivado para la organización",
+      reason: cfg.enabled ? "Sin conversación vinculada" : `${sofi} no está atendiendo en la clínica`,
       pendingProposalIds: [],
       awaitingContact: false,
     }
@@ -355,7 +357,7 @@ async function resolveAgentState(
       state: "approval",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Propuesta del agente que espera la confirmación del interlocutor",
+      reason: `Propuesta de ${sofi} que espera la confirmación del interlocutor`,
       pendingProposalIds,
       awaitingContact,
     }
@@ -365,7 +367,7 @@ async function resolveAgentState(
       state: "human",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: cfg.enabled ? "El agente no atiende este canal" : "Agente desactivado para la organización",
+      reason: cfg.enabled ? `${sofi} no atiende este canal` : `${sofi} no está atendiendo en la clínica`,
       pendingProposalIds: [],
       awaitingContact: false,
     }
@@ -374,7 +376,7 @@ async function resolveAgentState(
     state: "agent",
     enabled: true,
     conversationId: convRow.id,
-    reason: "Atiende el agente",
+    reason: `Atiende ${sofi}`,
     pendingProposalIds: [],
     awaitingContact: false,
   }

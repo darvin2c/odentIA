@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ADMIN_LINE_WHERE, type AdminAdvice, type AdminRecommendation, type AdminUnreached, refreshAdmin } from "../../lib/admin"
+import { ADMIN_NAME, useReceptionName, withReceptionNameIn } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
@@ -20,12 +21,13 @@ const hourEnd = (iso: string) => {
 }
 
 /**
- * Una recomendación del administrador: una línea apagada que hoy tiene casos.
+ * Una recomendación de Argos: una línea apagada que hoy tiene casos.
  * Dice cómo se calculó y quiénes son, y ofrece dos cosas: resolverlo solo esta
  * vez o prender la línea. Nada se ejecuta al abrirla.
  */
 export function AdminRecommendationDrawer({ recommendationKey, onClose }: { recommendationKey: string | null; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const canTasks = usePermission("tasks.write")
   const canDecide = usePermission("agent.decide")
   const canAdmin = usePermission("agent.write")
@@ -51,7 +53,7 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
         created === 0
           ? `Eso ya se pidió hoy: no se duplicó nada.${left}`
           : writes
-            ? `Listo: el agente Recepción le${created === 1 ? "" : "s"} escribe a ${created === 1 ? "1 persona" : `${created} personas`} en unos minutos. A quien no pueda, lo verás en Inicio con el motivo.${left}`
+            ? `Listo: ${receptionName} le${created === 1 ? "" : "s"} escribe a ${created === 1 ? "1 persona" : `${created} personas`} en unos minutos. A quien no pueda, lo verás en Inicio con el motivo.${left}`
             : `${created} ${created === 1 ? "tarea creada" : "tareas creadas"}${created < total ? `; las otras ${total - created} ya existían` : ""}. Las ves en Tareas.${left}`,
       )
       setConfirmOnce(false)
@@ -77,14 +79,15 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
   }
 
   if (recommendationKey === null) return null
-  const item = query.data?.data
+  // Los textos del servidor nombran a «Sofi»: con otro nombre en la clínica, se dice el suyo.
+  const item = query.data ? withReceptionNameIn(query.data.data, receptionName) : undefined
   const where = ADMIN_LINE_WHERE[recommendationKey]
   const rows = item ? (showAll ? item.items : item.items.slice(0, PREVIEW)) : []
   // «Solo esta vez» lo pide quien puede crear las tareas o, si el agente escribe, quien decide por él.
   const canOnce = item?.once ? (item.actor === "agente" ? canDecide : canTasks) : false
 
   return (
-    <DetailDrawer open title="Recomendación del administrador" description={item?.title} onClose={close} isSubmitting={once.isPending || stop.isPending}>
+    <DetailDrawer open title={`Recomendación de ${ADMIN_NAME}`} description={item?.title} onClose={close} isSubmitting={once.isPending || stop.isPending}>
       {query.isPending ? (
         <LoadingState kind="indeterminate" message="Calculando con tus datos de ahora…" />
       ) : query.isError || !item ? (
@@ -156,7 +159,7 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                   Desde ahora, y solo para lo que ocurra desde que la prendas: {item.description.charAt(0).toLowerCase() + item.description.slice(1)}
                 </p>
               </div>
-              {/* La página del Administrador solo la abre quien administra el agente: a los demás no se les ofrece un enlace que rebota. */}
+              {/* La página de Argos solo la abre quien administra el agente: a los demás no se les ofrece un enlace que rebota. */}
               {canAdmin ? (
                 <Link
                   to="/agent/administrador"
@@ -273,7 +276,7 @@ export function AdminUnreachedDrawer({ open, onClose }: { open: boolean; onClose
   )
 }
 
-/** Lo que el administrador recomendaría hoy con los datos de ahora, aunque esté apagado. */
+/** Lo que Argos recomendaría hoy con los datos de ahora, aunque esté apagado. */
 export function AdminPreview() {
   const [open, setOpen] = useState<string | null>(null)
   const query = useQuery({

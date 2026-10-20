@@ -29,6 +29,7 @@ import { RegistrationQuestionnaire } from "../../components/patient/registration
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { RegistrationFieldsPicker } from "../../components/settings/registration-fields-picker"
+import { ADMIN_NAME } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
@@ -334,7 +335,7 @@ function RegistrationSettings() {
               </h2>
               <p className="text-sm text-muted-foreground">
                 Lo que el registro pregunta, además de la atención. Lo que la persona acepte vale de
-                inmediato para lo que el agente le escribe por su cuenta; sin preguntarlo, casi
+                inmediato para lo que {ADMIN_NAME} le escribe por su cuenta; sin preguntarlo, casi
                 nadie podrá recibirlo.
               </p>
             </div>

@@ -9,7 +9,8 @@ import { AdminLine } from "../../components/agent/admin-line"
 import { AdminPreview } from "../../components/agent/admin-recommendation"
 import { ADMIN_PAGE_KEY, type AdminLineView, type AdminPage, refreshAdmin } from "../../lib/admin"
 import { writingWeekRows } from "../../lib/writing-hours"
-import type { AgentRoles } from "../../lib/agent"
+import { type AgentRoles, namedAgentRoles } from "../../lib/agent"
+import { ADMIN_NAME, AGENT_NAME_REASONS, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -127,7 +128,7 @@ const PURPOSE_WORDS = {
 
 /**
  * Lo que falta para que lo prendido escriba, cada cosa con su acción. Sin
- * Recepción o sin el Administrador, «Recordar la cita» y sus avisos no salen
+ * Sofi o sin Argos, «Recordar la cita» y sus avisos no salen
  * aunque estén prendidos: se dice y se ofrece encenderlos a quien puede.
  */
 function MissingNotices({
@@ -143,16 +144,17 @@ function MissingNotices({
   powering: boolean
   onTurnOn: () => void
 }) {
+  const receptionName = useReceptionName()
   const writing = page.lines.filter((line) => line.enabled && line.agentPart)
   if (writing.length === 0) return null
   const what = writing.length === 1 ? `«${writing[0]!.name}» está prendida` : `${writing.length} líneas que escriben están prendidas`
   const offWords =
     !page.enabled && !page.receptionOn
-      ? "el Administrador y Recepción están apagados"
+      ? `${ADMIN_NAME} y ${receptionName} están apagados`
       : !page.enabled
-        ? "el Administrador está apagado"
+        ? `${ADMIN_NAME} está apagado`
         : !page.receptionOn
-          ? "Recepción está apagada"
+          ? `${receptionName} no está atendiendo`
           : null
   // Sin ellos no sale nada: lo ve quien puede encenderlos.
   if (offWords) {
@@ -165,19 +167,19 @@ function MissingNotices({
           </p>
           <p>
             {page.enabled
-              ? "Recepción es quien escribe. Al encenderla salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás."
-              : "El Administrador detecta a quién escribir y Recepción escribe. Al encenderlos salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás."}
+              ? `${receptionName} es quien escribe. Al encenderla salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás.`
+              : `${ADMIN_NAME} detecta a quién escribir y ${receptionName} escribe. Al encenderlos salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás.`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {!page.enabled ? (
             <Button type="button" className="min-h-11 sm:min-h-8" disabled={powering} onClick={onTurnOn}>
-              Encender al administrador
+              Encender a {ADMIN_NAME}
             </Button>
           ) : null}
           {!page.receptionOn ? (
             <Link to="/agent/recepcion" className={LINK}>
-              Encender Recepción
+              Encender a {receptionName}
             </Link>
           ) : null}
         </div>
@@ -231,6 +233,7 @@ function AdministratorPage() {
   const { linea, ver } = Route.useSearch()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
+  const receptionName = useReceptionName()
 
   const pageQuery = useQuery({
     queryKey: ADMIN_PAGE_KEY,
@@ -241,6 +244,7 @@ function AdministratorPage() {
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
     enabled: canRead,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -267,8 +271,8 @@ function AdministratorPage() {
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader
-        title="Administrador"
-        subtitle={role?.audience}
+        title={`${ADMIN_NAME}, tu agente administrador`}
+        subtitle={AGENT_NAME_REASONS.administrador}
         actions={
           page && canWrite ? (
             <label htmlFor="administrador-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
@@ -277,7 +281,7 @@ function AdministratorPage() {
                 id="administrador-encendido"
                 checked={page.enabled}
                 disabled={power.isPending}
-                aria-label={page.enabled ? "Apagar al Administrador" : "Encender al Administrador"}
+                aria-label={page.enabled ? `Apagar a ${ADMIN_NAME}` : `Encender a ${ADMIN_NAME}`}
                 onCheckedChange={(next: boolean) => power.mutate(next)}
               />
             </label>
@@ -292,7 +296,7 @@ function AdministratorPage() {
       {role ? <p className="-mt-2 max-w-prose text-sm">{role.role}</p> : null}
 
       {pageQuery.isPending || rolesQuery.isPending ? (
-        <LoadingState message="Cargando al Administrador…" />
+        <LoadingState message={`Cargando a ${ADMIN_NAME}…`} />
       ) : pageQuery.isError || !page || !role ? (
         <QueryErrorState error={pageQuery.error ?? rolesQuery.error} onRetry={() => void (pageQuery.isError ? pageQuery : rolesQuery).refetch()} />
       ) : (
@@ -339,7 +343,7 @@ function AdministratorPage() {
                 </p>
                 {canWrite ? (
                   <Button type="button" className="min-h-11" disabled={power.isPending} onClick={() => power.mutate(true)}>
-                    Encender al administrador
+                    Encender a {ADMIN_NAME}
                   </Button>
                 ) : null}
               </div>
@@ -357,8 +361,8 @@ function AdministratorPage() {
               title="Prendidas"
               hint={
                 page.enabled
-                  ? "Esto se hace solo. Cada línea dice quién lo hace: el agente, o una persona de tu equipo. Al tocar una, se abre con su flujo."
-                  : "Empiezan a hacerse solas cuando enciendas al administrador. Puedes apagarlas antes. Al tocar una, se abre con su flujo."
+                  ? `Esto se hace solo. Cada línea dice quién lo hace: ${ADMIN_NAME}, o una persona de tu equipo. Al tocar una, se abre con su flujo.`
+                  : `Empiezan a hacerse solas cuando enciendas a ${ADMIN_NAME}. Puedes apagarlas antes. Al tocar una, se abre con su flujo.`
               }
               lines={on}
               empty="Todavía no hay ninguna prendida. Prende abajo las que quieras, una por una."
@@ -374,7 +378,7 @@ function AdministratorPage() {
             title="Listas para activar"
             hint={
               page.enabled
-                ? "Están apagadas: no pasa nada con ellas. Si hoy tienen casos, el administrador te las recomienda en Inicio."
+                ? `Están apagadas: no pasa nada con ellas. Si hoy tienen casos, ${ADMIN_NAME} te las recomienda en Inicio.`
                 : "Lo que podrá hacer cuando lo enciendas. Tócalas para ver su flujo."
             }
             lines={off}

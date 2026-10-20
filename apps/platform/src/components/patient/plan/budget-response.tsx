@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check } from "lucide-react"
 import { useId, useMemo, useState } from "react"
+import { useReceptionName } from "../../../lib/agent-names"
 import { ApiError, apiFetch } from "../../../lib/api"
 import {
   BUDGET_ANSWERABLE_STATUSES,
@@ -174,6 +175,7 @@ export function BudgetResponse({
   openOnMount?: boolean
   className?: string
 }): React.JSX.Element {
+  const receptionName = useReceptionName()
   const uid = useId()
   const queryClient = useQueryClient()
   const canDecide = usePermission("budgets.decide")
@@ -498,7 +500,7 @@ export function BudgetResponse({
           <div className="flex flex-col gap-1 border-t pt-3">
             <span className="text-sm font-semibold text-muted-foreground">También puede responder la persona</span>
             <span className="text-sm">
-              Por el chat: el agente le confirma lo que entendió antes de anotarlo. Si tiene acceso al portal, también
+              Por el chat: {receptionName} le confirma lo que entendió antes de anotarlo. Si tiene acceso al portal, también
               puede elegir ahí. Su respuesta llega aquí.
             </span>
           </div>

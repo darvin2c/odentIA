@@ -5,7 +5,8 @@
  * en este archivo.
  */
 import { formatMoney } from "@odentia/clinical"
-import { AGENT_CASE_ROW, urgencyWord } from "./agent"
+import { agentCaseRow, urgencyWord } from "./agent"
+import { ADMIN_NAME, withReceptionName } from "./agent-names"
 import { channelLabel } from "./channels"
 import { timeAgo } from "./crm"
 import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
@@ -21,6 +22,8 @@ export interface HomeTextContext {
   locale: string
   /** Quien mira ve las tareas de todo el equipo. */
   allTasks: boolean
+  /** El nombre del agente de recepción en esta clínica (`useReceptionName`). */
+  receptionName: string
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -95,9 +98,10 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     }
     case "case":
       return {
-        title: row.contactName ? `${row.contactName} · ${row.reason}` : row.reason,
-        // Un solo nombre y una sola escala: «Te lo pasó el agente hace 25 min · Ahora».
-        detail: joined([`${AGENT_CASE_ROW} ${ago(row.createdAt)}`, urgencyWord(row.priority), row.channel ? channelLabel(row.channel) : null]),
+        // El motivo lo escribe el servidor y nombra a «Sofi».
+        title: withReceptionName(row.contactName ? `${row.contactName} · ${row.reason}` : row.reason, context.receptionName),
+        // Un solo nombre y una sola escala: «Te lo pasó Sofi hace 25 min · Ahora».
+        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, urgencyWord(row.priority), row.channel ? channelLabel(row.channel) : null]),
         action: !row.conversationId ? "Revisar" : row.unclaimed ? "Tomar" : "Ver el caso",
       }
     case "unconfirmed":
@@ -145,8 +149,8 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     case "advice":
       return {
         title: row.title,
-        // Dice quién lo haría si se prende: el agente o una persona del equipo.
-        detail: joined(["Lo recomienda el administrador", row.actor === "agente" ? "puede escribirles el agente" : "le tocaría a tu equipo", row.detail]),
+        // Dice quién lo haría si se prende: Argos (con sus líneas) o una persona del equipo.
+        detail: joined([`Lo recomienda ${ADMIN_NAME}`, row.actor === "agente" ? `puede escribirles ${context.receptionName}` : "le tocaría a tu equipo", row.detail]),
         action: row.actor === "agente" ? "Ver la propuesta" : "Ver la lista",
       }
     case "unreached":
@@ -240,7 +244,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     case "more":
       if (row.of === "cases") {
         return {
-          title: row.count === 1 ? "1 caso más del agente" : `${row.count} casos más del agente`,
+          title: row.count === 1 ? `1 caso más de ${context.receptionName}` : `${row.count} casos más de ${context.receptionName}`,
           detail: "Siguen sin resolver",
           action: "Ver todos",
         }

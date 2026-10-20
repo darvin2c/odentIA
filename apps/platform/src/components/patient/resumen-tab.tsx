@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { type ReactNode, useState } from "react"
+import { useReceptionName } from "../../lib/agent-names"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
@@ -100,6 +101,7 @@ export function PatientPendingCard({
   clinical?: { summary?: PatientSummary; health?: PatientHealth | null }
   onTabChange: (section: PatientSectionId) => void
 }) {
+  const receptionName = useReceptionName()
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
   const canAppointments = usePermission("appointments.read")
@@ -171,7 +173,7 @@ export function PatientPendingCard({
     pending.push({
       id: `proposal-${proposal.id}`,
       agent: true,
-      title: `El agente propone: ${ACTION_LABEL[proposal.action] ?? proposal.action}`,
+      title: `${receptionName} propone: ${ACTION_LABEL[proposal.action] ?? proposal.action}`,
       detail:
         proposal.context.afterSummary || proposal.reason || "Espera la confirmación del paciente.",
       action: (

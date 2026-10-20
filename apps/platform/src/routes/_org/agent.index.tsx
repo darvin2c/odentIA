@@ -10,7 +10,8 @@ import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { WritingHoursCard } from "../../components/agent/writing-hours"
 import { AgentTabs } from "../../components/agent-tabs"
-import { AGENT_MODEL_DOWN, type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles } from "../../lib/agent"
+import { agentModelDown, type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, namedAgentRoles } from "../../lib/agent"
+import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -22,12 +23,12 @@ export const Route = createFileRoute("/_org/agent/")({
 })
 const orgRouteApi = getRouteApi("/_org")
 
-/** Lo que el Administrador tiene activo, en una frase: cuántas, quién las hace y cuántas más recomienda. */
+/** Lo que Argos tiene activo, en una frase: cuántas, quién las hace y cuántas más recomienda. */
 function adminSummary(admin: AdminOverview): string {
   const parts = [
     admin.on === 0
       ? "Ninguna línea prendida todavía"
-      : `${admin.on} ${admin.on === 1 ? "prendida" : "prendidas"}: ${admin.byAgent} ${admin.byAgent === 1 ? "la hace" : "las hace"} el agente y ${admin.byTeam} ${admin.byTeam === 1 ? "le toca" : "le tocan"} a tu equipo`,
+      : `${admin.on} ${admin.on === 1 ? "prendida" : "prendidas"}: ${admin.byAgent} ${admin.byAgent === 1 ? "la hace" : "las hace"} ${ADMIN_NAME} y ${admin.byTeam} ${admin.byTeam === 1 ? "le toca" : "le tocan"} a tu equipo`,
     admin.recommended > 0 ? `te recomienda ${admin.recommended} más` : null,
   ]
   return parts.filter(Boolean).join(" · ")
@@ -95,6 +96,7 @@ function AgentSummaryPage() {
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
   const canDecide = usePermission("agent.decide")
+  const receptionName = useReceptionName()
   const [baseOpen, setBaseOpen] = useState(false)
   const [turnOffOpen, setTurnOffOpen] = useState(false)
 
@@ -107,6 +109,7 @@ function AgentSummaryPage() {
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
     enabled: canRead,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -115,7 +118,7 @@ function AgentSummaryPage() {
     queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
     enabled: canRead,
   })
-  // El Administrador se enciende aparte: lo suyo sale de su propio resumen.
+  // Argos se enciende aparte: lo suyo sale de su propio resumen.
   const adminQuery = useQuery({
     queryKey: ["agent-admin", "overview"],
     queryFn: () => apiFetch<{ data: AdminOverview }>("/api/agent/admin/overview"),
@@ -176,9 +179,9 @@ function AgentSummaryPage() {
           {overview.enabled && overview.provider.problem ? (
             <SummaryNotice
               tone="danger"
-              title={AGENT_MODEL_DOWN.title}
+              title={agentModelDown(receptionName).title}
             >
-              {AGENT_MODEL_DOWN.body}
+              {agentModelDown(receptionName).body}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
             </SummaryNotice>
           ) : null}
@@ -325,7 +328,7 @@ function AgentSummaryPage() {
                             {canWrite ? "Configurar" : "Ver"}
                           </Link>
                           {isReception && canWrite ? (
-                            <Switch checked aria-label="Apagar Recepción" onCheckedChange={(next) => (next ? undefined : setTurnOffOpen(true))} />
+                            <Switch checked aria-label={`Apagar a ${receptionName}`} onCheckedChange={(next) => (next ? undefined : setTurnOffOpen(true))} />
                           ) : null}
                         </div>
                       ) : (
@@ -426,7 +429,7 @@ function AgentSummaryPage() {
           ) : null}
           <ConfirmDialog
             open={turnOffOpen}
-            title="Apagar Recepción"
+            title={`Apagar a ${receptionName}`}
             description="Deja de responder en todos los canales. Las conversaciones abiertas y lo que esté a medias quedan para tu equipo."
             confirmLabel="Apagar"
             pending={turnOff.isPending}

@@ -44,13 +44,13 @@ export function screenDayWords(iso: string | null | undefined): string {
 }
 
 /** El aviso de arriba de la conversación en Spam (tablero 4). */
-export function spamNoticeWords(view: ContactScreenView): { title: string; detail: string } {
+export function spamNoticeWords(view: ContactScreenView, receptionName: string): { title: string; detail: string } {
   const day = screenDayWords(view.at)
-  const who = view.byName ? `Lo marcó ${view.byName}` : "Lo decidió el agente"
+  const who = view.byName ? `Lo marcó ${view.byName}` : `Lo decidió ${receptionName}`
   const reason = view.byName ? null : screenReasonWords("spam", view.reason)
   return {
     title: reason ? `Spam: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}` : "Spam",
-    detail: `${who}${day ? ` el ${day}` : ""}. El agente no le responde y no se cobra.`,
+    detail: `${who}${day ? ` el ${day}` : ""}. ${receptionName} no le responde y no se cobra.`,
   }
 }
 
@@ -64,10 +64,10 @@ export function blockedNoticeWords(view: ContactScreenView): { title: string; de
 }
 
 /** Salió sola de Spam (decisión 9b): con qué escribió y quién la había marcado. */
-export function leftSpamWords(view: ContactScreenView): string | null {
+export function leftSpamWords(view: ContactScreenView, receptionName: string): string | null {
   if (!view.leftSpam) return null
   const marked = view.leftSpam.markedByName
     ? `lo había marcado ${view.leftSpam.markedByName}${view.leftSpam.markedAt ? ` el ${screenDayWords(view.leftSpam.markedAt)}` : ""}`
-    : "lo había decidido el agente"
+    : `lo había decidido ${receptionName}`
   return `Salió de Spam al escribir algo para la clínica · ${marked}`
 }

@@ -1,3 +1,5 @@
+import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
+
 
 /**
  * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
@@ -11,11 +13,14 @@ export function urgencyWord(priority: string): string {
 
 /**
  * Lo que el agente le pasa al equipo tiene un solo nombre (decisión 1 de la
- * fase 2): cada fila dice «Te lo pasó el agente» (Inicio, Bandeja, panel,
- * Tareas) y la lista se llama «Casos del agente». La urgencia es siempre
- * «Ahora / Hoy / Sin apuro». En el código sigue llamándose handoff.
+ * fase 2): cada fila dice «Te lo pasó Sofi», con el nombre que la clínica le
+ * puso (Inicio, Bandeja, panel, Tareas), y la lista se llama «Casos del
+ * agente». La urgencia es siempre «Ahora / Hoy / Sin apuro». En el código
+ * sigue llamándose handoff.
  */
-export const AGENT_CASE_ROW = "Te lo pasó el agente"
+export function agentCaseRow(receptionName: string): string {
+  return `Te lo pasó ${receptionName}`
+}
 export const AGENT_CASES_TITLE = "Casos del agente"
 
 /** Etiquetas en español para las acciones del agente autónomo. */
@@ -221,6 +226,17 @@ export interface AgentRoles {
   roles: AgentRole[]
 }
 
+/**
+ * El catálogo de agentes como lo dice esta clínica: los textos del servidor
+ * nombran a «Sofi»; aquí dicen el nombre que la clínica le puso. Los ids no cambian.
+ */
+export function namedAgentRoles(roles: AgentRoles, receptionName: string): AgentRoles {
+  return {
+    principles: withReceptionNameIn(roles.principles, receptionName),
+    roles: roles.roles.map((role) => ({ ...withReceptionNameIn(role, receptionName), id: role.id, name: agentName(role.id, receptionName) })),
+  }
+}
+
 export interface AgentOutcomes {
   attended: number
   /** Tres tramos que suman `attended`: corregidas, pasadas a una persona y las que llevó sola. */
@@ -247,12 +263,14 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
  * dice qué pasa con los mensajes y que odentIA ya lo sabe (el caso
  * automático en Soporte lleva el motivo técnico).
  */
-export const AGENT_MODEL_DOWN = {
-  title: "El agente no puede responder ahora",
-  body: "Los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
-  /** En una línea: «El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.» */
-  line: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
-} as const
+export function agentModelDown(receptionName: string): { title: string; body: string; line: string } {
+  return {
+    title: `${receptionName} no puede responder ahora`,
+    body: "Los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+    /** En una línea: «Sofi no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.» */
+    line: `${receptionName} no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.`,
+  }
+}
 
 /**
  * «El modelo responde» (`GET /api/agent/model`). El servidor lo guarda 10
@@ -307,9 +325,8 @@ export function voicePreview(input: {
   emojis?: "no" | "pocos"
   clinicName: string
 }): string {
-  const who = input.personaName?.trim()
-    ? `Soy ${input.personaName.trim()}, asistente virtual de ${input.clinicName}.`
-    : `Soy el asistente virtual de ${input.clinicName}.`
+  // Vacío vale Sofi: siempre tiene un nombre.
+  const who = `Soy ${input.personaName?.trim() || RECEPTION_DEFAULT_NAME}, asistente virtual de ${input.clinicName}.`
   const formal = input.treatment === "usted"
   const emoji = input.emojis === "pocos" ? " 😊" : ""
   if (input.tone === "formal") return `Buenos días.${emoji} ${who} ¿En qué ${formal ? "puedo ayudarle" : "puedo ayudarte"}?`
@@ -377,11 +394,9 @@ export const LESSON_KIND_LABEL: Record<LessonKind, string> = {
 }
 
 /** A quién se aplica una lección, dicho para la clínica. */
-export function lessonScopeLabel(scope: string): string {
+export function lessonScopeLabel(scope: string, receptionName: string): string {
   if (scope === "clinica") return "Toda la clínica"
-  if (scope === "recepcion") return "Solo Recepción"
-  if (scope === "asistente_clinico") return "Solo el Asistente clínico"
-  if (scope === "administrador") return "Solo el Administrador"
+  if (scope === "recepcion" || scope in AGENT_NAME) return `Solo ${agentName(scope, receptionName)}`
   return scope
 }
 
@@ -449,26 +464,29 @@ export function impactSummary(impact: LessonImpact): string {
 }
 
 const AGENT_NAME: Record<string, string> = {
-  recepcion: "Recepción",
-  asistente_clinico: "Asistente clínico",
-  clinico: "Asistente clínico",
-  administrador: "Administrador",
+  asistente_clinico: CLINICAL_NAME,
+  clinico: CLINICAL_NAME,
+  administrador: ADMIN_NAME,
   ayuda: "Ayuda",
 }
 
-/** Nombre del agente para la clínica; un identificador desconocido se muestra tal cual. */
-export function agentName(agent: string): string {
+/**
+ * Nombre del agente para la clínica: el de recepción es el que eligió la
+ * clínica (`useReceptionName`); un identificador desconocido se muestra tal cual.
+ */
+export function agentName(agent: string, receptionName: string): string {
+  if (agent === "recepcion") return receptionName
   return AGENT_NAME[agent] ?? agent
 }
 
 /** Alcance de una lección como etiqueta corta: «Toda la clínica» o el agente. */
-export function lessonScopeChip(scope: string): string {
-  return scope === "clinica" ? "Toda la clínica" : agentName(scope)
+export function lessonScopeChip(scope: string, receptionName: string): string {
+  return scope === "clinica" ? "Toda la clínica" : agentName(scope, receptionName)
 }
 
-/** Alcance de una lección como frase: «Para toda la clínica» o «Solo para Recepción». */
-export function lessonScopeFor(scope: string): string {
-  return scope === "clinica" ? "Para toda la clínica" : `Solo para ${agentName(scope)}`
+/** Alcance de una lección como frase: «Para toda la clínica» o «Solo para Sofi». */
+export function lessonScopeFor(scope: string, receptionName: string): string {
+  return scope === "clinica" ? "Para toda la clínica" : `Solo para ${agentName(scope, receptionName)}`
 }
 
 const UNUSED_AFTER_MS = 30 * 86_400_000
