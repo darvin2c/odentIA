@@ -1,4 +1,5 @@
 import { type AgentRuntime, consumeAgentRun, createAlreadyTold, decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
@@ -257,6 +258,16 @@ queues.push({
     const result = await runAccountLifecycleTick(ownerDb, {
       notify: { sendReminder: (email, mail) => mailer.send({ to: email, ...mail }) },
       onboardingUrl: `${env.WEB_URL.replace(/\/+$/, "")}/onboarding`,
+      // Lleva al panel ya adentro, como «Reenviar el enlace» de la pantalla de entrar.
+      verificationUrl: (email) =>
+        emailVerificationUrl({
+          secret: env.BETTER_AUTH_SECRET,
+          authUrl: env.BETTER_AUTH_URL,
+          email,
+          callbackURL: `${env.WEB_URL.replace(/\/+$/, "")}/`,
+          expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
+        }),
+      verificationDays: REMINDER_VERIFICATION_TTL_SECONDS / 86_400,
     })
     for (const error of result.errors) console.error(`worker: account_lifecycle ${error}`)
     return result.reminders > 0 || result.cleaned > 0

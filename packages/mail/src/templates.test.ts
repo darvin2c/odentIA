@@ -39,7 +39,7 @@ const TEMPLATES: Record<string, () => MailTemplate> = {
     }),
   invitacion: () => invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL }),
   invitacionAlPersonal: () => staffInvitationTemplate({ url: URL }),
-  cuentaSinVerificar: () => accountReminderTemplate({ kind: "sin_verificar" }),
+  cuentaSinVerificar: () => accountReminderTemplate({ kind: "sin_verificar", url: URL, days: 7 }),
   cuentaSinClinica: () => accountReminderTemplate({ kind: "sin_clinica", url: URL }),
   soporteCasoNuevo: () =>
     supportInboxNoticeTemplate({

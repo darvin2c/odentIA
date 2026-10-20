@@ -6,6 +6,9 @@ const envSchema = z.object({
   /** Rol owner: setup de memoria del agente (paso 7). */
   DATABASE_URL: z.string().min(1),
   SECRETS_KEY: z.string().min(1),
+  /** Los de la API: el enlace «Verificar mi correo» del recordatorio lo firma y lo canjea Better Auth. */
+  BETTER_AUTH_SECRET: z.string().min(32),
+  BETTER_AUTH_URL: z.string().url(),
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
