@@ -84,6 +84,13 @@ export function unpinAnswer(id: string): Promise<unknown> {
 
 export const PINS_KEY = ["report", "pins"] as const
 
+/** Qué está fijado, sin recalcularlo. Vive bajo `PINS_KEY`: fijar o quitar la pone al día. */
+export const PIN_KEYS_KEY = [...PINS_KEY, "keys"] as const
+
+export function fetchPinKeys(): Promise<{ data: Array<{ id: string; figure: string; group: FigureGroup; focus: string | null }> }> {
+  return apiFetch("/api/reports/pins/keys")
+}
+
 // --- Metas ---------------------------------------------------------------------------
 
 export type ReportGoalMetric = "cobrado" | "pacientes_nuevos"

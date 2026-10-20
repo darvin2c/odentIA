@@ -30,6 +30,7 @@ import {
   interpretReportQuestion,
   isPatientReportList,
   keywordReportDecider,
+  listReportPinKeys,
   listReportPins,
   PATIENT_REPORT_LISTS,
   pinReportAnswer,
@@ -209,6 +210,12 @@ export function createReportsRoute(deps: ReportsDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const options = { billing: seesBilling(memberRole), can: (permission: string) => canAccess(memberRole, permission) }
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listReportPins(tx, orgId, parsed.data, options)))
+  })
+
+  // Solo qué está fijado, sin recalcular: lo lee cada respuesta del panel.
+  app.get("/pins/keys", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listReportPinKeys(tx, orgId)))
   })
 
   app.post("/pins", async (c) => {

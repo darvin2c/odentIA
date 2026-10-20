@@ -337,6 +337,19 @@ export async function listReportPins(tx: Db, orgId: string, screen: ReportQuery,
   return { limit: REPORT_PIN_LIMIT, pins }
 }
 
+/**
+ * Lo que está fijado, sin recalcularlo: con esto una respuesta del panel sabe
+ * si ya está en el Resumen, aunque alguien la haya quitado desde ahí.
+ */
+export async function listReportPinKeys(tx: Db, orgId: string): Promise<Array<{ id: string; figure: string; group: FigureGroup; focus: string | null }>> {
+  const rows = await tx
+    .select({ id: reportPin.id, figure: reportPin.figure, group: reportPin.groupBy, focus: reportPin.focus })
+    .from(reportPin)
+    .where(eq(reportPin.organizationId, orgId))
+    .orderBy(reportPin.createdAt, reportPin.id)
+  return rows.map((row) => ({ id: row.id, figure: row.figure, group: row.group as FigureGroup, focus: row.focus || null }))
+}
+
 export async function pinReportAnswer(tx: Db, orgId: string, userId: string, query: Pick<ReportAskQuery, "figure" | "group" | "focus">, billing: boolean): Promise<{ id: string }> {
   const figure = reportFigureOf(query.figure)
   if (!figure || (figure.billing && !billing)) throw validation("Esa cifra no está entre las que Argos sabe responder")

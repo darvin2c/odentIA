@@ -85,8 +85,15 @@ for (const width of [1440, 390]) {
       // Fijarla: queda en el Resumen, recalculada con la pantalla.
       await panel.getByRole("button", { name: "Fijar en Resumen" }).click()
       await expect(panel.getByRole("button", { name: "Fijada en Resumen" })).toBeDisabled()
-      await page.keyboard.press("Escape")
       const pinned = page.getByRole("region", { name: "Fijadas" })
+      if (width === 1440) {
+        // Con la respuesta al lado, quitarla del Resumen vuelve a ofrecer «Fijar» en el panel.
+        await pinned.getByRole("button", { name: "Quitar" }).click()
+        await expect(panel.getByRole("button", { name: "Fijar en Resumen" })).toBeEnabled()
+        await panel.getByRole("button", { name: "Fijar en Resumen" }).click()
+        await expect(panel.getByRole("button", { name: "Fijada en Resumen" })).toBeDisabled()
+      }
+      await page.keyboard.press("Escape")
       await expect(pinned.getByRole("region", { name: "No vinieron, por profesional" })).toBeVisible()
       await expect(pinned.getByText(/Caben 3 más/)).toBeVisible()
       await observe(page, info, "fijada")

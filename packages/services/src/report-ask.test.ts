@@ -13,7 +13,7 @@ import { reportQuestion } from "@odentia/db/schema/reports"
 import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { updateAdminSettings } from "./agent-admin.js"
-import { answerFor, listReportPins, pinReportAnswer, prepareReportQuestion, REPORT_DAILY_LIMIT, resolveReportQuestion, unpinReportAnswer } from "./report-ask.js"
+import { answerFor, listReportPinKeys, listReportPins, pinReportAnswer, prepareReportQuestion, REPORT_DAILY_LIMIT, resolveReportQuestion, unpinReportAnswer } from "./report-ask.js"
 import { claimReportDigest, composeReportDigest, dueReportDigests, getReportDigest, setReportDigest } from "./report-digest.js"
 import { goalsForMonth, setReportGoal } from "./report-goals.js"
 import { getReportSummary } from "./report-summary.js"
@@ -126,8 +126,11 @@ describe("fijar en el Resumen", () => {
     const pins = await c.run((tx) => listReportPins(tx, c.orgId, { period: "2026-09" }, OPTIONS))
     expect(pins.pins).toHaveLength(4)
     expect(pins.pins[0]).toMatchObject({ pinnedBy: "Ana Torres", answer: { title: "No vinieron, por profesional", scope: "Setiembre de 2026 · Todas las sedes" } })
+    expect((await c.run((tx) => listReportPinKeys(tx, c.orgId)))[0]).toEqual({ id: first.id, figure: "no_vinieron", group: "profesional", focus: null })
     await c.run((tx) => unpinReportAnswer(tx, c.orgId, first.id))
     expect((await c.run((tx) => listReportPins(tx, c.orgId, { period: "2026-09" }, OPTIONS))).pins).toHaveLength(3)
+    // Quitada desde el Resumen, la respuesta del panel ya no la ve fijada.
+    expect((await c.run((tx) => listReportPinKeys(tx, c.orgId))).map((pin) => pin.figure)).not.toContain("no_vinieron")
   })
 })
 

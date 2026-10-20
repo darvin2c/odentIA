@@ -18,7 +18,7 @@ import { ADMIN_NAME } from "../../lib/agent-names"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportListKey, ReportQuery } from "../../lib/reports"
-import { askReport, downloadReportAnswer, type FigureUnit, PINS_KEY, pinAnswer, type ReportAnswer, type ReportAskQuery, type ReportAskResult, type ReportSentence } from "../../lib/reports-ask"
+import { askReport, downloadReportAnswer, fetchPinKeys, type FigureUnit, PIN_KEYS_KEY, PINS_KEY, pinAnswer, type ReportAnswer, type ReportAskQuery, type ReportAskResult, type ReportSentence } from "../../lib/reports-ask"
 import { screenEnvelope, WhatIsSent } from "../help-panel"
 import { AdviceNote } from "./advice-note"
 
@@ -112,14 +112,18 @@ export function ArgosAnswer({
 }) {
   const at: ReportQuery = { period: answer.query.period, ...(answer.query.branchId ? { branchId: answer.query.branchId } : {}) }
   const queryClient = useQueryClient()
-  const [pinned, setPinned] = useState(false)
+  // Fijada o no lo dice lo guardado, no el último clic: quitarla desde el Resumen vuelve a ofrecer «Fijar».
+  const pinKeys = useQuery({ queryKey: PIN_KEYS_KEY, queryFn: fetchPinKeys, retry: false })
+  const pinned = (pinKeys.data?.data ?? []).some(
+    (item) => item.figure === answer.query.figure && item.group === answer.query.group && (item.focus ?? "") === (answer.query.focus ?? ""),
+  )
   const pin = useMutation({
     retry: false,
     mutationFn: () => pinAnswer(answer.query),
     onSuccess: () => {
-      setPinned(true)
       toast.success("Fijada en el Resumen: sigue el periodo y la sede de arriba")
-      void queryClient.invalidateQueries({ queryKey: PINS_KEY })
+      // El botón sigue pendiente hasta que la lista diga que quedó fijada.
+      return queryClient.invalidateQueries({ queryKey: PINS_KEY })
     },
   })
   const download = useMutation({ retry: false, mutationFn: () => downloadReportAnswer(answer.query), onError: (error) => toast.error(mutationErrorMessage(error)) })
