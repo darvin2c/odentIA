@@ -37,9 +37,10 @@ export function createTranscriber(env: Env): TranscribeFn | null {
     form.set("model", model)
     form.set("file", new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }), filename)
     form.set("language", "es")
-    // whisper-1 solo dice cuánto duró el audio (lo que cobra) en verbose_json;
-    // los modelos gpt-4o-*-transcribe lo informan en `usage` con json.
-    form.set("response_format", model === "whisper-1" ? "verbose_json" : "json")
+    // Los Whisper (whisper-1 de OpenAI y whisper-large-v3[-turbo] de Groq) solo
+    // dicen cuánto duró el audio, que es lo que cobran, en verbose_json; los
+    // gpt-4o-*-transcribe lo informan en `usage` con json.
+    form.set("response_format", model.startsWith("whisper") ? "verbose_json" : "json")
     const res = await fetch(`${baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}` },

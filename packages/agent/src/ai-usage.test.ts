@@ -37,6 +37,16 @@ describe("costo de una llamada", () => {
     expect(costMicrosOf({ model: "gpt-4o-mini-transcribe", audioSeconds: 60 })).toBe(3_000)
   })
 
+  it("Whisper de Groq se cobra por hora de audio, con 10 s como mínimo por audio", () => {
+    // Una nota de voz típica de 35 s con turbo (USD 0,04 la hora): 389 millonésimas.
+    expect(costMicrosOf({ model: "whisper-large-v3-turbo", audioSeconds: 35 })).toBe(389)
+    // Un «sí» de 4 s se cobra como 10 s.
+    expect(costMicrosOf({ model: "whisper-large-v3-turbo", audioSeconds: 4 })).toBe(111)
+    expect(costMicrosOf({ model: "whisper-large-v3", audioSeconds: 60 })).toBe(1_850)
+    // OpenAI no tiene mínimo: whisper-1 cobra los 4 s.
+    expect(costMicrosOf({ model: "whisper-1", audioSeconds: 4 })).toBe(400)
+  })
+
   it("Jev cobra solo la entrada: un mensaje típico de Recepción cuesta 57 millonésimas", () => {
     // Camino, conocimiento e interés: ~1 360 tokens a 0,042 USD por millón; la salida no se cobra.
     expect(costMicrosOf({ model: "jev-1.13.0", inputTokens: 1_360, outputTokens: 12 })).toBe(57)
