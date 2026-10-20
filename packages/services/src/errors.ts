@@ -42,6 +42,11 @@ export function isExclusionViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23P01"
 }
 
+/** true si el error es violación de un CHECK o de una regla de la base que la imita (Postgres 23514). */
+export function isCheckViolation(error: unknown): boolean {
+  return pgCodeOf(error) === "23514"
+}
+
 function pgCodeOf(error: unknown): string | undefined {
   const code = codeOf(error) ?? codeOf(causeOf(error))
   return typeof code === "string" ? code : undefined

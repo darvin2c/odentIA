@@ -340,7 +340,7 @@ export function lapsedSql(orgId: string, scope: Pick<ReportScope, "branch" | "ti
     )`
 }
 
-async function lapsedCount(tx: Db, orgId: string, scope: ReportScope): Promise<number> {
+export async function lapsedCount(tx: Db, orgId: string, scope: ReportScope): Promise<number> {
   const [row] = await tx.execute<{ count: number }>(sql`with ${lapsedSql(orgId, scope, scope.now)} select count(*)::int as count from lapsed`)
   return row?.count ?? 0
 }
@@ -473,10 +473,11 @@ const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "la
 export async function getPatientReportList(
   tx: Db,
   orgId: string,
-  query: ReportQuery & { list: PatientReportListKey },
+  query: ReportQuery & { list: PatientReportListKey; limit?: number },
   now: Date = new Date(),
 ) {
   const scope = await reportScope(tx, orgId, query, now)
+  const limit = Math.max(1, Math.min(query.limit ?? LIST_LIMIT, 5000))
   const { window } = scope
   const nextAppointment = (patient: SQL): SQL => sql`exists (
     select 1 from appointment n where n.organization_id = ${orgId} and n.patient_id = ${patient}
@@ -497,7 +498,7 @@ export async function getPatientReportList(
         join patient p on p.id = f.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         where f.organization_id = ${orgId} and f.due_at >= ${at(window.start)} and f.due_at < ${at(window.end)}
           and not (f.status = 'realizado' and f.completed_encounter_id is not null and f.outcome is not null and e.status is not distinct from 'finalizada')
-        order by f.due_at, f.id limit ${LIST_LIMIT}`)),
+        order by f.due_at, f.id limit ${limit}`)),
     ]
   } else if (query.list === "lapsed") {
     rows = [
@@ -510,7 +511,7 @@ export async function getPatientReportList(
         join patient p on p.id = v.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         left join branch br on br.id = v.branch_id and br.organization_id = ${orgId}
         left join "user" u on u.id = v.dentist_user_id
-        order by v.starts_at, v.patient_id limit ${LIST_LIMIT}`)),
+        order by v.starts_at, v.patient_id limit ${limit}`)),
     ]
   } else {
     rows = [
@@ -523,7 +524,7 @@ export async function getPatientReportList(
           count(*) over()::int as total
         from funnel f join contact pp on pp.organization_id = ${orgId} and pp.id = f.person_id
         where ${FUNNEL_WHERE[query.list]}
-        order by f.first_at desc, f.person_id limit ${LIST_LIMIT}`)),
+        order by f.first_at desc, f.person_id limit ${limit}`)),
     ]
   }
 

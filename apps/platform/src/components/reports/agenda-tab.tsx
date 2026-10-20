@@ -134,7 +134,7 @@ function AgendaCards({ data, onOpenList }: { data: AgendaReport; onOpenList: (li
   const partial = data.months[data.months.length - 1]?.partial ?? false
   const free = data.occupancy.current.availMin - data.occupancy.current.occMin
   return (
-    <section aria-label="Cifras de agenda" className="grid min-w-0 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+    <section aria-label="Cifras de agenda" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
       <AgendaCard
         title="Citas atendidas"
         value={String(current.attended)}

@@ -22,7 +22,7 @@ La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
-Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 29 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
+Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 30 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
 
 El correo de liquidación incluye una fila por clínica y otra por ajuste antes
 del total. `mail:preview --html <carpeta>` permite revisar ese detalle sin
@@ -111,7 +111,8 @@ y responde sin modelo de decisión; con un modelo que escribe real, además abre
 -- --provider=jev` compara un proveedor con los ejemplos propios de
 `packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:off-topic` mide si reconoce lo que no es de la clínica sin marcar lo que sí lo es. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
-por llamada; `eval:month` corre un mes de una clínica inventada y proyecta los tokens
+por llamada; `eval:reports` hace lo mismo con las preguntas a Argos en Reportes (cuántas
+responde bien, cuántas pregunta, que ninguna invente y el costo por pregunta); `eval:month` corre un mes de una clínica inventada y proyecta los tokens
 del mes (necesita el runtime de contenedores, como las pruebas).
 
 En producción, usar las mismas variables en los secretos de despliegue de API y

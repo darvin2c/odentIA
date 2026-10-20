@@ -17,6 +17,7 @@ import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runContactScreensTick } from "./contact-screens.js"
+import { runReportDigestTick } from "./report-digests.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -192,6 +193,7 @@ let nextScreensPoll = 0
 let nextAccountPoll = 0
 let nextSupportPoll = 0
 let nextLegalPoll = 0
+let nextDigestPoll = 0
 queues.push({
   name: "saas_billing",
   poll: async () => {
@@ -239,6 +241,15 @@ queues.push({
       // Quien no está de acuerdo responde al correo: llega a soporte.
       replyTo: env.SUPPORT_INBOX_EMAIL || undefined,
     })
+    return result.mailed > 0
+  },
+}, {
+  // El resumen del lunes de Reportes: a quien lo prendió, el lunes desde las 8:00 de su clínica.
+  name: "report_digests",
+  poll: async () => {
+    if (Date.now() < nextDigestPoll) return false
+    nextDigestPoll = Date.now() + 60_000
+    const result = await runReportDigestTick({ ownerDb, appDb: db, mailer, secretsKey })
     return result.mailed > 0
   },
 }, {

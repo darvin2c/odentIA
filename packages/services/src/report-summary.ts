@@ -28,6 +28,7 @@ import {
 import { appointmentTotalsMany, budgetLinesSql, newPatientsMany } from "./reports.js"
 import { agentBookedMany, agentCollectedMany, agentRecoveredMany, collectedIn } from "./report-agent.js"
 import { occupancyMany } from "./report-agenda.js"
+import { reportGoalsFor } from "./report-goals.js"
 
 /** Presupuestos presentados y cuántos de ellos se aceptaron (en todo o en parte), por tramo. */
 export interface Acceptance {
@@ -111,6 +112,18 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
   const buckets = scopeBuckets(scope)
   const before = buckets.map((bucket) => yearBefore(scope.timezone, bucket))
   const chart = await collectedNetMany(tx, orgId, [...buckets, ...before], { branchId })
+  // Las metas son de toda la clínica (decisión 9): con una sede elegida no se comparan.
+  const goals = branchId
+    ? null
+    : await reportGoalsFor(tx, orgId, {
+        window,
+        timezone: scope.timezone,
+        currency,
+        now,
+        collected: cents(nth(collected, 0)),
+        newPatients: nth(fresh, 0),
+        months: months.map((month, index) => ({ key: month.key, partial: month.partial, collected: cents(collected[index + 2]), newPatients: fresh[index + 2] ?? 0 })),
+      })
 
   return {
     ...reportHead(scope),
@@ -154,6 +167,8 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
     })),
     /** Presupuestos y deudas de la persona: no pertenecen a una sede. */
     wholeClinic: scope.branch ? (["acceptance"] as const) : ([] as const),
+    /** Las metas del mes y su avance; null con una sede elegida (son de toda la clínica). */
+    goals,
   }
 }
 

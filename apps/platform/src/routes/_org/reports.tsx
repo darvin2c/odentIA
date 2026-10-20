@@ -13,6 +13,7 @@ import { Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
+import { ArgosPanel, AskArgosField, useArgosConversation } from "../../components/reports/ask-argos"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { AgentTab } from "../../components/reports/agent-tab"
 import { FinanceTab } from "../../components/reports/finance-tab"
@@ -125,8 +126,14 @@ function ReportsPage() {
     return found ? <AdviceNote advice={found} onOpen={setRecommendation} /> : undefined
   }
 
+  // La conversación con Argos sigue al cambiar de pestaña: vive en la pantalla, no se guarda.
+  const argos = useArgosConversation(query)
+  const argosEnabled = advice.data?.data.enabled
+
   const setSearch = (patch: Partial<ReportsSearch>): void => void navigate({ search: (prev) => ({ ...prev, ...patch }) })
-  const openList = (lista: ReportListKey): void => setSearch({ lista })
+  // Una respuesta de Argos puede ser de otro periodo o sede («¿Y en agosto?»): su lista se abre con los suyos.
+  const openList = (lista: ReportListKey, at?: ReportQuery): void =>
+    setSearch({ lista, ...(at ? { period: at.period === DEFAULT_PERIOD ? undefined : at.period, branch: at.branchId } : {}) })
   const showCurrentMonth = (): void => setSearch({ period: undefined })
 
   if (!allowed) {
@@ -179,6 +186,7 @@ function ReportsPage() {
               </ChoiceSelect>
             ) : null}
             {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
+            <AskArgosField conversation={argos} enabled={argosEnabled} />
           </div>
 
           {head.isError ? (
@@ -209,10 +217,13 @@ function ReportsPage() {
                 </div>
               ) : null}
 
+              {/* Las cifras siguen al ancho de la pestaña, no al de la ventana: con Argos o una lista al lado, caben menos. */}
+              <div className="@container min-w-0">
               {tab === "resumen" ? (
                 <SummaryTab
                   query={query}
                   onOpenList={openList}
+                  argosEnabled={argosEnabled}
                   advice={
                     <AdminWatch enabled={advice.data?.data.enabled}>
                       {notices && notices.length > 0 ? (
@@ -243,10 +254,12 @@ function ReportsPage() {
               ) : (
                 <AgentTab query={query} onOpenList={openList} />
               )}
+              </div>
             </>
           )}
         </>
       )}
+      <ArgosPanel conversation={argos} onOpenList={openList} onOpenRecommendation={setRecommendation} />
       <ReportListDrawer list={search.lista ?? null} query={query} onClose={() => setSearch({ lista: undefined })} />
       <AdminRecommendationDrawer recommendationKey={recommendation} onClose={() => setRecommendation(null)} />
     </PageShell>

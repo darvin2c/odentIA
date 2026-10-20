@@ -304,7 +304,7 @@ async function firstScheduleDays(tx: Db, orgId: string, branchId: string | undef
 }
 
 /** Citas del periodo de cada profesional, por cómo terminaron (la misma regla de `appointmentTotalsMany`). */
-async function appointmentsByProfessional(tx: Db, orgId: string, span: Span, now: Date, branchId: string | undefined) {
+export async function appointmentsByProfessional(tx: Db, orgId: string, span: Span, now: Date, branchId: string | undefined) {
   const rows = await tx.execute<{ userId: string; name: string; attended: number; noShow: number; cancelled: number; unmarked: number }>(sql`
     select a.dentist_user_id as "userId", u.name,
       count(*) filter (where a.status = 'atendida')::int as attended,

@@ -316,6 +316,20 @@
       "when": 1792502613752,
       "tag": "0044_biblioteca_por_pais_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792513556859,
+      "tag": "0045_argos_reportes_metas_y_lunes",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792513565688,
+      "tag": "0046_argos_reportes_metas_y_lunes_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -712,8 +712,9 @@ function dayAndHour(date: Date, locale: string, timeZone: string): string {
  * reservaron (esa es la fecha de la fila; la de la cita va en el texto) y las
  * conversaciones de quienes escribieron por primera vez en el periodo.
  */
-export async function getAgentReportList(tx: Db, orgId: string, query: ReportQuery & { list: AgentReportListKey }, now: Date = new Date()) {
+export async function getAgentReportList(tx: Db, orgId: string, query: ReportQuery & { list: AgentReportListKey; limit?: number }, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
+  const limit = Math.max(1, Math.min(query.limit ?? AGENT_LIST_LIMIT, 5000))
   const { window, currency } = scope
   type Row = Omit<ReportListRow, "cents"> & { cents: number | null; total: number }
   let rows: Row[]
@@ -731,7 +732,7 @@ export async function getAgentReportList(tx: Db, orgId: string, query: ReportQue
       join "user" u on u.id = a.dentist_user_id
       where a.organization_id = ${orgId} and a.created_at >= ${at(window.start)} and a.created_at < ${at(window.end)}
         and a.source in (${agentSources()}) ${scope.branch ? sql`and a.branch_id = ${scope.branch.id}` : sql``}
-      order by a.created_at desc, a.id limit ${AGENT_LIST_LIMIT}`)
+      order by a.created_at desc, a.id limit ${limit}`)
     const paid = await appointmentsPaid(tx, orgId, [...booked].map((row) => row.id), now)
     rows = [...booked].map(({ startsAt, service, ...row }) => {
       const cents = paid.get(row.id)?.find((item) => item.currency === currency)?.cents ?? null
@@ -760,7 +761,7 @@ export async function getAgentReportList(tx: Db, orgId: string, query: ReportQue
         from passed x
         left join contact pp on pp.organization_id = ${orgId} and pp.id = x.contact_id
         left join patient pt on pt.organization_id = ${orgId} and pt.person_id = x.contact_id
-        order by x.created_at desc, x.id limit ${AGENT_LIST_LIMIT}`)),
+        order by x.created_at desc, x.id limit ${limit}`)),
     ]
   }
   return {

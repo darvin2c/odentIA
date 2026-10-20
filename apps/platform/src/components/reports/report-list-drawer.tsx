@@ -19,8 +19,9 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
-import { during } from "./report-parts"
+import { DownloadButton, during } from "./report-parts"
 import { ADMIN_NAME } from "../../lib/agent-names"
+import { downloadReportList } from "../../lib/reports-ask"
 
 /** Filas a la vista antes de «Mostrar las otras». */
 const PREVIEW = 8
@@ -313,15 +314,19 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
       onClose={onClose}
       isLoading={report.isPending}
       actions={
-        copy.where.to === "/inbox" ? (
-          <Link to="/inbox" search={{ conversation: undefined }} className={buttonVariants()}>
-            {copy.where.label}
-          </Link>
-        ) : (
-          <Link to={copy.where.to} className={buttonVariants()}>
-            {copy.where.label}
-          </Link>
-        )
+        <>
+          {/* La lista entera en CSV, con el teléfono si quien descarga puede verlo (decisión 11). */}
+          {data && data.total > 0 ? <DownloadButton onDownload={() => downloadReportList(list, query)} /> : null}
+          {copy.where.to === "/inbox" ? (
+            <Link to="/inbox" search={{ conversation: undefined }} className={buttonVariants()}>
+              {copy.where.label}
+            </Link>
+          ) : (
+            <Link to={copy.where.to} className={buttonVariants()}>
+              {copy.where.label}
+            </Link>
+          )}
+        </>
       }
     >
       {report.isError ? (

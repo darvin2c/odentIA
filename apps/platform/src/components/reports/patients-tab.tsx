@@ -293,7 +293,7 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <section aria-label="Cifras de pacientes" className="grid min-w-0 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Cifras de pacientes" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
         <Figure
           title="Nos buscaron por primera vez"
           value={funnel.current.sought}
