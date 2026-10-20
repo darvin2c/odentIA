@@ -850,8 +850,8 @@ test("una lista y un buscador: Pacientes, Por registrar y Responsables; Contacto
   // El documento se lee con la etiqueta del catálogo, como en la ficha, nunca con su código.
   await expect(page.getByText(/Pasaporte AB1234567/)).toBeVisible()
   await expect(page.getByText(/PASAPORTE/)).toHaveCount(0)
-  // Plegado, el buscador dice «Buscar» entero; la ayuda completa es su nombre y aparece al abrirlo.
-  await expect(page.getByRole("searchbox")).toHaveAttribute("placeholder", "Buscar")
+  // Plegado, el buscador dice su nombre («Buscar en pacientes», ADR 0066); la ayuda completa aparece al abrirlo.
+  await expect(page.getByRole("searchbox")).toHaveAttribute("placeholder", "Buscar en pacientes")
   await page.getByRole("button", { name: /^Por registrar/ }).click()
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
   await page.getByRole("button", { name: "Responsables", exact: true }).click()
