@@ -23,8 +23,9 @@ CREATE TRIGGER saas_commercial_terms_append_only BEFORE UPDATE OR DELETE ON admi
 INSERT INTO admin.saas_commercial_terms
   (effective_from, conversation_window_hours, recovery_window_days, review_auto_percent, review_answer_days,
    review_read_days, payment_days, grace_days, proof_extension_days, proof_extension_max, half_cycle_days,
-   trial_days, warn_percent, alarm_percent, waitlist_answer_days, commission_months)
-VALUES ('1970-01-01T00:00:00Z', 24, 7, 10, 2, 7, 7, 7, 3, 1, 15, 30, 75, 90, 2, 12);--> statement-breakpoint
+   trial_days, warn_percent, alarm_percent, waitlist_answer_days, commission_months, discount_notice_days,
+   guarantee_notice_days)
+VALUES ('1970-01-01T00:00:00Z', 24, 7, 10, 2, 7, 7, 7, 3, 1, 15, 30, 75, 90, 2, 12, 15, 30);--> statement-breakpoint
 
 -- 4. Sin plan por defecto, la prueba del alta dura lo que dicen las condiciones
 -- vigentes (antes, 30 fijos).

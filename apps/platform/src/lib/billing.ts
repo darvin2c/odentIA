@@ -43,6 +43,8 @@ export interface SaasTerms {
   halfCycleDays: number
   warnPercent: number
   alarmPercent: number
+  /** Días antes del fin de las condiciones de Fundador en que se avisa. */
+  guaranteeNoticeDays: number
 }
 
 export function useSaasTerms() {

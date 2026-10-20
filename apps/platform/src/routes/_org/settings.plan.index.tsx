@@ -20,7 +20,7 @@ import { SpendCapDrawer } from "../../components/billing/spend-cap"
 import { type BillingSummary, SubscriptionStatusCard } from "../../components/billing/subscription-status"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError, apiFetch } from "../../lib/api"
-import { PLAN_ACTIONS_PATH, useClinicLine } from "../../lib/billing"
+import { PLAN_ACTIONS_PATH, useClinicLine, useSaasTerms } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
@@ -89,6 +89,7 @@ function PlanContent() {
   const [capOpen, setCapOpen] = useState(false)
   const orgParam = `orgId=${encodeURIComponent(organizationId)}`
 
+  const terms = useSaasTerms().data
   const subscription = useQuery({
     queryKey: ["billing", organizationId, "subscription"],
     queryFn: () => apiFetch<{ data: BillingSummary }>(`/api/account/billing/subscription?${orgParam}`).then((res) => res.data),
@@ -243,7 +244,9 @@ function PlanContent() {
             {new Intl.DateTimeFormat(activeOrgLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: activeOrgTimeZone() }).format(
               new Date(summary.guaranteedUntil),
             )}
-            . Después pasas al plan de lista de odentIA; te avisamos 30 días antes. Si quieres cambiar algo antes, escríbenos desde Ayuda.
+            . Después pasas al plan de lista de odentIA
+            {terms ? `; te avisamos ${terms.guaranteeNoticeDays} ${terms.guaranteeNoticeDays === 1 ? "día" : "días"} antes` : ""}. Si quieres cambiar algo
+            antes, escríbenos desde Ayuda.
           </p>
         ) : plans.isPending ? (
           <LoadingState message="Cargando planes…" />

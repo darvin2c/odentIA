@@ -33,6 +33,8 @@ export interface SaasCommercialTerms {
   alarmPercent: number
   waitlistAnswerDays: number
   commissionMonths: number
+  discountNoticeDays: number
+  guaranteeNoticeDays: number
 }
 export type SaasTermKey = keyof SaasCommercialTerms
 
@@ -56,6 +58,8 @@ export const SAAS_TERMS_INITIAL: Readonly<SaasCommercialTerms> = Object.freeze({
   alarmPercent: 90,
   waitlistAnswerDays: 2,
   commissionMonths: 12,
+  discountNoticeDays: 15,
+  guaranteeNoticeDays: 30,
 })
 
 /* ---------- Palabras ---------- */
@@ -85,6 +89,8 @@ export const SAAS_TERM_WORDS: Record<SaasTermKey, (n: number) => string> = {
   alarmPercent: percent,
   waitlistAnswerDays: businessDays,
   commissionMonths: months,
+  discountNoticeDays: days,
+  guaranteeNoticeDays: days,
 }
 
 export interface SaasTermField {
@@ -104,7 +110,7 @@ export interface SaasTermField {
   sameRow?: boolean
 }
 
-export type SaasTermsGroupKey = "cobro" | "revision" | "pagos" | "prueba" | "invitaciones"
+export type SaasTermsGroupKey = "cobro" | "revision" | "pagos" | "prueba" | "invitaciones" | "fin"
 
 /** Un trozo de frase: la cifra va resaltada. */
 export interface SaasTermsPart {
@@ -329,6 +335,36 @@ const GROUPS: GroupSpec[] = [
       [t("El vendedor cobra comisión durante los primeros "), v(months(x.commissionMonths)), t(" de la clínica.")],
     ],
   },
+  {
+    key: "fin",
+    title: "Avisos antes de que termine algo",
+    fields: [
+      {
+        key: "discountNoticeDays",
+        name: "Aviso del fin de un precio especial",
+        label: "Avisar que termina un precio especial",
+        unit: "días antes",
+        min: 1,
+        max: 30,
+        hint: "Entre 1 y 30. Lo ven la clínica y el Inicio de la administración.",
+        since: "Desde ya: solo avisan.",
+      },
+      {
+        key: "guaranteeNoticeDays",
+        name: "Aviso del fin de las condiciones de una Fundadora",
+        label: "Avisar que terminan las condiciones garantizadas de una Fundadora",
+        unit: "días antes",
+        min: 1,
+        max: 60,
+        hint: "Entre 1 y 60. Después pasa al plan por defecto.",
+        since: "Desde ya: solo avisan.",
+      },
+    ],
+    sentences: (x) => [
+      [t("Un precio especial se avisa "), v(days(x.discountNoticeDays)), t(" antes de que termine.")],
+      [t("Las condiciones garantizadas de una Fundadora se avisan "), v(days(x.guaranteeNoticeDays)), t(" antes de que terminen.")],
+    ],
+  },
 ]
 
 const FIELDS: SaasTermField[] = GROUPS.flatMap((group) => group.fields)
@@ -405,6 +441,7 @@ export interface ClinicSaasTerms {
   halfCycleDays: number
   warnPercent: number
   alarmPercent: number
+  guaranteeNoticeDays: number
 }
 
 export async function getClinicSaasTerms(tx: Db, now = new Date()): Promise<ClinicSaasTerms> {
@@ -418,6 +455,7 @@ export async function getClinicSaasTerms(tx: Db, now = new Date()): Promise<Clin
     halfCycleDays: x.halfCycleDays,
     warnPercent: x.warnPercent,
     alarmPercent: x.alarmPercent,
+    guaranteeNoticeDays: x.guaranteeNoticeDays,
   }
 }
 

@@ -786,6 +786,10 @@ export const saasCommercialTerms = adminSchema.table(
     /** Días hábiles para responder una solicitud de invitación. */
     waitlistAnswerDays: integer("waitlist_answer_days").notNull(),
     commissionMonths: integer("commission_months").notNull(),
+    /** Días antes del fin de un precio especial en que se avisa a la clínica y a la administración. */
+    discountNoticeDays: integer("discount_notice_days").notNull(),
+    /** Días antes del fin de las condiciones garantizadas de una Fundadora en que se avisa. */
+    guaranteeNoticeDays: integer("guarantee_notice_days").notNull(),
     reason: text("reason"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -809,7 +813,9 @@ export const saasCommercialTerms = adminSchema.table(
         AND ${table.alarmPercent} BETWEEN 50 AND 99
         AND ${table.warnPercent} < ${table.alarmPercent}
         AND ${table.waitlistAnswerDays} BETWEEN 1 AND 10
-        AND ${table.commissionMonths} BETWEEN 1 AND 36`,
+        AND ${table.commissionMonths} BETWEEN 1 AND 36
+        AND ${table.discountNoticeDays} BETWEEN 1 AND 30
+        AND ${table.guaranteeNoticeDays} BETWEEN 1 AND 60`,
     ),
     check("saas_commercial_terms_reason_check", sql`${table.reason} IS NULL OR length(${table.reason}) BETWEEN 1 AND 500`),
   ],

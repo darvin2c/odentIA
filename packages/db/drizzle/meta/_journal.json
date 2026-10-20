@@ -355,14 +355,14 @@
     {
       "idx": 50,
       "version": "7",
-      "when": 1792531561572,
+      "when": 1792533926844,
       "tag": "0050_condiciones_comerciales",
       "breakpoints": true
     },
     {
       "idx": 51,
       "version": "7",
-      "when": 1792531570926,
+      "when": 1792533930189,
       "tag": "0051_condiciones_comerciales_reglas",
       "breakpoints": true
     }

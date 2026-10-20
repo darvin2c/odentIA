@@ -16,6 +16,8 @@ CREATE TABLE "admin"."saas_commercial_terms" (
 	"alarm_percent" integer NOT NULL,
 	"waitlist_answer_days" integer NOT NULL,
 	"commission_months" integer NOT NULL,
+	"discount_notice_days" integer NOT NULL,
+	"guarantee_notice_days" integer NOT NULL,
 	"reason" text,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -35,7 +37,9 @@ CREATE TABLE "admin"."saas_commercial_terms" (
         AND "admin"."saas_commercial_terms"."alarm_percent" BETWEEN 50 AND 99
         AND "admin"."saas_commercial_terms"."warn_percent" < "admin"."saas_commercial_terms"."alarm_percent"
         AND "admin"."saas_commercial_terms"."waitlist_answer_days" BETWEEN 1 AND 10
-        AND "admin"."saas_commercial_terms"."commission_months" BETWEEN 1 AND 36),
+        AND "admin"."saas_commercial_terms"."commission_months" BETWEEN 1 AND 36
+        AND "admin"."saas_commercial_terms"."discount_notice_days" BETWEEN 1 AND 30
+        AND "admin"."saas_commercial_terms"."guarantee_notice_days" BETWEEN 1 AND 60),
 	CONSTRAINT "saas_commercial_terms_reason_check" CHECK ("admin"."saas_commercial_terms"."reason" IS NULL OR length("admin"."saas_commercial_terms"."reason") BETWEEN 1 AND 500)
 );
 --> statement-breakpoint

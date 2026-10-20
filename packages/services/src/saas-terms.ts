@@ -413,11 +413,12 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
-  // Precio negociado con vencimiento (issue 168): se avisa desde 15 días antes.
+  // Precio negociado con vencimiento (issue 168): se avisa desde los días que
+  // dicen las condiciones comerciales (15 al empezar).
   const discount = activeDiscountBps(sub, now)
   if (discount > 0 && sub.discountEndsAt) {
     const daysLeft = Math.ceil((sub.discountEndsAt.getTime() - now.getTime()) / DAY)
-    if (daysLeft <= SAAS_DISCOUNT_NOTICE_DAYS) {
+    if (daysLeft <= levels.discountNoticeDays) {
       alerts.push({
         family: "precio_especial",
         level: daysLeft <= 3 ? "alarma" : "aviso",
@@ -430,10 +431,11 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
-  // Condiciones garantizadas de quien entró por invitación (Fundadores): se avisa desde 30 días antes.
+  // Condiciones garantizadas de quien entró por invitación (Fundadores): se
+  // avisa desde los días que dicen las condiciones comerciales (30 al empezar).
   if (sub.guaranteedUntil && sub.guaranteedUntil.getTime() > now.getTime()) {
     const daysLeft = Math.ceil((sub.guaranteedUntil.getTime() - now.getTime()) / DAY)
-    if (daysLeft <= SAAS_GUARANTEE_NOTICE_DAYS) {
+    if (daysLeft <= levels.guaranteeNoticeDays) {
       alerts.push({
         family: "condiciones",
         level: daysLeft <= 7 ? "alarma" : "aviso",
@@ -448,10 +450,6 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   return alerts
 }
 
-/** Días antes del fin de un precio negociado en que se avisa a la clínica y a la administración. */
-export const SAAS_DISCOUNT_NOTICE_DAYS = 15
-/** Días antes del fin de las condiciones garantizadas en que se avisa (decisión 4 de Fundadores). */
-export const SAAS_GUARANTEE_NOTICE_DAYS = 30
 
 export interface AgentSpendGate {
   /** Se usó todo el saldo de prueba: los agentes se pausan. */
@@ -612,6 +610,8 @@ export interface OrganizationBillingTerms {
   /** Desde qué parte del crédito avisa y alarma el medidor (las condiciones que rigen). */
   warnPercent: number
   alarmPercent: number
+  /** Días antes del fin de un precio especial en que se avisa (las condiciones que rigen). */
+  discountNoticeDays: number
   activatedAt: Date | null
   seller: { id: string; name: string; userId: string | null } | null
   consumption: SaasConsumption
@@ -667,6 +667,7 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
     halfCycleDays: periodTerms.halfCycleDays,
     warnPercent: terms.warnPercent,
     alarmPercent: terms.alarmPercent,
+    discountNoticeDays: terms.discountNoticeDays,
     activatedAt: sub.activatedAt,
     seller: await saasSellerOf(tx, orgId),
     consumption: await getSaasConsumption(tx, orgId, now),

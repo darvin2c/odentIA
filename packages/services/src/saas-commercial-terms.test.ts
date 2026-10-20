@@ -42,6 +42,7 @@ it("parte de los valores que estaban en el código, en una versión que no se re
     "Pagos",
     "Prueba y avisos del tope",
     "Invitaciones y vendedores",
+    "Avisos antes de que termine algo",
   ])
   // Las frases llevan la cifra resaltada, con su unidad.
   expect(view.groups[0]!.sentences[0]).toEqual([

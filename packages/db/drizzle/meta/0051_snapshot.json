@@ -1,6 +1,6 @@
 {
-  "id": "8826a55c-55f1-49cb-af1b-da20fa2b5eee",
-  "prevId": "e030def3-a93f-405b-a04e-f7aabdaf5303",
+  "id": "eb3c1c2b-f034-40f1-ba8d-8d7725ad3a74",
+  "prevId": "eb4d8292-42cc-4b92-bca2-c84c58414647",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -34230,6 +34230,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "discount_notice_days": {
+          "name": "discount_notice_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "guarantee_notice_days": {
+          "name": "guarantee_notice_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "reason": {
           "name": "reason",
           "type": "text",
@@ -34281,7 +34293,7 @@
       "checkConstraints": {
         "saas_commercial_terms_limits_check": {
           "name": "saas_commercial_terms_limits_check",
-          "value": "\"admin\".\"saas_commercial_terms\".\"conversation_window_hours\" BETWEEN 1 AND 72\n        AND \"admin\".\"saas_commercial_terms\".\"recovery_window_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"review_auto_percent\" BETWEEN 0 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"review_answer_days\" BETWEEN 1 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"review_read_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"payment_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"grace_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"proof_extension_days\" BETWEEN 0 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"proof_extension_max\" BETWEEN 0 AND 3\n        AND \"admin\".\"saas_commercial_terms\".\"half_cycle_days\" BETWEEN 7 AND 21\n        AND \"admin\".\"saas_commercial_terms\".\"trial_days\" BETWEEN 7 AND 90\n        AND \"admin\".\"saas_commercial_terms\".\"warn_percent\" BETWEEN 50 AND 99\n        AND \"admin\".\"saas_commercial_terms\".\"alarm_percent\" BETWEEN 50 AND 99\n        AND \"admin\".\"saas_commercial_terms\".\"warn_percent\" < \"admin\".\"saas_commercial_terms\".\"alarm_percent\"\n        AND \"admin\".\"saas_commercial_terms\".\"waitlist_answer_days\" BETWEEN 1 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"commission_months\" BETWEEN 1 AND 36"
+          "value": "\"admin\".\"saas_commercial_terms\".\"conversation_window_hours\" BETWEEN 1 AND 72\n        AND \"admin\".\"saas_commercial_terms\".\"recovery_window_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"review_auto_percent\" BETWEEN 0 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"review_answer_days\" BETWEEN 1 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"review_read_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"payment_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"grace_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"proof_extension_days\" BETWEEN 0 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"proof_extension_max\" BETWEEN 0 AND 3\n        AND \"admin\".\"saas_commercial_terms\".\"half_cycle_days\" BETWEEN 7 AND 21\n        AND \"admin\".\"saas_commercial_terms\".\"trial_days\" BETWEEN 7 AND 90\n        AND \"admin\".\"saas_commercial_terms\".\"warn_percent\" BETWEEN 50 AND 99\n        AND \"admin\".\"saas_commercial_terms\".\"alarm_percent\" BETWEEN 50 AND 99\n        AND \"admin\".\"saas_commercial_terms\".\"warn_percent\" < \"admin\".\"saas_commercial_terms\".\"alarm_percent\"\n        AND \"admin\".\"saas_commercial_terms\".\"waitlist_answer_days\" BETWEEN 1 AND 10\n        AND \"admin\".\"saas_commercial_terms\".\"commission_months\" BETWEEN 1 AND 36\n        AND \"admin\".\"saas_commercial_terms\".\"discount_notice_days\" BETWEEN 1 AND 30\n        AND \"admin\".\"saas_commercial_terms\".\"guarantee_notice_days\" BETWEEN 1 AND 60"
         },
         "saas_commercial_terms_reason_check": {
           "name": "saas_commercial_terms_reason_check",

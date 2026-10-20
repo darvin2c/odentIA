@@ -38,6 +38,8 @@ interface BillingTerms {
   halfCycleDays: number
   warnPercent: number
   alarmPercent: number
+  /** Días antes del fin de un precio especial en que se avisa (condiciones comerciales). */
+  discountNoticeDays: number
   seller: { name: string } | null
   consumption: {
     currency: string | null
@@ -270,7 +272,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
             </div>
             <p className="text-xs text-muted-foreground">
               El vendedor da hasta {plan.sellerDiscountBps / 100} % sin aprobación; la administración, hasta {plan.maxDiscountBps / 100} %. La cuota no
-              cambia. Sin fecha, no vence; con fecha, se avisa a la clínica y aquí 15 días antes.
+              cambia. Sin fecha, no vence; con fecha, se avisa a la clínica y aquí {data.discountNoticeDays} días antes.
             </p>
             {Number.isFinite(bps) && bps >= 0 ? (
               <table className="w-full text-sm">

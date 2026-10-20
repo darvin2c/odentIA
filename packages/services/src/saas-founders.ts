@@ -608,8 +608,10 @@ export interface ExpiringTermRow {
 }
 
 export async function listExpiringTerms(tx: Db, now = new Date()): Promise<ExpiringTermRow[]> {
-  const discountHorizon = new Date(now.getTime() + 15 * DAY)
-  const guaranteeHorizon = new Date(now.getTime() + 30 * DAY)
+  // Desde cuántos días antes se avisa: las condiciones comerciales que rigen (ADR 0074).
+  const terms = await currentSaasTerms(tx, now)
+  const discountHorizon = new Date(now.getTime() + terms.discountNoticeDays * DAY)
+  const guaranteeHorizon = new Date(now.getTime() + terms.guaranteeNoticeDays * DAY)
   const rows = await tx
     .select({
       organizationId: saasSubscription.organizationId,
