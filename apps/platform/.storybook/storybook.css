@@ -1,4 +1,5 @@
 @import "@odentia/ui/globals.css";
+@import "@odentia/ui-patterns/src/image-adjust.css";
 @source "../src";
 @source "../../../packages/ui/src";
 @source "../../../packages/ui-patterns/src";

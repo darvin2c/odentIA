@@ -3,7 +3,6 @@ import { Camera, ImageUp, RotateCw } from "lucide-react"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import Cropper, { type Area, type Point } from "react-easy-crop"
 import ReactCrop, { type PercentCrop } from "react-image-crop"
-import "react-image-crop/dist/ReactCrop.css"
 import { personInitials } from "./person-avatar.js"
 
 /**
