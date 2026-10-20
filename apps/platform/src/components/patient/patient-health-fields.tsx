@@ -18,6 +18,11 @@ import {
   type RegistrationConfig,
   ALLERGY_SEVERITIES,
   CONDITION_STATUSES,
+  DOSE_UNIT_LABELS,
+  DOSE_UNITS,
+  type DoseUnit,
+  MEDICATION_FREQUENCIES,
+  MEDICATION_FREQUENCY_LABELS,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -46,6 +51,7 @@ import {
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
+import { MedicationPicker } from "./medication-picker"
 
 export type HealthDeclaration = NonNullable<RegistrationAnswers["health"]>
 
@@ -240,18 +246,6 @@ export interface AllergyRowValue {
   persisted?: boolean
 }
 
-const KIND_LABELS: Record<string, string> = { alergia: "Alergia", intolerancia: "Intolerancia" }
-const CRITICALITY_LABELS: Record<string, string> = {
-  baja: "Baja",
-  alta: "Alta",
-  no_evaluable: "No evaluable",
-}
-const VERIFICATION_LABELS: Record<string, string> = {
-  no_confirmada: "No confirmada",
-  confirmada: "Confirmada",
-  descartada: "Descartada",
-}
-
 export interface ConditionRowValue {
   key: string
   name: string
@@ -271,8 +265,14 @@ export interface MedicationRowValue {
   name: string
   /** Principio activo (DCI); solo en modo clínico. */
   genericName?: string
+  /** Lo escrito antes del cambio (o en la declaración); con número y unidad se escribe solo. */
   dose: string
+  /** Número y unidad UCUM de la dosis; solo en modo clínico. */
+  doseValue?: string
+  doseUnit?: string
   frequency: string
+  /** Frecuencia de la lista (`MEDICATION_FREQUENCIES`); «otra» deja `frequency` escrita. */
+  frequencyCode?: string
   startDate: string
   endDate: string
   notes: string
@@ -299,7 +299,6 @@ export function AllergyRows({
   readOnly,
   errors,
   idPrefix,
-  mode,
 }: RowsBase & {
   rows: AllergyRowValue[]
   onChange: (next: AllergyRowValue[]) => void
@@ -329,30 +328,6 @@ export function AllergyRows({
               ])}
             />
           </Field>
-          {mode === "clinical" ? (
-            <Field>
-              <FieldLabel htmlFor={fid(`alg-cat-${row.key}`)}>Tipo de alérgeno</FieldLabel>
-              <Select
-                value={row.category || "__sin__"}
-                onValueChange={(v) => patch(row.key, { category: !v || v === "__sin__" ? "" : v })}
-                disabled={readOnly}
-              >
-                <SelectTrigger id={fid(`alg-cat-${row.key}`)}>
-                  <SelectValue>
-                    {ALLERGY_CATEGORY_LABELS[row.category ?? ""] ?? "Sin precisar"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__sin__">Sin precisar</SelectItem>
-                  {Object.entries(ALLERGY_CATEGORY_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`alg-rea-${row.key}`)}>Reacción</FieldLabel>
             <Input
@@ -369,35 +344,6 @@ export function AllergyRows({
               ])}
             />
           </Field>
-          {mode === "clinical" ? (
-            <>
-              {(
-                [
-                  ["kind", "Tipo", KIND_LABELS, "alergia"],
-                  ["criticality", "Criticidad", CRITICALITY_LABELS, ""],
-                  ["verification", "Verificación", VERIFICATION_LABELS, "no_confirmada"],
-                ] as const
-              ).map(([key, text, options, fallback]) => (
-                <Field key={key}>
-                  <FieldLabel htmlFor={fid(`alg-${key}-${row.key}`)}>{text}</FieldLabel>
-                  <ChoiceSelect
-                    id={fid(`alg-${key}-${row.key}`)}
-                    
-                    value={row[key] ?? fallback}
-                    disabled={readOnly}
-                    onChange={(e) => patch(row.key, { [key]: e.target.value })}
-                  >
-                    {key === "criticality" ? <option value="">Sin evaluar</option> : null}
-                    {Object.entries(options).map(([value, optionLabel]) => (
-                      <option key={value} value={value}>
-                        {optionLabel}
-                      </option>
-                    ))}
-                  </ChoiceSelect>
-                </Field>
-              ))}
-            </>
-          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`alg-sev-${row.key}`)}>Gravedad</FieldLabel>
             <Select
@@ -431,29 +377,15 @@ export function AllergyRows({
             </p>
           </Field>
           <div className="flex items-end gap-2">
-            {mode === "clinical" && row.persisted ? (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id={fid(`alg-vig-${row.key}`)}
-                  checked={row.isActive}
-                  disabled={readOnly}
-                  onCheckedChange={(c: boolean) => patch(row.key, { isActive: c === true })}
-                />
-                <label htmlFor={fid(`alg-vig-${row.key}`)} className="text-sm">
-                  Vigente (quitar para archivar)
-                </label>
-              </div>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={readOnly}
-                onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
-              >
-                Quitar fila
-              </Button>
-            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={readOnly}
+              onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
+            >
+              Quitar fila
+            </Button>
           </div>
         </div>
       ))}
@@ -632,6 +564,99 @@ export function ConditionRows({
   )
 }
 
+function capitalize(text: string): string {
+  return text.charAt(0).toLocaleUpperCase("es") + text.slice(1)
+}
+
+const FREQUENCY_OPTIONS = [
+  ...MEDICATION_FREQUENCIES.map((value) => ({ value, label: MEDICATION_FREQUENCY_LABELS[value] })),
+  { value: "otra" as const, label: "Otra" },
+]
+
+/**
+ * La dosis con número y unidad (UCUM) y la frecuencia elegida de la lista,
+ * como en la receta (tablero 7). Lo escrito antes del cambio se muestra y se
+ * conserva mientras no se elija otra cosa: es el respaldo.
+ */
+function ClinicalDoseFields({
+  row,
+  fid,
+  readOnly,
+  errors,
+  onPatch,
+}: {
+  row: MedicationRowValue
+  fid: (name: string) => string
+  readOnly?: boolean
+  errors?: Record<string, string>
+  onPatch: (next: Partial<MedicationRowValue>) => void
+}): React.JSX.Element {
+  const frequencyChoice = row.frequencyCode || (row.frequency.trim() ? "otra" : null)
+  const legacyDose = !row.doseValue && row.dose.trim() ? row.dose.trim() : null
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor={fid(`med-dos-${row.key}`)}>Dosis (opcional)</FieldLabel>
+        <div className="flex gap-2">
+          <Input
+            id={fid(`med-dos-${row.key}`)}
+            inputMode="decimal"
+            className="w-28"
+            value={row.doseValue ?? ""}
+            disabled={readOnly}
+            placeholder="500"
+            aria-describedby={legacyDose ? fid(`med-dos-ant-${row.key}`) : undefined}
+            onChange={(e) => onPatch({ doseValue: e.target.value.replace(/[^\d.,]/g, "") })}
+          />
+          <Select
+            value={row.doseUnit || "__elegir__"}
+            onValueChange={(v) => onPatch({ doseUnit: !v || v === "__elegir__" ? "" : v })}
+            disabled={readOnly}
+          >
+            <SelectTrigger id={fid(`med-uni-${row.key}`)} aria-label="Unidad de la dosis" className="min-w-0 flex-1">
+              <SelectValue>{row.doseUnit ? (DOSE_UNIT_LABELS[row.doseUnit as DoseUnit]?.[1] ?? row.doseUnit) : "Unidad"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {DOSE_UNITS.map((unit) => (
+                <SelectItem key={unit} value={unit}>
+                  {DOSE_UNIT_LABELS[unit][1]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {legacyDose ? (
+          <p id={fid(`med-dos-ant-${row.key}`)} className="text-xs text-muted-foreground">
+            Escrita antes: «{legacyDose}». Se conserva mientras no la cambies.
+          </p>
+        ) : null}
+        <RowError message={pickError(errors, [fid(`med-dos-${row.key}`), fid(`med-uni-${row.key}`)])} />
+      </Field>
+      <Field>
+        <FieldLabel id={fid(`med-fre-${row.key}`)}>Frecuencia (opcional)</FieldLabel>
+        <ChoiceButtons
+          label="Frecuencia"
+          value={frequencyChoice as (typeof FREQUENCY_OPTIONS)[number]["value"] | null}
+          options={FREQUENCY_OPTIONS}
+          disabled={readOnly}
+          onChange={(next) =>
+            onPatch(next === "otra" ? { frequencyCode: "" } : { frequencyCode: next, frequency: "" })
+          }
+        />
+        {frequencyChoice === "otra" ? (
+          <Input
+            aria-label="Otra frecuencia"
+            value={row.frequency}
+            disabled={readOnly}
+            placeholder="Ej.: lunes, miércoles y viernes"
+            onChange={(e) => onPatch({ frequency: e.target.value })}
+          />
+        ) : null}
+      </Field>
+    </>
+  )
+}
+
 export function MedicationRows({
   rows,
   onChange,
@@ -673,35 +698,42 @@ export function MedicationRows({
               <FieldLabel htmlFor={fid(`med-gen-${row.key}`)}>
                 Principio activo (opcional)
               </FieldLabel>
-              <Input
+              <MedicationPicker
                 id={fid(`med-gen-${row.key}`)}
                 value={row.genericName ?? ""}
-                maxLength={200}
                 disabled={readOnly}
-                placeholder="Ej.: losartán"
-                onChange={(e) => patch(row.key, { genericName: e.target.value })}
+                onChange={(dci) =>
+                  // Sin nombre aún, el nombre es la misma DCI.
+                  patch(row.key, { genericName: dci, ...(row.name.trim() === "" && dci ? { name: capitalize(dci) } : {}) })
+                }
               />
             </Field>
           ) : null}
-          <Field>
-            <FieldLabel htmlFor={fid(`med-dos-${row.key}`)}>Dosis</FieldLabel>
-            <Input
-              id={fid(`med-dos-${row.key}`)}
-              value={row.dose}
-              disabled={readOnly}
-              placeholder="Se deja vacío si se desconoce, no se inventa"
-              onChange={(e) => patch(row.key, { dose: e.target.value })}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={fid(`med-fre-${row.key}`)}>Frecuencia</FieldLabel>
-            <Input
-              id={fid(`med-fre-${row.key}`)}
-              value={row.frequency}
-              disabled={readOnly}
-              onChange={(e) => patch(row.key, { frequency: e.target.value })}
-            />
-          </Field>
+          {mode === "clinical" ? (
+            <ClinicalDoseFields row={row} fid={fid} readOnly={readOnly} errors={errors} onPatch={(next) => patch(row.key, next)} />
+          ) : (
+            <>
+              <Field>
+                <FieldLabel htmlFor={fid(`med-dos-${row.key}`)}>Dosis</FieldLabel>
+                <Input
+                  id={fid(`med-dos-${row.key}`)}
+                  value={row.dose}
+                  disabled={readOnly}
+                  placeholder="Se deja vacío si se desconoce, no se inventa"
+                  onChange={(e) => patch(row.key, { dose: e.target.value })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={fid(`med-fre-${row.key}`)}>Frecuencia</FieldLabel>
+                <Input
+                  id={fid(`med-fre-${row.key}`)}
+                  value={row.frequency}
+                  disabled={readOnly}
+                  onChange={(e) => patch(row.key, { frequency: e.target.value })}
+                />
+              </Field>
+            </>
+          )}
           {mode === "clinical" ? (
             <Field>
               <FieldLabel htmlFor={fid(`med-ini-${row.key}`)}>Inicio</FieldLabel>

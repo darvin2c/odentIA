@@ -344,7 +344,7 @@ function OrgLayout() {
       items={navItems}
       LinkComponent={RouterLink}
       pathname={pathname}
-      user={{ name: session.name, email: session.email }}
+      user={{ name: session.name, email: session.email, avatarUrl: session.image }}
       // El perfil vive en el panel de la cuenta (otro origen): se llega con un enlace normal.
       userMenuItems={[
         // `clinica` deja en el panel el enlace para volver a esta clínica.

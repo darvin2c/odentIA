@@ -337,9 +337,6 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.3.0(react@19.3.0)
-      react-easy-crop:
-        specifier: 6.2.3
-        version: 6.2.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       srvx:
         specifier: 0.11.22
         version: 0.11.22
@@ -887,6 +884,12 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.3.0(react@19.3.0)
+      react-easy-crop:
+        specifier: 6.2.3
+        version: 6.2.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      react-image-crop:
+        specifier: 11.1.2
+        version: 11.1.2(react@19.3.0)
     devDependencies:
       '@fontsource-variable/manrope':
         specifier: 5.3.0
@@ -6690,6 +6693,11 @@ packages:
     peerDependencies:
       react: '>=16.4.0'
       react-dom: '>=16.4.0'
+
+  react-image-crop@11.1.2:
+    resolution: {integrity: sha512-+0Pc2fxpwKL4u4oLmdKBw8XSwUceFbXbKEHvFOlsl/MGB1OVNic4uBlAPmEHGXYgoJIq+b63xHbc/aJMG0AVkA==}
+    peerDependencies:
+      react: '>=16.13.1'
 
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
@@ -13617,6 +13625,10 @@ snapshots:
       normalize-wheel: 1.0.1
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
+
+  react-image-crop@11.1.2(react@19.3.0):
+    dependencies:
+      react: 19.3.0
 
   react-is@17.0.2: {}
 

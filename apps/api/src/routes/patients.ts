@@ -19,9 +19,11 @@ import {
   addEncounterDiagnosis,
   addEncounterProcedure,
   addOdontogramEntries,
+  addPatientAllergy,
   addPlanItem,
   addPlanItemsBatch,
   type ClinicalAccessResource,
+  codePatientAllergy,
   correctEncounterMaterial,
   createEncounter,
   createOdontogramAssessment,
@@ -59,6 +61,7 @@ import {
   listPatients,
   listPlanItems,
   listTreatmentPlans,
+  markAllergiesReviewed,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
@@ -68,8 +71,10 @@ import {
   registerPatientDocument,
   retirePatientDocument,
   setDocumentReportStatus,
+  removePatientAllergy,
   removePatientContact,
   requirePatient,
+  restorePatientAllergy,
   reviewLegacyEntry,
   revokeDataConsent,
   ServiceError,
@@ -198,11 +203,28 @@ const healthMedication = z
     name: z.string().min(1).max(200),
     genericName: z.string().max(200).nullish(),
     dose: z.string().max(200).nullish(),
+    doseValue: z.number().positive().nullish(),
+    doseUnit: z.string().max(20).nullish(),
     frequency: z.string().max(200).nullish(),
+    frequencyCode: z.string().max(30).nullish(),
     startDate: z.string().max(10).nullish(),
     endDate: z.string().max(10).nullish(),
     notes: z.string().max(2000).nullish(),
   })
+  .strict()
+// Alergias una por una (tablero 7): la sustancia de la lista o escrita, qué tan
+// fuerte fue y qué le pasó; quitar con su motivo.
+const allergySubstance = {
+  substance: z.string().max(200).nullish(),
+  substanceSystem: z.string().max(20).nullish(),
+  substanceCode: z.string().max(20).nullish(),
+}
+const allergyAddInput = z
+  .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
+  .strict()
+const allergyRemoveInput = z.object({ reason: z.string().min(1).max(20) }).strict()
+const allergyCodeInput = z
+  .object({ substanceSystem: z.string().min(1).max(20), substanceCode: z.string().min(1).max(20) })
   .strict()
 // Guardado conjunto del agregado: colecciones completas con sus IDs, revisión
 // optimista y entrevista opcional con versión esperada. El servicio valida el
@@ -217,7 +239,8 @@ const healthSaveInput = z
         medications: healthReviewState,
       })
       .strict(),
-    allergies: z.array(healthAllergy).max(200),
+    // Sin alergias, quedan como están: se agregan y quitan una por una (`/health/allergies`).
+    allergies: z.array(healthAllergy).max(200).optional(),
     conditions: z.array(healthCondition).max(200),
     medications: z.array(healthMedication).max(200),
     familyHistory: z.array(familyHistoryItem).max(50).optional(),
@@ -910,6 +933,50 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         savePatientHealth(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // --- Alergias una por una (issue 43, tablero 7). Escribir es `clinical.write` (`/health`). ---
+  app.post("/:id/health/allergies", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = allergyAddInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => addPatientAllergy(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
+  })
+  app.post("/:id/health/allergies/reviewed", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => markAllergiesReviewed(tx, orgId, userId, c.req.param("id"))),
+    )
+  })
+  app.post("/:id/health/allergies/:allergyId/remove", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = allergyRemoveInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        removePatientAllergy(tx, orgId, userId, c.req.param("id"), c.req.param("allergyId"), parsed.data.reason),
+      ),
+    )
+  })
+  app.post("/:id/health/allergies/:allergyId/restore", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        restorePatientAllergy(tx, orgId, userId, c.req.param("id"), c.req.param("allergyId")),
+      ),
+    )
+  })
+  app.post("/:id/health/allergies/:allergyId/code", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = allergyCodeInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        codePatientAllergy(tx, orgId, userId, c.req.param("id"), c.req.param("allergyId"), parsed.data),
       ),
     )
   })

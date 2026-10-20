@@ -84,11 +84,57 @@ it("exige DCI y vía reconocida, y avisa la alergia antes de prescribir", async 
       createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "amoxicilina" }] }),
     ),
   ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
+  // Recetar igual pide un motivo escrito (decisión 10): confirmar sin motivo no basta.
+  await expect(
+    f.run((tx) =>
+      createPrescription(tx, ...f.args, {
+        acknowledgeAllergies: true,
+        allergyOverrideReason: "  ",
+        items: [{ ...base, genericName: "amoxicilina" }],
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
   const confirmed = await f.run((tx) =>
     createPrescription(tx, ...f.args, {
       acknowledgeAllergies: true,
+      allergyOverrideReason: "Tolera amoxicilina desde hace años; lo de la penicilina fue un malestar",
       items: [{ ...base, genericName: "amoxicilina" }],
     }),
   )
   expect(confirmed.items[0]).toMatchObject({ genericName: "amoxicilina", atcCode: "J01CA04" })
+  expect(confirmed.allergyOverrideReason).toMatch(/^Tolera amoxicilina/)
+  // Sin aviso no queda motivo, aunque se mande.
+  const plain = await f.run((tx) =>
+    createPrescription(tx, ...f.args, {
+      allergyOverrideReason: "no aplica",
+      items: [{ ...base, genericName: "paracetamol" }],
+    }),
+  )
+  expect(plain.allergyOverrideReason).toBeNull()
+})
+
+it("avisa por el código de la alergia, se haya escrito como se haya escrito", async () => {
+  const f = await clinicalFixture()
+  // Elegida de la lista (grupo ATC) y escrita en mayúsculas: las dos avisan igual.
+  await ownerDb.insert(patientAllergy).values([
+    { organizationId: "org_a", patientId: f.patient.id, substance: "Penicilinas (grupo)", substanceSystem: "atc", substanceCode: "J01C", severity: "severa" },
+  ])
+  const base = {
+    strength: "500 mg",
+    dosageForm: "cápsula",
+    dose: "1 cápsula",
+    route: "oral",
+    frequency: "Cada 8 horas",
+    duration: "7 días",
+  }
+  for (const genericName of ["amoxicilina", "ampicilina", "cefalexina"]) {
+    await expect(
+      f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName }] })),
+      genericName,
+    ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
+  }
+  // Otro grupo no avisa.
+  await expect(
+    f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "clindamicina" }] })),
+  ).resolves.toMatchObject({ status: "emitida" })
 })

@@ -8,6 +8,8 @@ export interface SessionInfo {
   userId: string
   email: string
   name: string
+  /** Foto de Mi perfil, para el avatar de la barra lateral; sin ella, las iniciales. */
+  image: string | null
   emailVerified: boolean
 }
 
@@ -45,6 +47,7 @@ export async function requireSession(location: { href: string }): Promise<Sessio
     userId: data.user.id,
     email: data.user.email,
     name: data.user.name,
+    image: data.user.image ?? null,
     emailVerified: data.user.emailVerified,
   }
 }

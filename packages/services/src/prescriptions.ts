@@ -49,6 +49,8 @@ export interface CreatePrescriptionInput {
   validUntil?: string | null
   /** La persona que prescribe vio el aviso de alergia y prescribe igual. */
   acknowledgeAllergies?: boolean
+  /** Con aviso de alergia, por qué se receta igual (decisión 10): obligatorio y queda en la receta. */
+  allergyOverrideReason?: string | null
   items: PrescriptionMedicationInput[]
 }
 function field(value: string | null | undefined, name: string, max = 200) {
@@ -148,11 +150,17 @@ export async function createPrescription(
       instructions: optional(item.instructions, "Las indicaciones", 2000),
     }
   })
-  // Alergias activas del paciente frente a cada DCI, también las declaradas
-  // sin confirmar (cuestionario, registro): el aviso exige que la persona que
-  // prescribe lo confirme; nunca se prescribe a ciegas.
+  // Alergias vigentes del paciente frente a cada DCI, todas por igual (las que
+  // dijo el paciente también): con aviso, recetar igual pide un motivo escrito
+  // que queda en la receta; nunca se prescribe a ciegas.
   const allergies = await tx
-    .select({ substance: patientAllergy.substance, verification: patientAllergy.verification })
+    .select({
+      substance: patientAllergy.substance,
+      substanceSystem: patientAllergy.substanceSystem,
+      substanceCode: patientAllergy.substanceCode,
+      severity: patientAllergy.severity,
+      verification: patientAllergy.verification,
+    })
     .from(patientAllergy)
     .where(
       and(
@@ -162,8 +170,11 @@ export async function createPrescription(
       ),
     )
   const conflicts = items.flatMap((item) => allergyWarnings(item.genericName, allergies))
-  if (conflicts.length > 0 && !input.acknowledgeAllergies)
-    throw new ServiceError("ALLERGY_CONFLICT", 409, `Aviso de alergia: ${conflicts.join("; ")}`)
+  const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
+  if (conflicts.length > 0 && (!input.acknowledgeAllergies || !overrideReason))
+    throw new ServiceError("ALLERGY_CONFLICT", 409, `Aviso de alergia: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`)
+  if (overrideReason && overrideReason.length > 500)
+    throw validation("El motivo para recetar igual debe tener hasta 500 caracteres")
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const [counter] = await tx
     .insert(orgCounter)
@@ -183,6 +194,7 @@ export async function createPrescription(
       notes: optional(input.notes, "Las notas", 2000),
       ...diagnosis,
       validUntil,
+      allergyOverrideReason: overrideReason,
       prescriberName: signer.name,
       prescriberTitle: signer.title,
       prescriberRegistration: signer.registration,
@@ -202,7 +214,8 @@ export async function createPrescription(
     action: "prescription.issued",
     entity: "prescription",
     entityId: row.id,
-    metadata: { patientId, allergyWarnings: conflicts.length },
+    // Sin copiar el motivo: la auditoría dice que se recetó igual, el motivo queda en la receta.
+    metadata: { patientId, allergyWarnings: conflicts.length, allergyOverride: Boolean(overrideReason) },
   })
   return { ...row, items: medications }
 }

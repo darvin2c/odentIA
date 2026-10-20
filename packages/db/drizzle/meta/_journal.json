@@ -302,6 +302,20 @@
       "when": 1792462037622,
       "tag": "0042_devolver_un_cobro_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792510149350,
+      "tag": "0043_alergias_y_medicacion_codificadas",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792510221381,
+      "tag": "0044_alergias_y_medicacion_codificadas_datos",
+      "breakpoints": true
     }
   ]
 }

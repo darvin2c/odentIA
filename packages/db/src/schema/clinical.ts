@@ -188,6 +188,13 @@ export const patient = pgTable(
       .default({ allergies: "unknown", conditions: "unknown", medications: "unknown" }),
     healthReviewedAt: timestamp("health_reviewed_at", { withTimezone: true }),
     healthReviewedBy: text("health_reviewed_by").references(() => user.id),
+    /**
+     * Última vez que alguien revisó sus alergias con el paciente («Sin
+     * cambios», agregar o quitar una; tablero 7). Pasados 6 meses, la atención
+     * pide preguntarle si tiene alergias nuevas.
+     */
+    allergiesReviewedAt: timestamp("allergies_reviewed_at", { withTimezone: true }),
+    allergiesReviewedBy: text("allergies_reviewed_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
@@ -397,7 +404,15 @@ export const patientAllergy = pgTable(
     patientId: uuid("patient_id")
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
+    /** Cómo se escribió; elegida de la lista, su nombre en la lista. Nunca se reescribe al codificarla. */
     substance: text("substance").notNull(),
+    /**
+     * La sustancia en su lista (ADR 0070): ATC de la OMS para medicamentos y sus
+     * grupos, o la lista propia de odentIA para lo demás. Sin código, «sin
+     * codificar»: el aviso al recetar compara el texto.
+     */
+    substanceSystem: text("substance_system"),
+    substanceCode: text("substance_code"),
     /** Tipo de alérgeno; nulo en registros anteriores o cuando no se precisó. */
     category: text("category"),
     reaction: text("reaction"),
@@ -407,12 +422,36 @@ export const patientAllergy = pgTable(
     kind: text("kind").notNull().default("alergia"),
     criticality: text("criticality"),
     verification: text("verification").notNull().default("no_confirmada"),
+    /** Quién la dijo (FHIR `asserter`): el equipo al registrarla o el paciente en su formulario. */
+    source: text("source").notNull().default("equipo"),
     isActive: boolean("is_active").notNull().default(true),
+    /** Quitarla no la borra: queda en «Alergias quitadas» con quién, cuándo y por qué. */
+    removedReason: text("removed_reason"),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: text("removed_by").references(() => user.id),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
     index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_allergy_substance_system_check",
+      sql`${table.substanceSystem} IS NULL OR ${table.substanceSystem} IN ('atc','odentia')`,
+    ),
+    check(
+      "patient_allergy_substance_code_check",
+      sql`(${table.substanceSystem} IS NULL) = (${table.substanceCode} IS NULL)`,
+    ),
+    check("patient_allergy_source_check", sql`${table.source} IN ('equipo','paciente')`),
+    check(
+      "patient_allergy_removed_reason_check",
+      sql`${table.removedReason} IS NULL OR ${table.removedReason} IN ('ya_no','otra_cosa','error')`,
+    ),
+    // Una alergia vigente no tiene motivo de quitada.
+    check(
+      "patient_allergy_removed_check",
+      sql`NOT (${table.isActive} AND ${table.removedReason} IS NOT NULL)`,
+    ),
     check(
       "patient_allergy_severity_check",
       sql`${table.severity} IN ('leve','moderada','severa','desconocida')`,
@@ -473,8 +512,15 @@ export const patientMedication = pgTable(
     name: text("name").notNull(),
     /** Denominación común internacional (principio activo), si se conoce. */
     genericName: text("generic_name"),
+    /** Código ATC de la OMS cuando la DCI es de la lista; lo escrito a mano queda sin código. */
+    atcCode: text("atc_code"),
+    /** La dosis en palabras («500 mg»); con número y unidad UCUM también por separado. */
     dose: text("dose"),
+    doseValue: numeric("dose_value", { precision: 10, scale: 3 }),
+    doseUnit: text("dose_unit"),
+    /** La frecuencia en palabras; elegida de la lista, también su código (`MEDICATION_FREQUENCIES`). */
     frequency: text("frequency"),
+    frequencyCode: text("frequency_code"),
     startDate: date("start_date"),
     endDate: date("end_date"),
     notes: text("notes"),
@@ -483,6 +529,18 @@ export const patientMedication = pgTable(
   },
   (table) => [
     index("patient_medication_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_medication_dose_unit_check",
+      sql`${table.doseUnit} IS NULL OR ${table.doseUnit} IN ('mg','g','ug','mL','[iU]','{tbl}','{cap}','{drop}','{puff}')`,
+    ),
+    check(
+      "patient_medication_frequency_code_check",
+      sql`${table.frequencyCode} IS NULL OR ${table.frequencyCode} IN ('cada_8_h','cada_12_h','cada_24_h','segun_necesidad')`,
+    ),
+    check(
+      "patient_medication_dose_check",
+      sql`(${table.doseValue} IS NULL) = (${table.doseUnit} IS NULL) AND (${table.doseValue} IS NULL OR ${table.doseValue} > 0)`,
+    ),
   ],
 )
 
@@ -2046,6 +2104,11 @@ export const prescription = pgTable(
     diagnosisSystem: text("diagnosis_system"),
     diagnosisCode: text("diagnosis_code"),
     validUntil: date("valid_until"),
+    /**
+     * Por qué se recetó igual pese al aviso de alergia (decisión 10): lo escribe
+     * quien prescribe y queda en la receta. Sin aviso, vacío.
+     */
+    allergyOverrideReason: text("allergy_override_reason"),
     /** Instantánea de quien prescribe (perfil profesional al emitir). */
     prescriberName: text("prescriber_name"),
     prescriberTitle: text("prescriber_title"),

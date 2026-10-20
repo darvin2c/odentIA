@@ -8,6 +8,9 @@ import {
   phoneFormatError,
   allergyConflicts,
   allergyWarnings,
+  codeAllergySubstance,
+  medicationGroupOfAtc,
+  searchAllergens,
   formatVitals,
   parseVitals,
   activeFindingsAsOf,
@@ -572,18 +575,44 @@ describe("alergias al prescribir", () => {
     expect(allergyConflicts("paracetamol", ["Látex"])).toEqual([])
   })
 
-  it("dice declarada la alergia sin confirmar y calla la descartada", () => {
-    expect(
-      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "no_confirmada" }]),
-    ).toEqual([
-      expect.stringMatching(/^amoxicilina: alergia a Penicilina, declarada y por confirmar \(mismo grupo/),
+  it("avisa igual a la declarada y a la registrada, y calla la descartada de antes", () => {
+    const declared = allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "no_confirmada" }])
+    expect(declared).toEqual([expect.stringMatching(/^Amoxicilina: alergia a «Penicilina» \(mismo grupo/)])
+    expect(declared[0]).not.toMatch(/declarada|confirmar/)
+    expect(allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "confirmada" }])).toEqual(declared)
+    expect(allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "descartada" }])).toEqual([])
+  })
+
+  it("con la sustancia de la lista avisa por código, se haya escrito como se haya escrito", () => {
+    // Escrita de varias formas: todas dan el mismo grupo ATC J01C.
+    for (const written of ["Penicilina", "PENICILINAS", "penicilina ", "Penicilinas (grupo)"]) {
+      const entry = codeAllergySubstance(written)
+      expect(entry?.code, written).toBe("J01C")
+    }
+    const penicilinas = { substance: "Penicilinas (grupo)", substanceSystem: "atc", substanceCode: "J01C", severity: "severa" }
+    expect(allergyWarnings("amoxicilina", [penicilinas])).toEqual([
+      "Amoxicilina: alergia severa a penicilinas. Es del mismo grupo, penicilinas (ATC J01CA04).",
     ])
-    expect(
-      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "confirmada" }])[0],
-    ).not.toMatch(/declarada/)
-    expect(
-      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "descartada" }]),
-    ).toEqual([])
+    // Reacción cruzada entre betalactámicos, y nada con otro grupo.
+    expect(allergyWarnings("cefalexina", [penicilinas])[0]).toMatch(/reacción cruzada/)
+    expect(allergyWarnings("clindamicina", [penicilinas])).toEqual([])
+    // Una alergia a un medicamento avisa con el mismo y con los de su grupo.
+    const amoxicilina = { substance: "amoxi", substanceSystem: "atc", substanceCode: "J01CA04" }
+    expect(allergyWarnings("Amoxicilina", [amoxicilina])[0]).toMatch(/el mismo medicamento/)
+    expect(allergyWarnings("ampicilina", [amoxicilina])[0]).toMatch(/mismo grupo/)
+    // Lo que no es medicamento no choca con una receta.
+    expect(allergyWarnings("lidocaína", [{ substance: "Látex", substanceSystem: "odentia", substanceCode: "latex" }])).toEqual([])
+  })
+
+  it("no codifica lo que no es exactamente una sustancia de la lista", () => {
+    expect(codeAllergySubstance("amoxi")).toBeNull()
+    expect(codeAllergySubstance("látex")?.code).toBe("latex")
+    expect(codeAllergySubstance("Aspirina")?.code).toBe("N02BA01")
+    const penic = searchAllergens("penic").map((entry) => entry.code)
+    expect(penic[0]).toBe("J01C")
+    expect(penic).toContain("J01CE08")
+    expect(medicationGroupOfAtc("J01CA04")).toBe("penicilinas")
+    expect(medicationGroupOfAtc("J01FF01")).toBe("lincosamidas")
   })
 })
 

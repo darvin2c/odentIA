@@ -5,6 +5,8 @@
  * pacientes. «¿No eres tú?» lo borra. Si el navegador no deja guardar, no pasa
  * nada: se pide todo.
  */
+import { personInitials } from "@odentia/ui-patterns"
+
 export type RememberedUser = {
   firstName: string
   name: string
@@ -56,8 +58,7 @@ export function greeting(now: Date = new Date()): string {
   return "Buenas noches"
 }
 
-/** «CR» para Carmen Ruiz. */
+/** «CR» para Carmen Ruiz Paredes: la misma regla que el avatar de toda la aplicación. */
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")).toUpperCase()
+  return personInitials(name)
 }

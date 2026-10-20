@@ -1,8 +1,5 @@
-import { AccessLinkPasswordGate, Brand, LegalGate, SideDockProvider, SideDockSlot } from "@odentia/ui-patterns"
+import { AccessLinkPasswordGate, Brand, LegalGate, PersonAvatar, SideDockProvider, SideDockSlot } from "@odentia/ui-patterns"
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -64,9 +61,20 @@ function AppLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const live = authClient.useSession().data?.user
   const user = live
-    ? { name: live.name, email: live.email, avatarUrl: live.image ?? undefined }
-    : { name: session.name, email: session.email, avatarUrl: undefined }
-  const initial = user.name?.trim().charAt(0).toUpperCase() || "U"
+    ? {
+        name: live.name,
+        email: live.email,
+        avatarUrl: live.image ?? null,
+        givenNames: live.firstName ?? "",
+        familyName: live.lastName ?? "",
+      }
+    : {
+        name: session.name,
+        email: session.email,
+        avatarUrl: session.image,
+        givenNames: session.firstName,
+        familyName: session.lastName,
+      }
   const origen = useClinicaDeOrigen()
   const organizations = useQuery({ ...accountOrganizationsQuery, enabled: origen !== null })
   const clinicaOrigen = origen ? organizations.data?.find((org) => org.slug === origen) : undefined
@@ -92,10 +100,15 @@ function AppLayout() {
             aria-label={`Menú de ${user.name || "usuario"}`}
             className="flex items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="size-9">
-              {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
-              <AvatarFallback className="bg-foreground font-semibold text-background">{initial}</AvatarFallback>
-            </Avatar>
+            <PersonAvatar
+              name={user.name}
+              givenNames={user.givenNames}
+              familyName={user.familyName}
+              src={user.avatarUrl}
+              className="size-9"
+              fallbackClassName="text-xs"
+              decorative
+            />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <div className="px-2 py-1.5">

@@ -12,7 +12,7 @@ import {
   DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import { Badge, Button, buttonVariants, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -615,6 +615,11 @@ export function PrescriptionEntry({
           </ul>
         )}
         {prescription.notes ? <p className="text-sm">{prescription.notes}</p> : null}
+        {prescription.allergyOverrideReason ? (
+          <p className="text-sm text-muted-foreground">
+            Recetada pese al aviso de alergia: {prescription.allergyOverrideReason}
+          </p>
+        ) : null}
         {prescription.cancelReason ? (
           <p className="text-sm text-muted-foreground">Anulada: {prescription.cancelReason}</p>
         ) : null}
@@ -789,7 +794,9 @@ export function RecetasPanel({
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
   const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [validUntil, setValidUntil] = useState("")
-  const [acknowledged, setAcknowledged] = useState(false)
+  // Recetar igual pese al aviso pide un motivo escrito, que queda en la receta (decisión 10).
+  const [overriding, setOverriding] = useState(false)
+  const [overrideReason, setOverrideReason] = useState("")
   const [createOpenState, setCreateOpenState] = useState(false)
   const createOpen = createOpenProp ?? createOpenState
   const setCreateOpen = (open: boolean) => {
@@ -807,9 +814,11 @@ export function RecetasPanel({
   const activeAllergies = (healthQuery.data?.data.allergies ?? []).filter(
     (allergy) => allergy.isActive,
   )
-  const conflicts = medications.flatMap((medication) =>
+  const conflictsByMedication = medications.map((medication) =>
     allergyWarnings(medication.genericName, activeAllergies),
   )
+  const conflicts = conflictsByMedication.flat()
+  const acknowledged = overriding && overrideReason.trim() !== ""
   const [error, setError] = useState<string | null>(null)
   const createMutation = useMutation({
     mutationFn: () =>
@@ -821,6 +830,7 @@ export function RecetasPanel({
         diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
         validUntil: validUntil || null,
         acknowledgeAllergies: conflicts.length > 0 && acknowledged,
+        allergyOverrideReason: conflicts.length > 0 && acknowledged ? overrideReason.trim() : null,
         items: medications.map((medication) => ({
           genericName: medication.genericName.trim(),
           brandName: medication.brandName.trim() || null,
@@ -839,7 +849,8 @@ export function RecetasPanel({
       setNotes("")
       setDiagnosisCode("")
       setValidUntil("")
-      setAcknowledged(false)
+      setOverriding(false)
+      setOverrideReason("")
       setCreateOpen(false)
       setError(null)
       toast.success("Receta emitida.")
@@ -879,7 +890,11 @@ export function RecetasPanel({
             return
           }
           if (conflicts.length > 0 && !acknowledged) {
-            setError("Revisa el aviso de alergia y confírmalo para emitir.")
+            setError(
+              overriding
+                ? "Escribe por qué la recetas igual."
+                : "Hay un aviso de alergia: cambia el medicamento o recétalo igual con un motivo.",
+            )
             return
           }
           createMutation.mutate()
@@ -1073,10 +1088,45 @@ export function RecetasPanel({
                   <li key={line}>{line}</li>
                 ))}
               </ul>
-              <label className="flex items-center gap-2">
-                <Checkbox checked={acknowledged} onCheckedChange={(value) => setAcknowledged(value === true)} />
-                Lo revisé y prescribo igualmente (queda registrado).
-              </label>
+              {overriding ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-rx-override`}>¿Por qué la recetas igual?</FieldLabel>
+                  <Textarea
+                    id={`${uid}-rx-override`}
+                    autoFocus
+                    maxLength={500}
+                    value={overrideReason}
+                    placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
+                    onChange={(event) => setOverrideReason(event.target.value)}
+                  />
+                  <FieldDescription>Queda en la receta, con tu nombre.</FieldDescription>
+                </Field>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // Lleva al primer medicamento que choca para cambiarlo.
+                    const index = conflictsByMedication.findIndex((lines) => lines.length > 0)
+                    const field = document.getElementById(`${uid}-med-${medications[index]?.key}`)
+                    if (field instanceof HTMLInputElement) {
+                      field.focus()
+                      field.select()
+                    }
+                    setOverriding(false)
+                    setOverrideReason("")
+                  }}
+                >
+                  Cambiar medicamento
+                </Button>
+                {overriding ? null : (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setOverriding(true)}>
+                    Recetar igual, con motivo
+                  </Button>
+                )}
+              </div>
             </div>
           ) : null}
           <DiagnosisSearch

@@ -3,6 +3,7 @@ import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
+import { allergyName } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { appointmentWhen } from "../../lib/patient-appointments"
@@ -114,7 +115,7 @@ function Alert({
 
 /**
  * Alergias y alertas antes de tocar al paciente (Resumen de quien atiende):
- * alergias por gravedad, con la declarada «por confirmar», condiciones
+ * alergias por gravedad, todas iguales (tablero 7: no hay «por confirmar»), condiciones
  * activas y medicación vigente. Sin alergias registradas dice lo que consta
  * («no preguntado» o «niega»), nunca «ninguna»: no es lo mismo.
  */
@@ -152,10 +153,10 @@ export function ClinicalAlertsCard({
               severe(allergy.severity)
                 ? ` ${(ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()}`
                 : ""
-            } · ${allergy.substance}`}
+            } · ${allergyName(allergy)}`}
             detail={[
               allergy.reaction ?? "reacción no descrita",
-              allergy.verification === "no_confirmada" ? "declarada · por confirmar" : null,
+              allergy.source === "paciente" ? "la declaró el paciente" : null,
             ]
               .filter(Boolean)
               .join(" · ")}

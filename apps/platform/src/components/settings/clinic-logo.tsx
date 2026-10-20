@@ -1,32 +1,33 @@
-import { Button, Field, FieldDescription, FieldLabel, Input, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
+import { FormDrawer, ImageAdjust, type ImageAdjustValue, renderAdjustedImage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useId, useRef, useState } from "react"
+import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { orgSlugFromHostname } from "../../lib/host"
 
-const ACCEPTED = ["image/png", "image/jpeg", "image/webp"]
-const MAX_BYTES = 2 * 1024 * 1024
-
 /**
  * El logo de la clínica (decisión 19): lo ven las personas al abrir el
  * registro y su enlace. Se guarda solo, con su confirmación: no es parte del
- * «Guardar» de los datos.
+ * «Guardar» de los datos. Antes de subirlo se recorta con «Ajustar imagen»
+ * (tablero 6 del lienzo de Pacientes): sin tocar el recuadro queda entero.
  */
 export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: string }) {
   const id = useId()
   const queryClient = useQueryClient()
-  const input = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState<ImageAdjustValue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const done = async () => {
     setError(null)
-    if (input.current) input.current.value = ""
     await queryClient.invalidateQueries({ queryKey: ["org-profile"] })
   }
   const upload = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async () => {
+      if (!value) throw new Error("Elige el logo y recórtalo.")
+      const { blob, ext } = await renderAdjustedImage(value)
       const form = new FormData()
-      form.append("file", file)
+      form.append("file", blob, `logo.${ext}`)
       const slug = orgSlugFromHostname(window.location.hostname)
       const response = await fetch(`${API_URL}/api/org-profile/logo`, {
         method: "PUT",
@@ -41,9 +42,10 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
     },
     onSuccess: async () => {
       await done()
+      setValue(null)
+      setOpen(false)
       toast.success("Logo guardado")
     },
-    onError: (cause) => setError(cause instanceof Error ? cause.message : "No se pudo guardar el logo."),
   })
   const remove = useMutation({
     mutationFn: () => apiFetch("/api/org-profile/logo", { method: "DELETE" }),
@@ -57,9 +59,12 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
   const busy = upload.isPending || remove.isPending
   return (
     <section aria-labelledby={`${id}-title`} className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5">
-      <h2 id={`${id}-title`} className="font-heading text-base font-medium">
-        Logo
-      </h2>
+      <div className="flex flex-col gap-1">
+        <h2 id={`${id}-title`} className="font-heading text-base font-medium">
+          Logo
+        </h2>
+        <p className="text-sm text-muted-foreground">Lo ven tus pacientes al abrir el registro y su enlace.</p>
+      </div>
       <div className="flex flex-wrap items-center gap-4">
         {logo ? (
           <img src={logo} alt={`Logo de ${name}`} className="size-16 rounded-lg border bg-white object-contain" />
@@ -68,43 +73,44 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
             Sin logo
           </div>
         )}
-        <Field className="min-w-0 flex-1">
-          <FieldLabel htmlFor={`${id}-file`}>{logo ? "Cambiar el logo" : "Subir el logo"}</FieldLabel>
-          <Input
-            ref={input}
-            id={`${id}-file`}
-            type="file"
-            accept={ACCEPTED.join(",")}
-            disabled={busy}
-            aria-describedby={`${id}-help`}
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (!file) return
-              if (!ACCEPTED.includes(file.type)) return setError("Elige una imagen PNG, JPG o WebP.")
-              if (file.size > MAX_BYTES) return setError("El logo no puede superar 2 MB.")
-              upload.mutate(file)
-            }}
-          />
-          <FieldDescription id={`${id}-help`}>
-            Lo ven tus pacientes al abrir el registro y su enlace. PNG, JPG o WebP, hasta 2 MB.
-          </FieldDescription>
-        </Field>
-        {logo ? (
-          <Button type="button" variant="outline" disabled={busy} onClick={() => remove.mutate()}>
-            {remove.isPending ? "Quitando…" : "Quitar el logo"}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(true)}>
+            {logo ? "Cambiar el logo" : "Subir el logo"}
           </Button>
-        ) : null}
+          {logo ? (
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => remove.mutate()}>
+              {remove.isPending ? "Quitando…" : "Quitar el logo"}
+            </Button>
+          ) : null}
+        </div>
       </div>
-      {upload.isPending ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Subiendo el logo…
-        </p>
-      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
+      <FormDrawer
+        open={open}
+        onClose={() => {
+          if (upload.isPending) return
+          setValue(null)
+          upload.reset()
+          setOpen(false)
+        }}
+        title="Logo de la clínica"
+        description="Elige el archivo o arrástralo y deja solo el logo, sin márgenes de sobra."
+        onSubmit={(event) => {
+          event.preventDefault()
+          upload.mutate()
+        }}
+        isDirty={value !== null}
+        isSubmitting={upload.isPending}
+        submitDisabled={!value}
+        submitLabel="Guardar"
+        error={upload.isError ? upload.error.message : null}
+      >
+        {open ? <ImageAdjust shape="logo" name={name} disabled={upload.isPending} onChange={setValue} /> : null}
+      </FormDrawer>
     </section>
   )
 }

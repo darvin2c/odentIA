@@ -71,7 +71,7 @@ import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
 import { ageFrom } from "../../lib/patients"
 import { ConsentSigningScreen, useSignAs } from "./consent-signing"
 import { EncounterClosingDialog } from "./encounter-closing"
-import { DeclaredQuestionnaireNotice, EncounterContextBody } from "./encounter-context"
+import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import {
   EncounterPeriodontalBlock,
@@ -1684,6 +1684,8 @@ export function EncounterEditor({
       />
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
+
+      {attending ? <EncounterAllergyReview patientId={patientId} patient={patient} disabled={locked} /> : null}
 
       {canWrite && !attending ? (
         <div

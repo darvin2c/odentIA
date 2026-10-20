@@ -107,6 +107,15 @@ export {
 } from "./master-detail.js"
 export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
 export { PageHeader, type PageHeaderProps } from "./page-header.js"
+export { PersonAvatar, type PersonAvatarProps, personInitials } from "./person-avatar.js"
+export {
+  ADJUSTED_IMAGE_SIZE,
+  ImageAdjust,
+  type ImageAdjustProps,
+  type ImageAdjustShape,
+  type ImageAdjustValue,
+  renderAdjustedImage,
+} from "./image-adjust.js"
 export {
   type DraftGuardComponent,
   SideColumn,

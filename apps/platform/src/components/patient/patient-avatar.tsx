@@ -1,4 +1,5 @@
-import { Avatar, AvatarFallback, AvatarImage, Button } from "@odentia/ui"
+import { Button } from "@odentia/ui"
+import { PersonAvatar } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -8,11 +9,15 @@ import { AvatarDrawer } from "./avatar-drawer"
 export function PatientAvatar({
   patientId,
   name,
+  givenNames,
+  familyName,
   storageKey,
   size = 80,
 }: {
   patientId: string
   name: string
+  givenNames?: string | null
+  familyName?: string | null
   storageKey?: string | null
   size?: number
 }) {
@@ -27,18 +32,16 @@ export function PatientAvatar({
     retry: false,
   })
   const avatar = (
-    <Avatar style={{ width: size, height: size }}>
-      {photo.data && <AvatarImage src={photo.data.data.url} alt={`Foto de ${name}`} />}
-      <AvatarFallback>
-        {name
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((word) => word[0])
-          .join("")
-          .toUpperCase()}
-      </AvatarFallback>
-    </Avatar>
+    <span style={{ width: size, height: size }} className="flex shrink-0">
+      <PersonAvatar
+        name={name}
+        givenNames={givenNames}
+        familyName={familyName}
+        src={photo.data?.data.url}
+        className="size-full"
+        fallbackClassName="text-2xl"
+      />
+    </span>
   )
   if (!canWrite) return avatar
   return (
@@ -48,14 +51,12 @@ export function PatientAvatar({
         variant="ghost"
         className="h-auto rounded-full p-0"
         aria-label={`Cambiar foto de ${name}`}
-        title={
-          photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"
-        }
+        title={photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"}
         onClick={() => setOpen(true)}
       >
         {avatar}
       </Button>
-      <AvatarDrawer patientId={patientId} open={open} onOpenChange={setOpen} />
+      <AvatarDrawer patientId={patientId} name={name} open={open} onOpenChange={setOpen} />
     </>
   )
 }
