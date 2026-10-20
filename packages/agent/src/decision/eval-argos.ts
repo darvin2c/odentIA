@@ -64,7 +64,7 @@ if (!owner) throw new Error(`La clínica ${ORG} no tiene propietario`)
 /** Lo que diría la pantalla, en una línea. */
 function said(answer: ArgosAskResult): string {
   if (answer.kind === "respuesta")
-    return [answer.partial ? "[parcial]" : "", answer.text, answer.missing ? `Falta: ${answer.missing}` : "", answer.closest ? `Cercano: ${answer.closest.text}` : ""].filter(Boolean).join(" ")
+    return [answer.partial ? "[parcial]" : "", answer.text, answer.missing ? `Falta: ${answer.missing}` : ""].filter(Boolean).join(" ")
   if (answer.kind === "no_existe") return [answer.message, answer.missing ? `Falta: ${answer.missing}` : "", answer.closest ? `Cercano: ${answer.closest.text}` : ""].filter(Boolean).join(" ")
   return `[${answer.kind}] ${answer.message}`
 }

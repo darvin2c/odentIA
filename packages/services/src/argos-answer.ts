@@ -20,9 +20,10 @@ import { REPORT_DAILY_LIMIT } from "./report-ask.js"
 import { type ReportQuery, reportScope } from "./report-scope.js"
 
 export const ARGOS_WORDS = {
-  apagado: "Argos está apagado. Enciéndelo para preguntarle; las cifras de Reportes no dependen de él.",
-  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo; las cifras de Reportes siguen a la vista.`,
-  sinModelo: "Ahora no puedo leer preguntas. Las cifras de Reportes siguen a la vista; prueba de nuevo en un momento.",
+  // Se ven en Reportes y en el buscador: no nombran una pantalla.
+  apagado: "Argos está apagado. Enciéndelo para preguntarle.",
+  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo.`,
+  sinModelo: "Ahora no puedo leer preguntas. Prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
   noExiste: "Eso no está en los datos que registra odentIA.",
   ayuda: "Eso es de cómo se usa odentIA: te lo explica la Ayuda.",

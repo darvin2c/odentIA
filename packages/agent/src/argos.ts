@@ -26,7 +26,7 @@ import { z } from "zod"
 import { createAdminDecisionModel } from "./admin.js"
 import { reportReplyUse } from "./ai-usage.js"
 import { answerOf, type DecisionModel, type DecisionQuestion, type PlatformDecisions } from "./decision/index.js"
-import { createConfiguredChatModel, type LlmSpec, type PlatformLlm, resolveLlmSpec } from "./llm.js"
+import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "./llm.js"
 import type { AgentRuntime } from "./run.js"
 
 /**
@@ -48,14 +48,14 @@ const planSchema = z.object({
   tipo: z
     .enum(["consulta", "parcial", "no_existe"])
     .describe("consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."),
-  sql: z.string().describe("Una sola consulta SELECT (o WITH … SELECT) sobre las vistas; vacía si tipo es no_existe."),
+  sql: z.string().describe("Una sola consulta SELECT (o WITH … SELECT) sobre las vistas; vacía en no_existe."),
   frase: z
     .string()
     .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."),
   frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin huecos)."),
   como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
   falta: z.string().describe("En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."),
-  sql_cercana: z.string().describe("En parcial o no_existe: una consulta con lo más cercano que sí existe. Vacía si no hay."),
+  sql_cercana: z.string().describe("En no_existe: una consulta con lo más cercano que sí existe. Vacía si no hay."),
   frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
 })
 
@@ -63,31 +63,35 @@ export type ArgosPlan = z.infer<typeof planSchema>
 
 const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental. Escribes UNA consulta de PostgreSQL de solo lectura sobre las vistas de abajo (nunca otras tablas) y una frase con huecos que odentIA llenará con el resultado. Nunca ves los datos y nunca escribes una cifra del resultado: las cifras salen solo de los huecos.
 
-Reglas:
-- Una tendencia sin periodo («¿estamos creciendo o disminuyendo?», «¿cómo vamos?»): los últimos 3 meses completos contra los 3 meses completos anteriores; el mes en curso no entra. Nómbralos en la frase.
+El periodo:
+- Una tendencia sin periodo («¿estamos creciendo o disminuyendo?», «¿cómo vamos?»): los últimos 3 meses completos contra los 3 meses completos anteriores; el mes en curso no entra.
 - Si la pregunta no dice periodo y no es una tendencia, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia («más frecuentes», «cada cuánto vuelven», «cuánto tardan») mira los últimos 12 meses.
 - Lo pendiente se mide a hoy, no por mes: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir.
 - Al comparar el mes en curso con otro mes («contra el mes anterior»), usa los mismos días de ese mes (del 1 al mismo día de hoy), nunca el mes entero.
-- «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
-- Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
-- Los paciente_id y persona_id sirven para contar y agrupar, no para mostrarlos: odentIA no los muestra en la frase.
 - Al buscar el mejor o el peor mes, el mes en curso (incompleto) no entra.
-- La frase dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también en pocas palabras qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
-- Un mes en el resultado va como el primer día de ese mes (date) en una columna terminada en _mes: odentIA lo muestra «mayo de 2026». Las fechas van como date o timestamptz, nunca como texto.
-- Si la lista puede pasar de 10 filas, ordénala para que lo importante salga primero: odentIA muestra 10 y dice cuántas más hay.
-- Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra» o lo que ninguna vista tiene.
+- current_date y now() ya están en la zona de la clínica.
+
+Qué contar:
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
 - «Ticket promedio» es el promedio de ventas.importe (por venta), no el de los tickets de pago.
 - odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado (cobros).
+- «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
+- Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
 - Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
-- Cuenta y agrupa a las personas por su paciente_id cuando la vista lo tenga: hay nombres repetidos.
-- Lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) no está en las vistas: tipo no_existe.
-- Si lo pedido no está en las vistas, tipo no_existe: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
-- Si solo puedes responder una parte, tipo parcial: responde esa parte y di en «falta» lo que no se puede saber.
-- Nombra las columnas del resultado en español y en minúsculas: el dinero con el sufijo _dinero y los porcentajes (de 0 a 100) con el sufijo _pct; redondea los porcentajes.
-- Huecos de la frase: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él.
-- current_date y now() ya están en la zona de la clínica.
-- Una sola sentencia SELECT (o WITH … SELECT), sin punto y coma, sin comentarios, sin comillas dobles y sin LIMIT mayor a 50. Español neutro, breve.`
+- Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
+- Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra», lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) o lo que ninguna vista tiene.
+- Si lo pedido no está, tipo no_existe y sin consulta: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
+- Si solo puedes responder una parte, tipo parcial: la consulta responde esa parte y «falta» dice lo que no se puede saber.
+
+La frase:
+- Dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
+- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él.
+
+La consulta:
+- Una sola sentencia SELECT (o WITH … SELECT), sin punto y coma, sin comentarios, sin comillas dobles y sin LIMIT mayor a 50. Si la lista puede pasar de 10 filas, ordénala para que lo importante salga primero.
+- Columnas del resultado en español y en minúsculas: el dinero con el sufijo _dinero, los porcentajes (de 0 a 100, redondeados) con _pct y un mes como el primer día de ese mes (date) con _mes, que odentIA muestra «mayo de 2026». Las fechas van como date o timestamptz, nunca como texto.
+
+Español neutro, breve.`
 
 const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> = {
   openai: { prompt_cache_breakpoint: { mode: "explicit" } },
@@ -251,7 +255,6 @@ export type ArgosAskResult =
       table: ArgosTable
       /** Lo que la pantalla guarda para seguir la conversación (D3) y fijar (D5). */
       query: string
-      closest: ArgosClosest | null
     }
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "sin_permiso"; message: string }
@@ -263,7 +266,6 @@ function tableOf(result: ArgosQueryResult): ArgosTable {
 }
 
 export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel" | "secretsKey"> {
-  platform: PlatformLlm
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
@@ -303,28 +305,31 @@ export async function askArgos(
 
   const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
+  /** Corre la consulta del plan: su resultado o el problema que se le devuelve al modelo (sin datos). */
+  const attempt = async (plan: ArgosPlan): Promise<{ result: ArgosQueryResult } | { problem: string }> => {
+    try {
+      const result = await run(plan.sql)
+      const holes = unknownArgosHoles(result.rows.length ? plan.frase : plan.frase_vacia, result)
+      return holes.length ? { problem: `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas del resultado` } : { result }
+    } catch (error) {
+      if (!(error instanceof ArgosQueryError) || error.code === "PERMISO") throw error
+      return { problem: error.message }
+    }
+  }
+
   let plan: ArgosPlan
   let result: ArgosQueryResult | null = null
   try {
     plan = await writeArgosPlan(deps, ask)
-    for (let attempt = 0; attempt < 2 && !withoutQuery(plan); attempt += 1) {
-      let problem: string | null = null
-      try {
-        result = await run(plan.sql)
-        const holes = unknownArgosHoles(result.rows.length ? plan.frase : plan.frase_vacia, result)
-        if (holes.length) problem = `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas del resultado`
-      } catch (error) {
-        if (!(error instanceof ArgosQueryError) || error.code === "PERMISO") throw error
-        result = null
-        problem = error.message
-      }
-      if (!problem) break
-      deps.onProblem?.(problem)
-      if (attempt === 1) {
-        result = null
+    // Una sola corrección: si la segunda tampoco corre, se dice que no se pudo.
+    for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
+      const outcome = await attempt(plan)
+      if ("result" in outcome) {
+        result = outcome.result
         break
       }
-      plan = await writeArgosPlan(deps, { ...ask, retry: { plan, problem } })
+      deps.onProblem?.(outcome.problem)
+      if (tries === 0) plan = await writeArgosPlan(deps, { ...ask, retry: { plan, problem: outcome.problem } })
     }
   } catch (error) {
     if (error instanceof ArgosQueryError && error.code === "PERMISO") {
@@ -336,12 +341,11 @@ export async function askArgos(
     return { kind: "sin_modelo", message: ARGOS_WORDS.sinModelo }
   }
 
-  const closest = await closestOf(plan, run, ready.zone)
   if (withoutQuery(plan)) {
     await record("no_sabe", null, true)
     // Sin resultado no hay con qué llenar un hueco: una frase con huecos se cambia por lo que falta.
     const message = /\{\w+\}/.test(plan.frase) ? plan.falta.trim() || ARGOS_WORDS.noExiste : plan.frase
-    return { kind: "no_existe", message, missing: plan.falta.trim() || null, closest }
+    return { kind: "no_existe", message, missing: plan.falta.trim() || null, closest: await closestOf(plan, run, ready.zone) }
   }
   if (!result) {
     await record("no_pudo", plan.sql, true)
@@ -358,7 +362,6 @@ export async function askArgos(
     missing: plan.falta.trim() || null,
     table: tableOf(result),
     query: plan.sql,
-    closest,
   }
 }
 
@@ -367,13 +370,13 @@ function withoutQuery(plan: ArgosPlan): boolean {
   return plan.tipo !== "consulta" && !plan.sql.trim()
 }
 
-/** Lo más cercano que sí existe, si el modelo lo propuso y corre; si falla, no se ofrece. */
+/** Lo más cercano que sí existe, cuando no hay respuesta: si el modelo lo propuso y corre; si falla, no se ofrece. */
 async function closestOf(
   plan: ArgosPlan,
   run: (query: string) => Promise<ArgosQueryResult>,
   zone: Parameters<typeof fillArgosSentence>[2],
 ): Promise<ArgosClosest | null> {
-  if (plan.tipo === "consulta" || !plan.sql_cercana.trim() || !plan.frase_cercana.trim()) return null
+  if (!plan.sql_cercana.trim() || !plan.frase_cercana.trim()) return null
   try {
     const result = await run(plan.sql_cercana)
     if (!result.rows.length || unknownArgosHoles(plan.frase_cercana, result).length) return null
