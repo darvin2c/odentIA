@@ -5,9 +5,9 @@ import { createDecisionModel, DecisionError, type DecisionModel, type DecisionQu
 import { type PlatformLlm, resolveLlmSpec } from "./llm.js"
 
 /**
- * El modelo del Administrador. Solo decide entre opciones cerradas: de qué
+ * El modelo de Argos (el agente administrador). Solo decide entre opciones cerradas: de qué
  * línea habla un pedido y qué se quiere hacer con ella, y si una persona ya
- * avisó algo antes de que Recepción le escriba. No redacta, no pone cifras y
+ * avisó algo antes de que Sofi le escriba. No redacta, no pone cifras y
  * no ejecuta nada: eso sigue en los servicios.
  */
 export interface AdminModelDeps {
@@ -17,7 +17,7 @@ export interface AdminModelDeps {
 }
 
 /**
- * Modelo de decisión de la organización para el Administrador: el que tenga
+ * Modelo de decisión de la organización para Argos: el que tenga
  * configurado y, si no eligió ninguno (o la plataforma no tiene su clave), su
  * modelo de chat respondiendo preguntas cerradas. Null con el modelo de
  * demostración: quien llama usa entonces su doble determinista.
@@ -58,7 +58,7 @@ export function asAdminDecider(model: DecisionModel): AdminDecider {
   }
 }
 
-/** Por encima de esto se da por dicho; por debajo, Recepción escribe como siempre. */
+/** Por encima de esto se da por dicho; por debajo, Sofi escribe como siempre. */
 export const ALREADY_TOLD_MIN = 0.8
 
 /** Lo que se le muestra al modelo: por qué se le va a escribir y lo último que la persona dijo. */
@@ -82,7 +82,7 @@ export const ALREADY_TOLD_QUESTION: DecisionQuestion = {
 }
 
 /**
- * «¿Ya avisó algo?»: antes de que Recepción escriba por un seguimiento, lee lo
+ * «¿Ya avisó algo?»: antes de que Sofi escriba por un seguimiento, lee lo
  * último que la persona escribió. Una llamada por mensaje, y solo cuando la
  * persona escribió hace poco. Si el modelo no está o falla, lanza: el servicio
  * escribe como siempre.

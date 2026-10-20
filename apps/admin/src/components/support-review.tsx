@@ -45,9 +45,9 @@ const reviewMessage = z.object({
 })
 
 const KIND_WORDS: Record<string, string> = {
-  conversacion: "Conversación · Recepción",
-  consulta: "Consulta dictada · Asistente clínico",
-  cita: "Cita recuperada · Administrador",
+  conversacion: "Conversación · Sofi",
+  consulta: "Consulta dictada · Clío",
+  cita: "Cita recuperada · Argos",
 }
 
 const CHANNEL_WORDS: Record<string, string> = {

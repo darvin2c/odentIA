@@ -133,7 +133,7 @@ describe("cerrar y reabrir", () => {
     // Cerrar dos veces no cambia nada; la auditoría dice que fue el agente y por qué.
     expect(await c.run((tx) => closeConversationWith(tx, c.orgId, conv.id, { reason: "manual", byUserId: c.ownerId }))).toBe(false)
     const [audit] = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.entityId, conv.id), eq(auditEvent.action, "conversation.closed_resuelta")))
-    expect(describeAuditEvent(audit!.action, (audit!.metadata as { origin?: string }).origin)).toMatchObject({ author: "El agente", what: "Cerró una conversación: terminó la atención" })
+    expect(describeAuditEvent(audit!.action, (audit!.metadata as { origin?: string }).origin)).toMatchObject({ author: "Sofi", what: "Cerró una conversación: terminó la atención" })
   })
 
   it("escribir a una cerrada la reabre con quién lo hizo; «Reabrir» también, sin mensaje", async () => {
@@ -163,7 +163,7 @@ describe("cerrar y reabrir", () => {
     const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!))
     expect(task?.status).toBe("done")
     const notes = await ownerDb.select().from(crmNote).where(eq(crmNote.conversationId, conv.id))
-    expect(notes.map((note) => note.body)).toEqual(["Caso del agente cerrado sin resolver: se cerró la conversación."])
+    expect(notes.map((note) => note.body)).toEqual(["Caso de Sofi cerrado sin resolver: se cerró la conversación."])
     expect((await c.messages(conv.id)).filter((item) => item.direction === "out")).toHaveLength(0)
   })
 })

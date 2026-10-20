@@ -2,6 +2,7 @@ import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { AgentMark, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
@@ -141,6 +142,7 @@ export function PersonNotes({ personId }: { personId: string }) {
  */
 export function PersonAgentMemory({ personId }: { personId: string }) {
   const can = useCan()
+  const receptionName = useReceptionName()
   const canRead = can("conversations.read") || can("crm.read")
   const memory = useQuery({
     queryKey: ["agent-person-memory", personId],
@@ -153,12 +155,12 @@ export function PersonAgentMemory({ personId }: { personId: string }) {
   const derived = memory.data?.data.derived ?? []
   return (
     <section
-      aria-label="Lo que recuerda el agente"
+      aria-label={`Lo que recuerda ${receptionName}`}
       className="flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-agent-soft p-6"
     >
       <div className="flex items-center gap-2">
         <AgentMark size="sm" />
-        <h2 className="font-heading text-base font-medium">Lo que recuerda el agente</h2>
+        <h2 className="font-heading text-base font-medium">Lo que recuerda {receptionName}</h2>
       </div>
       {memory.isPending ? (
         <LoadingState message="Cargando…" />

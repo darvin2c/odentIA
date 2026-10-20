@@ -35,6 +35,7 @@ import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import { activeOrgLocale } from "../../lib/locale"
+import { useReceptionName } from "../../lib/agent-names"
 import { isAmbiguousMutationError, mutationErrorMessage } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
@@ -80,6 +81,8 @@ function AgentKnowledgePage() {
   const queryClient = useQueryClient()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
+  // Las respuestas las dice a los pacientes el agente de recepción.
+  const receptionName = useReceptionName()
   const [detailId, setDetailId] = useState<string | null>(null)
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null)
@@ -406,12 +409,12 @@ function AgentKnowledgePage() {
           }
           description={
             answering
-              ? "La próxima vez que lo pregunten, el agente responderá con esto."
+              ? `La próxima vez que lo pregunten, ${receptionName} responderá con esto.`
               : basicsRun
                 ? runNext
                   ? `Faltan ${missing.length}. Al guardar pasas a la siguiente.`
                   : "Es la última que falta."
-                : "El agente la cita tal cual. Escríbela como se la dirías a un paciente."
+                : `${receptionName} la cita tal cual. Escríbela como se la dirías a un paciente.`
           }
           onSubmit={submit}
           isSubmitting={saveMutation.isPending}
@@ -560,7 +563,7 @@ function AgentKnowledgePage() {
                   onChange={(event) => setForm({ ...form, askForms: event.target.value })}
                   placeholder={"¿Puedo ir sin reservar?\n¿Reciben pacientes sin turno?"}
                 />
-                <FieldDescription>Una por línea. Ayudan al agente a encontrar esta respuesta.</FieldDescription>
+                <FieldDescription>Una por línea. Ayudan a {receptionName} a encontrar esta respuesta.</FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="nc-sede">Sede</FieldLabel>
@@ -616,7 +619,7 @@ function AgentKnowledgePage() {
                 </Field>
               </div>
               <p className="-mt-2 text-sm text-muted-foreground">
-                Déjalas vacías si vale siempre. Pasada la fecha, el agente deja de usarla sin que hagas nada.
+                Déjalas vacías si vale siempre. Pasada la fecha, {receptionName} deja de usarla sin que hagas nada.
               </p>
               {basicsRun ? null : (
                 <Field>
@@ -651,7 +654,7 @@ function AgentKnowledgePage() {
                     />
                     Publicar al guardar
                   </label>
-                  <FieldDescription>Sin publicar queda como borrador y el agente no la usa.</FieldDescription>
+                  <FieldDescription>Sin publicar queda como borrador y {receptionName} no la usa.</FieldDescription>
                 </Field>
               ) : null}
             </>

@@ -26,8 +26,8 @@ type SceneEvent = { ch: number; agent: number; time: string; short: string; text
 const AGENTS: AgentMeta[] = [
   {
     key: "recepcion",
-    name: "Recepción",
-    sub: "Sofi · en todos los canales",
+    name: "Sofi",
+    sub: "Recepción · en todos los canales",
     idle: "Conversa con Lucía y con su mamá, agenda y responde.",
     color: "#4fc3d7",
     rgb: "79,195,215",
@@ -39,8 +39,8 @@ const AGENTS: AgentMeta[] = [
   },
   {
     key: "clinico",
-    name: "Asistente clínico",
-    sub: "En la consulta",
+    name: "Clío",
+    sub: "Clínica · en la consulta",
     idle: "Ordena lo que dicta la doctora en la historia de Lucía.",
     color: "#a6f0d8",
     rgb: "166,240,216",
@@ -52,8 +52,8 @@ const AGENTS: AgentMeta[] = [
   },
   {
     key: "administrador",
-    name: "Administrador",
-    sub: "Atento a lo pendiente",
+    name: "Argos",
+    sub: "Administración · atento a lo pendiente",
     idle: "Ve lo que falta y avisa a tiempo para que nada se olvide.",
     color: "#f5c46b",
     rgb: "245,196,107",

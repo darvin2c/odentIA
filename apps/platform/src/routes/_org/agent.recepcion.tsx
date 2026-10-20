@@ -28,14 +28,16 @@ import { AgentSandbox } from "../../components/agent/sandbox"
 import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
 import { useAgentPanel } from "../../components/agent-panel"
 import {
-  AGENT_MODEL_DOWN,
+  agentModelDown,
   type AgentFunction,
   type AgentOverview,
   type AgentRoles,
   type LearningOverview,
   minutesToClock,
+  namedAgentRoles,
   voicePreview,
 } from "../../lib/agent"
+import { AGENT_NAME_REASONS, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, usePermission } from "../../lib/crm"
@@ -248,6 +250,7 @@ function ReceptionPage() {
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
   const agentPanel = useAgentPanel()
+  const receptionName = useReceptionName()
   const [noteFor, setNoteFor] = useState<AgentFunction | null>(null)
   const [limits, setLimits] = useState<LimitsSection | null>(null)
   const [baseOpen, setBaseOpen] = useState(false)
@@ -273,6 +276,7 @@ function ReceptionPage() {
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
     enabled: canRead,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -325,6 +329,7 @@ function ReceptionPage() {
     )
   }
 
+  const title = `${receptionName}, tu agente de recepción`
   const roles = rolesQuery.data?.data
   const overview = overviewQuery.data?.data
   const config = configQuery.data?.data
@@ -335,9 +340,9 @@ function ReceptionPage() {
   if (pending || failed || !roles || !overview || !config || !role) {
     return (
       <PageShell className="flex flex-col gap-6">
-        <PageHeader title="Recepción" />
+        <PageHeader title={title} />
         {pending ? (
-          <LoadingState message="Cargando a Recepción…" />
+          <LoadingState message={`Cargando a ${receptionName}…`} />
         ) : (
           <QueryErrorState error={failed?.error} onRetry={() => void (failed ?? rolesQuery).refetch()} />
         )}
@@ -355,7 +360,7 @@ function ReceptionPage() {
   const dailyLimit = count(config.dailyRunLimit, "respuesta", "respuestas")
   const closeAfter = `A las ${count(config.closeAfterHours, "hora", "horas")} sin respuesta`
   const voice = [
-    config.personaName ? `Se presenta como ${config.personaName}` : "Sin nombre propio",
+    `Se presenta como ${config.personaName?.trim() || receptionName}`,
     `trata ${TREATMENT_LABEL[config.treatment ?? "tu"]}`,
     `tono ${TONE_LABEL[config.tone]}`,
     EMOJIS_LABEL[config.emojis],
@@ -399,16 +404,17 @@ function ReceptionPage() {
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>Recepción</BreadcrumbPage>
+            <BreadcrumbPage>{receptionName}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
       <PageHeader
         className={besideTest}
-        title="Recepción"
+        title={title}
         subtitle={
           <>
-            <span className="max-sm:hidden">{role.role}</span>
+            {/* El porqué de «Sofi»; con otro nombre, lo que hace. */}
+            <span className="max-sm:hidden">{receptionName === RECEPTION_DEFAULT_NAME ? AGENT_NAME_REASONS.recepcion : role.role}</span>
             <span className="truncate sm:hidden">
               {status} · {count(today.attended, "conversación hoy", "conversaciones hoy")}
             </span>
@@ -421,7 +427,7 @@ function ReceptionPage() {
               <Switch
                 id="recepcion-encendido"
                 checked={overview.enabled}
-                aria-label={overview.enabled ? "Apagar Recepción" : "Encender Recepción"}
+                aria-label={overview.enabled ? `Apagar a ${receptionName}` : `Encender a ${receptionName}`}
                 onCheckedChange={(next) => (next ? setTurnOnOpen(true) : setTurnOffOpen(true))}
               />
             </label>
@@ -436,15 +442,15 @@ function ReceptionPage() {
       {/* El modelo dejó de responder: los casos pasan al equipo y odentIA ya tiene el caso. Se va solo cuando vuelve a responder. */}
       {overview.enabled && overview.provider.problem ? (
         <p role="alert" className={`rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm font-semibold ${besideTest}`}>
-          {AGENT_MODEL_DOWN.line}
+          {agentModelDown(receptionName).line}
         </p>
       ) : null}
 
-      {/* Sin teléfono para urgencias el agente remite a emergencias: se dice con su acción (ADR 0050). */}
+      {/* Sin teléfono para urgencias Sofi remite a emergencias: se dice con su acción (ADR 0050). */}
       {orgProfile.data && !orgProfile.data.emergencyPhone ? (
         <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm ${besideTest}`}>
           <span className="font-semibold">Sin teléfono para urgencias.</span>
-          <span className="min-w-0 flex-1">Ante una urgencia, el agente dice que acuda al servicio de emergencias más cercano.</span>
+          <span className="min-w-0 flex-1">Ante una urgencia, {receptionName} dice que acuda al servicio de emergencias más cercano.</span>
           {canEditClinic ? (
             <Link to="/settings" className="inline-flex min-h-11 items-center font-semibold text-primary underline-offset-2 hover:underline sm:min-h-0">
               Agregarlo en Datos de la clínica
@@ -621,9 +627,9 @@ function ReceptionPage() {
 
           <Card
             title="Cómo se comporta"
-            hint="La voz es la de tu clínica. Aquí va solo lo propio de Recepción."
+            hint={`La voz es la de tu clínica. Aquí va solo lo propio de ${receptionName}.`}
             phone={{
-              summary: `${config.personaName ?? "Sin nombre propio"} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${EMOJIS_LABEL[config.emojis]}`,
+              summary: `${config.personaName?.trim() || receptionName} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${EMOJIS_LABEL[config.emojis]}`,
               expanded: behaviorOpen,
               onToggle: () => setBehaviorOpen((open) => !open),
             }}
@@ -697,7 +703,7 @@ function ReceptionPage() {
       />
       <ConfirmDialog
         open={turnOffOpen}
-        title="Apagar Recepción"
+        title={`Apagar a ${receptionName}`}
         description="Deja de responder en todos los canales. Las conversaciones abiertas y lo que esté a medias quedan para tu equipo."
         confirmLabel="Apagar"
         pending={turnOff.isPending}

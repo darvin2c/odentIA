@@ -41,10 +41,10 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
 
   // --- Página del asistente: dictado de práctica y encendido ---
   await gotoHydrated(page, tenant(org.slug, "/agent"))
-  const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Asistente clínico" })
+  const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Clío" })
   await expect(row).toContainText("Apagado")
   await row.getByRole("link", { name: "Ver y encender" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Asistente clínico" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Clío, tu agente clínico" })).toBeVisible()
   // El mismo marco de seis apartados que los otros agentes, con lo que el catálogo dice de este.
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Qué hace", "Hasta dónde llega solo", "Qué sabe", "Cómo se comporta", "Cómo se prueba", "Qué aprende, y de quién es"])
   await expect(page.getByRole("region", { name: "Qué sabe" })).toContainText("Lo que el odontólogo dicta en esa atención.")
@@ -71,8 +71,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("asistente-clinico-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.getByRole("switch", { name: "Encender el Asistente clínico" }).click()
-  await expect(page.getByRole("switch", { name: "Apagar el Asistente clínico" })).toBeChecked()
+  await page.getByRole("switch", { name: "Encender a Clío" }).click()
+  await expect(page.getByRole("switch", { name: "Apagar a Clío" })).toBeChecked()
 
   // --- En la atención: escribir lo dictado, revisar dentro de cada bloque y confirmar ---
   // El micrófono no se puede probar aquí: el navegador de la prueba recibe un reconocimiento de voz
@@ -103,7 +103,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const review = page.getByRole("region", { name: "Sugerencias por revisar" })
   const block = (name: string) => page.locator(`section[aria-label="${name}"]`).filter({ has: page.getByRole("heading", { level: 2, name, exact: true }) })
-  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias del asistente: ${name}` })
+  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
   const write = async (text: string, from = idle) => {
     await from.getByRole("button", { name: "Escribir lo dictado" }).click()
     await from.getByLabel("Escribe lo dictado").fill(text)
@@ -119,7 +119,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
   // Indicaciones y controles se revisan en un solo bloque, «Plan y controles» (ADR 0034).
   await expect(block("Plan y controles")).toContainText("Sin indicaciones confirmadas · 2 sugerencias")
-  await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias del asistente: Controles" }).getByRole("listitem")).toHaveCount(1)
+  await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias de Clío: Controles" }).getByRole("listitem")).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // El cierre dice que el diagnóstico está sugerido, no registrado.
   const closing = page.getByRole("region", { name: "Cierre de la atención" })
@@ -135,7 +135,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
 
   // Editar una en la superficie lateral: muestra lo que se dijo y «Guardar y confirmar» la lleva a la historia.
   await suggested("Controles").getByRole("button", { name: "Editar", exact: true }).click()
-  await expect(page.getByText("Sugerencia del asistente")).toBeVisible()
+  await expect(page.getByText("Sugerencia de Clío")).toBeVisible()
   await expect(page.getByText("«Control en 6 meses.»")).toBeVisible()
   await info.attach("dictado-editar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByLabel("Control", { exact: true }).fill("Control de endodoncia")
@@ -242,7 +242,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await info.attach("revision-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // Tocar la sugerencia la abre para editarla.
   await phoneRow.getByRole("button", { name: /^K02\.9/ }).click()
-  await expect(page.getByRole("dialog").getByText("Sugerencia del asistente")).toBeVisible()
+  await expect(page.getByRole("dialog").getByText("Sugerencia de Clío")).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click()
 

@@ -12,6 +12,7 @@ import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage } from "../../lib/query-error"
 import { fetchReportAdvice, type ReportAdvice, type ReportAdviceTab, reportKey, type ReportQuery } from "../../lib/reports"
+import { ADMIN_NAME } from "../../lib/agent-names"
 
 /** Los avisos del periodo; sin el administrador encendido no hay ninguno. */
 export function useReportAdvice(query: ReportQuery, enabled: boolean) {
@@ -41,10 +42,10 @@ export function AdviceNote({ advice, onOpen }: { advice: ReportAdvice; onOpen: (
   })
 
   return (
-    <AgentSurface aria-label="Aviso del administrador" className="flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-3 p-3.5">
+    <AgentSurface aria-label={`Aviso de ${ADMIN_NAME}`} className="flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-3 p-3.5">
       <AgentMark />
       <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-        <span className="text-xs font-bold tracking-wider text-primary-soft-foreground uppercase">El administrador</span>
+        <span className="text-xs font-bold tracking-wider text-primary-soft-foreground uppercase">{ADMIN_NAME}</span>
         <span className="text-[15px] font-bold">{headline(advice)}</span>
         {advice.rate !== null ? <span className="text-[13px] text-muted-foreground">{advice.title}.</span> : null}
         {snooze.isError ? (

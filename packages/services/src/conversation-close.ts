@@ -188,8 +188,8 @@ const CLOSE_ACTION: Record<ConversationCloseReason, string> = {
 
 /** Nota que queda en la ficha cuando un cierre resuelve los casos derivados del hilo. */
 const HANDOFF_CLOSE_NOTE: Partial<Record<ConversationCloseReason, string>> = {
-  equipo: "Caso del agente resuelto por el equipo al resolver la conversación.",
-  manual: "Caso del agente cerrado sin resolver: se cerró la conversación.",
+  equipo: "Caso de Sofi resuelto por el equipo al resolver la conversación.",
+  manual: "Caso de Sofi cerrado sin resolver: se cerró la conversación.",
 }
 
 /**

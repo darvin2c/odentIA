@@ -1,4 +1,5 @@
 import { ADMIN_LINES, say } from "./admin-lines.js"
+import { AGENT_NAME_REASONS, AGENT_NAMES, AGENT_ROLE_WORDS } from "./agent-names.js"
 
 /**
  * Ficha de cada agente: su manual de funciones. Es la fuente única de lo que
@@ -42,7 +43,12 @@ export interface AgentFunction {
 
 export interface AgentRole {
   id: AgentRoleId
+  /** Su nombre (issue 183): Sofi, Clío, Argos; Ayuda sigue siendo Ayuda. El de Sofi lo puede cambiar cada clínica. */
   name: string
+  /** El rol que acompaña al nombre la primera vez: «tu agente de recepción». Ayuda no lo lleva. */
+  roleWords?: string
+  /** El porqué del nombre, de subtítulo en su página. Ayuda no lo lleva. */
+  nameReason?: string
   audience: string
   /** Una frase: para qué existe. */
   role: string
@@ -73,7 +79,9 @@ export interface AgentRole {
 export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
   recepcion: {
     id: "recepcion",
-    name: "Recepción",
+    name: AGENT_NAMES.recepcion,
+    roleWords: AGENT_ROLE_WORDS.recepcion,
+    nameReason: AGENT_NAME_REASONS.recepcion,
     audience: "Para pacientes y contactos, en todos los canales",
     role: "Atiende a quien escribe a la clínica: responde, agenda y hace seguimiento, y pasa el caso a una persona cuando corresponde.",
     available: true,
@@ -185,7 +193,9 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
   },
   asistente_clinico: {
     id: "asistente_clinico",
-    name: "Asistente clínico",
+    name: AGENT_NAMES.asistente_clinico,
+    roleWords: AGENT_ROLE_WORDS.asistente_clinico,
+    nameReason: AGENT_NAME_REASONS.asistente_clinico,
     audience: "Para el odontólogo, dentro de la atención",
     role: "Convierte lo que el odontólogo dicta en el borrador de la atención, para que revise y firme sin escribir.",
     available: true,
@@ -217,7 +227,9 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
   },
   administrador: {
     id: "administrador",
-    name: "Administrador",
+    name: AGENT_NAMES.administrador,
+    roleWords: AGENT_ROLE_WORDS.administrador,
+    nameReason: AGENT_NAME_REASONS.administrador,
     audience: "Para quien administra, en su página y en Inicio",
     role: "Mira cómo va la clínica, te recomienda qué atender y hace por su cuenta lo que tú le encargues.",
     available: true,
@@ -227,20 +239,20 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       ...ADMIN_LINES.map((line) => ({
         id: line.key,
         label: line.name,
-        description: `${line.trigger(line.defaultDays)}: ${line.agent ? `el agente Recepción ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
+        description: `${line.trigger(line.defaultDays)}: ${line.agent ? `${AGENT_NAMES.recepcion} ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
         fixed: false,
         tools: [],
       })),
       { id: "recomendar", label: "Recomendar qué prender", description: "Las líneas apagadas que hoy tienen casos, con su lista. A lo sumo tres a la vez.", fixed: true, tools: [] },
-      { id: "avisar", label: "Avisar cuando no puede", description: "Si el agente no puede escribirle a alguien, dice por qué y cómo habilitarlo. No se apaga.", fixed: true, tools: [] },
+      { id: "avisar", label: "Avisar cuando no puede", description: "Si Sofi no puede escribirle a alguien, dice por qué y cómo habilitarlo. No se apaga.", fixed: true, tools: [] },
       { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda y lo que pasó con cada persona.", fixed: true, tools: [] },
       { id: "pedir", label: "Entender lo que le pides con palabras", description: "Arma el cambio con las líneas que el sistema ya sabe hacer y lo deja como borrador, con su flujo, una prueba con tus últimos 30 días y lo que revisó. Tú lo prendes, lo guardas o lo descartas.", fixed: true, tools: [] },
       { id: "proponer", label: "Proponer cambiar o apagar", description: "Cuando una línea prendida no está sirviendo lo dice con su cifra. No la cambia.", fixed: true, tools: [] },
-      { id: "ya_aviso", label: "No escribir encima de lo que la persona ya dijo", description: "Antes de que Recepción escriba por un seguimiento, mira si esa persona ya avisó algo sobre eso. Si es así, no le escribe.", fixed: true, tools: [] },
+      { id: "ya_aviso", label: "No escribir encima de lo que la persona ya dijo", description: "Antes de que Sofi escriba por un seguimiento, mira si esa persona ya avisó algo sobre eso. Si es así, no le escribe.", fixed: true, tools: [] },
     ],
     always: [],
     sees: "Agenda, pendientes y cifras, según los permisos de quien lee. Los números salen de la base de datos, no de un modelo. El modelo recibe dos cosas: el texto de lo que le pides con palabras y, antes de un mensaje de seguimiento, los últimos mensajes que escribió esa persona.",
-    notSees: "Historia clínica, caja ni el resto de las conversaciones. Al entender un pedido el modelo no recibe nombres ni datos de la clínica. Quien escribe a las personas es Recepción.",
+    notSees: "Historia clínica, caja ni el resto de las conversaciones. Al entender un pedido el modelo no recibe nombres ni datos de la clínica. Quien escribe a las personas es Sofi.",
     never: "Prender, cambiar ni apagar nada por su cuenta. Escribirle a quien no lo aceptó. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez. Armar una línea que el sistema no sepa hacer ni cambiar el texto de un mensaje.",
     confirms: "Una persona prende cada línea, una por una; prender una línea ya es aprobar sus mensajes.",
     learnsFrom: "De lo que descartas: «No recomendarla más» deja la línea en la lista sin volver a recomendarla. El plazo de cada línea lo cambias tú. No aprende de las conversaciones.",

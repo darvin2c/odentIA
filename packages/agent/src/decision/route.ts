@@ -230,10 +230,11 @@ export function guardBurst(route: AgentRoute, messages: number): AgentRoute {
  * Respuesta fija a lo que no es de la clínica: no se llama al modelo que
  * escribe (no se usa el agente como chat gratis) y siempre dice lo mismo.
  */
-export function offTopicReply(treatment: "tu" | "usted" | null, persona: string | null, name: string, informs = true): string {
+export function offTopicReply(treatment: "tu" | "usted" | null, persona: string, name: string, informs = true): string {
   // Sin punto final propio: «S.A.C.» no deja «S.A.C..».
   const clinic = name.trim().replace(/\.+$/, "")
-  const who = persona ? `Soy ${persona}, asistente virtual de ${clinic}` : `Soy el asistente virtual de ${clinic}`
+  // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
+  const who = `Soy ${persona}, asistente virtual de ${clinic}`
   // Con «Informar» apagado no se ofrecen precios ni tratamientos: el agente no responde eso.
   const usted = treatment === "usted"
   const topics = informs

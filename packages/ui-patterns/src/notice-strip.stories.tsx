@@ -37,7 +37,7 @@ const tope: StripNotice = {
 const soloLectura: StripNotice = {
   id: "solo-lectura",
   tone: "limite",
-  message: "La clínica está en solo lectura: falta pagar el cargo de septiembre (USD 32.76). El agente no responde.",
+  message: "La clínica está en solo lectura: falta pagar el cargo de septiembre (USD 32.76). Sofi no responde.",
   short: "Solo lectura: falta un pago",
   action: { label: "Registrar pago", shortLabel: "Pagar", onSelect: noop },
 }

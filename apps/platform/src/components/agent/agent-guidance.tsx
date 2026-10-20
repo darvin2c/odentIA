@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { GUIDANCE_KEY, type GuidanceItem, type GuidanceList } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -36,6 +37,8 @@ function originDetail(item: GuidanceItem): string {
  */
 export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient()
+  // Está en la página de recepción: es lo que le llega a ella.
+  const receptionName = useReceptionName()
   const [filter, setFilter] = useState<Filter>("todas")
   const [editing, setEditing] = useState<GuidanceItem | "nueva" | null>(null)
   const [removing, setRemoving] = useState<GuidanceItem | null>(null)
@@ -68,7 +71,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1 basis-56">
           <h2 id="lo-que-debe-saber" className="font-heading text-base font-semibold">
-            Lo que el agente debe saber
+            Lo que {receptionName} debe saber
           </h2>
           <p className="text-sm text-muted-foreground">
             Lo que le pide la clínica y lo que aprendió de sus correcciones, en una sola lista. Los datos concretos (precios, horarios) van en
@@ -176,7 +179,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
         title="Borrar de lo que debe saber"
         description={
           removing
-            ? `«${removing.body.slice(0, 160)}» deja de llegarle al agente desde ahora.${removing.source === "aprendida" ? " La regla queda retirada en Aprender y se puede restaurar." : ""}`
+            ? `«${removing.body.slice(0, 160)}» deja de llegarle a ${receptionName} desde ahora.${removing.source === "aprendida" ? " La regla queda retirada en Aprender y se puede restaurar." : ""}`
             : ""
         }
         confirmLabel="Borrar"

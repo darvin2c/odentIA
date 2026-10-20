@@ -128,7 +128,7 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
       if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
-      // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó el agente»).
+      // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó Sofi»).
       return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
     default:
       return null

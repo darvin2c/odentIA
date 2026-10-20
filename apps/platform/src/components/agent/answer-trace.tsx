@@ -4,7 +4,8 @@ import { useMutation } from "@tanstack/react-query"
 import { BookOpen, CalendarDays, CircleAlert, CircleCheck, GraduationCap, MessagesSquare, Notebook, Tag, UserRound } from "lucide-react"
 import type { ReactNode } from "react"
 import { apiFetch } from "../../lib/api"
-import { ANSWER_CHECK_LABEL, type AnswerBasisItem, type AnswerTrace } from "../../lib/agent"
+import { ANSWER_CHECK_LABEL, type AnswerBasisItem, type AnswerTrace, agentName } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage } from "../../lib/query-error"
 
@@ -19,13 +20,6 @@ const BASIS_ICON: Record<string, ReactNode> = {
   conversacion: <MessagesSquare aria-hidden />,
   otros_canales: <MessagesSquare aria-hidden />,
   leccion: <GraduationCap aria-hidden />,
-}
-
-const AGENT_NAME: Record<string, string> = {
-  recepcion: "Recepción",
-  clinico: "Asistente clínico",
-  administrador: "Administrador",
-  ayuda: "Ayuda",
 }
 
 /** Lo que pasó con la respuesta, con lo que el sistema registra de ella. */
@@ -83,6 +77,7 @@ export function AnswerTraceDrawer({
   /** Quien administra el agente abre la lección para retirarla. */
   onOpenLesson?: (lessonId: string) => void
 }) {
+  const receptionName = useReceptionName()
   const ok = useMutation({
     retry: false,
     mutationFn: (traceId: string) => apiFetch(`/api/agent/learning/answers/${traceId}/ok`, { method: "POST" }),
@@ -109,7 +104,7 @@ export function AnswerTraceDrawer({
     <DetailDrawer
       open
       title="En qué se basó"
-      description={`Respuesta de ${AGENT_NAME[trace.agent] ?? "el agente"} · ${when}`}
+      description={`Respuesta de ${agentName(trace.agent, receptionName)} · ${when}`}
       onClose={close}
       isSubmitting={ok.isPending}
       actions={
@@ -138,7 +133,7 @@ export function AnswerTraceDrawer({
             </p>
           ) : null}
           <p className="max-w-[90%] self-end whitespace-pre-wrap rounded-2xl rounded-br-sm border border-agent-border bg-agent-soft px-3 py-2">
-            <span className="sr-only">El agente respondió: </span>
+            <span className="sr-only">{agentName(trace.agent, receptionName)} respondió: </span>
             {trace.replyText}
           </p>
         </div>

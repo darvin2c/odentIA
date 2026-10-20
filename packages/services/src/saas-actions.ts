@@ -249,7 +249,7 @@ const asDate = (value: Date | string) => (value instanceof Date ? value : new Da
 function recoveryDetail(row: RecoveredRow): string {
   const line = adminLineOf(row.line_kind)?.name
   const how = row.source === "enlace" ? "reservó desde el enlace" : "reservó en la conversación"
-  return line ? `Volvió tras «${line}» y ${how}` : `Volvió tras un mensaje del Administrador y ${how}`
+  return line ? `Volvió tras «${line}» y ${how}` : `Volvió tras un mensaje de Argos y ${how}`
 }
 
 /**

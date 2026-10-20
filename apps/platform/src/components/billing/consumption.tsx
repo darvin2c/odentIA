@@ -6,6 +6,10 @@
 import { Button } from "@odentia/ui"
 import { UsageMeter } from "@odentia/ui-patterns"
 import { formatBps, formatMicros, formatPlanMoney } from "./money"
+import { agentName, type AgentRole } from "../../lib/agent"
+import { useReceptionName } from "../../lib/agent-names"
+
+type AgentRoleId = Exclude<AgentRole["id"], "ayuda">
 
 export type SaasActionKind = "conversacion" | "consulta" | "cita"
 
@@ -43,10 +47,11 @@ export interface Consumption {
   }
 }
 
-export const AGENT_OF: Record<SaasActionKind, { agent: string; what: (count: number) => string }> = {
-  conversacion: { agent: "Recepción", what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}` },
-  consulta: { agent: "Asistente clínico", what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}` },
-  cita: { agent: "Administrador", what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}` },
+/** De qué agente es cada acción (su id de rol: el nombre se dice con `agentName`). */
+export const AGENT_OF: Record<SaasActionKind, { agent: AgentRoleId; what: (count: number) => string }> = {
+  conversacion: { agent: "recepcion", what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}` },
+  consulta: { agent: "asistente_clinico", what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}` },
+  cita: { agent: "administrador", what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}` },
 }
 
 function day(iso: string): string {
@@ -80,6 +85,7 @@ export function ConsumptionCard({
   onShowActions: () => void
   onChangeCap?: () => void
 }) {
+  const receptionName = useReceptionName()
   const currency = data.currency ?? "USD"
   const money = (cents: number) => formatPlanMoney(cents, currency)
   const trial = data.period.credit === "prueba"
@@ -120,7 +126,7 @@ export function ConsumptionCard({
         {data.lines.map((line) => (
           <li key={line.kind} className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">{AGENT_OF[line.kind].agent}</p>
+              <p className="text-xs text-muted-foreground">{agentName(AGENT_OF[line.kind].agent, receptionName)}</p>
               <p className="text-sm font-medium">
                 {AGENT_OF[line.kind].what(line.count)}
                 {line.kind === "cita" && data.pendingRecoveries > 0 ? (
@@ -178,7 +184,7 @@ export function ConsumptionCard({
                   value={data.overCreditCents}
                   total={data.spendCapCents}
                   valueText={`${money(data.overCreditCents)} de ${money(data.spendCapCents)}`}
-                  description="Al llegar, Recepción pasa los casos nuevos a tu equipo con un mensaje fijo."
+                  description={`Al llegar, ${receptionName} pasa los casos nuevos a tu equipo con un mensaje fijo.`}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">Sin tope de gasto: los agentes siguen atendiendo y cada acción se cobra con tu precio.</p>

@@ -11,10 +11,12 @@ interface Props {
   accent: string
   /** Color del final del título: el del agente al frente o el celeste de la marca. */
   accentColor?: string
+  /** Por qué el agente se llama así (solo en la página de cada agente). */
+  meaning?: string
   lead: string
   focus?: AgentFocus
 }
-const { tag, title, accent, accentColor = "var(--sky-2)", lead, focus = "todos" } = Astro.props
+const { tag, title, accent, accentColor = "var(--sky-2)", meaning, lead, focus = "todos" } = Astro.props
 ---
 <section class="hero ah">
   <div class="grain" aria-hidden="true"></div>
@@ -22,6 +24,7 @@ const { tag, title, accent, accentColor = "var(--sky-2)", lead, focus = "todos" 
     <div class="ah-col">
       <span class="tag tag-d rise">[ {tag} ]</span>
       <h1 class="ah-h1 rise d1">{title} <span style={`color: ${accentColor}`}>{accent}</span></h1>
+      {meaning && <p class="ah-meaning rise d2" style={`--mc: ${accentColor}`}>{meaning}</p>}
       <p class="lead lead-d rise d2">{lead}</p>
       <div class="ah-ctas rise d3">
         <a class="btn btn-p" href={cta.href}>{cta.label}</a>
@@ -40,6 +43,7 @@ const { tag, title, accent, accentColor = "var(--sky-2)", lead, focus = "todos" 
   .ah-col { display: flex; flex-direction: column; gap: 26px; width: min(560px, 44vw); pointer-events: auto; }
   .ah-h1 { font-size: clamp(40px, 4.1vw, 60px); line-height: 1; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
   .ah-col .lead { max-width: 540px; }
+  .ah-meaning { max-width: 540px; margin: -8px 0 0; padding-left: 14px; border-left: 2px solid var(--mc); font-size: 15px; line-height: 1.5; font-style: italic; color: #cfe2e7; }
   .ah-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
   .ah-scene { position: absolute; z-index: 1; top: 96px; right: 0; width: min(800px, calc(100% - 640px)); }
 

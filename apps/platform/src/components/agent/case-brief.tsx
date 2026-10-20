@@ -3,6 +3,7 @@ import { DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odenti
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo } from "../../lib/crm"
@@ -100,6 +101,7 @@ export function CaseBriefDrawer({
   onClaimed?: () => void
 }) {
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [showMessages, setShowMessages] = useState(false)
   const query = useQuery({
     queryKey: ["agent-case-brief", conversationId],
@@ -227,9 +229,9 @@ export function CaseBriefDrawer({
             )}
           </DetailSection>
 
-          <DetailSection title="Lo que ya hizo el agente">
+          <DetailSection title={`Lo que ya hizo ${receptionName}`}>
             {told === null && brief.proposals.length === 0 ? (
-              <p className="text-sm text-muted-foreground">El agente no respondió ni propuso nada en este caso.</p>
+              <p className="text-sm text-muted-foreground">{receptionName} no respondió ni propuso nada en este caso.</p>
             ) : (
               <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm">
                 {told ? (
@@ -263,7 +265,7 @@ export function CaseBriefDrawer({
             </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            Este resumen se arma solo con la memoria del caso, lo que se recuerda de la persona y su ficha. El agente usa el
+            Este resumen se arma solo con la memoria del caso, lo que se recuerda de la persona y su ficha. {receptionName} usa el
             mismo antes de preguntar algo.
           </p>
         </div>

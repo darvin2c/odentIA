@@ -35,3 +35,14 @@ export function useAgentNames(): Record<"recepcion" | "asistente_clinico" | "adm
 export function withReceptionName(text: string, name: string): string {
   return name === RECEPTION_DEFAULT_NAME ? text : text.replace(/\bSofi\b/g, name)
 }
+
+/** Lo mismo en todos los textos de un valor del servidor (objetos y listas); las claves no cambian. */
+export function withReceptionNameIn<T>(value: T, name: string): T {
+  if (name === RECEPTION_DEFAULT_NAME) return value
+  if (typeof value === "string") return withReceptionName(value, name) as T
+  if (Array.isArray(value)) return value.map((item) => withReceptionNameIn(item, name)) as T
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withReceptionNameIn(item, name)])) as T
+  }
+  return value
+}

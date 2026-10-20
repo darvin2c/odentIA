@@ -1,5 +1,6 @@
 import type { ConnectionItem } from "./crm"
 import { type ChannelField, channelAccount } from "./integrations"
+import { ADMIN_NAME } from "./agent-names"
 
 /**
  * WhatsApp en Configuración y en la Bandeja: lo que entrega el servidor y lo
@@ -386,7 +387,7 @@ const SOURCE_WORDS: Record<Exclude<MessageOrigin, "agente">, string> = {
 /** De dónde sale: los automáticos dicen cómo está su línea; los demás, su origen. */
 export function messageSource(item: ClinicMessage): string {
   if (item.origin !== "agente") return SOURCE_WORDS[item.origin]
-  if (!item.line) return "Lo envía el agente"
+  if (!item.line) return `Lo envía ${ADMIN_NAME}`
   return item.line.enabled ? "Línea prendida" : "Línea apagada"
 }
 

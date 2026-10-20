@@ -60,7 +60,7 @@ import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 
-/* ---------- Administrador: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
+/* ---------- Argos: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
 
 /**
  * Su página es la lista de líneas (`ADMIN_LINES`): cada una está prendida o
@@ -92,7 +92,7 @@ export async function getAdminSettings(tx: Db, orgId: string): Promise<AdminSett
 }
 
 /**
- * Enciende o apaga al Administrador. Encenderlo no prende ninguna línea. A qué
+ * Enciende o apaga a Argos. Encenderlo no prende ninguna línea. A qué
  * hora escribe ya no es un ajuste suyo: es el «Horario para escribir» de
  * Agente (`writing-hours.ts`, decisión 18 v3), el mismo para todo.
  */
@@ -647,7 +647,7 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
   if (row.status === "enviado") {
     if (row.kind === "recordatorio_cita" && row.appointment_status === "confirmada") return { outcome: "confirmo", text: `Confirmó, ${via}.`, fix: null, cause: null }
     if (row.kind !== "recordatorio_cita" && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
-    if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Recepción.`, fix: null, cause: null }
+    if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
     const delivery: JobDelivery | null = deliveryOf(row.message_status)
     if (delivery === "entregado" || delivery === "leido") return { outcome: "entregado", text: `Entregado ${via}${delivery === "leido" ? "; lo leyó" : ""}. Sin respuesta todavía.`, fix: null, cause: null }
     return { outcome: "enviando", text: `Enviado ${via}; todavía sin confirmación de entrega.`, fix: null, cause: null }
@@ -656,7 +656,7 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
     const cause = (row.cause ?? "proveedor") as AutomationCause
     const words = CAUSE_WORDS[cause] ?? CAUSE_WORDS.proveedor
     const who = row.task_status ? (taskDone ? ` ${resolved}` : ` Lo tiene ${taskTeam}.`) : ""
-    return { outcome: "no_pudo", text: `El agente no pudo escribirle: ${words.one}.${who}`, fix: words.fix, cause }
+    return { outcome: "no_pudo", text: `Sofi no pudo escribirle: ${words.one}.${who}`, fix: words.fix, cause }
   }
   if (row.status === "tarea") {
     return taskDone
@@ -755,7 +755,7 @@ function suggestionOf(line: AdminLine, writes: boolean, month: LineWeek | undefi
   if (!month) return null
   const reached = month.messages + month.unreached
   if (writes && month.unreached >= SUGGESTION_MIN_CASES && month.unreached > month.messages) {
-    return `En ${SUGGESTION_DAYS} días el agente no pudo escribirle a ${month.unreached} de ${reached} personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.`
+    return `En ${SUGGESTION_DAYS} días Sofi no pudo escribirle a ${month.unreached} de ${reached} personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.`
   }
   if (writes && month.messages >= SUGGESTION_MIN_CASES && month.answered === 0) {
     return `En ${SUGGESTION_DAYS} días envió ${month.messages} mensajes y nadie respondió. Puedes cambiar cuándo sale, dejárselo a una persona o apagarla.`
@@ -882,7 +882,7 @@ export interface AdminPage {
   enabled: boolean
   /** El «Horario para escribir» de Agente: lo respeta todo lo que escribe el agente por su cuenta. */
   writingHours: WritingWeek
-  /** Recepción es quien escribe: apagada, las líneas que escriben quedan en pausa. */
+  /** Sofi es quien escribe: apagada, las líneas que escriben quedan en pausa. */
   receptionOn: boolean
   /** Hay un WhatsApp conectado por el que escribir. */
   whatsapp: boolean
@@ -942,7 +942,7 @@ async function permissionGaps(tx: Db, orgId: string, rules: Map<string, RuleRow>
 }
 
 /**
- * La página del Administrador. Apagado, las líneas viajan igual con lo que
+ * La página de Argos. Apagado, las líneas viajan igual con lo que
  * harían hoy: es la vista previa antes de encenderlo. Nada aquí cambia nada.
  */
 export async function getAdminPage(tx: Db, orgId: string, can: (permission: string) => boolean): Promise<AdminPage> {
@@ -1123,8 +1123,8 @@ function toRecommendation(line: AdminLine, rule: RuleRow | null, result: CaseRes
             label: `Escribirles esta vez`,
             detail:
               total > ADMIN_ONCE_LIMIT
-                ? `El agente Recepción les escribe a ${ADMIN_ONCE_LIMIT} de estas ${total} personas, las primeras de la lista, por única vez. A quien no pueda, lo dice con el motivo.`
-                : `El agente Recepción les escribe a ${total === 1 ? "esta persona" : `estas ${total} personas`}, por única vez. A quien no pueda, lo dice con el motivo.`,
+                ? `Sofi les escribe a ${ADMIN_ONCE_LIMIT} de estas ${total} personas, las primeras de la lista, por única vez. A quien no pueda, lo dice con el motivo.`
+                : `Sofi les escribe a ${total === 1 ? "esta persona" : `estas ${total} personas`}, por única vez. A quien no pueda, lo dice con el motivo.`,
           }
         : {
             label: `Crear ${Math.min(total, ADMIN_ONCE_LIMIT)} ${plural(Math.min(total, ADMIN_ONCE_LIMIT), "tarea", "tareas")}`,
@@ -1171,7 +1171,7 @@ export function canActOnLine(line: AdminLine, rule: { agentPart?: boolean } | nu
 }
 
 /**
- * Lo que el Administrador recomienda prender: las líneas apagadas que hoy
+ * Lo que Argos recomienda prender: las líneas apagadas que hoy
  * tienen casos, que el rol de quien lee puede ver y que nadie pidió dejar de
  * recomendar. A lo sumo tres a la vez, en orden fijo. Con él apagado, ninguna.
  * Con `actionable` (Inicio), solo las que quien lee puede atender

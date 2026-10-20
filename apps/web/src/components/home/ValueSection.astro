@@ -15,7 +15,7 @@ const was = (own: number | null, base: number | null | undefined) =>
   founder && own !== null && base != null && base !== own ? money(base, plan!.currency) : null
 const cards = plan
   ? [
-      { tag: "Conversación atendida", price: plan.conversation, before: was(plan.conversation, list?.conversation), desc: "Todo lo que Recepción habla con una persona en 24 horas, aunque sean veinte mensajes." },
+      { tag: "Conversación atendida", price: plan.conversation, before: was(plan.conversation, list?.conversation), desc: "Todo lo que Sofi habla con una persona en 24 horas, aunque sean veinte mensajes." },
       { tag: "Consulta documentada", price: plan.consultation, before: was(plan.consultation, list?.consultation), desc: "Cuando el odontólogo confirma la nota que dictó. Si la descarta, no se cobra." },
       { tag: "Cita recuperada", price: plan.recovered, before: was(plan.recovered, list?.recovered), desc: "Un paciente que vuelve por un mensaje del agente y asiste. Si no asiste, no se cobra.", hi: true },
     ]

@@ -1,8 +1,9 @@
 import type { AutomationKind, ConsentPurpose } from "@odentia/db/schema/automation"
 import type { TaskArea } from "@odentia/db/schema/crm"
+import { AGENT_NAMES } from "./agent-names.js"
 
 /**
- * Las líneas del agente Administrador: lo que puede pasar en la clínica y qué
+ * Las líneas de Argos, el agente administrador: lo que puede pasar en la clínica y qué
  * se hace cuando pasa. Ocho vienen armadas (`ADMIN_LINES`) y otras solo
  * existen en la clínica que las pide (`CUSTOM_LINES`). Es un catálogo fijo,
  * sin base de datos y sin modelo: de aquí salen los textos de su página, el flujo de cada línea, las
@@ -56,7 +57,7 @@ export interface AdminLine {
   /** Parte «el agente le escribe»; null en las líneas que solo dejan trabajo al equipo. */
   agent: null | {
     purpose: ConsentPurpose
-    /** «le recuerda un día antes y 3 horas antes»: se antepone «El agente Recepción». */
+    /** «le recuerda un día antes y 3 horas antes»: se antepone «Sofi». */
     does: Phrase
     /** Lo mismo, apagada: «le recordaría un día antes y 3 horas antes». */
     would: Phrase
@@ -90,7 +91,7 @@ export interface AdminLine {
   hourAdjustable?: boolean
   /**
    * No viene armada: existe en una clínica solo cuando ella la crea pidiéndosela
-   * al Administrador, y es la única clase de línea que se puede eliminar.
+   * a Argos, y es la única clase de línea que se puede eliminar.
    */
   custom?: boolean
 }
@@ -314,7 +315,7 @@ export const ADMIN_LINES: readonly AdminLine[] = [
 
 /**
  * Piezas que el sistema también sabe hacer y que no vienen armadas: una clínica
- * las tiene solo si las creó pidiéndoselas al Administrador con palabras. Una
+ * las tiene solo si las creó pidiéndoselas a Argos con palabras. Una
  * pieza nueva se añade aquí con su mensaje declarado, su consulta de casos y su
  * prueba; el modelo nunca arma una que no esté en esta lista.
  */
@@ -385,7 +386,7 @@ export function describeLine(
 ): string {
   const { agent, team } = line
   if (!agent || !state.agentPart) return `${state.enabled ? team.does : team.would}.`
-  const writes = `El agente Recepción ${say(state.enabled ? agent.does : agent.would, timing)}.`
+  const writes = `${AGENT_NAMES.recepcion} ${say(state.enabled ? agent.does : agent.would, timing)}.`
   const notice = "Si no puede, avisa por qué y cómo habilitarlo"
   if (!state.teamPart) return `${writes} ${notice}.`
   const whom = team.toOwner ? "quien lo lleva" : TASK_AREA_LABELS[team.area].team
@@ -412,7 +413,7 @@ export interface FlowStep {
   label: string
   /** Quién hace el paso; null en el inicio, la decisión y el fin. */
   actor: FlowActor | null
-  /** «Administrador · agente», «Equipo de recepción · persona»… */
+  /** «Argos · agente», «Equipo de recepción · persona»… */
   actorLabel: string | null
   /** Parte de la línea a la que pertenece: su interruptor lo prende o lo apaga. */
   part: "agent" | "team" | null
@@ -445,7 +446,7 @@ export function flowOf(
   const start: FlowStep = { id: "inicio", kind: "inicio", label: line.trigger(options.days), actor: null, actorLabel: null, part: null, always: false }
   const wait = line.wait(options.days, options.timing)
   const waitStep: FlowStep[] = wait
-    ? [{ id: "espera", kind: "paso", label: wait, actor: "administrador", actorLabel: "Administrador · agente", part: null, always: false }]
+    ? [{ id: "espera", kind: "paso", label: wait, actor: "administrador", actorLabel: `${AGENT_NAMES.administrador} · agente`, part: null, always: false }]
     : []
   const teamStep = (label: string): FlowStep => ({
     id: "tarea",
@@ -463,12 +464,12 @@ export function flowOf(
   const main: FlowStep[] = [
     start,
     ...waitStep,
-    { id: "puede", kind: "decision", label: "¿Puede escribirle el agente?", actor: null, actorLabel: null, part: null, always: false },
-    { id: "escribe", kind: "paso", label: line.agent.step, actor: "recepcion", actorLabel: "Recepción · agente", part: "agent", always: false },
-    end("fin", "Lo resuelve el agente"),
+    { id: "puede", kind: "decision", label: `¿Puede escribirle ${AGENT_NAMES.recepcion}?`, actor: null, actorLabel: null, part: null, always: false },
+    { id: "escribe", kind: "paso", label: line.agent.step, actor: "recepcion", actorLabel: `${AGENT_NAMES.recepcion} · agente`, part: "agent", always: false },
+    end("fin", `Lo resuelve ${AGENT_NAMES.recepcion}`),
   ]
   const otherwise: FlowStep[] = [
-    { id: "aviso", kind: "paso", label: "Avisa por qué y cómo habilitarlo", actor: "administrador", actorLabel: "Administrador · siempre", part: null, always: true },
+    { id: "aviso", kind: "paso", label: "Avisa por qué y cómo habilitarlo", actor: "administrador", actorLabel: `${AGENT_NAMES.administrador} · siempre`, part: null, always: true },
     ...(teamOn ? [teamStep(line.agent.fallback), end("fin-persona", "Le toca a una persona")] : [end("fin-aviso", "Queda avisado")]),
   ]
   return { main, otherwise }

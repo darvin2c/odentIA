@@ -232,7 +232,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     ])
     expect(reminder.buttons).toEqual([
       { title: "Confirmar", does: "La cita queda confirmada al momento." },
-      { title: "No podré ir", does: "Recepción le busca otra fecha en la conversación." },
+      { title: "No podré ir", does: "Sofi le busca otra fecha en la conversación." },
       { title: "No más recordatorios", does: "Deja de recibir recordatorios; lo demás no cambia." },
     ])
     expect(reminder.variables.map((item) => [item.key, item.required])).toEqual([["persona", true], ["lugar", true], ["citas", true]])
@@ -252,7 +252,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       line: { key: "recordatorio_cita", title: "Recordar la cita", enabled: true },
       category: "Utilidad",
       // Un aviso de lo que pasó no tiene botón de baja (ADR 0040).
-      buttons: [{ title: "No podré ir", does: "Recepción le busca otra fecha en la conversación." }],
+      buttons: [{ title: "No podré ir", does: "Sofi le busca otra fecha en la conversación." }],
     })
     // El aviso de reserva con «Su enlace»: su botón abre el enlace.
     expect(items[3]).toMatchObject({
@@ -271,7 +271,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       editable: true,
       deletable: false,
       buttons: [
-        { title: "Sí, continuemos", does: "Recepción sigue la conversación con la persona." },
+        { title: "Sí, continuemos", does: "Sofi sigue la conversación con la persona." },
         { title: "No enviar más", does: "Deja de recibir estos mensajes; lo demás no cambia." },
       ],
     })

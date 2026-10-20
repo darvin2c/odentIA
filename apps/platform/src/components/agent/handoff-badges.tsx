@@ -2,6 +2,7 @@ import { Badge, Button } from "@odentia/ui"
 import { Clock, Minus, TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { type AgentHandoff, URGENCY_WORDS, urgencyWord } from "../../lib/agent"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo } from "../../lib/crm"
 
@@ -78,13 +79,17 @@ export function HandoffNotice({
   children?: ReactNode
 }) {
   const arrived = timeAgo(handoff.createdAt)
+  // El motivo y el resumen los escribe el servidor y nombran a «Sofi».
+  const receptionName = useReceptionName()
+  const reason = withReceptionName(handoff.reason, receptionName)
+  const summary = handoff.summary === null ? null : withReceptionName(handoff.summary, receptionName)
   return (
     <div className="flex min-w-0 flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <HandoffUrgency priority={handoff.priority} />
         {/* El motivo se parte en líneas en vez de cortarse en la columna angosta. */}
         <Badge variant="secondary" className="h-auto max-w-full whitespace-normal text-left">
-          {handoff.reason}
+          {reason}
         </Badge>
       </div>
       <div className="flex flex-col">
@@ -93,7 +98,7 @@ export function HandoffNotice({
           {[handoff.channel ? channelLabel(handoff.channel) : null, arrived || null].filter(Boolean).join(" · ")}
         </span>
       </div>
-      <HandoffSummary reason={handoff.reason} summary={handoff.summary} />
+      <HandoffSummary reason={reason} summary={summary} />
       {handoff.notice ? (
         <p className="text-muted-foreground">
           Se le dijo: <span className="line-clamp-3 text-foreground">«{handoff.notice}»</span>

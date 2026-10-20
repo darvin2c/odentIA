@@ -16,7 +16,7 @@ export const homeFaq = (plan: PlanPrices | null): (FaqItem & { pending?: boolean
   },
   {
     q: "¿Qué cuenta como una conversación?",
-    a: "Todo lo que Recepción responde a una misma persona en 24 horas, aunque sean muchos mensajes. Si el agente no llegó a responder, no cuenta. Si la conversación termina en una cita recuperada, se cobra solo la cita.",
+    a: "Todo lo que Sofi responde a una misma persona en 24 horas, aunque sean muchos mensajes. Si el agente no llegó a responder, no cuenta. Si la conversación termina en una cita recuperada, se cobra solo la cita.",
   },
   {
     q: "¿Qué inteligencia artificial usa?",

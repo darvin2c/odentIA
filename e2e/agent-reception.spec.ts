@@ -48,12 +48,12 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   await expect(page.getByRole("heading", { level: 1, name: "Agente" })).toBeVisible()
   const agents = page.getByRole("region", { name: "Tus agentes" })
-  const reception = agents.getByRole("listitem").filter({ hasText: "Recepción" })
+  const reception = agents.getByRole("listitem").filter({ hasText: "Sofi" })
   await expect(reception).toContainText("Apagado")
   // Ayuda viene con el sistema: no se enciende ni aparece en esta lista.
   await expect(agents.getByRole("listitem")).toHaveCount(3)
   // El Asistente clínico y el Administrador ya existen y se encienden por separado.
-  for (const name of ["Asistente clínico", "Administrador"]) {
+  for (const name of ["Clío", "Argos"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
   // Lo básico que falta se dice en la ficha de las preguntas sin respuesta: se responde en el mismo sitio.
@@ -65,12 +65,12 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // --- Encender sin canal: dice qué falta y a dónde ir; no deja encender ---
   // Apagada, el Resumen lleva a su página: ahí se ve qué hace y se enciende.
   await reception.getByRole("link", { name: "Ver y encender" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Recepción" })).toBeVisible()
-  await page.getByRole("switch", { name: "Encender Recepción" }).click()
-  const turnOn = sideSurface(page, { name: "Encender Recepción", exact: true })
+  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeVisible()
+  await page.getByRole("switch", { name: "Encender a Sofi" }).click()
+  const turnOn = sideSurface(page, { name: "Encender a Sofi", exact: true })
   await expect(turnOn).toContainText("Sin un canal conectado no le llega ningún mensaje.")
   await expect(turnOn.getByRole("link", { name: "Conectar un canal" })).toBeVisible()
-  await expect(turnOn.getByRole("button", { name: "Encender Recepción" })).toBeDisabled()
+  await expect(turnOn.getByRole("button", { name: "Encender a Sofi" })).toBeDisabled()
   await info.attach("encender-sin-canal", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await turnOn.getByRole("button", { name: "Ahora no" }).click()
   await expect(turnOn).toBeHidden()
@@ -82,7 +82,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
 
   // --- Página de Recepción ---
   await gotoHydrated(page, tenant(org.slug, "/agent/recepcion"))
-  await expect(page.getByRole("heading", { level: 1, name: "Recepción" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeVisible()
   await expect(page.getByRole("navigation", { name: "breadcrumb" }).getByRole("link", { name: "Agente" })).toBeVisible()
   const today = page.getByRole("region", { name: "Hoy" })
   const does = page.getByRole("region", { name: "Qué hace" })
@@ -146,7 +146,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Límites: cada fila abre solo lo suyo y guardar una no pisa las otras.
   await expect(reach.getByRole("button", { name: /^Canales/ })).toContainText("Telegram")
   await reach.getByRole("button", { name: /^Horario/ }).click()
-  const hoursForm = sideSurface(page, { name: "Horario de Recepción", exact: true })
+  const hoursForm = sideSurface(page, { name: "Horario de Sofi", exact: true })
   await expect(hoursForm.getByRole("checkbox", { name: "En todos los canales conectados" })).toHaveCount(0)
   await hoursForm.getByRole("checkbox", { name: "A toda hora" }).uncheck()
   // «Hora»: una lista cada 15 minutos, no el campo de hora del navegador.
@@ -157,7 +157,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(reach.getByRole("button", { name: /^Horario/ })).toContainText("De 08:00 a 20:00")
   await expect(reach.getByRole("button", { name: /^Tope diario/ })).toContainText("500 respuestas")
   await reach.getByRole("button", { name: /^Tope diario/ }).click()
-  const capForm = sideSurface(page, { name: "Tope diario de Recepción", exact: true })
+  const capForm = sideSurface(page, { name: "Tope diario de Sofi", exact: true })
   await capForm.getByLabel("Tope diario de respuestas").fill("0")
   await expect(capForm.getByRole("button", { name: "Guardar" })).toBeDisabled()
   await capForm.getByLabel("Tope diario de respuestas").fill("300")
@@ -180,7 +180,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knows).toContainText("Lo que recuerda de cada persona")
 
   // «Lo que el agente debe saber» (decisión 24): una sola lista, cada línea con su origen; editar una no pierde las demás.
-  const knowsMust = page.getByRole("region", { name: "Lo que el agente debe saber" })
+  const knowsMust = page.getByRole("region", { name: "Lo que Sofi debe saber" })
   await expect(knowsMust).toContainText("Todavía no hay nada aquí.")
   for (const text of ["No ofrezcas descuentos.", "Despídete recordando la dirección."]) {
     await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
@@ -256,7 +256,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(0)
 
   // --- Encender: ya hay canal y ya se probó; no hay nivel que elegir ---
-  await page.getByRole("switch", { name: "Encender Recepción" }).click()
+  await page.getByRole("switch", { name: "Encender a Sofi" }).click()
   await expect(turnOn).toContainText("Telegram")
   await expect(turnOn).toContainText("Cinco comprobaciones.")
   // El modelo de demostración responde: la quinta comprobación lo dice y deja encender.
@@ -268,9 +268,9 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(turnOn).toContainText("Responde siempre al momento.")
   await expect(turnOn).toContainText("lo que esté a medias pasa a tu equipo.")
   await info.attach("encender", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await turnOn.getByRole("button", { name: "Encender Recepción" }).click()
+  await turnOn.getByRole("button", { name: "Encender a Sofi" }).click()
   await expect(turnOn).toBeHidden()
-  await expect(page.getByRole("switch", { name: "Apagar Recepción" })).toBeChecked()
+  await expect(page.getByRole("switch", { name: "Apagar a Sofi" })).toBeChecked()
   expect(await overview()).toMatchObject({ enabled: true })
 
   await gotoHydrated(page, tenant(org.slug, "/agent"))
@@ -287,7 +287,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("resumen-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await configure.click()
-  await expect(page.getByRole("heading", { level: 1, name: "Recepción" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeVisible()
   // Versión compacta: el estado y las conversaciones de hoy van en la cabecera; la franja «Hoy» no ocupa sitio.
   await expect(page.getByText("Encendido · 0 conversaciones hoy")).toBeVisible()
   await expect(today).toBeHidden()
@@ -311,7 +311,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await info.attach("recepcion-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await info.attach("recepcion-movil-pantalla", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await reach.getByRole("button", { name: "Límites y cuándo pasa a una persona" }).click()
-  const mobileLimits = page.getByRole("dialog", { name: "Límites de Recepción" })
+  const mobileLimits = page.getByRole("dialog", { name: "Límites de Sofi" })
   await expect(mobileLimits.getByLabel("Desde", { exact: true })).toContainText("08:00")
   await expect(mobileLimits.getByLabel("Tope diario de respuestas")).toHaveValue("300")
   await expect(mobileLimits.getByLabel("Pasa siempre a una persona si mencionan")).toHaveValue("queja, reclamo")
@@ -322,9 +322,9 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Probar en teléfono es una pantalla propia: cabecera con volver, ejemplos en una fila y el campo fijo abajo.
   await testButton.click()
   await expect(page.getByRole("heading", { level: 1, name: "Probar" })).toBeVisible()
-  await expect(page.getByRole("heading", { level: 1, name: "Recepción" })).toBeHidden()
+  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeHidden()
   await expect(does).toBeHidden()
-  const back = sandbox.getByRole("button", { name: "Volver a Recepción" })
+  const back = sandbox.getByRole("button", { name: "Volver a Sofi" })
   await expect(back).toBeFocused()
   const field = sandbox.getByRole("textbox", { name: "Mensaje de prueba" })
   const sendButton = sandbox.getByRole("button", { name: "Enviar el mensaje de prueba" })
@@ -347,13 +347,13 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("probar-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await back.click()
-  await expect(page.getByRole("heading", { level: 1, name: "Recepción" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeVisible()
   await expect(sandbox).toBeHidden()
   await expect(testButton).toBeFocused()
 
   // Apagar se confirma y dice qué pasa con lo que quedó a medias.
-  await page.getByRole("switch", { name: "Apagar Recepción" }).click()
-  const turnOff = page.getByRole("alertdialog", { name: "Apagar Recepción" })
+  await page.getByRole("switch", { name: "Apagar a Sofi" }).click()
+  const turnOff = page.getByRole("alertdialog", { name: "Apagar a Sofi" })
   await expect(turnOff).toContainText("quedan para tu equipo")
   await turnOff.getByRole("button", { name: "Apagar" }).click()
   await expect(turnOff).toBeHidden()

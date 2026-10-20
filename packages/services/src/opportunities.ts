@@ -315,7 +315,7 @@ function whyOf(
       const verb = last.cause === "evaluacion_cancelada" ? "Volvió sola" : "Pasó sola"
       return words ? `${verb}: ${words}` : `${verb} ${when}`
     }
-    if (last.origin === "agente") return `La movió el agente ${when}`
+    if (last.origin === "agente") return `La movió Sofi ${when}`
     return `La movió ${last.actorName ?? "el equipo"} ${when}`
   }
   if (last.action === "opportunity.reopened") return `La reabrió ${last.actorName ?? "el equipo"} ${when}`
@@ -358,7 +358,7 @@ function historyWhat(
 }
 
 function whoOf(origin: string, actorName: string | null): string {
-  if (origin === "agente") return "El agente"
+  if (origin === "agente") return "Sofi"
   if (origin === "automatico") return "Automático"
   return actorName ?? "Una persona del equipo"
 }

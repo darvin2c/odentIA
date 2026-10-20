@@ -272,12 +272,12 @@ it("lo que no es de la clínica va al texto fijo solo si el modelo de decisión 
   expect(offTopicReply("usted", "Sofi", "Dental Smile")).toBe(
     "Soy Sofi, asistente virtual de Dental Smile. Solo puedo ayudarle con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué le ayudo?",
   )
-  expect(offTopicReply(null, null, "Dental Smile")).toContain("Soy el asistente virtual de Dental Smile. Solo puedo ayudarte")
+  expect(offTopicReply(null, "Vale", "Dental Smile")).toContain("Soy Vale, asistente virtual de Dental Smile. Solo puedo ayudarte")
 })
 
 it("la respuesta fija no duplica el punto de una razón social", async () => {
   const { offTopicReply } = await import("./route.js")
-  expect(offTopicReply("tu", null, "Dental Smile S.A.C.")).toMatch(/^Soy el asistente virtual de Dental Smile S\.A\.C\. Solo puedo/)
+  expect(offTopicReply("tu", "Sofi", "Dental Smile S.A.C.")).toMatch(/^Soy Sofi, asistente virtual de Dental Smile S\.A\.C\. Solo puedo/)
 })
 
 it("la regla de la ráfaga solo cambia el camino «saludo» y solo con más de un mensaje", async () => {

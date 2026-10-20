@@ -1438,7 +1438,7 @@ const carlosTopic = await createHandoff(db, ORG_A, null, {
   conversationId: convCarlos.id,
   reason: "Pregunta por precio de extracción y pide hablar con una persona",
   summary:
-    "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
+    "Carlos consultó el costo de una extracción de muela del juicio; Sofi no da precios inventados y derivó con prioridad alta.",
   priority: "alta",
   createdBy: "agent",
 })

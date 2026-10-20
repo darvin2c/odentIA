@@ -8,6 +8,7 @@ import { Button, Input, Label } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useEffect, useState } from "react"
 import { centsToMajor, formatPlanMoney, majorToCents } from "./money"
+import { useReceptionName } from "../../lib/agent-names"
 
 export function SpendCapDrawer({
   open,
@@ -25,6 +26,7 @@ export function SpendCapDrawer({
   onClose: () => void
   onSave: (capCents: number | null) => Promise<void>
 }) {
+  const receptionName = useReceptionName()
   const [text, setText] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -92,7 +94,7 @@ export function SpendCapDrawer({
       <div className="rounded-lg border p-3 text-sm">
         <p className="font-medium">Cuando llegue al tope</p>
         <p className="mt-1 text-muted-foreground">
-          Recepción deja de atender casos nuevos y se los pasa a tu equipo con un mensaje fijo. Nadie se queda sin respuesta. El dictado y las citas en
+          {receptionName} deja de atender casos nuevos y se los pasa a tu equipo con un mensaje fijo. Nadie se queda sin respuesta. El dictado y las citas en
           curso siguen.
         </p>
       </div>

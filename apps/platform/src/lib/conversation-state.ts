@@ -1,4 +1,4 @@
-import { AGENT_CASE_ROW, urgencyWord } from "./agent"
+import { agentCaseRow, urgencyWord } from "./agent"
 import type { ConversationAttention, ConversationClosure, InboxTopic, ResolvePreview } from "./crm"
 import { timeAgo } from "./crm"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -6,7 +6,9 @@ import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 /**
  * En qué está una conversación, en palabras, con lo que entrega el servidor
  * (`attention` y `closure`). La pantalla no deduce nada: lo que el servidor no
- * dice, no se escribe. El tono acompaña al texto y nunca lo reemplaza.
+ * dice, no se escribe. El tono acompaña al texto y nunca lo reemplaza. Las
+ * conversaciones las atiende el agente de recepción: se dice su nombre en esta
+ * clínica (`receptionName`, de `useReceptionName`).
  */
 export type ConversationTone = "urgent" | "team" | "waiting" | "patient" | "agent" | "closed"
 
@@ -16,12 +18,12 @@ export interface ConversationWords {
 }
 
 /** Cómo se dice el motivo de cierre, con quién lo cerró si fue una persona. */
-export function closureWords(closure: ConversationClosure): string {
+export function closureWords(closure: ConversationClosure, receptionName: string): string {
   switch (closure.reason) {
     case "resuelta":
-      return "Cerrada por el agente · resuelta"
+      return `Cerrada por ${receptionName} · resuelta`
     case "sin_respuesta":
-      return "Cerrada por el agente · sin respuesta del paciente"
+      return `Cerrada por ${receptionName} · sin respuesta del paciente`
     case "equipo":
       return closure.byName ? `Resuelta por ${closure.byName}` : "Resuelta por el equipo"
     case "manual":
@@ -50,22 +52,25 @@ export function conversationWords(input: {
   closure?: ConversationClosure | null
   /** Quien mira: un tema suyo se dice «Lo tienes tú». */
   myUserId?: string | null
+  /** El nombre del agente de recepción en esta clínica. */
+  receptionName: string
 }): ConversationWords | null {
-  if (input.closure) return { text: closureWords(input.closure), tone: "closed" }
+  const agent = input.receptionName
+  if (input.closure) return { text: closureWords(input.closure, agent), tone: "closed" }
   if (input.status === "closed") return { text: "Cerrada", tone: "closed" }
   const attention = input.attention
   if (!attention) return null
   const topic = attention.topics?.[0]
-  if (topic) return { text: topicWords(topic, input.myUserId ?? null), tone: topic.urgent ? "urgent" : "team" }
+  if (topic) return { text: topicWords(topic, input.myUserId ?? null, agent), tone: topic.urgent ? "urgent" : "team" }
   // Sin temas en una respuesta antigua en caché: la urgencia del caso, como antes.
   if (attention.handoffPriority) {
     return {
-      text: `${AGENT_CASE_ROW} · ${urgencyWord(attention.handoffPriority)}`,
+      text: `${agentCaseRow(agent)} · ${urgencyWord(attention.handoffPriority)}`,
       tone: attention.handoffPriority === "alta" ? "urgent" : "team",
     }
   }
   // Solo si el agente la atiende tiene sentido decir que espera.
-  if (attention.teamLive && attention.agentAttending) return { text: "Conversa alguien del equipo · el agente espera", tone: "team" }
+  if (attention.teamLive && attention.agentAttending) return { text: `Conversa alguien del equipo · ${agent} espera`, tone: "team" }
   // Mismo orden que las pestañas del servidor: esperar al paciente va antes que «Por responder».
   if (attention.pendingContact > 0) return { text: "Espera al paciente · cita propuesta", tone: "patient" }
   if (attention.awaitingPatientSince) {
@@ -73,23 +78,23 @@ export function conversationWords(input: {
     return { text: nudged ? `Espera al paciente · se le recordó ${nudged}` : "Espera al paciente", tone: "patient" }
   }
   if (!attention.agentAttending && attention.unanswered === true) {
-    return { text: "Por responder · el agente no la atiende", tone: "team" }
+    return { text: `Por responder · ${agent} no la atiende`, tone: "team" }
   }
   if (attention.agentAttending) {
     return {
-      text: attention.outOfHours ? "La atiende el agente · responde al abrir" : "La atiende el agente",
+      text: attention.outOfHours ? `La atiende ${agent} · responde al abrir` : `La atiende ${agent}`,
       tone: "agent",
     }
   }
   return null
 }
 
-/** De quién es un tema, en una línea: «Te lo pasó el agente · Ahora», «Lo tienes tú», «Lo tiene Luis». */
-export function topicWords(topic: InboxTopic, myUserId: string | null): string {
+/** De quién es un tema, en una línea: «Te lo pasó Sofi · Ahora», «Lo tienes tú», «Lo tiene Luis». */
+export function topicWords(topic: InboxTopic, myUserId: string | null, receptionName: string): string {
   const again = topic.askedAgainAt ? " · volvió a preguntar" : ""
   if (topic.assigneeUserId && topic.assigneeUserId === myUserId) return `Lo tienes tú${again}`
   if (topic.assigneeUserId) return `Lo tiene ${topic.assigneeName ?? "otra persona"}${again}`
-  const who = topic.createdBy === "agent" ? AGENT_CASE_ROW : "Tema sin tomar"
+  const who = topic.createdBy === "agent" ? agentCaseRow(receptionName) : "Tema sin tomar"
   return `${who} · ${topic.urgent ? "Ahora" : urgencyWord(topic.priority)}${again}`
 }
 
@@ -143,27 +148,37 @@ export function fullWhenWords(iso: string): string {
 }
 
 /** La franja del hilo cerrado: cómo y cuándo se cerró. */
-export function closureBand(closure: ConversationClosure, now: Date = new Date()): string {
+export function closureBand(closure: ConversationClosure, receptionName: string, now: Date = new Date()): string {
   const when = whenWords(closure.at, now)
-  return when ? `${closureWords(closure)} · ${when}` : closureWords(closure)
+  const words = closureWords(closure, receptionName)
+  return when ? `${words} · ${when}` : words
 }
 
 /**
  * Lo que dice la confirmación de «Resolver», con lo que devuelve
  * `resolve-preview`: a quién, si se le escribe la despedida y qué más se cierra.
  */
-export function resolveWords(name: string, preview: ResolvePreview): { description: string; also: string[] } {
+export function resolveWords(
+  name: string,
+  preview: ResolvePreview,
+  receptionName: string,
+): { description: string; also: string[] } {
   const description = preview.farewell
-    ? `Se cerrará la conversación con ${name}, se le enviará la despedida de la clínica y el agente volverá a atenderla si escribe de nuevo.`
+    ? `Se cerrará la conversación con ${name}, se le enviará la despedida de la clínica y ${receptionName} volverá a atenderla si escribe de nuevo.`
     : `Se cerrará la conversación con ${name}, pero no se le puede escribir: pasaron más de 23 horas desde su último mensaje. Se cerrará sin enviarle nada.`
-  return { description, also: pendingWords(preview.handoffs, preview.pendingContact, "resolver") }
+  return { description, also: pendingWords(preview.handoffs, preview.pendingContact, "resolver", receptionName) }
 }
 
 /** Lo que pasa con lo pendiente del hilo al resolver o al cerrar sin resolver. */
-export function pendingWords(handoffs: number, pendingContact: number, how: "resolver" | "cerrar"): string[] {
+export function pendingWords(
+  handoffs: number,
+  pendingContact: number,
+  how: "resolver" | "cerrar",
+  receptionName: string,
+): string[] {
   const words: string[] = []
   if (handoffs > 0) {
-    const what = handoffs === 1 ? "el caso que te pasó el agente" : `los ${handoffs} casos que te pasó el agente`
+    const what = handoffs === 1 ? `el caso que te pasó ${receptionName}` : `los ${handoffs} casos que te pasó ${receptionName}`
     words.push(
       how === "resolver"
         ? `También se dará por resuelto ${what}.`
@@ -181,8 +196,8 @@ export function pendingWords(handoffs: number, pendingContact: number, how: "res
 }
 
 /** La confirmación de «Cerrar sin resolver»: no hay despedida y el agente vuelve si escribe. */
-export function closeWithoutResolvingWords(name: string): string {
-  return `Se cerrará la conversación con ${name} sin enviarle nada. Si vuelve a escribir, la atenderá el agente.`
+export function closeWithoutResolvingWords(name: string, receptionName: string): string {
+  return `Se cerrará la conversación con ${name} sin enviarle nada. Si vuelve a escribir, la atenderá ${receptionName}.`
 }
 
 /** «Cerrar la conversación si el paciente no responde»: horas enteras entre 6 y 23. */

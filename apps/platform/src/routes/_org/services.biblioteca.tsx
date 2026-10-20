@@ -39,6 +39,7 @@ import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
+import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
@@ -222,6 +223,7 @@ function errorMessage(error: unknown): string {
  * solo consulta la biblioteca.
  */
 function AddServicesPage() {
+  const receptionName = useReceptionName()
   const canIncorporate = usePermission("settings.write")
   const canViewLibrary =
     canIncorporate ||
@@ -373,7 +375,7 @@ function AddServicesPage() {
   }, [])
 
   /**
-   * «¿Cómo dice el agente estos precios?»: una sola pregunta para todo lo que
+   * «¿Cómo dice {receptionName} estos precios?»: una sola pregunta para todo lo que
    * se guarda, con «Precio exacto» marcado (decisión 5 de la fase 4). Después
    * se cambia en Servicios, uno por uno o varios a la vez.
    */
@@ -790,7 +792,7 @@ function AddServicesPage() {
               {chosen.length > 0 ? (
                 <div className="flex min-w-0 basis-full flex-col gap-1.5">
                   <span id={disclosureLabelId} className="text-sm font-medium">
-                    ¿Cómo dice el agente estos precios?
+                    ¿Cómo dice {receptionName} estos precios?
                   </span>
                   <RadioChips
                     value={disclosure}

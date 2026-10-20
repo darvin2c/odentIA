@@ -212,7 +212,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   // «Te espera» trae el caso una sola vez (ni su tarea ni su conversación son otra fila);
   // no hay nada del agente que aprobar ni la cita del paciente.
   const home = page.getByRole("region", { name: /^Te espera/ })
-  await expect(home.getByRole("listitem").filter({ hasText: "Te lo pasó el agente" })).toContainText("Pide hablar con una persona")
+  await expect(home.getByRole("listitem").filter({ hasText: "Te lo pasó Sofi" })).toContainText("Pide hablar con una persona")
   await expect(home.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })).toHaveCount(1)
   await expect(home).not.toContainText("espera tu aprobación")
   await expect(home).not.toContainText("Cita el jueves a las 10:00")

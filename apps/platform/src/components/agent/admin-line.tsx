@@ -13,17 +13,18 @@ import {
   adminLineKey,
   refreshAdmin,
 } from "../../lib/admin"
+import { ADMIN_NAME, useReceptionName, withReceptionName, withReceptionNameIn } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { AdminDraftBlock, DeleteAdminLine } from "./admin-draft"
 
-/** Quién lo hace, con icono y palabras: nunca solo con color. */
+/** Quién lo hace, con icono y palabras: nunca solo con color. Las líneas son de Argos. */
 export function WhoDoesIt({ actor }: { actor: "agente" | "persona" }) {
   return actor === "agente" ? (
     <Badge variant="soft" className="gap-1">
       <Bot aria-hidden className="size-3.5" />
-      Lo hace el agente
+      Lo hace {ADMIN_NAME}
     </Badge>
   ) : (
     <Badge variant="outline" className="gap-1">
@@ -42,7 +43,7 @@ function todayNote(line: AdminLineView): string | null {
   if (line.todayCases === null) return null
   if (line.todayCases === 0) return "Hoy no hay ninguno"
   const many = line.todayCases === 1 ? "Hoy sería 1 caso" : `Hoy serían ${line.todayCases} casos`
-  return line.recommended ? `${many} · el administrador te la recomienda` : many
+  return line.recommended ? `${many} · ${ADMIN_NAME} te la recomienda` : many
 }
 
 function toDiagram(flow: AdminFlow): { main: FlowDiagramStep[]; otherwise: FlowDiagramStep[] | null } {
@@ -57,7 +58,7 @@ function toDiagram(flow: AdminFlow): { main: FlowDiagramStep[]; otherwise: FlowD
 }
 
 /**
- * Una línea del Administrador. Cerrada dice qué pasa, quién lo hace y cómo le
+ * Una línea de Argos. Cerrada dice qué pasa, quién lo hace y cómo le
  * va; su interruptor la prende o la apaga al momento. Abierta, en el mismo
  * lugar, muestra su flujo con solo lo que se ejecuta.
  */
@@ -80,6 +81,7 @@ export function AdminLine({
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const save = useMutation({
     retry: false,
     mutationFn: (enabled: boolean) =>
@@ -95,7 +97,7 @@ export function AdminLine({
       : "Borrador: todavía no hace nada."
     : line.enabled
       ? line.paused
-        ? "En pausa: Recepción está apagada y es quien escribe."
+        ? `En pausa: ${receptionName} no está atendiendo y es quien escribe.`
         : line.week
       : todayNote(line)
   return (
@@ -116,14 +118,14 @@ export function AdminLine({
               {line.hasDraft ? <Badge variant="warning">{line.enabled ? "Cambio sin guardar" : "Borrador"}</Badge> : null}
               {line.custom ? <Badge variant="secondary">Creada por tu clínica</Badge> : null}
             </span>
-            <span className="text-sm text-muted-foreground">{line.description}</span>
+            <span className="text-sm text-muted-foreground">{withReceptionName(line.description, receptionName)}</span>
             {note ? <span className={cn("text-sm", (line.paused || line.hasDraft) && "font-medium text-warning")}>{note}</span> : null}
-            {line.suggestion && !line.hasDraft ? <span className="text-sm font-medium">El administrador propone revisarla: {line.suggestion}</span> : null}
+            {line.suggestion && !line.hasDraft ? <span className="text-sm font-medium">{ADMIN_NAME} propone revisarla: {withReceptionName(line.suggestion, receptionName)}</span> : null}
           </span>
         </button>
         <Switch
           checked={line.enabled}
-          // Con el Administrador apagado no se prende nada, pero lo prendido se puede apagar.
+          // Con Argos apagado no se prende nada, pero lo prendido se puede apagar.
           disabled={!canWrite || (!adminOn && !line.enabled) || save.isPending}
           aria-label={`${line.enabled ? "Apagar" : "Prender"}: ${line.name}`}
           onCheckedChange={(next: boolean) => save.mutate(next)}
@@ -186,6 +188,7 @@ export function AdminLineOpen({
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
+  const receptionName = useReceptionName()
   const [whole, setWhole] = useState(false)
   const [allPeople, setAllPeople] = useState(false)
   const [daysDraft, setDaysDraft] = useState<string | null>(null)
@@ -220,7 +223,8 @@ export function AdminLineOpen({
   })
   if (query.isPending) return <LoadingState kind="indeterminate" message="Cargando la línea…" />
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
-  const line = query.data.data
+  // Los textos del servidor nombran a «Sofi»: con otro nombre en la clínica, se dice el suyo.
+  const line = withReceptionNameIn(query.data.data, receptionName)
   const editable = canWrite && adminOn && !save.isPending
   // Apagada se ve entera; prendida, solo lo que se ejecuta salvo que se pida verla entera.
   const showWhole = !line.enabled || whole
@@ -236,7 +240,7 @@ export function AdminLineOpen({
       {line.draft ? <AdminDraftBlock line={line} draft={line.draft} canWrite={canWrite} adminOn={adminOn} /> : null}
       {line.suggestion && !line.draft ? (
         <p role="status" className="rounded-xl border border-warning/40 bg-warning-soft px-3.5 py-3 text-sm">
-          <span className="font-semibold">El administrador propone revisarla.</span> {line.suggestion} Nada cambia hasta que tú lo decidas.
+          <span className="font-semibold">{ADMIN_NAME} propone revisarla.</span> {line.suggestion} Nada cambia hasta que tú lo decidas.
         </p>
       ) : null}
       <section aria-labelledby={`${uid}-flujo`} className="flex flex-col gap-3">
@@ -270,7 +274,7 @@ export function AdminLineOpen({
             // En una línea que solo deja trabajo al equipo, su única parte se apaga con la línea.
             if (source.part === "team" && !line.hasAgent) return null
             const checked = source.part === "agent" ? line.agentPart : line.teamPart
-            const label = source.part === "agent" ? "El agente le escribe" : `Tarea para ${line.team}`
+            const label = source.part === "agent" ? `${receptionName} le escribe` : `Tarea para ${line.team}`
             return (
               <label className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium">
                 {checked ? "Prendido" : "Apagado"}
@@ -313,7 +317,7 @@ export function AdminLineOpen({
           </div>
           <p className="text-sm text-muted-foreground">
             Con datos de ejemplo: los de verdad salen de la agenda y de la ficha al enviar. Sale por WhatsApp a quien lo aceptó; si no tiene, por correo.
-            Al responder, la conversación sigue con el agente Recepción.
+            Al responder, la conversación sigue con {receptionName}.
           </p>
         </section>
       ) : null}
@@ -375,7 +379,7 @@ export function AdminLineOpen({
               setNoteDraft(null)
             }}
           />
-          <FieldDescription>La lee la persona de {line.team}; el agente nunca la dice. Se guarda al salir del campo.</FieldDescription>
+          <FieldDescription>La lee la persona de {line.team}; {receptionName} nunca la dice. Se guarda al salir del campo.</FieldDescription>
         </Field>
       ) : null}
 

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
 import { useState } from "react"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type OpportunityListItem, timeAgo, usePermission } from "../../lib/crm"
@@ -24,6 +25,7 @@ import { usePersonConversations } from "./person-summary"
 export function PersonConversations({ person }: { person: PersonPage }) {
   const canChats = usePermission("conversations.read")
   const canWrite = usePermission("conversations.write")
+  const receptionName = useReceptionName()
   const canCrm = usePermission("crm.read")
   const canCrmWrite = usePermission("crm.write")
   const queryClient = useQueryClient()
@@ -87,7 +89,7 @@ export function PersonConversations({ person }: { person: PersonPage }) {
                       {conversation.connectionName ? ` · ${conversation.connectionName}` : ""}
                     </span>
                     <span className="text-sm text-muted-foreground">
-                      {conversationStatusLabel(conversation.status, conversation.closure)}
+                      {conversationStatusLabel(conversation.status, conversation.closure, receptionName)}
                       {conversation.lastMessageAt
                         ? ` · ${timeAgo(conversation.lastMessageAt)}`
                         : ""}

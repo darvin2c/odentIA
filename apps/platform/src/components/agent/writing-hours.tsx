@@ -3,6 +3,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { QueryErrorState } from "../../lib/query-error"
 import { WRITING_HOURS_KEY, type WritingWeek, writingWeekRows } from "../../lib/writing-hours"
@@ -53,6 +54,7 @@ export function WritingHoursRows({ week }: { week: WritingWeek }) {
  */
 export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
   const query = useWritingHours()
+  const receptionName = useReceptionName()
   const [open, setOpen] = useState(false)
   const week = query.data?.data.week
   return (
@@ -63,8 +65,8 @@ export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
             Horario para escribir
           </h2>
           <p className="text-sm text-muted-foreground">
-            Cuándo odentIA escribe por su cuenta: recordatorios, controles, seguimientos, novedades y lo que inicia el agente.
-            Con la hora de cada sede. No cambia cuándo responde el agente cuando la persona escribe.
+            Cuándo odentIA escribe por su cuenta: recordatorios, controles, seguimientos, novedades y lo que inicia {ADMIN_NAME}.
+            Con la hora de cada sede. No cambia cuándo responde {receptionName} cuando la persona escribe.
           </p>
         </div>
         {canWrite && week ? (
@@ -88,7 +90,7 @@ export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
         <Link to="/agent/recepcion" className="font-semibold text-primary underline-offset-4 hover:underline">
           A qué horas responde
         </Link>{" "}
-        va aparte, en Recepción.
+        va aparte, en la página de {receptionName}.
       </p>
       {open && week ? <WritingHoursDrawer week={week} onClose={() => setOpen(false)} /> : null}
     </section>

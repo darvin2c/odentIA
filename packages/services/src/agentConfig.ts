@@ -160,7 +160,7 @@ export interface UpsertAgentConfigOpts {
   modelCheck?: AgentModelCheck
 }
 
-/** Encender Recepción con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
+/** Encender a Sofi con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
 export const MODEL_NOT_RESPONDING = "MODEL_NOT_RESPONDING"
 
 /** Guarda la configuración; cada cambio queda auditado con quién y cuándo. */
@@ -232,7 +232,7 @@ export async function upsertAgentConfig(
     .limit(1)
   if (input.enabled === true && opts.modelCheck) {
     if (!(await opts.modelCheck()).responds) {
-      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Recepción no se puede encender. Ya avisamos a odentIA.")
+      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a odentIA.")
     }
   }
   if (input.activeFromMin !== undefined || input.activeUntilMin !== undefined) {

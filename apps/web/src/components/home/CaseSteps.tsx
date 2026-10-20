@@ -5,7 +5,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 const CC = ["#0e7490", "#1f9d7a", "#c98a1c"]
-const AN = ["Recepción · Sofi", "Asistente clínico", "Administrador"]
+const AN = ["Sofi", "Clío", "Argos"]
 const CASE = [
   {
     when: "Lunes 19:10",

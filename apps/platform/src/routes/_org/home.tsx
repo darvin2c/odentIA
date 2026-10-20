@@ -16,6 +16,7 @@ import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayP
 import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
@@ -150,8 +151,11 @@ function HomePage() {
     onError: (cause) => toast.error(mutationErrorMessage(cause) ?? "No se pudo anular la atención."),
   })
 
+  const receptionName = useReceptionName()
   const data = query.data?.data
-  const context = data ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks } : null
+  const context = data
+    ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks, receptionName }
+    : null
   const choice = { branches: sede.branches, onChange: (id: string) => sede.choose(id) }
   return <PageShell className="flex flex-col gap-4">
     <PageHeader title="Inicio" subtitle={data ? longDay(data.date, data.locale) : "Lo que te toca hoy"} />

@@ -22,7 +22,8 @@ import { dueWords, formatDueAt, isOverdue } from "../../components/crm/crm-helpe
 import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { TaskDrawer } from "../../components/crm/task-drawer"
 import { PersonLink } from "../../components/person-link"
-import { AGENT_CASE_ROW } from "../../lib/agent"
+import { agentCaseRow } from "../../lib/agent"
+import { ADMIN_NAME, useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { TASK_AREA_LABEL, type TaskItem, useMemberName, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
@@ -46,12 +47,15 @@ const VIEWS = [
 const PAGE = 30
 
 /** Quién dejó la tarea, con palabras. */
-function originWords(task: TaskItem): string {
-  if (task.createdBy === "admin") return "La dejó el Administrador"
-  if (task.createdBy === "agent") return "La dejó el agente"
+function originWords(task: TaskItem, receptionName: string): string {
+  if (task.createdBy === "admin") return `La dejó ${ADMIN_NAME}`
+  if (task.createdBy === "agent") return `La dejó ${receptionName}`
   if (task.createdBy === "sistema") return "La dejó el sistema"
   return "La dejó el equipo"
 }
+
+/** El título guardado de un caso empieza por «Te lo pasó …: » (antes «el agente», ahora el nombre). */
+const CASE_PREFIX = /^Te lo pasó [^:]{1,60}: /
 
 /**
  * Tareas: la lista completa de lo que hay que hacer, con páginas, búsqueda y
@@ -64,6 +68,7 @@ function originWords(task: TaskItem): string {
 function TasksPage() {
   const queryClient = useQueryClient()
   const memberName = useMemberName()
+  const receptionName = useReceptionName()
   const canWrite = usePermission("tasks.write")
   const canAll = usePermission("tasks.all")
   const canReadCrm = usePermission("crm.read")
@@ -135,20 +140,19 @@ function TasksPage() {
         cell: ({ row }) => {
           const task = row.original
           // La etiqueta ya explica el origen; el título guardado no se modifica.
-          const prefix = `${AGENT_CASE_ROW}: `
-          const title = task.agentCase && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title
+          const title = task.agentCase ? task.title.replace(CASE_PREFIX, "") : task.title
           return (
             <div className="flex min-w-0 max-w-sm flex-col items-start gap-1 whitespace-normal [overflow-wrap:anywhere]">
               <ExpandableText text={title} label="título de la tarea" className="font-medium" />
               {task.agentCase ? (
                 <span className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                  {AGENT_CASE_ROW} <HandoffUrgency priority={task.agentCase.priority} />
+                  {agentCaseRow(receptionName)} <HandoffUrgency priority={task.agentCase.priority} />
                 </span>
               ) : null}
               {task.settledReason ? (
                 <ExpandableText text={`${task.status === "cancelled" ? "Descartada" : "Se cerró sola"}: ${task.settledReason}`} label="motivo del cierre" className="text-sm text-muted-foreground" />
               ) : task.reason ? (
-                <ExpandableText text={task.reason} label="contexto de la tarea" className="text-sm text-muted-foreground" />
+                <ExpandableText text={withReceptionName(task.reason, receptionName)} label="contexto de la tarea" className="text-sm text-muted-foreground" />
               ) : null}
             </div>
           )
@@ -212,7 +216,7 @@ function TasksPage() {
       {
         id: "origen",
         header: "Origen",
-        cell: ({ row }) => <span className="text-sm text-muted-foreground">{originWords(row.original)}</span>,
+        cell: ({ row }) => <span className="text-sm text-muted-foreground">{originWords(row.original, receptionName)}</span>,
       },
       {
         id: "actions",
@@ -253,7 +257,7 @@ function TasksPage() {
         },
       },
     ],
-    [memberName, busy, canWrite, canReadCrm, listSearch, reopenMutation],
+    [memberName, receptionName, busy, canWrite, canReadCrm, listSearch, reopenMutation],
   )
 
   const table = useReactTable({ data: tasks, columns, getCoreRowModel: getCoreRowModel() })
@@ -263,7 +267,7 @@ function TasksPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Tareas"
-        subtitle={wholeClinic ? "Las de toda la clínica" : "Las tuyas y las de tu parte del equipo, las deje una persona, el agente o el Administrador"}
+        subtitle={wholeClinic ? "Las de toda la clínica" : `Las tuyas y las de tu parte del equipo, las deje una persona, ${receptionName} o ${ADMIN_NAME}`}
         actions={
           canWrite ? (
             <Button type="button" className="min-h-11" onClick={() => { setEditTaskId(null); setDrawerOpen(true) }}>
