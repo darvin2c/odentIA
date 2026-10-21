@@ -11,6 +11,7 @@
  */
 import type { Db } from "@odentia/db"
 import { canAccess, seesBilling } from "@odentia/auth/permissions"
+import { currencyFractionDigits } from "@odentia/clinical"
 import { supportAccessGrant, supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { saasCharge, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
@@ -73,8 +74,9 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     new Intl.DateTimeFormat(lang, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date).replace(/\./g, "")
   // El mes solo, en minúscula: algunas variantes regionales lo dan con mayúscula («Octubre»).
   const monthOf = (date: Date) => new Intl.DateTimeFormat(lang, { month: "long", timeZone: "UTC" }).format(date).toLocaleLowerCase(lang)
+  // Con los decimales de la moneda (ISO 4217), no siempre dos.
   const money = (cents: number, currency: string) =>
-    new Intl.NumberFormat(lang, { style: "currency", currency, currencyDisplay: "code" }).format(cents / 100)
+    new Intl.NumberFormat(lang, { style: "currency", currency, currencyDisplay: "code" }).format(cents / 10 ** currencyFractionDigits(currency))
 
   // A quién avisar cuando la persona no puede resolverlo: la primera propietaria.
   const [owner] = await tx

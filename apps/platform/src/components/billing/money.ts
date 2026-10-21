@@ -1,25 +1,26 @@
-/** Moneda para el panel (sin @odentia/clinical: el panel solo depende de ui/ui-patterns). */
-export function currencyFractionDigits(currency: string): number {
-  if (currency === "JPY" || currency === "CLP" || currency === "COP") return 0
-  return 2
+import { currencyFractionDigits, formatMoney } from "@odentia/clinical"
+import { activeOrgLocale } from "../../lib/locale"
+
+/**
+ * Montos de Plan y pagos con el formato de la clínica (issue 36): el idioma
+ * y país de su perfil, no los de Perú. Sin perfil cargado, el español sin país.
+ */
+function clinicLocale(locale?: string): string {
+  return locale ?? activeOrgLocale() ?? "es"
 }
 
-export function formatPlanMoney(cents: number, currency: string, locale = "es-PE"): string {
-  const digits = currencyFractionDigits(currency)
+export function formatPlanMoney(cents: number, currency: string, locale?: string): string {
   try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(cents / 10 ** digits)
+    return formatMoney(Math.round(cents), currency, clinicLocale(locale))
   } catch {
     return `${cents} ${currency}`
   }
 }
 
-/** Dígitos de la moneda según Intl (sin listas propias). */
+/** Dígitos de la moneda según ISO 4217 (los mismos que en el resto de la aplicación). */
 export function currencyDigits(currency: string): number {
   try {
-    return (
-      new Intl.NumberFormat("en-US", { style: "currency", currency }).resolvedOptions()
-        .maximumFractionDigits ?? 2
-    )
+    return currencyFractionDigits(currency)
   } catch {
     return 2
   }
@@ -39,9 +40,9 @@ export function centsToMajor(cents: number, currency: string): string {
 }
 
 /** Precio por acción en millonésimas: hasta tres decimales (USD 0,425). */
-export function formatMicros(micros: number, currency: string, locale = "es-PE"): string {
+export function formatMicros(micros: number, currency: string, locale?: string): string {
   try {
-    return new Intl.NumberFormat(locale, {
+    return new Intl.NumberFormat(clinicLocale(locale), {
       style: "currency",
       currency,
       minimumFractionDigits: 2,
@@ -53,6 +54,6 @@ export function formatMicros(micros: number, currency: string, locale = "es-PE")
 }
 
 /** «10 %» desde puntos básicos. */
-export function formatBps(bps: number, locale = "es-PE"): string {
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bps / 100)} %`
+export function formatBps(bps: number, locale?: string): string {
+  return `${new Intl.NumberFormat(clinicLocale(locale), { maximumFractionDigits: 1 }).format(bps / 100)} %`
 }

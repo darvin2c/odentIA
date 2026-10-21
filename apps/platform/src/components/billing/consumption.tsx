@@ -5,6 +5,7 @@
  */
 import { Button } from "@odentia/ui"
 import { UsageMeter } from "@odentia/ui-patterns"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { formatBps, formatMicros, formatPlanMoney } from "./money"
 import { agentName, type AgentRole } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
@@ -58,7 +59,7 @@ export const AGENT_OF: Record<SaasActionKind, { agent: AgentRoleId; what: (count
 }
 
 function day(iso: string): string {
-  return new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "long" }).format(new Date(iso))
+  return new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "long", timeZone: activeOrgTimeZone() }).format(new Date(iso))
 }
 
 /** Precio base tachado y el propio al lado, solo si hubo negociación. */

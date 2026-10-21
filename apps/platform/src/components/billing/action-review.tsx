@@ -12,6 +12,7 @@ import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { businessDaysWords, type SaasTerms, useSaasTerms } from "../../lib/billing"
 import type { SaasActionKind } from "./consumption"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { formatMicros } from "./money"
 
 export type ReviewReason = "spam" | "agente" | "doble" | "otro"
@@ -72,7 +73,7 @@ const KIND_WORDS: Record<SaasActionKind, string> = {
 const NOTE_MAX = 1000
 
 function day(iso: string): string {
-  return new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "short" }).format(new Date(iso))
+  return new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "short", timeZone: activeOrgTimeZone() }).format(new Date(iso))
 }
 
 /**
