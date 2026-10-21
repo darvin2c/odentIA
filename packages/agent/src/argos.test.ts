@@ -1,6 +1,6 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
-// Argos sobre las vistas del negocio (ADR 0073), de punta a punta con un modelo
+// Argos sobre las vistas del negocio (ADR 0075), de punta a punta con un modelo
 // guionizado: el modelo recibe solo las vistas del rol y nunca un dato, la
 // frase la llena el servidor, la base corrige al modelo una vez y cada pregunta
 // queda anotada con su consulta y sin su texto.

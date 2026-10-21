@@ -1,5 +1,5 @@
 /**
- * Argos consulta las vistas del negocio (ADR 0073). El modelo escribe una
+ * Argos consulta las vistas del negocio (ADR 0075). El modelo escribe una
  * consulta; aquí se revisa y se corre con la llave de solo lectura del rol de
  * quien pregunta. Lo que garantiza los permisos es la base (la llave solo lee
  * las vistas `argos` de su rol, `argos_dueno` está sujeto a la RLS de la

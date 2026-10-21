@@ -1,4 +1,4 @@
-# 0073 · Argos consulta las vistas del negocio con la llave de quien pregunta
+# 0075 · Argos consulta las vistas del negocio con la llave de quien pregunta
 
 Fecha: 2026-10-20 · Estado: aceptada · Sustituye en parte a [0070](0070-argos-responde-con-las-cifras-de-reportes.md): el modelo ya no elige de un catálogo cerrado. Issue darvin2c/odentIA#192; lienzo «Argos conoce la base», aprobado entero el 2026-10-20 (decisiones D1 a D7).
 

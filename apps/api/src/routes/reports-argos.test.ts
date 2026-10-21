@@ -12,7 +12,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import type { CrmDeps } from "./helpers.js"
 import { createReportsRoute } from "./reports.js"
 
-// POST /reports/argos (ADR 0073) sobre la API real y PostgreSQL efímero, con
+// POST /reports/argos (ADR 0075) sobre la API real y PostgreSQL efímero, con
 // el modelo de demostración: lo pide `reports.read` (hoy, quien dirige), valida
 // el cuerpo y responde con la llave del rol.
 

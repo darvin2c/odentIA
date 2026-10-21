@@ -1,5 +1,5 @@
 /**
- * El examen de Argos con los modelos reales (ADR 0073, fase 2 del issue 192):
+ * El examen de Argos con los modelos reales (ADR 0075, fase 2 del issue 192):
  * cada pregunta del banco pasa por `askArgos` de punta a punta (Jev decide la
  * fila, ChatGPT 6 escribe la consulta, la base la corre con la llave del rol)
  * sobre la base de desarrollo con su semilla. Uso:

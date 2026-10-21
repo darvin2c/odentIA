@@ -1,4 +1,4 @@
--- Argos consulta las vistas del negocio con la llave de quien pregunta (ADR 0073).
+-- Argos consulta las vistas del negocio con la llave de quien pregunta (ADR 0075).
 -- Las vistas son de argos_dueno: sin BYPASSRLS, ve solo la clínica de app.org_id.
 -- Las llaves argos_* no leen tablas, solo las vistas de su rol. Nada de texto libre
 -- (mensajes, notas, motivos escritos) ni de historia clínica.

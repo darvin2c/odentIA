@@ -1,5 +1,5 @@
 /**
- * Lo que el modelo de Argos sabe de las vistas del negocio (ADR 0073): qué es
+ * Lo que el modelo de Argos sabe de las vistas del negocio (ADR 0075): qué es
  * cada vista, sus columnas y qué llave la lee. Es la única descripción: el
  * modelo recibe solo las vistas que lee el rol de quien pregunta, y una prueba
  * compara este catálogo con las vistas y los permisos reales de la base

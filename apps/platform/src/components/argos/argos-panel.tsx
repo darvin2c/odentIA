@@ -1,5 +1,5 @@
 /**
- * Argos sobre los datos de la clínica (ADR 0073; tableros 2 a 6 del lienzo «Argos
+ * Argos sobre los datos de la clínica (ADR 0075; tableros 2 a 6 del lienzo «Argos
  * conoce la base»). Se abre desde el buscador o desde Reportes, sin botón en la
  * cabecera, y responde al lado: columna si cabe, cajón si no y la hoja de abajo
  * en el teléfono (`DetailDrawer`). La frase con sus cifras, el dibujo cuando

@@ -12,7 +12,7 @@ import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * Argos sobre los datos de la clínica (ADR 0073) desde el buscador y desde
+ * Argos sobre los datos de la clínica (ADR 0075) desde el buscador y desde
  * Reportes, y la fase 6 de Reportes (ADR 0071): metas, descargas y el resumen
  * del lunes. El modelo es el de demostración (`demoArgosPlan` y la fila por
  * palabras): sirve para ver el recorrido, no acredita a ningún proveedor.

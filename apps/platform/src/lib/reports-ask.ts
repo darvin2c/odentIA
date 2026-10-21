@@ -60,7 +60,7 @@ export function reportParams(query: ReportQuery & Record<string, string | null |
   return search.toString()
 }
 
-/** Una respuesta del Argos de las vistas (ADR 0073) fijada: se vuelve a correr cada vez con la llave de quien mira. */
+/** Una respuesta del Argos de las vistas (ADR 0075) fijada: se vuelve a correr cada vez con la llave de quien mira. */
 export interface PinnedArgosAnswer {
   id: string
   pinnedBy: string

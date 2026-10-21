@@ -1,5 +1,5 @@
 /**
- * La respuesta de Argos sobre las vistas del negocio (ADR 0073): lo que hace
+ * La respuesta de Argos sobre las vistas del negocio (ADR 0075): lo que hace
  * falta antes de llamar a los modelos, la frase con huecos llenada con el
  * resultado y el registro de cada pregunta. El modelo nunca ve el resultado:
  * escribe la frase con `{columna}`, `{lista}` y `{filas}` y aquí se llenan,

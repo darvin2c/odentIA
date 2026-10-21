@@ -36,7 +36,7 @@ import type { AgentRuntime } from "./run.js"
 
 /**
  * Argos responde preguntas del negocio escribiendo una consulta sobre las
- * vistas `argos` (ADR 0073). Jev decide la fila (una pregunta de los datos, de
+ * vistas `argos` (ADR 0075). Jev decide la fila (una pregunta de los datos, de
  * cómo se usa odentIA u otra cosa) con solo el texto. ChatGPT 6 recibe la
  * pregunta y la descripción de las vistas que lee el rol de quien pregunta, y
  * devuelve la consulta y una frase con huecos: nunca ve el resultado ni

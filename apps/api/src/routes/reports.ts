@@ -4,7 +4,7 @@
  *
  * Todo pide `reports.read`: ni caja ni el profesional lo ven. El periodo es una
  * opción cerrada (meses completos) o un rango de días; la sede es opcional.
- * Además: preguntarle a Argos sobre las vistas del negocio (ADR 0073), las
+ * Además: preguntarle a Argos sobre las vistas del negocio (ADR 0075), las
  * respuestas fijadas, las metas, el resumen del lunes de cada persona y
  * «Descargar» en CSV (ADR 0071).
  */
@@ -63,7 +63,7 @@ const reportQuery = z.object({
 })
 
 /**
- * Una pregunta al Argos de las vistas (ADR 0073). Desde Reportes llevan su
+ * Una pregunta al Argos de las vistas (ADR 0075). Desde Reportes llevan su
  * periodo y su sede (D7); la anterior de la conversación va con su consulta
  * (D3) y solo se le muestra al modelo: no se corre ni se guarda.
  */
@@ -168,7 +168,7 @@ export function createReportsRoute(deps: ReportsDeps) {
     )
   })
 
-  // --- Argos sobre las vistas del negocio (ADR 0073) -----------------------------------
+  // --- Argos sobre las vistas del negocio (ADR 0075) -----------------------------------
 
   /**
    * Jev decide la fila y ChatGPT 6 escribe la consulta; corre con la llave del

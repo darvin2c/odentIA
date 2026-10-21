@@ -1,5 +1,5 @@
 /**
- * Lo que la pantalla le pide al Argos de las vistas (ADR 0073): preguntar, la
+ * Lo que la pantalla le pide al Argos de las vistas (ADR 0075): preguntar, la
  * fila del buscador, fijar en el Resumen y descargar. Las frases, las cifras y
  * las opciones para seguir las entrega el servidor; la pantalla solo las dibuja.
  * La conversación vive en el panel y no se guarda (decisiones D2 y D4).

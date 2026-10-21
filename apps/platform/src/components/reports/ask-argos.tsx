@@ -1,7 +1,7 @@
 /**
  * El gráfico de una respuesta fijada de las 32 cifras (ADR 0070): las que ya
  * estaban en el Resumen se siguen mostrando. Preguntar es del Argos de las
- * vistas (`components/argos/argos-panel.tsx`, ADR 0073).
+ * vistas (`components/argos/argos-panel.tsx`, ADR 0075).
  */
 import { formatMoney } from "@odentia/clinical"
 import { BarList, ColumnChart } from "@odentia/ui-patterns"

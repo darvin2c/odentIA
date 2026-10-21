@@ -1,5 +1,5 @@
 /**
- * Argos sobre las vistas del negocio (ADR 0073): cada llave lee solo las vistas
+ * Argos sobre las vistas del negocio (ADR 0075): cada llave lee solo las vistas
  * de su rol, nunca tablas ni otra clínica, y no puede cambiar de clínica; el
  * revisor rechaza lo que no es una lectura de las vistas. Y el cuadre: cada
  * cifra de Reportes que dan las vistas sale igual que en la pantalla.

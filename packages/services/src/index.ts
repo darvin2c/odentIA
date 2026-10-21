@@ -16,7 +16,7 @@ export * from "./admin-request.js"
 export * from "./agent-admin.js"
 export * from "./agent-learning.js"
 export * from "./agent-guidance.js"
-// Abre su propia transacción de solo lectura con la llave del rol (ADR 0073).
+// Abre su propia transacción de solo lectura con la llave del rol (ADR 0075).
 export * from "./argos-answer.js"
 export * from "./argos-catalog.js"
 export * from "./argos-query.js"

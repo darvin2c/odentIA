@@ -20,7 +20,7 @@ export const reportQuestion = pgTable("report_question", {
   figure: text("figure"),
   groupBy: text("group_by"),
   /**
-   * La consulta que corrió Argos sobre las vistas del negocio (ADR 0073,
+   * La consulta que corrió Argos sobre las vistas del negocio (ADR 0075,
    * decisión D2): se guarda la consulta, nunca el texto de la pregunta.
    */
   query: text("query"),
@@ -49,7 +49,7 @@ export const reportQuestion = pgTable("report_question", {
  * pregunta ya entendida, nunca la imagen ni las cifras. La de las 32 cifras
  * (ADR 0070) guarda la cifra, la agrupación y lo que se destaca, y se
  * recalcula con el periodo y la sede de la pantalla; la del Argos de las
- * vistas (ADR 0073, D5) guarda su consulta y sus frases en `argos` y se
+ * vistas (ADR 0075, D5) guarda su consulta y sus frases en `argos` y se
  * vuelve a correr tal cual. Una de las dos, nunca ambas. Hasta cuatro por
  * clínica, compartidas por quienes ven Reportes.
  */
