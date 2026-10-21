@@ -110,6 +110,8 @@ it("el atajo «Por invitar a volver» de Pacientes muestra a quien toca, con su 
     listPeople(tx, c.orgId, { view: "pacientes", atajo: "por_invitar_a_volver" }, everything),
   )
   expect(page.items.map((row) => row.displayName)).toEqual(["Lucía Fernández"])
+  // Nadie le lleva la invitación todavía: la línea está apagada, así que la lleva una persona.
+  expect(page.items[0]).toMatchObject({ attention: "persona" })
   // El contador de cada atajo dice lo mismo que la lista; el de quien no ve el atajo, no aparece.
   const counts = await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes" }, everything))
   expect(counts.shortcuts?.por_invitar_a_volver).toBe(1)

@@ -37,7 +37,7 @@ import { type ContactScreenView, getContactScreenView } from "./contact-screen.j
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { personSearchCondition } from "./person-search.js"
-import { getPlanNextStep } from "./plan-next.js"
+import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
 import {
   PEOPLE_SHORTCUTS,
   type PeopleShortcut,
@@ -352,6 +352,36 @@ export type PersonSituation =
   | "sin_conversacion"
   | "sin_pendientes"
 
+/** Quién lleva lo que sigue de una persona: el agente, una persona del equipo o nadie todavía. */
+export type PersonAttention = "agente" | "persona" | "nadie"
+
+/**
+ * Quién lleva el siguiente paso del plan: el agente solo si su línea está
+ * prendida; si no, una persona. Lo que no tiene línea ni paso no lo lleva nadie.
+ */
+export function attentionOf(kind: PlanNextKind, lines: ReadonlySet<string>): PersonAttention {
+  switch (kind) {
+    case "respuesta":
+      return lines.has("seguimiento_presupuesto") ? "agente" : "persona"
+    case "control":
+      return lines.has("recordatorio_control") ? "agente" : "nadie"
+    case "enviar":
+    case "agendar":
+    case "continuar":
+      return "persona"
+    case "ninguno":
+      return "nadie"
+  }
+}
+
+/** Las líneas del Administrador que la clínica tiene prendidas: de ellas depende quién lleva cada caso. */
+async function enabledLineKinds(tx: Db, orgId: string): Promise<Set<string>> {
+  const rows = await tx.execute<{ kind: string }>(
+    sql`select kind from automation_rule where organization_id = ${orgId} and enabled`,
+  )
+  return new Set(rows.map((row) => row.kind))
+}
+
 export interface PersonListItem {
   id: string
   displayName: string
@@ -385,6 +415,10 @@ export interface PersonListItem {
   waitingSince: string | null
   /** Qué sigue del plan y el texto de su botón; solo para quien ve el plan. */
   nextStep: { text: string; actionLabel: string | null } | null
+  /** Quién lleva lo que sigue; nulo si no es paciente o no ve el plan. */
+  attention: PersonAttention | null
+  /** La ficha le falta algo para atenderla (`faltan_datos`). */
+  missingData: boolean
 }
 
 export interface PeopleListInput {
@@ -595,6 +629,9 @@ export async function listPeople(
   const fingerprint = JSON.stringify({ view, q, atajo })
   const { timezone } = await findOrgLocale(tx, orgId)
   const members = view === "pacientes" ? await peopleShortcutMembers(tx, orgId, can, timezone, new Date()) : null
+  const lines = view === "pacientes" ? await enabledLineKinds(tx, orgId) : new Set<string>()
+  const missing = new Set(members?.faltan_datos ?? [])
+  const toInvite = new Set(members?.por_invitar_a_volver ?? [])
   if (atajo && members?.[atajo] === undefined) throw new ServiceError("FORBIDDEN", 403, "Este atajo no es para quien lo pide")
   const atajoIds = atajo ? (members?.[atajo] ?? []) : []
   const inAtajo = atajo
@@ -702,10 +739,15 @@ export async function listPeople(
       waitingSince:
         chats && (situation === "sin_respuesta" || situation === "esperamos") ? (extra?.waitingSince ?? null) : null,
       nextStep: null,
+      attention: null,
+      missingData: isPatient && missing.has(r.patient_id ?? ""),
     })
     if (isPatient && plan && r.patient_id) {
       const step = await getPlanNextStep(tx, orgId, r.patient_id, can)
-      items[items.length - 1].nextStep = { text: step.text, actionLabel: step.action?.label ?? null }
+      const item = items[items.length - 1]!
+      item.nextStep = { text: step.text, actionLabel: step.action?.label ?? null }
+      // Quien tiene que volver a verla lo lleva la línea de invitar, si está prendida.
+      item.attention = toInvite.has(r.patient_id) ? (lines.has("invitar_a_volver") ? "agente" : "persona") : attentionOf(step.kind, lines)
     }
   }
   const last = page[page.length - 1]

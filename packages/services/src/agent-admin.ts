@@ -173,6 +173,16 @@ const NO_FUTURE_APPOINTMENT = sql`not exists (
     and a.starts_at > now() and a.status in ('programada', 'confirmada'))`
 
 /** Solo lo nuevo desde que se prendió y que aún no tiene su caso. `at` es cuándo se cumplió la condición. */
+/** Un tratamiento en curso del presupuesto sin cita viva para su próxima sesión (decisión 14). */
+const NEXT_SESSION_OPEN = sql`exists (select 1 from treatment_budget_item bi
+  join treatment_plan_item i on i.organization_id = bi.organization_id and i.id = bi.plan_item_id
+  where bi.organization_id = b.organization_id and bi.budget_id = b.id
+    and i.status = 'en_curso' and i.decision_status = 'aceptado'
+    and not exists (select 1 from appointment_plan_item api
+      join appointment a on a.organization_id = api.organization_id and a.id = api.appointment_id
+      where api.organization_id = b.organization_id and api.plan_item_id = i.id
+        and a.status in ('programada', 'confirmada')))`
+
 function fresh(scope: Fresh | undefined, id: SQL, at: SQL): SQL {
   if (!scope) return sql``
   return sql`and ${at} >= ${scope.since.toISOString()}::timestamptz
@@ -351,13 +361,13 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
 }
 
 async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; total: number }>(sql`
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; total: number }>(sql`
     select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
-           count(*) over ()::int as total
+           ${NEXT_SESSION_OPEN} as next_session, count(*) over ()::int as total
     from treatment_budget b
     join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
-      and b.decided_at < now() - make_interval(days => ${days})
+      and (b.decided_at < now() - make_interval(days => ${days}) or ${NEXT_SESSION_OPEN})
       and pp.is_active and ${NO_FUTURE_APPOINTMENT}
       ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
     order by b.decided_at asc
@@ -370,13 +380,13 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       id: row.id,
       personName: row.name,
       // Sin importes: quien agenda ve el presupuesto mínimo, no sus líneas.
-      line: `Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
+      line: `${row.next_session ? "Falta agendar la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
       patientId: row.patient_id,
       budgetId: row.id,
     })),
     title: `${total} ${plural(total, "presupuesto aceptado", "presupuestos aceptados")} hace más de ${days} días, sin cita`,
     detail: "El paciente aceptó y todavía no tiene fecha para empezar.",
-    how: `Presupuestos aceptados (del todo o en parte) hace más de ${days} días, de pacientes activos que no tienen una cita programada o confirmada desde ahora.`,
+    how: `Presupuestos aceptados (del todo o en parte) hace más de ${days} días, o con un tratamiento en curso sin cita para su próxima sesión; de pacientes activos que no tienen una cita programada o confirmada desde ahora.`,
   }
 }
 

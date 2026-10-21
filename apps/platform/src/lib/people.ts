@@ -116,6 +116,8 @@ export interface PersonListItem {
   situation: PersonSituation | null
   waitingSince: string | null
   nextStep: { text: string; actionLabel: string | null } | null
+  attention: "agente" | "persona" | "nadie" | null
+  missingData: boolean
 }
 
 export const PEOPLE_VIEWS = [
@@ -278,6 +280,14 @@ export function situationAction(situation: PersonSituation | null): string {
     default:
       return "Ver conversación"
   }
+}
+
+/** Quién lleva lo que sigue, con las palabras de la fila. */
+export function attentionWords(attention: PersonListItem["attention"]): string | null {
+  if (attention === "agente") return "Lo lleva el agente"
+  if (attention === "persona") return "Lo lleva una persona del equipo"
+  if (attention === "nadie") return "Nadie lo lleva todavía"
+  return null
 }
 
 /** Días enteros desde una fecha ISO; nulo si no hay fecha. */

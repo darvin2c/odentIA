@@ -3,7 +3,17 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { encounter, patientCharge, patientContact, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import {
+  encounter,
+  patientCharge,
+  patientContact,
+  patientPayment,
+  treatmentBudget,
+  treatmentBudgetItem,
+  treatmentBudgetOption,
+  treatmentPlan,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import { agentConfig, crmTask, } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -518,5 +528,33 @@ describe("propone cambiar o apagar la línea que no sirve", () => {
     const line = (await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((item) => item.key === "seguimiento_presupuesto")!
     expect(line.suggestion).toBe("En 30 días Sofi no pudo escribirle a 10 de 10 personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.")
     expect(line.enabled).toBe(true)
+  })
+})
+
+describe("decisión 14: un tratamiento en curso sin siguiente sesión cuenta en «Presupuesto aceptado sin cita»", () => {
+  it("un presupuesto recién aceptado no cuenta; con un tratamiento en curso sin cita para su próxima sesión, sí", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: rosa, title: "Plan" }).returning({ id: treatmentPlan.id })
+    const [item] = await ownerDb
+      .insert(treatmentPlanItem)
+      .values({ organizationId: c.orgId, patientId: rosa, planId: plan!.id, title: "Endodoncia de la 36", currency: "PEN", status: "pendiente", decisionStatus: "aceptado" })
+      .returning({ id: treatmentPlanItem.id })
+    const [budget] = await ownerDb
+      .insert(treatmentBudget)
+      .values({ organizationId: c.orgId, patientId: rosa, planId: plan!.id, budgetNumber: budgetNumber++, title: "Endodoncia", currency: "PEN", status: "borrador" })
+      .returning({ id: treatmentBudget.id })
+    // Solo un presupuesto en borrador admite líneas: se acepta después.
+    const optionId = randomUUID()
+    await ownerDb.insert(treatmentBudgetOption).values({ id: optionId, organizationId: c.orgId, patientId: rosa, budgetId: budget!.id, position: 1 })
+    await ownerDb
+      .insert(treatmentBudgetItem)
+      .values({ organizationId: c.orgId, patientId: rosa, planId: plan!.id, budgetId: budget!.id, optionId, planItemId: item!.id, title: "Endodoncia de la 36", currency: "PEN" })
+    await ownerDb.update(treatmentBudget).set({ status: "aceptado", decidedAt: new Date(Date.now() - DAY) }).where(eq(treatmentBudget.id, budget!.id))
+    // El presupuesto es de ayer y el tratamiento aún no empezó: nada que pedir todavía.
+    expect((await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))).todayCases).toBe(0)
+    // Empezó y no tiene la siguiente sesión agendada: la línea lo pide a recepción.
+    await ownerDb.update(treatmentPlanItem).set({ status: "en_curso" }).where(eq(treatmentPlanItem.id, item!.id))
+    expect((await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))).todayCases).toBe(1)
   })
 })

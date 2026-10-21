@@ -42,6 +42,7 @@ import {
   type PeopleShortcutCounts,
   type PeopleView,
   type PersonListItem,
+  attentionWords,
   daysSince,
   situationAction,
   situationText,
@@ -129,6 +130,7 @@ function PeoplePage() {
   const search = listSearch.get("q") ?? ""
   const atajoParam = listSearch.get("atajo")
   const atajo = view === "pacientes" && isPeopleShortcut(atajoParam) ? atajoParam : undefined
+  const atajoLabel = PEOPLE_SHORTCUTS.find((item) => item.id === atajo)?.label ?? ""
   const [cursors, setCursors] = useState<string[]>([])
   const cursor = cursors.at(-1) ?? null
   const [creating, setCreating] = useState(false)
@@ -222,18 +224,23 @@ function PeoplePage() {
           cell: ({ row }) => {
             const step = row.original.nextStep
             if (!step) return <span className="text-sm text-muted-foreground">—</span>
+            const who = attentionWords(row.original.attention)
             return (
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-sm">{step.text}</span>
-                {step.actionLabel ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    render={<Link to="/people/$personId" params={{ personId: row.original.id }} />}
-                  >
-                    {step.actionLabel}
-                  </Button>
-                ) : null}
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="text-sm">{step.text}</span>
+                  {row.original.missingData ? <Badge variant="warning">Faltan datos</Badge> : null}
+                  {step.actionLabel ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      render={<Link to="/people/$personId" params={{ personId: row.original.id }} />}
+                    >
+                      {step.actionLabel}
+                    </Button>
+                  ) : null}
+                </span>
+                {who ? <span className="text-xs text-muted-foreground">{who}</span> : null}
               </span>
             )
           },
@@ -413,7 +420,7 @@ function PeoplePage() {
             filtered
               ? "Nadie coincide con la búsqueda"
               : atajo
-                ? "Nadie en este atajo"
+                ? `Nadie en «${atajoLabel}». ¡Al día!`
               : view === "pacientes"
                 ? "Sin pacientes todavía"
                 : view === "por_registrar"
@@ -425,8 +432,16 @@ function PeoplePage() {
               ? "Prueba con otra parte del nombre, el teléfono o el documento, o mira en «Todos»."
               : "Cuando alguien escriba o lo registres, aparece aquí."
           }
-          actionLabel={canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
-          onAction={canRegister ? () => setRegistering(true) : canCreate ? () => setCreating(true) : undefined}
+          actionLabel={atajo ? "Ver todos" : canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
+          onAction={
+            atajo
+              ? () => listSearch.setParam("atajo", undefined, { replace: true })
+              : canRegister
+                ? () => setRegistering(true)
+                : canCreate
+                  ? () => setCreating(true)
+                  : undefined
+          }
         />
       ) : (
         <>
