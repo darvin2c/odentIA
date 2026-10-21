@@ -1,47 +1,58 @@
-/** Moneda para el panel (sin @odentia/clinical: el panel solo depende de ui/ui-patterns). */
-export function currencyFractionDigits(currency: string): number {
-  if (currency === "JPY" || currency === "CLP" || currency === "COP") return 0
-  return 2
+import { currencyFractionDigits, formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { activeOrgLocale } from "../../lib/locale"
+
+/**
+ * Montos de Plan y pagos con el formato de la clínica (issue 36): el idioma
+ * y país de su perfil, no los de Perú. Sin perfil cargado, el español sin país.
+ */
+function clinicLocale(locale?: string): string {
+  return locale ?? activeOrgLocale() ?? "es"
 }
 
-export function formatPlanMoney(cents: number, currency: string, locale = "es-PE"): string {
-  const digits = currencyFractionDigits(currency)
+export function formatPlanMoney(cents: number, currency: string, locale?: string): string {
   try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(cents / 10 ** digits)
+    return formatMoney(Math.round(cents), currency, clinicLocale(locale))
   } catch {
     return `${cents} ${currency}`
   }
 }
 
-/** Dígitos de la moneda según Intl (sin listas propias). */
+/** Dígitos de la moneda según ISO 4217 (los mismos que en el resto de la aplicación). */
 export function currencyDigits(currency: string): number {
   try {
-    return (
-      new Intl.NumberFormat("en-US", { style: "currency", currency }).resolvedOptions()
-        .maximumFractionDigits ?? 2
-    )
+    return currencyFractionDigits(currency)
   } catch {
     return 2
   }
 }
 
-/** Texto en unidades mayores → unidad menor. null si no es un importe válido. */
-export function majorToCents(text: string, currency: string): number | null {
-  const amount = Number(text.trim().replace(/\s/g, "").replace(",", "."))
-  if (!Number.isFinite(amount) || amount <= 0) return null
-  const cents = Math.round(amount * 10 ** currencyDigits(currency))
-  return Number.isSafeInteger(cents) && cents > 0 ? cents : null
+/**
+ * Lo escrito en unidades mayores → unidad menor, con los separadores de la
+ * clínica, los mismos con que se muestra: «50.000» son cincuenta mil en Chile.
+ * null si no es un importe válido.
+ */
+export function majorToCents(text: string, currency: string, locale?: string): number | null {
+  try {
+    const cents = parseMoney(text, currency, clinicLocale(locale))
+    return cents > 0 ? cents : null
+  } catch {
+    return null
+  }
 }
 
-/** Unidad menor → texto en unidades mayores. */
-export function centsToMajor(cents: number, currency: string): string {
-  return String(cents / 10 ** currencyDigits(currency))
+/** Unidad menor → texto para editar, el que lee `majorToCents`. */
+export function centsToMajor(cents: number, currency: string, locale?: string): string {
+  try {
+    return formatMoneyInput(cents, currency, clinicLocale(locale))
+  } catch {
+    return String(cents / 10 ** currencyDigits(currency))
+  }
 }
 
 /** Precio por acción en millonésimas: hasta tres decimales (USD 0,425). */
-export function formatMicros(micros: number, currency: string, locale = "es-PE"): string {
+export function formatMicros(micros: number, currency: string, locale?: string): string {
   try {
-    return new Intl.NumberFormat(locale, {
+    return new Intl.NumberFormat(clinicLocale(locale), {
       style: "currency",
       currency,
       minimumFractionDigits: 2,
@@ -53,6 +64,6 @@ export function formatMicros(micros: number, currency: string, locale = "es-PE")
 }
 
 /** «10 %» desde puntos básicos. */
-export function formatBps(bps: number, locale = "es-PE"): string {
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bps / 100)} %`
+export function formatBps(bps: number, locale?: string): string {
+  return `${new Intl.NumberFormat(clinicLocale(locale), { maximumFractionDigits: 1 }).format(bps / 100)} %`
 }

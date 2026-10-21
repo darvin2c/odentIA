@@ -759,7 +759,7 @@ export function assertActionPricingFloor(plan: Parameters<typeof checkActionPric
   throw new ServiceError(
     "SAAS_PRICE_BELOW_FLOOR",
     409,
-    `${KIND_WORDS[failed.kind]} quedaría en ${new Intl.NumberFormat("es-PE", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)} con el descuento máximo: menos del doble de su peor costo. Sube el precio o baja el descuento máximo.`,
+    `${KIND_WORDS[failed.kind]} quedaría en ${new Intl.NumberFormat("es", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)} con el descuento máximo: menos del doble de su peor costo. Sube el precio o baja el descuento máximo.`,
   )
 }
 

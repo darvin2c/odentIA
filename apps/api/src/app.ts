@@ -5,7 +5,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configurePublicLinks, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -33,6 +33,7 @@ import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createSearchRoute } from "./routes/search.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
+import { type AddressProviders, createAddressRoute } from "./routes/address.js"
 import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
@@ -106,20 +107,26 @@ export interface AppDeps {
   decisions?: PlatformDecisions
   /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
   embedder?: SearchEmbedder
+  /** Quién sugiere direcciones (issue 36): Google para la sede, Geoapify para el paciente. */
+  addressProviders?: AddressProviders
+  /** Búsquedas de Geoapify al día para todo odentIA: la administración lo ve en su Inicio. */
+  geoapifyDailyLimit?: number
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
 }
+// La dirección tiene la forma de la del paciente (issue 36); la valida el servicio según el país.
 const branchInput = z.object({
   name: z.string().min(1).max(120),
-  addressLine1: z.string().max(200).nullish(),
-  addressLine2: z.string().max(200).nullish(),
-  department: z.string().max(80).nullish(),
-  province: z.string().max(80).nullish(),
-  district: z.string().max(80).nullish(),
+  addressLine1: z.string().max(300).nullish(),
+  city: z.string().max(100).nullish(),
+  district: z.string().max(100).nullish(),
+  region: z.string().max(100).nullish(),
+  postalCode: z.string().max(20).nullish(),
+  country: z.string().length(2).nullish(),
+  googlePlaceId: z.string().max(300).nullish(),
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
-  mapsUrl: z.string().url().nullish(),
   // `null` = hereda la zona horaria de la organización (columna nullable).
   timezone: z.string().max(60).nullish(),
 })
@@ -277,7 +284,11 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelURL: deps.webURL, replyTo: deps.foundersEmail }))
   app.get("/api/admin/overview", (c) => runService(c, 200, () =>
-    deps.ownerDb.transaction((tx) => getBackofficeOverview(tx, adminContextOf(c))),
+    deps.ownerDb.transaction((tx) =>
+      getBackofficeOverview(tx, adminContextOf(c), {
+        ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit ? { geoapifyDailyLimit: deps.geoapifyDailyLimit } : {}),
+      }),
+    ),
   ))
   app.all("/api/admin/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404))
   app.route("/api/account/admin-access", createAccountAdminAccessRoute(deps))
@@ -330,7 +341,12 @@ export function createApp(deps: AppDeps) {
   app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
   app.route(
     "/api/public/booking",
-    createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
+    createPublicBookingRoute({
+      db: deps.db,
+      secretsKey: deps.secretsKey,
+      remoteAddress: deps.registrationRemoteAddress,
+      addressProvider: deps.addressProviders?.paciente ?? null,
+    }),
   )
   app.route(
     "/api/webchat",
@@ -591,24 +607,7 @@ export function createApp(deps: AppDeps) {
     }
     const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      await assertSaasBranchAvailable(tx, orgId)
-      const [created] = await tx
-        .insert(branch)
-        .values({ organizationId: orgId, ...parsed.data })
-        .returning()
-      await tx.insert(auditEvent).values({
-        organizationId: orgId,
-        actorUserId: userId,
-        action: "branch.create",
-        entity: "branch",
-        entityId: created.id,
-        metadata: parsed.data,
-      })
-      return created
-    })
-    return c.json({ data: row }, 201)
+    return runService(c, 201, () => withOrgContext(db, orgId, (tx) => createBranch(tx, orgId, userId, parsed.data)))
   })
 
   guarded.patch("/branches/:id", async (c) => {
@@ -619,27 +618,7 @@ export function createApp(deps: AppDeps) {
     const id = c.req.param("id")
     const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      const [updated] = await tx
-        .update(branch)
-        .set({ ...parsed.data, updatedAt: new Date() })
-        .where(and(eq(branch.id, id), eq(branch.organizationId, orgId)))
-        .returning()
-      if (updated) {
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: userId,
-          action: "branch.update",
-          entity: "branch",
-          entityId: id,
-          metadata: parsed.data,
-        })
-      }
-      return updated ?? null
-    })
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sede no encontrada"), 404)
-    return c.json({ data: row })
+    return runService(c, 200, () => withOrgContext(db, orgId, (tx) => updateBranch(tx, orgId, userId, id, parsed.data)))
   })
 
   guarded.delete("/branches/:id", async (c) => {
@@ -659,12 +638,7 @@ export function createApp(deps: AppDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reactivar sedes"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, async (tx) => {
-        const [current] = await tx.select({ isActive: branch.isActive }).from(branch)
-          .where(and(eq(branch.id, c.req.param("id")), eq(branch.organizationId, orgId))).for("update")
-        if (current && !current.isActive) await assertSaasBranchAvailable(tx, orgId)
-        return setBranchActive(tx, orgId, userId, c.req.param("id"), true)
-      }),
+      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), true)),
     )
   })
 
@@ -758,6 +732,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/diagnosis-codes", createDiagnosisCodesRoute(crmDeps))
+  guarded.route("/address", createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))

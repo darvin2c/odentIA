@@ -36,6 +36,7 @@ import {
 import { requirePatient } from "./patients.js"
 import { contactDecides } from "./responsibilities.js"
 import { getPatientAccount } from "./payments.js"
+import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -899,6 +900,9 @@ export interface PortalAppointmentView {
   status: string
   branchId: string
   branchName: string
+  /** La dirección de la sede en una línea y «Cómo llegar», como en «Su enlace». */
+  branchAddress: string | null
+  branchDirectionsUrl: string | null
   /** Quién la atiende: el bloque de la cita es el mismo de «Su enlace». */
   dentistName: string
   /** Zona de la sede (o de la clínica): la hora de la cita se dice en ella, no en la del teléfono. */
@@ -999,6 +1003,8 @@ export async function getPortalAppointments(
       version: appointment.version,
       branchId: appointment.branchId,
       branchName: branch.name,
+      branchAddress: branchAddressColumns,
+      branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
       dentistName: user.name,
     })
@@ -1016,8 +1022,12 @@ export async function getPortalAppointments(
     .limit(50)
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointments.listed")
   const clinicZone = (await findOrgLocale(tx, ctx.orgId)).timezone
-  return rows.map(({ branchTimeZone, ...row }) => ({
+  const addressText = await branchAddressWriter(tx, ctx.orgId)
+  const directions = await branchDirectionsWriter(tx, ctx.orgId)
+  return rows.map(({ branchTimeZone, branchAddress, branchPlaceId, ...row }) => ({
     ...row,
+    branchAddress: addressText(branchAddress),
+    branchDirectionsUrl: directions({ address: branchAddress, placeId: branchPlaceId }),
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     timeZone: branchTimeZone ?? clinicZone,
@@ -1036,6 +1046,8 @@ async function portalAppointmentView(tx: Db, orgId: string, appointmentId: strin
       version: appointment.version,
       branchId: appointment.branchId,
       branchName: branch.name,
+      branchAddress: branchAddressColumns,
+      branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
       dentistName: user.name,
     })
@@ -1045,9 +1057,11 @@ async function portalAppointmentView(tx: Db, orgId: string, appointmentId: strin
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
     .limit(1)
   if (!row) throw notFound("Cita")
-  const { branchTimeZone, ...rest } = row
+  const { branchTimeZone, branchAddress, branchPlaceId, ...rest } = row
   return {
     ...rest,
+    branchAddress: (await branchAddressWriter(tx, orgId))(branchAddress),
+    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({ address: branchAddress, placeId: branchPlaceId }),
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     timeZone: branchTimeZone ?? (await findOrgLocale(tx, orgId)).timezone,

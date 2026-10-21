@@ -408,6 +408,8 @@ async function wipeSeed(): Promise<void> {
     "portal_grant",
     "portal_policy",
     "portal_access_log",
+    // El contador diario de sugerencias de direcciones (ADR 0077).
+    "address_lookup_day",
     // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
     "clinical_access_log",
     "portal_session",
@@ -943,25 +945,43 @@ await db.transaction(async (tx) => {
 const [miraflores] = await db
   .insert(branch)
   .values([
-    // Miraflores hereda la zona de la organización (`timezone` en null).
-    { organizationId: ORG_A, name: "Sede Miraflores", department: "Lima", province: "Lima", district: "Miraflores" },
+    // Miraflores hereda la zona de la organización (`timezone` en null). La dirección
+    // tiene la forma de la del paciente (issue 36): distrito, provincia y región ISO 3166-2.
+    {
+      organizationId: ORG_A,
+      name: "Sede Miraflores",
+      addressLine1: "Av. José Larco 345",
+      city: "Miraflores",
+      district: "Lima",
+      region: "PE-LMA",
+      country: "PE",
+    },
     // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin unidades dentales
     // ni horarios: es la sede limpia para probar la configuración desde cero.
     {
       organizationId: ORG_A,
       name: "Sede Surco",
-      department: "Lima",
-      province: "Lima",
-      district: "Santiago de Surco",
+      city: "Santiago de Surco",
+      district: "Lima",
+      region: "PE-LMA",
+      country: "PE",
       phone: "+51987655001",
       timezone: "America/Lima",
     },
     // San Isidro es la segunda sede con historia: dos años de citas en Reportes, con el Dr. Salas.
-    { organizationId: ORG_A, name: "Sede San Isidro", department: "Lima", province: "Lima", district: "San Isidro" },
+    {
+      organizationId: ORG_A,
+      name: "Sede San Isidro",
+      addressLine1: "Av. Javier Prado Este 2465",
+      city: "San Isidro",
+      district: "Lima",
+      region: "PE-LMA",
+      country: "PE",
+    },
   ])
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
-await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima" }])
+await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", country: "PE" }])
 
 // --- CRM con servicios ---
 const pipeA = await ensureDefaultPipeline(db, ORG_A)

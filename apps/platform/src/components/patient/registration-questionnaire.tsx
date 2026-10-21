@@ -53,7 +53,9 @@ import {
 } from "@odentia/ui"
 import { BirthDateInput, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
 import { createContext, useContext, useId, useState } from "react"
+import type { AddressSource } from "../../lib/address-suggestions"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
+import { AddressStreetField } from "../address/address-street-field"
 import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
@@ -338,6 +340,7 @@ export function RegistrationQuestionnaire({
   fill,
   submitLabel = "Enviar registro",
   shortcuts = true,
+  addressSource,
   onSubmit,
 }: {
   config: RegistrationConfig
@@ -350,6 +353,8 @@ export function RegistrationQuestionnaire({
   submitLabel?: string
   /** Letras de atajo para el teclado; la vista previa imita un celular y no las lleva. */
   shortcuts?: boolean
+  /** Sugerencias para «Calle y número» (Geoapify, issue 36); sin ellas, el campo de siempre. */
+  addressSource?: AddressSource
   /** Recibe las respuestas ya validadas. Si lanza un error, su mensaje se muestra en la última pantalla. */
   onSubmit: (answers: RegistrationAnswers) => Promise<void>
 }) {
@@ -1122,15 +1127,32 @@ export function RegistrationQuestionnaire({
                 optional={!required("address")}
                 htmlFor={id("address")}
               >
-                <Input
-                  id={id("address")}
-                  placeholder="Calle y número"
-                  autoComplete={forOther ? "off" : "street-address"}
-                  maxLength={500}
-                  value={draft.address}
-                  aria-invalid={flag("address")}
-                  onChange={(event) => set({ address: event.target.value })}
-                />
+                {addressSource ? (
+                  <AddressStreetField
+                    id={id("address")}
+                    value={draft.address}
+                    source={addressSource}
+                    placeholder="Calle y número"
+                    autoComplete={forOther ? "off" : "street-address"}
+                    maxLength={500}
+                    invalid={flag("address")}
+                    pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
+                    onChange={(next) => set({ address: next })}
+                    onPick={(pick) => {
+                      if (pick.city) set({ addressCity: pick.city })
+                    }}
+                  />
+                ) : (
+                  <Input
+                    id={id("address")}
+                    placeholder="Calle y número"
+                    autoComplete={forOther ? "off" : "street-address"}
+                    maxLength={500}
+                    value={draft.address}
+                    aria-invalid={flag("address")}
+                    onChange={(event) => set({ address: event.target.value })}
+                  />
+                )}
               </Labeled>
               <Labeled
                 name="addressCity"

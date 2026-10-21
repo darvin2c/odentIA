@@ -62,6 +62,9 @@ export interface PortalAppointment {
   status: string
   branchId: string
   branchName: string
+  /** La dirección de la sede y «Cómo llegar», como en «Su enlace». Ausentes en respuestas antiguas. */
+  branchAddress?: string | null
+  branchDirectionsUrl?: string | null
   /** Quién la atiende: el bloque de la cita es el mismo de «Su enlace». */
   dentistName: string
   /** Zona de la sede: la hora de la cita se dice en ella. Ausente en respuestas antiguas. */

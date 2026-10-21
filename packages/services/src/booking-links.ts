@@ -18,6 +18,7 @@ import {
   ownAppointmentChangeable,
 } from "./own-appointment.js"
 import { listAvailableSlots } from "./availability.js"
+import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -436,6 +437,8 @@ export interface BookingLinkAppointment {
   canConfirm: boolean
   branchName: string
   branchAddress: string | null
+  /** «Cómo llegar» a la sede (Google Maps); null sin dirección. */
+  branchDirectionsUrl: string | null
   dentistName: string
   serviceName: string | null
 }
@@ -449,7 +452,8 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
       branchId: appointment.branchId,
       serviceName: appointment.serviceName,
       branchName: branch.name,
-      branchAddress: branch.addressLine1,
+      branchAddress: branchAddressColumns,
+      branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
       dentistName: user.name,
     })
@@ -472,7 +476,8 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
     canChange: changeable,
     canConfirm: changeable && row.status === "programada",
     branchName: row.branchName,
-    branchAddress: row.branchAddress,
+    branchAddress: (await branchAddressWriter(tx, orgId))(row.branchAddress),
+    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({ address: row.branchAddress, placeId: row.branchPlaceId }),
     dentistName: row.dentistName,
     serviceName: row.serviceName,
   }
@@ -503,15 +508,31 @@ export async function bookingContext(
       )[0] ?? null
     : null
   const sites = await tx
-    .select({ id: branch.id, name: branch.name, address: branch.addressLine1, timezone: branch.timezone, minutes: branch.appointmentDefaultMinutes })
+    .select({
+      id: branch.id,
+      name: branch.name,
+      address: branchAddressColumns,
+      placeId: branch.googlePlaceId,
+      timezone: branch.timezone,
+      minutes: branch.appointmentDefaultMinutes,
+    })
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .orderBy(asc(branch.name), asc(branch.id))
+  const addressText = await branchAddressWriter(tx, orgId)
+  const directions = await branchDirectionsWriter(tx, orgId)
   return {
     service,
     branches: sites
       .filter((site) => !link.branchId || site.id === link.branchId)
-      .map((site) => ({ id: site.id, name: site.name, address: site.address, timeZone: site.timezone ?? region.timezone, defaultMinutes: site.minutes })),
+      .map((site) => ({
+        id: site.id,
+        name: site.name,
+        address: addressText(site.address),
+        directionsUrl: directions({ address: site.address, placeId: site.placeId }),
+        timeZone: site.timezone ?? region.timezone,
+        defaultMinutes: site.minutes,
+      })),
     branchId: link.branchId,
   }
 }

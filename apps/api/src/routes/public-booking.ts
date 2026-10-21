@@ -9,6 +9,9 @@ import {
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
   getBookingLinkRegistrationForm,
+  getBranchDirections,
+  suggestAddresses,
+  type AddressProvider,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkPaper,
@@ -32,6 +35,9 @@ import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const WINDOW_MS = 10 * 60 * 1000
 const MAX_BUCKETS = 10000
+// Por clínica y dirección cada 10 minutos. Las sugerencias de dirección llegan
+// mientras se escribe: tienen su cupo y no gastan el de enviar (issue 36).
+const LIMITS = { get: 240, post: 30, address: 60 } as const
 const token = z.string().regex(/^[0-9a-f]{64}$/)
 const slotsQuery = z.strictObject({ token, branchId: z.uuid(), from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) })
 const reserveBody = z.strictObject({
@@ -106,6 +112,8 @@ const messagesBody = z.strictObject({
   tipo: z.enum(["recordatorio", "seguimiento", "novedades", "ninguno"]),
   recibir: z.boolean(),
 })
+// Lo escrito en «Calle y número» del registro o de «Tus datos» (issue 36): va en el cuerpo.
+const addressBody = z.strictObject({ q: z.string().max(200), session: z.uuid() })
 // «Tus papeles»: el token va en el cuerpo, nunca en la dirección (registros de acceso, proxies, Referer).
 const paperBody = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
 export type BookingRemoteAddress = (c: Context) => string | undefined
@@ -116,9 +124,15 @@ export type BookingRemoteAddress = (c: Context) => string | undefined
  * entrega lo guardado. Límites locales de una instancia, sin confiar en
  * cabeceras del cliente.
  */
-export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; remoteAddress?: BookingRemoteAddress }) {
+export function createPublicBookingRoute(deps: {
+  db: Db
+  secretsKey: Buffer
+  remoteAddress?: BookingRemoteAddress
+  /** Quién sugiere la dirección de la persona (Geoapify, issue 36); null: los campos de siempre. */
+  addressProvider?: AddressProvider | null
+}) {
   const app = new Hono<{ Variables: { bookingOrganization: { id: string } } }>()
-  const buckets = new Map<string, { expiresAt: number; get: number; post: number }>()
+  const buckets = new Map<string, { expiresAt: number } & Record<keyof typeof LIMITS, number>>()
   const unavailable = (c: Context) => c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
   const address: BookingRemoteAddress =
     deps.remoteAddress ??
@@ -157,11 +171,11 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     let bucket = buckets.get(key)
     if (!bucket) {
       if (buckets.size >= MAX_BUCKETS) return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
-      bucket = { expiresAt: now + WINDOW_MS, get: 0, post: 0 }
+      bucket = { expiresAt: now + WINDOW_MS, get: 0, post: 0, address: 0 }
       buckets.set(key, bucket)
     }
-    const method = c.req.method === "POST" ? "post" : "get"
-    if (bucket[method] >= (method === "post" ? 30 : 240)) {
+    const method = c.req.method === "GET" ? "get" : c.req.path.endsWith("/address") ? "address" : "post"
+    if (bucket[method] >= LIMITS[method]) {
       c.header("Retry-After", String(Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000))))
       return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
     }
@@ -193,6 +207,23 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     const query = z.strictObject({ token }).safeParse(c.req.query())
     if (!query.success) return unavailable(c)
     return answer(c, 200, () => inOrg(c, (tx, orgId) => getPersonalLinkView(tx, orgId, query.data.token)))
+  })
+
+  // El enlace corto para llegar a una sede (issue 36): sin sesión ni token, solo
+  // a dónde llevar en el mapa; una sede desactivada o sin dirección no existe.
+  app.get("/:slug/directions/:branch", (c) =>
+    answer(c, 200, () => inOrg(c, (tx, orgId) => getBranchDirections(tx, orgId, c.req.param("branch") ?? ""))),
+  )
+
+  // Sugerencias para la dirección que escribe la persona (issue 36): sin token,
+  // con su propio cupo por clínica y dirección (`LIMITS.address`) y el tope diario de la clínica.
+  app.post("/:slug/address", async (c) => {
+    const body = addressBody.safeParse(await bodyOf(c))
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa lo escrito"), 400)
+    const org = c.get("bookingOrganization") as { id: string }
+    // El proveedor responde fuera de la transacción: la que se abre solo cuenta la búsqueda.
+    const run = <T>(fn: (tx: Db) => Promise<T>) => withOrgContext(deps.db, org.id, fn)
+    return answer(c, 200, () => suggestAddresses(run, org.id, deps.addressProvider, "paciente", { text: body.data.q, session: body.data.session }))
   })
 
   app.get("/:slug/slots", async (c) => {

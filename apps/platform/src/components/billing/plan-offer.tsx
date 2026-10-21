@@ -16,6 +16,8 @@ export interface OfferPlan {
   currency: string
   priceCents: number
   billingPeriod: string
+  /** El plan de lista de odentIA (el por defecto de la administración). */
+  isDefault: boolean
   creditCents: number
   conversationMicros: number | null
   consultationMicros: number | null
@@ -51,6 +53,7 @@ const ACTIONS = [
 export function PlanOffer({
   plan,
   current,
+  switching = false,
   trialing,
   consumption,
   taxLabel,
@@ -59,6 +62,8 @@ export function PlanOffer({
 }: {
   plan: OfferPlan
   current: boolean
+  /** La clínica ya tiene otro plan: el botón la pasa a este. */
+  switching?: boolean
   trialing: boolean
   consumption: Consumption | null
   taxLabel: string | null
@@ -92,7 +97,7 @@ export function PlanOffer({
         </div>
         {!current ? (
           <Button onClick={onActivate} disabled={busy}>
-            {busy ? "Activando…" : "Activar plan"}
+            {switching ? (busy ? "Cambiando…" : "Pasarme a este plan") : busy ? "Activando…" : "Activar plan"}
           </Button>
         ) : null}
       </div>
@@ -137,6 +142,24 @@ export function PlanOffer({
       <p className="text-xs text-muted-foreground">
         ¿Tu clínica tiene mucho volumen? Tu asesor puede mejorar tus precios por acción; siempre verás el precio base junto al tuyo. WhatsApp lo
         pagas directo a Meta. El crédito que no usas no pasa al mes siguiente.
+      </p>
+    </section>
+  )
+}
+
+/** El plan especial que la administración le asignó a la clínica, debajo del de lista y en corto. */
+export function SpecialPlanCard({ plan, taxLabel }: { plan: OfferPlan; taxLabel: string | null }) {
+  return (
+    <section aria-label={plan.name} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-primary bg-card p-4">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="text-sm font-medium">
+          {plan.name} <span className="font-normal text-muted-foreground">(tu plan)</span>
+        </p>
+        <p className="text-sm text-muted-foreground">Condiciones que acordaste con odentIA. Arriba, el plan de lista, por si quieres pasarte.</p>
+      </div>
+      <p className="text-lg font-semibold tabular-nums">
+        {formatPlanMoney(plan.priceCents, plan.currency)}{" "}
+        <span className="text-sm font-normal text-muted-foreground">al mes{taxLabel ? ` + ${taxLabel}` : ""}</span>
       </p>
     </section>
   )

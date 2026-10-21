@@ -4,6 +4,7 @@
  * suma es exactamente lo que se vio en «Ver cada acción».
  */
 import { EmptyState } from "@odentia/ui-patterns"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { formatMicros, formatPlanMoney } from "./money"
 
 export interface ChargeLine {
@@ -39,7 +40,7 @@ const STATUS_WORDS: Record<string, string> = {
 }
 
 function day(iso: string): string {
-  return new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso))
+  return new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "short", year: "numeric", timeZone: activeOrgTimeZone() }).format(new Date(iso))
 }
 
 export function ChargesList({ charges }: { charges: ChargeWithLines[] }) {

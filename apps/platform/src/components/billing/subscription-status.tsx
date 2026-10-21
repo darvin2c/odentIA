@@ -1,3 +1,4 @@
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { formatPlanMoney } from "./money"
 
 export interface PlanSummary {
@@ -46,7 +47,7 @@ function dateLabel(iso: string | null): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "—"
-  return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium" }).format(date)
+  return new Intl.DateTimeFormat(activeOrgLocale(), { dateStyle: "medium", timeZone: activeOrgTimeZone() }).format(date)
 }
 
 export function SubscriptionStatusCard({ summary }: { summary: BillingSummary }) {

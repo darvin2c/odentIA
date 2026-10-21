@@ -3,6 +3,8 @@ import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CircleCheck } from "lucide-react"
+import { useMemo } from "react"
+import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
 import { fetchPersonalDataForm, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
 import { RegistrationQuestionnaire } from "../patient/registration-questionnaire"
@@ -85,6 +87,8 @@ export function PersonalDataForm({
   appointmentLine?: string | null
   onDone: () => void
 }) {
+  // La dirección se sugiere por la página de la clínica, sin el token (issue 36).
+  const addressSource = useMemo(() => publicAddressSource(slug), [slug])
   const formQuery = useQuery({
     queryKey: ["personal-link-data", slug, token],
     queryFn: () => fetchPersonalDataForm(slug, token),
@@ -140,6 +144,7 @@ export function PersonalDataForm({
         }}
         submitLabel="Enviar"
         shortcuts={false}
+        addressSource={addressSource}
         onSubmit={async (answers) => {
           try {
             await send.mutateAsync(toInput(answers))

@@ -22,6 +22,8 @@ export interface BookingAppointment {
   canConfirm: boolean
   branchName: string
   branchAddress: string | null
+  /** «Cómo llegar» a la sede (Google Maps); null sin dirección. */
+  branchDirectionsUrl: string | null
   dentistName: string
   serviceName: string | null
 }
@@ -30,6 +32,8 @@ export interface BookingLinkBranch {
   id: string
   name: string
   address: string | null
+  /** «Cómo llegar» a la sede (Google Maps); ausente o null sin dirección. */
+  directionsUrl?: string | null
   timeZone: string
   defaultMinutes: number
 }
@@ -116,6 +120,11 @@ const post = <T>(url: string, body: unknown) => publicFetch<T>(url, { method: "P
 
 export function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
   return publicFetch(`${base(slug)}?token=${encodeURIComponent(token)}`)
+}
+
+/** A dónde lleva el enlace corto para llegar a una sede (`/llegar/<sede>`). */
+export function fetchBranchDirections(slug: string, branchSlug: string): Promise<{ data: { branchName: string; url: string } }> {
+  return publicFetch(`${base(slug)}/directions/${encodeURIComponent(branchSlug)}`)
 }
 
 /** Cambia un interruptor de «Tus mensajes», o «ningún mensaje». */

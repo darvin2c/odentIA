@@ -14,7 +14,7 @@ import { useState } from "react"
 import { ChargesList, type ChargeLine } from "../../components/billing/charges"
 import { ConsumptionCard, type Consumption } from "../../components/billing/consumption"
 import { formatPlanMoney } from "../../components/billing/money"
-import { type OfferPlan, PlanOffer } from "../../components/billing/plan-offer"
+import { type OfferPlan, PlanOffer, SpecialPlanCard } from "../../components/billing/plan-offer"
 import { ReceiptForm, type ReceiptCharge, type ReceiptMethod } from "../../components/billing/receipt-form"
 import { SpendCapDrawer } from "../../components/billing/spend-cap"
 import { type BillingSummary, SubscriptionStatusCard } from "../../components/billing/subscription-status"
@@ -236,7 +236,7 @@ function PlanContent() {
 
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">
-          Planes
+          {(plans.data?.length ?? 0) > 1 ? "Planes" : "Tu plan"}
         </h2>
         {summary.guaranteedUntil ? (
           <p className="rounded-lg border bg-card px-4 py-3 text-sm">
@@ -256,18 +256,24 @@ function PlanContent() {
           <p className="text-sm text-muted-foreground">Aún no hay planes publicados.</p>
         ) : (
           <div className="flex flex-col gap-3">
-            {plans.data.map((plan) => (
-              <PlanOffer
-                key={plan.code}
-                plan={plan}
-                current={summary.plan?.code === plan.code}
-                trialing={summary.status === "prueba"}
-                consumption={consumption.data ?? null}
-                taxLabel={consumption.data?.tax?.label ?? null}
-                busy={choosePlan.isPending && choosePlan.variables === plan.code}
-                onActivate={() => choosePlan.mutate(plan.code)}
-              />
-            ))}
+            {/* El plan de lista va completo; un plan especial de la clínica, debajo y en corto (issue 104). */}
+            {plans.data.map((plan) =>
+              plan.isDefault || plans.data.length === 1 ? (
+                <PlanOffer
+                  key={plan.code}
+                  plan={plan}
+                  current={summary.plan?.code === plan.code}
+                  switching={summary.plan !== null && summary.plan.code !== plan.code}
+                  trialing={summary.status === "prueba"}
+                  consumption={consumption.data ?? null}
+                  taxLabel={consumption.data?.tax?.label ?? null}
+                  busy={choosePlan.isPending && choosePlan.variables === plan.code}
+                  onActivate={() => choosePlan.mutate(plan.code)}
+                />
+              ) : (
+                <SpecialPlanCard key={plan.code} plan={plan} taxLabel={consumption.data?.tax?.label ?? null} />
+              ),
+            )}
           </div>
         )}
       </section>

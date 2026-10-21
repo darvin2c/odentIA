@@ -19,8 +19,6 @@ export interface AdminPlan {
   currency: string
   priceCents: number
   billingPeriod: string
-  maxBranches: number | null
-  maxSeats: number | null
   isActive: boolean
   creditCents: number
   conversationMicros: number | null

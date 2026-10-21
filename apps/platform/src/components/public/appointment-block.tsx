@@ -1,5 +1,6 @@
 import { Badge, Button } from "@odentia/ui"
 import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
+import { MapPin } from "lucide-react"
 import { useState } from "react"
 import { longDay, timeLabel } from "./week-slots"
 
@@ -10,6 +11,8 @@ export interface AppointmentBlockData {
   timeZone: string
   branchName: string
   branchAddress?: string | null
+  /** «Cómo llegar» a la sede (Google Maps), si tiene dirección. */
+  branchDirectionsUrl?: string | null
   dentistName: string
   serviceName: string | null
   confirmed: boolean
@@ -51,8 +54,8 @@ function calendarFile(clinicName: string, appointment: AppointmentBlockData, uid
 }
 
 /**
- * «Tu cita»: día y hora, dónde y con quién; confirmar, cambiar, cancelar y
- * añadir al calendario. El mismo bloque en «Su enlace» y en el portal.
+ * «Tu cita»: día y hora, dónde y con quién; confirmar, cambiar, cancelar,
+ * cómo llegar y añadir al calendario. El mismo bloque en «Su enlace» y en el portal.
  */
 export function AppointmentBlock({
   title,
@@ -124,6 +127,16 @@ export function AppointmentBlock({
               Cancelar
             </Button>
           </>
+        ) : null}
+        {appointment.branchDirectionsUrl ? (
+          <Button
+            variant="outline"
+            className="min-h-11"
+            render={<a href={appointment.branchDirectionsUrl} target="_blank" rel="noopener noreferrer" />}
+          >
+            <MapPin aria-hidden />
+            Cómo llegar
+          </Button>
         ) : null}
         <Button type="button" variant="ghost" className="min-h-11" onClick={() => void addToCalendar()}>
           Añadir al calendario

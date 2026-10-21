@@ -407,6 +407,48 @@
       "when": 1792555293166,
       "tag": "0057_chat_web_sitios_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792601137531,
+      "tag": "0058_plan_sin_topes",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792601595319,
+      "tag": "0059_sede_direccion_internacional",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792601612213,
+      "tag": "0060_sede_sin_campos_viejos",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792602211924,
+      "tag": "0061_sede_enlace_y_lugar",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792603040589,
+      "tag": "0062_direcciones_sugeridas",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1792603043577,
+      "tag": "0063_direcciones_sugeridas_reglas",
+      "breakpoints": true
     }
   ]
 }

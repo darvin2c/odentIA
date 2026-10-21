@@ -637,8 +637,8 @@ export async function searchEverything(
       order by u.name limit ${PER_TYPE}`)
     for (const row of team) addOwner(professionalOwner(row, true, []))
     const branches = await rows(sql`
-      select b.id, b.name, b.district, b.province from branch b
-      where b.organization_id = ${orgId} and b.is_active and ${foldedWordsMatch([sql`b.name`, sql`b.district`, sql`b.province`], q)}
+      select b.id, b.name, b.address_line1, b.city from branch b
+      where b.organization_id = ${orgId} and b.is_active and ${foldedWordsMatch([sql`b.name`, sql`b.city`, sql`b.address_line1`], q)}
       order by b.name limit ${PER_TYPE}`)
     for (const row of branches)
       addOwner({
@@ -648,7 +648,7 @@ export async function searchEverything(
         id: String(row.id),
         title: String(row.name),
         badge: "Sede",
-        detail: [str(row.district), str(row.province)].filter(Boolean).join(", ") || null,
+        detail: [str(row.address_line1), str(row.city)].filter(Boolean).join(" · ") || null,
         matched: true,
         target: { screen: "agenda", branchId: String(row.id) },
         items: [],
