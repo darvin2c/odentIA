@@ -8,13 +8,15 @@
  * respuestas fijadas, las metas, el resumen del lunes de cada persona y
  * «Descargar» en CSV (ADR 0071).
  */
-import { askArgos, meterAiUse, type PlatformDecisions, type PlatformLlm, routeArgos, routeByWords, showArgosAnswer } from "@odentia/agent"
+import { askArgos, meterAiUse, type PlatformDecisions, type PlatformLlm, rerunArgos, routeArgos, routeByWords, showArgosAnswer } from "@odentia/agent"
 import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
   ARGOS_DOWNLOAD_LIMIT,
   ArgosQueryError,
   argosAnswerCsv,
+  argosChoiceOf,
+  boundArgosQuery,
   getAdminSettings,
   getArgosAnswer,
   getOrgLocale,
@@ -32,6 +34,7 @@ import {
   getReportPatients,
   getReportProfessionals,
   getReportSummary,
+  isArgosPeriod,
   isPatientReportList,
   listArgosPins,
   listReportPins,
@@ -81,6 +84,23 @@ const argosRouteInput = z.object({ text: z.string().trim().min(2).max(500) }).st
 
 /** Una respuesta de Argos ya dada: la principal o una de las de seguir. */
 const argosAnswerRef = z.object({ questionId: z.uuid(), option: z.number().int().min(0).max(2).nullable().optional() }).strict()
+
+const argosPeriod = z.string().refine(isArgosPeriod, "Periodo no reconocido")
+
+/**
+ * Ver una respuesta con otro periodo, el segundo periodo (D15) o la sede
+ * (D13): sin valor, lo de la pregunta; `branchId: null`, todas las sedes.
+ */
+const argosChoiceInput = z
+  .object({ period: argosPeriod.optional(), other: argosPeriod.nullable().optional(), branchId: z.uuid().nullable().optional() })
+  .strict()
+
+/** Lo mismo en la dirección de la descarga: `branch=todas` es todas las sedes. */
+const argosChoiceQuery = z.object({
+  period: argosPeriod.optional(),
+  other: argosPeriod.optional(),
+  branch: z.union([z.uuid(), z.literal("todas")]).optional(),
+})
 
 const goalInput = z
   .object({ amount: z.number().int("La meta va en números enteros").positive("La meta tiene que ser mayor que cero").nullable() })
@@ -226,19 +246,37 @@ export function createReportsRoute(deps: ReportsDeps) {
     )
   })
 
-  /** Descargar (D5): la misma consulta, corrida otra vez con la llave de quien descarga. */
+  /**
+   * Otro periodo o sede (D9): la misma consulta con otras fechas, la principal
+   * y las de seguir, sin el modelo y sin contar para el tope. Solo quien preguntó.
+   */
+  app.post("/argos/:questionId/rerun", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    const questionId = z.uuid().safeParse(c.req.param("questionId"))
+    if (!questionId.success) return validationError(c, questionId.error.issues)
+    const parsed = argosChoiceInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => rerunArgos(deps.db, { orgId, userId, memberRole, questionId: questionId.data, choice: parsed.data }))
+  })
+
+  /** Descargar (D5): la misma consulta, corrida otra vez con la llave de quien descarga y con el periodo y la sede que se ven. */
   app.get("/argos/:questionId/csv", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
     const raw = c.req.query("option")
     const parsed = argosAnswerRef.safeParse({ questionId: c.req.param("questionId"), option: raw === undefined || raw === "" ? null : Number(raw) })
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const seen = argosChoiceQuery.safeParse({ period: c.req.query("period"), other: c.req.query("other"), branch: c.req.query("branch") })
+    if (!seen.success) return validationError(c, seen.error.issues)
+    const { branch, ...periods } = seen.data
+    const choice = { ...periods, ...(branch === undefined ? {} : { branchId: branch === "todas" ? null : branch }) }
     return sendCsv(c, async () => {
-      const { answer, zone } = await withOrgContext(deps.db, orgId, async (tx) => ({
-        answer: await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null),
-        zone: await getOrgLocale(tx, orgId),
-      }))
+      const { answer, zone, query } = await withOrgContext(deps.db, orgId, async (tx) => {
+        const answer = await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null)
+        const zone = await getOrgLocale(tx, orgId)
+        return { answer, zone, query: boundArgosQuery(answer.sql, await argosChoiceOf(tx, orgId, answer, choice, zone, new Date())) }
+      })
       // El mismo tope que los demás CSV de Reportes, no el de la respuesta en pantalla.
-      const result = await runArgosQuery(deps.db, { orgId, memberRole, query: answer.sql, rowLimit: ARGOS_DOWNLOAD_LIMIT }).catch((error: unknown) => {
+      const result = await runArgosQuery(deps.db, { orgId, memberRole, query, rowLimit: ARGOS_DOWNLOAD_LIMIT }).catch((error: unknown) => {
         throw error instanceof ArgosQueryError ? new ServiceError("ARGOS_QUERY", 409, error.message) : error
       })
       const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
@@ -257,20 +295,26 @@ export function createReportsRoute(deps: ReportsDeps) {
         saved: await listArgosPins(tx, orgId),
         zone: await getOrgLocale(tx, orgId),
       }))
-      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, a la vez.
+      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, a la vez, con el periodo
+      // y la sede de arriba (D11); lo que es a hoy sigue a hoy.
       const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" })
+      const choice = { period: parsed.data.period, branchId: parsed.data.branchId ?? null }
       const argos = await Promise.all(
-        saved.map(async (pin) => ({
-          id: pin.id,
-          pinnedBy: pin.pinnedBy,
-          pinnedOn: day.format(new Date(pin.pinnedAt)),
-          title: pin.answer.titulo,
-          screen: pin.answer.pantalla,
-          how: pin.answer.como,
-          partial: pin.answer.parcial === true,
-          missing: pin.answer.falta?.trim() || null,
-          answer: await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone }),
-        })),
+        saved.map(async (pin) => {
+          const shown = await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone, choice })
+          return {
+            id: pin.id,
+            pinnedBy: pin.pinnedBy,
+            pinnedOn: day.format(new Date(pin.pinnedAt)),
+            title: pin.answer.titulo,
+            screen: pin.answer.pantalla,
+            how: shown?.how ?? pin.answer.como,
+            partial: pin.answer.parcial === true,
+            missing: pin.answer.falta?.trim() || null,
+            period: shown?.period ?? null,
+            answer: shown,
+          }
+        }),
       )
       return { ...figures, argos }
     })

@@ -2,18 +2,34 @@ import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from "@langc
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  ARGOS_COMPARES,
   ARGOS_SCREENS,
   ARGOS_WORDS,
+  type ArgosChoice,
   type ArgosColumnKind,
   type ArgosKey,
   type ArgosOutcome,
+  type ArgosPeriodView,
   type ArgosQueryResult,
+  type ArgosResolvedPeriod,
   type ArgosScreenKey,
   type ArgosSentencePart,
   type ArgosStoredAnswer,
   type ArgosStoredPlan,
+  type ArgosWords,
+  bindArgosPeriod,
   argosCatalogText,
+  argosChoiceOf,
   argosColumnLabel,
+  argosPeriodView,
+  argosUsesBranch,
+  fillArgosWords,
+  findArgosBranch,
+  getArgosPlan,
+  getOrgLocale,
+  listArgosBranches,
+  resolveArgosPeriod,
+  validation,
   isArgosHiddenColumn,
   argosKeyOf,
   ArgosQueryError,
@@ -58,18 +74,18 @@ const planSchema = z.object({
   frase: z
     .string()
     .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."),
-  frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin huecos)."),
+  frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."),
   como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
   falta: z.string().describe("En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."),
   sql_cercana: z.string().describe("En no_existe: una consulta con lo más cercano que sí existe. Vacía si no hay."),
   frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
-  titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas: «Lo cobrado este mes»."),
+  titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."),
   // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
   pantalla: z.string().describe(`La pantalla de odentIA donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
   seguir: z
     .array(
       z.object({
-        etiqueta: z.string().describe("El botón, de 1 a 4 palabras: «¿Y ayer?», «Por monto», «Por sede», «Solo productos»."),
+        etiqueta: z.string().describe("El botón, de 1 a 4 palabras: «Por monto», «Por sede», «Solo productos». Nunca otra fecha."),
         sql: z.string().describe("La consulta completa de esa variante."),
         frase: z.string().describe("Su frase con huecos."),
         frase_vacia: z.string().describe("Su frase si no trae filas."),
@@ -77,20 +93,23 @@ const planSchema = z.object({
       }),
     )
     .describe("Hasta 3 variantes que la persona querría ver después; vacío en no_existe. Más de 3 no se usan."),
+  periodo: z.string().describe("El periodo de la respuesta (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD o a_hoy."),
+  compara: z.enum(ARGOS_COMPARES).describe("no, anterior, año_anterior u otro (la pregunta nombra dos periodos)."),
+  otro_periodo: z.string().describe("Con compara otro: el segundo periodo. Vacío si no."),
+  sede: z.string().describe("La sede que nombra la pregunta, tal cual. Vacío si no nombra ninguna."),
 })
 
 export type ArgosPlan = z.infer<typeof planSchema>
 
 const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental. Escribes UNA consulta de PostgreSQL de solo lectura sobre las vistas de abajo (nunca otras tablas) y una frase con huecos que odentIA llenará con el resultado. Nunca ves los datos y nunca escribes una cifra del resultado: las cifras salen solo de los huecos.
 
-El periodo:
-- Una tendencia sin periodo («¿estamos creciendo o disminuyendo?», «¿cómo vamos?»): los últimos 3 meses completos contra los 3 meses completos anteriores; el mes en curso no entra.
-- Si la pregunta no dice periodo y no es una tendencia, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia o tiempo («más frecuentes», «cada cuánto vuelven», «cuánto tardan», «cuánto dura un tratamiento») y el valor de un paciente según cómo llegó miran el último año hasta hoy (dia > current_date - interval '1 year'), no meses completos.
-- Lo pendiente se mide a hoy, no por mes: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir.
-- Al comparar el mes en curso con otro mes («contra el mes anterior»), usa los mismos días de ese mes (del 1 al mismo día de hoy), nunca el mes entero.
-- «Los últimos N meses» y la evolución mes a mes son los N meses completos anteriores al actual; el mes en curso no entra.
-- Al buscar el mejor o el peor mes, el mes en curso (incompleto) no entra; sin periodo, mira los últimos 12 meses completos.
-- current_date y now() ya están en la zona de la clínica.
+El periodo (las fechas las pone odentIA):
+- Elige en «periodo» el que pide la pregunta y filtra la consulta con :desde y :hasta (instantes; :hasta no entra) sobre la fecha y hora de la vista (momento, pagado_en, cargado_en, inicio, fecha, emitido_en, presentado_en, indicado_en, creada_en…), o con :dia_desde y :dia_hasta (:dia_hasta no entra) si la vista solo tiene días. Nunca escribas fechas, current_date ni now() para el periodo: odentIA pone las mismas fechas que Reportes y, si el periodo llega a hoy, corta los dos lados a la misma hora. La pantalla deja cambiar el periodo y vuelve a correr tu consulta con otras fechas.
+- «periodo» es uno de: este_mes, mes_pasado, ultimos_N_meses (N meses completos antes del actual), este_ano, AAAA-MM (un mes), hoy, ayer, AAAA-MM-DD (un día), esta_semana, semana_pasada, ultimos_N_dias (hasta hoy), AAAA-MM-DD..AAAA-MM-DD (unas fechas) o a_hoy.
+- Sin periodo en la pregunta: el de la pantalla si se indica; si no, este_mes. Una tendencia («¿estamos creciendo?», «¿cómo vamos?»): ultimos_3_meses comparado con el anterior. Lo mes a mes y el mejor o el peor mes, sin periodo: ultimos_12_meses (solo meses completos). Lo que mide frecuencia o tiempo («más frecuentes», «cada cuánto vuelven», «cuánto tardan», «cuánto dura un tratamiento») y el valor de un paciente según cómo llegó: ultimos_365_dias.
+- a_hoy es lo que se mide a hoy y no por periodo: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir, los pacientes sin venir. Con a_hoy la consulta no usa :desde ni :hasta (current_date y now() ya están en la zona de la clínica).
+- «compara»: no; anterior si compara con el periodo anterior («contra el mes anterior», una tendencia), y odentIA pone los mismos días de antes; año_anterior si compara con el año pasado; otro si la pregunta nombra dos periodos («¿marzo o julio?»), con el segundo en «otro_periodo». Lo de antes se filtra con :desde_antes y :hasta_antes (o :dia_desde_antes y :dia_hasta_antes), en la misma fila que lo de ahora.
+- La sede la pone odentIA: si la vista tiene sede y la respuesta no va por sede, filtra con (:sede is null or <vista>.sede = :sede). Si la pregunta nombra una sede, va en «sede» tal cual; si no, vacío.
 
 Qué contar:
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
@@ -109,8 +128,8 @@ Qué contar:
   - «¿Por qué subió o bajó…?»: las cifras de los dos periodos y lo que más cambió entre ellos (por concepto, profesional o sede), sin decir que eso es la causa.
 
 La frase:
-- Dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
-- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 12) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas trajo la consulta. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Nunca llames «filas» ni «lista» a una columna.
+- Dice el periodo con {periodo} y lo de antes con {periodo_antes}: odentIA los llena con palabras y preposición («del 1 al 21 de octubre», «en setiembre», «hoy»; «en los mismos días de setiembre», «en agosto»). Van donde iría el periodo, sin nada delante: «{periodo} cobraste {cobrado_dinero}; {periodo_antes}, {antes_dinero}: {variacion_pct}.». Nunca escribas un periodo, un mes ni una fecha con tus palabras, tampoco en «como» ni en el título. Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
+- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 12) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas trajo la consulta. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Nunca llames «filas», «lista» ni «periodo» a una columna.
 - {lista} va una sola vez y al final de la frase, después de dos puntos: «Los que más deben: {lista}.». Para el mayor y el menor (el mejor y el peor mes) no uses {lista}: una sola fila con columnas como mejor_mes, mejor_dinero, peor_mes y peor_dinero.
 - Una lista de personas, ventas o cosas dice antes cuántas son en total y, si es dinero, cuánto suman, con columnas que empiezan con total_general: count(*) over () AS total_general y sum(saldo) over () AS total_general_dinero. «{total_general} pacientes te deben {total_general_dinero}. Los que más deben: {lista}.» Esas columnas no salen en la lista.
 - Un cambio entre dos periodos va en una columna que empieza con variacion y termina en _pct (variacion_pct): odentIA le pone el signo («+1 %», «-32 %»). La frase nombra los dos periodos y sus cifras.
@@ -118,7 +137,7 @@ La frase:
 - Lo que sale en la lista se lee: un estado o un tipo va en palabras (CASE estado WHEN 'hace_falta' THEN 'bajo el mínimo' … END), nunca su código; y no pongas columnas que la pregunta no necesita.
 
 Para seguir:
-- En «seguir», hasta 3 variantes de la misma respuesta que la persona querría ver después: otra fecha («¿Y ayer?», «¿Y el mes pasado?»), otro orden («Por monto»), otro grupo («Por sede», «Por profesional»), un filtro («Solo productos») o, si la pregunta se puede entender de otra forma, esa otra lectura. Cada una con su consulta completa y su frase; odentIA las corre al tocar el botón, sin volver a preguntarte.
+- En «seguir», hasta 3 variantes de la misma respuesta que la persona querría ver después: otro orden («Por monto»), otro grupo («Por sede», «Por profesional»), un filtro («Solo productos») o, si la pregunta se puede entender de otra forma, esa otra lectura. Nunca otra fecha: el periodo se cambia en la pantalla. Cada una con su consulta completa (con el mismo periodo: :desde, :hasta y lo de antes) y su frase; odentIA las corre al tocar el botón, sin volver a preguntarte.
 
 La consulta:
 - Una sola sentencia SELECT (o WITH … SELECT), sin punto y coma, sin comentarios, sin comillas dobles y sin generate_series (para meses, date_trunc sobre las filas). Sin LIMIT, salvo que la pregunta pida un número («los 5 que más…»): odentIA muestra las primeras y dice cuántas más hay. Ordena la lista para que lo importante salga primero.
@@ -135,8 +154,8 @@ export interface ArgosAsk {
   key: ArgosKey
   now: Date
   zone: { timezone: string; locale: string }
-  /** Lo que muestra la pantalla desde donde se pregunta (decisión D7). */
-  screen?: { from: string; to: string; branch: string | null } | null
+  /** El periodo y la sede de Reportes cuando se pregunta desde ahí (decisión D7). */
+  screen?: { period: string; branch: string | null } | null
   /** La pregunta anterior de la conversación y su consulta (decisión D3): «¿Y ayer?». */
   previous?: { text: string; query: string } | null
 }
@@ -152,9 +171,9 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
   const mark = CACHE_MARK[provider]
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
-    `Ahora en la clínica: ${now} (zona ${input.zone.timezone}). ${argosPeriodNames(input.now, input.zone)}`,
+    `Ahora en la clínica: ${now} (zona ${input.zone.timezone}).`,
     input.screen
-      ? `La pantalla muestra del ${input.screen.from} al ${input.screen.to}${input.screen.branch ? `, solo la sede «${input.screen.branch}»` : ", todas las sedes"}: úsalo si la pregunta no dice otro periodo o sede.`
+      ? `En Reportes se ve el periodo «${input.screen.period}»${input.screen.branch ? ` y la sede «${input.screen.branch}»` : ", todas las sedes"}: úsalos si la pregunta no dice otro periodo o sede.`
       : "",
     input.previous ? `Pregunta anterior: «${input.previous.text.slice(0, 300)}»\nSu consulta: ${input.previous.query.slice(0, 2000)}` : "",
     `Pregunta: «${input.question}»`,
@@ -164,53 +183,28 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
   return [new SystemMessage({ content: mark ? [{ type: "text", text: fixed, ...mark }] : fixed }), new HumanMessage({ content: human })]
 }
 
-/**
- * Los periodos de la frase con su nombre, calculados aquí: el modelo los copia
- * en vez de contarlos (se equivocaba de mes al nombrar «los últimos 12 meses»).
- */
-export function argosPeriodNames(now: Date, zone: { timezone: string; locale: string }): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now)
-  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value)
-  const [year, month, day] = [get("year"), get("month"), get("day")]
-  const monthName = (back: number, withYear = true) =>
-    new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", month: "long", ...(withYear ? { year: "numeric" } : {}) })
-      .format(new Date(Date.UTC(year, month - 1 - back, 1)))
-      .toLocaleLowerCase(zone.locale)
-  /** «de julio a setiembre de 2026», con el año en los dos si cruza de año. */
-  const range = (from: number, to: number) =>
-    `de ${monthName(from, new Date(Date.UTC(year, month - 1 - from, 1)).getUTCFullYear() !== new Date(Date.UTC(year, month - 1 - to, 1)).getUTCFullYear())} a ${monthName(to)}`
-  const dayName = (date: Date) => new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", day: "numeric", month: "long", year: "numeric" }).format(date)
-  const yearAgo = new Date(Date.UTC(year - 1, month - 1, day + 1))
-  return [
-    `El mes en curso es ${monthName(0)} y va del 1 al ${day}; el mes anterior, ${monthName(1)} (sus mismos días: del 1 al ${day}).`,
-    `Los últimos 3 meses completos van ${range(3, 1)}; los 3 anteriores, ${range(6, 4)}.`,
-    `Los últimos 12 meses completos van ${range(12, 1)}.`,
-    `El último año hasta hoy va del ${dayName(yearAgo)} al ${dayName(new Date(Date.UTC(year, month - 1, day)))}.`,
-    "Usa estos nombres en la frase, tal cual.",
-  ].join(" ")
-}
-
 /** Con el modelo de demostración: unas pocas preguntas por palabras, sin proveedor. */
 export function demoArgosPlan(question: string): ArgosPlan {
   const text = question.toLowerCase()
-  const empty = { falta: "", sql_cercana: "", frase_cercana: "", seguir: [] }
+  const empty = { falta: "", sql_cercana: "", frase_cercana: "", seguir: [], compara: "no" as const, otro_periodo: "", sede: "" }
   if (/cobr|ingres/.test(text))
     return {
       ...empty,
       tipo: "consulta",
-      sql: "select coalesce(sum(importe), 0) as cobrado_dinero from cobros where dia >= date_trunc('month', current_date)",
-      frase: "Este mes se cobró {cobrado_dinero}.",
-      frase_vacia: "Este mes no se cobró nada.",
-      como: "Lo cobrado del mes en curso: pagos menos anulaciones y devoluciones.",
-      titulo: "Lo cobrado este mes",
+      periodo: "este_mes",
+      sql: "select coalesce(sum(importe), 0) as cobrado_dinero from cobros where momento >= :desde and momento < :hasta and (:sede is null or sede = :sede)",
+      frase: "{periodo} se cobró {cobrado_dinero}.",
+      frase_vacia: "{periodo} no se cobró nada.",
+      como: "Lo cobrado {periodo}: pagos menos anulaciones y devoluciones.",
+      titulo: "Lo cobrado",
       pantalla: "finanzas",
       seguir: [
         {
           etiqueta: "Por medio de pago",
-          sql: "select medio, sum(importe) as cobrado_dinero from cobros where dia >= date_trunc('month', current_date) and medio is not null group by medio order by cobrado_dinero desc",
-          frase: "Este mes, por medio de pago: {lista}.",
-          frase_vacia: "Este mes no se cobró nada.",
-          como: "Lo cobrado del mes en curso por medio de pago.",
+          sql: "select medio, sum(importe) as cobrado_dinero from cobros where momento >= :desde and momento < :hasta and (:sede is null or sede = :sede) and medio is not null group by medio order by cobrado_dinero desc",
+          frase: "{periodo}, por medio de pago: {lista}.",
+          frase_vacia: "{periodo} no se cobró nada.",
+          como: "Lo cobrado {periodo} por medio de pago.",
         },
       ],
     }
@@ -219,6 +213,8 @@ export function demoArgosPlan(question: string): ArgosPlan {
     return {
       ...empty,
       tipo: "consulta",
+      // Las citas por venir se cuentan a hoy, sin periodo que cambiar (D12).
+      periodo: "a_hoy",
       sql: `select count(*) as citas from citas where dia = current_date${tomorrow ? " + 1" : ""} and estado in ('programada', 'confirmada', 'atendida')`,
       frase: `${tomorrow ? "Mañana hay" : "Hoy hay"} {citas} citas.`,
       frase_vacia: "No hay citas.",
@@ -231,16 +227,18 @@ export function demoArgosPlan(question: string): ArgosPlan {
     return {
       ...empty,
       tipo: "consulta",
-      sql: "select count(*) as pacientes from pacientes where primera_atencion >= date_trunc('month', current_date)",
-      frase: "Este mes llegaron {pacientes} pacientes nuevos.",
-      frase_vacia: "Este mes no llegaron pacientes nuevos.",
-      como: "Pacientes cuya primera cita atendida fue este mes.",
-      titulo: "Pacientes nuevos este mes",
+      periodo: "este_mes",
+      sql: "select count(*) as pacientes from pacientes where primera_atencion >= :dia_desde and primera_atencion < :dia_hasta",
+      frase: "{periodo} llegaron {pacientes} pacientes nuevos.",
+      frase_vacia: "{periodo} no llegaron pacientes nuevos.",
+      como: "Pacientes cuya primera cita atendida fue {periodo}.",
+      titulo: "Pacientes nuevos",
       pantalla: "pacientes",
     }
   return {
     ...empty,
     tipo: "no_existe",
+    periodo: "a_hoy",
     sql: "",
     frase: "Con el modelo de demostración solo respondo lo cobrado, las citas y los pacientes nuevos.",
     frase_vacia: "",
@@ -392,6 +390,8 @@ export type ArgosAskResult =
        * viaja como anterior si se está viendo); `index` es su número para fijar y descargar.
        */
       options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
+      /** El periodo que se ve y cómo cambiarlo (D8 a D16); en lo que es a hoy, solo su texto. */
+      period: ArgosPeriodView
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
@@ -443,6 +443,7 @@ export async function askArgos(
   const ready = await withOrgContext(db, input.orgId, async (tx) => ({
     ...(await prepareArgosQuestion(tx, input.orgId, now)),
     screen: input.screen ? await argosScreen(tx, input.orgId, input.screen, now) : null,
+    branches: await listArgosBranches(tx, input.orgId),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
@@ -456,11 +457,30 @@ export async function askArgos(
 
   const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
-  /** Corre la consulta del plan: su resultado o el problema que se le devuelve al modelo (sin datos). */
-  const attempt = (plan: Pick<ArgosPlan, "sql" | "frase" | "frase_vacia">) => runPlan(run, plan)
+  /** El periodo y la sede del plan: los que eligió el modelo y, si la pregunta no nombra una sede, la de Reportes (D7). */
+  const bindingOf = (plan: ArgosPlan): ArgosBinding | { problem: string; code: "PERIODO" } => {
+    let period: ArgosResolvedPeriod | null
+    try {
+      period = resolveArgosPeriod({ periodo: plan.periodo.trim() || "a_hoy", compara: plan.compara, otro: plan.otro_periodo.trim() || null }, ready.zone, now)
+    } catch (error) {
+      return { problem: `el periodo «${plan.periodo}» no sirve (${error instanceof Error ? error.message : "no se reconoce"}): elige uno de los de «El periodo»`, code: "PERIODO" }
+    }
+    const named = plan.sede.trim() || ready.screen?.branch || ""
+    const branch = named ? findArgosBranch(ready.branches, named) : null
+    if (named && !branch) return { problem: `la sede «${named}» no existe; las sedes son ${ready.branches.map((item) => `«${item.name}»`).join(", ")}`, code: "PERIODO" }
+    return { period, branch }
+  }
+  /** Corre la consulta del plan con su periodo y su sede: su resultado o el problema que se le devuelve al modelo (sin datos). */
+  const attempt = async (plan: ArgosPlan) => {
+    const binding = bindingOf(plan)
+    if ("problem" in binding) return binding
+    const outcome = await runPlan(run, plan, binding)
+    return "result" in outcome ? { ...outcome, binding } : outcome
+  }
 
   let plan: ArgosPlan
   let result: ArgosQueryResult | null = null
+  let binding: ArgosBinding = { period: null, branch: null }
   let timedOut = false
   try {
     plan = await writeArgosPlan(deps, ask)
@@ -472,6 +492,7 @@ export async function askArgos(
         const unreadable = tries === 0 ? argosSentenceProblem(outcome.result.rows.length ? plan.frase : plan.frase_vacia, outcome.result.rows.length) : null
         if (!unreadable) {
           result = outcome.result
+          binding = outcome.binding
           break
         }
         deps.onProblem?.(unreadable)
@@ -496,22 +517,24 @@ export async function askArgos(
     await record("no_sabe", null, true)
     // Sin resultado no hay con qué llenar un hueco: una frase con huecos se cambia por lo que falta.
     const message = /\{\w+\}/.test(plan.frase) ? plan.falta.trim() || ARGOS_WORDS.noExiste : plan.frase
-    return { kind: "no_existe", message, missing: plan.falta.trim() || null, closest: await closestOf(plan, run, ready.zone) }
+    const near = bindingOf(plan)
+    return { kind: "no_existe", message, missing: plan.falta.trim() || null, closest: "problem" in near ? null : await closestOf(plan, run, ready.zone, near) }
   }
   if (!result) {
     await record("no_pudo", plan.sql, true)
     return timedOut ? { kind: "tiempo", message: ARGOS_WORDS.tiempo } : { kind: "no_pudo", message: ARGOS_WORDS.noPudo }
   }
-  const main = shown(plan, result, ready.zone)
-  // Las de seguir ya corridas: la que falla, no llena su frase o no tiene nombre no se ofrece.
+  const words = binding.period?.words ?? {}
+  const main = shown(plan, result, ready.zone, words)
+  // Las de seguir ya corridas, con el mismo periodo y la misma sede: la que falla, no llena su frase o no tiene nombre no se ofrece.
   const follows = plan.seguir.slice(0, 3)
   const options = (
     await Promise.all(
       follows.map(async (follow, index) => {
         if (!follow.etiqueta.trim()) return null
-        const outcome = await attempt(follow).catch(() => null)
+        const outcome = await runPlan(run, follow, binding).catch(() => null)
         return outcome && "result" in outcome && !argosSentenceProblem(outcome.result.rows.length ? follow.frase : follow.frase_vacia, outcome.result.rows.length)
-          ? { index, label: follow.etiqueta.trim(), how: follow.como.trim() || plan.como, query: follow.sql, answer: shown(follow, outcome.result, ready.zone) }
+          ? { index, label: follow.etiqueta.trim(), how: fillArgosWords(follow.como.trim() || plan.como, words), query: follow.sql, answer: shown(follow, outcome.result, ready.zone, words) }
           : null
       }),
     )
@@ -528,6 +551,9 @@ export async function askArgos(
     falta: plan.falta.trim(),
     // Solo las que se ofrecieron se pueden fijar o descargar; las demás quedan vacías para conservar su número.
     seguir: follows.map((follow, index) => (offered.has(index) ? follow : null)),
+    // Con esto se vuelve a correr con otro periodo o sede, sin el modelo (D9), y lo fijado sigue el de arriba (D11).
+    periodo: binding.period?.spec ?? { periodo: "a_hoy", compara: "no" },
+    sede: binding.branch?.name ?? null,
   }
   const questionId = await record(plan.tipo === "parcial" ? "parcial" : "respondida", plan.sql, true, stored)
   return {
@@ -537,33 +563,117 @@ export async function askArgos(
     screen: pantalla,
     partial: plan.tipo !== "consulta",
     ...main,
-    how: plan.como,
+    how: fillArgosWords(plan.como, words),
     missing: plan.falta.trim() || null,
     query: plan.sql,
     options,
+    period: argosPeriodView(binding.period, ready.zone, now, { chosen: binding.branch, options: ready.branches, used: argosUsesBranch(plan.sql) }),
+  }
+}
+
+/** El periodo y la sede con que se corre una consulta del plan. */
+interface ArgosBinding {
+  period: ArgosResolvedPeriod | null
+  branch: { id: string; name: string } | null
+}
+
+/** Una respuesta vuelta a correr con otro periodo o sede (D9): sin el modelo y sin contar para el tope. */
+export interface ArgosRerun extends ArgosShown {
+  how: string
+  options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
+  period: ArgosPeriodView
+}
+
+/**
+ * Vuelve a correr una respuesta ya dada con el periodo, el segundo periodo o
+ * la sede que se eligieron en la pantalla: la principal y las de seguir que se
+ * ofrecieron, con la llave de quien pregunta. Solo quien preguntó. La
+ * comparación es la que pidió la pregunta (D14). Si la principal no corre,
+ * se dice y la pantalla conserva lo que se veía.
+ */
+export async function rerunArgos(
+  db: Db,
+  input: { orgId: string; userId: string; memberRole: string; questionId: string; choice: ArgosChoice; now?: Date },
+): Promise<ArgosRerun> {
+  const now = input.now ?? new Date()
+  const { row, zone, bound } = await withOrgContext(db, input.orgId, async (tx) => {
+    const row = await getArgosPlan(tx, input.orgId, input.userId, input.questionId)
+    const zone = await getOrgLocale(tx, input.orgId)
+    return { row, zone, bound: await argosChoiceOf(tx, input.orgId, row.plan, input.choice, zone, now) }
+  })
+  if (bound.legacy) throw validation("Esta respuesta es de antes: pregúntala otra vez para cambiar su periodo")
+  const binding: ArgosBinding = { period: bound.period, branch: bound.branch }
+  const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
+  const words = binding.period?.words ?? {}
+  let main: Awaited<ReturnType<typeof runPlan>>
+  try {
+    main = await runPlan(run, { sql: row.query, frase: row.plan.frase, frase_vacia: row.plan.frase_vacia }, binding)
+  } catch (error) {
+    if (error instanceof ArgosQueryError) throw new ServiceError("FORBIDDEN", 403, error.message)
+    throw error
+  }
+  if (!("result" in main)) throw new ServiceError("ARGOS_RERUN", 409, main.code === "TIEMPO" ? ARGOS_WORDS.tiempo : "No se pudo calcular con ese periodo.")
+  const options = (
+    await Promise.all(
+      row.plan.seguir.map(async (follow, index) => {
+        if (!follow) return null
+        const outcome = await runPlan(run, follow, binding).catch(() => null)
+        return outcome && "result" in outcome
+          ? { index, label: follow.etiqueta.trim(), how: fillArgosWords(follow.como?.trim() || row.plan.como, words), query: follow.sql, answer: shown(follow, outcome.result, zone, words) }
+          : null
+      }),
+    )
+  ).filter((option): option is NonNullable<typeof option> => option !== null)
+  return {
+    ...shown(row.plan, main.result, zone, words),
+    how: fillArgosWords(row.plan.como, words),
+    options,
+    period: argosPeriodView(bound.period, zone, now, { chosen: bound.branch, options: bound.branches, used: argosUsesBranch(row.query) }),
   }
 }
 
 /**
  * Vuelve a correr una respuesta guardada (una fijada en el Resumen) con la
- * llave de quien la mira. Si ya no corre o su rol no la ve, null.
+ * llave de quien la mira y, si tiene periodo, con el periodo y la sede de
+ * arriba (D11); lo que es a hoy sigue a hoy. Si ya no corre o su rol no la ve,
+ * null.
  */
 export async function showArgosAnswer(
   db: Db,
-  input: { orgId: string; memberRole: string; answer: ArgosStoredAnswer; zone: Parameters<typeof fillArgosSentence>[2] },
-): Promise<ArgosShown | null> {
-  const outcome = await runPlan((query) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query }), input.answer).catch(() => null)
-  return outcome && "result" in outcome ? shown(input.answer, outcome.result, input.zone) : null
+  input: {
+    orgId: string
+    memberRole: string
+    answer: ArgosStoredAnswer
+    zone: Parameters<typeof fillArgosSentence>[2] & { locale: string }
+    choice?: ArgosChoice
+    now?: Date
+  },
+): Promise<(ArgosShown & { how: string; period: ArgosPeriodView | null }) | null> {
+  const now = input.now ?? new Date()
+  const bound = await withOrgContext(db, input.orgId, (tx) => argosChoiceOf(tx, input.orgId, input.answer, input.choice ?? {}, input.zone, now)).catch(() => null)
+  if (!bound) return null
+  const binding: ArgosBinding = { period: bound.period, branch: bound.branch }
+  const outcome = await runPlan((query) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query }), input.answer, binding).catch(() => null)
+  if (!outcome || !("result" in outcome)) return null
+  const words = binding.period?.words ?? {}
+  return {
+    ...shown(input.answer, outcome.result, input.zone, words),
+    how: fillArgosWords(input.answer.como, words),
+    period: bound.legacy ? null : argosPeriodView(bound.period, input.zone, now, { chosen: bound.branch, options: bound.branches, used: argosUsesBranch(input.answer.sql) }),
+  }
 }
 
-/** Corre una consulta del plan: su resultado o el problema que se le devuelve al modelo (sin datos). */
+/** Pone el periodo y la sede en una consulta del plan y la corre: su resultado o el problema que se le devuelve al modelo (sin datos). */
 async function runPlan(
   run: (query: string) => Promise<ArgosQueryResult>,
   plan: Pick<ArgosPlan, "sql" | "frase" | "frase_vacia">,
-): Promise<{ result: ArgosQueryResult } | { problem: string; code: ArgosQueryError["code"] | "HUECOS" }> {
+  binding: ArgosBinding,
+): Promise<{ result: ArgosQueryResult } | { problem: string; code: ArgosQueryError["code"] | "HUECOS" | "PERIODO" }> {
+  const bound = bindArgosPeriod(plan.sql, binding.period, binding.branch?.name ?? null)
+  if ("problem" in bound) return { problem: bound.problem, code: "PERIODO" }
   try {
-    const result = await run(plan.sql)
-    const holes = unknownArgosHoles(result.rows.length ? plan.frase : plan.frase_vacia, result)
+    const result = await run(bound.sql)
+    const holes = unknownArgosHoles(result.rows.length ? plan.frase : plan.frase_vacia, result, binding.period?.words ?? {})
     return holes.length ? { problem: `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas del resultado`, code: "HUECOS" } : { result }
   } catch (error) {
     if (!(error instanceof ArgosQueryError) || error.code === "PERMISO") throw error
@@ -571,9 +681,10 @@ async function runPlan(
   }
 }
 
-/** La frase llena (o la de sin filas) y su tabla. */
-function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2]): ArgosShown {
-  const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone) : { text: plan.frase_vacia, parts: [{ text: plan.frase_vacia }] }
+/** La frase llena (o la de sin filas) y su tabla; el periodo lo dice odentIA. */
+function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2], words: ArgosWords): ArgosShown {
+  const empty = fillArgosWords(plan.frase_vacia, words)
+  const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone, words) : { text: empty, parts: [{ text: empty }] }
   return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone) }
 }
 
@@ -587,12 +698,16 @@ async function closestOf(
   plan: ArgosPlan,
   run: (query: string) => Promise<ArgosQueryResult>,
   zone: Parameters<typeof fillArgosSentence>[2],
+  binding: ArgosBinding,
 ): Promise<ArgosClosest | null> {
   if (!plan.sql_cercana.trim() || !plan.frase_cercana.trim()) return null
+  const words = binding.period?.words ?? {}
+  const bound = bindArgosPeriod(plan.sql_cercana, binding.period, binding.branch?.name ?? null)
+  if ("problem" in bound) return null
   try {
-    const result = await run(plan.sql_cercana)
-    if (!result.rows.length || unknownArgosHoles(plan.frase_cercana, result).length) return null
-    const filled = fillArgosSentence(plan.frase_cercana, result, zone)
+    const result = await run(bound.sql)
+    if (!result.rows.length || unknownArgosHoles(plan.frase_cercana, result, words).length) return null
+    const filled = fillArgosSentence(plan.frase_cercana, result, zone, words)
     return { text: filled.text, sentence: filled.parts, query: plan.sql_cercana, table: tableOf(result, zone) }
   } catch {
     return null

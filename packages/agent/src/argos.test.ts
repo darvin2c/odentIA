@@ -3,7 +3,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 // Argos sobre las vistas del negocio (ADR 0075), de punta a punta con un modelo
 // guionizado: el modelo recibe solo las vistas del rol y nunca un dato, la
 // frase la llena el servidor, la base corrige al modelo una vez y cada pregunta
-// queda anotada con su consulta y sin su texto.
+// queda anotada con su consulta y sin su texto. El periodo y la sede los pone
+// odentIA y se cambian sin volver a llamar al modelo (D8 a D16).
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
@@ -11,13 +12,14 @@ import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db
 import { user } from "@odentia/db/schema/auth"
 import { patient, patientPayment } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
+import { branch } from "@odentia/db/schema/org"
 import { reportQuestion } from "@odentia/db/schema/reports"
-import { prepareArgosQuestion, secretsKeyFromEnv, updateAdminSettings } from "@odentia/services"
+import { getArgosAnswer, getOrgLocale, prepareArgosQuestion, secretsKeyFromEnv, updateAdminSettings } from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { type ArgosDeps, type ArgosPlan, argosPeriodNames, askArgos } from "./argos.js"
+import { type ArgosDeps, type ArgosPlan, askArgos, rerunArgos, showArgosAnswer } from "./argos.js"
 import type { DecisionModel } from "./decision/index.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -46,7 +48,24 @@ class ScriptedModel extends BaseChatModel {
     this.calls.push(messages)
     const next = this.plans[this.calls.length - 1]
     if (!next || next instanceof Error) throw next ?? new Error("sin guion")
-    const args = { tipo: "consulta", sql: "", frase: "", frase_vacia: "", como: "", falta: "", sql_cercana: "", frase_cercana: "", titulo: "", pantalla: "ninguna", seguir: [], ...next }
+    const args = {
+      tipo: "consulta",
+      sql: "",
+      frase: "",
+      frase_vacia: "",
+      como: "",
+      falta: "",
+      sql_cercana: "",
+      frase_cercana: "",
+      titulo: "",
+      pantalla: "ninguna",
+      seguir: [],
+      periodo: "a_hoy",
+      compara: "no",
+      otro_periodo: "",
+      sede: "",
+      ...next,
+    }
     const message = new AIMessage({ content: "", tool_calls: [{ name: "responder", args, id: `call-${this.calls.length}`, type: "tool_call" }] })
     return { generations: [{ text: "", message }] }
   }
@@ -105,6 +124,16 @@ afterAll(async () => {
 beforeEach(async () => {
   await ownerDb.delete(reportQuestion).where(eq(reportQuestion.organizationId, ORG))
 })
+
+/** Lo cobrado contra el periodo anterior, con el periodo y la sede que pone odentIA. */
+const COBRADO_MES: Partial<ArgosPlan> = {
+  periodo: "este_mes",
+  compara: "anterior",
+  sql: "select coalesce(sum(importe) filter (where momento >= :desde and momento < :hasta), 0) as cobrado_dinero, coalesce(sum(importe) filter (where momento >= :desde_antes and momento < :hasta_antes), 0) as antes_dinero from cobros where (:sede is null or sede = :sede)",
+  frase: "{periodo} se cobró {cobrado_dinero}; {periodo_antes}, {antes_dinero}.",
+  frase_vacia: "{periodo} no se cobró nada.",
+  como: "Lo cobrado {periodo}, contra lo cobrado {periodo_antes}.",
+}
 
 const COBRADO: Partial<ArgosPlan> = {
   sql: "select sum(importe) as cobrado_dinero, count(*) as pagos from cobros where dia >= date_trunc('month', current_date)",
@@ -237,10 +266,84 @@ describe("Argos sobre las vistas", () => {
     expect(answer).toMatchObject({ kind: "respuesta" })
   })
 
-  it("los periodos de la frase llegan con su nombre, aunque crucen de año", () => {
-    const names = argosPeriodNames(new Date("2026-02-15T15:00:00Z"), { timezone: "America/Lima", locale: "es-PE" })
-    expect(names).toContain("El mes en curso es febrero de 2026 y va del 1 al 15")
-    expect(names).toContain("Los últimos 3 meses completos van de noviembre de 2025 a enero de 2026")
-    expect(names).toContain("Los últimos 12 meses completos van de febrero de 2025 a enero de 2026")
+  it("el periodo lo pone odentIA: la consulta corre con sus fechas, la frase lo dice y la respuesta lo trae para cambiarlo", async () => {
+    const model = new ScriptedModel([COBRADO_MES])
+    const answer = await ask(model, "¿Cuánto cobramos comparado con el mes anterior?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^(Del|El) .+ se cobró S\/\s?1,250\.50; en los mismos días de .+, S\/\s?0\.00\.$/)
+    // El periodo no es una cifra: no va destacado.
+    expect(answer.sentence.filter((part) => part.strong).map((part) => part.text)).toHaveLength(2)
+    expect(answer.how).toMatch(/^Lo cobrado (del|el) .+, contra lo cobrado en los mismos días de .+\.$/)
+    expect(answer.period).toMatchObject({
+      value: "este_mes",
+      grain: "mes",
+      compare: "anterior",
+      label: expect.stringMatching(/, hasta hoy$/),
+      compareLabel: expect.stringMatching(/^los mismos días de /),
+      branch: null,
+    })
+    // Se guarda la consulta con los nombres, no con las fechas: así se vuelve a correr con otras.
+    expect(await lastQuestion()).toMatchObject({ query: COBRADO_MES.sql, plan: { periodo: { periodo: "este_mes", compara: "anterior" }, sede: null } })
+  })
+
+  it("si la consulta no usa el periodo que eligió, el modelo lo corrige una vez", async () => {
+    const written = { ...COBRADO_MES, sql: "select sum(importe) as cobrado_dinero, 0 as antes_dinero from cobros where dia >= date_trunc('month', current_date)" }
+    const model = new ScriptedModel([written, COBRADO_MES])
+    expect(await ask(model, "¿Cuánto cobramos este mes?")).toMatchObject({ kind: "respuesta", query: COBRADO_MES.sql })
+    expect(String(model.calls[1]?.at(-1)?.content)).toContain(":desde y :hasta")
+    const wrongPeriod = new ScriptedModel([{ ...COBRADO_MES, periodo: "la_quincena" }, COBRADO_MES])
+    expect(await ask(wrongPeriod, "¿Cuánto cobramos?")).toMatchObject({ kind: "respuesta" })
+    expect(String(wrongPeriod.calls[1]?.at(-1)?.content)).toContain("«la_quincena» no sirve")
+  })
+
+  it("cambiar el periodo vuelve a correr la misma consulta sin el modelo ni el tope; solo quien preguntó", async () => {
+    const model = new ScriptedModel([COBRADO_MES])
+    const answer = await ask(model, "¿Cuánto cobramos comparado con el mes anterior?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    const before = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
+    const rerun = await rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { period: "mes_pasado" } })
+    expect(model.calls).toHaveLength(1)
+    expect(rerun.period).toMatchObject({ value: "mes_pasado", compare: "anterior", label: expect.not.stringContaining("hasta hoy") })
+    expect(rerun.text).toMatch(/^En .+ se cobró S\/\s?0\.00; en .+, S\/\s?0\.00\.$/)
+    expect(rerun.how).toMatch(/^Lo cobrado en .+, contra lo cobrado en .+\.$/)
+    const after = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
+    expect(after.roomLeft).toBe(before.roomLeft)
+    await expect(rerunArgos(appDb, { orgId: ORG, userId: "otra_persona", memberRole: "owner", questionId: answer.questionId, choice: { period: "mes_pasado" } })).rejects.toMatchObject({ status: 404 })
+    await expect(rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { period: "2999-01" } })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it("lo que es a hoy no lleva periodo; fijada, una respuesta con periodo sigue el de arriba (D11 y D12)", async () => {
+    const today = await ask(new ScriptedModel([COBRADO]), "¿Cuánto nos han pagado?")
+    if (today.kind !== "respuesta") throw new Error(today.kind)
+    expect(today.period).toMatchObject({ value: "a_hoy", grain: null, label: expect.stringMatching(/^A hoy, /) })
+
+    const answer = await ask(new ScriptedModel([COBRADO_MES]), "¿Cuánto cobramos comparado con el mes anterior?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    const { stored, zone } = await withOrgContext(appDb, ORG, async (tx) => ({ stored: await getArgosAnswer(tx, ORG, OWNER, answer.questionId), zone: await getOrgLocale(tx, ORG) }))
+    const pinned = await showArgosAnswer(appDb, { orgId: ORG, memberRole: "owner", answer: stored, zone, choice: { period: "mes_pasado", branchId: null } })
+    expect(pinned?.period).toMatchObject({ value: "mes_pasado", compare: "anterior" })
+    expect(pinned?.text).toMatch(/^En .+ se cobró/)
+  })
+
+  it("la sede la pone odentIA: la que nombra la pregunta, otra elegida o todas (D13)", async () => {
+    const [surco] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Surco" }).returning({ id: branch.id })
+    await ownerDb.insert(branch).values({ organizationId: ORG, name: "Miraflores" })
+    try {
+      const answer = await ask(new ScriptedModel([{ ...COBRADO_MES, sede: "surco" }]), "¿Cuánto cobró Surco este mes?")
+      if (answer.kind !== "respuesta") throw new Error(answer.kind)
+      // El pago no es de Surco: con la sede elegida no se cobró nada; con todas, sí.
+      expect(answer.text).toMatch(/se cobró S\/\s?0\.00;/)
+      expect(answer.period.branch).toMatchObject({ id: surco!.id, options: [{ name: "Miraflores" }, { name: "Surco" }] })
+      const all = await rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { branchId: null } })
+      expect(all.text).toMatch(/se cobró S\/\s?1,250\.50;/)
+      expect(all.period.branch).toMatchObject({ id: null })
+
+      const unknown = new ScriptedModel([{ ...COBRADO_MES, sede: "Lima" }, COBRADO_MES])
+      expect(await ask(unknown, "¿Cuánto cobró Lima?")).toMatchObject({ kind: "respuesta" })
+      expect(String(unknown.calls[1]?.at(-1)?.content)).toContain("las sedes son «Miraflores», «Surco»")
+    } finally {
+      // Una sede no se borra (tiene su almacén): se desactiva, y deja de ofrecerse.
+      await ownerDb.update(branch).set({ isActive: false }).where(eq(branch.organizationId, ORG))
+    }
   })
 })

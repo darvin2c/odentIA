@@ -14,7 +14,8 @@ import { createReportsRoute } from "./reports.js"
 
 // POST /reports/argos (ADR 0075) sobre la API real y PostgreSQL efímero, con
 // el modelo de demostración: lo pide `reports.read` (hoy, quien dirige), valida
-// el cuerpo y responde con la llave del rol.
+// el cuerpo y responde con la llave del rol. El periodo se cambia sin el modelo
+// y lo fijado sigue el de arriba (D9 y D11).
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -77,9 +78,9 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
   await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
   const on = await ask("admin", { text: "¿Cuánto cobramos este mes?", screen: { period: "este_mes" }, previous: null })
   expect(on.status).toBe(200)
-  expect(await on.json()).toMatchObject({ data: { kind: "respuesta", text: expect.stringContaining("Este mes se cobró") } })
+  expect(await on.json()).toMatchObject({ data: { kind: "respuesta", text: expect.stringMatching(/^(Del|El) .+ se cobró/), period: { value: "este_mes" } } })
   const [row] = await ownerDb.select().from(reportQuestion).where(eq(reportQuestion.organizationId, ORG))
-  expect(row).toMatchObject({ outcome: "respondida", query: expect.stringContaining("from cobros") })
+  expect(row).toMatchObject({ outcome: "respondida", query: expect.stringContaining(":desde") })
   // El modelo de demostración no se paga: no deja uso.
   expect(await ownerDb.select().from(aiUsage).where(eq(aiUsage.organizationId, ORG))).toEqual([])
 })
@@ -97,11 +98,17 @@ it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar e
   // Fijarla otra vez devuelve la misma.
   expect(await (await post("/reports/argos/pins", { questionId: data.questionId })).json()).toEqual(await pinned.clone().json())
   const pins = (await (await app.request("/reports/pins?period=este_mes")).json()) as { data: { argos: Array<{ title: string; answer: { text: string } | null }> } }
-  expect(pins.data.argos).toEqual([expect.objectContaining({ title: "Lo cobrado este mes", answer: expect.objectContaining({ text: expect.stringContaining("Este mes se cobró") }) })])
+  expect(pins.data.argos).toEqual([expect.objectContaining({ title: "Lo cobrado", answer: expect.objectContaining({ text: expect.stringMatching(/^(Del|El) .+ se cobró/) }) })])
+  // Fijada sigue el periodo de arriba (D11).
+  const lastMonth = (await (await app.request("/reports/pins?period=mes_pasado")).json()) as { data: { argos: Array<{ period: { value: string } | null; answer: { text: string } | null }> } }
+  expect(lastMonth.data.argos).toEqual([expect.objectContaining({ period: expect.objectContaining({ value: "mes_pasado" }), answer: expect.objectContaining({ text: expect.stringMatching(/^En .+ se cobró S\/\s?0\.00\.$/) }) })])
 
   const csv = await app.request(`/reports/argos/${data.questionId}/csv?option=0`)
   expect(csv.status).toBe(200)
-  expect(csv.headers.get("content-disposition")).toMatch(/lo-cobrado-este-mes-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv/)
+  expect(csv.headers.get("content-disposition")).toMatch(/lo-cobrado-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv/)
+  // Se descarga lo que se ve: con otro periodo y todas las sedes; un periodo que no existe no.
+  expect((await app.request(`/reports/argos/${data.questionId}/csv?period=mes_pasado&branch=todas`)).status).toBe(200)
+  expect((await app.request(`/reports/argos/${data.questionId}/csv?period=la_quincena`)).status).toBe(400)
   // `text()` quitaría la marca UTF-8: se miran los bytes.
   const bytes = new Uint8Array(await csv.arrayBuffer())
   expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
@@ -116,6 +123,23 @@ it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar e
 
   const saved = await ownerDb.select().from(reportQuestion).where(eq(reportQuestion.id, data.questionId))
   expect(JSON.stringify(saved)).not.toContain("¿Cuánto cobramos")
+})
+
+it("otro periodo vuelve a correr la respuesta sin el modelo; solo quien preguntó y con un periodo que existe", async () => {
+  await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
+  const asked = await ask("owner", { text: "¿Cuánto cobramos este mes?", routed: true })
+  const { data } = (await asked.json()) as { data: { questionId: string } }
+  const rerun = (body: unknown, userId = OWNER) =>
+    buildApp("owner", userId).request(`/reports/argos/${data.questionId}/rerun`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const lastMonth = await rerun({ period: "mes_pasado" })
+  expect(lastMonth.status).toBe(200)
+  expect(await lastMonth.json()).toMatchObject({
+    data: { text: expect.stringMatching(/^En .+ se cobró S\/\s?0\.00\.$/), period: { value: "mes_pasado", grain: "mes" }, options: [{ index: 0, label: "Por medio de pago" }] },
+  })
+  expect((await rerun({ period: "la_quincena" })).status).toBe(400)
+  expect((await rerun({ period: "2999-01" })).status).toBe(400)
+  expect((await rerun({ period: "mes_pasado" }, "u-otra-persona")).status).toBe(404)
+  expect((await rerun({ period: "mes_pasado", sql: "select 1" })).status).toBe(400)
 })
 
 it("solo quien ve Reportes pregunta, y el cuerpo se valida", async () => {

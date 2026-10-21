@@ -70,13 +70,13 @@ export async function recordArgosQuestion(
 }
 
 /**
- * Lo que muestra la pantalla desde donde se pregunta (decisión D7): su periodo
- * y su sede valen si la pregunta no dice otros. Días locales, ambos incluidos.
+ * Lo que muestra Reportes cuando se pregunta desde ahí (decisión D7): su
+ * periodo (el mismo valor de la pantalla, que Argos entiende) y su sede valen
+ * si la pregunta no dice otros.
  */
-export async function argosScreen(tx: Db, orgId: string, screen: ReportQuery, now: Date): Promise<{ from: string; to: string; branch: string | null }> {
+export async function argosScreen(tx: Db, orgId: string, screen: ReportQuery, now: Date): Promise<{ period: string; branch: string | null }> {
   const scope = await reportScope(tx, orgId, screen, now)
-  const day = (at: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: scope.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
-  return { from: day(scope.window.start), to: day(new Date(scope.window.end.getTime() - 1)), branch: scope.branch?.name ?? null }
+  return { period: screen.period, branch: scope.branch?.name ?? null }
 }
 
 /** Una parte de la frase: lo que vino del resultado va destacado. */
@@ -84,10 +84,21 @@ export type ArgosSentencePart = { text: string; strong?: true }
 
 const HOLE = /\{(\w+)\}/g
 
-/** Los huecos de la frase que no son columnas del resultado ni `{lista}`/`{filas}`: el modelo se equivocó. */
-export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResult, "columns">): string[] {
+/** Lo que dice el periodo en la frase (`{periodo}`, `{periodo_antes}`): lo pone odentIA, no el resultado. */
+export type ArgosWords = Partial<Record<"periodo" | "periodo_antes", string>>
+
+/** Los huecos de la frase que no son columnas del resultado, `{lista}`/`{filas}` ni el periodo que hay: el modelo se equivocó. */
+export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResult, "columns">, words: ArgosWords = {}): string[] {
   const names = new Set(result.columns.map((column) => column.name))
-  return [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas" && !names.has(name))
+  return [...template.matchAll(HOLE)]
+    .map((match) => match[1] ?? "")
+    .filter((name) => name !== "lista" && name !== "filas" && !names.has(name) && !(name in words))
+}
+
+/** Llena solo el periodo de un texto («Así lo calculé», la frase sin filas) y lo empieza con mayúscula si abre con él. */
+export function fillArgosWords(text: string, words: ArgosWords): string {
+  const filled = text.replace(HOLE, (whole, name: string) => (name === "periodo" || name === "periodo_antes" ? (words[name] ?? whole) : whole))
+  return /^\{periodo/.test(text) ? filled.charAt(0).toLocaleUpperCase() + filled.slice(1) : filled
 }
 
 /**
@@ -98,7 +109,8 @@ export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResul
  * dos veces la primera («nuevos: 17 %; recurrentes: 17 %»).
  */
 export function argosSentenceProblem(template: string, rows = 1): string | null {
-  const holes = [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas")
+  // El periodo no es una fila: puede repetirse.
+  const holes = [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas" && name !== "periodo" && name !== "periodo_antes")
   const repeated = holes.find((name, index) => holes.indexOf(name) !== index)
   if (repeated && rows > 1)
     return `la frase usa {${repeated}} dos veces y siempre es la primera fila: para dos cifras distintas, una sola fila con una columna por cifra`
@@ -175,6 +187,7 @@ export function fillArgosSentence(
   template: string,
   result: ArgosQueryResult,
   zone: Pick<OrgLocale, "locale" | "currency" | "timezone">,
+  words: ArgosWords = {},
 ): { text: string; parts: ArgosSentencePart[] } {
   const first = result.rows[0] ?? {}
   const byName = new Map(result.columns.map((column) => [column.name, column]))
@@ -203,6 +216,13 @@ export function fillArgosSentence(
     const name = match[1] ?? ""
     const at = match.index ?? 0
     if (at > last) parts.push({ text: template.slice(last, at) })
+    // El periodo lo dice odentIA, no es una cifra: va sin destacar y, al abrir la frase, con mayúscula.
+    const said = !byName.has(name) && (name === "periodo" || name === "periodo_antes") ? words[name] : undefined
+    if (said !== undefined) {
+      parts.push({ text: at === 0 ? said.charAt(0).toLocaleUpperCase() + said.slice(1) : said })
+      last = at + match[0].length
+      continue
+    }
     parts.push({ text: byName.has(name) ? cell(first, name) : name === "lista" ? list : name === "filas" ? rows : "—", strong: true })
     last = at + match[0].length
     if (/_pct$/.test(name)) {
