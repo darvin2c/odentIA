@@ -68,7 +68,7 @@ import {
   useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import {
   AlertCircle,
@@ -97,6 +97,7 @@ import {
   type ConversationListItem,
   type InboxSummary,
   type InboxTopic,
+  type PersonChannel,
   previewWords,
   type ResolvePreview,
   timeAgo,
@@ -136,6 +137,7 @@ import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/
 import { filiationGapsText } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
 import {
+  channelsWords,
   clockWords,
   closeWithoutResolvingWords,
   closureBand,
@@ -148,6 +150,7 @@ import {
   topicQuote,
   topicWords,
   pendingWords,
+  replyWindowWords,
 } from "../../lib/conversation-state"
 
 export const Route = createFileRoute("/_org/inbox")({
@@ -167,6 +170,14 @@ export const Route = createFileRoute("/_org/inbox")({
   component: InboxPage,
 })
 const orgRouteApi = getRouteApi("/_org")
+
+/**
+ * La fila de la lista es la persona (fase 4 del pulido): sigue elegida al abrir
+ * cualquiera de sus conversaciones, también desde un enlace viejo.
+ */
+function isRowOf(item: ConversationListItem, id: string | null): boolean {
+  return id !== null && (item.id === id || (item.conversationIds ?? []).includes(id))
+}
 
 /**
  * Canales del filtro de la bandeja: todos los soportados por el núcleo,
@@ -349,8 +360,9 @@ function InboxPage() {
       }
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
       if (current) {
-        void queryClient.invalidateQueries({ queryKey: ["conversation", current] })
-        void queryClient.invalidateQueries({ queryKey: ["agent-answer-traces", current] })
+        // El hilo junta los canales de la persona y puede responder por otro: se refresca cualquiera abierto.
+        void queryClient.invalidateQueries({ queryKey: ["conversation"] })
+        void queryClient.invalidateQueries({ queryKey: ["agent-answer-traces"] })
         void queryClient.invalidateQueries({ queryKey: ["crm-context"] })
         void queryClient.invalidateQueries({ queryKey: ["crm-activity"] })
       }
@@ -379,7 +391,7 @@ function InboxPage() {
   // «Siguiente tema por atender»: la siguiente fila de «Por atender» que aún tiene un tema.
   const nextTopicId =
     activeView === "attend"
-      ? (items.find((item) => item.id !== selectedId && (item.attention?.topics?.length ?? 0) > 0)?.id ?? null)
+      ? (items.find((item) => !isRowOf(item, selectedId) && (item.attention?.topics?.length ?? 0) > 0)?.id ?? null)
       : null
   // Con el teclado: J y K pasan entre conversaciones, R lleva a la caja de texto (fuera de un campo).
   useEffect(() => {
@@ -399,7 +411,7 @@ function InboxPage() {
       }
       if (items.length === 0) return
       event.preventDefault()
-      const at = items.findIndex((item) => item.id === selectedId)
+      const at = items.findIndex((item) => isRowOf(item, selectedId))
       const next = key === "j" ? Math.min(items.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1)
       const target_ = items[next]
       if (target_) selectConversation(target_.id)
@@ -421,7 +433,7 @@ function InboxPage() {
 
   // Contacto del hilo seleccionado: sale de la lista; en enlace directo se
   // resuelve con el detalle ya cacheado por ThreadView (misma queryKey).
-  const selectedItem = items.find((item) => item.id === selectedId) ?? null
+  const selectedItem = items.find((item) => isRowOf(item, selectedId)) ?? null
   const contactFallbackQuery = useQuery({
     queryKey: ["conversation", selectedId ?? "ninguna"],
     queryFn: () =>
@@ -444,7 +456,7 @@ function InboxPage() {
   const thread = selectedId ? (
     <ThreadView
       key={selectedId}
-      id={selectedId}
+      openId={selectedId}
       members={org.members}
       orgName={org.name}
       orgSlug={org.slug}
@@ -472,6 +484,7 @@ function InboxPage() {
       contextOpen={mode === "panel" ? contextVisible : true}
       attention={selectedItem?.attention}
       listClosure={selectedItem?.closure}
+      row={selectedItem ? { id: selectedItem.id, status: selectedItem.status } : undefined}
       canSeeProposals={canDecideAgent || canReadAgent}
       startOnTopic={activeView === "attend"}
       onNextTopic={nextTopicId ? () => selectConversation(nextTopicId) : undefined}
@@ -961,9 +974,10 @@ function ConversationList({
         </div>
       ) : null}
       {items.map((item) => {
-        const selected = item.id === selectedId
+        const selected = isRowOf(item, selectedId)
         const initials = personInitials(item.contact.displayName)
-        const ChannelIcon = channelIcon(item.connection.channel)
+        // La fila es la persona: un icono por canal, primero el de la conversación que muestra.
+        const rowChannels = item.channels?.length ? item.channels : [item.connection.channel]
         const words = conversationWords({ ...item, myUserId, receptionName })
         // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0050).
         const topic = item.attention?.topics?.[0]
@@ -1000,9 +1014,12 @@ function ConversationList({
               {preview}
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
-              {/* Con el estado a la vista, el canal queda en su icono: el estado no debe recortarse. */}
-              <span className={words || screen ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
+              {rowChannels.map((rowChannel) => {
+                const ChannelIcon = channelIcon(rowChannel)
+                return <ChannelIcon key={rowChannel} className="size-3.5 shrink-0" aria-hidden />
+              })}
+              {/* Con el estado a la vista, los canales quedan en sus iconos: el estado no debe recortarse. */}
+              <span className={words || screen ? "sr-only" : "truncate"}>{channelsWords(rowChannels)}</span>
               {item.isTest ? <Badge variant="secondary" className="shrink-0">Prueba</Badge> : null}
               {/* En Spam y Bloqueados la fila dice por qué; el estado de atención no aplica. */}
               {screen ? (
@@ -1120,7 +1137,7 @@ interface Member {
 }
 
 function ThreadView({
-  id,
+  openId,
   members,
   orgName,
   orgSlug,
@@ -1135,11 +1152,13 @@ function ThreadView({
   contextOpen,
   attention,
   listClosure,
+  row,
   canSeeProposals,
   startOnTopic = false,
   onNextTopic,
 }: {
-  id: string
+  /** La conversación con que se abrió; «Responder por» puede pasar a otro canal de la persona. */
+  openId: string
   members: Member[]
   orgName: string
   orgSlug: string
@@ -1156,6 +1175,8 @@ function ThreadView({
   attention?: ConversationAttention
   /** Cierre según la lista, mientras llega el detalle. */
   listClosure?: ConversationClosure | null
+  /** La conversación que muestra la fila de la persona: la cabecera dice su estado aunque se responda por otro canal. */
+  row?: { id: string; status: string }
   canSeeProposals: boolean
   /** Desde «Por atender» el hilo abre en «Solo este tema» (ADR 0050). */
   startOnTopic?: boolean
@@ -1164,6 +1185,10 @@ function ThreadView({
 }) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
+  // La conversación que responde (decisión 6 del pulido): la abierta, o la del
+  // canal elegido en «Responder por». El historial es el de toda la persona.
+  const [id, setId] = useState(openId)
+  const switchingRef = useRef(false)
   const [composer, setComposer] = useState("")
   const [older, setOlder] = useState<ChatMessage[]>([])
   const [olderCursor, setOlderCursor] = useState<string | null>(null)
@@ -1185,15 +1210,28 @@ function ThreadView({
     queryKey: ["conversation", id],
     queryFn: () => apiFetch<{ data: ConversationDetail }>(`/api/conversations/${id}`),
     enabled: canRead,
+    // Al cambiar de canal sigue a la vista la misma persona mientras llega el otro.
+    placeholderData: keepPreviousData,
   })
 
   const detail = detailQuery.data?.data
   const messages = useMemo(() => [...older, ...(detail?.messages ?? [])], [older, detail?.messages])
+  // Los canales de la persona (fase 4 del pulido); sin el dato, solo este.
+  const personChannels: PersonChannel[] = detail?.person?.channels ?? []
+  const personIds = personChannels.length > 0 ? personChannels.map((item) => item.conversationId) : [id]
 
-  // En qué se basó cada respuesta del agente: solo se ofrece en los mensajes que la tienen.
+  // En qué se basó cada respuesta del agente, en todos sus canales: solo se ofrece en los mensajes que la tienen.
   const tracesQuery = useQuery({
-    queryKey: ["agent-answer-traces", id],
-    queryFn: () => apiFetch<{ data: AnswerTrace[] }>(`/api/agent/answer-traces?conversationId=${id}`),
+    queryKey: ["agent-answer-traces", id, personIds.join(",")],
+    queryFn: async () => ({
+      data: (
+        await Promise.all(
+          personIds.map((conversationId) =>
+            apiFetch<{ data: AnswerTrace[] }>(`/api/agent/answer-traces?conversationId=${conversationId}`),
+          ),
+        )
+      ).flatMap((page) => page.data),
+    }),
     enabled: canRead,
   })
   const traceByMessage = useMemo(() => {
@@ -1238,9 +1276,14 @@ function ThreadView({
   const [sentToWhatsapp, setSentToWhatsapp] = useState<string | null>(null)
 
   useEffect(() => {
-    setOlder([])
-    setOlderCursor(null)
-    setComposer("")
+    // Cambiar de canal con «Responder por» conserva lo escrito y el historial ya cargado: es la misma persona.
+    const switching = switchingRef.current
+    switchingRef.current = false
+    if (!switching) {
+      setOlder([])
+      setOlderCursor(null)
+      setComposer("")
+    }
     setWindowClosed(false)
     setMarkedRef(null)
     setRegistrationLink(null)
@@ -1262,14 +1305,16 @@ function ThreadView({
     setOnlyTopic(startOnTopic)
   }, [startOnTopic])
 
+  // Abrirla la deja leída en todos sus canales.
+  const unread = detail ? (detail.person?.unreadCount ?? detail.conversation.unreadCount) : 0
   useEffect(() => {
-    if (detail && detail.conversation.unreadCount > 0 && markedRef !== id) {
+    if (detail && unread > 0 && markedRef !== id) {
       setMarkedRef(id)
       void apiFetch(`/api/conversations/${id}/read`, { method: "POST" }).then(() =>
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
       )
     }
-  }, [detail, id, markedRef, queryClient])
+  }, [detail, unread, id, markedRef, queryClient])
 
   // Cuando la persona vuelve a escribir, la ventana se abre de nuevo: manda lo que diga el servidor.
   const lastInboundAt = detail?.whatsappWindow?.lastInboundAt
@@ -1552,7 +1597,11 @@ function ThreadView({
   const threadAttention = detail.attention ?? attention
   // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
   const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
-  const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId, receptionName })
+  // La cabecera dice el estado de la persona, el de su fila, también al responder por otro canal (fase 4).
+  const words =
+    row && row.id !== id && attention
+      ? conversationWords({ status: row.status, attention, closure: listClosure ?? null, myUserId, receptionName })
+      : conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId, receptionName })
   // Spam o bloqueada (ADR 0054): el aviso, el menú y la caja de texto lo leen de aquí.
   const screenView = detail.screen
   const blocked = screenView?.screen === "blocked"
@@ -1592,6 +1641,18 @@ function ThreadView({
   // Promete responder después: se sugiere dejar el tema pendiente.
   const promises = replyTopic !== null && /\b(te (confirmo|aviso|escribo|respondo|cuento|averiguo)|consult|averigu|lo veo)/i.test(composer)
   const conversers = members.filter((member) => ["owner", "admin", "reception", "dentist"].includes(member.role))
+  // «Responder por» (decisión 6 del pulido): otro canal de la persona, sin perder lo escrito.
+  const switchTo = (next: string) => {
+    if (next === id) return
+    switchingRef.current = true
+    setId(next)
+  }
+  const multiChannel = personChannels.length > 1
+  const channelOf = (conversationId: string | undefined) =>
+    personChannels.find((item) => item.conversationId === conversationId)?.channel ?? detail.connection.channel
+  const activeChannel = personChannels.find((item) => item.conversationId === id) ?? null
+  // Un tema de otro canal se responde por ese canal: se dice y se ofrece pasar a él.
+  const otherTopics = personChannels.filter((item) => item.conversationId !== id && item.topics > 0)
   const busy = actionMutation.isPending
   const name = detail.contact.displayName
   const preview = previewQuery.data?.data
@@ -1635,7 +1696,9 @@ function ThreadView({
             <span className="block truncate text-[15px] font-bold">{detail.contact.displayName}</span>
           )}
           <div className="flex min-w-0 items-center gap-x-1.5 text-xs text-muted-foreground">
-            <span className="shrink-0">{channelLabel(detail.connection.channel)}</span>
+            <span className="shrink-0">
+              {multiChannel ? channelsWords(personChannels.map((item) => item.channel)) : channelLabel(detail.connection.channel)}
+            </span>
             {conv.isTest ? <Badge variant="secondary" title="Prueba del chat web: no se cobra ni cuenta, y se borra a los 7 días">Prueba · no se cobra</Badge> : null}
             {words ? <StateLabel words={words} className="min-w-0" /> : null}
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
@@ -1806,6 +1869,27 @@ function ThreadView({
           }
         />
       ) : null}
+      {otherTopics.map((item) => (
+        <div
+          key={item.conversationId}
+          role="status"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-warning-soft/40 px-3 py-1.5 text-xs"
+        >
+          <span className="min-w-0 flex-1">
+            {item.topics === 1 ? "Tiene un tema por responder" : `Tiene ${item.topics} temas por responder`} en{" "}
+            {channelLabel(item.channel)}: se responde por ahí.
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0"
+            onClick={() => switchTo(item.conversationId)}
+          >
+            Responder por {channelLabel(item.channel)}
+          </Button>
+        </div>
+      ))}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         {/* El historial conserva siempre un alto útil: la zona de escritura (p. ej. los
             mensajes aprobados) no puede dejarlo en cero. */}
@@ -1867,7 +1951,8 @@ function ThreadView({
                     <div id={`mensaje-${item.msg.id}`}>
                       <MessageBubble
                         msg={item.msg}
-                        conversationId={id}
+                        conversationId={item.msg.conversationId ?? id}
+                        channel={multiChannel ? channelOf(item.msg.conversationId) : null}
                         orgSlug={orgSlug}
                         highlight={topicMessageIds.has(item.msg.id) ? (askedIds.has(item.msg.id) ? "asked" : "topic") : undefined}
                         quote={quoteOf(item.msg, messages, jumpTo)}
@@ -1945,6 +2030,35 @@ function ThreadView({
           cerrada, el aviso y los mensajes aprobados no se comen el historial (antes quedaba en 0 px). */}
       <ScrollArea className="flex max-h-[45%] min-h-0 flex-col border-t [&_[data-slot=scroll-area-viewport]]:h-auto [&_[data-slot=scroll-area-viewport]]:min-h-0 [&_[data-slot=scroll-area-viewport]]:flex-1">
       <div className="flex flex-col p-3">
+        {multiChannel && canWrite && !blocked ? (
+          <div className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+            <span>Responder por:</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={`Responder por ${channelLabel(detail.connection.channel)}, ${replyWindowWords(activeChannel?.replyWindow ?? null)}. Cambiar de canal`}
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {channelLabel(detail.connection.channel)}
+                <span className="font-normal text-muted-foreground">· {replyWindowWords(activeChannel?.replyWindow ?? null)}</span>
+                <ChevronDown className="size-3.5" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-auto">
+                {/* Base UI: el elemento del menú responde a `onClick`. */}
+                {personChannels.map((item) => (
+                  <DropdownMenuItem key={item.conversationId} onClick={() => switchTo(item.conversationId)}>
+                    <span className="whitespace-nowrap">
+                      <span className="font-medium">{channelLabel(item.channel)}</span>
+                      <span className="text-muted-foreground">
+                        {" "}· {replyWindowWords(item.replyWindow)}
+                        {item.topics > 0 ? " · tema por responder" : ""}
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : null}
         {registrationError && (
           <p className="mb-2 text-sm text-destructive" role="alert">
             {registrationError}
@@ -2024,9 +2138,15 @@ function ThreadView({
               <p role="status" className="flex flex-wrap items-center gap-x-2">
                 <CheckCircle2 className="size-4 text-success" aria-hidden />
                 Tu respuesta salió por su WhatsApp.
-                <Link to="/inbox" search={{ conversation: sentToWhatsapp }} className="font-semibold text-primary underline-offset-2 hover:underline">
-                  Ver la conversación de WhatsApp
-                </Link>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto min-h-11 p-0 font-semibold sm:min-h-0"
+                  onClick={() => switchTo(sentToWhatsapp)}
+                >
+                  Seguir por WhatsApp
+                </Button>
               </p>
             ) : null}
             {metaWindow?.whatsapp ? (
@@ -2115,17 +2235,17 @@ function ThreadView({
                   <DropdownMenuContent align="end">
                     {orderedTopics.map((topic) =>
                       topic.source ? (
-                        <DropdownMenuItem key={topic.id} onSelect={() => setReplyTo(topic.source?.id ?? null)}>
+                        <DropdownMenuItem key={topic.id} onClick={() => setReplyTo(topic.source?.id ?? null)}>
                           «{topicQuote(topic, 60)}»
                         </DropdownMenuItem>
                       ) : null,
                     )}
-                    {[...messages].reverse().filter((item) => item.direction === "in" && !topicMessageIds.has(item.id)).slice(0, 4).map((item) => (
-                      <DropdownMenuItem key={item.id} onSelect={() => setReplyTo(item.id)}>
+                    {[...messages].reverse().filter((item) => item.direction === "in" && (item.conversationId ?? id) === id && !topicMessageIds.has(item.id)).slice(0, 4).map((item) => (
+                      <DropdownMenuItem key={item.id} onClick={() => setReplyTo(item.id)}>
                         «{(item.body ?? "Adjunto").slice(0, 60)}»
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem onSelect={() => setReplyTo(null)}>Mensaje nuevo, sin tema</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setReplyTo(null)}>Mensaje nuevo, sin tema</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -2489,6 +2609,7 @@ function MessageAttachments({
 function MessageBubble({
   msg,
   conversationId,
+  channel,
   orgSlug,
   onShowTrace,
   highlight,
@@ -2498,6 +2619,8 @@ function MessageBubble({
 }: {
   msg: ChatMessage
   conversationId: string
+  /** Por qué canal llegó o salió, cuando la persona escribe por varios (fase 4 del pulido). */
+  channel?: string | null
   orgSlug: string
   /** Presente solo si el mensaje tiene traza: abre «En qué se basó». */
   onShowTrace?: () => void
@@ -2584,6 +2707,7 @@ function MessageBubble({
         <div
           className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
         >
+          {channel ? <span>{channelLabel(channel)} ·</span> : null}
           {/* Fecha cuando no es de hoy y siempre en la zona de la clínica; el título la dice completa. */}
           <time dateTime={msg.createdAt} title={fullWhenWords(msg.createdAt)}>
             {clockWords(msg.createdAt)}

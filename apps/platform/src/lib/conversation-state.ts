@@ -1,4 +1,5 @@
 import { agentCaseRow, urgencyWord } from "./agent"
+import { channelLabel } from "./channels"
 import type { ConversationAttention, ConversationClosure, InboxTopic, ResolvePreview } from "./crm"
 import { timeAgo } from "./crm"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -282,4 +283,23 @@ export function closeAfterHoursIssue(value: string): string | null {
   const text = value.trim()
   const hours = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN
   return hours >= CLOSE_AFTER_HOURS_MIN && hours <= CLOSE_AFTER_HOURS_MAX ? null : "Escribe un número de horas entre 6 y 23."
+}
+
+/**
+ * Los canales de una persona en palabras, sin repetir: «WhatsApp»,
+ * «WhatsApp y Telegram», «WhatsApp, Telegram y Correo» (fase 4 del pulido).
+ */
+export function channelsWords(channels: string[]): string {
+  const names = [...new Set(channels.map(channelLabel))]
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`
+}
+
+/**
+ * Si se le puede escribir por ese canal (decisión 6 del pulido): WhatsApp,
+ * Instagram y Messenger se cierran 24 horas después de lo último de la
+ * persona; los demás siempre están abiertos.
+ */
+export function replyWindowWords(replyWindow: "open" | "closed" | null): string {
+  return replyWindow === "closed" ? "pasaron 24 horas" : "abierto"
 }

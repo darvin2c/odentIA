@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  channelsWords,
   closeAfterHoursIssue,
   closeWithoutResolvingWords,
   closureBand,
@@ -8,6 +9,7 @@ import {
   dayWords,
   listTimeWords,
   messageTimeWords,
+  replyWindowWords,
   resolveWords,
   whenWords,
 } from "./conversation-state"
@@ -160,5 +162,19 @@ describe("la hora de una fila y el día de un mensaje (pulido de la Bandeja)", (
     // 00:30 UTC del 15 es todavía el 14 en Lima.
     expect(dayWords("2026-10-15T00:30:00.000Z", NOW)).toBe("Ayer")
     expect(dayWords("2026-10-13T15:00:00.000Z", NOW)).toBe("Martes, 13 de octubre")
+  })
+})
+
+describe("una fila por persona (fase 4 del pulido)", () => {
+  it("sus canales se dicen una vez cada uno, como en una frase", () => {
+    expect(channelsWords(["whatsapp"])).toBe("WhatsApp")
+    expect(channelsWords(["whatsapp", "telegram"])).toBe("WhatsApp y Telegram")
+    expect(channelsWords(["whatsapp", "telegram", "email", "email"])).toBe("WhatsApp, Telegram y Correo")
+  })
+
+  it("«Responder por» dice si el canal está abierto", () => {
+    expect(replyWindowWords("open")).toBe("abierto")
+    expect(replyWindowWords(null)).toBe("abierto")
+    expect(replyWindowWords("closed")).toBe("pasaron 24 horas")
   })
 })

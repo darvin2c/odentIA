@@ -118,6 +118,10 @@ export interface ConversationListItem {
   attention?: ConversationAttention
   /** Cómo se cerró; null si está abierta. Ausente en respuestas antiguas en caché. */
   closure?: ConversationClosure | null
+  /** La fila es la persona (fase 4 del pulido): sus canales, primero el de esta conversación. */
+  channels?: string[]
+  /** Sus conversaciones: abrir cualquiera es abrir esta fila. */
+  conversationIds?: string[]
 }
 
 /** Totales de los chips de la Bandeja para los filtros vigentes (sin `status`). */
@@ -173,6 +177,8 @@ export interface InboxTopic {
 
 export interface ChatMessage {
   id: string
+  /** Su conversación: el hilo junta los canales de la persona (fase 4). Ausente en respuestas antiguas. */
+  conversationId?: string
   direction: string
   senderKind: string
   /** Quién del equipo lo escribió; nulo si no fue una persona del equipo. */
@@ -258,8 +264,28 @@ export interface ConversationDetail {
   missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
   /** Spam o bloqueada (ADR 0054); ausente en respuestas antiguas en caché. */
   screen?: ContactScreenView
+  /**
+   * Los canales de la persona, del último que usó al primero, para «Responder
+   * por» (fase 4 del pulido). Los mensajes son de todos ellos. Ausente en
+   * respuestas antiguas en caché.
+   */
+  person?: { channels: PersonChannel[]; unreadCount: number }
   messages: ChatMessage[]
   messagesCursor: string | null
+}
+
+/** Un canal de la persona en el hilo: por dónde se le puede responder. */
+export interface PersonChannel {
+  conversationId: string
+  channel: string
+  provider: string
+  connectionName: string
+  status: string
+  /** WhatsApp, Instagram y Messenger: si escribió en las últimas 24 horas. Nulo en los demás. */
+  replyWindow: "open" | "closed" | null
+  /** Temas sin resolver en ese canal. */
+  topics: number
+  lastMessageAt: string | null
 }
 
 export interface TaskItem {

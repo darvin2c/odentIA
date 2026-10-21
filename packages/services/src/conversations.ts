@@ -35,7 +35,7 @@ import {
 import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql } from "./conversation-state.js"
+import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql, personKeySql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
@@ -45,7 +45,7 @@ import type { AttachmentRef, Storage } from "./storage.js"
 
 
 /** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
-function conversationCursor(value: string): { ts: string; id: string } {
+export function conversationCursor(value: string): { ts: string; id: string } {
   const decoded = decodeCursor(value)
   if (!decoded ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.id) ||
@@ -112,6 +112,8 @@ export type TranscribeFn = (input: {
 
 export interface MessageItem {
   id: string
+  /** Su conversación: el hilo de la Bandeja junta los canales de la persona (fase 4). */
+  conversationId: string
   direction: string
   senderKind: string
   senderUserId: string | null
@@ -154,6 +156,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
   return {
     automatic,
     id: row.id,
+    conversationId: row.conversationId,
     direction: row.direction,
     senderKind: row.senderKind,
     senderUserId: row.senderUserId,
@@ -1030,7 +1033,7 @@ export interface ConversationFilters {
 }
 
 /** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
-function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
+export function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
   const conditions: SQL[] = [eq(conversation.organizationId, orgId)]
   if (input.status) {
     if (!(CONVERSATION_STATUSES as readonly string[]).includes(input.status)) {
@@ -1150,6 +1153,23 @@ export async function listConversations(
     .orderBy(desc(activityAt), desc(conversation.id))
     .limit(limit + 1)
   const page = rows.slice(0, limit)
+  const items = await toListItems(tx, page)
+  const last = page[page.length - 1]
+  const nextCursor =
+    rows.length > limit && last
+      ? encodeCursor(last.cursorAt, last.conversation.id)
+      : null
+  return { items, nextCursor }
+}
+
+type ListRow = {
+  conversation: typeof conversation.$inferSelect
+  contact: typeof contact.$inferSelect
+  connection: typeof channelConnection.$inferSelect
+}
+
+/** Las filas de la lista con el último mensaje de cada una, en el orden dado. */
+async function toListItems(tx: Db, page: ListRow[]): Promise<ConversationListItem[]> {
   const previews = new Map<string, ConversationListItem["preview"]>()
   if (page.length > 0) {
     const ids = page.map((r) => r.conversation.id)
@@ -1183,7 +1203,7 @@ export async function listConversations(
       })
     }
   }
-  const items: ConversationListItem[] = page.map((r) => ({
+  return page.map((r) => ({
     id: r.conversation.id,
     status: r.conversation.status,
     agentStatus: r.conversation.agentStatus,
@@ -1206,12 +1226,22 @@ export async function listConversations(
     },
     preview: previews.get(r.conversation.id) ?? null,
   }))
-  const last = page[page.length - 1]
-  const nextCursor =
-    rows.length > limit && last
-      ? encodeCursor(last.cursorAt, last.conversation.id)
-      : null
-  return { items, nextCursor }
+}
+
+/**
+ * Las filas de la lista de unas conversaciones, en el orden de `ids`: la
+ * Bandeja elige primero qué conversación muestra cada persona (fase 4).
+ */
+export async function conversationListItems(tx: Db, orgId: string, ids: string[]): Promise<ConversationListItem[]> {
+  if (ids.length === 0) return []
+  const rows = await tx
+    .select({ conversation, contact, connection: channelConnection })
+    .from(conversation)
+    .innerJoin(contact, eq(conversation.contactId, contact.id))
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(eq(conversation.organizationId, orgId), inArray(conversation.id, ids)))
+  const byId = new Map(rows.map((row) => [row.conversation.id, row]))
+  return toListItems(tx, ids.map((id) => byId.get(id)).filter((row): row is ListRow => row !== undefined))
 }
 
 export async function listMessages(
@@ -1226,8 +1256,50 @@ export async function listMessages(
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
+  return listMessagesIn(tx, orgId, [conversationId], input)
+}
+
+/**
+ * Las conversaciones de la persona de una conversación, con lo que tienen sin
+ * leer: todos sus canales, o solo ese hilo si es un grupo (fase 4 del pulido,
+ * `personKeySql`). Nunca por coincidencia de teléfono: es su `contact_id`.
+ */
+export async function personConversations(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+): Promise<{ id: string; unreadCount: number }[]> {
+  const rows = await tx.execute<{ id: string; unread_count: number }>(sql`
+    select c2.id, c2.unread_count
+    from conversation c1
+    join conversation c2 on c2.organization_id = c1.organization_id and ${personKeySql(sql.raw("c2"))} = ${personKeySql(sql.raw("c1"))}
+    where c1.id = ${conversationId}::uuid and c1.organization_id = ${orgId}`)
+  if (rows.length === 0) throw notFound("Conversación")
+  return rows.map((row) => ({ id: row.id, unreadCount: Number(row.unread_count) }))
+}
+
+/**
+ * El hilo de la Bandeja: los mensajes de todos los canales de la persona, en
+ * una sola línea de tiempo y con su conversación (fase 4 del pulido).
+ */
+export async function listPersonMessages(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  input: { before?: string; limit?: number },
+): Promise<{ items: MessageItem[]; nextCursor: string | null }> {
+  const ids = (await personConversations(tx, orgId, conversationId)).map((row) => row.id)
+  return listMessagesIn(tx, orgId, ids, input)
+}
+
+async function listMessagesIn(
+  tx: Db,
+  orgId: string,
+  conversationIds: string[],
+  input: { before?: string; limit?: number },
+): Promise<{ items: MessageItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
-  const conditions = [eq(message.conversationId, conversationId)]
+  const conditions = [eq(message.organizationId, orgId), inArray(message.conversationId, conversationIds)]
   if (input.before) {
     const decoded = conversationCursor(input.before)
     const ts = new Date(decoded.ts)
@@ -1464,6 +1536,8 @@ export async function getConversationDetail(
   tx: Db,
   orgId: string,
   id: string,
+  /** `person`: los mensajes de todos los canales de la persona (el hilo de la Bandeja, fase 4). */
+  timeline: "conversation" | "person" = "conversation",
 ): Promise<ConversationDetail> {
   const [row] = await tx
     .select({ conversation, contact, connection: channelConnection })
@@ -1474,7 +1548,8 @@ export async function getConversationDetail(
     .limit(1)
   if (!row) throw notFound("Conversación")
   const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
-  const { items, nextCursor } = await listMessages(tx, orgId, id, {})
+  const { items, nextCursor } =
+    timeline === "person" ? await listPersonMessages(tx, orgId, id, {}) : await listMessages(tx, orgId, id, {})
   const patientId = await selfPatientOf(tx, orgId, row.contact.id)
   const missing = patientId ? await getPatientMissingData(tx, orgId, patientId) : []
   return {
@@ -1587,8 +1662,13 @@ export async function setAgentStatus(
   )
 }
 
+/** Abrir a la persona la deja leída en todos sus canales (fase 4 del pulido). */
 export async function markRead(tx: Db, orgId: string, id: string): Promise<void> {
-  await mutateConversation(tx, orgId, id, { unreadCount: 0 }, { op: "read" })
+  for (const row of await personConversations(tx, orgId, id)) {
+    if (row.id === id || row.unreadCount > 0) {
+      await mutateConversation(tx, orgId, row.id, { unreadCount: 0 }, { op: "read" })
+    }
+  }
 }
 
 /** Resuelve un adjunto a URL firmada (15 min), verificando la cadena RLS. */

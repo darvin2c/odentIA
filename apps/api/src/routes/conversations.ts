@@ -17,7 +17,7 @@ import {
   getResolvePreview,
   listApprovedMessages,
   listInboxConversations,
-  listMessages,
+  listPersonMessages,
   markRead,
   OUTBOUND_MEDIA_MAX_BYTES,
   OUTBOUND_MEDIA_MIME_EXT,
@@ -154,13 +154,14 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
+  // «Cargar anteriores» del hilo: la línea de tiempo de todos los canales de la persona (fase 4 del pulido).
   app.get("/:id/messages", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = messagesQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
-        listMessages(tx, orgId, c.req.param("id"), parsed.data),
+        listPersonMessages(tx, orgId, c.req.param("id"), parsed.data),
       )
       return c.json({ data: items, nextCursor })
     } catch (e) {

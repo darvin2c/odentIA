@@ -218,3 +218,20 @@ export function mineOrUnclaimedSql(conv: SQL, userId: string): SQL {
         and ${handoffOpenSql(sql.raw("h_mine"))} and (h_mine.assignee_user_id is null or h_mine.assignee_user_id = ${userId}))
     else (${conv}.assigned_user_id is null or ${conv}.assigned_user_id = ${userId}) end)`
 }
+
+/**
+ * De quién es la fila de la Bandeja (fase 4 del pulido, ADR 0076): de la
+ * persona, con todos sus canales. Un grupo de Telegram no es una persona y
+ * sigue con su propia fila: Telegram da a los grupos un id de chat negativo
+ * (Bot API, `Chat.id`) y su hilo es `tg:<id>`.
+ */
+export function personKeySql(conv: SQL): SQL {
+  return sql`(case when ${conv}.external_thread_id like 'tg:-%' then ${conv}.id else ${conv}.contact_id end)`
+}
+
+/**
+ * La persona está en el estado más urgente de sus conversaciones (fase 4): lo
+ * que pide a una persona, lo que atiende el agente, lo que espera al paciente
+ * y lo cerrado, en ese orden. Spam y bloqueados son de la persona entera.
+ */
+export const VIEW_URGENCY = ["attend", "agent", "awaiting_patient", "closed", "spam", "blocked"] as const satisfies readonly ConversationView[]

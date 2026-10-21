@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { agentProposal } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
-import { eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createHandoff } from "./agent-operations.js"
+import { listPersonMessages, markRead } from "./conversations.js"
 import { getInboxConversationDetail, listInboxConversations, summarizeInbox } from "./inbox.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { getWorkspaceHome } from "./workspace.js"
@@ -160,4 +161,88 @@ it("las vistas viejas y un estado desconocido no se aceptan", async () => {
     ).rejects.toMatchObject({ code: "VALIDATION" })
   }
   await expect(withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { status: "archivada" }))).rejects.toMatchObject({ code: "VALIDATION" })
+})
+
+it("una fila por persona: sus canales juntos, en su estado más urgente, y un grupo de Telegram aparte (fase 4)", async () => {
+  const { orgId, handoff } = await seedInbox()
+  const [whatsapp] = await ownerDb.insert(channelConnection).values({
+    organizationId: orgId, channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WhatsApp",
+    configEncrypted: "config", webhookSecret: "secret-wa", status: "active",
+  }).returning()
+  const [telegram] = await ownerDb.select().from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.channel, "telegram")))
+  const [rosa] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Rosa Quispe" }).returning()
+  if (!whatsapp || !telegram || !rosa) throw new Error("semilla")
+  const ago = (ms: number) => new Date(Date.now() - ms)
+  const HOUR = 3_600_000
+  const open = async (connectionId: string, externalThreadId: string, values: Partial<typeof conversation.$inferInsert>) => {
+    const [row] = await ownerDb.insert(conversation).values({
+      organizationId: orgId, contactId: rosa.id, channelConnectionId: connectionId, externalThreadId, agentStatus: "on", ...values,
+    }).returning()
+    if (!row) throw new Error("conversación")
+    return { id: row.id, contactId: rosa.id }
+  }
+  // El martes preguntó por Telegram y Sofi le respondió; hoy escribe por WhatsApp y Sofi le pasó el tema al equipo.
+  const tg = await open(telegram.id, "tg:555", { lastMessageAt: ago(72 * HOUR), lastInboundAt: ago(72 * HOUR), unreadCount: 1 })
+  const wa = await open(whatsapp.id, "wa:51987654321", { lastMessageAt: ago(HOUR), lastInboundAt: ago(HOUR), unreadCount: 2 })
+  await ownerDb.insert(message).values([
+    { organizationId: orgId, conversationId: tg.id, direction: "in", senderKind: "contact", body: "¿Atienden niños?", status: "received", createdAt: ago(72 * HOUR) },
+    { organizationId: orgId, conversationId: tg.id, direction: "out", senderKind: "agent", body: "Sí, desde los 3 años.", status: "sent", externalId: "tg:555:2", createdAt: ago(72 * HOUR - 60_000) },
+    { organizationId: orgId, conversationId: wa.id, direction: "in", senderKind: "contact", body: "Quisiera registrar a mi hijo.", status: "received", createdAt: ago(HOUR) },
+  ])
+  await handoff(wa, "media")
+  // Un grupo de Telegram donde escribió Rosa no es ella: sigue con su propia fila.
+  const group = await open(telegram.id, "tg:-100123", { lastMessageAt: ago(2 * HOUR), lastInboundAt: ago(2 * HOUR), unreadCount: 4 })
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: group.id, direction: "in", senderKind: "contact", body: "Hola a todos", status: "received", createdAt: ago(2 * HOUR) })
+
+  const list = (input: Parameters<typeof listInboxConversations>[2] = {}) =>
+    withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
+  // Rosa sale una vez, con la conversación que pide a una persona y sus dos canales.
+  const everyone = (await list()).items
+  expect(everyone.map((item) => item.id).sort()).toEqual([wa.id, group.id].sort())
+  const row = everyone.find((item) => item.id === wa.id)
+  expect(row).toMatchObject({ channels: ["whatsapp", "telegram"], unreadCount: 3 })
+  expect([...(row?.conversationIds ?? [])].sort()).toEqual([wa.id, tg.id].sort())
+  // La hora de la fila es la de su último mensaje por cualquier canal: el de WhatsApp, hace una hora.
+  expect(Math.abs(Date.parse(row?.lastMessageAt ?? "") - ago(HOUR).getTime())).toBeLessThan(60_000)
+  expect(everyone.find((item) => item.id === group.id)).toMatchObject({ channels: ["telegram"], unreadCount: 4 })
+  // Con la vista, el estado no filtra: Rosa está en «Por atender» y no en «Esperan al paciente».
+  expect((await list({ view: "attend", status: "open" })).items.map((item) => item.id)).toContain(wa.id)
+  expect((await list({ view: "awaiting_patient", status: "open" })).items.map((item) => item.id)).not.toContain(tg.id)
+  const summary = await withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, {}))
+  expect(summary.attend).toBe(1)
+  expect(summary.awaitingPatient).toBe(0)
+  expect(summary.open).toBe(2)
+  // Un canal suyo cerrado no la pone también en «Cerradas».
+  await ownerDb.update(conversation).set({ status: "closed", closeReason: "manual", closedAt: new Date() }).where(eq(conversation.id, tg.id))
+  expect((await list({ view: "closed", status: "closed" })).items).toEqual([])
+  expect((await withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, {}))).closed).toBe(0)
+
+  // El hilo es una línea de tiempo con sus dos canales, y dice por cuáles se le responde (decisión 6).
+  const detail = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, wa.id))
+  expect(detail.messages.map((item) => [item.body, item.conversationId])).toEqual([
+    ["¿Atienden niños?", tg.id],
+    ["Sí, desde los 3 años.", tg.id],
+    ["Quisiera registrar a mi hijo.", wa.id],
+  ])
+  expect(detail.person.channels.map((item) => [item.conversationId, item.channel, item.replyWindow, item.topics])).toEqual([
+    [wa.id, "whatsapp", "open", 1],
+    [tg.id, "telegram", null, 0],
+  ])
+  expect(detail.person.unreadCount).toBe(3)
+  // Un enlace viejo al canal de Telegram abre a la misma persona.
+  const fromTelegram = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, tg.id))
+  expect(fromTelegram.conversation.id).toBe(tg.id)
+  expect(fromTelegram.messages).toHaveLength(3)
+  // «Cargar anteriores» sigue por la misma línea de tiempo.
+  const page = await withOrgContext(appDb, orgId, (tx) => listPersonMessages(tx, orgId, wa.id, { limit: 2 }))
+  expect(page.items.map((item) => item.body)).toEqual(["Sí, desde los 3 años.", "Quisiera registrar a mi hijo."])
+  const before = await withOrgContext(appDb, orgId, (tx) => listPersonMessages(tx, orgId, wa.id, { limit: 2, before: page.nextCursor ?? "" }))
+  expect(before.items.map((item) => item.body)).toEqual(["¿Atienden niños?"])
+
+  // Abrirla la deja leída en sus dos canales; el grupo, no.
+  await withOrgContext(appDb, orgId, (tx) => markRead(tx, orgId, wa.id))
+  const unread = await ownerDb.select({ id: conversation.id, unread: conversation.unreadCount }).from(conversation)
+    .where(inArray(conversation.id, [wa.id, tg.id, group.id]))
+  expect(Object.fromEntries(unread.map((item) => [item.id, item.unread]))).toEqual({ [wa.id]: 0, [tg.id]: 0, [group.id]: 4 })
 })

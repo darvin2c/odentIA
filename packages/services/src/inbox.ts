@@ -9,13 +9,8 @@ import {
   teamLiveSql,
   unansweredSql,
 } from "./conversation-state.js"
-import {
-  type ConversationFilters,
-  type ConversationListItem,
-  countConversationViews,
-  getConversationDetail,
-  listConversations,
-} from "./conversations.js"
+import { type ConversationFilters, type ConversationListItem, conversationListItems, getConversationDetail } from "./conversations.js"
+import { countPersonViews, listPersonRows, personChannels } from "./inbox-person.js"
 import { TOPIC_KINDS, type TopicKind, topicIsUrgent } from "./topic-urgency.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { lateReplyOf } from "./held-replies.js"
@@ -24,10 +19,11 @@ import { insideAgentHours } from "./opportune-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
 
 /**
- * Bandeja: el listado de conversaciones con lo que cada una espera del equipo,
- * del agente o del paciente, cómo se cerró, y los totales de sus vistas. No
- * decide nada: reúne, con las reglas de `conversation-state.ts`, el estado que
- * la lista, el hilo y los chips necesitan.
+ * Bandeja: una fila por persona (fase 4 del pulido, `inbox-person.ts`) con lo
+ * que su conversación más urgente espera del equipo, del agente o del
+ * paciente, cómo se cerró, y los totales de sus vistas. No decide nada: reúne,
+ * con las reglas de `conversation-state.ts`, el estado que la lista, el hilo y
+ * los chips necesitan.
  */
 
 const PRIORITY_ORDER = ["alta", "media", "baja"] as const
@@ -94,9 +90,17 @@ export interface ConversationClosure {
   byName: string | null
 }
 
+/**
+ * Una fila de la Bandeja: la persona, mostrada con su conversación más urgente
+ * (`id`). `unreadCount` y `lastMessageAt` son de todos sus canales.
+ */
 export interface InboxConversationItem extends ConversationListItem {
   attention: ConversationAttention
   closure: ConversationClosure | null
+  /** Sus canales, primero el de esta conversación. */
+  channels: string[]
+  /** Sus conversaciones: abrir cualquiera es abrir esta fila. */
+  conversationIds: string[]
 }
 
 const NO_ATTENTION: ConversationAttention = {
@@ -259,33 +263,40 @@ export async function listInboxConversations(
   input: ConversationFilters & { view?: ConversationView; cursor?: string; limit?: number; now?: Date },
 ): Promise<{ items: InboxConversationItem[]; nextCursor: string | null }> {
   const { now, ...filters } = input
-  const page = await listConversations(tx, orgId, filters)
-  const state = await conversationAttention(
-    tx,
-    orgId,
-    page.items.map((item) => item.id),
-    now ?? new Date(),
-  )
-  return {
-    items: page.items.map((item) => ({
+  const { rows, nextCursor } = await listPersonRows(tx, orgId, filters)
+  const ids = rows.map((row) => row.id)
+  const listed = new Map((await conversationListItems(tx, orgId, ids)).map((item) => [item.id, item]))
+  const state = await conversationAttention(tx, orgId, ids, now ?? new Date())
+  const items: InboxConversationItem[] = []
+  for (const row of rows) {
+    const item = listed.get(row.id)
+    if (!item) continue
+    items.push({
       ...item,
+      unreadCount: row.unreadCount,
+      lastMessageAt: row.lastAt,
       attention: state.attention.get(item.id) ?? NO_ATTENTION,
       closure: state.closure.get(item.id) ?? null,
-    })),
-    nextCursor: page.nextCursor,
+      channels: row.channels,
+      conversationIds: row.conversationIds,
+    })
   }
+  return { items, nextCursor }
 }
 
 /**
  * Detalle del hilo con su atención y su cierre: el hilo abierto no depende de
  * que su fila esté en la página cargada de la lista (enlace directo, otra
- * vista o filtro).
+ * vista o filtro). Los mensajes son los de todos los canales de la persona y
+ * `person` dice por cuáles se le puede responder (fase 4 del pulido); lo
+ * demás es de esta conversación, la que responde.
  */
 export async function getInboxConversationDetail(tx: Db, orgId: string, id: string, now = new Date()) {
-  const detail = await getConversationDetail(tx, orgId, id)
+  const detail = await getConversationDetail(tx, orgId, id, "person")
   const state = await conversationAttention(tx, orgId, [detail.conversation.id], now)
   return {
     ...detail,
+    person: await personChannels(tx, orgId, detail.conversation.id, now),
     attention: state.attention.get(detail.conversation.id) ?? NO_ATTENTION,
     closure: state.closure.get(detail.conversation.id) ?? null,
     // Responder pasadas las 24 horas: «Ver respuesta» en WhatsApp, la ventana de Instagram y Messenger.
@@ -310,13 +321,13 @@ export interface InboxSummary {
 
 /**
  * Totales de las pestañas de la Bandeja con los mismos filtros que la lista,
- * salvo el estado: cada pestaña ya dice si cuenta abiertas o cerradas. Las
- * vistas no se superponen: `attend + agent + awaitingPatient = open`; Spam y
- * bloqueados no entran en ninguna.
+ * salvo el estado: cada pestaña ya dice si cuenta abiertas o cerradas. Cuentan
+ * personas (fase 4 del pulido) y no se superponen: cada persona está en la
+ * vista más urgente de sus conversaciones, así `attend + agent +
+ * awaitingPatient = open`; Spam y bloqueados no entran en ninguna.
  */
 export async function summarizeInbox(tx: Db, orgId: string, input: ConversationFilters): Promise<InboxSummary> {
-  const { status: _status, ...filters } = input
-  const totals = await countConversationViews(tx, orgId, filters, ["attend", "agent", "awaiting_patient", "closed", "spam"])
+  const totals = await countPersonViews(tx, orgId, input)
   return {
     open: totals.attend + totals.agent + totals.awaiting_patient,
     attend: totals.attend,
