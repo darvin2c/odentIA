@@ -9,6 +9,7 @@ import {
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  askConfirmationAfterReaction,
   handleAutomationReply,
   ingestInbound,
   isStopWord,
@@ -82,6 +83,12 @@ export async function processInbound(
         secretsKey: deps.secretsKey,
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
+      // Una reacción (👍) no es un mensaje: no despierta al agente. Sobre una cita
+      // propuesta, Sofi le pide el sí una vez con un texto fijo (decisión 7).
+      if (result.reaction) {
+        await askConfirmationAfterReaction(tx, orgId, { ...result, emoji: result.reaction.emoji })
+        return
+      }
       if (!result.created) return
       // Spam y bloqueados (ADR 0054): lo que escriben queda guardado, pero el
       // agente no lo atiende y el sistema no les responde. A quien está en

@@ -81,6 +81,7 @@ import {
   Clock,
   Copy,
   Hand,
+  MapPin,
   PanelRight,
   SquarePen,
   UserPlus,
@@ -1817,6 +1818,7 @@ function ThreadView({
                         highlight={topicMessageIds.has(item.msg.id) ? (askedIds.has(item.msg.id) ? "asked" : "topic") : undefined}
                         quote={quoteOf(item.msg, messages, jumpTo)}
                         senderName={item.msg.senderUserId ? (members.find((member) => member.userId === item.msg.senderUserId)?.user.name ?? null) : null}
+                        personFirstName={detail.contact.displayName.split(/\s+/)[0]}
                         onShowTrace={
                           traceByMessage.has(item.msg.id) ? () => setOpenTrace(traceByMessage.get(item.msg.id) ?? null) : undefined
                         }
@@ -2329,6 +2331,12 @@ function MessageAttachments({
             </AudioPlayer>
           )
         }
+        if (att.mimeType.startsWith("video/")) {
+          return (
+            // biome-ignore lint/a11y/useMediaCaption: el video lo manda la persona; no trae subtítulos.
+            <video key={index} src={url} controls preload="metadata" className="max-h-80 max-w-64 rounded-md bg-black" />
+          )
+        }
         const data: AttachmentData = {
           id: `${msg.id}-${index}`,
           type: "file",
@@ -2359,6 +2367,7 @@ function MessageBubble({
   highlight,
   quote,
   senderName,
+  personFirstName,
 }: {
   msg: ChatMessage
   conversationId: string
@@ -2371,6 +2380,8 @@ function MessageBubble({
   quote?: { text: string; onJump: () => void } | "missing"
   /** Quién del equipo lo escribió. */
   senderName?: string | null
+  /** El nombre de pila de la persona, para decir de quién es la reacción. */
+  personFirstName?: string
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
@@ -2410,6 +2421,8 @@ function MessageBubble({
           <span className="text-xs font-semibold text-warning">{highlight === "asked" ? "Sobre el tema" : "Tema · te toca"}</span>
         ) : null}
         {out && !byAgent && senderName ? <span className="text-xs font-semibold text-muted-foreground">{senderName}</span> : null}
+        {/* Reenviado: no lo escribió la persona (fase 7). */}
+        {msg.forwarded ? <span className="text-xs italic text-muted-foreground">Reenviado</span> : null}
         {quote === "missing" ? (
           <span className="rounded-md border-l-2 border-muted-foreground/40 bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
             Respondió a un mensaje anterior que no está cargado
@@ -2436,6 +2449,8 @@ function MessageBubble({
           )
         ) : msg.redactedAt ? (
           <span className="italic text-muted-foreground">Mensaje de spam borrado a los 90 días</span>
+        ) : msg.location ? (
+          <LocationCard location={msg.location} />
         ) : (
           msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
         )}
@@ -2460,7 +2475,39 @@ function MessageBubble({
           </Button>
         ) : null}
       </MessageContent>
+      {/* La reacción de la persona, pegada al mensaje: no confirma nada (decisión 7). */}
+      {msg.contactReaction ? (
+        <span
+          className={`-mt-1 w-fit rounded-full border bg-card px-2 py-0.5 text-xs ${out ? "self-end" : "self-start"}`}
+          title={`${personFirstName ?? "La persona"} reaccionó con ${msg.contactReaction}`}
+        >
+          {msg.contactReaction} {personFirstName}
+        </span>
+      ) : null}
     </Message>
+  )
+}
+
+/** Una ubicación que mandó la persona: lo que dice y el enlace al mapa (sin servicio de mapas en la página). */
+function LocationCard({ location }: { location: NonNullable<ChatMessage["location"]> }) {
+  const named = [location.name, location.address].filter(Boolean).join(", ")
+  const query = `${location.latitude},${location.longitude}`
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="flex items-center gap-1.5 font-semibold">
+        <MapPin className="size-4 shrink-0" aria-hidden />
+        Ubicación
+      </span>
+      {named ? <span>{named}</span> : null}
+      <a
+        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`}
+        target="_blank"
+        rel="noreferrer"
+        className="w-fit text-sm font-medium text-primary underline-offset-2 hover:underline"
+      >
+        Ver en el mapa
+      </a>
+    </span>
   )
 }
 

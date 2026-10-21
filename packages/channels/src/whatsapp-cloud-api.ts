@@ -101,10 +101,17 @@ interface WaMessage {
   video?: WaMedia
   /** Respuesta rápida de una plantilla. */
   button?: { payload?: string; text?: string }
-  /** Botón de un mensaje interactivo enviado dentro de la ventana. */
-  interactive?: { type?: string; button_reply?: { id?: string; title?: string } }
-  /** Mensaje que la persona citó al responder (el `wamid`). */
-  context?: { id?: string; from?: string }
+  /** Botón o fila de lista de un mensaje interactivo enviado dentro de la ventana. */
+  interactive?: {
+    type?: string
+    button_reply?: { id?: string; title?: string }
+    list_reply?: { id?: string; title?: string; description?: string }
+  }
+  /** Mensaje que la persona citó al responder (el `wamid`) y si lo reenvió. */
+  context?: { id?: string; from?: string; forwarded?: boolean; frequently_forwarded?: boolean }
+  /** Reacción a un mensaje: `emoji` vacío es que la quitó. */
+  reaction?: { message_id?: string; emoji?: string }
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string }
 }
 
 /** Error de un envío, en la respuesta o en el aviso de estado `failed`. */
@@ -148,7 +155,47 @@ function messageToNormalized(
   }
   const withName = {
     ...(displayName ? { senderDisplayName: displayName } : {}),
-    ...(typeof m.context?.id === "string" && m.context.id ? { replyToExternalId: m.context.id } : {}),
+    ...(typeof m.context?.id === "string" && m.context.id
+      ? { replyToExternalId: m.context.id }
+      : {}),
+    // Reenviado (o reenviado muchas veces): no lo escribió la persona.
+    ...(m.context?.forwarded === true || m.context?.frequently_forwarded === true
+      ? { forwarded: true }
+      : {}),
+  }
+  // Una reacción no es un mensaje: se pega al reaccionado. Sin emoji, la quitó.
+  if (
+    m.type === "reaction" &&
+    typeof m.reaction?.message_id === "string" &&
+    m.reaction.message_id
+  ) {
+    const emoji = typeof m.reaction.emoji === "string" && m.reaction.emoji ? m.reaction.emoji : null
+    return {
+      ...base,
+      ...withName,
+      content: { type: "reaction", targetExternalMessageId: m.reaction.message_id, emoji },
+    }
+  }
+  if (
+    m.type === "location" &&
+    typeof m.location?.latitude === "number" &&
+    typeof m.location.longitude === "number"
+  ) {
+    return {
+      ...base,
+      ...withName,
+      content: {
+        type: "location",
+        latitude: m.location.latitude,
+        longitude: m.location.longitude,
+        ...(typeof m.location.name === "string" && m.location.name
+          ? { name: m.location.name }
+          : {}),
+        ...(typeof m.location.address === "string" && m.location.address
+          ? { address: m.location.address }
+          : {}),
+      },
+    }
   }
   if (m.type === "text" && typeof m.text?.body === "string") {
     return { ...base, ...withName, content: { type: "text", text: m.text.body } }
@@ -159,7 +206,11 @@ function messageToNormalized(
     const replyId = typeof m.button.payload === "string" ? { replyId: m.button.payload } : {}
     return { ...base, ...withName, content: { type: "text", text: m.button.text, ...replyId } }
   }
-  const reply = m.type === "interactive" ? m.interactive?.button_reply : undefined
+  // Lo que eligió de una lista llega igual que un botón: el texto que ve y su identificador.
+  const reply =
+    m.type === "interactive"
+      ? (m.interactive?.button_reply ?? m.interactive?.list_reply)
+      : undefined
   if (reply && typeof reply.title === "string") {
     const replyId = typeof reply.id === "string" ? { replyId: reply.id } : {}
     return { ...base, ...withName, content: { type: "text", text: reply.title, ...replyId } }
@@ -187,7 +238,7 @@ function messageToNormalized(
       },
     }
   }
-  // Tipos no soportados (reaction, sticker, location, contacts…): se ignoran.
+  // Tipos no soportados (sticker, contacts…): se ignoran.
   return null
 }
 

@@ -526,6 +526,25 @@ export const message = pgTable(
     // adaptador al recibir una respuesta citada. Nulo si no cita nada.
     replyToMessageId: uuid("reply_to_message_id"),
     /**
+     * La persona lo reenvió: no lo escribió ella (WhatsApp `context.forwarded`,
+     * Telegram `forward_origin`). El agente no lo toma como dicho por ella.
+     */
+    forwarded: boolean("forwarded").notNull().default(false),
+    /**
+     * La reacción de la persona a este mensaje (👍, ❤️…), la última que puso; nula
+     * si no reaccionó o la quitó. Una reacción no es un mensaje ni confirma nada
+     * (decisión 7 de la Bandeja).
+     */
+    contactReaction: text("contact_reaction"),
+    contactReactionAt: timestamp("contact_reaction_at", { withTimezone: true }),
+    /** Ubicación que mandó la persona (`content_type` 'location'); el texto la dice en palabras. */
+    location: jsonb("location").$type<{
+      latitude: number
+      longitude: number
+      name?: string
+      address?: string
+    }>(),
+    /**
      * Se borró su texto y sus adjuntos: era spam y pasaron 90 días (decisión 16
      * del issue 77). La fila queda para que el hilo y el libro sigan enteros.
      */

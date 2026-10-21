@@ -869,3 +869,120 @@ it("el detalle dice qué le falta a la paciente para que la Bandeja ofrezca su e
   expect(after.missingData?.patientId).toBe(ficha!.id)
   expect(after.missingData?.missing.length).toBeGreaterThan(0)
 })
+
+it("una ubicación entra en palabras y con sus coordenadas; un reenviado queda marcado", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const place = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-loc-1",
+      externalMessageId: "ext-loc-1",
+      externalThreadId: "tg:940001",
+      senderExternalId: "tg:940001",
+      content: {
+        type: "location",
+        latitude: -12.12,
+        longitude: -77.03,
+        name: "Dental Smile",
+        address: "Av. Larco 345, Miraflores",
+      },
+    }),
+  )
+  const forwarded = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-fwd-1",
+      externalMessageId: "ext-fwd-1",
+      externalThreadId: "tg:940001",
+      senderExternalId: "tg:940001",
+      content: { type: "text", text: "Promo 2x1 en blanqueamiento" },
+      forwarded: true,
+    }),
+  )
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", place.conversationId),
+  )
+  expect(forwarded.conversationId).toBe(place.conversationId)
+  expect(detail.messages.map((m) => [m.contentType, m.body, m.forwarded])).toEqual([
+    ["location", "Ubicación: Dental Smile, Av. Larco 345, Miraflores", false],
+    ["text", "Promo 2x1 en blanqueamiento", true],
+  ])
+  expect(detail.messages[0]?.location).toEqual({
+    latitude: -12.12,
+    longitude: -77.03,
+    name: "Dental Smile",
+    address: "Av. Larco 345, Miraflores",
+  })
+})
+
+it("una reacción se pega al mensaje: no crea mensaje ni cuenta como sin leer, y quitarla la borra", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const first = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-rx-1",
+      externalMessageId: "ext-rx-1",
+      externalThreadId: "tg:950001",
+      senderExternalId: "tg:950001",
+    }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) => markRead(tx, "org_a", first.conversationId))
+  const [offer] = await ownerDb
+    .insert(message)
+    .values({
+      organizationId: "org_a",
+      conversationId: first.conversationId,
+      direction: "out",
+      senderKind: "agent",
+      body: "¿Te acomoda el viernes?",
+      status: "sent",
+      externalId: "ext-rx-out",
+    })
+    .returning()
+  const reaction = (emoji: string | null, id: string) =>
+    ingest(
+      "org_a",
+      connId,
+      textEvent({
+        externalEventId: id,
+        externalMessageId: id,
+        externalThreadId: "tg:950001",
+        senderExternalId: "tg:950001",
+        content: { type: "reaction", targetExternalMessageId: "ext-rx-out", emoji },
+      }),
+    )
+  const put = await reaction("👍", "evt-rx-2")
+  expect(put).toEqual({
+    conversationId: first.conversationId,
+    messageId: offer!.id,
+    created: false,
+    reaction: { emoji: "👍" },
+  })
+  let detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", first.conversationId),
+  )
+  expect(detail.messages).toHaveLength(2)
+  expect(detail.messages.find((m) => m.id === offer!.id)?.contactReaction).toBe("👍")
+  expect(detail.conversation.unreadCount).toBe(0)
+  await reaction(null, "evt-rx-3")
+  detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", first.conversationId),
+  )
+  expect(detail.messages.find((m) => m.id === offer!.id)?.contactReaction).toBeNull()
+  // A un mensaje que no existe, o en un hilo que no existe, no deja nada.
+  const lost = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-rx-4",
+      externalMessageId: "evt-rx-4",
+      externalThreadId: "tg:959999",
+      senderExternalId: "tg:959999",
+      content: { type: "reaction", targetExternalMessageId: "no-existe", emoji: "👍" },
+    }),
+  )
+  expect(lost.created).toBe(false)
+})

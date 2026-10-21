@@ -134,6 +134,12 @@ export interface MessageItem {
   automatic: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado (ADR 0050). */
   replyToMessageId: string | null
+  /** Lo reenvió la persona: no lo escribió ella. */
+  forwarded: boolean
+  /** La reacción de la persona a este mensaje (👍…); nula si no reaccionó. No confirma nada. */
+  contactReaction: string | null
+  /** Ubicación que mandó la persona (`contentType` «location»). */
+  location: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró su texto y sus adjuntos: era spam y pasaron 90 días (ADR 0054). */
   redactedAt: string | null
   createdAt: string
@@ -161,6 +167,9 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
         ? row.templateParams
         : null,
     replyToMessageId: row.replyToMessageId ?? null,
+    forwarded: row.forwarded,
+    contactReaction: row.contactReaction,
+    location: row.location ?? null,
     redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
   }
@@ -195,7 +204,13 @@ export async function ingestInbound(
   job: InboundMessageJob,
   adapter: ChannelAdapter,
   deps: IngestDeps,
-): Promise<{ conversationId: string; messageId: string; created: boolean }> {
+): Promise<{
+  conversationId: string
+  messageId: string
+  created: boolean
+  /** Fue una reacción (👍…) pegada a un mensaje existente: no hay mensaje nuevo (decisión 7). */
+  reaction?: { emoji: string | null }
+}> {
   const orgId = job.orgId
   const event = job.event
   const [connection] = await tx
@@ -211,6 +226,8 @@ export async function ingestInbound(
   }
 
   const channel = connection.channel
+  if (event.content.type === "reaction")
+    return applyReaction(tx, orgId, connection.id, event.externalThreadId, event.content)
   // Serializar creación/resolución/traslado de identidad bajo el mismo
   // advisory lock que usa la transferencia (sin capturar unique violations
   // en transacciones abortadas: se inserta con ON CONFLICT).
@@ -350,7 +367,19 @@ export async function ingestInbound(
   const isMedia = content.type === "media"
   let contentType: string
   let body: string | null
-  if (!isMedia) {
+  let location: { latitude: number; longitude: number; name?: string; address?: string } | null =
+    null
+  if (content.type === "location") {
+    // El texto la dice en palabras: así la leen la Bandeja, la búsqueda y el agente.
+    contentType = "location"
+    location = {
+      latitude: content.latitude,
+      longitude: content.longitude,
+      ...(content.name ? { name: content.name } : {}),
+      ...(content.address ? { address: content.address } : {}),
+    }
+    body = locationWords(location)
+  } else if (!isMedia) {
     contentType = "text"
     body = content.text
   } else {
@@ -441,6 +470,8 @@ export async function ingestInbound(
       status: "received",
       error: mediaError,
       replyToMessageId,
+      forwarded: event.forwarded === true,
+      location,
     })
     .onConflictDoNothing()
     .returning({ id: message.id })
@@ -495,6 +526,73 @@ export async function ingestInbound(
     at: now.toISOString(),
   })
   return { conversationId, messageId, created: true }
+}
+
+/** Una ubicación en palabras: su nombre, su dirección o, si no trae ninguno, sus coordenadas. */
+export function locationWords(location: {
+  latitude: number
+  longitude: number
+  name?: string
+  address?: string
+}): string {
+  const named = [location.name, location.address]
+    .filter((part): part is string => !!part && part.trim() !== "")
+    .join(", ")
+  return `Ubicación: ${named || `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`}`
+}
+
+/**
+ * Una reacción de la persona (👍, ❤️…) se pega al mensaje que la recibió; sin
+ * emoji es que la quitó. No es un mensaje: no crea hilo, no reabre, no cuenta
+ * como sin leer ni despierta al agente, y nunca confirma nada (decisión 7 de la
+ * Bandeja). Si el hilo o el mensaje no existen, no deja nada.
+ */
+async function applyReaction(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  externalThreadId: string,
+  content: { targetExternalMessageId: string; emoji: string | null },
+): Promise<{
+  conversationId: string
+  messageId: string
+  created: boolean
+  reaction?: { emoji: string | null }
+}> {
+  const [target] = await tx
+    .select({ id: message.id, conversationId: message.conversationId })
+    .from(message)
+    .innerJoin(
+      conversation,
+      and(eq(conversation.id, message.conversationId), eq(conversation.organizationId, orgId)),
+    )
+    .where(
+      and(
+        eq(conversation.channelConnectionId, connectionId),
+        eq(conversation.externalThreadId, externalThreadId),
+        eq(message.externalId, content.targetExternalMessageId),
+      ),
+    )
+    .limit(1)
+  if (!target) return { conversationId: "", messageId: "", created: false }
+  const now = new Date()
+  await tx
+    .update(message)
+    .set({ contactReaction: content.emoji, contactReactionAt: content.emoji ? now : null })
+    .where(and(eq(message.id, target.id), eq(message.organizationId, orgId)))
+  await notify(tx, {
+    orgId,
+    kind: "message.updated",
+    conversationId: target.conversationId,
+    messageId: target.id,
+    at: now.toISOString(),
+  })
+  return {
+    conversationId: target.conversationId,
+    messageId: target.id,
+    created: false,
+    reaction: { emoji: content.emoji },
+  }
 }
 
 /**

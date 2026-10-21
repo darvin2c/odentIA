@@ -186,6 +186,12 @@ export interface ChatMessage {
   automatic?: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado. */
   replyToMessageId?: string | null
+  /** Lo reenvió la persona: no lo escribió ella. */
+  forwarded?: boolean
+  /** La reacción de la persona a este mensaje (👍…); no confirma nada. */
+  contactReaction?: string | null
+  /** Ubicación que mandó la persona. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró: era spam y pasaron 90 días. */
   redactedAt?: string | null
   createdAt: string

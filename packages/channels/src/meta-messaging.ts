@@ -30,7 +30,6 @@ import { metaGraphVersion } from "./meta-graph.js"
 
 const GRAPH_HOST = "https://graph.facebook.com"
 const IG_HOST = "https://graph.instagram.com"
-const IG_VERSION = "v25.0"
 
 export interface MessengerConfig {
   pageId: string
@@ -430,7 +429,7 @@ export const instagramAdapter: ChannelAdapter = {
     const cfg = instagramConfig(config)
     return sendViaGraph(
       "Instagram",
-      `${IG_HOST}/${IG_VERSION}`,
+      `${IG_HOST}/${metaGraphVersion()}`,
       `${cfg.instagramId}/messages`,
       cfg.accessToken,
       stripPrefix(msg.to, "ig"),
@@ -451,7 +450,7 @@ export const instagramAdapter: ChannelAdapter = {
       cfg.accessToken,
       {},
       deps,
-      `${IG_HOST}/${IG_VERSION}`,
+      `${IG_HOST}/${metaGraphVersion()}`,
     )
     if (status >= 400 || !json || typeof json !== "object" || !("id" in json)) {
       throw new Error("Instagram validate falló: token o cuenta inválido")

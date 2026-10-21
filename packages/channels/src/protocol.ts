@@ -28,9 +28,16 @@ export interface ReplyButton {
 }
 
 export type InboundContent =
-  // `replyId` viene cuando el texto es el botón que tocó la persona.
+  // `replyId` viene cuando el texto es el botón que tocó la persona (o lo que eligió de una lista).
   | { type: "text"; text: string; replyId?: string }
   | { type: "media"; mediaExternalId: string; mimeType: string; caption?: string }
+  // Una ubicación que mandó la persona; nombre y dirección si el proveedor los trae.
+  | { type: "location"; latitude: number; longitude: number; name?: string; address?: string }
+  /**
+   * La persona reaccionó a un mensaje (👍, ❤️…). No es un mensaje: se pega al
+   * reaccionado (`targetExternalMessageId`) y `emoji` nulo es que la quitó.
+   */
+  | { type: "reaction"; targetExternalMessageId: string; emoji: string | null }
 
 export interface NormalizedInbound {
   externalEventId: string
@@ -48,6 +55,8 @@ export interface NormalizedInbound {
   automated?: boolean
   /** La persona respondió citando este mensaje (el id del proveedor). */
   replyToExternalId?: string
+  /** Lo reenvió: no lo escribió la persona (WhatsApp `context.forwarded`, Telegram `forward_origin`). */
+  forwarded?: boolean
 }
 
 /** Remitentes que por convención no leen respuestas. */

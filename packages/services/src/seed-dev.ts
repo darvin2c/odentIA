@@ -714,6 +714,10 @@ async function seedMessage(args: {
   externalId: string
   status: string
   createdAt: Date
+  /** Fase 7 de la Bandeja: reenviado, la reacción de la persona y una ubicación. */
+  forwarded?: boolean
+  contactReaction?: string | null
+  location?: { latitude: number; longitude: number; name?: string; address?: string } | null
 }): Promise<{ id: string }> {
   const [row] = await db
     .insert(message)
@@ -728,6 +732,10 @@ async function seedMessage(args: {
       attachments: args.attachments ?? [],
       externalId: args.externalId,
       status: args.status,
+      forwarded: args.forwarded ?? false,
+      contactReaction: args.contactReaction ?? null,
+      contactReactionAt: args.contactReaction ? args.createdAt : null,
+      location: args.location ?? null,
       createdAt: args.createdAt,
     })
     .returning({ id: message.id })
@@ -1177,6 +1185,43 @@ await seedMessage({
   externalId: "seed-msg-5",
   status: "received",
   createdAt: hoursAgo(1),
+})
+// Fase 7 de la Bandeja: lo que antes se perdía se ve. Sofi le propuso un horario
+// y Rosa reaccionó con 👍 (no confirma nada), reenvió una promoción ajena y mandó
+// su ubicación.
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "¿Te acomoda mañana a las 17:30 con la Dra. Ana Torres?",
+  externalId: "seed-msg-rosa-propuesta",
+  status: "read",
+  createdAt: new Date(hoursAgo(1).getTime() + 60_000),
+  contactReaction: "👍",
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Promo 2x1 en blanqueamiento hasta el viernes",
+  externalId: "seed-msg-rosa-reenvio",
+  status: "received",
+  createdAt: new Date(hoursAgo(1).getTime() + 120_000),
+  forwarded: true,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Ubicación: Av. Larco 345, Miraflores",
+  contentType: "location",
+  externalId: "seed-msg-rosa-ubicacion",
+  status: "received",
+  createdAt: new Date(hoursAgo(1).getTime() + 180_000),
+  location: { latitude: -12.1219, longitude: -77.0297, address: "Av. Larco 345, Miraflores" },
 })
 
 const convJorge = await seedConversation({

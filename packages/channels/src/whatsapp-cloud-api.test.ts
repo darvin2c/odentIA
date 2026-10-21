@@ -183,6 +183,122 @@ it("un botón tocado llega como texto con su identificador, venga de plantilla o
   expect(interactive.messages[0]?.content).toEqual({ type: "text", text: "No podré ir", replyId: "odentia:no-puedo:j1" })
 })
 
+it("lo elegido de una lista llega como un botón: el texto que vio y su identificador", () => {
+  const base = { from: "51999000111", timestamp: "1760000000" }
+  const got = parse({
+    messages: [
+      {
+        ...base,
+        id: "m3",
+        type: "interactive",
+        interactive: {
+          type: "list_reply",
+          list_reply: {
+            id: "sede:sanisidro",
+            title: "Sede San Isidro",
+            description: "Av. Javier Prado 123",
+          },
+        },
+      },
+    ],
+  })
+  expect(got.messages[0]?.content).toEqual({
+    type: "text",
+    text: "Sede San Isidro",
+    replyId: "sede:sanisidro",
+  })
+})
+
+it("una reacción se pega al mensaje que la recibió; sin emoji es que la quitó (decisión 7)", () => {
+  const base = { from: "51999000111", timestamp: "1760000000" }
+  const put = parse({
+    messages: [
+      {
+        ...base,
+        id: "m4",
+        type: "reaction",
+        reaction: { message_id: "wamid.propuesta", emoji: "👍" },
+      },
+    ],
+  })
+  expect(put.messages[0]).toMatchObject({
+    externalThreadId: "wa:51999000111",
+    content: { type: "reaction", targetExternalMessageId: "wamid.propuesta", emoji: "👍" },
+  })
+  const removed = parse({
+    messages: [
+      {
+        ...base,
+        id: "m5",
+        type: "reaction",
+        reaction: { message_id: "wamid.propuesta", emoji: "" },
+      },
+    ],
+  })
+  expect(removed.messages[0]?.content).toEqual({
+    type: "reaction",
+    targetExternalMessageId: "wamid.propuesta",
+    emoji: null,
+  })
+})
+
+it("una ubicación entra con su nombre y dirección; un reenviado se marca", () => {
+  const base = { from: "51999000111", timestamp: "1760000000" }
+  const location = parse({
+    messages: [
+      {
+        ...base,
+        id: "m6",
+        type: "location",
+        location: {
+          latitude: -12.12,
+          longitude: -77.03,
+          name: "Dental Smile",
+          address: "Av. Larco 345, Miraflores",
+        },
+      },
+    ],
+  })
+  expect(location.messages[0]?.content).toEqual({
+    type: "location",
+    latitude: -12.12,
+    longitude: -77.03,
+    name: "Dental Smile",
+    address: "Av. Larco 345, Miraflores",
+  })
+  const forwarded = parse({
+    messages: [
+      {
+        ...base,
+        id: "m7",
+        type: "text",
+        text: { body: "Promo 2x1" },
+        context: { forwarded: true },
+      },
+    ],
+  })
+  expect(forwarded.messages[0]).toMatchObject({
+    forwarded: true,
+    content: { type: "text", text: "Promo 2x1" },
+  })
+  const many = parse({
+    messages: [
+      {
+        ...base,
+        id: "m8",
+        type: "text",
+        text: { body: "Promo 2x1" },
+        context: { frequently_forwarded: true },
+      },
+    ],
+  })
+  expect(many.messages[0]?.forwarded).toBe(true)
+  expect(
+    parse({ messages: [{ ...base, id: "m9", type: "text", text: { body: "Hola" } }] }).messages[0]
+      ?.forwarded,
+  ).toBeUndefined()
+})
+
 it("lee las plantillas de la cuenta con estado, categoría, variables y botones, siguiendo las páginas", async () => {
   const { calls, fetch } = fakeFetch(
     {
