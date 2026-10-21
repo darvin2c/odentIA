@@ -101,8 +101,9 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         // El motivo lo escribe el servidor y nombra a «Sofi».
         title: withReceptionName(row.contactName ? `${row.contactName} · ${row.reason}` : row.reason, context.receptionName),
         // Un solo nombre y una sola escala: «Te lo pasó Sofi hace 25 min · Ahora».
-        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, urgencyWord(row.priority), row.channel ? channelLabel(row.channel) : null]),
-        action: !row.conversationId ? "Revisar" : row.unclaimed ? "Tomar" : "Ver el caso",
+        // «Ahora» lo dice el servidor (decisión 1 del pulido de la Bandeja).
+        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, urgencyWord(row.urgent ? "alta" : row.priority), row.channel ? channelLabel(row.channel) : null]),
+        action: !row.conversationId ? "Revisar" : row.canReply ? "Responder" : row.unclaimed ? "Tomar este tema" : "Ver el caso",
       }
     case "unconfirmed":
       // Quien no recibe recordatorios se llama el día antes (ADR 0040).

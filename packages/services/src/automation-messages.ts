@@ -26,7 +26,7 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  * 0037) ese botón abre su enlace (`MessageSpec.link`); la acción queda para
  * los mensajes que ya salieron con la versión anterior.
  */
-export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no", "presupuesto"] as const
+export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no", "presupuesto", "ver_respuesta"] as const
 export type ReplyAction = (typeof REPLY_ACTIONS)[number]
 
 export interface MessageButton {
@@ -305,6 +305,25 @@ export const RESUME_MESSAGE: MessageSpec = {
 }
 
 /**
+ * «Ver respuesta» (R1 del pulido de la Bandeja): alguien del equipo respondió
+ * un tema pasadas las 24 horas, cuando WhatsApp ya no deja escribir con
+ * libertad. La respuesta queda «Por entregar» y sale este aviso; al tocar «Ver
+ * respuesta» (o al volver a escribir) le llega la respuesta citando su
+ * pregunta. Es la respuesta a lo que la persona preguntó: no pide permiso y
+ * solo lo frena «No quiero ningún mensaje». Varias respuestas pendientes salen
+ * con un solo aviso.
+ */
+export const ANSWER_READY_MESSAGE_KEY = "ver_respuesta"
+export const ANSWER_READY_MESSAGE: MessageSpec = {
+  key: ANSWER_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_ver_respuesta_v1",
+  body: "Hola, {{1}}. {{2}} respondió tu consulta. Toca «Ver respuesta» para leerla.",
+  variables: ["persona", "clinica"],
+  buttons: [{ action: "ver_respuesta", title: "Ver respuesta" }],
+}
+
+/**
  * «Presupuesto listo» (paso 3 de la fase 3): lo envía quien entrega el
  * presupuesto desde Plan o el cierre de la atención, y el agente cuando la
  * persona se lo pide por el chat. Es un aviso de lo que pasó (ADR 0040): no
@@ -360,6 +379,7 @@ export const CATALOG_MESSAGE_KEYS = [
   RESUME_MESSAGE_KEY,
   BUDGET_READY_MESSAGE_KEY,
   PERSONAL_LINK_MESSAGE_KEY,
+  ANSWER_READY_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -367,6 +387,7 @@ export function catalogMessageOf(key: string): MessageSpec | null {
   if (key === RESUME_MESSAGE_KEY) return RESUME_MESSAGE
   if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
   if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
+  if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
   return automationMessageOf(key)
 }
 

@@ -81,7 +81,7 @@ function HomePage() {
   useOrgEvents(HOME_EVENTS, refresh)
 
   const canDoTasks = usePermission("tasks.write")
-  // «Tomar» desde la fila: la misma acción que en la Bandeja y el panel (toma la conversación del caso).
+  // «Tomar este tema» desde la fila: la misma acción que en la Bandeja y el panel (toma el tema, no la conversación).
   const take = useMutation({
     mutationFn: (row: CaseRow) => takeCase({ id: row.id, conversationId: row.conversationId }),
     onSuccess: () => {
@@ -207,6 +207,23 @@ function HomePage() {
               onUnreached: () => setUnreached(true),
               onBudgets: setBudgets,
               onTake: canTake ? (row) => take.mutate(row) : undefined,
+              noCaseBrief: !data.access.conversations && !data.access.agent,
+              // Responder sin entrar a la Bandeja: el odontólogo su duda clínica, caja un pago (R3 y decisión 3).
+              onReply: async (row, text) => {
+                try {
+                  const sent = await apiFetch<{ data: { held?: boolean } }>(`/api/workspace/topics/${row.id}/reply`, {
+                    method: "POST",
+                    body: JSON.stringify({ text }),
+                  })
+                  const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
+                  toast.success(sent.data.held ? `Quedó por entregar: a ${first} le llega con «Ver respuesta».` : `Le respondiste a ${first}. Tema resuelto.`)
+                  invalidateAgentPanelQueries(queryClient)
+                  refresh()
+                  return null
+                } catch (cause) {
+                  return mutationErrorMessage(cause) ?? "No se pudo enviar la respuesta."
+                }
+              },
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,

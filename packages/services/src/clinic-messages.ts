@@ -51,6 +51,7 @@ import {
   placePhrase,
   positionalBody,
   PERSONAL_LINK_MESSAGE_KEY,
+  ANSWER_READY_MESSAGE_KEY,
   RESUME_MESSAGE_KEY,
   replyId,
   splitNamedBody,
@@ -205,6 +206,7 @@ function catalogTitle(key: CatalogMessageKey): string {
   if (key === RESUME_MESSAGE_KEY) return "Retomar la conversación"
   if (key === BUDGET_READY_MESSAGE_KEY) return "Presupuesto listo"
   if (key === PERSONAL_LINK_MESSAGE_KEY) return "Su enlace"
+  if (key === ANSWER_READY_MESSAGE_KEY) return "Ver respuesta"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -221,7 +223,7 @@ function catalogDef(
     origin:
       key === RESUME_MESSAGE_KEY
         ? "bandeja"
-        : key === BUDGET_READY_MESSAGE_KEY || key === PERSONAL_LINK_MESSAGE_KEY
+        : key === BUDGET_READY_MESSAGE_KEY || key === PERSONAL_LINK_MESSAGE_KEY || key === ANSWER_READY_MESSAGE_KEY
           ? "plan"
           : "agente",
     title: catalogTitle(key),
@@ -937,6 +939,7 @@ function buttonDoes(def: MessageDef, button: MessageButton): string {
   }
   if (button.action === "presupuesto")
     return "Le llega el PDF del presupuesto en la conversación y puede decir ahí qué acepta."
+  if (button.action === "ver_respuesta") return "Le llega en la conversación la respuesta que le escribió tu equipo."
   if (button.asks === "cambiar") return "Sofi le busca otra fecha en la conversación."
   if (button.asks === "reservar") return "Sofi le ofrece horarios en la conversación."
   if (def.origin === "agente") return "Sofi sigue la conversación con la persona."
@@ -979,6 +982,8 @@ function meanwhileOf(
   }
   if (def.id === PERSONAL_LINK_MESSAGE_KEY)
     return "Mientras tanto su enlace sale escrito a quien escribió en las últimas 24 horas, o por correo."
+  if (def.id === ANSWER_READY_MESSAGE_KEY)
+    return "Mientras tanto la respuesta queda por entregar y sale sola cuando la persona vuelve a escribir."
   if (def.origin === "plan")
     return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
@@ -1039,6 +1044,8 @@ function itemOf(
       ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule))
       : def.id === PERSONAL_LINK_MESSAGE_KEY
         ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
+        : def.id === ANSWER_READY_MESSAGE_KEY
+          ? "Cuando alguien del equipo responde un tema pasadas las 24 horas: la respuesta queda por entregar y le llega este aviso para verla."
         : def.origin === "plan"
           ? "Al entregar un presupuesto: desde Plan, al cerrar la atención o cuando la persona lo pide por el chat."
           : null,
@@ -1896,6 +1903,20 @@ export async function resumeConversationBySystem(
   // «No quiero ningún mensaje de la clínica» también frena retomar.
   if (!(await mayWriteFirst(tx, orgId, person.contactId, "avisos"))) {
     return { sent: false, waiting: `${name} pidió no recibir ningún mensaje de la clínica: llámala si hace falta.` }
+  }
+  // Instagram y Messenger no admiten mensajes aprobados: no es WhatsApp quien no deja (tablero 4b del pulido).
+  const [thread] = await tx
+    .select({ provider: channelConnection.provider })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (thread && !channelAdapters[thread.provider as ChannelProvider]?.capabilities.templates) {
+    const channel = thread.provider === "instagram" ? "Instagram" : thread.provider === "messenger" ? "Messenger" : "Este canal"
+    return {
+      sent: false,
+      waiting: `Pasaron 24 horas desde que ${name} escribió: ${channel} no deja escribirle hasta que vuelva a escribir. Si tiene WhatsApp, escríbele por ahí desde la Bandeja.`,
+    }
   }
   // Lo inicia el agente: sale dentro del «Horario para escribir» (ADR 0042).
   const schedule = await writingScheduleOf(tx, orgId)

@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { encounter, patient } from "@odentia/db/schema/clinical"
+import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
@@ -17,6 +18,7 @@ import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { windowOpen } from "./message-window.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
@@ -56,6 +58,11 @@ export interface WorkspaceAccess {
    * recepción y quien dirige. Le salen los presupuestos que nadie envió.
    */
   sendsBudgets?: boolean
+  /**
+   * Responde los temas que le pasan sin ver la Bandeja (`conversations.topics`):
+   * caja recibe en «Te espera» los temas de pagos y los responde ahí mismo.
+   */
+  topics?: boolean
   /**
    * Escribe en la historia clínica (`clinical.write`): si hoy tiene citas propias
    * ve «Mis pacientes de hoy», también si es la dueña, y sus atenciones de otro
@@ -460,21 +467,60 @@ async function waitingCases(
   orgId: string,
   userId: string,
   all: boolean,
-  onlyMine = false,
+  scope: { onlyMine?: boolean; onlyPayments?: boolean } = {},
 ): Promise<{ items: WaitingCase[]; total: number }> {
   // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
   // Quien no ve los casos del agente (el odontólogo) recibe solo los temas que
-  // le pasaron, como una duda clínica de su paciente (ADR 0050).
+  // le pasaron, como una duda clínica de su paciente (ADR 0050); caja, los de
+  // pagos (R3 y decisión 3 del pulido).
   const listed = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
-  const rows = onlyMine ? listed.filter((row) => row.assigneeUserId === userId) : listed
+  const onlyMine = scope.onlyMine === true
+  const rows = listed.filter((row) =>
+    onlyMine && scope.onlyPayments
+      ? row.assigneeUserId === userId || row.kind === "pago"
+      : onlyMine
+        ? row.assigneeUserId === userId
+        : scope.onlyPayments
+          ? row.kind === "pago"
+          : true,
+  )
+  // Se responde desde Inicio lo propio, y caja los pagos que nadie tomó. No
+  // donde Instagram o Messenger ya no dejan escribir: eso se responde en la
+  // Bandeja, con «Escribirle por WhatsApp» (tablero 4b del pulido).
+  const mayReply = (row: (typeof rows)[number]) =>
+    row.conversationId !== null && (row.assigneeUserId === userId || (scope.onlyPayments === true && row.kind === "pago" && row.assigneeUserId === null))
+  const candidates = rows.filter(mayReply).map((row) => row.conversationId).filter((id): id is string => id !== null)
+  const shut = new Set(
+    candidates.length
+      ? (
+          await tx
+            .select({ id: conversation.id, lastInboundAt: conversation.lastInboundAt })
+            .from(conversation)
+            .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+            .where(and(eq(conversation.organizationId, orgId), inArray(conversation.id, candidates), inArray(channelConnection.provider, ["instagram", "messenger"])))
+        )
+          .filter((row) => !windowOpen(row.lastInboundAt))
+          .map((row) => row.id)
+      : [],
+  )
+  const replies = (row: (typeof rows)[number]) => mayReply(row) && !shut.has(row.conversationId ?? "")
+  const sourceIds = rows.filter(replies).map((row) => row.sourceMessageId).filter((id): id is string => id !== null)
+  const quotes = new Map(
+    sourceIds.length
+      ? (await tx.select({ id: message.id, body: message.body }).from(message).where(and(eq(message.organizationId, orgId), inArray(message.id, sourceIds))))
+          .map((row) => [row.id, (row.body ?? "").replace(/\s+/g, " ").trim().slice(0, 280) || null] as const)
+      : [],
+  )
   const items = rows
     .map(row => ({
-      id: row.id, priority: row.priority, reason: row.reason, contactName: row.contactName,
+      id: row.id, priority: row.priority, urgent: row.urgent, topicKind: row.kind, reason: row.reason, contactName: row.contactName,
       channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId,
       unclaimed: row.assigneeUserId === null,
+      canReply: replies(row),
+      quote: replies(row) && row.sourceMessageId ? (quotes.get(row.sourceMessageId) ?? null) : null,
     }))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  const total = onlyMine || rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
+  const total = onlyMine || scope.onlyPayments || rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
   return { items, total }
 }
 
@@ -586,8 +632,9 @@ function noRemindersTomorrowSql(orgId: string): SQL {
 
 async function waitingTasks(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, dayEnd: SQL) {
   const areas = access.taskAreas?.length ? sql`or (t.assignee_user_id is null and t.area in ${[...access.taskAreas]})` : sql``
-  // La tarea de un caso del agente no es otra fila: el caso ya está en la lista.
-  const cases = access.agent
+  // La tarea de un caso del agente no es otra fila: el caso ya está en la lista,
+  // también para el odontólogo y caja, que ven sus temas como casos.
+  const cases = access.agent || access.conversations || access.topics
     ? sql`and not exists (select 1 from agent_handoff h where h.organization_id = t.organization_id and h.task_id = t.id)`
     : sql``
   // Lo que dejó el sistema con su propia fila (`task.kind`) no se repite como tarea.
@@ -780,8 +827,11 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
   const waiting = composeWaiting({
-    ...(access.agent || access.conversations
-      ? await waitingCases(tx, orgId, userId, access.agent && access.allTasks, !access.agent).then(({ items, total }) => ({ cases: items, casesTotal: total }))
+    ...(access.agent || access.conversations || access.topics
+      ? await waitingCases(tx, orgId, userId, access.agent && access.allTasks, {
+          onlyMine: !access.agent,
+          onlyPayments: !access.conversations && access.topics === true,
+        }).then(({ items, total }) => ({ cases: items, casesTotal: total }))
       : { cases: [] }),
     // Ningún borrador queda abandonado: la atención de otro día le sale a quien la lleva.
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],

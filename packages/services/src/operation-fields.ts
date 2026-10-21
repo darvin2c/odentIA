@@ -261,6 +261,8 @@ export const OPERATIONS = {
       assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "person" },
       message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de quién verá su consulta y cuándo le responde (por ejemplo, «la Dra. lo verá mañana desde las 9:00»). El agente sigue atendiendo lo demás.", body: "none", agent: "fills" },
       clinical: { kind: "flag", label: "Duda clínica", description: "Sí si es una duda sobre su salud, un síntoma, un medicamento o un tratamiento: el tema va al profesional que atiende al paciente.", body: "optional", agent: "fills" },
+      // R3 del pulido de la Bandeja: dice a quién le llega y qué temas puede retomar Sofi.
+      kind: { kind: "enum", values: ["cita", "precio", "clinico", "pago", "otro"], default: "otro", label: "De qué trata", description: "cita si quiere reservar, cambiar o cancelar una cita; precio si pregunta un precio de la lista (un descuento es otro); clinico si es una duda de salud; pago si habla de un pago, una transferencia o un comprobante; otro en lo demás (un reclamo, un descuento, hablar con una persona).", body: "optional", agent: "fills" },
       asks: { kind: "text", min: 1, max: 400, label: "Qué pide", description: "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.", body: "none", agent: "fills" },
       pending: { kind: "text", min: 1, max: 400, label: "Lo que falta", description: "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.", body: "none", agent: "fills" },
     },

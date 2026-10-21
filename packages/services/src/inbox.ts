@@ -16,7 +16,9 @@ import {
   getConversationDetail,
   listConversations,
 } from "./conversations.js"
+import { TOPIC_KINDS, type TopicKind, topicIsUrgent } from "./topic-urgency.js"
 import { handoffOpenSql } from "./handoff-state.js"
+import { lateReplyOf } from "./held-replies.js"
 import { findOrgLocale } from "./locale.js"
 import { insideAgentHours } from "./opportune-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
@@ -57,16 +59,15 @@ export interface ConversationAttention {
   topics: InboxTopic[]
 }
 
-/** Horas tras las que un tema sin resolver pasa a «Ahora» (ADR 0050). */
-export const TOPIC_URGENT_AFTER_HOURS = 2
-
 /** Un tema sin resolver: lo que una persona del equipo tiene que contestar. */
 export interface InboxTopic {
   id: string
   reason: string
   priority: HandoffPriorityLevel
-  /** Ahora: prioridad alta o lleva más de `TOPIC_URGENT_AFTER_HOURS` sin resolverse. */
+  /** Ahora: prioridad alta o ya pasaron dos horas de clínica abierta esperando al equipo (`urgent_at`, decisión 1). */
   urgent: boolean
+  /** De qué trata: dice a quién le llega (R3). */
+  kind: TopicKind
   assigneeUserId: string | null
   assigneeName: string | null
   /** Lo creó el agente o una persona del equipo al escribir. */
@@ -195,9 +196,11 @@ async function conversationAttention(
     source_at: Date | string | null
     asked_message_ids: string[] | null
     asked_again_at: Date | string | null
+    kind: string
+    urgent_at: Date | string | null
   }>(sql`
     select h.id, h.conversation_id, h.priority, h.reason, h.assignee_user_id, ua.name as assignee_name,
-      h.created_by, h.created_at, t.due_at, h.task_id, h.asked_message_ids, h.asked_again_at,
+      h.created_by, h.created_at, t.due_at, h.task_id, h.asked_message_ids, h.asked_again_at, h.kind, h.urgent_at,
       ms.id as source_id, ms.body as source_body, ms.created_at as source_at
     from agent_handoff h
     left join "user" ua on ua.id = h.assignee_user_id
@@ -205,7 +208,6 @@ async function conversationAttention(
     left join message ms on ms.id = h.source_message_id and ms.conversation_id = h.conversation_id
     where h.organization_id = ${orgId} and h.conversation_id in (${list}) and ${handoffOpenSql(sql.raw("h"))}
     order by h.created_at`)
-  const urgentBefore = now.getTime() - TOPIC_URGENT_AFTER_HOURS * 3_600_000
   for (const row of handoffs) {
     const item = attention.get(row.conversation_id)
     const priority = PRIORITY_ORDER.find((p) => p === row.priority)
@@ -218,7 +220,8 @@ async function conversationAttention(
       id: row.id,
       reason: row.reason,
       priority,
-      urgent: priority === "alta" || new Date(createdAt).getTime() <= urgentBefore,
+      urgent: topicIsUrgent({ priority, urgentAt: row.urgent_at === null ? null : new Date(row.urgent_at) }, now),
+      kind: (TOPIC_KINDS as readonly string[]).includes(row.kind) ? (row.kind as TopicKind) : "otro",
       assigneeUserId: row.assignee_user_id,
       assigneeName: row.assignee_name,
       createdBy: row.created_by === "user" ? "user" : "agent",
@@ -272,6 +275,8 @@ export async function getInboxConversationDetail(tx: Db, orgId: string, id: stri
     ...detail,
     attention: state.attention.get(detail.conversation.id) ?? NO_ATTENTION,
     closure: state.closure.get(detail.conversation.id) ?? null,
+    // Responder pasadas las 24 horas: «Ver respuesta» en WhatsApp, la ventana de Instagram y Messenger.
+    lateReply: await lateReplyOf(tx, orgId, detail.conversation.id),
   }
 }
 

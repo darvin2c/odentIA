@@ -1229,6 +1229,12 @@ function ThreadView({
   const [onlyTopic, setOnlyTopic] = useState(startOnTopic)
   const [doneTopic, setDoneTopic] = useState(false)
   const keepPendingRef = useRef(false)
+  // Pasadas las 24 horas: elegir un mensaje aprobado en vez de responder el tema
+  // (R1), o escribirle por WhatsApp desde Instagram o Messenger (tablero 4b).
+  const [useApproved, setUseApproved] = useState(false)
+  const [viaWhatsapp, setViaWhatsapp] = useState(false)
+  // La conversación de WhatsApp a la que fue la respuesta: el hilo de Instagram lo dice.
+  const [sentToWhatsapp, setSentToWhatsapp] = useState<string | null>(null)
 
   useEffect(() => {
     setOlder([])
@@ -1246,6 +1252,9 @@ function ThreadView({
     setReplyTo(undefined)
     setDoneTopic(false)
     setBlocking(false)
+    setUseApproved(false)
+    setViaWhatsapp(false)
+    setSentToWhatsapp(null)
   }, [id])
   // Desde «Por atender» cada hilo abre en «Solo este tema» (ADR 0050).
   useEffect(() => {
@@ -1336,8 +1345,8 @@ function ThreadView({
   }, [prepareRegistration, canRegister, detail])
 
   const sendMutation = useMutation({
-    mutationFn: (input: { text: string; replyToMessageId: string | null; keepPending: boolean }) =>
-      apiFetch<{ data: ChatMessage & { topicId: string | null; topicResolved: boolean } }>(`/api/conversations/${id}/messages`, {
+    mutationFn: (input: { text: string; replyToMessageId: string | null; keepPending: boolean; viaWhatsapp?: boolean }) =>
+      apiFetch<{ data: ChatMessage & { topicResolved: boolean; conversationId?: string } }>(`/api/conversations/${id}/messages${input.viaWhatsapp ? "/whatsapp" : ""}`, {
         method: "POST",
         body: JSON.stringify({
           text: input.text,
@@ -1345,11 +1354,18 @@ function ThreadView({
           ...(input.keepPending ? { keepPending: true } : {}),
         }),
       }),
-    onSuccess: (result) => {
+    onSuccess: (result, input) => {
       setComposer("")
       setWindowClosed(false)
       setSendError(null)
       setReplyTo(undefined)
+      if (input.viaWhatsapp) {
+        setViaWhatsapp(false)
+        setSentToWhatsapp(result.data.conversationId ?? null)
+        toast.success(
+          result.data.held ? "Quedó en su WhatsApp: le llega con «Ver respuesta»." : "Se le envió por WhatsApp.",
+        )
+      }
       if (result.data.topicResolved) setDoneTopic(true)
       invalidate()
       invalidateAgentPanelQueries(queryClient)
@@ -1404,7 +1420,12 @@ function ThreadView({
     setUploading(true)
     try {
       if (text) {
-        await sendMutation.mutateAsync({ text, replyToMessageId: effectiveReplyTo, keepPending: keepPendingRef.current })
+        await sendMutation.mutateAsync({
+          text,
+          replyToMessageId: effectiveReplyTo,
+          keepPending: keepPendingRef.current,
+          ...(viaWhatsapp ? { viaWhatsapp: true } : {}),
+        })
       }
       for (const file of files) {
         const blob = await (await fetch(file.url)).blob()
@@ -1546,6 +1567,14 @@ function ThreadView({
     ? (topics.find((topic) => topic.source?.id === effectiveReplyTo || topic.askedMessageIds.includes(effectiveReplyTo)) ?? null)
     : null
   const replyText = replyMessage?.body ?? (replyTopic ? topicQuote(replyTopic) : null)
+  // Pasadas las 24 horas de WhatsApp, responder una pregunta se sigue
+  // escribiendo: queda por entregar y le llega con «Ver respuesta» (R1).
+  const holdReply = windowShut && effectiveReplyTo !== null && !useApproved
+  // Instagram y Messenger, pasadas las 24 horas: no admiten mensajes aprobados (tablero 4b).
+  const metaWindow = detail.lateReply?.metaWindow ?? null
+  const metaShut = metaWindow !== null && !metaWindow.open
+  const firstName = detail.contact.displayName.split(/\s+/)[0] ?? detail.contact.displayName
+  const metaChannel = detail.connection.provider === "messenger" ? "Messenger" : "Instagram"
   // Mensajes del tema: los que lo originaron o volvieron a preguntar por él.
   const topicMessageIds = new Set(topics.flatMap((topic) => [topic.source?.id, ...topic.askedMessageIds].filter((item): item is string => !!item)))
   const askedIds = new Set(topics.flatMap((topic) => topic.askedMessageIds))
@@ -1932,19 +1961,81 @@ function ThreadView({
           <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
             No puedes escribirle mientras esté bloqueado.
           </p>
-        ) : windowShut ? (
-          // Pasaron las 24 horas de WhatsApp: se dice antes de escribir y se ofrecen los mensajes aprobados.
-          <InboxApprovedMessages
-            // Otra conversación es otra elección: no arrastra lo elegido ni el error de la anterior.
-            key={id}
-            conversationId={id}
-            contactName={detail.contact.displayName}
-            lastInboundAt={detail.whatsappWindow?.lastInboundAt}
-            draft={composer}
-            onSent={invalidate}
-          />
+        ) : windowShut && !holdReply ? (
+          <div className="flex flex-col gap-1.5">
+            {defaultTopic?.source ? (
+              // Hay una pregunta sin responder: se le puede responder igual y le llega con «Ver respuesta» (R1).
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11 w-fit sm:min-h-8"
+                onClick={() => {
+                  setUseApproved(false)
+                  setReplyTo(defaultTopic.source?.id ?? null)
+                }}
+              >
+                Responder su pregunta
+              </Button>
+            ) : null}
+            {/* Pasaron las 24 horas de WhatsApp: se dice antes de escribir y se ofrecen los mensajes aprobados. */}
+            <InboxApprovedMessages
+              // Otra conversación es otra elección: no arrastra lo elegido ni el error de la anterior.
+              key={id}
+              conversationId={id}
+              contactName={detail.contact.displayName}
+              lastInboundAt={detail.whatsappWindow?.lastInboundAt}
+              draft={composer}
+              onSent={invalidate}
+            />
+          </div>
+        ) : metaShut && !viaWhatsapp ? (
+          // Instagram y Messenger pasadas las 24 horas: no dejan escribirle; si tiene WhatsApp, por ahí (tablero 4b).
+          <div className="flex flex-col gap-2 rounded-lg border border-dashed px-3 py-2 text-sm">
+            <p>
+              Pasaron 24 horas desde que {firstName} escribió por {metaChannel}. {metaChannel} no deja escribirle hasta que vuelva a escribir.
+            </p>
+            {sentToWhatsapp ? (
+              <p role="status" className="flex flex-wrap items-center gap-x-2">
+                <CheckCircle2 className="size-4 text-success" aria-hidden />
+                Tu respuesta salió por su WhatsApp.
+                <Link to="/inbox" search={{ conversation: sentToWhatsapp }} className="font-semibold text-primary underline-offset-2 hover:underline">
+                  Ver la conversación de WhatsApp
+                </Link>
+              </p>
+            ) : null}
+            {metaWindow?.whatsapp ? (
+              <Button type="button" variant="outline" size="sm" className="min-h-11 w-fit sm:min-h-8" onClick={() => setViaWhatsapp(true)}>
+                Escribirle por WhatsApp
+              </Button>
+            ) : null}
+          </div>
         ) : (
           <div className="flex flex-col gap-1.5">
+            {holdReply ? (
+              <div role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-dashed px-3 py-2 text-xs">
+                <span className="min-w-0 flex-1">
+                  {detail.lateReply?.answerReady === false
+                    ? `Pasaron 24 horas desde su último mensaje: tu respuesta queda guardada y le llega cuando Meta apruebe «Ver respuesta» o cuando ${firstName} vuelva a escribir.`
+                    : `Pasaron 24 horas desde su último mensaje: tu respuesta queda por entregar y le llega a ${firstName} con «Ver respuesta».`}
+                </span>
+                <Button type="button" variant="ghost" size="sm" className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0" onClick={() => setUseApproved(true)}>
+                  Enviar un mensaje aprobado
+                </Button>
+              </div>
+            ) : null}
+            {viaWhatsapp ? (
+              <div role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-dashed px-3 py-2 text-xs">
+                <span className="min-w-0 flex-1">
+                  {metaWindow?.whatsappOpen
+                    ? `Le llega a su WhatsApp: ${firstName} escribió por ahí en las últimas 24 horas.`
+                    : `Le llega a su WhatsApp con «Ver respuesta»: ${firstName} lo toca y ve tu respuesta.`}
+                </span>
+                <Button type="button" variant="ghost" size="sm" className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0" onClick={() => setViaWhatsapp(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            ) : null}
             {doneTopic ? (
               <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
                 <CheckCircle2 className="size-4 text-success" aria-hidden />
@@ -2035,12 +2126,15 @@ function ThreadView({
               </PromptInputBody>
               <PromptInputFooter>
                 <PromptInputTools>
-                  <PromptInputActionMenu>
-                    <PromptInputActionMenuTrigger aria-label="Adjuntar archivo" />
-                    <PromptInputActionMenuContent>
-                      <PromptInputActionAddAttachments label="Adjuntar archivo" />
-                    </PromptInputActionMenuContent>
-                  </PromptInputActionMenu>
+                  {/* Una respuesta por entregar es solo texto: un adjunto no espera a «Ver respuesta». */}
+                  {holdReply || viaWhatsapp ? null : (
+                    <PromptInputActionMenu>
+                      <PromptInputActionMenuTrigger aria-label="Adjuntar archivo" />
+                      <PromptInputActionMenuContent>
+                        <PromptInputActionAddAttachments label="Adjuntar archivo" />
+                      </PromptInputActionMenuContent>
+                    </PromptInputActionMenu>
+                  )}
                   <SpeechInput
                     lang={activeOrgLocale() ?? "es"}
                     size="icon-sm"
@@ -2461,6 +2555,9 @@ function MessageBubble({
           <time dateTime={msg.createdAt} title={fullWhenWords(msg.createdAt)}>
             {clockWords(msg.createdAt)}
           </time>
+          {/* Respuesta pasadas las 24 horas (R1): espera a que la persona toque «Ver respuesta». */}
+          {out && msg.status === "held" ? <span className="font-semibold">· Por entregar</span> : null}
+          {out && msg.held && msg.status !== "held" && msg.sentAt ? <span>· Entregada {clockWords(msg.sentAt)}</span> : null}
           {out && statusIcon(msg.status)}
         </div>
         {onShowTrace ? (

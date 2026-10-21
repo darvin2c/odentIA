@@ -32,6 +32,7 @@ import {
   closeConversationWith,
   closurePendingReason,
   createHandoff,
+  topicKindOf,
   recordTopicAskedAgain,
   createProposal,
   createTask,
@@ -1900,7 +1901,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean }) => {
+    async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
@@ -1941,6 +1942,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           pending,
           sourceMessageId: ctx.triggerId,
           clinical: clinical === true,
+          kind: topicKindOf(kind),
         }),
       )
       ctx.handedOff = true

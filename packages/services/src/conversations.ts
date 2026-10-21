@@ -134,6 +134,12 @@ export interface MessageItem {
   automatic: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado (ADR 0050). */
   replyToMessageId: string | null
+  /**
+   * Respuesta del equipo que quedó por entregar pasadas las 24 horas (R1):
+   * mientras `status` es «held» dice «Por entregar»; después, «Entregada» con
+   * su hora (`sentAt`).
+   */
+  held: boolean
   /** Lo reenvió la persona: no lo escribió ella. */
   forwarded: boolean
   /** La reacción de la persona a este mensaje (👍…); nula si no reaccionó. No confirma nada. */
@@ -167,6 +173,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
         ? row.templateParams
         : null,
     replyToMessageId: row.replyToMessageId ?? null,
+    held: row.held,
     forwarded: row.forwarded,
     contactReaction: row.contactReaction,
     location: row.location ?? null,
@@ -799,6 +806,12 @@ export async function sendOutbound(
     content: OutboundContent
     /** Responde citando este mensaje de la misma conversación (ADR 0050). */
     replyToMessageId?: string | null
+    /**
+     * Responde un tema (R1 del pulido de la Bandeja): si WhatsApp ya no deja
+     * escribirle, queda «Por entregar» en vez de fallar y sale cuando la
+     * persona toca «Ver respuesta» o vuelve a escribir.
+     */
+    holdIfClosed?: boolean
   },
 ): Promise<MessageItem> {
   const row = await requireWritableConversation(tx, orgId, input.conversationId, { userId: input.senderUserId ?? null })
@@ -810,8 +823,13 @@ export async function sendOutbound(
       .limit(1)
     if (!quoted) throw validation("El mensaje citado no es de esta conversación")
   }
+  const hold =
+    input.holdIfClosed === true &&
+    row.connection.provider === "whatsapp_cloud_api" &&
+    input.content.type !== "template" &&
+    !windowOpen(row.conversation.lastInboundAt)
   if (row.connection.provider === "whatsapp_cloud_api") {
-    assertWindowAllows(row, input.content)
+    if (!hold) assertWindowAllows(row, input.content)
   } else if (META_OUTBOUND_PROVIDERS.includes(row.connection.provider)) {
     assertMetaWindowAllows(row)
   }
@@ -860,11 +878,16 @@ export async function sendOutbound(
       listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       replyToMessageId: input.replyToMessageId ?? null,
-      status: "queued",
+      status: hold ? "held" : "queued",
+      held: hold,
+      // La hora en que se escribe, no la de la transacción: dos mensajes en la
+      // misma (la respuesta por entregar y su «Ver respuesta») conservan su orden.
+      createdAt: sql`clock_timestamp()`,
     })
     .returning()
   if (!created) throw new Error("No se pudo crear el mensaje")
-  await sendOutboundMessage(tx, { orgId, messageId: created.id })
+  // Por entregar: el worker no lo ve hasta que se pueda escribirle (`deliverHeldReplies`).
+  if (!hold) await sendOutboundMessage(tx, { orgId, messageId: created.id })
   await audit(tx, orgId, {
     actorUserId: input.senderUserId ?? null,
     action: "message.created",
@@ -880,6 +903,26 @@ export async function sendOutbound(
     at: now.toISOString(),
   })
   return toMessageItem(created)
+}
+
+/**
+ * Entrega las respuestas del equipo que quedaron por entregar (R1): la persona
+ * tocó «Ver respuesta» o volvió a escribir, y WhatsApp deja escribirle otra
+ * vez. Salen en el orden en que se escribieron, cada una citando su pregunta.
+ */
+export async function deliverHeldReplies(tx: Db, orgId: string, conversationId: string): Promise<number> {
+  const released = await tx
+    .update(message)
+    .set({ status: "queued" })
+    .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), eq(message.status, "held")))
+    .returning({ id: message.id, createdAt: message.createdAt })
+  released.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  const at = new Date().toISOString()
+  for (const row of released) {
+    await sendOutboundMessage(tx, { orgId, messageId: row.id })
+    await notify(tx, { orgId, kind: "message.updated", conversationId, messageId: row.id, at })
+  }
+  return released.length
 }
 
 /**

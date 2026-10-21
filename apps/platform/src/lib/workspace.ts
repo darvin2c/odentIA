@@ -68,8 +68,16 @@ export type WaitingRow =
       channel: string | null
       createdAt: string
       conversationId: string | null
-      /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
+      /** Nadie lo tomó todavía: la fila ofrece «Tomar este tema». */
       unclaimed: boolean
+      /** «Ahora»: alta, o dos horas de clínica abierta esperando (decisión 1 del pulido). */
+      urgent?: boolean
+      /** De qué trata: cita, precio, clínico, pago u otro (R3). */
+      topicKind?: string
+      /** Quien mira lo responde aquí mismo, sin entrar a la Bandeja (R3 y decisión 3). */
+      canReply?: boolean
+      /** Lo que preguntó, para responderlo aquí; solo si `canReply`. */
+      quote?: string | null
     }
   /**
    * Una cita que hay que confirmar llamando: sigue sin confirmar tras el primer

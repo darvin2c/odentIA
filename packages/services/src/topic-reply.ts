@@ -1,16 +1,20 @@
 import type { Db } from "@odentia/db"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import { and, eq, sql } from "drizzle-orm"
-import { notFound } from "./errors.js"
+import { notFound, ServiceError, validation } from "./errors.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
-import { type MessageItem, type OutboundContent, sendOutbound } from "./conversations.js"
+import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
 import { handoffOpenSql } from "./handoff-state.js"
+import { offerHeldReplies, whatsappOf } from "./held-replies.js"
 import { updateTask } from "./tasks.js"
+import { topicUrgentAt } from "./topic-urgency.js"
 
 /**
  * Una persona del equipo responde en la Bandeja (ADR 0050). Si cita un mensaje
- * de la persona, la respuesta sale citada y responde su tema:
+ * de la persona, la respuesta sale citada y responde su tema (pasadas las 24
+ * horas de WhatsApp queda «Por entregar» y sale «Ver respuesta», R1):
  * - Si el mensaje es de un tema abierto, ese tema pasa a quien responde (si
  *   lo tenía otra persona, se le avisa) y, con «Enviar y resolver», queda
  *   resuelto.
@@ -42,12 +46,19 @@ export async function sendTeamReply(
     senderUserId: input.userId,
     content: input.content,
     replyToMessageId: replyTo,
+    holdIfClosed: replyTo !== null,
   })
+  if (sent.held) await offerInSavepoint(tx, orgId, input.conversationId)
   if (topic) {
     if (!input.keepPending && topic.taskId) {
       await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
       return { ...sent, topicId: topic.id, topicResolved: true }
     }
+    // «Enviar, sigue pendiente»: la persona ya tiene una respuesta; las dos horas para «Ahora» vuelven a contar.
+    await tx
+      .update(agentHandoff)
+      .set({ urgentAt: await topicUrgentAt(tx, orgId, new Date()) })
+      .where(and(eq(agentHandoff.id, topic.id), eq(agentHandoff.organizationId, orgId)))
     return { ...sent, topicId: topic.id, topicResolved: false }
   }
   if (replyTo && input.keepPending) {
@@ -64,6 +75,117 @@ export async function sendTeamReply(
     return { ...sent, topicId: created.id, topicResolved: false }
   }
   return { ...sent, topicId: null, topicResolved: false }
+}
+
+/**
+ * «Ver respuesta» al momento, en su punto de guardado: si no sale (Meta lo
+ * recategorizó, por ejemplo), la respuesta queda guardada igual y el ciclo lo
+ * vuelve a intentar.
+ */
+async function offerInSavepoint(tx: Db, orgId: string, conversationId: string): Promise<void> {
+  await tx
+    .transaction((inner) => offerHeldReplies(inner, orgId, conversationId))
+    .catch((error: unknown) => {
+      if (!(error instanceof ServiceError)) throw error
+    })
+}
+
+/**
+ * «Escribirle por WhatsApp» (tablero 4b del pulido de la Bandeja): en
+ * Instagram o Messenger pasaron las 24 horas y esos canales no admiten
+ * mensajes aprobados. La respuesta va a su WhatsApp marcado como suyo, «Por
+ * entregar» y con «Ver respuesta» (R1): un WhatsApp en el que nunca escribió
+ * no admite «Retomar la conversación». El tema que respondía queda resuelto en
+ * su conversación, salvo «sigue pendiente» (decisión 4).
+ */
+export async function replyByWhatsApp(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; userId: string; text: string; replyToMessageId?: string | null; keepPending?: boolean },
+): Promise<MessageItem & { conversationId: string; topicResolved: boolean }> {
+  const [source] = await tx
+    .select({ contactId: conversation.contactId, provider: channelConnection.provider })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!source) throw notFound("Conversación")
+  if (source.provider !== "instagram" && source.provider !== "messenger") {
+    throw validation("Escribirle por WhatsApp es para una conversación de Instagram o Messenger")
+  }
+  const whatsapp = await whatsappOf(tx, orgId, source.contactId)
+  if (!whatsapp) {
+    throw new ServiceError(
+      "NO_WHATSAPP",
+      409,
+      "No tiene un WhatsApp marcado como suyo: márcalo en su página para escribirle por ahí.",
+    )
+  }
+  const replyTo = input.replyToMessageId ?? null
+  const topic = replyTo ? await openTopicOf(tx, orgId, input.conversationId, replyTo) : null
+  if (topic && topic.assigneeUserId !== input.userId) {
+    await claimHandoff(tx, orgId, input.userId, topic.id, { takeOver: true })
+  }
+  const thread = await startContactConversation(tx, orgId, input.userId, source.contactId, whatsapp)
+  const sent = await sendOutbound(tx, orgId, {
+    conversationId: thread.id,
+    senderKind: "user",
+    senderUserId: input.userId,
+    content: { type: "text", text: input.text },
+    holdIfClosed: true,
+  })
+  if (sent.held) await offerInSavepoint(tx, orgId, thread.id)
+  const resolved = topic !== null && !input.keepPending && topic.taskId !== null
+  if (resolved && topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  return { ...sent, conversationId: thread.id, topicResolved: resolved }
+}
+
+/**
+ * «Responder» desde Inicio (R3 y decisión 3 del pulido de la Bandeja): el
+ * odontólogo responde la duda clínica que le pasaron y caja el tema de un
+ * pago, sin entrar a la Bandeja. Es la misma respuesta de la Bandeja
+ * (`sendTeamReply`): cita la pregunta, toma el tema y lo resuelve. Se responde
+ * lo propio o lo que nadie tomó; quién puede tenerlo lo decide `claimHandoff`.
+ */
+export async function replyToTopic(
+  tx: Db,
+  orgId: string,
+  input: { topicId: string; userId: string; text: string },
+): Promise<MessageItem & { topicId: string | null; topicResolved: boolean }> {
+  const [topic] = await tx
+    .select({
+      id: agentHandoff.id,
+      conversationId: agentHandoff.conversationId,
+      sourceMessageId: agentHandoff.sourceMessageId,
+      assigneeUserId: agentHandoff.assigneeUserId,
+      taskId: agentHandoff.taskId,
+    })
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId), handoffOpenSql(sql.raw('"agent_handoff"'))))
+    .limit(1)
+  if (!topic?.conversationId) throw notFound("Tema")
+  if (topic.assigneeUserId !== null && topic.assigneeUserId !== input.userId) {
+    throw new ServiceError("TOPIC_TAKEN", 409, "Este tema ya lo tiene otra persona del equipo.")
+  }
+  // Primero se toma este tema: `claimHandoff` dice si quien responde puede tenerlo.
+  if (topic.assigneeUserId !== input.userId) await claimHandoff(tx, orgId, input.userId, topic.id, { takeOver: true })
+  if (topic.sourceMessageId) {
+    return sendTeamReply(tx, orgId, {
+      conversationId: topic.conversationId,
+      userId: input.userId,
+      content: { type: "text", text: input.text },
+      replyToMessageId: topic.sourceMessageId,
+    })
+  }
+  // Sin mensaje que citar: se responde sin cita y el tema se resuelve igual.
+  const sent = await sendOutbound(tx, orgId, {
+    conversationId: topic.conversationId,
+    senderKind: "user",
+    senderUserId: input.userId,
+    content: { type: "text", text: input.text },
+  })
+  if (topic.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  return { ...sent, topicId: topic.id, topicResolved: topic.taskId !== null }
 }
 
 /** El tema abierto al que pertenece un mensaje: lo originó o la persona volvió a preguntar con él. */

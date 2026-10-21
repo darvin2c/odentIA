@@ -840,7 +840,7 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los catorce, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los quince, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
@@ -857,6 +857,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial"],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto"],
       ["odentia_su_enlace_v1", "en_revision", "su_enlace"],
+      ["odentia_ver_respuesta_v1", "en_revision", "ver_respuesta"],
     ])
     // Ya están pedidos: el ciclo no vuelve a llamar a WhatsApp.
     const meta = fakeMeta()
@@ -995,6 +996,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial", 3],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto", 3],
       ["odentia_su_enlace_v1", "en_revision", "su_enlace", 2],
+      ["odentia_ver_respuesta_v1", "en_revision", "ver_respuesta", 2],
     ])
     expect(synced.find((item) => item.status === "rechazada")?.reason).toBe("INVALID_FORMAT")
     // Con el cuerpo conocido, se exige un dato por variable.
@@ -1002,7 +1004,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(15)
+    expect(rows).toHaveLength(16)
   })
 })
 

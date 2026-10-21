@@ -526,6 +526,13 @@ export const message = pgTable(
     // adaptador al recibir una respuesta citada. Nulo si no cita nada.
     replyToMessageId: uuid("reply_to_message_id"),
     /**
+     * Respuesta del equipo a un tema pasadas las 24 horas de WhatsApp (R1 del
+     * pulido de la Bandeja): queda «Por entregar» (`status` 'held') y sale
+     * cuando la persona toca «Ver respuesta» o vuelve a escribir. Sigue en true
+     * después, para decir «Entregada» con su hora.
+     */
+    held: boolean("held").notNull().default(false),
+    /**
      * La persona lo reenvió: no lo escribió ella (WhatsApp `context.forwarded`,
      * Telegram `forward_origin`). El agente no lo toma como dicho por ella.
      */
@@ -564,6 +571,8 @@ export const message = pgTable(
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
     // Los mensajes de una clínica en un tramo (Reportes): sin él, cada consulta recorre los de todas.
     index("message_org_created_idx").on(table.organizationId, table.createdAt),
+    // Las respuestas por entregar (R1): el ciclo las busca cada minuto y casi nunca hay.
+    index("message_held_idx").on(table.organizationId, table.conversationId).where(sql`"status" = 'held'`),
   ],
 )
 

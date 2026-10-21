@@ -10,6 +10,7 @@ import { agentConfig, channelConnection, conversation } from "@odentia/db/schema
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   askConfirmationAfterReaction,
+  deliverHeldReplies,
   handleAutomationReply,
   ingestInbound,
   isStopWord,
@@ -116,6 +117,9 @@ export async function processInbound(
       }
       if (screen.screen === "blocked") return
       if (screen.screen === "spam" && !screen.recheck) return
+      // Volvió a escribir: WhatsApp deja escribirle otra vez y salen las
+      // respuestas del equipo que quedaron por entregar (R1), antes que nada.
+      await tx.transaction((inner) => deliverHeldReplies(inner, orgId, result.conversationId))
       // Un botón de un mensaje automático («Confirmar», «No más recordatorios»)
       // y «BAJA» o «STOP» los resuelve el sistema: no llegan al modelo ni gastan
       // una corrida. Va en su propio punto de guardado: si su respuesta no puede

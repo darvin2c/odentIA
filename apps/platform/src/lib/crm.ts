@@ -186,6 +186,13 @@ export interface ChatMessage {
   automatic?: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado. */
   replyToMessageId?: string | null
+  /**
+   * Respuesta del equipo que quedó por entregar pasadas las 24 horas (R1):
+   * con `status` «held» dice «Por entregar»; después, «Entregada» con `sentAt`.
+   */
+  held?: boolean
+  /** Cuándo lo aceptó el proveedor; nulo si aún no salió. */
+  sentAt?: string | null
   /** Lo reenvió la persona: no lo escribió ella. */
   forwarded?: boolean
   /** La reacción de la persona a este mensaje (👍…); no confirma nada. */
@@ -232,6 +239,15 @@ export interface ConversationDetail {
    * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
    */
   whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
+  /**
+   * Responder pasadas las 24 horas: si Meta aprobó «Ver respuesta» (WhatsApp)
+   * y la ventana de Instagram y Messenger, con si tiene un WhatsApp suyo.
+   * Ausente en respuestas antiguas en caché.
+   */
+  lateReply?: {
+    answerReady: boolean
+    metaWindow: { open: boolean; lastInboundAt: string | null; whatsapp: boolean; whatsappOpen?: boolean } | null
+  }
   /** Paciente al que le faltan datos: la Bandeja ofrece pegar su enlace. Ausente en respuestas antiguas. */
   missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
   /** Spam o bloqueada (ADR 0054); ausente en respuestas antiguas en caché. */

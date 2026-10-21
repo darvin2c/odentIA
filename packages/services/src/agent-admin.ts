@@ -55,6 +55,8 @@ import type { TemplateDeps } from "./channel-templates.js"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
 import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { offerPendingHeldReplies } from "./held-replies.js"
+import { retakeForgottenTopics } from "./topic-retake.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -1337,6 +1339,10 @@ export interface TickSummary {
   cerradas: number
   /** Tareas que se cerraron solas porque su motivo desapareció. */
   tareasCerradas: number
+  /** «Ver respuesta» que salieron por respuestas del equipo por entregar (R1). */
+  respuestasOfrecidas: number
+  /** Temas de cita o precio que Sofi retomó a la hora de apertura (decisión 5 del pulido). */
+  temasRetomados: number
 }
 
 /** Las líneas que escriben a la persona, cada una con quien anota sus casos. */
@@ -1367,7 +1373,7 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0, respuestasOfrecidas: 0, temasRetomados: 0 }
   for (const { orgId } of orgRows) {
     // Restricción/pausa comercial: no se programa, coordina ni entrega nada;
     // lo encolado se conserva para la reanudación. La ingesta no pasa por aquí.
@@ -1379,9 +1385,16 @@ export async function tickAutomations(
     )
     summary.insistidas += care.nudged
     summary.cerradas += care.closed
+    // «Sofi se ofrece» (decisión 5 del pulido de la Bandeja): es de Recepción, como insistir y cerrar.
+    summary.temasRetomados += await withOrgContext(appDb, orgId, (tx) =>
+      retakeForgottenTopics(tx, orgId, now, { secretsKey: deps.secretsKey, ...(deps.format ? { format: deps.format } : {}) }),
+    )
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
     summary.tareasCerradas += await withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now))
+    // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver
+    // respuesta» sale cuando Meta lo aprueba, dentro del «Horario para escribir».
+    summary.respuestasOfrecidas += await withOrgContext(appDb, orgId, (tx) => offerPendingHeldReplies(tx, orgId, now))
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {

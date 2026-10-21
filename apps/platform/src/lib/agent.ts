@@ -100,6 +100,8 @@ export interface AgentHandoff {
   /** abierta | tomada | resuelta (derivado de su tarea). */
   status: "abierta" | "tomada" | "resuelta"
   createdAt: string
+  /** «Ahora»: alta, o ya pasaron dos horas de clínica abierta esperando (decisión 1 del pulido). */
+  urgent?: boolean
 }
 
 /** Resumen ligero del panel del agente (legible con agent.decide). */

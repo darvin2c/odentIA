@@ -22,7 +22,10 @@
  * sus alergias activas (declaradas en el registro o validadas), nunca el resto
  * de la ficha. No implica `clinical.read`. `clinical.receive` es la otra:
  * quien recibe el CD sube la tomografía a la ficha y ve que llegó, sin
- * abrirla ni descargarla (ADR 0055).
+ * abrirla ni descargarla (ADR 0055). `conversations.topics` es la tercera:
+ * responde un tema que Sofi le pasó (un pago, a caja) desde Inicio, con solo
+ * ese tema a la vista; no abre la Bandeja ni las demás conversaciones
+ * (decisión 3 del pulido de la Bandeja).
  *
  * Invariante: lo clínico (`clinical.read`/`.write`) nunca se entrega a
  * recepción/caja y lo financiero (`finance.*`) nunca a recepción/clínica.
@@ -62,6 +65,7 @@ export type Permission =
   | "agent.decide"
   | "clinical.alerts"
   | "clinical.receive"
+  | "conversations.topics"
   | "budgets.decide"
   | "budgets.send"
   | "finance.close"
@@ -100,6 +104,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "agent.decide",
   "clinical.alerts",
   "clinical.receive",
+  "conversations.topics",
   "budgets.decide",
   "budgets.send",
   "finance.close",
@@ -126,6 +131,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "crm.write",
     "conversations.read",
     "conversations.write",
+    "conversations.topics",
     "tasks.read",
     "tasks.write",
     "agent.decide",
@@ -156,6 +162,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "appointments.write",
     "conversations.read",
     "conversations.write",
+    "conversations.topics",
     "tasks.read",
     "tasks.write",
   ],
@@ -169,6 +176,8 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "catalog.read",
     "tasks.read",
     "tasks.write",
+    // Responde los temas de pagos que le pasa Sofi, desde Inicio, sin ver la Bandeja (decisión 3 del pulido).
+    "conversations.topics",
   ],
   member: ["tasks.read"],
 };
@@ -183,6 +192,7 @@ function isPermission(permission: string): permission is Permission {
     permission === "agent.decide" ||
     permission === "clinical.alerts" ||
     permission === "clinical.receive" ||
+    permission === "conversations.topics" ||
     permission === "budgets.decide" ||
     permission === "budgets.send" ||
     permission === "finance.close" ||

@@ -372,6 +372,27 @@
       "when": 1792543534956,
       "tag": "0052_bandeja_reenviados_reacciones_ubicaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792551824608,
+      "tag": "0053_bandeja_temas_tipo_y_ahora",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792551836173,
+      "tag": "0054_bandeja_temas_tipo_y_ahora_datos",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792552416296,
+      "tag": "0055_bandeja_respuesta_por_entregar",
+      "breakpoints": true
     }
   ]
 }

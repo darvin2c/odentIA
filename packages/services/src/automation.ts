@@ -69,7 +69,7 @@ import {
   settleMessageTexts,
   templateReasonWords,
 } from "./clinic-messages.js"
-import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -3142,6 +3142,13 @@ export async function handleAutomationReply(
       { conversationId: input.conversationId, contactId: thread.contactId, budgetId: reply.jobId },
       deps,
     )
+  }
+  // «Ver respuesta» (R1): le llegan las respuestas del equipo que esperaban. El
+  // botón lleva su conversación y solo vale ahí; tocarlo no es una pregunta.
+  if (reply.action === "ver_respuesta") {
+    if (reply.jobId !== input.conversationId) return false
+    await deliverHeldReplies(tx, orgId, input.conversationId)
+    return true
   }
   // La pregunta de novedades y promociones: su botón lleva la persona y solo vale en su conversación.
   if (reply.action === "permiso_si" || reply.action === "permiso_no") {

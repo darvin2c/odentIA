@@ -28,6 +28,7 @@ import {
   sendApprovedMessage,
   sendOutbound,
   sendTeamReply,
+  replyByWhatsApp,
   takeTopic,
   resolveTopic,
   setAgentStatus,
@@ -204,6 +205,25 @@ export function createConversationsRoute(deps: CrmDeps) {
           conversationId: c.req.param("id"),
           userId,
           content: { type: "text", text: parsed.data.text },
+          replyToMessageId: parsed.data.replyToMessageId ?? null,
+          keepPending: parsed.data.keepPending ?? false,
+        }),
+      ),
+    )
+  })
+
+  // «Escribirle por WhatsApp» (tablero 4b del pulido): desde Instagram o
+  // Messenger pasadas las 24 horas, a su WhatsApp con «Ver respuesta».
+  app.post("/:id/messages/whatsapp", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = textInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        replyByWhatsApp(tx, orgId, {
+          conversationId: c.req.param("id"),
+          userId,
+          text: parsed.data.text,
           replyToMessageId: parsed.data.replyToMessageId ?? null,
           keepPending: parsed.data.keepPending ?? false,
         }),

@@ -31,6 +31,7 @@ import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/sch
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
+import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
 import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
 import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
@@ -2980,6 +2981,16 @@ export interface HandoffItem {
   status: HandoffStatus
   createdBy: string
   createdAt: string
+  /** De qué trata: dice a quién le llega (R3 de la Bandeja). */
+  kind: TopicKind
+  /** El mensaje de la persona que originó el tema; nulo si no hay uno. */
+  sourceMessageId: string | null
+  /**
+   * «Ahora»: prioridad alta o ya pasaron dos horas de clínica abierta
+   * esperando al equipo (`urgent_at`; decisión 1 del pulido). La misma regla
+   * en la Bandeja, Inicio y el panel.
+   */
+  urgent: boolean
 }
 
 export type HandoffStatus = "abierta" | "tomada" | "resuelta"
@@ -3051,6 +3062,9 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
             : "abierta",
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),
+      kind: topicKindOf(row.kind),
+      sourceMessageId: row.sourceMessageId,
+      urgent: topicIsUrgent(row),
     }
   })
 }
@@ -3381,8 +3395,10 @@ export async function createHandoff(
     pending?: string | null
     /** El mensaje de la persona que se responde; por defecto, su último entrante. */
     sourceMessageId?: string | null
-    /** Duda clínica: sin responsable, va al profesional que atiende al paciente. */
+    /** Duda clínica: sin responsable, va al profesional que atiende al paciente. Es lo mismo que `kind: "clinico"`. */
     clinical?: boolean
+    /** De qué trata (R3): decide a quién le llega si no se dice el responsable. */
+    kind?: TopicKind | null
   },
 ): Promise<HandoffItem> {
   const conv = await requireConversationInOrg(tx, orgId, input.conversationId)
@@ -3407,7 +3423,10 @@ export async function createHandoff(
     }
     assigneeUserId ??= task.assigneeUserId
   }
-  if (!assigneeUserId && input.clinical && conv.contactId) {
+  const kind: TopicKind = input.clinical ? "clinico" : topicKindOf(input.kind)
+  // Una duda clínica va al odontólogo que atiende a la persona; si no tiene o
+  // está ausente, queda para recepción (R3 de la Bandeja).
+  if (!assigneeUserId && kind === "clinico" && conv.contactId) {
     assigneeUserId = await treatingProfessional(tx, orgId, conv.contactId)
   }
   if (assigneeUserId) {
@@ -3429,8 +3448,9 @@ export async function createHandoff(
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
-    // Sin área, nadie de recepción la vería en «Mías y de mi área» (M5): el caso es de Recepción.
-    area: "recepcion",
+    // Sin área nadie la vería en «Mías y de mi área» (M5): un pago es de caja,
+    // una duda clínica del equipo clínico y lo demás de recepción (R3).
+    area: kind === "pago" ? "caja" : kind === "clinico" ? "clinico" : "recepcion",
     dueAt: new Date(Date.now() + HANDOFF_DUE_HOURS[priority] * 3_600_000).toISOString(),
     createdBy,
     actorUserId,
@@ -3450,6 +3470,9 @@ export async function createHandoff(
       taskId: task.id,
       createdBy,
       sourceMessageId,
+      kind,
+      // Pasa a «Ahora» a las dos horas de clínica abierta (decisión 1 del pulido).
+      urgentAt: await topicUrgentAt(tx, orgId, new Date()),
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar la derivación")
@@ -3490,18 +3513,32 @@ async function topicSourceMessage(tx: Db, orgId: string, conversationId: string,
 }
 
 /**
- * El profesional que atiende al paciente de esta persona: el de su cita no
- * cancelada más cercana a hoy (la última que tuvo o la próxima). Nulo si no
- * es paciente o nunca tuvo cita: el tema queda para recepción.
+ * El odontólogo que atiende a esta persona (R3 de la Bandeja): el que la
+ * atendió por última vez; si nunca la atendieron, el de su próxima cita. Si
+ * ese profesional está ausente hoy (Horarios y ausencias) o ya no es del
+ * equipo, nulo: el tema queda para recepción.
  */
 async function treatingProfessional(tx: Db, orgId: string, contactId: string): Promise<string | null> {
   const rows = await tx.execute<{ dentist_user_id: string }>(sql`
-    select a.dentist_user_id from appointment a
-    join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
-    join member mb on mb.organization_id = a.organization_id and mb.user_id = a.dentist_user_id
-    where a.organization_id = ${orgId} and p.person_id = ${contactId}
-      and a.status <> 'cancelada'
-    order by abs(extract(epoch from (a.starts_at - now()))) asc
+    select who.dentist_user_id from (
+      (select a.dentist_user_id, 0 as rank, a.starts_at as at from appointment a
+        join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+        where a.organization_id = ${orgId} and p.person_id = ${contactId}
+          and a.status = 'atendida' and a.starts_at <= now()
+        order by a.starts_at desc limit 1)
+      union all
+      (select a.dentist_user_id, 1 as rank, a.starts_at as at from appointment a
+        join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+        where a.organization_id = ${orgId} and p.person_id = ${contactId}
+          and a.status in ('programada', 'confirmada') and a.starts_at > now()
+        order by a.starts_at asc limit 1)
+    ) who
+    join member mb on mb.organization_id = ${orgId} and mb.user_id = who.dentist_user_id
+    where not exists (
+      select 1 from schedule_block b
+      where b.organization_id = ${orgId} and b.dentist_user_id = who.dentist_user_id
+        and b.starts_at <= now() and b.ends_at > now())
+    order by who.rank
     limit 1`)
   return rows[0]?.dentist_user_id ?? null
 }
@@ -3556,7 +3593,7 @@ export async function listHandoffs(
   const order =
     input.order === "urgencia"
       ? [
-          sql`case ${agentHandoff.priority} when 'alta' then 0 when 'media' then 1 else 2 end`,
+          sql`case when ${agentHandoff.priority} = 'alta' or ${agentHandoff.urgentAt} <= now() then 0 when ${agentHandoff.priority} = 'media' then 1 else 2 end`,
           asc(agentHandoff.createdAt),
           asc(agentHandoff.id),
         ]
@@ -3603,17 +3640,19 @@ export async function claimHandoff(
     .where(and(eq(member.organizationId, orgId), eq(member.userId, target)))
     .limit(1)
   if (!membership) throw validation("Solo un miembro de la organización puede tener el tema")
-  // Un tema se contesta en la conversación: solo lo recibe quien puede escribir en ella (caja no).
-  if (!canAccess(membership.role, "conversations.write")) {
-    throw validation(
-      "Esa persona no atiende conversaciones: elige a alguien de recepción o del equipo clínico",
-    )
-  }
   const [before] = await tx
-    .select({ assigneeUserId: agentHandoff.assigneeUserId })
+    .select({ assigneeUserId: agentHandoff.assigneeUserId, kind: agentHandoff.kind })
     .from(agentHandoff)
     .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
     .limit(1)
+  // Un tema se contesta en la conversación: lo recibe quien escribe en ella, o
+  // caja si es un pago (lo responde desde Inicio; decisión 3 del pulido).
+  const allowed =
+    canAccess(membership.role, "conversations.write") ||
+    (before?.kind === "pago" && canAccess(membership.role, "conversations.topics"))
+  if (!allowed) {
+    throw validation("Esa persona no atiende conversaciones: elige a alguien de recepción o del equipo clínico")
+  }
   const passing = opts.toUserId !== undefined && opts.toUserId !== userId
   const [claimed] = await tx
     .update(agentHandoff)
