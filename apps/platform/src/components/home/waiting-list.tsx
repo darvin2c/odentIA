@@ -301,7 +301,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         </Button>
       ))}
       {actions.length > 0 ? (
-        <span className="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center">
+        <span className="flex shrink-0 flex-col gap-1.5 max-sm:basis-full max-sm:w-full max-sm:flex-row max-sm:[&>button]:flex-1 sm:flex-row sm:items-center">
           {actions.map((action) => (
             <Button
               key={action.id}

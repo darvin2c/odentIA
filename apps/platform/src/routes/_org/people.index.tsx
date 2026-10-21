@@ -2,6 +2,7 @@ import { documentText } from "@odentia/clinical"
 import {
   Badge,
   Button,
+  buttonVariants,
   ButtonGroup,
   DropdownMenu,
   DropdownMenuContent,
@@ -246,13 +247,13 @@ function PeoplePage() {
                   <span className="text-sm">{step.text}</span>
                   {row.original.missingData ? <Badge variant="warning">Faltan datos</Badge> : null}
                   {step.actionLabel ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      render={<Link to="/people/$personId" params={{ personId: row.original.id }} />}
+                    <Link
+                      to="/people/$personId"
+                      params={{ personId: row.original.id }}
+                      className={buttonVariants({ size: "sm", variant: "outline" })}
                     >
                       {step.actionLabel}
-                    </Button>
+                    </Link>
                   ) : null}
                 </span>
                 {who ? <span className="text-xs text-muted-foreground">{who}</span> : null}
@@ -291,13 +292,13 @@ function PeoplePage() {
           id: "step",
           header: "Siguiente paso",
           cell: ({ row }) => (
-            <Button
-              size="sm"
-              variant="outline"
-              render={<Link to="/people/$personId" params={{ personId: row.original.id }} />}
+            <Link
+              to="/people/$personId"
+              params={{ personId: row.original.id }}
+              className={buttonVariants({ size: "sm", variant: "outline" })}
             >
               {situationAction(row.original.situation)}
-            </Button>
+            </Link>
           ),
         },
       ]

@@ -1,5 +1,10 @@
 import {
   Button,
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -197,6 +202,8 @@ function AgendaPage() {
   const queryClient = useQueryClient()
   const { get, setParam, setParams } = useListSearch()
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
+  // En teléfono, la tira de días y las fichas de profesionales van en este cajón.
+  const [resourcesOpen, setResourcesOpen] = React.useState(false)
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
   const canAttend = usePermission("clinical.write")
@@ -865,6 +872,11 @@ function AgendaPage() {
     )
   }
   const pickWho = (id: string | null) => setParam("who", id ?? (ownColumn ? WHO_ALL : undefined))
+  // Las fichas del teléfono: quiénes son según la vista y cuál está elegida; la fila dice el nombre.
+  const resourceTitle = group === "chairs" ? "Unidades dentales" : "Profesionales"
+  const phoneResources = view === "semana" ? team : view === "dia" ? dayColumns : dayTeam
+  const phoneValue = view === "lista" ? filter : view === "semana" ? focus : dayFocus
+  const resourceChosen = phoneResources.find((item) => item.id === phoneValue)?.label ?? "todos"
 
   const newButton = canWrite ? (
     <Button onClick={() => openBooking()} className={small ? "h-12 w-full text-base" : undefined}>
@@ -1148,40 +1160,70 @@ function AgendaPage() {
         }
       />
 
-      {small && view !== "semana" ? (
-        <ScheduleDayStrip
-          dates={week.slice(0, 6).includes(day) ? week.slice(0, 6) : week}
-          value={day}
-          today={today}
-          onChange={goTo}
-          onPrevious={() => goTo(addDays(day, -7))}
-          onNext={() => goTo(addDays(day, 7))}
-        />
-      ) : null}
-
-      {small && view === "dia" && chairs.length > 0 ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-mb-1.5 -ml-2.5 h-7 gap-1 self-start px-2.5 text-[13px] font-bold text-muted-foreground"
-          onClick={() =>
-            setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
-          }
-        >
-          {group === "chairs" ? "Unidades dentales" : "Profesionales"}
-          <span className="font-normal">· cambiar</span>
-        </Button>
-      ) : null}
       {small ? (
-        <ScheduleResourceChips
-          label={group === "chairs" ? "Unidades dentales" : "Profesionales"}
-          resources={view === "semana" ? team : view === "dia" ? dayColumns : dayTeam}
-          formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
-          value={view === "lista" ? filter : view === "semana" ? focus : dayFocus}
-          allLabel={view === "lista" ? "Todos" : undefined}
-          onChange={pickWho}
-          className="-mx-4 px-4"
-        />
+        <>
+          <Button
+            variant="outline"
+            className="h-11 w-full justify-between px-4 font-semibold"
+            onClick={() => setResourcesOpen(true)}
+          >
+            <span className="min-w-0 truncate">{`${resourceTitle}: ${resourceChosen}`}</span>
+            <ChevronDown aria-hidden className="shrink-0" />
+          </Button>
+          <Drawer
+            open={resourcesOpen}
+            onOpenChange={setResourcesOpen}
+            swipeDirection="down"
+            showSwipeHandle
+          >
+            <DrawerContent>
+              <DrawerHeader className="gap-1 border-b border-border px-6 py-4 text-left">
+                <DrawerTitle>{view === "semana" ? resourceTitle : "Días y profesionales"}</DrawerTitle>
+                <DrawerDescription className="sr-only">{resourceTitle}</DrawerDescription>
+              </DrawerHeader>
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="space-y-5 px-6 py-4">
+                  {view !== "semana" ? (
+                    <ScheduleDayStrip
+                      dates={week.slice(0, 6).includes(day) ? week.slice(0, 6) : week}
+                      value={day}
+                      today={today}
+                      onChange={(date) => {
+                        goTo(date)
+                        setResourcesOpen(false)
+                      }}
+                      onPrevious={() => goTo(addDays(day, -7))}
+                      onNext={() => goTo(addDays(day, 7))}
+                    />
+                  ) : null}
+                  {view === "dia" && chairs.length > 0 ? (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
+                      }
+                    >
+                      {group === "chairs" ? "Ver por profesional" : "Ver por unidad dental"}
+                    </Button>
+                  ) : null}
+                  <ScheduleResourceChips
+                    label={resourceTitle}
+                    wrap
+                    resources={phoneResources}
+                    formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
+                    value={phoneValue}
+                    allLabel={view === "lista" ? "Todos" : undefined}
+                    onChange={(id) => {
+                      pickWho(id)
+                      setResourcesOpen(false)
+                    }}
+                  />
+                </div>
+              </ScrollArea>
+            </DrawerContent>
+          </Drawer>
+        </>
       ) : null}
 
       {stale ? (

@@ -79,13 +79,16 @@ export function OpenEncounterCard({
           {missing.length > 0 ? ` · falta ${missing.join(", ")}` : " · lista para cerrar"}
         </p>
       </div>
-      <Link
-        to="/patients/$patientId/encounters/$encounterId"
-        params={{ patientId, encounterId: encounter.id }}
-        className={buttonVariants()}
-      >
-        {canWrite && mine ? "Continuar" : "Ver atención"}
-      </Link>
+      {/* Quien la lleva ya tiene «Continuar la atención» arriba: aquí no se repite. */}
+      {canWrite && mine ? null : (
+        <Link
+          to="/patients/$patientId/encounters/$encounterId"
+          params={{ patientId, encounterId: encounter.id }}
+          className={buttonVariants()}
+        >
+          Ver atención
+        </Link>
+      )}
     </section>
   )
 }

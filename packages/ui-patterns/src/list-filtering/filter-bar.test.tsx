@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { Calendar } from "./calendar.js"
 import { FilterBar } from "./filter-bar.js"
+import type { FilterDef } from "./filter-def.js"
 import { setFormatRegion } from "../locale.js"
 import { FilterControl, filterSummary } from "./filter-control.js"
 import { SearchInput } from "./search-input.js"
@@ -245,6 +246,23 @@ describe("filtros de listas", () => {
     const drawer = await screen.findByRole("dialog", { name: "Filtros" })
     expect(within(drawer).queryByRole("searchbox")).toBeNull()
     expect(within(drawer).queryByRole("button", { name: "Ordenar" })).toBeNull()
+  })
+
+  it("el cajón del teléfono reúne los filtros solo de teléfono y cuenta los activos", async () => {
+    const lista: FilterDef = {
+      key: "lista",
+      label: "Lista aparte",
+      type: "select",
+      options: [{ value: "spam", label: "Spam" }],
+    }
+    mocks.values = { lista: "spam" }
+    const { container } = render(<FilterBar filters={[]} mobileOnlyFilters={[lista]} sortOptions={[]} />)
+    const compact = within(container.querySelector<HTMLElement>('[class~="md:hidden"]') as HTMLElement)
+    // Sin filtros de escritorio, el botón igual abre el cajón, y cuenta el de teléfono activo.
+    expect(compact.getByRole("button", { name: "Filtros" }).textContent).toContain("1")
+    fireEvent.click(compact.getByRole("button", { name: "Filtros" }))
+    const drawer = await screen.findByRole("dialog", { name: "Filtros" })
+    expect(within(drawer).getByText("Lista aparte")).toBeTruthy()
   })
 
   it("agrupa filtros secundarios activos en Más filtros", async () => {

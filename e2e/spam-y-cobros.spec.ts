@@ -102,7 +102,7 @@ test("bandeja: el mismo texto cinco veces va a Spam y «No es spam» la devuelve
   expect(blockedReply.body.error?.code).toBe("CONTACT_BLOCKED")
 
   // En Bloqueados, «Desbloquear» confirma y queda anotado.
-  await gotoHydrated(page, tenant(org.slug, "/inbox?view=blocked"))
+  await gotoHydrated(page, tenant(org.slug, "/inbox?lista=blocked"))
   await expect(page.getByText("Amenazas").first()).toBeVisible()
   await page.getByRole("button", { name: "Desbloquear" }).first().click()
   await page.getByRole("alertdialog").getByRole("button", { name: "Desbloquear" }).click()

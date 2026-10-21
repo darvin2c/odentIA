@@ -825,8 +825,9 @@ function DebtLine({
             Escribirle
           </Button>
         ) : null}
+        {/* En el teléfono, cobrar a alguien es la barra de abajo: sin repetir el botón en cada fila. */}
         {canWrite ? (
-          <Button aria-label={`Cobrar a ${name}`} onClick={() => onCollect({ id: row.patientId, name })}>
+          <Button className="max-sm:hidden" aria-label={`Cobrar a ${name}`} onClick={() => onCollect({ id: row.patientId, name })}>
             Cobrar
           </Button>
         ) : null}

@@ -66,6 +66,11 @@ function useFittedInlineCount(eligibleCount: number, contentKey: string): Fitted
 }
 export interface FilterBarProps {
   filters: FilterDef[]
+  /**
+   * Filtros que solo ofrece el cajón del teléfono: en escritorio sus controles
+   * están a la vista en la pantalla, fuera de esta barra.
+   */
+  mobileOnlyFilters?: FilterDef[]
   sortOptions: SortOption[]
   searchPlaceholder?: string
   /** Texto plegado del buscador de la lista: «Buscar en pacientes». */
@@ -85,6 +90,7 @@ export interface FilterBarProps {
 
 export function FilterBar({
   filters,
+  mobileOnlyFilters = [],
   sortOptions,
   searchPlaceholder = common.filters.search,
   searchLabel,
@@ -123,10 +129,13 @@ export function FilterBar({
   const { containerRef, visibleCount } = useFittedInlineCount(orderedFilters.length, contentKey)
   const primaryFilters = orderedFilters.slice(0, visibleCount)
   const overflowFilters = orderedFilters.slice(visibleCount)
-  const activeFilterCount = filters.filter((filter) => hasFilterValue(filter, get)).length
   const activeOverflowCount = overflowFilters.filter((filter) => hasFilterValue(filter, get)).length
-  const hasActiveCriteria = activeFilterCount > 0 || Boolean(get("q"))
-  const drawerFilters = drawerMode === "overflow" ? overflowFilters : filters
+  const hasActiveCriteria = filters.some((filter) => hasFilterValue(filter, get)) || Boolean(get("q"))
+  // El cajón del teléfono reúne los dos grupos: lo que cuenta y lo que solo vive ahí.
+  const phoneFilters = [...filters, ...mobileOnlyFilters]
+  const activePhoneCount = phoneFilters.filter((filter) => hasFilterValue(filter, get)).length
+  const hasPhoneCriteria = activePhoneCount > 0 || Boolean(get("q"))
+  const drawerFilters = drawerMode === "overflow" ? overflowFilters : phoneFilters
   const drawerTitle = drawerMode === "overflow" ? common.filters.moreFilters : common.filters.label
 
   return (
@@ -188,7 +197,7 @@ export function FilterBar({
           <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
         )}
         {/* Sin filtros que elegir, el botón no tiene nada que abrir: no se muestra. */}
-        {filters.length > 0 && (
+        {phoneFilters.length > 0 && (
           <Button
             type="button"
             variant="outline"
@@ -198,14 +207,14 @@ export function FilterBar({
           >
             <SlidersHorizontal />
             <span>{common.filters.label}</span>
-            {activeFilterCount > 0 ? (
+            {activePhoneCount > 0 ? (
               <span className="flex min-w-5 items-center justify-center rounded-full bg-accent-soft px-1.5 text-xs text-accent-foreground">
-                {activeFilterCount}
+                {activePhoneCount}
               </span>
             ) : null}
           </Button>
         )}
-        {hasActiveCriteria && (
+        {hasPhoneCriteria && (
           <Button type="button" size="sm" variant="ghost" onClick={clear}>
             {common.filters.clear}
           </Button>
