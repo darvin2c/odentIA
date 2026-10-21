@@ -164,7 +164,7 @@ const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de u
 1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
 3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.
-4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos. Para juntar cifras de varios cálculos del mismo periodo (un consejo, una comparación de dos cuentas), pon sus ids («c1, c2») y nombra las columnas de los demás con su id delante: {c2_te_deben_dinero}.
+4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos. Para juntar cifras de varios cálculos del mismo periodo (un consejo, una comparación de dos cuentas), pon sus ids («c1, c2») y nombra las columnas de los demás con su id delante: {c2_te_deben_dinero}. Dos listas se juntan por lo que comparten (por profesional con por profesional).
 Si ya calculaste algo que sirve, responde con eso (tipo parcial si falta una parte): no_existe es solo cuando nada de lo que se puede calcular responde la pregunta. «Facturar» se responde con lo cobrado, diciendo que odentIA no emite facturas.
 Tienes 4 turnos como mucho; en el último solo puedes responder.
 
@@ -685,27 +685,35 @@ export async function askArgos(
    * (`c2_te_deben_dinero`). Es una sola consulta con los mismos huecos: se
    * vuelve a correr con otro periodo, se fija y se descarga igual.
    */
-  const joinCalcs = async (parts: ArgosCalc[]): Promise<ArgosCalc | { problem: string }> => {
+  const joinCalcs = (parts: ArgosCalc[]): ArgosCalc | { problem: string } => {
     const [main, ...rest] = parts
     if (!main) return { problem: "no hay cálculos que juntar" }
     const same = (calc: ArgosCalc) => JSON.stringify(calc.choice) === JSON.stringify(main.choice)
     if (!rest.every(same)) return { problem: "solo se juntan cálculos del mismo periodo, la misma comparación y la misma sede" }
-    const wide = rest.find((calc) => calc.result.rows.length > 1)
-    if (wide) return { problem: `${wide.id} trae varias filas: al juntar, solo el primero puede tener varias` }
-    const extra = rest.flatMap((calc) => calc.result.columns.map((column) => `${calc.id}.${column.name} as ${calc.id}_${column.name}`))
-    const sql = `with ${parts.map((calc) => `${calc.id} as (${calc.sql})`).join(", ")} select ${[`${main.id}.*`, ...extra].join(", ")} from ${main.id}${rest.map((calc) => ` left join ${calc.id} on true`).join("")}`
-    const bound = bindArgosPeriod(sql, main.binding.period, main.binding.branch?.name ?? null, main.binding.patient)
-    if ("problem" in bound) return bound
-    try {
-      const result = await run(bound.sql)
-      // Una cifra oficial sigue siéndolo si todas lo son; «Así lo calculé» las nombra a todas.
-      const official = parts.every((calc) => calc.figure)
-      const how = parts.map((calc) => calc.how).filter(Boolean).join(" ")
-      return { ...main, id: parts.map((calc) => calc.id).join("+"), sql, result, figure: official ? main.figure : null, how: how || null }
-    } catch (error) {
-      if (error instanceof ArgosQueryError && error.code !== "PERMISO") return { problem: `al juntar, la base no lo aceptó: ${error.message}` }
-      throw error
+    const mainNames = new Set(main.result.columns.map((column) => column.name))
+    const columns = [...main.result.columns]
+    const rows = main.result.rows.map((row) => ({ ...row }))
+    const joins: string[] = []
+    const extra: string[] = []
+    for (const calc of rest) {
+      // Se junta por lo que comparte con la primera (el profesional, el mes); una fila sin nada en común va al lado de todas.
+      const keys = calc.result.columns.filter((column) => column.kind !== "number" && mainNames.has(column.name)).map((column) => column.name)
+      if (calc.result.rows.length > 1 && !keys.length) return { problem: `${calc.id} trae varias filas y no comparte columnas con ${main.id} (un profesional, un mes…): no se puede juntar` }
+      const added = calc.result.columns.filter((column) => !keys.includes(column.name))
+      columns.push(...added.map((column) => ({ ...column, name: `${calc.id}_${column.name}` })))
+      extra.push(...added.map((column) => `${calc.id}.${column.name} as ${calc.id}_${column.name}`))
+      joins.push(keys.length ? ` left join ${calc.id} using (${keys.join(", ")})` : ` left join ${calc.id} on true`)
+      for (const row of rows) {
+        const match = keys.length ? calc.result.rows.find((other) => keys.every((key) => other[key] === row[key])) : calc.result.rows[0]
+        for (const column of added) row[`${calc.id}_${column.name}`] = match?.[column.name] ?? null
+      }
     }
+    // Lo mismo, en una sola consulta: así se vuelve a correr con otro periodo, se fija y se descarga (con más tiempo: `argosQueryTimeout`).
+    const sql = `with ${parts.map((calc) => `${calc.id} as (${calc.sql})`).join(", ")} select ${[`${main.id}.*`, ...extra].join(", ")} from ${main.id}${joins.join("")}`
+    // Una cifra oficial sigue siéndolo si todas lo son; «Así lo calculé» las nombra a todas.
+    const official = parts.every((calc) => calc.figure)
+    const how = parts.map((calc) => calc.how).filter(Boolean).join(" ")
+    return { ...main, id: parts.map((calc) => calc.id).join("+"), sql, result: { ...main.result, columns, rows }, figure: official ? main.figure : null, how: how || null }
   }
 
   /**
@@ -725,7 +733,7 @@ export async function askArgos(
     if (missing) return { problem: `no hay un cálculo «${missing}»: usa el id de uno de tus cálculos que corrió`, code: "HUECOS" }
     let calc = ids[0] ? calcs.get(ids[0]) : undefined
     if (calc && ids.length > 1) {
-      const joined = await joinCalcs(ids.map((item) => calcs.get(item) as ArgosCalc))
+      const joined = joinCalcs(ids.map((item) => calcs.get(item) as ArgosCalc))
       if ("problem" in joined) return { problem: joined.problem, code: "HUECOS" }
       calc = joined
     }

@@ -183,6 +183,16 @@ export const ARGOS_DOWNLOAD_LIMIT = 5_000
 export const ARGOS_TIMEOUT_MS = 3_000
 
 /**
+ * El tope de tiempo de una consulta: el de siempre o, si junta varios cálculos
+ * de Argos (`with c1 as (…), c2 as (…)`, ADR 0076), el de siempre por cada uno,
+ * hasta 10 s. Vale igual al volver a correrla, fijada o al descargarla.
+ */
+export function argosQueryTimeout(query: string): number {
+  const parts = query.match(/(?:^\s*with|,)\s+c\d+\s+as\s+\(/gi)?.length ?? 0
+  return parts > 1 ? Math.min(ARGOS_TIMEOUT_MS * parts, 10_000) : ARGOS_TIMEOUT_MS
+}
+
+/**
  * Corre una consulta ya revisada con la llave del rol: transacción de solo
  * lectura, la clínica fijada, `SET LOCAL ROLE`, `search_path` en `argos`,
  * tope de tiempo y de filas. Recibe la conexión del rol app (`appDb`).
@@ -196,7 +206,7 @@ export async function runArgosQuery(
   const review = reviewArgosQuery(input.query)
   if (!review.ok) throw new ArgosQueryError("REVISOR", review.reason)
   const limit = Math.max(1, Math.min(input.rowLimit ?? ARGOS_ROW_LIMIT, ARGOS_DOWNLOAD_LIMIT))
-  const timeout = Math.max(100, Math.min(input.timeoutMs ?? ARGOS_TIMEOUT_MS, 10_000))
+  const timeout = Math.max(100, Math.min(input.timeoutMs ?? argosQueryTimeout(review.sql), 10_000))
   try {
     return await db.transaction(async (tx) => {
       // Primero: después de cualquier lectura ya no se puede pasar a solo lectura.

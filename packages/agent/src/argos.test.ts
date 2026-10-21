@@ -482,4 +482,17 @@ describe("Argos sobre las vistas", () => {
     const again = await rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: {} })
     expect(again.text).toBe(answer.text)
   })
+
+  it("dos listas se juntan por lo que comparten, sin volver a consultar; la columna del otro cálculo se dice sin su id", async () => {
+    const sqlCalc = (id: string, sql: string) => ({ name: "calcular", args: { id, cifra: null, sql, periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })
+    const model = new ScriptedModel([
+      { tools: [sqlCalc("c1", "select medio, sum(importe) as cobrado_dinero from cobros group by medio"), sqlCalc("c2", "select medio, count(*)::int as pagos from cobros group by medio")] },
+      { calculo: "c1, c2", frase: "Por medio: {lista}.", frase_vacia: "Nada.", titulo: "Por medio" },
+    ])
+    const answer = await ask(model, "¿Cómo nos pagan?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^Por medio: Efectivo \(S\/\s?1,250\.50, pagos: 1\)\.$/)
+    expect(answer.query).toMatch(/from c1 left join c2 using \(medio\)$/)
+    expect(answer.table.columns.map((column) => column.label)).toEqual(["Medio", "Cobrado", "Pagos"])
+  })
 })

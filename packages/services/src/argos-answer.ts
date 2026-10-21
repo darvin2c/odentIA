@@ -215,7 +215,8 @@ export function argosRepeatedColumns(template: string, result: Pick<ArgosQueryRe
 
 /** «cobrado_dinero» → «Cobrado»: el nombre de una columna dicho para la pantalla. */
 export function argosColumnLabel(name: string): string {
-  const text = name.replace(/_(dinero|pct|mes)$/, "").replace(/_/g, " ").trim()
+  // La columna de otro cálculo juntado (`c2_pagos`) se dice sin su id.
+  const text = name.replace(/^c\d+_/, "").replace(/_(dinero|pct|mes)$/, "").replace(/_/g, " ").trim()
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : name
 }
 
