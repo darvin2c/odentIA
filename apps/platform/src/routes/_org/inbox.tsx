@@ -15,6 +15,9 @@ import {
   ResizablePanelGroup,
   ScrollArea,
   Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   toast,
 } from "@odentia/ui"
 import {
@@ -163,7 +166,6 @@ export const Route = createFileRoute("/_org/inbox")({
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
     ...(search.mine === "1" || search.mine === 1 ? { mine: "1" } : {}),
     ...(typeof search.view === "string" ? { view: search.view } : {}),
-    ...(typeof search.lista === "string" ? { lista: search.lista } : {}),
     ...(search.contexto === true || search.contexto === "true"
       ? { contexto: true as const }
       : {}),
@@ -305,11 +307,8 @@ function InboxPage() {
     if (search.trim()) params.set("q", search.trim())
     return params.toString()
   }, [channel, mine, search])
-  // Las pestañas van en `view` y Spam o Bloqueados en `lista`: mientras una lista está abierta, manda ella.
-  const tabView = view && CHIP_VIEWS.includes(view) ? view : DEFAULT_VIEW
-  const lista = listSearch.get("lista")
-  const sideView = isSideView(lista) ? lista : null
-  const activeView = sideView ?? tabView
+  const activeView = view && (CHIP_VIEWS.includes(view) || isSideView(view)) ? view : DEFAULT_VIEW
+  const sideView = isSideView(activeView) ? activeView : null
   // El subtítulo habla de toda la bandeja: con filtros no afirma un total parcial.
   const narrowed = Boolean(channel) || mine || search.trim() !== ""
   const listParams = useMemo(() => {
@@ -556,71 +555,40 @@ function InboxPage() {
           En angosto, con un hilo abierto, la pantalla es del hilo: vuelven con la lista. */}
       {mode === "panel" || !selectedId ? (
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-          {/* En el teléfono, una sola fila que se desplaza: las cuatro pestañas caben en el ancho y el resto va en Filtros. */}
-          <fieldset className="-m-1 flex min-w-0 gap-1.5 overflow-x-auto p-1 [scrollbar-width:none] max-sm:w-full sm:flex-wrap [&::-webkit-scrollbar]:hidden">
-            <legend className="sr-only">Vista de la bandeja</legend>
-            {VIEW_CHIPS.map((chip) => {
-              const pressed = activeView === chip.value
-              return (
-                <Button
-                  key={chip.value}
-                  type="button"
-                  size="sm"
-                  variant={pressed ? "default" : "outline"}
-                  aria-pressed={pressed}
-                  className="shrink-0 min-h-11 rounded-full sm:min-h-9"
-                  onClick={() => listSearch.setParams({ view: chip.value === DEFAULT_VIEW ? undefined : chip.value, lista: undefined }, { replace: true })}
-                >
+          {/* Cambiar de vista es siempre pestaña: cambia la lista entera. Spam y Bloqueados son vistas, al final y aparte. */}
+          <Tabs
+            value={activeView}
+            onValueChange={(next) => listSearch.setParam("view", String(next) === DEFAULT_VIEW ? undefined : String(next), { replace: true })}
+            className="min-w-0 max-sm:w-full"
+          >
+            <TabsList aria-label="Vista de la bandeja" className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {VIEW_CHIPS.map((chip) => (
+                <TabsTrigger key={chip.value} value={chip.value} className="shrink-0 min-h-11 sm:min-h-9">
                   {chipLabel(chip, receptionName)}
                   {summary ? <span className="tabular-nums opacity-80"> {summary[chip.total]}</span> : null}
-                </Button>
-              )
-            })}
-          </fieldset>
-          {/* Junto a las pestañas, en gris: no piden nada a nadie (ADR 0054). No se encogen: los filtros bajan de fila. */}
-          {/* En el teléfono estas dos listas están en Filtros, con «Solo las mías». */}
-          <div className="flex shrink-0 items-center gap-1 max-sm:hidden">
-            <Button
-              type="button"
-              size="sm"
-              variant={sideView === "spam" ? "secondary" : "ghost"}
-              aria-pressed={sideView === "spam"}
-              className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
-              onClick={() => listSearch.setParam("lista", sideView === "spam" ? undefined : "spam", { replace: true })}
-              title={`Publicidad y envíos automáticos: ${receptionName} no los responde y no se cobran`}
-            >
-              Spam
-              {summary?.spam ? <span className="tabular-nums opacity-80"> {summary.spam}</span> : null}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={sideView === "blocked" ? "secondary" : "ghost"}
-              aria-pressed={sideView === "blocked"}
-              className="min-h-11 rounded-full text-muted-foreground sm:min-h-9"
-              onClick={() => listSearch.setParam("lista", sideView === "blocked" ? undefined : "blocked", { replace: true })}
-              title={`Personas bloqueadas: nadie les escribe y ${receptionName} no les responde`}
-            >
-              <Ban className="size-4" aria-hidden />
-              <span className="sr-only sm:not-sr-only">Bloqueados</span>
-            </Button>
-          </div>
-          {/* No se encoge por debajo de su contenido: alineado a la derecha, se desbordaría
-              sobre «Spam» y «Bloqueados»; si no cabe, baja de fila. */}
-          <div className="flex min-w-fit flex-1 flex-wrap items-center justify-end gap-2 max-sm:min-w-0">
-            <Button
-              type="button"
-              size="sm"
-              variant={mine ? "secondary" : "outline"}
-              aria-pressed={mine}
-              className="min-h-11 rounded-full max-sm:hidden sm:min-h-9"
-              onClick={() => listSearch.setParam("mine", mine ? undefined : "1", { replace: true })}
-              title="Los temas que tienes tú y los que nadie tomó"
-            >
-              {mine ? <CheckCircle2 className="size-4" aria-hidden /> : null}
-              Solo las mías
-            </Button>
-            {/* Solo el teléfono: en escritorio «Solo las mías» y Spam ya están a la vista, junto a las pestañas. */}
+                </TabsTrigger>
+              ))}
+              <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+              <TabsTrigger
+                value="spam"
+                className="shrink-0 min-h-11 text-muted-foreground sm:min-h-9"
+                title={`Publicidad y envíos automáticos: ${receptionName} no los responde y no se cobran`}
+              >
+                Spam
+                {summary?.spam ? <span className="tabular-nums opacity-80"> {summary.spam}</span> : null}
+              </TabsTrigger>
+              <TabsTrigger
+                value="blocked"
+                className="shrink-0 min-h-11 text-muted-foreground sm:min-h-9"
+                title={`Personas bloqueadas: nadie les escribe y ${receptionName} no les responde`}
+              >
+                <Ban className="size-4" aria-hidden />
+                <span className="sr-only sm:not-sr-only">Bloqueados</span>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {/* Los filtros tienen su propia fila, bajo las pestañas: acotan la lista y no compiten con las vistas. */}
+          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
             <FilterBar
               filters={[
                 {
@@ -632,28 +600,19 @@ function InboxPage() {
                     label: channelLabel(channel),
                   })),
                 },
-              ]}
-              mobileOnlyFilters={[
+                // Acota la lista que ya se ve: se combina con el canal y se quita con ×.
                 {
                   key: "mine",
                   label: "Temas",
                   type: "select",
                   options: [{ value: "1", label: "Solo las mías" }],
                 },
-                {
-                  key: "lista",
-                  label: "Lista aparte",
-                  type: "select",
-                  options: [
-                    { value: "spam", label: "Spam · últimos 30 días", count: summary?.spam },
-                    { value: "blocked", label: "Bloqueados" },
-                  ],
-                },
               ]}
+              className="w-full"
               sortOptions={[]}
               searchPlaceholder="Buscar por nombre o teléfono" searchLabel="Buscar en la Bandeja"
               searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
-              resetKeys={["channel", "mine", "lista", "q"]}
+              resetKeys={["channel", "mine", "q"]}
             />
           </div>
         </div>
@@ -691,7 +650,7 @@ function InboxPage() {
               searching={search.trim() !== ""}
               sideView={sideView}
               onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
-              onBackToTabs={() => listSearch.setParams({ view: undefined, lista: undefined }, { replace: true })}
+              onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -738,7 +697,7 @@ function InboxPage() {
               searching={search.trim() !== ""}
               sideView={sideView}
               onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
-              onBackToTabs={() => listSearch.setParams({ view: undefined, lista: undefined }, { replace: true })}
+              onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
             />
           ) : (
             thread

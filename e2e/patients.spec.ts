@@ -853,7 +853,7 @@ test("una lista y un buscador: Pacientes, Contactos nuevos y Todos con sus vínc
   // Plegado, el buscador dice su nombre («Buscar en pacientes», ADR 0066); la ayuda completa aparece al abrirlo.
   await expect(page.getByRole("searchbox")).toHaveAttribute("placeholder", "Buscar en pacientes")
   // Contactos nuevos: quien aún no es paciente ni familiar de uno.
-  await page.getByRole("button", { name: /^Contactos nuevos/ }).click()
+  await page.getByRole("tab", { name: /^Contactos nuevos/ }).click()
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
   // Familiares y tutores no son contactos nuevos: aparecen en Todos, con su vínculo.
   await expect(page.getByRole("link", { name: "Madre de Lucía" })).toHaveCount(0)

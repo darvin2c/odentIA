@@ -38,9 +38,9 @@ describe("ScheduleToolbar", () => {
   it("el conmutador marca la vista activa y avisa del cambio", () => {
     const onViewChange = vi.fn()
     render(<ScheduleToolbar rangeLabel="Semana 39" views={VISTAS} view="semana" onViewChange={onViewChange} />)
-    expect(screen.getByRole("button", { name: "Semana" }).getAttribute("aria-pressed")).toBe("true")
-    expect(screen.getByRole("button", { name: "Día" }).getAttribute("aria-pressed")).toBe("false")
-    fireEvent.click(screen.getByRole("button", { name: "Mes" }))
+    expect(screen.getByRole("tab", { name: "Semana" }).getAttribute("aria-selected")).toBe("true")
+    expect(screen.getByRole("tab", { name: "Día" }).getAttribute("aria-selected")).toBe("false")
+    fireEvent.click(screen.getByRole("tab", { name: "Mes" }))
     expect(onViewChange).toHaveBeenCalledWith("mes")
   })
 

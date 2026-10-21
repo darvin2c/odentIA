@@ -3,12 +3,11 @@
  * rotulado con su resumen) y cómo (conmutador de vista y filtros). Lo que más
  * se usa, a la izquierda; lo que se cambia poco, a la derecha.
  *
- * El conmutador es un fieldset de botones con `aria-pressed`: `@odentia/ui`
- * no exporta el ToggleGroup del registry, así que la alternativa semántica
- * simple es la correcta.
+ * El conmutador de vista son pestañas (`Tabs`), la misma pieza que Finanzas e
+ * Inventario: cambiar de vista es siempre una pestaña.
  */
 
-import { Button, cn } from "@odentia/ui"
+import { Button, cn, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type * as React from "react"
 
@@ -116,35 +115,24 @@ export function ScheduleToolbar({
       </div>
 
       {hasViews ? (
-        <fieldset
-          className={cn(
-            "flex min-w-0 gap-0.5 rounded-xl border-0 bg-secondary p-[3px]",
-            stretchViews ? "w-full" : "ml-auto",
-          )}
+        <Tabs
+          value={view ?? null}
+          onValueChange={(next) => onViewChange?.(String(next))}
+          className={cn(stretchViews ? "w-full" : "ml-auto")}
         >
-          <legend className="sr-only">Vista de la agenda</legend>
-          {views.map((option) => {
-            const active = option.id === view
-            return (
-              <button
+          <TabsList aria-label="Vista de la agenda" className={cn(stretchViews && "w-full")}>
+            {views.map((option) => (
+              <TabsTrigger
                 key={option.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onViewChange?.(option.id)}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 rounded-[9px] px-4 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  stretchViews ? "h-10 flex-1" : "h-[30px]",
-                  active
-                    ? "bg-card text-foreground shadow-xs"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                value={option.id}
+                className={cn(stretchViews && "h-10")}
               >
                 {option.icon}
                 {option.label}
-              </button>
-            )
-          })}
-        </fieldset>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       ) : null}
 
       {filters ? (

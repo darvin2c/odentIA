@@ -324,17 +324,17 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("button", { name: /espera/i })).toHaveCount(0)
 
   // Lista y Semana.
-  await page.getByRole("button", { name: "Lista", exact: true }).click()
+  await page.getByRole("tab", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
   await expect(page.getByText("Micaela Ríos").first()).toBeVisible()
   await shot("lista-escritorio")
-  await page.getByRole("button", { name: "Semana", exact: true }).click()
+  await page.getByRole("tab", { name: "Semana", exact: true }).click()
   await expect(page.getByRole("region", { name: /^Semana del/ })).toBeVisible()
   await shot("semana-escritorio")
 
   // Teléfono: un profesional a la vez; lo libre se ve en la rejilla, no en la ficha.
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole("button", { name: "Día", exact: true }).click()
+  await page.getByRole("tab", { name: "Día", exact: true }).click()
   await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
   await expect(page.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
@@ -345,10 +345,10 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await shot("dia-telefono-sillones")
   await page.getByRole("button", { name: /^Unidades dentales/ }).click()
   await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
-  await page.getByRole("button", { name: "Lista", exact: true }).click()
+  await page.getByRole("tab", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
   await shot("lista-telefono")
-  await page.getByRole("button", { name: "Semana", exact: true }).click()
+  await page.getByRole("tab", { name: "Semana", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toHaveCount(0)
   await expect(page.getByText(/libres?/).first()).toBeVisible()
   await shot("semana-telefono")

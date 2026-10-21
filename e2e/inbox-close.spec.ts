@@ -81,13 +81,13 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await fixtureDb.update(conversation).set({ lastInboundAt: longAgo, lastMessageAt: longAgo }).where(eq(conversation.id, old.id))
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  const tab = (name: RegExp) => page.getByRole("button", { name })
+  const tab = (name: RegExp) => page.getByRole("tab", { name })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   // Cuatro pestañas que no se superponen; sin vista abre «Por atender» (ADR 0050).
-  await expect(tab(/^Por atender 2$/)).toHaveAttribute("aria-pressed", "true")
+  await expect(tab(/^Por atender 2$/)).toHaveAttribute("aria-selected", "true")
   await expect(tab(/^Cerradas 0$/)).toBeVisible()
   await expect(page.getByRole("button", { name: /^(Abiertas|Esperan respuesta|Con el equipo)/ })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Solo las mías" })).toHaveAttribute("aria-pressed", "false")
+  await expect(page.getByRole("button", { name: "Temas", exact: true })).toBeVisible()
   await info.attach("pestanas", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- El agente pasa un tema: la fila dice la pregunta y el hilo pone arriba lo que hay que contestar ---

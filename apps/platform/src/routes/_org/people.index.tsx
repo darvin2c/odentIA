@@ -9,6 +9,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from "@odentia/ui"
 import {
   DataTable,
@@ -390,32 +393,29 @@ function PeoplePage() {
         }
       />
       <div className="flex flex-col gap-2 py-4">
-        <fieldset className="flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap [&::-webkit-scrollbar]:hidden">
-          <legend className="sr-only">Qué personas ver</legend>
-          {views.map((item) => {
-            const pressed = view === item.id
-            return (
-              <Button
-                key={item.id}
-                type="button"
-                size="sm"
-                variant={pressed ? "default" : "outline"}
-                aria-pressed={pressed}
-                className="min-h-11 shrink-0 rounded-full sm:min-h-9"
-                onClick={() =>
-                  listSearch.setParam("ver", item.id === "pacientes" ? undefined : item.id, {
-                    replace: true,
-                  })
-                }
-              >
+        {/* Elegir qué personas ver cambia la lista entera: es pestaña, igual que Finanzas. */}
+        <Tabs
+          value={view}
+          onValueChange={(next) =>
+            listSearch.setParam("ver", String(next) === "pacientes" ? undefined : String(next), {
+              replace: true,
+            })
+          }
+        >
+          <TabsList
+            aria-label="Qué personas ver"
+            className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {views.map((item) => (
+              <TabsTrigger key={item.id} value={item.id} className="shrink-0 min-h-11 sm:min-h-9">
                 {item.label}
                 {item.id === "por_registrar" && porRegistrar !== undefined
                   ? ` · ${porRegistrar}`
                   : ""}
-              </Button>
-            )
-          })}
-        </fieldset>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <FilterBar
           filters={shortcutFilters}
           resetKeys={["atajo"]}
