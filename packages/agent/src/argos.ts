@@ -484,7 +484,14 @@ export async function askArgos(
   let binding: ArgosBinding = { period: null, branch: null }
   let timedOut = false
   try {
-    plan = await writeArgosPlan(deps, ask)
+    // Una respuesta del modelo que no se lee (pasó una vez en 88) se pide otra vez, una sola.
+    plan = await writeArgosPlan(deps, ask).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "ARGOS_UNREADABLE") {
+        deps.onProblem?.("el modelo respondió algo que no se lee")
+        return writeArgosPlan(deps, ask)
+      }
+      throw error
+    })
     // Una sola corrección: si la segunda tampoco corre, se dice que no se pudo.
     for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
       const outcome = await attempt(plan)

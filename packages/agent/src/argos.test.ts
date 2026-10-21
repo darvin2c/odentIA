@@ -252,6 +252,14 @@ describe("Argos sobre las vistas", () => {
     expect(await lastQuestion()).toMatchObject({ outcome: "ayuda", usedModel: false })
   })
 
+  it("si el modelo responde algo que no se lee, se le pide otra vez una sola", async () => {
+    const model = new ScriptedModel([{ ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }, COBRADO])
+    expect(await ask(model, "¿Cuánto cobramos?")).toMatchObject({ kind: "respuesta" })
+    expect(model.calls).toHaveLength(2)
+    const twice = new ScriptedModel([{ ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }, { ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }])
+    expect(await ask(twice, "¿Cuánto cobramos?")).toMatchObject({ kind: "sin_modelo" })
+  })
+
   it("si el modelo no responde lo dice, y ese intento no cuenta para el tope", async () => {
     const before = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
     const answer = await ask(new ScriptedModel([new Error("proveedor caído")]), "¿Cuánto cobramos?")

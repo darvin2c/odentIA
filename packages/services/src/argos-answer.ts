@@ -107,9 +107,9 @@ function withoutExtraPreposition(before: string, said: string): string {
   return SAID_WITH_PREPOSITION.test(said) ? before.replace(LEADING_PREPOSITION, "$1") : before
 }
 
-/** Al abrir la frase, el periodo va con mayúscula. */
+/** Al abrir la frase o después de un punto, el periodo va con mayúscula. */
 function opening(before: string, said: string): string {
-  return before.trim() === "" ? said.charAt(0).toLocaleUpperCase() + said.slice(1) : said
+  return before.trim() === "" || /[.!?]\s*$/.test(before) ? said.charAt(0).toLocaleUpperCase() + said.slice(1) : said
 }
 
 /** Llena solo el periodo de un texto («Así lo calculé», la frase sin filas). */

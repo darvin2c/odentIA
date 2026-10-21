@@ -130,5 +130,6 @@ describe("la consulta con el periodo", () => {
     expect(fillArgosSentence("En {periodo} se cobró {cobrado_dinero}.", result, { ...ZONE, currency: "PEN" }, period.words).text).toBe("Del 1 al 21 de octubre se cobró S/\u00a034,818.00.")
     expect(fillArgosWords("Lo cobrado en {periodo}.", period.words)).toBe("Lo cobrado del 1 al 21 de octubre.")
     expect(fillArgosWords("Lo cobrado durante {periodo}.", resolve("hoy").words)).toBe("Lo cobrado hoy.")
+    expect(fillArgosSentence("No hay facturas. {periodo} se cobró {cobrado_dinero}.", result, { ...ZONE, currency: "PEN" }, period.words).text).toMatch(/^No hay facturas\. Del 1 al 21/)
   })
 })
