@@ -30,6 +30,8 @@ const listQuery = z.object({
   assignedUserId: z.string().max(200).optional(),
   // Solo las que tienen su tarea vencida.
   taskDue: z.enum(["true", "false"]).optional(),
+  // Solo las que el agente creó o movió alguna vez.
+  byAgent: z.enum(["true", "false"]).optional(),
   // El tablero: lo abierto y lo cerrado de los últimos 30 días.
   recent: z.enum(["true", "false"]).optional(),
   cursor: z.string().optional(),
@@ -37,8 +39,8 @@ const listQuery = z.object({
 })
 
 function filtersOf(query: z.infer<typeof listQuery>) {
-  const { taskDue, recent, ...rest } = query
-  return { ...rest, taskDue: taskDue === "true", recent: recent === "true" }
+  const { taskDue, byAgent, recent, ...rest } = query
+  return { ...rest, taskDue: taskDue === "true", byAgent: byAgent === "true", recent: recent === "true" }
 }
 
 // Crear, mover y cerrar una oportunidad declaran sus campos una vez, para la pantalla y para el agente.

@@ -67,12 +67,12 @@ it("agendar una cita mueve sola su oportunidad «Interesado» y la tarjeta dice 
   const moved = await f.run((tx) => getOpportunity(tx, "org_a", wanted.id, { appointments: true }))
   expect(moved).toMatchObject({
     moment: "evaluacion_agendada",
-    why: `Pasó sola: agendó su evaluación para ${dayWords(startsAt, new Date(), LIMA)}`,
+    why: `Pasó sola: el equipo le agendó la evaluación para ${dayWords(startsAt, new Date(), LIMA)}`,
     after: "Cuando se presente el presupuesto, avanza sola",
   })
   expect(moved.nextAppointment?.text).toContain("Tratamiento propio")
   expect(moved.history.at(-1)).toMatchObject({ origin: "automatico", who: "Automático" })
-  expect(moved.history.at(-1)?.what).toMatch(/^Pasó sola a «Evaluación agendada»: agendó su evaluación para /)
+  expect(moved.history.at(-1)?.what).toMatch(/^Pasó sola a «Evaluación agendada»: el equipo le agendó la evaluación para /)
   // La del otro interés sigue donde estaba.
   expect((await f.run((tx) => getOpportunity(tx, "org_a", older.id))).moment).toBe("interesado")
 })
@@ -89,7 +89,7 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   const linked = await f.run((tx) => getOpportunity(tx, "org_a", same.id))
   expect(linked).toMatchObject({ budgetId: budget.id, patientId: f.patient.id, moment: "presupuesto_enviado" })
-  expect(linked.why).toBe("Pasó sola: presupuesto presentado hoy")
+  expect(linked.why).toBe("Pasó sola: el equipo presentó el presupuesto hoy")
   expect((await f.run((tx) => getOpportunity(tx, "org_a", newest.id))).budgetId).toBeNull()
   await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
   expect(await f.run((tx) => getOpportunity(tx, "org_a", same.id))).toMatchObject({

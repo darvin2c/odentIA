@@ -262,7 +262,7 @@ export async function sendBudget(
     if (actor.by === "agente") {
       throw new ServiceError("BUDGET_NOT_READY", 409, "El presupuesto todavía no está listo para enviar")
     }
-    await deliverBudget(tx, orgId, actor.userId, input.patientId, input.budgetId, { memberRole: actor.memberRole })
+    await deliverBudget(tx, orgId, actor.userId, input.patientId, input.budgetId, { memberRole: actor.memberRole, by: "persona" })
     deliveredBudget = true
     budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
   }
