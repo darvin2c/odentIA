@@ -37,15 +37,6 @@ import { adminContextOf, forbidUnlessManager } from "../lib/admin-context.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-/**
- * El trigger `saas_seat_cap_check` (Billing) limita miembros + invitaciones
- * al cupo del plan: su error se traduce a 409 legible en vez de 500.
- */
-function seatCapExceeded(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  return error.message.includes("saas_seat_cap")
-}
-
 export interface AdminOrganizationsDeps
   extends Pick<AppDeps, "auth" | "ownerDb" | "mailer" | "webURL"> {
   getBillingSummary?: OrganizationBillingLoaders["getBillingSummary"]
@@ -206,12 +197,6 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     } catch (e) {
       const mapped = serviceErrorResponse(c, e)
       if (mapped) return mapped
-      if (seatCapExceeded(e)) {
-        return c.json(
-          errorBody(c, "CONFLICT", "La clínica alcanzó el cupo de asientos de su plan"),
-          409,
-        )
-      }
       throw e
     }
     if (created.invitationId) {

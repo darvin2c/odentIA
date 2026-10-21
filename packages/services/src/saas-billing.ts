@@ -12,8 +12,8 @@
 import type { Db } from "@odentia/db"
 import type { MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
-import { invitation, member, organization, user } from "@odentia/db/schema/auth"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { member, organization, user } from "@odentia/db/schema/auth"
+import { auditEvent } from "@odentia/db/schema/org"
 import {
   type SaasChargeStatus,
   type SaasSubscriptionStatus,
@@ -308,8 +308,6 @@ export interface SaasPlanInput {
   currency: string
   priceCents: number
   billingPeriod?: string | null
-  maxBranches?: number | null
-  maxSeats?: number | null
   sortOrder?: number
   /** Cobro por acción (ADR 0031). */
   creditCents?: number
@@ -339,8 +337,6 @@ export interface SaasPlanRow {
   currency: string
   priceCents: number
   billingPeriod: string
-  maxBranches: number | null
-  maxSeats: number | null
   isActive: boolean
   sortOrder: number
   creditCents: number
@@ -370,8 +366,6 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     currency: row.currency,
     priceCents: row.priceCents,
     billingPeriod: row.billingPeriod,
-    maxBranches: row.maxBranches,
-    maxSeats: row.maxSeats,
     isActive: row.isActive,
     sortOrder: row.sortOrder,
     creditCents: row.creditCents,
@@ -474,8 +468,6 @@ function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
     currency: currency(value.currency),
     priceCents: assertCents(value.priceCents, "El precio", false),
     billingPeriod: value.billingPeriod?.trim() || "mensual",
-    maxBranches: value.maxBranches ?? null,
-    maxSeats: value.maxSeats ?? null,
     sortOrder: value.sortOrder ?? 0,
   }
 }
@@ -483,19 +475,33 @@ function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
 /** Planes activos por moneda (lectura segura para panel y admin). */
 export async function listSaasPlans(
   tx: Db,
-  query: { currency?: string; includeInactive?: boolean; excludeInvitationOnly?: boolean } = {},
+  query: { currency?: string; includeInactive?: boolean } = {},
 ): Promise<SaasPlanRow[]> {
   const filters = []
   if (query.currency) filters.push(eq(saasPlan.currency, currency(query.currency)))
   if (!query.includeInactive) filters.push(eq(saasPlan.isActive, true))
-  // Un plan con lugares (Fundadores) solo se entra por invitación: la clínica no lo elige.
-  if (query.excludeInvitationOnly) filters.push(sql`${saasPlan.seatLimit} IS NULL`)
   const rows = await tx
     .select()
     .from(saasPlan)
     .where(filters.length > 0 ? and(...filters) : undefined)
     .orderBy(asc(saasPlan.sortOrder), asc(saasPlan.name))
   return rows.map(toPlanRow)
+}
+
+/**
+ * Lo que ve la clínica en Plan y pagos (issue 104): el plan de lista (el por
+ * defecto de la administración) y, si tiene otro, el suyo. Ningún otro plan
+ * activo se le ofrece: un plan especial o de Fundadores lo asigna la
+ * administración, no se elige. Primero el de lista.
+ */
+export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRow[]> {
+  const sub = await getSaasSubscription(tx, orgId)
+  const listPlan = and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))
+  const rows = await tx
+    .select()
+    .from(saasPlan)
+    .where(sub?.planId ? or(listPlan, eq(saasPlan.id, sub.planId)) : listPlan)
+  return rows.map(toPlanRow).sort((a, b) => Number(b.isDefault && b.isActive) - Number(a.isDefault && a.isActive))
 }
 
 /**
@@ -554,8 +560,6 @@ export async function updateSaasPlan(
     patch.priceCents = assertCents(input.priceCents, "El precio", false)
   if (input.billingPeriod !== undefined)
     patch.billingPeriod = input.billingPeriod?.trim() || "mensual"
-  if (input.maxBranches !== undefined) patch.maxBranches = input.maxBranches
-  if (input.maxSeats !== undefined) patch.maxSeats = input.maxSeats
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
   Object.assign(patch, actionTerms(input))
   const [current] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
@@ -1379,120 +1383,6 @@ export async function getOrganizationBillingSummary(
     proofExtensionUntil: sub?.proofExtensionUntil ?? null,
     usage30d,
     guaranteedUntil: sub?.guaranteedUntil && sub.guaranteedUntil > new Date() ? sub.guaranteedUntil : null,
-  }
-}
-
-// --- Límites de sedes/personas -------------------------------------------------------
-
-export interface SaasLimitCheck {
-  withinLimits: boolean
-  branches: { used: number; max: number | null }
-  seats: { used: number; max: number | null }
-}
-
-/**
- * Compara altas reales contra el tope del plan. Solo orienta altas nuevas;
- * jamás recorta históricos. La imponen Organizations (sedes/miembros) al crear.
- */
-export async function checkSaasLimits(tx: Db, orgId: string): Promise<SaasLimitCheck> {
-  const sub = await getSaasSubscription(tx, orgId)
-  let maxBranches: number | null = null
-  let maxSeats: number | null = null
-  if (sub?.planId) {
-    const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-    maxBranches = plan?.maxBranches ?? null
-    maxSeats = plan?.maxSeats ?? null
-  }
-  const branchRows = await tx
-    .select({ id: branch.id })
-    .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
-  const usedBranches = branchRows.length
-  const usedSeats = await countSaasSeats(tx, orgId)
-  return {
-    withinLimits:
-      (maxBranches === null || usedBranches <= maxBranches) &&
-      (maxSeats === null || usedSeats <= maxSeats),
-    branches: { used: usedBranches, max: maxBranches },
-    seats: { used: usedSeats, max: maxSeats },
-  }
-}
-
-/**
- * Asientos ocupados: UNIÓN por correo de miembros e invitaciones pendientes.
- * Aceptar una invitación no suma dos veces: el correo ya está reservado por
- * la invitación (o el miembro ya existe y la invitación dejó de estar
- * pendiente). `excludeEmail` quita el correo que se está sumando (el nuevo
- * invitado o quien acepta): el chequeo es "los demás + uno cabe en el plan".
- */
-export async function countSaasSeats(
-  tx: Db,
-  orgId: string,
-  excludeEmail?: string,
-): Promise<number> {
-  const excluded = excludeEmail?.trim().toLowerCase() ?? null
-  const memberRows = await tx
-    .select({ email: user.email })
-    .from(member)
-    .innerJoin(user, eq(user.id, member.userId))
-    .where(eq(member.organizationId, orgId))
-  const pendingRows = await tx
-    .select({ email: invitation.email })
-    .from(invitation)
-    .where(and(eq(invitation.organizationId, orgId), eq(invitation.status, "pending")))
-  const emails: Record<string, true> = {}
-  for (const row of memberRows) {
-    const email = row.email.trim().toLowerCase()
-    if (email && email !== excluded) emails[email] = true
-  }
-  for (const row of pendingRows) {
-    const email = row.email.trim().toLowerCase()
-    if (email && email !== excluded) emails[email] = true
-  }
-  return Object.keys(emails).length
-}
-
-/**
- * Lanza 409 si el plan no admite un miembro más. `excludeEmail` es el correo
- * que se suma (invitado nuevo o quien acepta): aceptar al límite exacto pasa
- * porque su asiento ya está reservado por su invitación. La usan el pre-auth
- * de invitar/aceptar y Organizations al invitar.
- */
-export async function assertSaasSeatAvailable(
-  tx: Db,
-  orgId: string,
-  excludeEmail?: string,
-): Promise<void> {
-  const sub = await getSaasSubscription(tx, orgId)
-  if (!sub || sub.isDemo || !sub.planId) return
-  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-  if (!plan || plan.maxSeats === null) return
-  const used = await countSaasSeats(tx, orgId, excludeEmail)
-  if (used >= plan.maxSeats) {
-    throw new ServiceError(
-      "SAAS_SEAT_LIMIT",
-      409,
-      `El plan ${plan.name} admite ${plan.maxSeats} personas: cambia de plan para invitar a más`,
-    )
-  }
-}
-
-/** Lanza 409 si el plan no admite una sede más. La usa quien crea sedes. */
-export async function assertSaasBranchAvailable(tx: Db, orgId: string): Promise<void> {
-  const sub = await getSaasSubscription(tx, orgId)
-  if (!sub || sub.isDemo || !sub.planId) return
-  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-  if (!plan || plan.maxBranches === null) return
-  const rows = await tx
-    .select({ id: branch.id })
-    .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
-  if (rows.length >= plan.maxBranches) {
-    throw new ServiceError(
-      "SAAS_BRANCH_LIMIT",
-      409,
-      `El plan ${plan.name} admite ${plan.maxBranches} sedes: cambia de plan para abrir otra`,
-    )
   }
 }
 

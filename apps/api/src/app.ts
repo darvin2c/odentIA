@@ -5,7 +5,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -593,7 +593,6 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
 
     const row = await withOrgContext(db, orgId, async (tx) => {
-      await assertSaasBranchAvailable(tx, orgId)
       const [created] = await tx
         .insert(branch)
         .values({ organizationId: orgId, ...parsed.data })
@@ -659,12 +658,7 @@ export function createApp(deps: AppDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reactivar sedes"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, async (tx) => {
-        const [current] = await tx.select({ isActive: branch.isActive }).from(branch)
-          .where(and(eq(branch.id, c.req.param("id")), eq(branch.organizationId, orgId))).for("update")
-        if (current && !current.isActive) await assertSaasBranchAvailable(tx, orgId)
-        return setBranchActive(tx, orgId, userId, c.req.param("id"), true)
-      }),
+      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), true)),
     )
   })
 

@@ -11,12 +11,12 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext, type Db } from "@odentia/db"
 import { invitation, member, user } from "@odentia/db/schema/auth"
+import { branch } from "@odentia/db/schema/org"
 import { saasCommissionSettlement, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   assertSaasAllowed,
-  assertSaasSeatAvailable,
   activateSaasSubscription,
   assignSaasSeller,
   chooseSaasPlan,
@@ -24,10 +24,10 @@ import {
   createSaasCharge,
   createSaasPlan,
   decideSaasAccess,
-  countSaasSeats,
   ensurePeriodCharge,
   getOrganizationBillingSummary,
   type SaasPaymentRow,
+  listClinicPlans,
   listPendingSaasCommissions,
   pauseSaasSubscription,
   reverseSaasPayment,
@@ -289,37 +289,28 @@ it("elegir plan no reescribe el cargo histórico", async () => {
   expect(charge.planCode).toBe(`base-${f.orgId}`)
   expect(charge.amountCents).toBe(10000)
 })
-it("el cupo cuenta unión por correo: aceptar al límite exacto pasa", async () => {
+it("el plan no limita personas ni sedes (ADR 0031)", async () => {
   const f = await billingFixture("bil-09")
-  await createSaasPlan(ownerDb, f.admin, {
-    code: `duo-${f.orgId}`,
-    name: "Dúo",
-    currency: "PEN",
-    priceCents: 5000,
-    maxSeats: 2,
-  })
-  await startSaasTrial(ownerDb, f.orgId, { planCode: `duo-${f.orgId}` })
-  // La invitación reserva el asiento sin duplicar al miembro que acepta.
-  await ownerDb.insert(invitation).values({
-    id: randomUUID(),
-    organizationId: f.orgId,
-    email: "nueva@example.test",
-    role: "member",
-    status: "pending",
-    expiresAt: new Date("2026-06-01T00:00:00Z"),
-    inviterId: f.admin,
-    createdAt: new Date(),
-  })
-  // Unión: dueño + invitada = 2 (la invitada cuenta una sola vez).
-  await f.run(async (tx) => {
-    expect(await countSaasSeats(tx, f.orgId)).toBe(2)
-    // Aceptar al límite exacto pasa: su asiento ya está reservado.
-    await assertSaasSeatAvailable(tx, f.orgId, "nueva@example.test")
-    // Un tercer correo distinto no cabe.
-    await expect(assertSaasSeatAvailable(tx, f.orgId, "otra@example.test")).rejects.toMatchObject({
-      code: "SAAS_SEAT_LIMIT",
-    })
-  })
+  await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}` })
+  // Antes un disparador contaba el cupo del plan: ahora invitar y abrir sedes pasa siempre.
+  await ownerDb.insert(invitation).values(
+    ["uno", "dos", "tres", "cuatro", "cinco", "seis"].map((name) => ({
+      id: randomUUID(),
+      organizationId: f.orgId,
+      email: `${name}@example.test`,
+      role: "member",
+      status: "pending",
+      expiresAt: new Date("2026-06-01T00:00:00Z"),
+      inviterId: f.admin,
+      createdAt: new Date(),
+    })),
+  )
+  await ownerDb.insert(branch).values([
+    { organizationId: f.orgId, name: "Sede Norte" },
+    { organizationId: f.orgId, name: "Sede Sur" },
+  ])
+  const rows = await ownerDb.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, f.orgId))
+  expect(rows.length).toBeGreaterThanOrEqual(2)
 })
 it("el comprobante disfrazado (SVG/HTML) se rechaza por bytes", async () => {
   const f = await billingFixture("bil-10")
@@ -486,4 +477,25 @@ it("después de 12 meses no hay comisión", async () => {
   )
   const confirmed = await confirmSaasPayment(ownerDb, f.orgId, f.admin, payment.id)
   expect(confirmed.commissionId).toBeNull()
+})
+
+it("la clínica ve el plan de lista y el suyo, nada más (issue 104)", async () => {
+  const f = await billingFixture("bil-17")
+  const list = await createSaasPlan(ownerDb, f.admin, {
+    code: `lista-${f.orgId}`,
+    name: "Lista",
+    currency: "USD",
+    priceCents: 2900,
+    isDefault: true,
+  })
+  await createSaasPlan(ownerDb, f.admin, { code: `otro-${f.orgId}`, name: "Otro", currency: "PEN", priceCents: 9900 })
+  await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}` })
+  // Con un plan especial: el de lista primero y el suyo; «Otro», activo, no se ofrece.
+  const withSpecial = await f.run((tx) => listClinicPlans(tx, f.orgId))
+  expect(withSpecial.map((plan) => plan.code)).toEqual([`lista-${f.orgId}`, `base-${f.orgId}`])
+  await f.run((tx) => chooseSaasPlan(tx, f.orgId, f.admin, `lista-${f.orgId}`))
+  const onList = await f.run((tx) => listClinicPlans(tx, f.orgId))
+  expect(onList.map((plan) => plan.code)).toEqual([`lista-${f.orgId}`])
+  // El plan por defecto es uno para toda la base: se deja como estaba.
+  await updateSaasPlan(ownerDb, f.admin, list.id, { isDefault: false })
 })
