@@ -46,7 +46,8 @@ const ALLOWED_CALLS = new Set([
   "length", "concat", "concat_ws", "substring", "left", "right", "replace", "position", "split_part", "date_trunc", "date_part",
   "extract", "to_char", "to_date", "make_date", "make_interval", "age", "now", "unnest", "array_length", "cardinality",
   // Palabras del lenguaje.
-  "cast", "in", "exists", "any", "all", "some", "values", "over", "filter", "within", "as", "from", "join", "lateral", "on", "and", "or",
+  // `within group (order by …)` de la mediana: «group» va antes de un paréntesis y no es una función.
+  "cast", "in", "exists", "any", "all", "some", "values", "over", "filter", "within", "group", "as", "from", "join", "lateral", "on", "and", "or",
   "not", "using", "select", "where", "when", "then", "else", "by", "between", "is", "interval", "date", "timestamp", "timestamptz", "numeric", "int",
 ])
 
@@ -129,6 +130,9 @@ function insideFromCall(text: string, index: number): boolean {
   return false
 }
 
+/** Filas que dice la lista de una respuesta (`fillArgosSentence`): alcanza un año mes por mes. */
+export const ARGOS_LIST_ROWS = 12
+
 export class ArgosQueryError extends Error {
   constructor(
     readonly code: "REVISOR" | "PERMISO" | "TIEMPO" | "CONSULTA",
@@ -209,7 +213,9 @@ export async function runArgosQuery(
       const described = (result as unknown as { columns?: Array<{ name: string; type: number }> }).columns ?? []
       const columns = described.map((column) => ({ name: column.name, kind: KIND_OF_TYPE[column.type] ?? ("text" as const) }))
       const rows = [...result].slice(0, limit).map((row) => Object.fromEntries(columns.map((column) => [column.name, plainValue(row[column.name], column.kind)])))
-      return { columns, rows, truncated: result.length > limit }
+      // Un LIMIT propio más largo que la lista que llega justo a su tope también cortó: «y 40 más» de un LIMIT 50 sería falso.
+      const own = Number(/\blimit\s+(\d+)\s*$/i.exec(review.sql)?.[1] ?? 0)
+      return { columns, rows, truncated: result.length > limit || (own > ARGOS_LIST_ROWS && rows.length === own) }
     })
   } catch (error) {
     const cause = (error as { cause?: { code?: string; message?: string } }).cause ?? (error as { code?: string; message?: string })

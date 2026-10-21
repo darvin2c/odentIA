@@ -13,7 +13,7 @@ import { encounter, encounterProcedure, patientCharge } from "@odentia/db/schema
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { fillArgosSentence } from "./argos-answer.js"
+import { argosSentenceProblem, fillArgosSentence } from "./argos-answer.js"
 import { ARGOS_CATALOG, ARGOS_FIGURE_RULES, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -123,16 +123,52 @@ describe("las llaves de Argos", () => {
         { name: "mes", kind: "date" as const },
         { name: "pacientes", kind: "number" as const },
       ],
-      rows: Array.from({ length: 12 }, (_, index) => ({ mes: `2026-${String(index + 1).padStart(2, "0")}-01`, pacientes: index })),
+      rows: Array.from({ length: 14 }, (_, index) => ({ mes: `${2026 + Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}-01`, pacientes: index })),
       truncated: false,
     }
+    // Un año entero entra en la lista; lo que pasa de 12 se cuenta.
     const filled = fillArgosSentence("Por mes: {lista}.", months, zone)
-    expect(filled.text).toMatch(/^Por mes: enero de 2026 \(pacientes: 0\); febrero de 2026 \(pacientes: 1\); .*octubre de 2026 \(pacientes: 9\) y 2 más\.$/)
+    expect(filled.text).toMatch(/^Por mes: enero de 2026 \(pacientes: 0\); febrero de 2026 \(pacientes: 1\); .*diciembre de 2026 \(pacientes: 11\) y 2 más\.$/)
     const money = { columns: [{ name: "categoria", kind: "text" as const }, { name: "monto_dinero", kind: "number" as const }], rows: [{ categoria: "Alquiler", monto_dinero: 11300 }], truncated: false }
     expect(fillArgosSentence("{lista}", money, zone).text).toMatch(/^Alquiler \(S\/\s?11,300\.00\)$/)
+    // Dos montos en la misma fila llevan su nombre: si no, no se sabe cuál es cuál.
+    const branches = {
+      columns: [{ name: "sede", kind: "text" as const }, { name: "cobrado_dinero", kind: "number" as const }, { name: "dejo_dinero", kind: "number" as const }],
+      rows: [{ sede: "Miraflores", cobrado_dinero: 284045, dejo_dinero: 15946.5 }],
+      truncated: false,
+    }
+    expect(fillArgosSentence("{lista}", branches, zone).text).toMatch(/^Miraflores \(cobrado: S\/\s?284,045\.00, dejo: S\/\s?15,946\.50\)$/)
     const rate = { columns: [{ name: "cobrado_pct", kind: "number" as const }], rows: [{ cobrado_pct: 88 }], truncated: false }
     expect(fillArgosSentence("Se cobró el {cobrado_pct}% de lo cargado; {cobrado_pct} %.", rate, zone).text).toBe("Se cobró el 88 % de lo cargado; 88 %.")
     expect(fillArgosSentence("Desde {desde}.", { columns: [{ name: "desde", kind: "date" }], rows: [{ desde: "2026-10-01" }], truncated: false }, zone).text).toBe("Desde 1 de octubre de 2026.")
+    // Una columna que se llama como el hueco reservado es lo que se contó: no la cantidad de filas.
+    expect(fillArgosSentence("Hay {filas} presupuestos.", { columns: [{ name: "filas", kind: "number" }], rows: [{ filas: 28 }], truncated: false }, zone).text).toBe("Hay 28 presupuestos.")
+    // Una variación dice si sube.
+    expect(fillArgosSentence("Cambiaron {variacion_pct}.", { columns: [{ name: "variacion_pct", kind: "number" }], rows: [{ variacion_pct: 1 }], truncated: false }, zone).text).toBe("Cambiaron +1 %.")
+    // La hora del día se dice como hora, y el total de todas las filas va en la frase, no en cada una.
+    const hours = { columns: [{ name: "hora", kind: "number" as const }, { name: "libres", kind: "number" as const }], rows: [{ hora: 9, libres: 4 }], truncated: false }
+    expect(fillArgosSentence("{lista}", hours, zone).text).toBe("09:00 (libres: 4)")
+    const owed = {
+      columns: [
+        { name: "paciente", kind: "text" as const },
+        { name: "saldo_dinero", kind: "number" as const },
+        { name: "total_general", kind: "number" as const },
+        { name: "total_general_dinero", kind: "number" as const },
+      ],
+      rows: [{ paciente: "Lorena", saldo_dinero: 1080, total_general: 211, total_general_dinero: 52785 }],
+      truncated: true,
+    }
+    expect(fillArgosSentence("{total_general} te deben {total_general_dinero}: {lista}.", owed, zone).text).toMatch(/^211 te deben S\/\s?52,785\.00: Lorena \(S\/\s?1,080\.00\) y más\.$/)
+  })
+
+  it("una frase con la lista dos veces o en medio no se lee: se corrige", () => {
+    expect(argosSentenceProblem("La mayor fue {lista} y la menor {lista}.")).toMatch(/una sola vez/)
+    expect(argosSentenceProblem("Del 1 al 20 de octubre, {lista} de los pacientes atendidos.")).toMatch(/al final/)
+    expect(argosSentenceProblem("Los que más deben: {lista}.")).toBeNull()
+    expect(argosSentenceProblem("Este mes se cobró {cobrado_dinero}.")).toBeNull()
+    // El mismo hueco dos veces es la misma primera fila: con varias filas no dice lo que parece.
+    expect(argosSentenceProblem("Nuevos: {porcentaje_pct}; recurrentes: {porcentaje_pct}.", 2)).toMatch(/dos veces/)
+    expect(argosSentenceProblem("Se cobró {cobrado_dinero}; sí, {cobrado_dinero}.", 1)).toBeNull()
   })
 
   it("lo que no tiene valor nunca sale primero", async () => {
@@ -140,6 +176,11 @@ describe("las llaves de Argos", () => {
     expect(review).toMatchObject({ ok: true, sql: "select nombre from pacientes where nombre <> 'desc' order by ultima_atencion desc nulls last, nombre desc nulls first" })
     const { rows } = await runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: "select v from unnest(array[1, null, 3]) as v order by v desc" })
     expect(rows.map((row) => row.v)).toEqual([3, 1, null])
+    // Un LIMIT propio más largo que la lista que llega a su tope también cortó: no se sabe cuántas faltan.
+    const cut = await runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: "select v from unnest(array[1,2,3,4,5,6,7,8,9,10,11,12,13,14]) as v order by v limit 13" })
+    expect(cut).toMatchObject({ truncated: true })
+    const top = await runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: "select v from unnest(array[1,2,3,4,5,6]) as v order by v limit 5" })
+    expect(top).toMatchObject({ truncated: false })
   })
 
   it("el revisor deja pasar una lectura de las vistas y rechaza lo demás", () => {
@@ -149,6 +190,8 @@ describe("las llaves de Argos", () => {
     expect(reviewArgosQuery("select extract(day from c.inicio) as d, count(*) as n from citas c where extract(dow from current_date) = 1 group by 1")).toMatchObject({ ok: true })
     expect(reviewArgosQuery("select extract(day from now()) as d from public.patient")).toMatchObject({ ok: false })
     expect(reviewArgosQuery("select count(*) from citas where sede = 'Sede E'")).toMatchObject({ ok: true })
+    // La mediana: «group» de `within group (…)` no es una función.
+    expect(reviewArgosQuery("select percentile_cont(0.5) within group (order by espera_min) as espera from citas")).toMatchObject({ ok: true })
     for (const bad of [
       "select * from public.patient",
       "select * from patient",

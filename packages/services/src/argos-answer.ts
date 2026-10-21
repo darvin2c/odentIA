@@ -14,7 +14,7 @@ import type { Db } from "@odentia/db"
 import { reportQuestion } from "@odentia/db/schema/reports"
 import { and, count, eq, gte, ne } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
-import type { ArgosQueryResult } from "./argos-query.js"
+import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
 import { REPORT_DAILY_LIMIT } from "./report-ask.js"
@@ -83,7 +83,6 @@ export async function argosScreen(tx: Db, orgId: string, screen: ReportQuery, no
 export type ArgosSentencePart = { text: string; strong?: true }
 
 const HOLE = /\{(\w+)\}/g
-const LIST_ROWS = 10
 
 /** Los huecos de la frase que no son columnas del resultado ni `{lista}`/`{filas}`: el modelo se equivocó. */
 export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResult, "columns">): string[] {
@@ -91,9 +90,33 @@ export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResul
   return [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas" && !names.has(name))
 }
 
-/** Un id (`paciente_id`, `presupuesto_id`…) sirve para contar y agrupar: no se muestra. */
-export function isArgosIdColumn(name: string): boolean {
-  return /(^|_)id$/.test(name)
+/**
+ * Lo que no se puede leer de una frase: la lista va una sola vez y al final,
+ * después de lo que dice qué es («Los que más deben: {lista}.»); en medio de
+ * la frase o dos veces, queda entre palabras que ya no se entienden («la mayor
+ * fue {lista} y la menor {lista}»). Y un hueco repetido con varias filas dice
+ * dos veces la primera («nuevos: 17 %; recurrentes: 17 %»).
+ */
+export function argosSentenceProblem(template: string, rows = 1): string | null {
+  const holes = [...template.matchAll(HOLE)].map((match) => match[1] ?? "").filter((name) => name !== "lista" && name !== "filas")
+  const repeated = holes.find((name, index) => holes.indexOf(name) !== index)
+  if (repeated && rows > 1)
+    return `la frase usa {${repeated}} dos veces y siempre es la primera fila: para dos cifras distintas, una sola fila con una columna por cifra`
+  const lists = [...template.matchAll(/\{lista\}/g)]
+  if (lists.length > 1) return "la frase usa {lista} más de una vez: va una sola vez, al final; para el mayor y el menor usa columnas de una sola fila"
+  const list = lists[0]
+  if (list && /[\p{L}\p{N}{]/u.test(template.slice((list.index ?? 0) + list[0].length)))
+    return "{lista} va al final de la frase, después de dos puntos, sin palabras detrás"
+  return null
+}
+
+/**
+ * Lo que no se muestra en la lista, la tabla ni el CSV: un id (`paciente_id`,
+ * `presupuesto_id`…) sirve para contar, agrupar y abrir la página de la persona,
+ * y un `total_general…` repite en cada fila el total de todas, que dice la frase.
+ */
+export function isArgosHiddenColumn(name: string): boolean {
+  return /(^|_)id$/.test(name) || /^total_general(_|$)/.test(name)
 }
 
 /** «cobrado_dinero» → «Cobrado»: el nombre de una columna dicho para la pantalla. */
@@ -124,6 +147,11 @@ export function formatArgosValue(value: string | number | boolean | null, column
       ...(/(^|_)mes$/.test(column.name) ? { month: "long", year: "numeric" } : { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }),
     }).format(new Date(String(value)))
   if (column.kind === "number" && typeof value === "number") {
+    // Una hora del día (0 a 23) se dice como hora: «14:00», no «14».
+    if (/(^|_)hora$/.test(column.name) && Number.isInteger(value) && value >= 0 && value <= 23) return `${String(value).padStart(2, "0")}:00`
+    // Una variación lleva su signo: «+1 %» sube, «-32 %» baja.
+    if (/^(variacion|cambio|diferencia|crecimiento)/.test(column.name) && /_pct$/.test(column.name) && value > 0)
+      return `+${formatArgosValue(value, { ...column, name: "valor_pct" }, zone)}`
     if (/_dinero$/.test(column.name)) return new Intl.NumberFormat(zone.locale, { style: "currency", currency: zone.currency }).format(value)
     if (/_pct$/.test(column.name)) return `${new Intl.NumberFormat(zone.locale, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)} %`
     return new Intl.NumberFormat(zone.locale, { maximumFractionDigits: 2 }).format(value)
@@ -134,7 +162,10 @@ export function formatArgosValue(value: string | number | boolean | null, column
 /**
  * Llena la frase con el resultado: `{columna}` es el valor de la primera fila,
  * `{lista}` las primeras filas como «a (b, c); …» en el orden de la consulta,
- * con «y N más» si hay más, y `{filas}` cuántas son. En la lista, un número
+ * con «y N más» si hay más, y `{filas}` cuántas son. Una columna del resultado
+ * que se llame `filas` o `lista` gana sobre el hueco: es lo que el modelo
+ * contó. Si la consulta se cortó (el tope o su propio LIMIT), la lista dice
+ * «y más»: no se sabe cuántas faltan. En la lista, un número
  * suelto lleva el nombre de su columna («Dra. Ana Torres (citas: 65)»): el
  * dinero y los porcentajes solos ya se entienden. Un hueco desconocido queda
  * «—» (antes se reintenta). El «%» que el modelo escriba junto a un
@@ -151,16 +182,19 @@ export function fillArgosSentence(
     const column = byName.get(name)
     return column ? formatArgosValue(row[name] ?? null, column, zone) : "—"
   }
-  const [lead, ...rest] = result.columns.filter((column) => !isArgosIdColumn(column.name))
-  const selfExplained = (column: ArgosQueryResult["columns"][number]) => column.kind !== "number" || /_(dinero|pct)$/.test(column.name)
+  const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
+  // El dinero y el porcentaje solos se entienden; dos de lo mismo en una fila llevan su nombre («cobrado: S/ 284,045.00, dejo: S/ 15,946.50»).
+  const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? null
+  const twice = (unit: string | null) => unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1
+  const selfExplained = (column: ArgosQueryResult["columns"][number]) => column.kind !== "number" || (unitOf(column.name) !== null && !twice(unitOf(column.name)))
   const labeled = !(rest.length === 1 && rest[0] && selfExplained(rest[0]))
-  const items = result.rows.slice(0, LIST_ROWS).map((row) => {
+  const items = result.rows.slice(0, ARGOS_LIST_ROWS).map((row) => {
     const head = lead ? cell(row, lead.name) : ""
     if (!rest.length) return head
     const details = rest.map((column) => (labeled && !selfExplained(column) ? `${argosColumnLabel(column.name).toLowerCase()}: ${cell(row, column.name)}` : cell(row, column.name)))
     return `${head} (${details.join(", ")})`
   })
-  const more = result.truncated ? " y más" : result.rows.length > LIST_ROWS ? ` y ${result.rows.length - LIST_ROWS} más` : ""
+  const more = result.truncated ? " y más" : result.rows.length > ARGOS_LIST_ROWS ? ` y ${result.rows.length - ARGOS_LIST_ROWS} más` : ""
   const list = `${items.join("; ")}${more}`
   const rows = result.truncated ? `más de ${result.rows.length}` : String(result.rows.length)
   const parts: ArgosSentencePart[] = []
@@ -169,7 +203,7 @@ export function fillArgosSentence(
     const name = match[1] ?? ""
     const at = match.index ?? 0
     if (at > last) parts.push({ text: template.slice(last, at) })
-    parts.push({ text: name === "lista" ? list : name === "filas" ? rows : cell(first, name), strong: true })
+    parts.push({ text: byName.has(name) ? cell(first, name) : name === "lista" ? list : name === "filas" ? rows : "—", strong: true })
     last = at + match[0].length
     if (/_pct$/.test(name)) {
       const repeated = /^\s?%/.exec(template.slice(last))

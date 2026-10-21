@@ -30,6 +30,10 @@ GRANT SELECT ON TABLE public.patient_charge, public.patient_payment, public.pati
   public.commission_rule, public.member, public.professional_schedule, public.schedule_block, public.conversation,
   public.channel_connection, public.opportunity, public.pipeline_stage, public.task TO argos_dueno;--> statement-breakpoint
 GRANT SELECT (id, name) ON TABLE auth."user" TO argos_dueno;--> statement-breakpoint
+-- El embudo: de los mensajes solo quién escribió y cuándo, nunca el texto; del registro, por dónde entró y quién escribió por la persona.
+GRANT SELECT (id, organization_id, conversation_id, direction, created_at) ON TABLE public.message TO argos_dueno;--> statement-breakpoint
+GRANT SELECT (organization_id, patient_id, entry_point, actor_user_id, context_contact_id, conversation_id) ON TABLE public.patient_registration TO argos_dueno;--> statement-breakpoint
+GRANT SELECT (organization_id, contact_id, relationship) ON TABLE public.patient_contact TO argos_dueno;--> statement-breakpoint
 GRANT SELECT (id, specialty) ON TABLE catalog.treatment_template TO argos_dueno;--> statement-breakpoint
 
 CREATE SCHEMA IF NOT EXISTS argos;--> statement-breakpoint
@@ -42,7 +46,7 @@ REVOKE ALL ON SCHEMA argos FROM PUBLIC;--> statement-breakpoint
 CREATE VIEW argos.ventas AS
 SELECT c.id AS venta_id, c.created_at AS cargado_en, (c.created_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia,
   c.patient_id AS paciente_id, pp.display_name AS paciente,
-  coalesce(sep.name, spi.name, pr.name) AS concepto,
+  coalesce(sep.name, spi.name, pr.name, c.description) AS concepto,
   CASE WHEN c.product_id IS NULL THEN 'tratamiento' ELSE 'producto' END AS tipo,
   coalesce(c.product_quantity, ep.quantity, 1) AS cantidad,
   round(c.amount_cents / 100.0, 2) AS importe,
@@ -88,8 +92,9 @@ LEFT JOIN public.branch b ON b.organization_id = x.organization_id AND b.id = x.
 -- Lo pagado aplicado a cada venta: qué se pagó, de qué y de quién lo atendió (solo pagos vigentes).
 CREATE VIEW argos.pagos_por_venta AS
 SELECT pay.paid_at AS pagado_en, (pay.paid_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, round(a.amount_cents / 100.0, 2) AS importe,
-  coalesce(sep.name, spi.name, pr.name) AS concepto, CASE WHEN c.product_id IS NULL THEN 'tratamiento' ELSE 'producto' END AS tipo,
-  coalesce(c.product_quantity, ep.quantity, 1) AS cantidad, u.name AS profesional, b.name AS sede, pp.display_name AS paciente, c.patient_id AS paciente_id, pay.method_name AS medio
+  coalesce(sep.name, spi.name, pr.name, c.description) AS concepto, CASE WHEN c.product_id IS NULL THEN 'tratamiento' ELSE 'producto' END AS tipo,
+  coalesce(c.product_quantity, ep.quantity, 1) AS cantidad, u.name AS profesional, b.name AS sede, pp.display_name AS paciente, c.patient_id AS paciente_id, pay.method_name AS medio,
+  c.id AS venta_id
 FROM public.patient_payment_application a
 JOIN public.patient_payment pay ON pay.organization_id = a.organization_id AND pay.id = a.payment_id AND pay.voided_at IS NULL
 JOIN public.patient_charge c ON c.organization_id = a.organization_id AND c.id = a.charge_id AND c.voided_at IS NULL
@@ -512,6 +517,76 @@ SELECT t.created_at AS creada_en, t.due_at AS vence_en, t.status AS estado, t.ar
 FROM public.task t
 LEFT JOIN auth."user" u ON u.id = t.assignee_user_id;--> statement-breakpoint
 
+-- El embudo de Reportes (report-patients.ts, `firstContactSql` y `funnelSql`): el primer contacto de cada persona
+-- (su primer mensaje entrante, el de quien escribió por ella y la registró en los 30 días anteriores, o su registro)
+-- y hasta dónde llegó desde entonces. Quien aún no es paciente y escribe por un paciente no se cuenta otra vez.
+CREATE VIEW argos.embudo AS
+WITH first_inbound AS (
+  SELECT DISTINCT ON (c.organization_id, c.contact_id) c.organization_id, c.contact_id, fi.created_at AS at, cc.channel
+  FROM public.conversation c
+  JOIN LATERAL (
+    SELECT m.created_at FROM public.message m
+    WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.direction = 'in'
+    ORDER BY m.created_at, m.id LIMIT 1
+  ) fi ON true
+  LEFT JOIN public.channel_connection cc ON cc.organization_id = c.organization_id AND cc.id = c.channel_connection_id
+  WHERE NOT EXISTS (SELECT 1 FROM public.contact s WHERE s.organization_id = c.organization_id AND s.id = c.contact_id AND s.screen IS NOT NULL)
+  ORDER BY c.organization_id, c.contact_id, fi.created_at, c.id
+), registered AS (
+  SELECT p.organization_id, p.id AS patient_id, p.person_id, p.created_at, r.conversation_id,
+    nullif(coalesce(r.context_contact_id, rc.contact_id), p.person_id) AS writer_id,
+    CASE WHEN r.entry_point IN ('public_link', 'qr') OR (r.entry_point = 'conversation' AND r.actor_user_id IS NULL)
+      THEN 'registro_en_linea' ELSE 'recepcion' END AS registered_via
+  FROM public.patient p
+  LEFT JOIN public.patient_registration r ON r.organization_id = p.organization_id AND r.patient_id = p.id
+  LEFT JOIN public.conversation rc ON rc.organization_id = r.organization_id AND rc.id = r.conversation_id
+), first_contact AS (
+  SELECT g.organization_id, g.person_id, g.patient_id, k.at AS first_at, k.channel
+  FROM registered g
+  LEFT JOIN first_inbound own ON own.organization_id = g.organization_id AND own.contact_id = g.person_id
+  LEFT JOIN LATERAL (
+    SELECT m.created_at AS at, wcc.channel FROM public.message m
+    JOIN public.conversation wc ON wc.organization_id = m.organization_id AND wc.id = m.conversation_id
+    LEFT JOIN public.channel_connection wcc ON wcc.organization_id = wc.organization_id AND wcc.id = wc.channel_connection_id
+    WHERE g.writer_id IS NOT NULL AND m.organization_id = g.organization_id AND m.conversation_id = g.conversation_id
+      AND m.direction = 'in' AND m.created_at <= g.created_at AND m.created_at > g.created_at - make_interval(days => 30)
+      AND NOT EXISTS (SELECT 1 FROM public.contact s WHERE s.organization_id = wc.organization_id AND s.id = wc.contact_id AND s.screen IS NOT NULL)
+    ORDER BY m.created_at, m.id LIMIT 1
+  ) w ON true
+  CROSS JOIN LATERAL (
+    SELECT x.at, x.channel FROM (VALUES (own.at, own.channel, 0), (w.at, w.channel, 1), (g.created_at, g.registered_via, 2)) AS x(at, channel, rank)
+    WHERE x.at IS NOT NULL ORDER BY x.at, x.rank LIMIT 1
+  ) k
+  UNION ALL
+  SELECT i.organization_id, i.contact_id, NULL::uuid, i.at, i.channel
+  FROM first_inbound i
+  WHERE NOT EXISTS (SELECT 1 FROM public.patient p WHERE p.organization_id = i.organization_id AND p.person_id = i.contact_id)
+    AND NOT EXISTS (SELECT 1 FROM public.patient_contact v WHERE v.organization_id = i.organization_id AND v.contact_id = i.contact_id AND v.relationship <> 'self')
+    AND NOT EXISTS (SELECT 1 FROM registered g WHERE g.organization_id = i.organization_id AND g.writer_id = i.contact_id)
+), reached AS (
+  SELECT k.*,
+    EXISTS (SELECT 1 FROM public.appointment a WHERE a.organization_id = k.organization_id AND a.patient_id = k.patient_id
+      AND a.created_at >= k.first_at AND a.status <> 'cancelada') AS booked,
+    EXISTS (SELECT 1 FROM public.appointment a WHERE a.organization_id = k.organization_id AND a.patient_id = k.patient_id
+      AND a.created_at >= k.first_at AND a.status = 'atendida')
+      OR EXISTS (SELECT 1 FROM public.encounter e WHERE e.organization_id = k.organization_id AND e.patient_id = k.patient_id
+        AND e.status = 'finalizada' AND e.finalized_at >= k.first_at) AS came,
+    EXISTS (SELECT 1 FROM public.treatment_budget b WHERE b.organization_id = k.organization_id AND b.patient_id = k.patient_id
+      AND b.status IN ('aceptado', 'parcial', 'presentado', 'pospuesto', 'rechazado') AND b.presented_at >= k.first_at) AS budget,
+    EXISTS (SELECT 1 FROM public.treatment_budget b WHERE b.organization_id = k.organization_id AND b.patient_id = k.patient_id
+      AND b.status IN ('aceptado', 'parcial') AND b.presented_at >= k.first_at) AS accepted,
+    EXISTS (SELECT 1 FROM public.patient_payment y WHERE y.organization_id = k.organization_id AND y.patient_id = k.patient_id
+      AND y.voided_at IS NULL AND y.paid_at >= k.first_at) AS paid
+  FROM first_contact k
+)
+SELECT r.first_at AS primer_contacto_en, (r.first_at AT TIME ZONE coalesce(op.timezone, 'UTC'))::date AS dia, r.channel AS canal,
+  pp.display_name AS persona, r.person_id AS persona_id, r.patient_id AS paciente_id,
+  r.booked OR r.came OR r.budget AS agendo, r.came OR r.budget AS vino, r.budget AS recibio_presupuesto, r.accepted AS acepto,
+  r.accepted AND r.paid AS pago
+FROM reached r
+JOIN public.contact pp ON pp.organization_id = r.organization_id AND pp.id = r.person_id
+LEFT JOIN public.org_profile op ON op.organization_id = r.organization_id;--> statement-breakpoint
+
 -- 9. Dueño y llaves. Las vistas son de argos_dueno; cada llave lee solo lo de su rol.
 DO $$
 DECLARE v text;
@@ -526,11 +601,11 @@ GRANT USAGE ON SCHEMA argos TO argos_gestion, argos_recepcion, argos_clinico, ar
 GRANT SELECT ON argos.ventas, argos.cobros, argos.pagos_por_venta, argos.tickets, argos.deudas, argos.gastos, argos.comisiones,
   argos.citas, argos.agenda_por_dia, argos.agenda_por_hora, argos.pacientes, argos.tratamientos_hechos, argos.planes, argos.controles,
   argos.presupuestos, argos.lineas_presupuesto, argos.promociones, argos.promociones_uso, argos.lotes, argos.inventario,
-  argos.movimientos_inventario, argos.compras, argos.conversaciones, argos.oportunidades, argos.tareas TO argos_gestion;--> statement-breakpoint
+  argos.movimientos_inventario, argos.compras, argos.conversaciones, argos.oportunidades, argos.tareas, argos.embudo TO argos_gestion;--> statement-breakpoint
 -- Recepción: agenda, personas, conversaciones, ventas del CRM, presupuestos como los recibe la persona e inventario sin precios.
 GRANT SELECT ON argos.citas, argos.agenda_por_dia, argos.agenda_por_hora, argos.pacientes, argos.controles, argos.presupuestos,
   argos.lineas_presupuesto, argos.promociones, argos.lotes, argos.inventario, argos.movimientos_inventario, argos.conversaciones,
-  argos.oportunidades TO argos_recepcion;--> statement-breakpoint
+  argos.oportunidades, argos.embudo TO argos_recepcion;--> statement-breakpoint
 -- Odontología: agenda, pacientes, lo realizado, planes, controles y presupuestos. Sin caja.
 GRANT SELECT ON argos.citas, argos.agenda_por_dia, argos.agenda_por_hora, argos.pacientes, argos.tratamientos_hechos, argos.planes,
   argos.controles, argos.presupuestos, argos.lineas_presupuesto, argos.promociones, argos.conversaciones TO argos_clinico;--> statement-breakpoint

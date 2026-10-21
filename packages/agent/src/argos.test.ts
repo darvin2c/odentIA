@@ -17,7 +17,7 @@ import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { type ArgosDeps, type ArgosPlan, askArgos } from "./argos.js"
+import { type ArgosDeps, type ArgosPlan, argosPeriodNames, askArgos } from "./argos.js"
 import type { DecisionModel } from "./decision/index.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -235,5 +235,12 @@ describe("Argos sobre las vistas", () => {
   it("con el modelo de demostración responde lo cobrado sin proveedor", async () => {
     const answer = await askArgos(appDb, { platform: { fake: true }, secretsKey: KEY }, { orgId: ORG, userId: OWNER, memberRole: "admin", text: "¿Cuánto cobramos este mes?" })
     expect(answer).toMatchObject({ kind: "respuesta" })
+  })
+
+  it("los periodos de la frase llegan con su nombre, aunque crucen de año", () => {
+    const names = argosPeriodNames(new Date("2026-02-15T15:00:00Z"), { timezone: "America/Lima", locale: "es-PE" })
+    expect(names).toContain("El mes en curso es febrero de 2026 y va del 1 al 15")
+    expect(names).toContain("Los últimos 3 meses completos van de noviembre de 2025 a enero de 2026")
+    expect(names).toContain("Los últimos 12 meses completos van de febrero de 2025 a enero de 2026")
   })
 })

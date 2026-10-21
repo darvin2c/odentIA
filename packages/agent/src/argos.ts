@@ -14,10 +14,11 @@ import {
   type ArgosStoredPlan,
   argosCatalogText,
   argosColumnLabel,
-  isArgosIdColumn,
+  isArgosHiddenColumn,
   argosKeyOf,
   ArgosQueryError,
   argosScreen,
+  argosSentenceProblem,
   fillArgosSentence,
   formatArgosValue,
   prepareArgosQuestion,
@@ -84,16 +85,17 @@ const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de u
 
 El periodo:
 - Una tendencia sin periodo («¿estamos creciendo o disminuyendo?», «¿cómo vamos?»): los últimos 3 meses completos contra los 3 meses completos anteriores; el mes en curso no entra.
-- Si la pregunta no dice periodo y no es una tendencia, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia («más frecuentes», «cada cuánto vuelven», «cuánto tardan») mira los últimos 12 meses.
+- Si la pregunta no dice periodo y no es una tendencia, usa el de la pantalla si se indica y, si no, el mes en curso. Solo lo que mide frecuencia o tiempo («más frecuentes», «cada cuánto vuelven», «cuánto tardan», «cuánto dura un tratamiento») y el valor de un paciente según cómo llegó miran el último año hasta hoy (dia > current_date - interval '1 year'), no meses completos.
 - Lo pendiente se mide a hoy, no por mes: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir.
 - Al comparar el mes en curso con otro mes («contra el mes anterior»), usa los mismos días de ese mes (del 1 al mismo día de hoy), nunca el mes entero.
-- Al buscar el mejor o el peor mes, el mes en curso (incompleto) no entra.
+- «Los últimos N meses» y la evolución mes a mes son los N meses completos anteriores al actual; el mes en curso no entra.
+- Al buscar el mejor o el peor mes, el mes en curso (incompleto) no entra; sin periodo, mira los últimos 12 meses completos.
 - current_date y now() ya están en la zona de la clínica.
 
 Qué contar:
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
 - «Ticket promedio» es el promedio de ventas.importe (por venta), no el de los tickets de pago.
-- odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado (cobros).
+- odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado (cobros). Si preguntan qué parte de lo facturado se cobró, es lo cargado (ventas.importe) y lo pagado de eso (ventas.pagado), de las ventas del periodo.
 - «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
 - Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
 - Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
@@ -104,14 +106,19 @@ Qué contar:
 
 La frase:
 - Dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
-- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Para decir cuántos hay, cuenta con count(*): {filas} de una consulta con LIMIT cuenta solo las que trajo.
+- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 12) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas trajo la consulta. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Nunca llames «filas» ni «lista» a una columna.
+- {lista} va una sola vez y al final de la frase, después de dos puntos: «Los que más deben: {lista}.». Para el mayor y el menor (el mejor y el peor mes) no uses {lista}: una sola fila con columnas como mejor_mes, mejor_dinero, peor_mes y peor_dinero.
+- Una lista de personas, ventas o cosas dice antes cuántas son en total y, si es dinero, cuánto suman, con columnas que empiezan con total_general: count(*) over () AS total_general y sum(saldo) over () AS total_general_dinero. «{total_general} pacientes te deben {total_general_dinero}. Los que más deben: {lista}.» Esas columnas no salen en la lista.
+- Un cambio entre dos periodos va en una columna que empieza con variacion y termina en _pct (variacion_pct): odentIA le pone el signo («+1 %», «-32 %»). La frase nombra los dos periodos y sus cifras.
+- Cada hueco {columna} es siempre la primera fila: para dos cifras de filas distintas, arma una sola fila con una columna por cifra.
+- Lo que sale en la lista se lee: un estado o un tipo va en palabras (CASE estado WHEN 'hace_falta' THEN 'bajo el mínimo' … END), nunca su código; y no pongas columnas que la pregunta no necesita.
 
 Para seguir:
 - En «seguir», hasta 3 variantes de la misma respuesta que la persona querría ver después: otra fecha («¿Y ayer?», «¿Y el mes pasado?»), otro orden («Por monto»), otro grupo («Por sede», «Por profesional»), un filtro («Solo productos») o, si la pregunta se puede entender de otra forma, esa otra lectura. Cada una con su consulta completa y su frase; odentIA las corre al tocar el botón, sin volver a preguntarte.
 
 La consulta:
-- Una sola sentencia SELECT (o WITH … SELECT), sin punto y coma, sin comentarios, sin comillas dobles y sin LIMIT mayor a 50. Si la lista puede pasar de 10 filas, ordénala para que lo importante salga primero.
-- Columnas del resultado en español y en minúsculas: el dinero con el sufijo _dinero, los porcentajes (de 0 a 100, redondeados) con _pct y un mes como el primer día de ese mes (date) con _mes, que odentIA muestra «mayo de 2026». Las fechas van como date o timestamptz, nunca como texto.
+- Una sola sentencia SELECT (o WITH … SELECT), sin punto y coma, sin comentarios, sin comillas dobles y sin generate_series (para meses, date_trunc sobre las filas). Sin LIMIT, salvo que la pregunta pida un número («los 5 que más…»): odentIA muestra las primeras y dice cuántas más hay. Ordena la lista para que lo importante salga primero.
+- Columnas del resultado en español y en minúsculas: el dinero (y solo el dinero, nunca una cantidad) con el sufijo _dinero, los porcentajes (de 0 a 100, redondeados) con _pct y un mes como el primer día de ese mes (date) con _mes, que odentIA muestra «mayo de 2026». Las fechas van como date o timestamptz, nunca como texto.
 
 Español neutro, breve.`
 
@@ -141,7 +148,7 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
   const mark = CACHE_MARK[provider]
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
-    `Ahora en la clínica: ${now} (zona ${input.zone.timezone}). El mes en curso va del día 1 hasta hoy.`,
+    `Ahora en la clínica: ${now} (zona ${input.zone.timezone}). ${argosPeriodNames(input.now, input.zone)}`,
     input.screen
       ? `La pantalla muestra del ${input.screen.from} al ${input.screen.to}${input.screen.branch ? `, solo la sede «${input.screen.branch}»` : ", todas las sedes"}: úsalo si la pregunta no dice otro periodo o sede.`
       : "",
@@ -151,6 +158,32 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
     .filter(Boolean)
     .join("\n\n")
   return [new SystemMessage({ content: mark ? [{ type: "text", text: fixed, ...mark }] : fixed }), new HumanMessage({ content: human })]
+}
+
+/**
+ * Los periodos de la frase con su nombre, calculados aquí: el modelo los copia
+ * en vez de contarlos (se equivocaba de mes al nombrar «los últimos 12 meses»).
+ */
+export function argosPeriodNames(now: Date, zone: { timezone: string; locale: string }): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now)
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value)
+  const [year, month, day] = [get("year"), get("month"), get("day")]
+  const monthName = (back: number, withYear = true) =>
+    new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", month: "long", ...(withYear ? { year: "numeric" } : {}) })
+      .format(new Date(Date.UTC(year, month - 1 - back, 1)))
+      .toLocaleLowerCase(zone.locale)
+  /** «de julio a setiembre de 2026», con el año en los dos si cruza de año. */
+  const range = (from: number, to: number) =>
+    `de ${monthName(from, new Date(Date.UTC(year, month - 1 - from, 1)).getUTCFullYear() !== new Date(Date.UTC(year, month - 1 - to, 1)).getUTCFullYear())} a ${monthName(to)}`
+  const dayName = (date: Date) => new Intl.DateTimeFormat(zone.locale, { timeZone: "UTC", day: "numeric", month: "long", year: "numeric" }).format(date)
+  const yearAgo = new Date(Date.UTC(year - 1, month - 1, day + 1))
+  return [
+    `El mes en curso es ${monthName(0)} y va del 1 al ${day}; el mes anterior, ${monthName(1)} (sus mismos días: del 1 al ${day}).`,
+    `Los últimos 3 meses completos van ${range(3, 1)}; los 3 anteriores, ${range(6, 4)}.`,
+    `Los últimos 12 meses completos van ${range(12, 1)}.`,
+    `El último año hasta hoy va del ${dayName(yearAgo)} al ${dayName(new Date(Date.UTC(year, month - 1, day)))}.`,
+    "Usa estos nombres en la frase, tal cual.",
+  ].join(" ")
 }
 
 /** Con el modelo de demostración: unas pocas preguntas por palabras, sin proveedor. */
@@ -232,7 +265,7 @@ export async function writeArgosPlan(
   if (input.retry)
     messages.push(
       new HumanMessage({
-        content: `Tu consulta anterior fue:\n${input.retry.plan.sql}\nNo se pudo usar: ${input.retry.problem}. Corrígela y responde otra vez.`,
+        content: `Tu consulta anterior fue:\n${input.retry.plan.sql}\nY tu frase: «${input.retry.plan.frase}»\nNo se pudo usar: ${input.retry.problem}. Corrígela y responde otra vez.`,
       }),
     )
   const reply = await bound.invoke(messages)
@@ -344,7 +377,7 @@ export type ArgosAskResult =
 
 function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2]): ArgosTable {
   // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre.
-  const shownColumns = result.columns.filter((column) => !isArgosIdColumn(column.name))
+  const shownColumns = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
   const columns = shownColumns.map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
   const display = result.rows.map((row) => Object.fromEntries(shownColumns.map((column) => [column.name, formatArgosValue(row[column.name] ?? null, column, zone)])))
   return { columns, rows: result.rows, display, truncated: result.truncated }
@@ -412,8 +445,15 @@ export async function askArgos(
     for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
       const outcome = await attempt(plan)
       if ("result" in outcome) {
-        result = outcome.result
-        break
+        // Una frase que no se lee (la lista dos veces o en medio) se corrige una vez; a la segunda se usa igual.
+        const unreadable = tries === 0 ? argosSentenceProblem(outcome.result.rows.length ? plan.frase : plan.frase_vacia, outcome.result.rows.length) : null
+        if (!unreadable) {
+          result = outcome.result
+          break
+        }
+        deps.onProblem?.(unreadable)
+        plan = await writeArgosPlan(deps, { ...ask, retry: { plan, problem: unreadable } })
+        continue
       }
       deps.onProblem?.(outcome.problem)
       timedOut = outcome.code === "TIEMPO"
@@ -447,7 +487,7 @@ export async function askArgos(
       follows.map(async (follow, index) => {
         if (!follow.etiqueta.trim()) return null
         const outcome = await attempt(follow).catch(() => null)
-        return outcome && "result" in outcome
+        return outcome && "result" in outcome && !argosSentenceProblem(outcome.result.rows.length ? follow.frase : follow.frase_vacia, outcome.result.rows.length)
           ? { index, label: follow.etiqueta.trim(), how: follow.como.trim() || plan.como, query: follow.sql, answer: shown(follow, outcome.result, ready.zone) }
           : null
       }),

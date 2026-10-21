@@ -8,7 +8,7 @@
 import type { Db } from "@odentia/db"
 import { reportPin, reportQuestion, REPORT_PIN_LIMIT } from "@odentia/db/schema/reports"
 import { and, eq, isNotNull, sql } from "drizzle-orm"
-import { argosColumnLabel, isArgosIdColumn } from "./argos-answer.js"
+import { argosColumnLabel, isArgosHiddenColumn } from "./argos-answer.js"
 import type { ArgosQueryResult } from "./argos-query.js"
 import { isCheckViolation, isUniqueViolation, notFound, ServiceError } from "./errors.js"
 import { type CsvFile, csvFileName, toCsv } from "./report-csv.js"
@@ -103,7 +103,7 @@ export async function listArgosPins(tx: Db, orgId: string): Promise<Array<{ id: 
  * demás CSV de Reportes, «AAAA-MM-DD HH:MM» en la zona de la clínica.
  */
 export function argosAnswerCsv(title: string, day: string, result: ArgosQueryResult, timezone: string): CsvFile {
-  const columns = result.columns.filter((column) => !isArgosIdColumn(column.name))
+  const columns = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
   const moment = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
   const cell = (value: string | number | boolean | null | undefined, kind: string) =>
     kind === "timestamp" && typeof value === "string" ? moment.format(new Date(value)) : value
