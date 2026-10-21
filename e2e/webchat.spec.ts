@@ -29,8 +29,9 @@ type Conversation = {
   attention: { unreachable?: boolean }
 }
 
-// En `*.localhost`, como el entorno: Chrome no deja que una página pública cargue
-// algo de una dirección local (Private Network Access); en producción ambos son públicos.
+// El sitio lo sirve Playwright, no una dirección de esta máquina: Chrome pide permiso
+// para que cargue algo del entorno local (acceso a la red local), y el contexto del
+// visitante lo tiene concedido. En producción el sitio y odentIA son públicos.
 const SITE = "https://sonrisa-e2e.localhost"
 const COPY = "https://copia-e2e.localhost"
 
@@ -75,7 +76,10 @@ test("chat web: una línea, el primer sitio queda solo, otro espera tu sí y el 
   await expect(page.getByText(script, { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Copiar código" })).toBeVisible()
 
-  const visitor = await browser.newContext({ ignoreHTTPSErrors: true })
+  const visitor = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    permissions: ["local-network-access"],
+  })
   try {
     // El primer sitio donde carga queda registrado solo y el chat responde ahí.
     const site = await openSite(visitor, SITE, script)
@@ -108,8 +112,13 @@ test("chat web: una línea, el primer sitio queda solo, otro espera tu sí y el 
     await launcher.click()
     const window = site.frameLocator("iframe")
     await expect(window.getByRole("textbox", { name: "Tu nombre" })).toHaveCount(0)
-    await window.getByRole("textbox", { name: "Tu mensaje" }).fill("¿Atienden niños?")
-    await window.getByRole("button", { name: "Enviar" }).click()
+    // La ventana carga dentro del sitio: se escribe cuando ya responde (lo escrito antes se pierde al hidratar).
+    const send = window.getByRole("button", { name: "Enviar" })
+    await expect(async () => {
+      await window.getByRole("textbox", { name: "Tu mensaje" }).fill("¿Atienden niños?")
+      await expect(send).toBeEnabled({ timeout: 1_000 })
+    }).toPass({ timeout: 30_000 })
+    await send.click()
     await expect(
       window.getByRole("list", { name: "Conversación" }).getByText("¿Atienden niños?"),
     ).toBeVisible()

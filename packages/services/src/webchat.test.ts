@@ -190,6 +190,23 @@ describe("un solo chat por clínica y los sitios donde responde (decisiones 7 y 
     ])
   })
 
+  it("la pantalla y su vista previa a la vez crean un solo chat", async () => {
+    const orgId = randomUUID()
+    await insertOrg(ownerDb, orgId, `a-la-vez-${orgId.slice(0, 8)}`)
+    const [first, second] = await Promise.all([
+      withOrgContext(appDb, orgId, (tx) => getClinicWebchat(tx, orgId, KEY, null)),
+      withOrgContext(appDb, orgId, (tx) => openWebchatTest(tx, orgId, KEY, null)),
+    ])
+    const chats = await ownerDb
+      .select()
+      .from(channelConnection)
+      .where(eq(channelConnection.organizationId, orgId))
+    expect(chats).toHaveLength(1)
+    expect(first.id).toBe(chats[0]!.id)
+    const found = (await findClinicWebchat(ownerDb, KEY, `a-la-vez-${orgId.slice(0, 8)}`))!
+    expect(readVisitorSession(found, second.token)).toEqual({ sessionId: second.sessionId })
+  })
+
   it("mirar la lista de Integraciones no crea el chat, y los sitios inventados tienen tope", async () => {
     const orgId = randomUUID()
     await insertOrg(ownerDb, orgId, `sin-chat-${orgId.slice(0, 8)}`)
@@ -465,7 +482,10 @@ describe("la prueba de Configuración no se cobra ni cuenta", () => {
       .update(channelConnection)
       .set({ status: "disabled" })
       .where(eq(channelConnection.id, c.chat.id))
-    const { sessionId } = await c.run((tx) => openWebchatTest(tx, c.orgId, KEY, c.ownerId))
+    const { sessionId, token } = await c.run((tx) => openWebchatTest(tx, c.orgId, KEY, c.ownerId))
+    // La ruta pública lee la sesión de la prueba con la misma clave.
+    const found = (await findClinicWebchat(ownerDb, KEY, c.slug))!
+    expect(readVisitorSession(found, token)).toEqual({ sessionId })
     expect(sessionId.startsWith("webchat:prueba:")).toBe(true)
     const said = await c.visitorSays(sessionId, "Hola, es una prueba")
     const [thread] = await ownerDb

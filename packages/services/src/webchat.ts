@@ -125,6 +125,12 @@ export async function getClinicWebchat(
 ): Promise<ClinicWebchat> {
   let row = await clinicWebchatRow(tx, orgId)
   if (!row) {
+    // La pantalla y su vista previa lo piden a la vez al abrirse: uno solo lo crea,
+    // el otro espera y usa ese. Dos chats firmarían sus sesiones con claves distintas.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`webchat-crear:${orgId}`}))`)
+    row = await clinicWebchatRow(tx, orgId)
+  }
+  if (!row) {
     const created = await createConnection(
       tx,
       orgId,
