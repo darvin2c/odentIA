@@ -113,7 +113,11 @@ if (!owner) throw new Error(`La clínica ${ORG} no tiene propietario`)
 function periodLine(answer: ArgosAskResult): string | null {
   if (answer.kind !== "respuesta") return null
   const { period } = answer
-  return [period.label, period.other ? `contra ${period.other.label}` : null, period.compareLabel ? `comparado con ${period.compareLabel}` : null].filter(Boolean).join(" · ")
+  // La sede se ve junto al periodo cuando la consulta la usa: también cuenta como dicha.
+  const branch = period.branch ? (period.branch.options.find((option) => option.id === period.branch?.id)?.name ?? "Todas las sedes") : null
+  return [period.label, period.other ? `contra ${period.other.label}` : null, period.compareLabel ? `comparado con ${period.compareLabel}` : null, branch]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 /** Lo que diría la pantalla, en una línea. */

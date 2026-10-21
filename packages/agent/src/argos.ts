@@ -20,8 +20,10 @@ import {
   bindArgosPeriod,
   argosCatalogText,
   argosChoiceOf,
+  argosEmptyHoleProblem,
   argosColumnLabel,
   argosGrainOf,
+  argosNamesText,
   argosPeriodView,
   argosRepeatedColumns,
   argosUsesBranch,
@@ -115,7 +117,7 @@ El periodo (las fechas las pone odentIA):
 
 Qué contar:
 - En una clínica «vender» incluye tratamientos y productos. «Lo que se vendió» es lo pagado (pagos_por_venta); lo cargado sin pagar es «lo que no se cobró» o «lo que deben».
-- «Ticket promedio» es el promedio de ventas.importe (por venta), no el de los tickets de pago.
+- «Ticket promedio», sin más, es por paciente: lo cobrado ÷ pacientes distintos que pagaron en el periodo (con cobros, contando los paciente_id de tipo 'pago'; por profesional o especialidad, con pagos_por_venta), y la frase dice «por paciente». «Ticket promedio de venta» o «por venta» es el promedio de ventas.importe, y la frase dice «por venta». Nunca el de los tickets de pago.
 - odentIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado (cobros). Si preguntan qué parte de lo facturado se cobró, es lo cargado (ventas.importe) y lo pagado de eso (ventas.pagado), de las ventas del periodo.
 - «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
 - Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
@@ -123,6 +125,7 @@ Qué contar:
 - Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
 - Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra», lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) o lo que ninguna vista tiene.
 - Si lo pedido no está, tipo no_existe y sin consulta: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
+- «odentIA no registra» solo para lo de «Lo que odentIA no registra»: lo que no está en tus vistas puede estar en odentIA (el texto de una tarea, el motivo de una ausencia…), así que dilo como «eso no lo puedo consultar», nunca como que no se registra.
 - Si solo puedes responder una parte, tipo parcial: la consulta responde esa parte y «falta» dice lo que no se puede saber.
 - Un consejo, una prioridad, una causa o un juicio («¿qué debería hacer…?», «¿por qué bajaron…?», «¿qué estoy desaprovechando?», «¿qué cambio en mi agenda?»): odentIA no aconseja ni sabe causas. Tipo parcial: la frase lo dice primero, en pocas palabras («Qué hacer lo decides tú; lo registrado que sirve para decidirlo:», «No sé por qué bajaron; lo que cambió:»), y sigue con cifras de las vistas sobre ese tema, nunca con una recomendación ni con una cifra que las vistas no tienen (oportunidades «perdidas», montos estimados). «falta» dice que odentIA no da consejos ni sabe causas. Las cifras de cada tema:
   - Dinero, oportunidades o prioridades: los presupuestos que esperan respuesta (cuántos y cuánto), lo aceptado que falta hacer (cuánto, y cuánto de eso no tiene cita), lo que te deben hace más de 30 días y los pacientes «Sin venir». Si habla de la semana, además las citas que quedan hasta el domingo sin confirmar.
@@ -160,19 +163,23 @@ export interface ArgosAsk {
   screen?: { period: string; branch: string | null } | null
   /** La pregunta anterior de la conversación y su consulta (decisión D3): «¿Y ayer?». */
   previous?: { text: string; query: string } | null
+  /** Los nombres de la clínica como están en las vistas (`argosNamesText`). */
+  names?: string
 }
 
 /**
  * Los mensajes al modelo. Lo fijo (las reglas y las vistas de la llave) va
  * primero y marcado para la caché del proveedor: es igual en cada pregunta de
- * ese rol. Lo que cambia (la hora, la pantalla, lo anterior y la pregunta) va
- * después.
+ * ese rol. Después, los nombres de la clínica (iguales en cada pregunta de esa
+ * clínica, también reusables por la caché) y lo que cambia: la hora, la
+ * pantalla, lo anterior y la pregunta.
  */
 export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): BaseMessage[] {
   const fixed = `${RULES}\n\n${argosCatalogText(input.key)}`
   const mark = CACHE_MARK[provider]
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
+    input.names ?? "",
     `Ahora en la clínica: ${now} (zona ${input.zone.timezone}).`,
     input.screen
       ? `En Reportes se ve el periodo «${input.screen.period}»${input.screen.branch ? ` y la sede «${input.screen.branch}»` : ", todas las sedes"}: úsalos si la pregunta no dice otro periodo o sede.`
@@ -447,6 +454,7 @@ export async function askArgos(
     ...(await prepareArgosQuestion(tx, input.orgId, now)),
     screen: input.screen ? await argosScreen(tx, input.orgId, input.screen, now) : null,
     branches: await listArgosBranches(tx, input.orgId),
+    names: await argosNamesText(tx, input.orgId, key),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
@@ -458,7 +466,7 @@ export async function askArgos(
     return { kind: route, message: ARGOS_WORDS[route] }
   }
 
-  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null }
+  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: ready.names }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
   /** El periodo y la sede del plan: los que eligió el modelo y, si la pregunta no nombra una sede, la de Reportes (D7). */
   const bindingOf = (plan: ArgosPlan): ArgosBinding | { problem: string; code: "PERIODO" } => {
@@ -498,8 +506,12 @@ export async function askArgos(
     for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
       const outcome = await attempt(plan)
       if ("result" in outcome) {
-        // Una frase que no se lee (la lista dos veces o en medio) se corrige una vez; a la segunda se usa igual.
-        const unreadable = tries === 0 ? argosSentenceProblem(outcome.result.rows.length ? plan.frase : plan.frase_vacia, outcome.result.rows.length) : null
+        // Una frase que no se lee (la lista dos veces o en medio, un hueco sin valor) se corrige una vez; a la segunda se usa igual.
+        const unreadable =
+          tries === 0
+            ? (argosSentenceProblem(outcome.result.rows.length ? plan.frase : plan.frase_vacia, outcome.result.rows.length) ??
+              argosEmptyHoleProblem(plan.frase, outcome.result))
+            : null
         if (!unreadable) {
           result = outcome.result
           binding = outcome.binding

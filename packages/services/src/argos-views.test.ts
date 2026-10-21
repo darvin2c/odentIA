@@ -10,10 +10,11 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { encounter, encounterProcedure, orgSpecialty, patientCharge, serviceCatalog } from "@odentia/db/schema/clinical"
+import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { argosSentenceProblem, fillArgosSentence } from "./argos-answer.js"
+import { argosEmptyHoleProblem, argosNamesText, argosSentenceProblem, fillArgosSentence } from "./argos-answer.js"
 import { ARGOS_CATALOG, ARGOS_FIGURE_RULES, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -32,9 +33,9 @@ const one = async (orgId: string, query: string, memberRole = "owner") =>
   Number((await runArgosQuery(appDb, { orgId, memberRole, query })).rows[0]?.v ?? 0)
 
 /** Lo que la pantalla dice de una cifra en un periodo, con la ventana para pedírselo a las vistas. */
-async function screen(orgId: string, period: string, figure: string) {
+async function screen(orgId: string, period: string, figure: string, branchId?: string) {
   return withOrgContext(appDb, orgId, async (tx) => {
-    const scope = await reportScope(tx, orgId, { period }, new Date())
+    const scope = await reportScope(tx, orgId, { period, ...(branchId ? { branchId } : {}) }, new Date())
     const ctx: FigureContext = { tx, orgId, scope, billing: true }
     const result = await computeFigure(ctx, { figure, group: "total" })
     return { value: result.total.value ?? 0, from: scope.window.start.toISOString(), to: scope.window.end.toISOString() }
@@ -170,6 +171,22 @@ describe("las llaves de Argos", () => {
     // El mismo hueco dos veces es la misma primera fila: con varias filas no dice lo que parece.
     expect(argosSentenceProblem("Nuevos: {porcentaje_pct}; recurrentes: {porcentaje_pct}.", 2)).toMatch(/dos veces/)
     expect(argosSentenceProblem("Se cobró {cobrado_dinero}; sí, {cobrado_dinero}.", 1)).toBeNull()
+  })
+
+  it("un hueco que vino sin valor se corrige antes de mostrarse, sin decirle al modelo ningún dato", () => {
+    const result = {
+      columns: [
+        { name: "surco_dinero", kind: "number" as const },
+        { name: "miraflores_dinero", kind: "number" as const },
+      ],
+      rows: [{ surco_dinero: null, miraflores_dinero: 223.87 }],
+    }
+    const problem = argosEmptyHoleProblem("El ticket de Surco fue {surco_dinero} y el de Miraflores {miraflores_dinero}.", result)
+    expect(problem).toMatch(/^\{surco_dinero\} vino sin valor/)
+    expect(problem).not.toMatch(/223/)
+    expect(argosEmptyHoleProblem("El de Miraflores fue {miraflores_dinero}.", result)).toBeNull()
+    // Sin filas habla la frase vacía: no hay hueco que revisar.
+    expect(argosEmptyHoleProblem("Fue {surco_dinero}.", { ...result, rows: [] })).toBeNull()
   })
 
   it("lo que no tiene valor nunca sale primero", async () => {
@@ -420,5 +437,75 @@ describe("cuadre con Reportes", () => {
     )
     expect(ocupada.vistas).toBe(ocupada.pantalla)
     expect(ocupada.vistas).toBeGreaterThan(0)
+  })
+
+  it("pacientes nuevos de una sede como Reportes, y lo que Argos ve del equipo, sus ausencias, la unidad dental y los nombres", async () => {
+    const orgId = randomUUID()
+    await insertOrg(ownerDb, orgId, `argos-${orgId}`)
+    const [norte, sur] = await ownerDb.insert(branch).values([{ organizationId: orgId, name: "Sede Norte" }, { organizationId: orgId, name: "Sede Sur" }]).returning()
+    const [northChair, southChair] = await ownerDb
+      .insert(scheduleChair)
+      .values([
+        { organizationId: orgId, branchId: norte!.id, name: "Unidad dental 1" },
+        { organizationId: orgId, branchId: sur!.id, name: "Unidad dental 2" },
+      ])
+      .returning()
+    const dentist = randomUUID()
+    await ownerDb.insert(user).values({ id: dentist, name: "Dra. Sur", email: `${dentist}@argos.test` })
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: dentist, role: "dentist", createdAt: new Date() })
+    const [specialty] = await ownerDb.insert(orgSpecialty).values({ organizationId: orgId, key: "orto", name: "Ortodoncia y Ortopedia Maxilar" }).returning()
+    await ownerDb.insert(professionalSpecialty).values({ organizationId: orgId, specialtyId: specialty!.id, userId: dentist })
+    await ownerDb.insert(serviceCatalog).values({ organizationId: orgId, name: "Control de ortodoncia", specialtyId: specialty!.id, priceCents: 12_000, currency: "PEN" })
+    const people = await insertTestPatients(ownerDb, [
+      { organizationId: orgId, displayName: "Primero en el norte", patientNumber: 1 },
+      { organizationId: orgId, displayName: "Primero en el sur", patientNumber: 2 },
+    ])
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).formatToParts(new Date())
+    const year = Number(parts.find((p) => p.type === "year")?.value)
+    const month = Number(parts.find((p) => p.type === "month")?.value)
+    const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
+    const at = (day: number, hour: number) => new Date(Date.UTC(previous.year, previous.month - 1, day, hour + 5))
+    const visit = (patient: number, site: string, day: number, hour: number) =>
+      ownerDb.insert(appointment).values({
+        organizationId: orgId,
+        branchId: site,
+        patientId: people[patient]!.id,
+        dentistUserId: dentist,
+        chairId: site === sur!.id ? southChair!.id : northChair!.id,
+        serviceName: "Consulta",
+        startsAt: at(day, hour),
+        endsAt: at(day, hour + 1),
+        durationMin: 60,
+        status: "atendida",
+      })
+    // El primero vino al norte y el mismo mes al sur: es nuevo del norte, no del sur.
+    await visit(0, norte!.id, 5, 9)
+    await visit(0, sur!.id, 12, 9)
+    await visit(1, sur!.id, 13, 10)
+    await ownerDb.insert(scheduleBlock).values({ organizationId: orgId, branchId: sur!.id, dentistUserId: dentist, kind: "ausencia", reason: "Vacaciones", startsAt: at(20, 0), endsAt: at(23, 0) })
+
+    const pantalla = await screen(orgId, "mes_pasado", "pacientes_nuevos", sur!.id)
+    const vistas = await one(
+      orgId,
+      `select count(*) as v from pacientes where primera_sede = 'Sede Sur' and primera_atencion_en >= timestamptz '${pantalla.from}' and primera_atencion_en < timestamptz '${pantalla.to}'`,
+    )
+    expect({ pantalla: pantalla.value, vistas }).toEqual({ pantalla: 1, vistas: 1 })
+
+    const rows = async (query: string, memberRole = "owner") => (await runArgosQuery(appDb, { orgId, memberRole, query })).rows
+    expect(await rows("select profesional, rol, especialidades from equipo")).toEqual([{ profesional: "Dra. Sur", rol: "odontología", especialidades: "Ortodoncia y Ortopedia Maxilar" }])
+    // El motivo es texto libre: no llega; el último día es el que falta, no el del regreso.
+    const [away] = await rows("select profesional, sede, primer_dia, ultimo_dia from ausencias")
+    expect(away).toMatchObject({ profesional: "Dra. Sur", sede: "Sede Sur" })
+    const day = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value)).slice(0, 10)
+    expect(day(away?.ultimo_dia) > day(away?.primer_dia)).toBe(true)
+    // Caja no ve la agenda: tampoco las ausencias.
+    await expect(rows("select count(*) as v from ausencias", "cashier")).rejects.toBeInstanceOf(ArgosQueryError)
+    expect(await rows("select distinct unidad_dental from citas where sede = 'Sede Sur'")).toEqual([{ unidad_dental: "Unidad dental 2" }])
+
+    const names = await withOrgContext(appDb, orgId, (tx) => argosNamesText(tx, orgId, "gestion"))
+    expect(names).toContain("Sedes: Sede Norte, Sede Sur.")
+    expect(names).toContain("Equipo: Dra. Sur.")
+    expect(names).toMatch(/Ortodoncia y Ortopedia Maxilar: Control de ortodoncia\./)
+    expect(await withOrgContext(appDb, orgId, (tx) => argosNamesText(tx, orgId, "clinico"))).not.toContain("Productos:")
   })
 })

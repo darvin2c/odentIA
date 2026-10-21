@@ -11,9 +11,14 @@
  * no (decisión D6: el costo lo asume odentIA).
  */
 import type { Db } from "@odentia/db"
+import { member, user } from "@odentia/db/schema/auth"
+import { product } from "@odentia/db/schema/inventory"
 import { reportQuestion } from "@odentia/db/schema/reports"
-import { and, count, eq, gte, ne } from "drizzle-orm"
+import { and, asc, count, eq, gte, ne } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
+import { formatServiceIndex, listAgentServices } from "./agent-clinic-info.js"
+import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
+import { listArgosBranches } from "./argos-period.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
@@ -53,6 +58,42 @@ export async function prepareArgosQuestion(
       ),
     )
   return { enabled, roomLeft: Math.max(0, REPORT_DAILY_LIMIT - Number(row?.total ?? 0)), zone: await getOrgLocale(tx, orgId) }
+}
+
+/**
+ * Los nombres de la clínica tal como están en las vistas: sedes, equipo,
+ * servicios por especialidad y, si la llave ve el inventario, productos. Sin
+ * ellos el modelo adivina («Ortodoncia» por «Ortodoncia y Ortopedia
+ * Maxilar», «extrac» por «Exodoncia simple», «Surco» por «Sede Surco») y la
+ * cifra sale en cero sin que nada falle. Son nombres, no datos de pacientes.
+ */
+export async function argosNamesText(tx: Db, orgId: string, key: ArgosKey): Promise<string> {
+  const [branches, team, services] = await Promise.all([
+    listArgosBranches(tx, orgId),
+    tx
+      .selectDistinct({ name: user.name })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(eq(member.organizationId, orgId))
+      .orderBy(asc(user.name)),
+    listAgentServices(tx, orgId),
+  ])
+  const seesStock = argosViewsOf(key).some((view) => view.name === "inventario")
+  const products = seesStock
+    ? await tx
+        .select({ name: product.name })
+        .from(product)
+        .where(and(eq(product.organizationId, orgId), eq(product.isActive, true)))
+        .orderBy(asc(product.name))
+    : []
+  const lines = [
+    "Los nombres de esta clínica, como están en las vistas. En la consulta escríbelos tal cual aunque la pregunta los diga de otra forma («Surco» es la sede que lo lleva, «extracciones» son los servicios de exodoncia, «ortodoncia» es la especialidad que la nombra). Para un tipo de tratamiento, filtra por su especialidad si es toda una, o por los nombres de sus servicios.",
+    `- Sedes: ${branches.map((item) => item.name).join(", ") || "ninguna"}.`,
+    `- Equipo: ${team.map((item) => item.name).join(", ")}.`,
+    services.length ? `- Servicios por especialidad:\n${formatServiceIndex(services).map((line) => `  ${line}`).join("\n")}` : "- Servicios: ninguno.",
+    seesStock ? `- Productos: ${products.map((item) => item.name).join(", ") || "ninguno"}.` : "",
+  ]
+  return lines.filter(Boolean).join("\n")
 }
 
 /** Anota la pregunta y devuelve su id: con él se fija, se descarga y se sigue (D2, D5). */
@@ -146,6 +187,21 @@ export function argosSentenceProblem(template: string, rows = 1): string | null 
   if (list && /[\p{L}\p{N}{]/u.test(template.slice((list.index ?? 0) + list[0].length)))
     return "{lista} va al final de la frase, después de dos puntos, sin palabras detrás"
   return null
+}
+
+/**
+ * Un hueco de la frase que en la primera fila vino sin valor: se leería «—»
+ * («el ticket de Surco fue — y el de Miraflores —»). Se le devuelve al modelo
+ * solo el nombre de la columna, nunca un dato, para que lo corrija una vez.
+ */
+export function argosEmptyHoleProblem(template: string, result: Pick<ArgosQueryResult, "columns" | "rows">): string | null {
+  const first = result.rows[0]
+  if (!first) return null
+  const names = new Set(result.columns.map((column) => column.name))
+  const empty = [...template.matchAll(HOLE)].map((match) => match[1] ?? "").find((name) => names.has(name) && first[name] === null)
+  return empty
+    ? `{${empty}} vino sin valor (null) y la frase se leería con un hueco vacío: si es una suma o un conteo, usa coalesce(…, 0); si puede no haber dato (un promedio sin filas, una sede sin nada), di ese caso con palabras en una columna de texto (CASE) y no lo pongas como cifra`
+    : null
 }
 
 /**

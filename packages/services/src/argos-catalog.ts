@@ -25,7 +25,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "ventas",
     about:
-      "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado. «Ticket promedio» es el promedio de «importe» de estas filas.",
+      "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado. «Ticket promedio de venta» (o por venta) es el promedio de «importe» de estas filas.",
     columns:
       "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta), sede, profesional (quien atendió), promocion, especialidad (de la clínica, la del tratamiento; null en productos)",
     keys: ["gestion", "caja"],
@@ -75,7 +75,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "citas",
     about: "Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron (atendidas, no vinieron, canceladas, «terminan realizándose») se divide entre todas las de ya_paso, canceladas incluidas.",
     columns:
-      "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi)",
+      "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la unidad dental de la cita)",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
@@ -92,11 +92,17 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
+    name: "ausencias",
+    about: "Las ausencias del equipo (vacaciones, permisos), por sede, sin su motivo. Ya están descontadas de lo disponible en la agenda.",
+    columns: "profesional, sede, desde (timestamptz), hasta (timestamptz: no entra), primer_dia (date), ultimo_dia (date: el último día que falta)",
+    keys: ["gestion", "recepcion", "clinico"],
+  },
+  {
     name: "pacientes",
     about:
-      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion. «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '6 months' (más de 6 meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.",
+      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion, y nuevo de una sede si además su primera_sede es esa sede (como Reportes: no basta con una cita ahí). «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '6 months' (más de 6 meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.",
     columns:
-      "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en, ultima_atencion_en (timestamptz: la hora de su última cita atendida)",
+      "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en, ultima_atencion_en (timestamptz: la hora de su última cita atendida), primera_atencion_en (timestamptz: la hora de su primera cita atendida), primera_sede (la sede de esa cita)",
     keys: ALL,
   },
   {
@@ -201,6 +207,12 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     columns: "creada_en, vence_en (timestamptz), estado ('open'|'done'|'cancelled'), area, tipo, dejada_por ('equipo'|'agent'|'admin'), responsable",
     keys: ["gestion"],
   },
+  {
+    name: "equipo",
+    about: "Las personas del equipo de la clínica, con su rol y las especialidades que atienden.",
+    columns: "profesional, rol ('propietario'|'administración'|'odontología'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene)",
+    keys: ALL,
+  },
 ]
 
 /**
@@ -223,7 +235,7 @@ export const ARGOS_FIGURE_RULES: readonly string[] = [
   "Insumos = productos con insumo (se usan en las atenciones); los productos a la venta, con se_vende. Un producto puede ser las dos cosas: en una pregunta de insumos van solo los insumo, y en una de productos que se venden, solo los se_vende.",
   "Lo aceptado que no tiene cita = de «Lo que viene», lo de los paciente_id sin pacientes.proxima_cita (null): cuánto y cuántos pacientes, como Reportes.",
   "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
-  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo. Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
+  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo; de una sede, con pacientes.primera_sede = :sede (o la sede nombrada). Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
   "Volvieron (retención, periodo a_hoy) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses (llevaba N meses sin venir) = una cita atendida en el periodo cuya cita atendida inmediatamente anterior, la última antes de esa, fue hace más de N meses; tener alguna cita vieja no basta.",
   "Inasistencia (no vinieron) y canceladas = citas con ese citas.estado ÷ citas del periodo con citas.ya_paso, en %.",
   "Espera en sala = mediana de citas.espera_min de las atendidas.",
