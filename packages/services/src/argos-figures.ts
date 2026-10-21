@@ -1284,7 +1284,8 @@ export function compileArgosFigure(
   const before = options.compare && figure.time !== "a_hoy"
   const columns = [...cuts, `ahora.v as ${figure.column}`]
   if (before) {
-    columns.push(`antes.v as ${beforeColumn(figure.column)}`)
+    // Lo que antes no tuvo nada es cero, no un vacío («de S/ 0.00 a S/ 28.00»).
+    columns.push(`${figure.additive ? "coalesce(antes.v, 0)" : "antes.v"} as ${beforeColumn(figure.column)}`)
     if (figure.additive)
       columns.push("round(100.0 * (ahora.v - antes.v) / nullif(abs(antes.v), 0)) as variacion_pct")
   }

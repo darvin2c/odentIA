@@ -76,7 +76,7 @@ describe("las cifras oficiales de Argos", () => {
   it("compara con lo de antes en la misma fila, con su variación; y da la parte del total", () => {
     const out = compile({ cifra: "cobrado", por: ["medio"], parte_del_total: true }, true)
     if ("problem" in out) throw new Error(out.problem)
-    expect(out.sql).toContain("antes.v as cobrado_antes_dinero")
+    expect(out.sql).toContain("coalesce(antes.v, 0) as cobrado_antes_dinero")
     expect(out.sql).toContain("as variacion_pct")
     expect(out.sql).toContain("as parte_pct")
     expect(out.sql).toContain("ahora left join antes using (medio)")

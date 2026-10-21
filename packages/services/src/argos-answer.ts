@@ -279,7 +279,9 @@ export function fillArgosSentence(
     return column ? formatArgosValue(row[name] ?? null, column, zone) : "—"
   }
   const repeated = argosRepeatedColumns(template, result)
-  const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name))
+  // En una lista, una columna que vale lo mismo en todas las filas es un total: no va delante de cada una («S/ 34,818.00 (Limpieza…)»).
+  const constant = (name: string) => result.rows.length > 1 && result.rows.every((row) => row[name] === first[name])
+  const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name) && !constant(column.name))
   // El dinero y el porcentaje solos se entienden; dos de lo mismo en una fila llevan su nombre («cobrado: S/ 284,045.00, dejo: S/ 15,946.50»).
   const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? null
   const twice = (unit: string | null) => unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1
