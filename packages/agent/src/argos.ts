@@ -745,7 +745,7 @@ export async function askArgos(
       if ("problem" in joined) return { problem: joined.problem, code: "HUECOS" }
       calc = joined
       // Las columnas de la base van sin su id: {c2_concepto} es {concepto}.
-      const own = new RegExp(`\{${joined.base.replace(/[^\w]/g, "")}_`, "g")
+      const own = new RegExp(`\\{${joined.base.replace(/[^\w]/g, "")}_`, "g")
       plan = { ...plan, frase: plan.frase.replace(own, "{"), frase_vacia: plan.frase_vacia.replace(own, "{") }
     }
     let result: ArgosQueryResult
