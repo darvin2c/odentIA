@@ -146,7 +146,8 @@ function personOf(row: ArgosTable["rows"][number]): { patientId: string | null; 
 /** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página (`PersonLink`). */
 function AnswerRows({ table }: { table: ArgosTable }) {
   const [all, setAll] = useState(false)
-  if (drawingOf(table) || table.columns.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
+  // Sin filas, la frase ya lo dice («En setiembre no se cobró nada»): una tabla vacía no agrega nada.
+  if (drawingOf(table) || table.columns.length === 0 || table.rows.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
   const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
   const [lead, ...rest] = table.columns
   return (
