@@ -11,6 +11,8 @@ export type CalendarProps =
       mode: "single"
       selected?: string
       compact?: boolean
+      /** Último día que se puede elegir (`yyyy-MM-dd`): los posteriores quedan deshabilitados. */
+      max?: string
       onSelect: (value?: string) => void
     }
   | {
@@ -74,6 +76,8 @@ export function Calendar(props: CalendarProps) {
         mode="single"
         locale={es}
         selected={parseDateOnly(props.selected)}
+        defaultMonth={parseDateOnly(props.selected ?? props.max)}
+        {...(props.max ? { disabled: { after: parseDateOnly(props.max) as Date } } : {})}
         onSelect={(day) => props.onSelect(toDateOnly(day))}
       />
     )

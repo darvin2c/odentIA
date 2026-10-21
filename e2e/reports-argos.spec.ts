@@ -13,8 +13,8 @@ import { gotoHydrated } from "./hydration"
 
 /**
  * Argos sobre los datos de la clínica (ADR 0075) desde el buscador y desde
- * Reportes, y la fase 6 de Reportes (ADR 0071): metas, descargas y el resumen
- * del lunes. El modelo es el de demostración (`demoArgosPlan` y la fila por
+ * Reportes, con el periodo de cada respuesta (tableros 7 a 12), y la fase 6 de
+ * Reportes (ADR 0071): metas, descargas y el resumen del lunes. El modelo es el de demostración (`demoArgosPlan` y la fila por
  * palabras): sirve para ver el recorrido, no acredita a ningún proveedor.
  */
 
@@ -86,7 +86,7 @@ async function openSearch(page: Page, width: number, text: string) {
 
 for (const width of [1440, 390]) {
   test.describe(`Argos a ${width}px`, () => {
-    test("desde el buscador: la fila de Argos, la respuesta al lado, seguir sin preguntar otra vez, descargar y fijar", async ({ owner, fixtureDb }, info) => {
+    test("desde el buscador: la fila de Argos, la respuesta al lado, seguir y cambiar el periodo sin preguntar otra vez, descargar y fijar", async ({ owner, fixtureDb }, info) => {
       await lastMonth(fixtureDb, owner)
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
@@ -102,20 +102,35 @@ for (const width of [1440, 390]) {
 
       const panel = panelOf(page)
       const answers = answersOf(page)
-      await expect(answers.getByText(/^Este mes se cobró S\/\s?400\.00\.$/)).toBeVisible()
+      // El periodo lo dice odentIA: en la frase y en el botón de arriba, con las palabras de Reportes.
+      await expect(answers.getByText(/^(Del|El) .+ se cobró S\/\s?400\.00\.$/)).toBeVisible()
       await expect(answers.getByText("Así lo calculé:")).toBeVisible()
+      const period = panel.getByRole("button", { name: /^Periodo: .+, hasta hoy\. Cambiar$/ })
+      await expect(period).toBeVisible()
       await observe(page, info, "respuesta")
 
       // El botón para seguir ya viene corrido: cambia lo que se ve sin volver a preguntar.
       const follow = panel.getByRole("button", { name: "Por medio de pago" })
       await follow.click()
       await expect(follow).toHaveAttribute("aria-pressed", "true")
-      await expect(answers.getByText(/^Este mes, por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
-      await expect(panel.getByRole("status")).toHaveText(/^Este mes, por medio de pago: Efectivo/)
+      await expect(answers.getByText(/^(Del|El) .+, por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
+      await expect(panel.getByRole("status")).toHaveText(/, por medio de pago: Efectivo/)
+
+      // Otro periodo: la misma consulta con otras fechas, sin preguntar otra vez. El mes pasado no tuvo cobros.
+      await period.click()
+      await page.getByRole("button", { name: /^Mes pasado/ }).click()
+      await expect(answers.getByText(/^En .+ no se cobró nada\.$/)).toBeVisible()
+      await expect(follow).toHaveAttribute("aria-pressed", "true")
+      const lastMonthButton = panel.getByRole("button", { name: /^Periodo: .+\. Cambiar$/ })
+      await expect(lastMonthButton).not.toHaveAccessibleName(/hasta hoy/)
+      await observe(page, info, "otro periodo")
+      await lastMonthButton.click()
+      await page.getByRole("button", { name: /^Este mes/ }).click()
+      await expect(answers.getByText(/^(Del|El) .+, por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
 
       // Descargar trae esa misma respuesta, en CSV.
       const file = await csvOf(page, () => panel.getByRole("button", { name: "Descargar" }).click())
-      expect(file.name).toMatch(/^lo-cobrado-este-mes-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv$/)
+      expect(file.name).toMatch(/^lo-cobrado-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv$/)
       expect(file.body.startsWith("﻿")).toBe(true)
       expect(file.body).toContain("Medio,Cobrado")
       expect(file.body).toContain("Efectivo,400")
@@ -126,12 +141,14 @@ for (const width of [1440, 390]) {
       await page.keyboard.press("Escape")
       await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
       const pinned = page.getByRole("region", { name: "Fijadas" })
-      await expect(pinned.getByText("Lo cobrado este mes · Por medio de pago")).toBeVisible()
+      await expect(pinned.getByText("Lo cobrado · Por medio de pago")).toBeVisible()
       await expect(pinned.getByText(/Efectivo \(S\/\s?400\.00\)/)).toBeVisible()
+      // Sigue el periodo de arriba (D11) y lo dice.
+      await expect(pinned.getByText(/, hasta hoy$/)).toBeVisible()
       await expect(pinned.getByText("Así lo calculé:")).toBeVisible()
       await observe(page, info, "fijada")
       await pinned.getByRole("button", { name: "Quitar" }).click()
-      await expect(pinned.getByText("Lo cobrado este mes · Por medio de pago")).toHaveCount(0)
+      await expect(pinned.getByText("Lo cobrado · Por medio de pago")).toHaveCount(0)
     })
   })
 }
@@ -166,6 +183,8 @@ test("desde Reportes: apagado lo dice; encendido pregunta con su periodo y respo
   const panel = panelOf(page)
   const answers = answersOf(page)
   await expect(answers.getByText(/^Mañana hay \d+ citas\.$/)).toBeVisible()
+  // Las citas por venir son de hoy: no llevan periodo que cambiar (D12).
+  await expect(answers.getByText(/^A hoy, /)).toBeVisible()
   // El periodo de Reportes sigue puesto para lo que se escriba en el panel, a la vista y con «Quitar».
   await expect(panel.getByText(/^Con lo de Reportes/)).toBeVisible()
   // Lo que no sabe lo dice, sin inventar una cifra.

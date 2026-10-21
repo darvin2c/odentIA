@@ -269,6 +269,16 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
                       Parcial
                     </Badge>
                   ) : null}
+                  {/* Con el periodo y la sede de arriba (D11); lo que es a hoy lo dice. */}
+                  {pin.period ? (
+                    <p className="text-[13px] text-muted-foreground">
+                      {pin.period.value === "a_hoy"
+                        ? pin.period.label
+                        : [pin.period.label, pin.period.other ? `contra ${pin.period.other.label}` : null, pin.period.compareLabel ? `comparado con ${pin.period.compareLabel}` : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                    </p>
+                  ) : null}
                   <ArgosShownView shown={pin.answer} title={pin.title} />
                   {pin.missing ? <p className="text-[13px] text-muted-foreground">Falta: {pin.missing}</p> : null}
                   {pin.how ? (

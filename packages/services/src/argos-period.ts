@@ -477,18 +477,27 @@ export interface ArgosPeriodView {
   branch: { id: string | null; options: Array<{ id: string; name: string }> } | null
 }
 
+/** Las opciones que ofrece el selector según el periodo que pidió la pregunta (D16): se quedan aunque se elijan otras fechas. */
+export function argosGrainOf(periodo: string): ArgosGrain {
+  if (periodo === "hoy" || periodo === "ayer" || /^\d{4}-\d{2}-\d{2}$/.test(periodo)) return "dia"
+  if (periodo === "esta_semana" || periodo === "semana_pasada") return "semana"
+  return "mes"
+}
+
 export function argosPeriodView(
   period: ArgosResolvedPeriod | null,
   zone: Zone,
   now: Date,
   branch: { chosen: { id: string; name: string } | null; options: Array<{ id: string; name: string }>; used: boolean },
+  /** Las opciones de la pregunta; sin ella, las del periodo que se ve. */
+  grain?: ArgosGrain,
 ): ArgosPeriodView {
   const today = reportDayOf(zone.timezone, now)
   const branchView = branch.used && branch.options.length > 1 ? { id: branch.chosen?.id ?? null, options: branch.options } : null
   if (!period) return { value: "a_hoy", grain: null, label: argosTodayLabel(zone, now), compare: "no", compareLabel: null, other: null, rolling: false, today, branch: branchView }
   return {
     value: period.spec.periodo,
-    grain: period.grain,
+    grain: grain ?? period.grain,
     label: period.label,
     compare: period.spec.compara,
     compareLabel: period.compareLabel,

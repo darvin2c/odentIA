@@ -3,16 +3,16 @@
  * conoce la base»). Se abre desde el buscador o desde Reportes, sin botón en la
  * cabecera, y responde al lado: columna si cabe, cajón si no y la hoja de abajo
  * en el teléfono (`DetailDrawer`). La frase con sus cifras, el dibujo cuando
- * ayuda, «Así lo calculé», los botones para seguir (ya corridos: no vuelven a
- * llamar al modelo), «Fijar en Resumen», «Descargar» y «Abrir…» los entrega el
- * servidor; aquí solo se dibujan. La conversación vive en el panel mientras dura
+ * ayuda, «Así lo calculé», el periodo (tableros 7 a 12: se cambia sin volver a
+ * llamar al modelo), los botones para seguir (ya corridos), «Fijar en Resumen»,
+ * «Descargar» y «Abrir…» los entrega el servidor; aquí solo se dibujan. La conversación vive en el panel mientras dura
  * la sesión (D4): el texto de las preguntas no se guarda (D2).
  */
 import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, toast } from "@odentia/ui"
 import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ArrowRight, Download, Pin, Search } from "lucide-react"
+import { ArrowRight, Download, LoaderCircle, Pin, Search } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { ADMIN_NAME } from "../../lib/agent-names"
@@ -20,13 +20,16 @@ import {
   ARGOS_SCREEN_LINKS,
   ASK_ARGOS_EVENT,
   type ArgosAskEvent,
+  type ArgosChoice,
   type ArgosResult,
   type ArgosShown,
   type ArgosTable,
   askArgos,
+  choiceOf,
   downloadArgos,
   openArgos,
   pinArgos,
+  rerunArgos,
 } from "../../lib/argos"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
@@ -35,6 +38,7 @@ import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportQuery } from "../../lib/reports"
 import { PINS_KEY } from "../../lib/reports-ask"
 import { PersonLink } from "../person-link"
+import { ArgosPeriodRow } from "./argos-period"
 
 const DESCRIPTION = "Responde con los datos de la clínica que tú puedes ver"
 const SAMPLES = ["¿Cuánto cobramos este mes?", "¿Qué pacientes tienen saldos pendientes?", "¿Cuántas citas hay mañana?"]
@@ -51,6 +55,12 @@ interface Exchange {
   error: string | null
   /** La opción para seguir que se está viendo; null es la respuesta. */
   option: number | null
+  /** Se está calculando con otro periodo o sede (D9). */
+  recalculating?: boolean
+  /** No se pudo con el periodo elegido: se dice y se sigue viendo lo de antes. */
+  recalcError?: string | null
+  /** Lo último que se pidió, para «Intentar de nuevo». */
+  lastChoice?: ArgosChoice
 }
 
 function Sentence({ parts }: { parts: ArgosShown["sentence"] }) {
@@ -203,10 +213,19 @@ export function ArgosShownView({ shown, title }: { shown: ArgosShown; title: str
   )
 }
 
-/** La respuesta (tablero 2): frase, dibujo o tabla, «Así lo calculé», acciones y los botones para seguir. */
-function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (option: number | null) => void }) {
+/** La respuesta (tableros 2 y 7): el periodo, frase, dibujo o tabla, «Así lo calculé», acciones y los botones para seguir. */
+function ArgosAnswer({
+  exchange,
+  onOption,
+  onPeriod,
+}: {
+  exchange: Exchange
+  onOption: (option: number | null) => void
+  onPeriod: (choice: ArgosChoice) => void
+}) {
   const result = exchange.result
   const role = useMyRole()
+  const locale = useOrgLocale() ?? "es"
   const queryClient = useQueryClient()
   const [pinned, setPinned] = useState<Array<number | null>>([])
   const pin = useMutation({
@@ -221,7 +240,8 @@ function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (op
   const download = useMutation({
     retry: false,
     mutationFn: (input: { option: number | null; title: string }) =>
-      result?.kind === "respuesta" ? downloadArgos(result.questionId, input.option, input.title) : Promise.resolve(),
+      // Se descarga lo que se ve: la opción, con su periodo y su sede.
+      result?.kind === "respuesta" ? downloadArgos(result.questionId, input.option, input.title, choiceOf(result.period)) : Promise.resolve(),
     onError: (error) => toast.error(mutationErrorMessage(error)),
   })
   if (result?.kind !== "respuesta") return null
@@ -235,12 +255,39 @@ function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (op
   const how = option ? option.how : result.how
   return (
     <div className={ANSWER}>
+      <ArgosPeriodRow
+        period={result.period}
+        locale={locale}
+        disabled={exchange.recalculating === true}
+        onChange={(change) => onPeriod({ ...choiceOf(result.period), ...change })}
+      />
+      {exchange.recalculating ? (
+        <p className="flex items-center gap-1.5 text-[13px] font-semibold text-primary-soft-foreground">
+          <LoaderCircle aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+          Calculando…
+        </p>
+      ) : null}
+      {exchange.recalcError ? (
+        <div role="alert" className="flex flex-col items-start gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-[13px]">
+          <p>
+            {exchange.recalcError} Sigues viendo {result.period.label.charAt(0).toLocaleLowerCase(locale) + result.period.label.slice(1)}.
+          </p>
+          {exchange.lastChoice ? (
+            <Button type="button" size="sm" className="min-h-11 sm:min-h-8" onClick={() => exchange.lastChoice && onPeriod(exchange.lastChoice)}>
+              Intentar de nuevo
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {partial?.partial ? (
         <Badge variant="outline" className="self-start">
           Parcial
         </Badge>
       ) : null}
-      <ArgosShownView shown={shown} title={title} />
+      {/* Mientras se calcula, lo de antes queda a la vista, atenuado. */}
+      <div className={cn("flex min-w-0 flex-col gap-3", exchange.recalculating && "opacity-50")}>
+        <ArgosShownView shown={shown} title={title} />
+      </div>
       {partial?.missing ? <p className="text-[13px] text-muted-foreground">Falta: {partial.missing}</p> : null}
       {how ? (
         <p className="text-[13px] text-muted-foreground">
@@ -304,7 +351,7 @@ function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (op
               )
             })}
           </fieldset>
-          <p className="text-[12px] text-muted-foreground">Estos botones muestran la misma pregunta con otra fecha, orden o grupo, sin volver a preguntarle a {ADMIN_NAME}.</p>
+          <p className="text-[12px] text-muted-foreground">Estos botones muestran la misma respuesta con otro orden o grupo, sin volver a preguntarle a {ADMIN_NAME}.</p>
         </div>
       ) : null}
     </div>
@@ -396,6 +443,32 @@ export function ArgosPanel() {
       }),
   })
 
+  // Otro periodo o sede (D9): la misma consulta en el servidor, sin el modelo. Lo de antes queda hasta que llega lo nuevo.
+  const recalc = useMutation({
+    retry: false,
+    mutationFn: (input: { id: number; questionId: string; choice: ArgosChoice }) => rerunArgos(input.questionId, input.choice),
+    onMutate: (input) => update(input.id, { recalculating: true, recalcError: null, lastChoice: input.choice }),
+    onSuccess: (response, input) =>
+      setExchanges((current) =>
+        current.map((item) => {
+          if (item.id !== input.id || item.result?.kind !== "respuesta") return item
+          const data = response.data
+          const option = item.option !== null && data.options.some((offered) => offered.index === item.option) ? item.option : null
+          return {
+            ...item,
+            recalculating: false,
+            option,
+            result: { ...item.result, text: data.text, sentence: data.sentence, table: data.table, how: data.how, options: data.options, period: data.period },
+          }
+        }),
+      ),
+    onError: (error, input) =>
+      update(input.id, {
+        recalculating: false,
+        recalcError: error instanceof ApiError && error.status < 500 && error.shape.message ? error.shape.message : "No se pudo calcular con ese periodo.",
+      }),
+  })
+
   function push(question: string, options: { screen?: ReportQuery | undefined; routed?: boolean } = {}) {
     const id = next.current++
     // La anterior con respuesta viaja con su consulta, nunca con su resultado (D3): la de la opción que se
@@ -455,6 +528,10 @@ export function ArgosPanel() {
       ? ""
       : !last.result
         ? "Consultando los datos…"
+        : last.recalculating
+          ? "Calculando…"
+          : last.recalcError
+            ? last.recalcError
         : last.result.kind === "respuesta"
           ? (last.result.options.find((item) => item.index === last.option)?.answer.text ?? last.result.text)
           : last.result.message
@@ -498,7 +575,13 @@ export function ArgosPanel() {
                     <span className="text-[13px] text-muted-foreground">Suele tardar entre 10 y 30 segundos. Se puede seguir trabajando en la página.</span>
                   </div>
                 ) : exchange.result.kind === "respuesta" ? (
-                  <ArgosAnswer exchange={exchange} onOption={(option) => update(exchange.id, { option })} />
+                  <ArgosAnswer
+                    exchange={exchange}
+                    onOption={(option) => update(exchange.id, { option })}
+                    onPeriod={(choice) => {
+                      if (exchange.result?.kind === "respuesta") recalc.mutate({ id: exchange.id, questionId: exchange.result.questionId, choice })
+                    }}
+                  />
                 ) : (
                   <ArgosReply exchange={exchange} onRetry={() => retry(exchange)} onClose={() => setOpen(false)} />
                 )}

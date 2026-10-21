@@ -1,7 +1,8 @@
 /**
  * Lo que la pantalla le pide al Argos de las vistas (ADR 0075): preguntar, la
- * fila del buscador, fijar en el Resumen y descargar. Las frases, las cifras y
- * las opciones para seguir las entrega el servidor; la pantalla solo las dibuja.
+ * fila del buscador, fijar en el Resumen, descargar y ver una respuesta con
+ * otro periodo o sede (D8 a D16). Las frases, las cifras, el periodo y las
+ * opciones para seguir las entrega el servidor; la pantalla solo las dibuja.
  * La conversación vive en el panel y no se guarda (decisiones D2 y D4).
  */
 import { apiDownload, apiFetch } from "./api"
@@ -26,6 +27,33 @@ export interface ArgosShown {
   table: ArgosTable
 }
 
+/** El periodo de una respuesta: lo que dice el botón y cómo cambiarlo. */
+export interface ArgosPeriod {
+  /** `este_mes`, `hoy`, `2026-10`, un rango… o `a_hoy` (sin periodo). */
+  value: string
+  /** Qué opciones ofrece el selector (D16): de un día, de una semana o las de Reportes. */
+  grain: "dia" | "semana" | "mes" | null
+  /** El botón o, a hoy, el texto. */
+  label: string
+  compare: "no" | "anterior" | "año_anterior" | "otro"
+  /** Lo que sigue a «Comparado con». */
+  compareLabel: string | null
+  /** El segundo periodo cuando la pregunta nombra dos (D15). */
+  other: { value: string; label: string } | null
+  rolling: boolean
+  /** Hoy en la clínica (`AAAA-MM-DD`). */
+  today: string
+  /** Solo si la respuesta va por sede y hay más de una (D13); `id` null: todas. */
+  branch: { id: string | null; options: Array<{ id: string; name: string }> } | null
+}
+
+/** Lo que se elige para ver una respuesta: sin valor, lo de la pregunta; `branchId: null`, todas las sedes. */
+export interface ArgosChoice {
+  period?: string
+  other?: string
+  branchId?: string | null
+}
+
 /** Las pantallas adonde una respuesta puede llevar («Abrir Finanzas»). */
 export type ArgosScreen = "finanzas" | "pacientes" | "agenda" | "presupuestos" | "inventario" | "servicios" | "reportes" | "ninguna"
 
@@ -41,6 +69,7 @@ export type ArgosResult =
       query: string
       /** Cada opción con su «Así lo calculé» y su consulta: la siguiente pregunta parte de la que se ve. */
       options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
+      period: ArgosPeriod
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: (ArgosShown & { query: string }) | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
@@ -70,8 +99,32 @@ export function pinArgos(questionId: string, option: number | null): Promise<{ d
   return apiFetch("/api/reports/argos/pins", { method: "POST", body: JSON.stringify({ questionId, option }) })
 }
 
-export function downloadArgos(questionId: string, option: number | null, title: string): Promise<void> {
-  return apiDownload(`/api/reports/argos/${questionId}/csv${option === null ? "" : `?option=${option}`}`, `${title}.csv`)
+/** La misma respuesta con otro periodo o sede (D9): la principal y las de seguir, sin el modelo ni el tope. */
+export interface ArgosRerun extends ArgosShown {
+  how: string
+  options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
+  period: ArgosPeriod
+}
+
+export function rerunArgos(questionId: string, choice: ArgosChoice): Promise<{ data: ArgosRerun }> {
+  return apiFetch(`/api/reports/argos/${questionId}/rerun`, { method: "POST", body: JSON.stringify(choice) })
+}
+
+/** Lo que se ve de una respuesta, para pedirlo otra vez (volver a calcular, descargar). */
+export function choiceOf(period: ArgosPeriod): ArgosChoice {
+  if (period.value === "a_hoy") return {}
+  return { period: period.value, ...(period.other ? { other: period.other.value } : {}), ...(period.branch ? { branchId: period.branch.id } : {}) }
+}
+
+/** Descarga lo que se ve: la opción, con su periodo y su sede. */
+export function downloadArgos(questionId: string, option: number | null, title: string, choice: ArgosChoice = {}): Promise<void> {
+  const params = new URLSearchParams()
+  if (option !== null) params.set("option", String(option))
+  if (choice.period) params.set("period", choice.period)
+  if (choice.other) params.set("other", choice.other)
+  if (choice.branchId !== undefined) params.set("branch", choice.branchId ?? "todas")
+  const query = params.toString()
+  return apiDownload(`/api/reports/argos/${questionId}/csv${query ? `?${query}` : ""}`, `${title}.csv`)
 }
 
 /** Lo que el buscador o Reportes le mandan al panel de Argos. */

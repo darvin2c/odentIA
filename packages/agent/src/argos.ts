@@ -21,6 +21,7 @@ import {
   argosCatalogText,
   argosChoiceOf,
   argosColumnLabel,
+  argosGrainOf,
   argosPeriodView,
   argosUsesBranch,
   fillArgosWords,
@@ -628,7 +629,13 @@ export async function rerunArgos(
     ...shown(row.plan, main.result, zone, words),
     how: fillArgosWords(row.plan.como, words),
     options,
-    period: argosPeriodView(bound.period, zone, now, { chosen: bound.branch, options: bound.branches, used: argosUsesBranch(row.query) }),
+    period: argosPeriodView(
+      bound.period,
+      zone,
+      now,
+      { chosen: bound.branch, options: bound.branches, used: argosUsesBranch(row.query) },
+      row.plan.periodo ? argosGrainOf(row.plan.periodo.periodo) : undefined,
+    ),
   }
 }
 

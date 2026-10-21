@@ -5,7 +5,7 @@
  * mostrando. Las frases y las cifras las entrega el servidor.
  */
 import { apiDownload, apiFetch } from "./api"
-import type { ArgosScreen, ArgosShown } from "./argos"
+import type { ArgosPeriod, ArgosScreen, ArgosShown } from "./argos"
 import type { ReportAdvice, ReportQuery } from "./reports"
 
 export type FigureGroup = "total" | "mes" | "sede" | "profesional" | "canal" | "medio" | "tratamiento" | "categoria" | "como_nos_conocio" | "antiguedad"
@@ -71,6 +71,8 @@ export interface PinnedArgosAnswer {
   /** Respondió solo una parte: fijada lo sigue diciendo, con lo que falta. */
   partial: boolean
   missing: string | null
+  /** Con el periodo y la sede de arriba (D11); lo que es a hoy, a hoy. null en una respuesta de antes. */
+  period: ArgosPeriod | null
   /** null: ya no corre o el rol de quien mira no la ve. */
   answer: ArgosShown | null
 }
