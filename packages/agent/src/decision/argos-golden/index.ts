@@ -1,7 +1,15 @@
-/** Las respuestas correctas de las preguntas nuevas del dueño (`eval/argos-owner.json`), por área. */
+/** Las respuestas correctas de las preguntas del dueño (`eval/argos-owner.json`), por área, y de las generadas (`eval/argos-generadas.json`). */
 import { budgetSolvers } from "./budgets.js"
 import { dentistSolvers } from "./dentists.js"
 import { financeSolvers } from "./finance.js"
+import { generatedSolvers1 } from "./generated-1.js"
+import { generatedSolvers2 } from "./generated-2.js"
+import { generatedSolvers3 } from "./generated-3.js"
+import { generatedSolvers4 } from "./generated-4.js"
+import { generatedSolvers5 } from "./generated-5.js"
+import { generatedSolvers6 } from "./generated-6.js"
+import { generatedSolvers7 } from "./generated-7.js"
+import { generatedSolvers8 } from "./generated-8.js"
 import type { GoldenHelpers, GoldenSolvers } from "./helpers.js"
 import { inventorySolvers } from "./inventory.js"
 import { marketingSolvers } from "./marketing.js"
@@ -23,5 +31,13 @@ export function ownerSolvers(h: GoldenHelpers): GoldenSolvers {
     ...salesSolvers(h),
     ...inventorySolvers(h),
     ...trendSolvers(h),
+    ...generatedSolvers1(h),
+    ...generatedSolvers2(h),
+    ...generatedSolvers3(h),
+    ...generatedSolvers4(h),
+    ...generatedSolvers5(h),
+    ...generatedSolvers6(h),
+    ...generatedSolvers7(h),
+    ...generatedSolvers8(h),
   }
 }
