@@ -32,7 +32,11 @@ export const reportQuestion = pgTable("report_question", {
    * a llamar al modelo.
    */
   plan: jsonb("plan"),
-  /** La pregunta pasó por el modelo de decisión: tocar una opción no cuenta para el tope. */
+  /**
+   * La pregunta pasó por un modelo que se paga (el de decisión o el que escribe
+   * la consulta): solo esas cuentan para el tope diario, salvo las que no
+   * pudieron (D6). Tocar una opción o el modelo de demostración no cuentan.
+   */
   usedModel: boolean("used_model").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

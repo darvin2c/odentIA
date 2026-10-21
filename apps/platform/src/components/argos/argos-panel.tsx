@@ -34,6 +34,7 @@ import { useOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportQuery } from "../../lib/reports"
 import { PINS_KEY } from "../../lib/reports-ask"
+import { PersonLink } from "../person-link"
 
 const DESCRIPTION = "Responde con los datos de la clínica que tú puedes ver"
 const SAMPLES = ["¿Cuánto cobramos este mes?", "¿Qué pacientes tienen saldos pendientes?", "¿Cuántas citas hay mañana?"]
@@ -68,17 +69,22 @@ type Drawing =
   | { kind: "bars"; label: ArgosTable["columns"][number]; value: ArgosTable["columns"][number] }
 
 /**
- * El dibujo solo cuando ayuda (tablero 3): una cifra por mes va en columnas;
- * pocas filas con un nombre y una cifra, en barras. Lo demás, la tabla.
+ * El dibujo solo cuando ayuda (tablero 3) y no engaña: una cifra por mes, cada
+ * mes una vez, va en columnas; pocas filas con un nombre distinto y una cifra,
+ * en barras. Una cifra vacía o negativa, una lista cortada o meses repetidos
+ * (por sede, por profesional) van en la tabla.
  */
 function drawingOf(table: ArgosTable): Drawing | null {
+  if (table.rows.length < 2 || table.truncated) return null
   const numbers = table.columns.filter((column) => column.kind === "number")
   const value = numbers.find((column) => /_dinero$/.test(column.name)) ?? numbers[0]
-  if (!value || table.rows.length < 2) return null
-  const month = table.columns.find((column) => column.kind === "date" && /(^|_)mes$/.test(column.name))
-  if (month && table.rows.length <= 24) return { kind: "months", month, value }
+  if (!value || numbers.length > 2) return null
+  if (table.rows.some((row) => typeof row[value.name] !== "number" || (row[value.name] as number) < 0)) return null
+  const once = (name: string) => new Set(table.rows.map((row) => row[name])).size === table.rows.length
+  const month = table.columns.find((column) => (column.kind === "date" || column.kind === "timestamp") && /(^|_)mes$/.test(column.name))
+  if (month) return table.columns.length === 2 && table.rows.length <= 24 && once(month.name) ? { kind: "months", month, value } : null
   const label = table.columns.find((column) => column.kind === "text")
-  return label && table.rows.length <= 12 && table.columns.length <= 4 ? { kind: "bars", label, value } : null
+  return label && table.columns.length <= 3 && table.rows.length <= 12 && once(label.name) ? { kind: "bars", label, value } : null
 }
 
 function AnswerDrawing({ table, title }: { table: ArgosTable; title: string }) {
@@ -88,16 +94,18 @@ function AnswerDrawing({ table, title }: { table: ArgosTable; title: string }) {
   const valueAt = (index: number) => Number(table.rows[index]?.[drawing.value.name] ?? 0)
   const textAt = (index: number, name: string) => table.display[index]?.[name] ?? ""
   if (drawing.kind === "months") {
-    const shown = new Map(table.rows.map((_, index) => [valueAt(index), textAt(index, drawing.value.name)]))
+    // Los meses de izquierda a derecha aunque la consulta los traiga del último al primero.
+    const order = table.rows.map((_, index) => index).sort((a, b) => String(table.rows[a]?.[drawing.month.name]).localeCompare(String(table.rows[b]?.[drawing.month.name])))
+    const shown = new Map(order.map((index) => [valueAt(index), textAt(index, drawing.value.name)]))
     return (
       <ColumnChart
         title={title}
         height={140}
-        categories={table.rows.map((_, index) => {
+        categories={order.map((index) => {
           const label = textAt(index, drawing.month.name)
           return { key: String(index), label, short: label.slice(0, 3), partial: false }
         })}
-        bars={[{ key: drawing.value.name, label: drawing.value.label, tone: "series-1", values: table.rows.map((_, index) => valueAt(index)) }]}
+        bars={[{ key: drawing.value.name, label: drawing.value.label, tone: "series-1", values: order.map((index) => valueAt(index)) }]}
         format={(value) => shown.get(value) ?? new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)}
         axis={(value) => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value)}
         tableHeading={drawing.month.label}
@@ -118,16 +126,15 @@ function AnswerDrawing({ table, title }: { table: ArgosTable; title: string }) {
   )
 }
 
-/** Adónde lleva una fila con una persona: su página, solo si quien mira puede abrirla. */
-function personHref(row: ArgosTable["rows"][number]): string | null {
-  if (typeof row.persona_id === "string") return `/people/${row.persona_id}`
-  if (typeof row.paciente_id === "string") return `/patients/${row.paciente_id}`
-  return null
+/** La persona de una fila, por los ids que la tabla trae y no muestra. */
+function personOf(row: ArgosTable["rows"][number]): { patientId: string | null; contactId: string | null } | null {
+  const patientId = typeof row.paciente_id === "string" ? row.paciente_id : null
+  const contactId = typeof row.persona_id === "string" ? row.persona_id : null
+  return patientId || contactId ? { patientId, contactId } : null
 }
 
-/** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página. */
+/** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página (`PersonLink`). */
 function AnswerRows({ table }: { table: ArgosTable }) {
-  const role = useMyRole()
   const [all, setAll] = useState(false)
   if (drawingOf(table) || table.columns.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
   const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
@@ -147,16 +154,20 @@ function AnswerRows({ table }: { table: ArgosTable }) {
           </thead>
           <tbody>
             {rows.map((row, index) => {
-              const href = personHref(row)
+              const person = lead?.kind === "text" ? personOf(row) : null
               const display = table.display[index] ?? {}
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: las filas de una respuesta no se reordenan.
                 <tr key={index} className="border-t">
                   <td className="px-2.5 py-1.5">
-                    {href && lead && canOpenHref(role, href) ? (
-                      <Link to={href} className="font-semibold text-primary-soft-foreground underline underline-offset-2">
+                    {person && lead ? (
+                      <PersonLink
+                        patientId={person.patientId}
+                        contactId={person.contactId}
+                        className="font-semibold text-primary-soft-foreground underline underline-offset-2"
+                      >
                         {display[lead.name]}
-                      </Link>
+                      </PersonLink>
                     ) : (
                       (lead ? display[lead.name] : "")
                     )}
@@ -173,7 +184,7 @@ function AnswerRows({ table }: { table: ArgosTable }) {
         </table>
       </div>
       {table.rows.length > ROWS_SHOWN ? (
-        <Button type="button" variant="link" className="h-auto self-start p-0 text-[13px]" onClick={() => setAll(!all)}>
+        <Button type="button" variant="link" className="min-h-11 self-start px-0 text-[13px] sm:min-h-8" onClick={() => setAll(!all)}>
           {all ? "Ver menos" : `Ver las ${table.truncated ? `más de ${table.rows.length}` : table.rows.length}`}
         </Button>
       ) : null}
@@ -219,25 +230,36 @@ function ArgosAnswer({ exchange, onOption }: { exchange: Exchange; onOption: (op
   const title = option ? `${result.title} · ${option.label}` : result.title
   const link = result.screen === "ninguna" ? null : ARGOS_SCREEN_LINKS[result.screen]
   const isPinned = pinned.includes(exchange.option)
+  // «Parcial» y «Falta» son de la respuesta principal; una opción es otra consulta, con su propio cálculo.
+  const partial = option ? null : { partial: result.partial, missing: result.missing }
+  const how = option ? option.how : result.how
   return (
     <div className={ANSWER}>
-      {result.partial ? (
+      {partial?.partial ? (
         <Badge variant="outline" className="self-start">
           Parcial
         </Badge>
       ) : null}
       <ArgosShownView shown={shown} title={title} />
-      {result.missing ? <p className="text-[13px] text-muted-foreground">Falta: {result.missing}</p> : null}
-      {result.how ? (
+      {partial?.missing ? <p className="text-[13px] text-muted-foreground">Falta: {partial.missing}</p> : null}
+      {how ? (
         <p className="text-[13px] text-muted-foreground">
-          <span className="font-bold text-foreground">Así lo calculé:</span> {result.how}
+          <span className="font-bold text-foreground">Así lo calculé:</span> {how}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <SubmitButton type="button" variant="outline" className="min-h-11 sm:min-h-9" pending={pin.isPending} disabled={isPinned} onClick={() => pin.mutate(exchange.option)}>
-          <Pin aria-hidden />
-          {isPinned ? "Fijada en Resumen" : "Fijar en Resumen"}
-        </SubmitButton>
+        {isPinned ? (
+          // Sigue en el orden del teclado y dice que ya está, en vez de desaparecer como un botón apagado.
+          <Button type="button" variant="outline" aria-disabled className="min-h-11 cursor-default opacity-70 sm:min-h-9">
+            <Pin aria-hidden />
+            Fijada en Resumen
+          </Button>
+        ) : (
+          <SubmitButton type="button" variant="outline" className="min-h-11 sm:min-h-9" pending={pin.isPending} onClick={() => pin.mutate(exchange.option)}>
+            <Pin aria-hidden />
+            Fijar en Resumen
+          </SubmitButton>
+        )}
         {shown.table.rows.length > 0 ? (
           <SubmitButton
             type="button"
@@ -359,8 +381,9 @@ export function ArgosPanel() {
   const [draft, setDraft] = useState("")
   const next = useRef(1)
   const end = useRef<HTMLDivElement>(null)
-  // El periodo y la sede de Reportes siguen valiendo para lo que se escribe después en el panel (D7).
-  const [screen, setScreen] = useState<ReportQuery | undefined>(undefined)
+  // El periodo y la sede de Reportes siguen valiendo para lo que se escribe después en el panel (D7),
+  // a la vista y con «Quitar»: así no se queda puesto sin que se sepa.
+  const [screen, setScreen] = useState<{ query: ReportQuery; label: string } | null>(null)
 
   const update = (id: number, patch: Partial<Exchange>) => setExchanges((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const ask = useMutation({
@@ -375,12 +398,19 @@ export function ArgosPanel() {
 
   function push(question: string, options: { screen?: ReportQuery | undefined; routed?: boolean } = {}) {
     const id = next.current++
-    // La anterior con respuesta viaja con su consulta, nunca con su resultado (D3).
+    // La anterior con respuesta viaja con su consulta, nunca con su resultado (D3): la de la opción que se
+    // está viendo, para que «¿y de esos…?» hable de lo que está en la pantalla.
     const previous = [...exchanges].reverse().find((item) => item.result?.kind === "respuesta")
+    const viewed = previous?.result?.kind === "respuesta" ? previous.result.options.find((item) => item.index === previous.option) : undefined
     const body = {
       text: question,
       ...(options.screen ? { screen: options.screen } : {}),
-      previous: previous?.result?.kind === "respuesta" ? { text: previous.question, query: previous.result.query } : null,
+      previous:
+        previous?.result?.kind === "respuesta"
+          ? viewed
+            ? { text: `${previous.question} (${viewed.label})`, query: viewed.query }
+            : { text: previous.question, query: previous.result.query }
+          : null,
       ...(options.routed ? { routed: true } : {}),
     }
     setExchanges((current) => [...current, { id, question, ...(options.screen ? { screen: options.screen } : {}), ...(options.routed ? { routed: true } : {}), result: null, error: null, option: null }])
@@ -394,7 +424,7 @@ export function ArgosPanel() {
     function onAsk(event: Event) {
       const detail = (event as CustomEvent<ArgosAskEvent>).detail
       const question = detail?.question?.trim() ?? ""
-      setScreen(detail?.screen)
+      setScreen(detail?.screen ? { query: detail.screen, label: detail.screenLabel ?? "" } : null)
       setOpen(true)
       if (question.length >= 3) pushRef.current(question, { screen: detail?.screen, ...(detail?.routed ? { routed: true } : {}) })
       else setDraft(question)
@@ -415,27 +445,38 @@ export function ArgosPanel() {
     event.preventDefault()
     const text = draft.trim()
     if (text.length < 3 || pending) return
-    push(text, { screen })
+    push(text, { screen: screen?.query })
     setDraft("")
   }
+  // Un solo aviso para el lector de pantalla con lo último que pasó, no la conversación entera.
+  const live = !last
+    ? ""
+    : last.error
+      ? ""
+      : !last.result
+        ? "Consultando los datos…"
+        : last.result.kind === "respuesta"
+          ? (last.result.options.find((item) => item.index === last.option)?.answer.text ?? last.result.text)
+          : last.result.message
   const retry = (exchange: Exchange) => push(exchange.question, { screen: exchange.screen, ...(exchange.routed ? { routed: true } : {}) })
 
   return (
-    <DetailDrawer open title={ADMIN_NAME} description={DESCRIPTION} onClose={() => setOpen(false)} isSubmitting={pending}>
+    // Se puede cerrar mientras pregunta: la respuesta llega igual a su pregunta y se ve al volver a abrir.
+    <DetailDrawer open title={ADMIN_NAME} description={DESCRIPTION} onClose={() => setOpen(false)}>
       <div className="flex flex-col gap-4">
         {exchanges.length === 0 ? (
           <section aria-label="Prueba una pregunta" className="flex flex-col gap-1.5">
             <h3 className="text-[13px] font-bold text-muted-foreground">Prueba una pregunta</h3>
             <div className="flex flex-wrap gap-1.5">
               {SAMPLES.map((sample) => (
-                <Button key={sample} type="button" variant="outline" size="sm" className="min-h-11 rounded-full sm:min-h-8" disabled={pending} onClick={() => push(sample, { screen })}>
+                <Button key={sample} type="button" variant="outline" size="sm" className="min-h-11 rounded-full sm:min-h-8" disabled={pending} onClick={() => push(sample, { screen: screen?.query })}>
                   {sample}
                 </Button>
               ))}
             </div>
           </section>
         ) : (
-          <ol className="flex flex-col gap-4" aria-live="polite">
+          <ol className="flex flex-col gap-4" aria-label="Preguntas y respuestas">
             {exchanges.map((exchange) => (
               <li key={exchange.id} className="flex flex-col gap-3">
                 <p className="max-w-[86%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm font-semibold text-primary-foreground">
@@ -452,7 +493,7 @@ export function ArgosPanel() {
                     </Button>
                   </div>
                 ) : !exchange.result ? (
-                  <div role="status" className="flex flex-col gap-0.5 text-sm">
+                  <div className="flex flex-col gap-0.5 text-sm">
                     <span className="font-semibold">Consultando los datos…</span>
                     <span className="text-[13px] text-muted-foreground">Suele tardar unos segundos. Se puede seguir trabajando en la página.</span>
                   </div>
@@ -466,7 +507,20 @@ export function ArgosPanel() {
           </ol>
         )}
         <div ref={end} />
+        <p role="status" className="sr-only">
+          {live}
+        </p>
         <div className="flex flex-col gap-2 border-t pt-3.5">
+          {screen ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+              <span className="min-w-0">
+                Con lo de Reportes{screen.label ? <>: <span className="font-semibold text-foreground">{screen.label}</span></> : null}
+              </span>
+              <Button type="button" variant="link" className="min-h-11 px-1 text-[13px] sm:min-h-8" onClick={() => setScreen(null)}>
+                Quitar
+              </Button>
+            </div>
+          ) : null}
           <form onSubmit={submit}>
             <FieldLabel htmlFor="argos-otra" className="sr-only">
               Escribe otra pregunta
@@ -513,7 +567,7 @@ export function ArgosPanel() {
  * El campo de Reportes (D7): pregunta con el periodo y la sede de la pantalla y
  * abre el panel. Con Argos apagado lo dice.
  */
-export function ArgosReportField({ query, enabled }: { query: ReportQuery; enabled: boolean | undefined }) {
+export function ArgosReportField({ query, label, enabled }: { query: ReportQuery; label?: string | undefined; enabled: boolean | undefined }) {
   const canAgent = usePermission("agent.write")
   const [draft, setDraft] = useState("")
   const off = enabled === false
@@ -521,7 +575,7 @@ export function ArgosReportField({ query, enabled }: { query: ReportQuery; enabl
     event.preventDefault()
     const text = draft.trim()
     if (text.length < 3 || off) return
-    openArgos({ question: text, screen: query })
+    openArgos({ question: text, screen: query, ...(label ? { screenLabel: label } : {}) })
     setDraft("")
   }
   return (

@@ -4,15 +4,18 @@
  *
  * Todo pide `reports.read`: ni caja ni el profesional lo ven. El periodo es una
  * opción cerrada (meses completos) o un rango de días; la sede es opcional.
- * Además: preguntarle a Argos (ADR 0070), las respuestas fijadas, las metas,
- * el resumen del lunes de cada persona y «Descargar» en CSV (ADR 0071).
+ * Además: preguntarle a Argos sobre las vistas del negocio (ADR 0073), las
+ * respuestas fijadas, las metas, el resumen del lunes de cada persona y
+ * «Descargar» en CSV (ADR 0071).
  */
-import { askArgos, meterAiUse, type PlatformDecisions, type PlatformLlm, routeArgos, showArgosAnswer } from "@odentia/agent"
+import { askArgos, meterAiUse, type PlatformDecisions, type PlatformLlm, routeArgos, routeByWords, showArgosAnswer } from "@odentia/agent"
 import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
+  ARGOS_DOWNLOAD_LIMIT,
   ArgosQueryError,
   argosAnswerCsv,
+  getAdminSettings,
   getArgosAnswer,
   getOrgLocale,
   getAgendaReport,
@@ -201,8 +204,16 @@ export function createReportsRoute(deps: ReportsDeps) {
     const { orgId } = orgContextOf(c)
     const parsed = argosRouteInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const text = parsed.data.text
     const argosDeps = { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey }
-    return runService(c, 200, async () => ({ route: await meterAiUse(deps.db, orgId, "reportes", () => routeArgos(deps.db, argosDeps, orgId, parsed.data.text)) }))
+    return runService(c, 200, async () => {
+      // Un teléfono, un documento o un número de historia se buscan: no viajan a ningún modelo. Con Argos apagado
+      // tampoco: las palabras dicen si va primero la Ayuda; lo demás, los resultados.
+      if (/^[\d\s+().-]+$/.test(text)) return { route: "buscar" as const }
+      const { enabled } = await withOrgContext(deps.db, orgId, (tx) => getAdminSettings(tx, orgId))
+      if (!enabled) return { route: routeByWords(text) === "ayuda" ? ("ayuda" as const) : ("buscar" as const) }
+      return { route: await meterAiUse(deps.db, orgId, "reportes", () => routeArgos(deps.db, argosDeps, orgId, text)) }
+    })
   })
 
   /** Fijar en el Resumen (D5): se guarda la consulta y sus frases; el Resumen la vuelve a correr cada vez. */
@@ -211,26 +222,27 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = argosAnswerRef.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, async (tx) => pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, parsed.data.questionId, parsed.data.option ?? null))),
+      withOrgContext(deps.db, orgId, async (tx) => pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null))),
     )
   })
 
   /** Descargar (D5): la misma consulta, corrida otra vez con la llave de quien descarga. */
   app.get("/argos/:questionId/csv", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, memberRole, userId } = orgContextOf(c)
     const raw = c.req.query("option")
     const parsed = argosAnswerRef.safeParse({ questionId: c.req.param("questionId"), option: raw === undefined || raw === "" ? null : Number(raw) })
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return sendCsv(c, async () => {
       const { answer, zone } = await withOrgContext(deps.db, orgId, async (tx) => ({
-        answer: await getArgosAnswer(tx, orgId, parsed.data.questionId, parsed.data.option ?? null),
+        answer: await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null),
         zone: await getOrgLocale(tx, orgId),
       }))
-      const result = await runArgosQuery(deps.db, { orgId, memberRole, query: answer.sql }).catch((error: unknown) => {
+      // El mismo tope que los demás CSV de Reportes, no el de la respuesta en pantalla.
+      const result = await runArgosQuery(deps.db, { orgId, memberRole, query: answer.sql, rowLimit: ARGOS_DOWNLOAD_LIMIT }).catch((error: unknown) => {
         throw error instanceof ArgosQueryError ? new ServiceError("ARGOS_QUERY", 409, error.message) : error
       })
       const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
-      return argosAnswerCsv(answer.titulo, day, result)
+      return argosAnswerCsv(answer.titulo, day, result, zone.timezone)
     })
   })
 
@@ -245,13 +257,21 @@ export function createReportsRoute(deps: ReportsDeps) {
         saved: await listArgosPins(tx, orgId),
         zone: await getOrgLocale(tx, orgId),
       }))
-      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, una por una.
+      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, a la vez.
       const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" })
-      const argos = []
-      for (const pin of saved) {
-        const shown = await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone })
-        argos.push({ id: pin.id, pinnedBy: pin.pinnedBy, pinnedOn: day.format(new Date(pin.pinnedAt)), title: pin.answer.titulo, screen: pin.answer.pantalla, how: pin.answer.como, answer: shown })
-      }
+      const argos = await Promise.all(
+        saved.map(async (pin) => ({
+          id: pin.id,
+          pinnedBy: pin.pinnedBy,
+          pinnedOn: day.format(new Date(pin.pinnedAt)),
+          title: pin.answer.titulo,
+          screen: pin.answer.pantalla,
+          how: pin.answer.como,
+          partial: pin.answer.parcial === true,
+          missing: pin.answer.falta?.trim() || null,
+          answer: await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone }),
+        })),
+      )
       return { ...figures, argos }
     })
   })

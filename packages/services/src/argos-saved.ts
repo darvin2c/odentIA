@@ -25,29 +25,49 @@ export interface ArgosStoredAnswer {
   como: string
   titulo: string
   pantalla: ArgosScreenKey
+  /** Respondió solo una parte: lo dice también fijada, con lo que falta. */
+  parcial?: boolean
+  falta?: string
 }
 
-/** Lo que guarda una pregunta además de su consulta: sus frases y las consultas para seguir. */
+/** Lo que guarda una pregunta además de su consulta: sus frases y las consultas para seguir (null: no se ofreció). */
 export interface ArgosStoredPlan extends Omit<ArgosStoredAnswer, "sql"> {
-  seguir: Array<{ etiqueta: string; sql: string; frase: string; frase_vacia: string }>
+  seguir: Array<{ etiqueta: string; sql: string; frase: string; frase_vacia: string; como?: string } | null>
 }
 
 /**
  * La respuesta guardada de una pregunta de la clínica: la principal o, con
  * `option`, una de las de seguir (con el título y la pantalla de la pregunta).
  */
-export async function getArgosAnswer(tx: Db, orgId: string, questionId: string, option: number | null = null): Promise<ArgosStoredAnswer> {
+export async function getArgosAnswer(tx: Db, orgId: string, userId: string, questionId: string, option: number | null = null): Promise<ArgosStoredAnswer> {
+  // Solo quien preguntó: el id de otra persona no sirve aunque sea de la misma clínica.
   const [row] = await tx
     .select({ query: reportQuestion.query, plan: reportQuestion.plan })
     .from(reportQuestion)
-    .where(and(eq(reportQuestion.organizationId, orgId), eq(reportQuestion.id, questionId)))
+    .where(and(eq(reportQuestion.organizationId, orgId), eq(reportQuestion.userId, userId), eq(reportQuestion.id, questionId)))
     .limit(1)
   const plan = row?.plan as ArgosStoredPlan | null | undefined
   if (!row?.query || !plan) throw notFound("Respuesta de Argos")
-  if (option === null) return { sql: row.query, frase: plan.frase, frase_vacia: plan.frase_vacia, como: plan.como, titulo: plan.titulo, pantalla: plan.pantalla }
+  if (option === null)
+    return {
+      sql: row.query,
+      frase: plan.frase,
+      frase_vacia: plan.frase_vacia,
+      como: plan.como,
+      titulo: plan.titulo,
+      pantalla: plan.pantalla,
+      ...(plan.parcial ? { parcial: true, falta: plan.falta ?? "" } : {}),
+    }
   const follow = plan.seguir[option]
   if (!follow) throw notFound("Opción de la respuesta")
-  return { ...follow, como: plan.como, titulo: `${plan.titulo} · ${follow.etiqueta}`, pantalla: plan.pantalla }
+  return {
+    sql: follow.sql,
+    frase: follow.frase,
+    frase_vacia: follow.frase_vacia,
+    como: follow.como?.trim() || plan.como,
+    titulo: `${plan.titulo} · ${follow.etiqueta}`,
+    pantalla: plan.pantalla,
+  }
 }
 
 /** Fija una respuesta en el Resumen; la misma consulta no se fija dos veces. */
@@ -77,14 +97,21 @@ export async function listArgosPins(tx: Db, orgId: string): Promise<Array<{ id: 
   return [...rows].map((row) => ({ id: row.id, answer: row.argos, pinnedBy: row.name, pinnedAt: row.createdAt }))
 }
 
-/** El resultado en CSV (RFC 4180, con marca UTF-8): las columnas que se muestran, con sus nombres, y los valores tal cual. */
-export function argosAnswerCsv(title: string, day: string, result: ArgosQueryResult): CsvFile {
+/**
+ * El resultado en CSV (RFC 4180, con marca UTF-8): las columnas que se
+ * muestran, con sus nombres, y los valores tal cual; un momento, como en los
+ * demás CSV de Reportes, «AAAA-MM-DD HH:MM» en la zona de la clínica.
+ */
+export function argosAnswerCsv(title: string, day: string, result: ArgosQueryResult, timezone: string): CsvFile {
   const columns = result.columns.filter((column) => !isArgosIdColumn(column.name))
+  const moment = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+  const cell = (value: string | number | boolean | null | undefined, kind: string) =>
+    kind === "timestamp" && typeof value === "string" ? moment.format(new Date(value)) : value
   return {
     filename: csvFileName(title, day),
     body: toCsv(
       columns.map((column) => argosColumnLabel(column.name)),
-      result.rows.map((row) => columns.map((column) => row[column.name])),
+      result.rows.map((row) => columns.map((column) => cell(row[column.name], column.kind))),
     ),
   }
 }

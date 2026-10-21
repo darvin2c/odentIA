@@ -173,8 +173,9 @@ function plainValue(value: unknown, kind: ArgosColumnKind): string | number | bo
   return typeof value === "object" ? JSON.stringify(value) : String(value)
 }
 
-/** Tope de filas y de tiempo de una consulta de Argos. */
+/** Tope de filas y de tiempo de una consulta de Argos; al descargar, el de los demás CSV de Reportes. */
 export const ARGOS_ROW_LIMIT = 200
+export const ARGOS_DOWNLOAD_LIMIT = 5_000
 export const ARGOS_TIMEOUT_MS = 3_000
 
 /**
@@ -190,7 +191,7 @@ export async function runArgosQuery(
   if (!role) throw new ArgosQueryError("PERMISO", "Tu rol no puede preguntarle a Argos")
   const review = reviewArgosQuery(input.query)
   if (!review.ok) throw new ArgosQueryError("REVISOR", review.reason)
-  const limit = Math.max(1, Math.min(input.rowLimit ?? ARGOS_ROW_LIMIT, ARGOS_ROW_LIMIT))
+  const limit = Math.max(1, Math.min(input.rowLimit ?? ARGOS_ROW_LIMIT, ARGOS_DOWNLOAD_LIMIT))
   const timeout = Math.max(100, Math.min(input.timeoutMs ?? ARGOS_TIMEOUT_MS, 10_000))
   try {
     return await db.transaction(async (tx) => {

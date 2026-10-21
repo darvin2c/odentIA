@@ -360,9 +360,22 @@ function GlobalSearchDialog({
   }
   const firstValue = firstRow()
   const [selected, setSelected] = useState("")
-  useEffect(() => setSelected(firstValue), [firstValue])
+  // La fila elegida sigue a lo que llega (resultados, la fila de Argos) mientras no se movió el cursor con las
+  // flechas: la decisión de Jev llega tarde y no debe pisar lo elegido. Lo que elige cmdk sola o el puntero al
+  // pasar no cuenta. Lo que se escribe de nuevo vuelve a elegir lo primero.
+  const moved = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cada texto nuevo olvida el movimiento de las flechas.
+  useEffect(() => {
+    moved.current = false
+  }, [text])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: con otro texto vuelve a la primera aunque sea la misma fila (cmdk elige la suya).
+  useEffect(() => {
+    if (!moved.current) setSelected(firstValue)
+  }, [firstValue, text])
+  // Una pregunta (la fila ya la decidió) no es un nombre que faltó: no se ofrece crear un paciente con ella.
   const nothing =
     typing &&
+    !askFirst &&
     debounced === text &&
     !search.isFetching &&
     search.isSuccess &&
@@ -371,14 +384,17 @@ function GlobalSearchDialog({
     !screenMatches.length
   const canRegister = canAccess(role, "patients.write")
 
+  // Solo mientras Jev decide de verdad: con dos letras o si la fila no llegó, la fila dice a quién pregunta.
+  const deciding = asksArgos && text.length >= 3 && !route && (routeText !== text || routing.isFetching)
   const argosRow = asksArgos ? (
     <CommandItem
       key="argos"
       value="preguntar-argos"
       onSelect={() => {
         onClose()
-        // Con la fila ya decidida no se le pregunta otra vez a Jev: quien la eligió quiere a Argos.
-        openArgos({ question: text, ...(route ? { routed: true } : {}) })
+        // Una pregunta de los datos o un nombre ya decididos no vuelven a pasar por Jev; sin decidir, o si era de la
+        // Ayuda u otra cosa, decide el servidor.
+        openArgos({ question: text, ...(route === "negocio" || route === "buscar" ? { routed: true } : {}) })
       }}
       className="gap-3 px-3 py-2"
     >
@@ -386,9 +402,9 @@ function GlobalSearchDialog({
         <AgentMark size="sm" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium">{route ? `Preguntarle a ${ADMIN_NAME}: «${text}»` : `Preguntar: «${text}»`}</span>
+        <span className="truncate font-medium">{deciding ? `Preguntar: «${text}»` : `Preguntarle a ${ADMIN_NAME}: «${text}»`}</span>
         <span className="text-xs text-muted-foreground">
-          {route ? "Responde con los datos de la clínica que tú puedes ver" : `Viendo si es para ${ADMIN_NAME} o para Ayuda…`}
+          {deciding ? `Viendo si es para ${ADMIN_NAME} o para Ayuda…` : "Responde con los datos de la clínica que tú puedes ver"}
         </span>
       </span>
       <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Preguntar</CommandShortcut>
@@ -521,6 +537,9 @@ function GlobalSearchDialog({
         loop
         value={selected}
         onValueChange={setSelected}
+        onKeyDown={(event) => {
+          if (["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp"].includes(event.key)) moved.current = true
+        }}
         className="flex h-full flex-col rounded-none! p-0"
       >
         <div className="flex items-center gap-2 border-b px-2 py-1">

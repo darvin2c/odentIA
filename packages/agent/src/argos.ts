@@ -63,7 +63,8 @@ const planSchema = z.object({
   sql_cercana: z.string().describe("En no_existe: una consulta con lo más cercano que sí existe. Vacía si no hay."),
   frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
   titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas: «Lo cobrado este mes»."),
-  pantalla: z.enum(ARGOS_SCREENS).describe("La pantalla de odentIA donde se ve esto, para el botón «Abrir…»; «ninguna» si no hay una."),
+  // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
+  pantalla: z.string().describe(`La pantalla de odentIA donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
   seguir: z
     .array(
       z.object({
@@ -71,10 +72,10 @@ const planSchema = z.object({
         sql: z.string().describe("La consulta completa de esa variante."),
         frase: z.string().describe("Su frase con huecos."),
         frase_vacia: z.string().describe("Su frase si no trae filas."),
+        como: z.string().describe("Su «Así lo calculé»."),
       }),
     )
-    .max(3)
-    .describe("Hasta 3 variantes que la persona querría ver después; vacío en no_existe."),
+    .describe("Hasta 3 variantes que la persona querría ver después; vacío en no_existe. Más de 3 no se usan."),
 })
 
 export type ArgosPlan = z.infer<typeof planSchema>
@@ -103,7 +104,7 @@ Qué contar:
 
 La frase:
 - Dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
-- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él.
+- Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 10) como «col1 (col2, col3)», en el orden de tu consulta, y odentIA dice cuántas más hay; {filas} es cuántas filas hay. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Para decir cuántos hay, cuenta con count(*): {filas} de una consulta con LIMIT cuenta solo las que trajo.
 
 Para seguir:
 - En «seguir», hasta 3 variantes de la misma respuesta que la persona querría ver después: otra fecha («¿Y ayer?», «¿Y el mes pasado?»), otro orden («Por monto»), otro grupo («Por sede», «Por profesional»), un filtro («Solo productos») o, si la pregunta se puede entender de otra forma, esa otra lectura. Cada una con su consulta completa y su frase; odentIA las corre al tocar el botón, sin volver a preguntarte.
@@ -172,6 +173,7 @@ export function demoArgosPlan(question: string): ArgosPlan {
           sql: "select medio, sum(importe) as cobrado_dinero from cobros where dia >= date_trunc('month', current_date) and medio is not null group by medio order by cobrado_dinero desc",
           frase: "Este mes, por medio de pago: {lista}.",
           frase_vacia: "Este mes no se cobró nada.",
+          como: "Lo cobrado del mes en curso por medio de pago.",
         },
       ],
     }
@@ -262,26 +264,32 @@ const ROUTES: readonly ArgosRoute[] = ["negocio", "ayuda", "buscar", "otro"]
  * La fila sin modelo de decisión (demostración o Jev caído): «cómo se hace» es
  * de la Ayuda, una pregunta es de los datos y lo demás se busca.
  */
-function routeByWords(text: string): ArgosRoute {
+/** La fila por palabras, sin modelo: lo que se usa si Jev no responde y, con Argos apagado, para la Ayuda. */
+export function routeByWords(text: string): ArgosRoute {
   if (/\b(c[oó]mo (hago|se|puedo)|d[oó]nde (est[aá]|encuentro|veo|configuro))\b/i.test(text)) return "ayuda"
   return /[¿?]|\b(cu[aá]nt[oa]s?|qu[eé]|qui[eé]n(es)?|cu[aá]l(es)?|hay|tengo|tenemos)\b/i.test(text) ? "negocio" : "buscar"
 }
 
-export async function routeArgosQuestion(model: DecisionModel | null, text: string): Promise<ArgosRoute> {
-  if (!model) return routeByWords(text)
+/**
+ * Sin respuesta de Jev (sin modelo, se negó o falló) decide `fallback`: en el
+ * buscador, las palabras, para no poner a Argos primero ante un nombre; al
+ * preguntarle a Argos, los datos, porque la persona ya lo eligió.
+ */
+export async function routeArgosQuestion(model: DecisionModel | null, text: string, fallback: (text: string) => ArgosRoute = routeByWords): Promise<ArgosRoute> {
+  if (!model) return fallback(text)
   try {
     const result = await model.decide(text, [ARGOS_ROUTE_QUESTION])
     const choice = answerOf(result, ARGOS_ROUTE_QUESTION.id, "choice")?.choice
-    return ROUTES.find((route) => route === choice) ?? "negocio"
+    return ROUTES.find((route) => route === choice) ?? fallback(text)
   } catch {
-    return "negocio"
+    return fallback(text)
   }
 }
 
 /** La fila del buscador para quien puede preguntarle a Argos: solo el texto viaja a Jev. Lo pagado lo mide quien llama. */
-export async function routeArgos(db: Db, deps: ArgosDeps, orgId: string, text: string): Promise<ArgosRoute> {
+export async function routeArgos(db: Db, deps: ArgosDeps, orgId: string, text: string, fallback: (text: string) => ArgosRoute = routeByWords): Promise<ArgosRoute> {
   const decision = deps.decisionModel !== undefined ? deps.decisionModel : await createAdminDecisionModel(db, deps, orgId).catch(() => null)
-  return routeArgosQuestion(decision, text)
+  return routeArgosQuestion(decision, text, fallback)
 }
 
 export interface ArgosTable {
@@ -298,6 +306,11 @@ export interface ArgosClosest {
   sentence: ArgosSentencePart[]
   query: string
   table: ArgosTable
+}
+
+/** La pantalla que propuso el modelo, si es una de las de odentIA. */
+function screenOf(value: string): ArgosScreenKey {
+  return (ARGOS_SCREENS as readonly string[]).includes(value) ? (value as ArgosScreenKey) : "ninguna"
 }
 
 /** Una respuesta lista para mostrar: la frase llena y su tabla. */
@@ -320,8 +333,11 @@ export type ArgosAskResult =
       missing: string | null
       /** Lo que la pantalla manda con la pregunta siguiente para entender «¿y de esos…?» (D3). */
       query: string
-      /** Para seguir sin volver a llamar al modelo: ya corridas; `index` es su número para fijar y descargar. */
-      options: Array<{ index: number; label: string; answer: ArgosShown }>
+      /**
+       * Para seguir sin volver a llamar al modelo: ya corridas, cada una con su «Así lo calculé» y su consulta (la que
+       * viaja como anterior si se está viendo); `index` es su número para fijar y descargar.
+       */
+      options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
@@ -376,7 +392,7 @@ export async function askArgos(
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
 
   // Quien eligió «Preguntarle a Argos» con un nombre suelto («buscar») también recibe respuesta.
-  const route = input.routed ? "negocio" : await routeArgos(db, deps, input.orgId, input.text)
+  const route = input.routed ? "negocio" : await routeArgos(db, deps, input.orgId, input.text, () => "negocio")
   if (route === "ayuda" || route === "otro") {
     await record(route, null, false)
     return { kind: route, message: ARGOS_WORDS[route] }
@@ -424,29 +440,38 @@ export async function askArgos(
     return timedOut ? { kind: "tiempo", message: ARGOS_WORDS.tiempo } : { kind: "no_pudo", message: ARGOS_WORDS.noPudo }
   }
   const main = shown(plan, result, ready.zone)
-  // Las de seguir ya corridas: la que falla o no llena su frase no se ofrece.
+  // Las de seguir ya corridas: la que falla, no llena su frase o no tiene nombre no se ofrece.
+  const follows = plan.seguir.slice(0, 3)
   const options = (
     await Promise.all(
-      plan.seguir.map(async (follow, index) => {
+      follows.map(async (follow, index) => {
+        if (!follow.etiqueta.trim()) return null
         const outcome = await attempt(follow).catch(() => null)
-        return outcome && "result" in outcome ? { index, label: follow.etiqueta.trim(), answer: shown(follow, outcome.result, ready.zone) } : null
+        return outcome && "result" in outcome
+          ? { index, label: follow.etiqueta.trim(), how: follow.como.trim() || plan.como, query: follow.sql, answer: shown(follow, outcome.result, ready.zone) }
+          : null
       }),
     )
-  ).filter((option): option is NonNullable<typeof option> => option !== null && option.label !== "")
+  ).filter((option): option is NonNullable<typeof option> => option !== null)
+  const offered = new Set(options.map((option) => option.index))
+  const pantalla = screenOf(plan.pantalla)
   const stored: ArgosStoredPlan = {
     frase: plan.frase,
     frase_vacia: plan.frase_vacia,
     como: plan.como,
     titulo: plan.titulo.trim() || "Respuesta de Argos",
-    pantalla: plan.pantalla,
-    seguir: plan.seguir,
+    pantalla,
+    parcial: plan.tipo !== "consulta",
+    falta: plan.falta.trim(),
+    // Solo las que se ofrecieron se pueden fijar o descargar; las demás quedan vacías para conservar su número.
+    seguir: follows.map((follow, index) => (offered.has(index) ? follow : null)),
   }
   const questionId = await record(plan.tipo === "parcial" ? "parcial" : "respondida", plan.sql, true, stored)
   return {
     kind: "respuesta",
     questionId,
     title: stored.titulo,
-    screen: plan.pantalla,
+    screen: pantalla,
     partial: plan.tipo !== "consulta",
     ...main,
     how: plan.como,

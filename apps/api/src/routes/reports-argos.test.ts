@@ -25,12 +25,12 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 
-function buildApp(role: string): Hono {
+function buildApp(role: string, userId = OWNER): Hono {
   const deps: CrmDeps = { db: appDb, secretsKey: KEY, storage: {} as CrmDeps["storage"], validateExternal: false, webhookBaseUrl: "https://api.example.com" }
   const app = new Hono()
   app.use("*", async (c: Context, next: Next) => {
     c.set("orgId", ORG)
-    c.set("userId", OWNER)
+    c.set("userId", userId)
     c.set("memberRole", role)
     await next()
   })
@@ -68,6 +68,11 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
   const off = await ask("owner", { text: "¿Cuánto cobramos este mes?" })
   expect(off.status).toBe(200)
   expect(await off.json()).toMatchObject({ data: { kind: "apagado" } })
+  // Apagado, la fila del buscador no gasta en Jev: las palabras ponen primero la Ayuda y lo demás son resultados.
+  const route = async (text: string) =>
+    (await buildApp("owner").request("/reports/argos/route", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) })).json()
+  expect(await route("dónde configuro los horarios")).toEqual({ data: { route: "ayuda" } })
+  expect(await route("¿cuánto cobramos hoy?")).toEqual({ data: { route: "buscar" } })
 
   await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
   const on = await ask("admin", { text: "¿Cuánto cobramos este mes?", screen: { period: "este_mes" }, previous: null })
@@ -102,6 +107,8 @@ it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar e
   expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
   expect(new TextDecoder().decode(bytes)).toMatch(/^Medio,Cobrado/)
   expect((await app.request(`/reports/argos/${data.questionId}/csv?option=2`)).status).toBe(404)
+  // El id de una pregunta solo le sirve a quien la hizo, aunque otra persona de la clínica también vea Reportes.
+  expect((await buildApp("admin", "u-otra-persona").request(`/reports/argos/${data.questionId}/csv`)).status).toBe(404)
 
   expect(await (await post("/reports/argos/route", { text: "¿cuánto cobré hoy?" })).json()).toEqual({ data: { route: "negocio" } })
   expect(await (await post("/reports/argos/route", { text: "lucia" })).json()).toEqual({ data: { route: "buscar" } })

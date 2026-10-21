@@ -370,8 +370,6 @@ function OrgLayout() {
               <>
                 <GlobalSearchButton />
                 <HelpButton />
-                {/* Argos no tiene botón: lo abren el buscador y Reportes. */}
-                <ArgosPanel />
                 <WorkspaceNotifications />
                 <AgentPanelButton />
               </>
@@ -379,6 +377,9 @@ function OrgLayout() {
           >
             <Outlet />
           </HeaderUtilitiesProvider>
+          {/* Argos no tiene botón: lo abren el buscador y Reportes. Una sola vez aquí, no en la cabecera de cada
+              página: la conversación sigue al navegar (D4). */}
+          <ArgosPanel />
           </GlobalSearchProvider>
         </AgentPanelProvider>
       </SideDockProvider>

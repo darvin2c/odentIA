@@ -137,8 +137,8 @@ describe("Argos sobre las vistas", () => {
         titulo: "Lo cobrado este mes",
         pantalla: "finanzas",
         seguir: [
-          { etiqueta: "Por medio", sql: "select medio, sum(importe) as cobrado_dinero from cobros group by medio", frase: "Por medio: {lista}.", frase_vacia: "Nada." },
-          { etiqueta: "Rota", sql: "select nada from cobros", frase: "{nada}", frase_vacia: "" },
+          { etiqueta: "Por medio", sql: "select medio, sum(importe) as cobrado_dinero from cobros group by medio", frase: "Por medio: {lista}.", frase_vacia: "Nada.", como: "Por medio de pago." },
+          { etiqueta: "Rota", sql: "select nada from cobros", frase: "{nada}", frase_vacia: "", como: "" },
         ],
       },
     ])
@@ -147,13 +147,14 @@ describe("Argos sobre las vistas", () => {
     expect(answer).toMatchObject({ title: "Lo cobrado este mes", screen: "finanzas" })
     // La que falla no se ofrece; la que corre llega lista, sin otra llamada al modelo.
     expect(answer.options).toHaveLength(1)
-    expect(answer.options[0]).toMatchObject({ index: 0, label: "Por medio" })
+    expect(answer.options[0]).toMatchObject({ index: 0, label: "Por medio", how: "Por medio de pago." })
     expect(answer.options[0]?.answer.text).toMatch(/^Por medio: Efectivo \(S\/\s?1,250\.50\)\.$/)
     expect(model.calls).toHaveLength(1)
     const row = await lastQuestion()
     expect(row).toMatchObject({ id: answer.questionId, query: COBRADO.sql })
     expect(JSON.stringify(row?.plan)).not.toContain("¿Cuánto cobramos")
-    expect(row?.plan).toMatchObject({ titulo: "Lo cobrado este mes", seguir: [{ etiqueta: "Por medio" }, { etiqueta: "Rota" }] })
+    // La que no se ofreció queda vacía: no se puede fijar ni descargar.
+    expect(row?.plan).toMatchObject({ titulo: "Lo cobrado este mes", seguir: [{ etiqueta: "Por medio" }, null] })
   })
 
   it("lo que el buscador ya decidió no se le pregunta otra vez a Jev; un nombre suelto también se responde", async () => {

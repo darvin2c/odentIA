@@ -26,10 +26,12 @@ Con 36 preguntas escritas por un dueño, el Argos de 0070 acertó 17. Falló de 
 
 ## Consecuencias
 
-- El campo de 0070 en Reportes queda oculto hasta que el Argos nuevo tenga su entrada; las respuestas fijadas siguen en el Resumen.
+- El campo de Reportes vuelve con el Argos nuevo (D7): pregunta con el periodo y la sede de arriba, y el panel los deja a la vista con «Quitar» para que no sigan puestos sin saberlo. Las respuestas fijadas de las 32 cifras (0070) siguen en el Resumen; ya no se pregunta con ellas.
 - Una tabla o un dato nuevo que Argos deba conocer entra como columna o vista de `argos` en el mismo cambio, con su `GRANT` por rol, su descripción en `argos-catalog.ts` (una prueba compara el catálogo con la base) y, si es una cifra de Reportes, su prueba de cuadre.
 - Cada pregunta deja en `report_question` la consulta que corrió y cómo terminó, nunca el texto (D2). Lo que falló por el modelo o la base no cuenta para el tope diario (D6).
-- Prueba rápida del 2026-10-20 (sin llaves por rol ni Jev): 33 de 36 en el examen tras ajustarlo con esas preguntas y 9 de 14 con preguntas de reserva sin ajustar; los fallos fueron vistas que faltaban y dos reglas del modelo. Costo medido: USD 0,0004 a 0,0005 por pregunta. La medición final usa las 55 preguntas de reserva restantes (`packages/agent/eval/argos-reserva.json` y el catálogo del dueño).
+- También deja su plan (`report_question.plan`): las frases con huecos, «Así lo calculé», el título y las consultas para seguir. Con eso se fija (se vuelve a correr con la llave de quien mira), se descarga y se sigue sin volver a llamar al modelo; el id solo le sirve a quien preguntó. Se conserva como el resto de `report_question`, sin plazo propio.
+- D2 no guarda el texto de la pregunta, pero lo que se escribe para filtrar puede quedar en la consulta o en el título (un nombre: `ilike '%rosa quispe%'`). Queda dentro de la clínica (RLS) y lo fijado lo ve quien ve Reportes; no se intenta quitarlo porque es la consulta misma.
+- Prueba rápida del 2026-10-20 (sin llaves por rol ni Jev): 33 de 36 en el examen tras ajustarlo con esas preguntas y 9 de 14 con preguntas de reserva sin ajustar; los fallos fueron vistas que faltaban y dos reglas del modelo. Costo medido: USD 0,0004 a 0,0005 por pregunta. Las 55 preguntas de reserva (`packages/agent/eval/argos-holdout.json`) se usaron para ajustar reglas y columnas, así que ya no sirven de reserva: la medición final usa preguntas nuevas del dueño, cada una dos veces.
 - Revisar si una clínica grande hace que una vista pase el tope de tiempo, o si aparece una pregunta frecuente que ninguna vista cubre.
 
 ## Referencias

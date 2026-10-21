@@ -68,6 +68,9 @@ export interface PinnedArgosAnswer {
   title: string
   screen: ArgosScreen
   how: string
+  /** Respondió solo una parte: fijada lo sigue diciendo, con lo que falta. */
+  partial: boolean
+  missing: string | null
   /** null: ya no corre o el rol de quien mira no la ve. */
   answer: ArgosShown | null
 }

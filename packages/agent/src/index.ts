@@ -63,6 +63,7 @@ export {
   demoArgosPlan,
   routeArgos,
   routeArgosQuestion,
+  routeByWords,
   showArgosAnswer,
   writeArgosPlan,
 } from "./argos.js"

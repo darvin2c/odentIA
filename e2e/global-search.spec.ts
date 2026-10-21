@@ -96,6 +96,18 @@ const setRole = (db: Db, owner: OwnerFixture, role: string) =>
     .where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Buscar en todo" })
+/**
+ * Ctrl+K lo escucha el layout de la clínica. La raíz marca la página como
+ * hidratada antes de que ese layout termine de montarse (el botón ya se ve,
+ * venido del servidor), y la tecla de ese momento se pierde: se vuelve a
+ * pulsar mientras la ventana no abre. Si el atajo no funciona, igual falla.
+ */
+async function pressSearchShortcut(page: Page) {
+  await expect(async () => {
+    if (!(await dialog(page).isVisible())) await page.keyboard.press("Control+K")
+    await expect(dialog(page)).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 10_000 })
+}
 /** Escribe en la ventana ya abierta (lo tecleado antes de que abra no cuenta). */
 async function search(page: Page, text: string) {
   await expect(dialog(page)).toBeVisible()
@@ -111,7 +123,7 @@ test("Ctrl+K desde cualquier pantalla: «lucia» encuentra a Lucía con lo suyo 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/tasks"))
 
-  await page.keyboard.press("Control+K")
+  await pressSearchShortcut(page)
   await expect(dialog(page)).toBeVisible()
   await search(page, "lucia")
   const result = dialog(page)
@@ -150,7 +162,7 @@ test("lo que dicen los mensajes aparece debajo de quien lo escribió y lleva a l
   const page = owner.page
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-  await page.keyboard.press("Control+K")
+  await pressSearchShortcut(page)
   await search(page, "blanqueamiento")
   await expect(dialog(page).getByRole("option", { name: /Marta Ríos/ })).toBeVisible()
   // Lo elegido al llegar los resultados es lo primero que se encontró, no «Preguntarle a Ayuda».
@@ -173,14 +185,14 @@ test("cada rol ve lo de su pantalla: recepción no ve la historia clínica, el o
   const page = owner.page
   await setRole(fixtureDb, owner, "reception")
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-  await page.keyboard.press("Control+K")
+  await pressSearchShortcut(page)
   await search(page, "bruxismo")
   await expect(dialog(page).getByText("No encontramos «bruxismo».")).toBeVisible()
   await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
 
   await setRole(fixtureDb, owner, "dentist")
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-  await page.keyboard.press("Control+K")
+  await pressSearchShortcut(page)
   await search(page, "bruxismo")
   await expect(dialog(page).getByRole("option", { name: /Nota.*bruxismo/ })).toBeVisible()
 })

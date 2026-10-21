@@ -23,7 +23,7 @@ import { type ReportQuery, reportScope } from "./report-scope.js"
 export const ARGOS_WORDS = {
   // Se ven en Reportes y en el buscador: no nombran una pantalla.
   apagado: "Argos está apagado. Enciéndelo para preguntarle.",
-  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo.`,
+  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de las últimas 24 horas. En unas horas sigo respondiendo.`,
   sinModelo: "Ahora no puedo leer preguntas. Prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
   tiempo: "La consulta tardaba más de 3 segundos y la detuve. Prueba con un periodo más corto.",
@@ -118,7 +118,11 @@ export function formatArgosValue(value: string | number | boolean | null, column
     )
   }
   if (column.kind === "timestamp")
-    return new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(String(value)))
+    // Un mes que llega como momento (`date_trunc` sobre una fecha con hora) se dice igual que un mes.
+    return new Intl.DateTimeFormat(zone.locale, {
+      timeZone: zone.timezone,
+      ...(/(^|_)mes$/.test(column.name) ? { month: "long", year: "numeric" } : { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+    }).format(new Date(String(value)))
   if (column.kind === "number" && typeof value === "number") {
     if (/_dinero$/.test(column.name)) return new Intl.NumberFormat(zone.locale, { style: "currency", currency: zone.currency }).format(value)
     if (/_pct$/.test(column.name)) return `${new Intl.NumberFormat(zone.locale, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)} %`

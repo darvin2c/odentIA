@@ -5,7 +5,7 @@
  * sí (tablero A4). Las cifras y el avance los calcula el servidor.
  */
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { Button, Field, FieldDescription, FieldLabel, Input, toast } from "@odentia/ui"
+import { Badge, Button, Field, FieldDescription, FieldLabel, Input, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -13,6 +13,7 @@ import { type FormEvent, useId, useState } from "react"
 import { ADMIN_NAME } from "../../lib/agent-names"
 import { monthLabel } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
+import { useOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { dayText, type ReportQuery } from "../../lib/reports"
 import {
@@ -194,6 +195,7 @@ export function GoalDrawer({
  */
 export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; argosEnabled: boolean | undefined }) {
   const queryClient = useQueryClient()
+  const locale = useOrgLocale() ?? "es"
   const pins = useQuery({ queryKey: [...PINS_KEY, query.period, query.branchId ?? null], queryFn: () => fetchPins(query), retry: false })
   const remove = useMutation({
     retry: false,
@@ -243,7 +245,15 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
                   Fijada por {pin.pinnedBy} el {dayText(pin.pinnedOn, pin.answer?.locale ?? "es", { day: "numeric", month: "long" })}
                   {pin.answer ? ` · ${pin.answer.scope}` : ""}
                 </span>
-                <Button type="button" variant="ghost" size="sm" className="min-h-11 text-primary-soft-foreground sm:min-h-8" disabled={remove.isPending} onClick={() => remove.mutate(pin.id)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 text-primary-soft-foreground sm:min-h-8"
+                  aria-label={`Quitar «${pin.answer?.title ?? "Cifra que ya no está"}» del Resumen`}
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(pin.id)}
+                >
                   Quitar
                 </Button>
               </div>
@@ -253,16 +263,36 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
             <ReportCard key={pin.id} title={pin.title}>
               {pin.answer ? (
                 <div className="flex min-w-0 flex-col gap-2 text-sm">
+                  {/* Fijada sigue diciendo que respondió solo una parte, y cómo se calculó. */}
+                  {pin.partial ? (
+                    <Badge variant="outline" className="self-start">
+                      Parcial
+                    </Badge>
+                  ) : null}
                   <ArgosShownView shown={pin.answer} title={pin.title} />
+                  {pin.missing ? <p className="text-[13px] text-muted-foreground">Falta: {pin.missing}</p> : null}
+                  {pin.how ? (
+                    <p className="text-[13px] text-muted-foreground">
+                      <span className="font-bold text-foreground">Así lo calculé:</span> {pin.how}
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">Esta respuesta ya no se puede calcular para ti.</p>
               )}
               <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs text-muted-foreground">
-                  Fijada por {pin.pinnedBy} el {dayText(pin.pinnedOn, "es", { day: "numeric", month: "long" })}
+                  Fijada por {pin.pinnedBy} el {dayText(pin.pinnedOn, locale, { day: "numeric", month: "long" })}
                 </span>
-                <Button type="button" variant="ghost" size="sm" className="min-h-11 text-primary-soft-foreground sm:min-h-8" disabled={remove.isPending} onClick={() => remove.mutate(pin.id)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 text-primary-soft-foreground sm:min-h-8"
+                  aria-label={`Quitar «${pin.title}» del Resumen`}
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(pin.id)}
+                >
                   Quitar
                 </Button>
               </div>

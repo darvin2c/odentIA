@@ -185,7 +185,17 @@ function ReportsPage() {
             ) : null}
             {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
             {/* Pregunta con el periodo y la sede de arriba (D7); la respuesta se abre en el panel de Argos. */}
-            <ArgosReportField query={query} enabled={argosEnabled} />
+            <ArgosReportField
+              query={query}
+              label={
+                data
+                  ? [periodLabel(data.period, locale), branchList.length > 1 ? (branchList.find((branch) => branch.id === search.branch)?.name ?? "Todas las sedes") : null]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : undefined
+              }
+              enabled={argosEnabled}
+            />
           </div>
 
           {head.isError ? (

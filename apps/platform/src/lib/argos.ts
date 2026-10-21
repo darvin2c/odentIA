@@ -39,7 +39,8 @@ export type ArgosResult =
       how: string
       missing: string | null
       query: string
-      options: Array<{ index: number; label: string; answer: ArgosShown }>
+      /** Cada opción con su «Así lo calculé» y su consulta: la siguiente pregunta parte de la que se ve. */
+      options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: (ArgosShown & { query: string }) | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
@@ -79,6 +80,8 @@ export const ASK_ARGOS_EVENT = "odentia:preguntar-argos"
 export interface ArgosAskEvent {
   question: string
   screen?: ReportQuery
+  /** Cómo se dice ese periodo y esa sede en el panel («Octubre de 2026 · Todas las sedes»). */
+  screenLabel?: string
   routed?: boolean
 }
 
