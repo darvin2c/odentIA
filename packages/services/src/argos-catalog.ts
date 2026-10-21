@@ -27,7 +27,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado. «Ticket promedio» es el promedio de «importe» de estas filas.",
     columns:
-      "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta), sede, profesional (quien atendió), promocion",
+      "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta), sede, profesional (quien atendió), promocion, especialidad (de la clínica, la del tratamiento; null en productos)",
     keys: ["gestion", "caja"],
   },
   {
@@ -40,7 +40,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "pagos_por_venta",
     about: "Lo pagado aplicado a cada venta: qué se pagó y de qué. Solo pagos vigentes. «Lo que más se vendió» es lo que más se pagó: se mide aquí. Una venta pagada en partes sale una vez por pago: cuántas veces se vendió = count(distinct venta_id), nunca count(*) ni sumando cantidad aquí.",
-    columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, paciente_id, medio, venta_id",
+    columns: "pagado_en (timestamptz), dia, importe, concepto, tipo ('tratamiento'|'producto'), cantidad (de la venta), profesional (quien la atendió), sede, paciente, paciente_id, medio, venta_id, especialidad (de la clínica, la del tratamiento; null en productos)",
     keys: ["gestion", "caja"],
   },
   {
@@ -212,9 +212,13 @@ export const ARGOS_FIGURE_RULES: readonly string[] = [
   "Lo que deja (lo que ganó la clínica) = lo cobrado − sum(comisiones.comision) − sum(gastos.monto) con tipo <> 'pago_de_comisiones', del mismo periodo. Solo cuenta los gastos registrados. Margen = lo que deja ÷ lo cobrado, en %. Por sede: cobros.sede, comisiones.sede y gastos.sede.",
   "Gastos operativos = gastos.monto con tipo <> 'pago_de_comisiones', por categoria. Materiales (insumos) = la categoria 'Materiales', que ya incluye lo pagado de las compras (tipo 'pago_de_compra').",
   "Lo que se va de lo cobrado (porcentaje de los ingresos en gastos, costos) = (sum(gastos.monto) con tipo <> 'pago_de_comisiones' + sum(comisiones.comision)) ÷ lo cobrado; dilo «en gastos y comisiones».",
-  "Medios de pago (los más usados) = por cobros.medio, con cobros.tipo 'pago' y 'anulacion' (un pago anulado deja las dos filas; las devoluciones no son de un medio): cuántos pagos = los 'pago' menos los 'anulacion', y cuánto = sum(cobros.importe) de esas filas. No pagos_por_venta.",
+  "Medios de pago (cuánto por efectivo, tarjeta, Yape…; los más usados) = por cobros.medio con todas sus filas, como Reportes: cuánto = sum(cobros.importe) (pagos menos anulaciones y devoluciones; una devolución resta del medio del pago devuelto) y cuántos pagos = las filas 'pago' menos las 'anulacion'. No pagos_por_venta.",
   "De lo cargado, cuánto se cobró = sum(ventas.pagado) ÷ sum(ventas.importe) de las ventas del periodo.",
   "Ticket promedio por tratamiento = una sola cifra: el promedio de ventas.importe con ventas.tipo 'tratamiento'; de cada tratamiento solo si lo pide.",
+  "Fuentes de ingresos (de dónde viene lo que entra) = primero por tipo: lo pagado de tratamientos y de productos (sum(pagos_por_venta.importe) por pagos_por_venta.tipo) con su % de lo cobrado, y lo cobrado que aún no se aplica a una venta (adelantos y saldo a favor: lo cobrado − sum(pagos_por_venta.importe)); después, los tratamientos que más aportan.",
+  "Lo que se cotiza mucho y se vende poco = de lineas_presupuesto del periodo (por presentado_en), por tratamiento: cuántas veces se cotizó y cuántas con decision 'aceptado', y su % aceptado; «mucho» = al menos el 5 % de las líneas cotizadas y 3 veces; «poco» = su % aceptado por debajo del % aceptado de todas las líneas, que la frase dice. De menor a mayor % aceptado.",
+  "Lo cobrado por especialidad (qué especialidad genera más ingresos) = sum(pagos_por_venta.importe) con pagos_por_venta.tipo 'tratamiento', por pagos_por_venta.especialidad (null es «Sin especialidad»); los productos no son de una especialidad: si los dices, aparte. Lo cargado por especialidad, con ventas.especialidad.",
+  "Pacientes que perdemos (dejan de venir) cada mes = los «Sin venir» de hoy (pacientes), por el mes en que cumplieron 6 meses sin venir (date_trunc('month', pacientes.ultima_atencion + interval '6 months')); por mes, los últimos 6 meses completos, y su promedio por mes. Es la regla de «Sin venir» de Reportes repartida por mes: dilo así.",
   "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida. deudas es solo a hoy: la deuda de meses pasados no está en las vistas.",
   "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
   "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo. Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",

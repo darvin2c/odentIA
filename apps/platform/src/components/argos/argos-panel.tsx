@@ -495,7 +495,7 @@ export function ArgosPanel() {
                 ) : !exchange.result ? (
                   <div className="flex flex-col gap-0.5 text-sm">
                     <span className="font-semibold">Consultando los datos…</span>
-                    <span className="text-[13px] text-muted-foreground">Suele tardar unos segundos. Se puede seguir trabajando en la página.</span>
+                    <span className="text-[13px] text-muted-foreground">Suele tardar entre 10 y 30 segundos. Se puede seguir trabajando en la página.</span>
                   </div>
                 ) : exchange.result.kind === "respuesta" ? (
                   <ArgosAnswer exchange={exchange} onOption={(option) => update(exchange.id, { option })} />

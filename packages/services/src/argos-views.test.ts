@@ -9,7 +9,7 @@ import { withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
-import { encounter, encounterProcedure, patientCharge } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, orgSpecialty, patientCharge, serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -19,8 +19,9 @@ import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createExpense, setCommissionRate } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
-import { collectCharge, createCharge, voidTicket } from "./payments.js"
+import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
 import { computeFigure, type FigureContext } from "./report-figures.js"
+import { collectedByMethod } from "./report-finance.js"
 import { reportScope } from "./report-scope.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
@@ -281,6 +282,63 @@ describe("cuadre con Reportes", () => {
     const vencido = await inMonth("deuda_vencida", () => "select sum(saldo) * 100 as v from deudas where vencida")
     expect(vencido.vistas).toBe(vencido.pantalla)
     expect(vencido.vistas).toBe(12_000)
+  })
+
+  it("lo cobrado por medio de pago resta anulaciones y devoluciones del medio del pago, como Reportes", async () => {
+    const f = await clinicalFixture()
+    const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+    const branchId = site!.id
+    const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))
+    const card = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Tarjeta ${randomUUID()}`, typeCode: "48" }))
+    const advance = (paymentMethodId: string, amountCents: number) =>
+      f.run((tx) => collectCharge(tx, ...f.args, { branchId, advanceCents: amountCents, payments: [{ paymentMethodId, amountCents }], requestId: randomUUID() }))
+    const voided = await advance(cash.id, 30_000)
+    await advance(cash.id, 10_000)
+    await advance(card.id, 8_000)
+    await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, voided.ticket.id, { reason: "Se cobró dos veces", allowPostClose: false }))
+    // Se devuelve parte de lo que está a favor: resta del medio del pago devuelto.
+    await f.run((tx) => refundCredit(tx, ...f.args, { branchId, amountCents: 3_000, reason: "Ya no se atiende" }))
+
+    const window = await screen("org_a", "este_mes", "cobrado")
+    const pantalla = await withOrgContext(appDb, "org_a", (tx) =>
+      collectedByMethod(tx, "org_a", { start: new Date(window.from), end: new Date(window.to) }, { currency: "PEN" }),
+    )
+    const vistas = await runArgosQuery(appDb, {
+      orgId: "org_a",
+      memberRole: "owner",
+      query: `select medio, sum(importe) * 100 as v from cobros where momento >= timestamptz '${window.from}' and momento < timestamptz '${window.to}' group by medio`,
+    })
+    const ours = Object.fromEntries(vistas.rows.map((row) => [String(row.medio), Math.round(Number(row.v))]).filter(([, cents]) => cents !== 0))
+    expect(ours).toEqual(Object.fromEntries(pantalla.methods.map((row) => [row.label, row.cents])))
+    // 10.000 + 8.000 cobrados, el de 30.000 anulado y 3.000 devueltos.
+    expect((ours[cash.name] ?? 0) + (ours[card.name] ?? 0)).toBe(15_000)
+  })
+
+  it("lo vendido y lo pagado llevan la especialidad del servicio del tratamiento", async () => {
+    const f = await clinicalFixture()
+    const [specialty] = await ownerDb.insert(orgSpecialty).values({ organizationId: "org_a", key: `endo-${randomUUID()}`, name: `Endodoncia ${randomUUID()}` }).returning()
+    await ownerDb.update(serviceCatalog).set({ specialtyId: specialty!.id }).where(eq(serviceCatalog.id, f.service.id))
+    const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+    const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))
+    const [done] = await ownerDb
+      .insert(encounterProcedure)
+      .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Tratamiento", priceCents: 25_000, currency: "PEN", createdBy: f.actor })
+      .returning()
+    await ownerDb
+      .update(encounter)
+      .set({ status: "finalizada", finalizedAt: new Date(), signerName: "Clínico", signerRegistration: "12345" })
+      .where(eq(encounter.id, f.encounter.id))
+    const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: done!.id }))
+    await f.run((tx) =>
+      collectCharge(tx, ...f.args, { branchId: site!.id, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 25_000 }], requestId: randomUUID() }),
+    )
+    const of = async (view: string) =>
+      (await runArgosQuery(appDb, { orgId: "org_a", memberRole: "owner", query: `select especialidad, importe from ${view} where venta_id = '${charge.id}'` })).rows.map((row) => ({
+        especialidad: row.especialidad,
+        importe: Number(row.importe),
+      }))
+    expect(await of("ventas")).toEqual([{ especialidad: specialty!.name, importe: 250 }])
+    expect(await of("pagos_por_venta")).toEqual([{ especialidad: specialty!.name, importe: 250 }])
   })
 
   it("citas y agenda del mes pasado: atendidas, inasistencia, canceladas, pacientes nuevos y agenda ocupada", async () => {

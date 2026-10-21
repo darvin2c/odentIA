@@ -6,8 +6,8 @@
  *
  *   pnpm --filter @odentia/agent eval:argos -- --file=eval/argos-holdout.json [--golden=respuestas.json --role=owner --org=seed-org-dental-smile --json=salida.json --only=r1,r6]
  *
- *   Con ARGOS_REVISION=0 corre sin la revisión del plan; con ARGOS_RAZONAMIENTO=low|medium|high
- *   el modelo piensa antes de escribir. Con ARGOS_MODELO=deepseek-flash|deepseek-v4-pro (y
+ *   Con ARGOS_RAZONAMIENTO=none|low|medium|high cambia cuánto piensa el modelo antes de escribir
+ *   (sin ella, lo de la pantalla: `ARGOS_REASONING`). Con ARGOS_MODELO=deepseek-flash|deepseek-v4-pro (y
  *   DEEPSEEK_API_KEY) escribe DeepSeek en vez del modelo de Argos: solo para comparar, el modelo de
  *   Argos lo fija ADR 0052. Su costo sale de los precios de hora pico de DeepSeek.
  *
@@ -26,7 +26,7 @@ import { createAppDb, withOrgContext } from "@odentia/db"
 import { type AiUsageEntry, knownCostMicros, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { withAiMeter } from "../ai-usage.js"
-import { type ArgosAskResult, type ArgosDeps, askArgos } from "../argos.js"
+import { ARGOS_REASONING, type ArgosAskResult, type ArgosDeps, askArgos } from "../argos.js"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 
 interface Question {
@@ -56,8 +56,8 @@ const platform = platformLlmFromEnv(env)
 if (resolveLlmSpec(platform).provider === "fake") throw new Error("El examen es con el modelo real: quita LLM_MODEL=fake y define LLM_OPENAI_API_KEY")
 if (!env.JEV_API_KEY) throw new Error("Falta JEV_API_KEY: Jev decide la fila")
 
-const reasoning = (["low", "medium", "high"] as const).find((value) => value === env.ARGOS_RAZONAMIENTO)
-if (env.ARGOS_RAZONAMIENTO && !reasoning) throw new Error("ARGOS_RAZONAMIENTO es low, medium o high")
+const reasoning = (["none", "low", "medium", "high"] as const).find((value) => value === env.ARGOS_RAZONAMIENTO)
+if (env.ARGOS_RAZONAMIENTO && !reasoning) throw new Error("ARGOS_RAZONAMIENTO es none, low, medium o high")
 /** DeepSeek para comparar (USD por millón de tokens, hora pico: lo más caro; fuera de hora, la mitad). */
 const DEEPSEEK_PRICES = {
   "deepseek-flash": { hit: 0.006, miss: 0.3, out: 1.2 },
@@ -80,9 +80,7 @@ const deps: ArgosDeps = {
   platform,
   decisions: { jev: { apiKey: env.JEV_API_KEY, ...(env.JEV_BASE_URL ? { baseUrl: env.JEV_BASE_URL } : {}), ...(env.JEV_MODEL ? { model: env.JEV_MODEL } : {}) }, timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000) },
   secretsKey: secretsKeyFromEnv(env.SECRETS_KEY ?? ""),
-  // ARGOS_REVISION=0: sin la revisión del plan, para medir cuánto aporta.
-  review: env.ARGOS_REVISION !== "0",
-  // ARGOS_RAZONAMIENTO=low|medium|high: el modelo piensa antes de escribir.
+  // ARGOS_RAZONAMIENTO=none|low|medium|high: cuánto piensa el modelo antes de escribir.
   ...(reasoning ? { reasoning } : {}),
   ...(deepseek
     ? {
@@ -157,5 +155,5 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
 }
 console.log(`\n${out.length} preguntas · USD ${(total / 1_000_000).toFixed(5)} en total · USD ${(total / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta`)
 const jsonPath = arg("json", "")
-if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? "gpt-6-luna", razonamiento: reasoning ?? "none", revision: env.ARGOS_REVISION !== "0", usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
+if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
 process.exit(0)

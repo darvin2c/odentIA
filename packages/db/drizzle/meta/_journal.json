@@ -386,6 +386,13 @@
       "when": 1792543670779,
       "tag": "0054_argos_sigue_fija_y_descarga",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792543670780,
+      "tag": "0055_argos_especialidad",
+      "breakpoints": true
     }
   ]
 }

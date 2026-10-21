@@ -103,6 +103,10 @@ Qué contar:
 - Antes de responder no_existe, mira si se arma con las vistas y las cifras de abajo (margen, retención, pagos parciales, valor por cómo nos conoció, prospectos, horas clínicas…). no_existe es solo para lo de «Lo que odentIA no registra», lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) o lo que ninguna vista tiene.
 - Si lo pedido no está, tipo no_existe y sin consulta: dilo con palabras simples y, si hay algo cercano que sí existe, ponlo en sql_cercana con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: los controles vencidos no son tratamientos atrasados, ni quien indicó un tratamiento es quien lo hará.
 - Si solo puedes responder una parte, tipo parcial: la consulta responde esa parte y «falta» dice lo que no se puede saber.
+- Un consejo, una prioridad, una causa o un juicio («¿qué debería hacer…?», «¿por qué bajaron…?», «¿qué estoy desaprovechando?», «¿qué cambio en mi agenda?»): odentIA no aconseja ni sabe causas. Tipo parcial: la frase lo dice primero, en pocas palabras («Qué hacer lo decides tú; lo registrado que sirve para decidirlo:», «No sé por qué bajaron; lo que cambió:»), y sigue con cifras de las vistas sobre ese tema, nunca con una recomendación ni con una cifra que las vistas no tienen (oportunidades «perdidas», montos estimados). «falta» dice que odentIA no da consejos ni sabe causas. Las cifras de cada tema:
+  - Dinero, oportunidades o prioridades: los presupuestos que esperan respuesta (cuántos y cuánto), lo aceptado que falta hacer (cuánto, y cuánto de eso no tiene cita), lo que te deben hace más de 30 días y los pacientes «Sin venir». Si habla de la semana, además las citas que quedan hasta el domingo sin confirmar.
+  - La agenda: las horas libres del mes en curso por día de la semana y hora (agenda_por_hora), las franjas con más horas libres primero, y la agenda ocupada.
+  - «¿Por qué subió o bajó…?»: las cifras de los dos periodos y lo que más cambió entre ellos (por concepto, profesional o sede), sin decir que eso es la causa.
 
 La frase:
 - Dice, en pocas palabras y solo cuando cambia la cifra, qué periodo o supuesto usaste, con nombres: «del 1 al 20 de octubre», «en septiembre de 2026», «en los últimos 12 meses (de noviembre de 2025 a octubre de 2026)», «hoy». Si comparas, nombra los dos periodos: «del 1 al 20 de octubre, frente a los mismos días de septiembre». Si la pregunta se puede entender de dos formas, di también qué contaste: «volvieron {pacientes} pacientes que llevaban más de 6 meses sin venir». El detalle del cálculo va en «como», no en la frase.
@@ -246,10 +250,17 @@ export function demoArgosPlan(question: string): ArgosPlan {
   }
 }
 
-/** El modelo escribe la consulta y las frases. Con `retry`, la corrige con el problema que tuvo la anterior. */
-/** Cuánto piensa el modelo antes de escribir el plan; sin él, no piensa (el modo de siempre). */
-export type ArgosReasoning = "low" | "medium" | "high"
+/** Cuánto piensa el modelo antes de escribir el plan; «none», nada (para medir sin pensar). */
+export type ArgosReasoning = "none" | "low" | "medium" | "high"
 
+/**
+ * Lo que piensa Argos si nadie dice otra cosa. Medido con 88 preguntas nuevas del
+ * dueño: sin pensar acertaba el 67 % (con una revisión del plan aparte); pensando
+ * alto, el 82 %, con 6 s más de espera y USD 0,0002 más por pregunta.
+ */
+export const ARGOS_REASONING: ArgosReasoning = "high"
+
+/** El modelo escribe la consulta y las frases. Con `retry`, la corrige con el problema que tuvo la anterior. */
 export async function writeArgosPlan(
   deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
   input: ArgosAsk & { retry?: { plan: ArgosPlan; problem: string } },
@@ -261,7 +272,10 @@ export async function writeArgosPlan(
     description: "Entrega la consulta y las frases de la respuesta.",
     schema: planSchema,
   })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(deps.reasoning ? { reasoning: deps.reasoning } : {}) })
+  const reasoning = deps.reasoning ?? ARGOS_REASONING
+  const model = deps.createModel
+    ? await deps.createModel(spec)
+    : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(reasoning === "none" ? {} : { reasoning }) })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
   const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([answer], { tool_choice: TOOL_NAME }) : model
   const messages = argosMessages(spec.provider, input)
@@ -279,57 +293,20 @@ export async function writeArgosPlan(
   return parsed.data
 }
 
-const REVIEW_TOOL = "revisar"
-
-/** Lo que devuelve la revisión del plan: si responde la pregunta tal como la frase lo dice. */
-const reviewSchema = z.object({
-  correcta: z.boolean().describe("true si la consulta y la frase responden la pregunta sin errores; false si hay que corregir algo."),
-  problema: z.string().describe("Si no es correcta: qué hay que cambiar, en una o dos frases concretas. Vacío si es correcta."),
-})
-
-const REVIEW = `Revisa el plan que escribió Argos para la pregunta de arriba, con las reglas, las vistas y los periodos con nombre. No ves los datos. Marca correcta=false solo si hay un error claro que cambie la cifra o lo que se entiende:
-1. La consulta no responde lo que se preguntó: otra medida, otro grupo, otro periodo, o una regla de las cifras que no aplicó.
-2. La frase no dice lo que calcula la consulta: otro periodo (los nombres son los de los periodos con nombre), otra cosa contada, algo que la consulta no calcula (si sube o baja, «el mayor», un total) o una cifra escrita a mano.
-3. Los huecos están mal usados: un {columna} que es la primera fila cuando la frase habla de todas, {lista} en medio o dos veces, una lista sin su total.
-4. Es no_existe o parcial y sí se puede responder con las vistas; o responde como dato lo que está en «Lo que odentIA no registra».
-Si todo está bien, correcta=true y problema vacío. No pidas cambios de estilo ni de redacción.`
-
-/**
- * La revisión del plan, antes de correrlo: el mismo modelo, sin ver los datos,
- * mira si la consulta responde lo que se preguntó y si la frase dice lo que la
- * consulta calcula. Si no puede revisar (sin modelo, falla, otra forma), null:
- * la respuesta sigue sin revisión, nunca se bloquea por ella.
- */
-export async function reviewArgosPlan(
-  deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
-  input: ArgosAsk,
-  plan: ArgosPlan,
-): Promise<z.infer<typeof reviewSchema> | null> {
-  const spec = resolveLlmSpec(deps.platform)
-  if (spec.provider === "fake" && !deps.createModel) return null
-  const verdict = tool(async () => "revisado", { name: REVIEW_TOOL, description: "Entrega la revisión del plan.", schema: reviewSchema })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(deps.reasoning ? { reasoning: deps.reasoning } : {}) })
-  type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
-  const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([verdict], { tool_choice: REVIEW_TOOL }) : model
-  const shown = { tipo: plan.tipo, sql: plan.sql, frase: plan.frase, frase_vacia: plan.frase_vacia, como: plan.como, falta: plan.falta }
-  const messages = [...argosMessages(spec.provider, input), new HumanMessage({ content: `${REVIEW}\n\nEl plan:\n${JSON.stringify(shown, null, 2)}` })]
-  const reply = await bound.invoke(messages)
-  reportReplyUse(spec.provider, spec.modelName, reply)
-  const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === REVIEW_TOOL) : undefined
-  const parsed = reviewSchema.safeParse(call?.args)
-  return parsed.success ? parsed.data : null
-}
-
 /** La fila del buscador (decisión D1): Jev la decide con solo el texto. */
 export const ARGOS_ROUTE_QUESTION: DecisionQuestion = {
   id: "argos.fila",
   kind: "choice",
   instructions: "Alguien del equipo de una clínica dental escribió esto. ¿Qué es?",
   options: [
-    { value: "negocio", description: "Una pregunta sobre los datos de la clínica: dinero, cobros, ventas, pacientes, citas, agenda, tratamientos, presupuestos, promociones, inventario o el equipo." },
+    {
+      value: "negocio",
+      description:
+        "Una pregunta sobre los datos o el negocio de la clínica: dinero, cobros, ventas, pacientes, citas, agenda, tratamientos, presupuestos, promociones, inventario o el equipo. También pedir un consejo, prioridades o causas del negocio («¿qué debería hacer…?», «¿qué acciones tomo esta semana?», «¿por qué bajaron…?»).",
+    },
     { value: "ayuda", description: "Cómo se usa odentIA: dónde está algo o cómo se hace algo en el sistema." },
     { value: "buscar", description: "Un nombre o una palabra suelta para encontrar algo (una persona, un servicio, un producto), no una pregunta." },
-    { value: "otro", description: "Un saludo, algo ajeno a la clínica o un pedido de hacer algo (enviar, cambiar, agendar)." },
+    { value: "otro", description: "Un saludo, algo ajeno a la clínica o un pedido de que odentIA haga algo ahora (enviar, cambiar, agendar)." },
   ],
 }
 
@@ -431,11 +408,9 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
-  /** Cada vez que la base rechaza una consulta del modelo o la revisión la corrige (para medir; no trae datos). */
+  /** Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). */
   onProblem?: (problem: string) => void
-  /** false: sin la revisión del plan (para medir cuánto aporta). */
-  review?: boolean
-  /** Que el modelo piense antes de escribir (y de revisar) el plan; sin él, no piensa. */
+  /** Cuánto piensa el modelo antes de escribir el plan (para medir); sin él, `ARGOS_REASONING`. */
   reasoning?: ArgosReasoning
 }
 
@@ -489,12 +464,6 @@ export async function askArgos(
   let timedOut = false
   try {
     plan = await writeArgosPlan(deps, ask)
-    // La revisión, sin datos: si la consulta no responde lo preguntado o la frase no dice lo que calcula, se reescribe una vez.
-    const review = deps.review === false ? null : await reviewArgosPlan(deps, ask, plan).catch(() => null)
-    if (review && !review.correcta && review.problema.trim()) {
-      deps.onProblem?.(`revisión: ${review.problema.trim()}`)
-      plan = await writeArgosPlan(deps, { ...ask, retry: { plan, problem: review.problema.trim() } })
-    }
     // Una sola corrección: si la segunda tampoco corre, se dice que no se pudo.
     for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
       const outcome = await attempt(plan)
