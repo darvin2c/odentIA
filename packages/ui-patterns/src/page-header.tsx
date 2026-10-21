@@ -56,17 +56,18 @@ export function PageHeader({
       )}
     >
       {navTrigger}
-      <div className="min-w-0 flex-1 basis-48">
+      <div className="min-w-0 flex-1 basis-48 max-sm:basis-0">
         <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{title}</h1>
         {typeof subtitle === "string" ? (
-          <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+          // En el teléfono el texto de contexto se oculta; los controles (sede, etc.) siguen.
+          <p className="truncate text-sm text-muted-foreground max-sm:hidden">{subtitle}</p>
         ) : subtitle ? (
           <div className="flex min-w-0 items-center text-sm text-muted-foreground">{subtitle}</div>
         ) : null}
       </div>
       {utilities || actions ? (
         // En el teléfono, si utilidades y acciones no caben en una fila, las acciones bajan: nunca se salen de la pantalla.
-        <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
+        <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 max-sm:flex-nowrap">
           {utilities}
           {utilities && actions ? <HeaderDivider /> : null}
           {actions ? <div className="flex items-center gap-2">{actions}</div> : null}

@@ -321,9 +321,9 @@ function PeoplePage() {
         actions={
           canRegister ? (
             <ButtonGroup>
-              <Button type="button" onClick={() => setRegistering(true)}>
+              <Button type="button" onClick={() => setRegistering(true)} className="max-sm:size-11 max-sm:rounded-full max-sm:px-0">
                 <Plus aria-hidden />
-                Nuevo paciente
+                <span className="max-sm:sr-only">Nuevo paciente</span>
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger

@@ -61,6 +61,7 @@ import {
 } from "../components/agent-panel"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { HelpButton } from "../components/help-panel"
+import { HeaderMoreMenu } from "../components/header-more-menu"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
 import { invalidateAppointmentQueries } from "../lib/agenda"
@@ -368,9 +369,10 @@ function OrgLayout() {
             value={
               <>
                 <GlobalSearchButton />
-                <HelpButton />
+                <HelpButton className="max-sm:hidden" />
                 <WorkspaceNotifications />
                 <AgentPanelButton />
+                <HeaderMoreMenu />
               </>
             }
           >
