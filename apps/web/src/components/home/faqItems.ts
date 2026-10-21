@@ -1,9 +1,9 @@
 // Preguntas del inicio (sección 08). Los textos vienen del lienzo aprobado.
 import type { FaqItem } from "../../lib/faq"
-import type { PlanPrices } from "../../lib/pricing"
+import { hours, type PlanPrices, type Terms } from "../../lib/pricing"
 
-/** Las preguntas con los días de prueba del plan que se muestra (no van fijos en el código). */
-export const homeFaq = (plan: PlanPrices | null): (FaqItem & { pending?: boolean })[] => {
+/** Las preguntas con los días de prueba del plan que se muestra y las condiciones comerciales (no van fijos en el código). */
+export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pending?: boolean })[] => {
   const days = plan ? `${plan.trialDays} días` : "la prueba"
   return [
   {
@@ -16,7 +16,7 @@ export const homeFaq = (plan: PlanPrices | null): (FaqItem & { pending?: boolean
   },
   {
     q: "¿Qué cuenta como una conversación?",
-    a: "Todo lo que Sofi responde a una misma persona en 24 horas, aunque sean muchos mensajes. Si el agente no llegó a responder, no cuenta. Si la conversación termina en una cita recuperada, se cobra solo la cita.",
+    a: `Todo lo que Sofi responde a una misma persona en ${hours(terms.conversationWindowHours)}, aunque sean muchos mensajes. Si el agente no llegó a responder, no cuenta. Si la conversación termina en una cita recuperada, se cobra solo la cita.`,
   },
   {
     q: "¿Qué inteligencia artificial usa?",

@@ -2904,6 +2904,49 @@ it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no 
   expect(said).not.toContain("[adjunto]")
 })
 
+it("quien responde citando uno de dos avisos de cita llega al modelo con el aviso que citó, aunque sea más viejo que lo leído", async () => {
+  // darvin2c/odentIA#96: Rosa cita el segundo aviso y escribe «esta no puedo».
+  const { conversationId } = await ingestText("tg:cita-citada", "evt-cita-0", "Hola")
+  // Los avisos y lo que siguió, hace unos minutos; la respuesta de Rosa llega ahora.
+  const at = (seconds: number) => new Date(Date.now() - 300_000 + seconds * 1000)
+  const out = (body: string, externalId: string, seconds: number) => ({
+    organizationId: "org_a", conversationId, direction: "out", senderKind: "agent", status: "sent",
+    contentType: "text", body, externalId, createdAt: at(seconds),
+  })
+  await ownerDb.insert(message).values([
+    out("Tu cita de limpieza es el martes 20 a las 10:00", "tg:cita-citada:101", 1),
+    out("Tu control de ortodoncia es el jueves 22 a las 15:00", "tg:cita-citada:102", 2),
+    // Después se habló de otra cosa: los avisos quedan fuera de los últimos 20 mensajes que lee el agente.
+    ...Array.from({ length: 20 }, (_, n) => out(`Te cuento lo del pago, parte ${n + 1}.`, `tg:cita-citada:${200 + n}`, 3 + n)),
+  ])
+  const { messageId } = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: tgConnId,
+        event: {
+          externalEventId: "evt-cita-1",
+          externalMessageId: "evt-cita-1",
+          externalThreadId: "tg:cita-citada",
+          senderExternalId: "tg:cita-citada",
+          senderDisplayName: "Rosa",
+          content: { type: "text", text: "esta no puedo" },
+          replyToExternalId: "tg:cita-citada:102",
+          sentAt: at(30).toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Entiendo, ¿movemos el control del jueves?" }, "call-1"))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  const said = model.seen[0]!.map((m) => String(m.content)).join("\n")
+  expect(said).toContain("[En respuesta a: «Tu control de ortodoncia es el jueves 22 a las 15:00»] esta no puedo")
+  expect(said).not.toContain("Tu cita de limpieza es el martes 20")
+})
+
 /** El estado de Spam de la persona de una conversación. */
 async function screenOf(conversationId: string) {
   const [row] = await ownerDb.execute<{ screen: string | null; reason: string | null; contact_id: string }>(sql`

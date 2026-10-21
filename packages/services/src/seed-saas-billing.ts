@@ -14,7 +14,16 @@ import type { Db } from "@odentia/db"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { saasAction, saasCharge, saasPayment, saasPaymentMethod, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import {
+  saasAction,
+  saasCharge,
+  saasCommercialTerms,
+  saasPayment,
+  saasPaymentMethod,
+  saasPlan,
+  saasSubscription,
+  saasWaitlistRequest,
+} from "@odentia/db/schema/saas-billing"
 import { and, eq, inArray } from "drizzle-orm"
 import {
   confirmSaasPayment,
@@ -27,44 +36,17 @@ import {
   submitSaasReceipt,
   upsertSaasSeller,
 } from "./saas-billing.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { invitationTokenHash } from "./saas-founders.js"
 import type { Storage } from "./storage.js"
 
-const FICTIONAL_PLANS = [
-  {
-    code: "ejemplo-ficticio-base",
-    name: "Plan Base (ficticio)",
-    description: "Ejemplo ficticio para prueba manual; no contratar.",
-    currency: "PEN",
-    priceCents: 9900,
-    billingPeriod: "mensual",
-    maxBranches: 1,
-    maxSeats: 5,
-    sortOrder: 1,
-  },
-  {
-    code: "ejemplo-ficticio-plus",
-    name: "Plan Plus (ficticio)",
-    description: "Ejemplo ficticio para prueba manual; no contratar.",
-    currency: "PEN",
-    priceCents: 19900,
-    billingPeriod: "mensual",
-    maxBranches: 3,
-    maxSeats: 15,
-    sortOrder: 2,
-  },
-  {
-    code: "ejemplo-ficticio-base-usd",
-    name: "Plan Base USD (ficticio)",
-    description: "Ejemplo ficticio para prueba manual; no contratar.",
-    currency: "USD",
-    priceCents: 2900,
-    billingPeriod: "mensual",
-    maxBranches: 1,
-    maxSeats: 5,
-    sortOrder: 3,
-  },
-] as const
+/**
+ * Planes de tamaños de la semilla anterior a la ADR 0031 (un solo plan, sin
+ * topes de sedes ni cuentas): se apagan en las bases ya sembradas para que la
+ * clínica vea solo el plan de hoy (darvin2c/odentIA#104). Son códigos de la
+ * semilla, no configuración de una persona.
+ */
+const RETIRED_PLAN_CODES = ["ejemplo-ficticio-base", "ejemplo-ficticio-plus", "ejemplo-ficticio-base-usd"]
 
 const FICTIONAL_METHODS = [
   {
@@ -140,22 +122,11 @@ const FOUNDERS_PLAN = {
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
   await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
   await db.insert(saasPlan).values(FOUNDERS_PLAN).onConflictDoNothing({ target: saasPlan.code })
-  for (const plan of FICTIONAL_PLANS) {
-    await db
-      .insert(saasPlan)
-      .values({
-        code: plan.code,
-        name: plan.name,
-        description: plan.description,
-        currency: plan.currency,
-        priceCents: plan.priceCents,
-        billingPeriod: plan.billingPeriod,
-        maxBranches: plan.maxBranches,
-        maxSeats: plan.maxSeats,
-        sortOrder: plan.sortOrder,
-      })
-      .onConflictDoNothing({ target: saasPlan.code })
-  }
+  await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
+  // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración
+  // 0051 ya deja la primera versión; esto solo la repone en una base sin ella.
+  const [terms] = await db.select({ id: saasCommercialTerms.id }).from(saasCommercialTerms).limit(1)
+  if (!terms) await db.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, effectiveFrom: new Date(0) })
   for (const method of FICTIONAL_METHODS) {
     await db
       .insert(saasPaymentMethod)
@@ -167,7 +138,7 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       })
       .onConflictDoNothing({ target: saasPaymentMethod.code })
   }
-  return { plans: FICTIONAL_PLANS.length + 2, methods: FICTIONAL_METHODS.length }
+  return { plans: 2, methods: FICTIONAL_METHODS.length }
 }
 
 const DEMO_ACTOR = "seed-saas-demo"
@@ -219,13 +190,13 @@ export async function seedSaasBillingDemo(
   const monthKey = monthKeyUTC(now)
 
   await ensureDemoOrg(db, "seed-saas-prueba", "Demo Prueba (ficticia)", "saas-demo-prueba")
-  await startSaasTrial(db, "seed-saas-prueba", { planCode: "ejemplo-ficticio-base" }, now)
+  await startSaasTrial(db, "seed-saas-prueba", { planCode: ACTION_PLAN.code }, now)
 
   await ensureDemoOrg(db, "seed-saas-deuda", "Demo Deuda (ficticia)", "saas-demo-deuda")
   await startSaasTrial(
     db,
     "seed-saas-deuda",
-    { planCode: "ejemplo-ficticio-plus", sellerId: seller.id, billingStart: "now" },
+    { planCode: ACTION_PLAN.code, sellerId: seller.id, billingStart: "now" },
     now,
   )
   const dueCharge = await db
@@ -237,7 +208,7 @@ export async function seedSaasBillingDemo(
     .limit(1)
   if (dueCharge.length === 0) {
     const charge = await createSaasCharge(db, "seed-saas-deuda", DEMO_ACTOR, {
-      planCode: "ejemplo-ficticio-plus",
+      planCode: ACTION_PLAN.code,
       periodStart: monthStartUTC(now),
       periodEnd: monthEndUTC(now),
     })
@@ -265,7 +236,7 @@ export async function seedSaasBillingDemo(
   await startSaasTrial(
     db,
     "seed-saas-cobrada",
-    { planCode: "ejemplo-ficticio-base", sellerId: seller.id, billingStart: "now" },
+    { planCode: ACTION_PLAN.code, sellerId: seller.id, billingStart: "now" },
     now,
   )
   const paidCharge = await db
@@ -280,7 +251,7 @@ export async function seedSaasBillingDemo(
     .limit(1)
   if (paidCharge.length === 0) {
     const charge = await createSaasCharge(db, "seed-saas-cobrada", DEMO_ACTOR, {
-      planCode: "ejemplo-ficticio-base",
+      planCode: ACTION_PLAN.code,
       periodStart: monthStartUTC(now),
       periodEnd: monthEndUTC(now),
     })
@@ -307,7 +278,7 @@ export async function seedSaasBillingDemo(
       sellerId: seller.id,
       year: now.getUTCFullYear(),
       month: now.getUTCMonth() + 1,
-      currency: "PEN",
+      currency: ACTION_PLAN.currency,
       notes: "Demo (ficticia)",
     })
   }

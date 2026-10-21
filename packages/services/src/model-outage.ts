@@ -4,7 +4,7 @@ import { organization } from "@odentia/db/schema/auth"
 import { and, eq, isNull, ne, sql } from "drizzle-orm"
 import { enqueueSupportInboxNotice } from "./support-notices.js"
 
-/* ---------- «Modelo sin responder»: el caso automático en Soporte ---------- */
+/* ---------- Casos automáticos en Soporte («Modelo sin responder», «Clave de Meta sin renovar») ---------- */
 
 /**
  * Quien abre un caso automático: odentIA, no una persona de la clínica. El
@@ -32,21 +32,36 @@ export interface ModelOutageReport {
 /** Una clínica de la lista del caso: su nombre y su id, para no repetirla. */
 const clinicMarker = (orgId: string) => `[${orgId}]`
 
+/** Un caso automático de odentIA: un motivo que puede afectar a varias clínicas. */
+export interface AutomaticCaseReport {
+  /** El motivo: mientras su caso siga abierto, cada clínica nueva se suma a él. */
+  dedupeKey: string
+  /** Título del caso; se le agregan los nombres de las clínicas. */
+  title: string
+  orgId: string
+  /** Lo que se anota de esta clínica, después de su nombre. */
+  note: string
+  /** Detalle técnico del motivo: va a soporte, nunca a la clínica. */
+  detail: string
+  /** Pantalla de la clínica donde se ve o se arregla. */
+  screen: string
+}
+
 /**
- * Avisa a odentIA que un modelo no responde. Un mismo motivo (modelo y clase
- * de problema) es un solo caso abierto, aunque afecte a varias clínicas: cada
- * clínica nueva se anota en el caso y su título las nombra. Abrirlo deja el
- * correo «Caso nuevo» al buzón de soporte. Corre con owner (el caso no es de
- * ninguna clínica) y bajo un candado por motivo, para que dos corridas a la
- * vez no abran dos casos. Resuelto el caso, el siguiente fallo abre otro.
+ * Abre o amplía un caso automático en Soporte. Un mismo motivo es un solo caso
+ * abierto, aunque afecte a varias clínicas: cada clínica nueva se anota en el
+ * caso y su título las nombra. Abrirlo deja el correo «Caso nuevo» al buzón de
+ * soporte. Corre con owner (el caso no es de ninguna clínica) y bajo un candado
+ * por motivo, para que dos corridas a la vez no abran dos casos. Resuelto el
+ * caso, el siguiente fallo abre otro.
  */
-export async function reportModelOutage(ownerDb: Db, report: ModelOutageReport): Promise<{ caseId: string; created: boolean }> {
-  const dedupeKey = `modelo-sin-responder:${report.llm}:${report.code}`
+export async function reportAutomaticCase(ownerDb: Db, report: AutomaticCaseReport): Promise<{ caseId: string; created: boolean }> {
+  const { dedupeKey } = report
   return ownerDb.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${dedupeKey}))`)
     const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, report.orgId)).limit(1)
     const clinic = org?.name ?? report.orgId
-    const line = `${clinic} ${clinicMarker(report.orgId)} · ${report.llmLabel} no responde desde ${report.at.toISOString()}: ${report.detail}`.slice(0, 4000)
+    const line = `${clinic} ${clinicMarker(report.orgId)} · ${report.note}`.slice(0, 4000)
     const [open] = await tx
       .select()
       .from(supportCase)
@@ -65,9 +80,9 @@ export async function reportModelOutage(ownerDb: Db, report: ModelOutageReport):
         .values({
           organizationId: null,
           kind: "problema",
-          question: `${TITLE} · ${clinic}`.slice(0, 500),
-          detail: `${report.llmLabel} (${report.code}): ${report.detail}`.slice(0, 500),
-          screen: "/agent",
+          question: `${report.title} · ${clinic}`.slice(0, 500),
+          detail: report.detail.slice(0, 500),
+          screen: report.screen,
           role: AUTOMATIC_CASE_ROLE,
           dedupeKey,
           openedBy: null,
@@ -91,5 +106,17 @@ export async function reportModelOutage(ownerDb: Db, report: ModelOutageReport):
       .set({ question: question.length > 500 ? `${question.slice(0, 497)}…` : question, updatedAt: new Date() })
       .where(eq(supportCase.id, open.id))
     return { caseId: open.id, created: false }
+  })
+}
+
+/** Avisa a odentIA que un modelo no responde: un caso por modelo y clase de problema. */
+export async function reportModelOutage(ownerDb: Db, report: ModelOutageReport): Promise<{ caseId: string; created: boolean }> {
+  return reportAutomaticCase(ownerDb, {
+    dedupeKey: `modelo-sin-responder:${report.llm}:${report.code}`,
+    title: TITLE,
+    orgId: report.orgId,
+    note: `${report.llmLabel} no responde desde ${report.at.toISOString()}: ${report.detail}`,
+    detail: `${report.llmLabel} (${report.code}): ${report.detail}`,
+    screen: "/agent",
   })
 }

@@ -229,7 +229,7 @@ export function staffInvitationTemplate({ url }: { url: string }): MailTemplate 
  * borra a los 30) o verificada y sin clínica. Informativos, no publicidad.
  */
 export function accountReminderTemplate(
-  input: { kind: "sin_verificar" } | { kind: "sin_clinica"; url: string },
+  input: { kind: "sin_verificar"; url: string; days: number } | { kind: "sin_clinica"; url: string },
 ): MailTemplate {
   if (input.kind === "sin_verificar") {
     return renderEmail({
@@ -238,8 +238,9 @@ export function accountReminderTemplate(
       title: "Completa tu cuenta",
       paragraphs: [
         "Hola. Creaste una cuenta en odentIA, pero aún no la verificaste ni pertenece a ninguna clínica.",
-        "Si quieres usarla, verifica tu correo desde el enlace que te enviamos al registrarte.",
+        `Si quieres usarla, verifica tu correo con este botón. Sirve durante ${input.days} días; después, entra con tu correo y pide otro enlace.`,
       ],
+      action: { label: "Verificar mi correo", url: input.url },
       note: "Si no la necesitas, no hagas nada: la cuenta se eliminará automáticamente a los 30 días.",
       reason: "Te escribimos porque se creó una cuenta de odentIA con este correo. Es un aviso informativo, no publicidad.",
     })

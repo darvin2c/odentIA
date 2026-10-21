@@ -39,6 +39,9 @@ export interface Consumption {
   overCreditCents: number
   projectedCents: number | null
   spendCapCents?: number | null
+  /** Desde qué parte avisa y alarma el medidor: las condiciones comerciales que rigen (ADR 0074). */
+  warnPercent: number
+  alarmPercent: number
   tax?: { label: string; rateBps: number } | null
   whatsapp?: {
     templates: { marketing: number; utility: number; authentication: number }
@@ -165,6 +168,8 @@ export function ConsumptionCard({
             label={trial ? "Saldo de prueba" : "Crédito del mes"}
             value={data.creditUsedCents}
             total={data.creditCents}
+            warnAt={data.warnPercent / 100}
+            alarmAt={data.alarmPercent / 100}
             valueText={`${money(data.creditUsedCents)} de ${money(data.creditCents)}`}
             description={
               data.creditExhaustedAt
@@ -183,6 +188,8 @@ export function ConsumptionCard({
                   label="Tope por encima del crédito"
                   value={data.overCreditCents}
                   total={data.spendCapCents}
+                  warnAt={data.warnPercent / 100}
+                  alarmAt={data.alarmPercent / 100}
                   valueText={`${money(data.overCreditCents)} de ${money(data.spendCapCents)}`}
                   description={`Al llegar, ${receptionName} pasa los casos nuevos a tu equipo con un mensaje fijo.`}
                 />

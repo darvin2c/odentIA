@@ -355,22 +355,36 @@
     {
       "idx": 50,
       "version": "7",
-      "when": 1792531393358,
-      "tag": "0050_argos_vistas_del_negocio",
+      "when": 1792533926844,
+      "tag": "0050_condiciones_comerciales",
       "breakpoints": true
     },
     {
       "idx": 51,
       "version": "7",
-      "when": 1792533496358,
-      "tag": "0051_argos_guarda_la_consulta",
+      "when": 1792533930189,
+      "tag": "0051_condiciones_comerciales_reglas",
       "breakpoints": true
     },
     {
       "idx": 52,
       "version": "7",
-      "when": 1792537724187,
-      "tag": "0052_argos_sigue_fija_y_descarga",
+      "when": 1792543668779,
+      "tag": "0052_argos_vistas_del_negocio",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792543669779,
+      "tag": "0053_argos_guarda_la_consulta",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792543670779,
+      "tag": "0054_argos_sigue_fija_y_descarga",
       "breakpoints": true
     }
   ]

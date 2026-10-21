@@ -8,6 +8,7 @@ import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
+import { currentSaasTerms, saasTermsAt } from "./saas-commercial-terms.js"
 import { activeDiscountBps, currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
 
 /* ---------- Negociación por clínica (ADR 0031, tablero O2) ---------- */
@@ -265,16 +266,19 @@ export interface SaasAlert {
   action: "elegir_plan" | "cambiar_tope" | "ver_consumo" | "ver_plan"
 }
 
-/** Desde qué parte usada avisa y alarma: los mismos niveles del medidor. */
-export const SAAS_WARN_AT = 0.75
-export const SAAS_ALARM_AT = 0.9
 const DAY = 86_400_000
 
-function levelOf(used: number, total: number, alarmByDate: boolean): SaasAlertLevel | null {
+/** Desde qué parte usada avisa y alarma: las condiciones comerciales que rigen (ADR 0074), los mismos niveles del medidor. */
+interface AlertLevels {
+  warnPercent: number
+  alarmPercent: number
+}
+
+function levelOf(levels: AlertLevels, used: number, total: number, alarmByDate: boolean): SaasAlertLevel | null {
   if (total <= 0) return null
   if (used >= total) return "limite"
-  if (used >= total * SAAS_ALARM_AT || alarmByDate) return "alarma"
-  if (used >= total * SAAS_WARN_AT) return "aviso"
+  if (used * 100 >= total * levels.alarmPercent || alarmByDate) return "alarma"
+  if (used * 100 >= total * levels.warnPercent) return "aviso"
   return null
 }
 
@@ -313,13 +317,14 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   const money = (cents: number) =>
     new Intl.NumberFormat(locale?.locale ?? "es-PE", { style: "currency", currency: consumption.currency ?? "USD" }).format(cents / 100)
   const periodKey = consumption.period.start.toISOString().slice(0, 10)
+  const levels = await currentSaasTerms(tx, now)
   const alerts: SaasAlert[] = []
 
   if (sub.status === "prueba" && consumption.priced && consumption.creditCents > 0) {
     const used = consumption.subtotalCents
     const ends = exhaustionDate(used, consumption.creditCents, consumption.period.start, now)
     const soon = ends !== null && ends.getTime() - now.getTime() <= 3 * DAY && ends < consumption.period.end
-    const level = levelOf(used, consumption.creditCents, soon)
+    const level = levelOf(levels, used, consumption.creditCents, soon)
     if (level) {
       const left = Math.max(0, consumption.creditCents - used)
       alerts.push({
@@ -361,7 +366,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   }
 
   if (sub.status !== "prueba" && consumption.priced && consumption.creditCents > 0) {
-    const level = levelOf(consumption.subtotalCents, consumption.creditCents, false)
+    const level = levelOf(levels, consumption.subtotalCents, consumption.creditCents, false)
     if (level) {
       alerts.push({
         family: "credito",
@@ -382,7 +387,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   }
 
   if (sub.status !== "prueba" && sub.spendCapCents !== null && sub.spendCapCents > 0) {
-    const level = levelOf(consumption.overCreditCents, sub.spendCapCents, false)
+    const level = levelOf(levels, consumption.overCreditCents, sub.spendCapCents, false)
     // Cuándo se llega al tope a este ritmo: lo de encima del crédito corre desde que se acabó.
     const reachesAt =
       level && level !== "limite"
@@ -408,11 +413,12 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
-  // Precio negociado con vencimiento (issue 168): se avisa desde 15 días antes.
+  // Precio negociado con vencimiento (issue 168): se avisa desde los días que
+  // dicen las condiciones comerciales (15 al empezar).
   const discount = activeDiscountBps(sub, now)
   if (discount > 0 && sub.discountEndsAt) {
     const daysLeft = Math.ceil((sub.discountEndsAt.getTime() - now.getTime()) / DAY)
-    if (daysLeft <= SAAS_DISCOUNT_NOTICE_DAYS) {
+    if (daysLeft <= levels.discountNoticeDays) {
       alerts.push({
         family: "precio_especial",
         level: daysLeft <= 3 ? "alarma" : "aviso",
@@ -425,10 +431,11 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
-  // Condiciones garantizadas de quien entró por invitación (Fundadores): se avisa desde 30 días antes.
+  // Condiciones garantizadas de quien entró por invitación (Fundadores): se
+  // avisa desde los días que dicen las condiciones comerciales (30 al empezar).
   if (sub.guaranteedUntil && sub.guaranteedUntil.getTime() > now.getTime()) {
     const daysLeft = Math.ceil((sub.guaranteedUntil.getTime() - now.getTime()) / DAY)
-    if (daysLeft <= SAAS_GUARANTEE_NOTICE_DAYS) {
+    if (daysLeft <= levels.guaranteeNoticeDays) {
       alerts.push({
         family: "condiciones",
         level: daysLeft <= 7 ? "alarma" : "aviso",
@@ -443,10 +450,6 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   return alerts
 }
 
-/** Días antes del fin de un precio negociado en que se avisa a la clínica y a la administración. */
-export const SAAS_DISCOUNT_NOTICE_DAYS = 15
-/** Días antes del fin de las condiciones garantizadas en que se avisa (decisión 4 de Fundadores). */
-export const SAAS_GUARANTEE_NOTICE_DAYS = 30
 
 export interface AgentSpendGate {
   /** Se usó todo el saldo de prueba: los agentes se pausan. */
@@ -602,6 +605,13 @@ export interface OrganizationBillingTerms {
   guaranteedUntil: Date | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
+  /** Con ciclo quincenal, a los cuántos días del tramo en curso se cobra (lo que regía al empezar el tramo). */
+  halfCycleDays: number
+  /** Desde qué parte del crédito avisa y alarma el medidor (las condiciones que rigen). */
+  warnPercent: number
+  alarmPercent: number
+  /** Días antes del fin de un precio especial en que se avisa (las condiciones que rigen). */
+  discountNoticeDays: number
   activatedAt: Date | null
   seller: { id: string; name: string; userId: string | null } | null
   consumption: SaasConsumption
@@ -623,6 +633,8 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
     .where(eq(saasNotice.organizationId, orgId))
     .orderBy(desc(saasNotice.createdAt))
     .limit(10)
+  const terms = await currentSaasTerms(tx, now)
+  const periodTerms = sub.currentPeriodStart ? await saasTermsAt(tx, sub.currentPeriodStart) : terms
   return {
     plan: plan
       ? {
@@ -652,6 +664,10 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
     guaranteedUntil: sub.guaranteedUntil,
     spendCapCents: sub.spendCapCents,
     billingCycle: sub.billingCycle as "mensual" | "quincenal",
+    halfCycleDays: periodTerms.halfCycleDays,
+    warnPercent: terms.warnPercent,
+    alarmPercent: terms.alarmPercent,
+    discountNoticeDays: terms.discountNoticeDays,
     activatedAt: sub.activatedAt,
     seller: await saasSellerOf(tx, orgId),
     consumption: await getSaasConsumption(tx, orgId, now),
@@ -687,6 +703,7 @@ export async function getSaasTrialWatch(tx: Db, now = new Date()): Promise<SaasT
     .innerJoin(organization, eq(organization.id, saasSubscription.organizationId))
     .where(and(eq(saasSubscription.status, "prueba"), eq(saasSubscription.isDemo, false)))
   const rows: SaasTrialWatchRow[] = []
+  const { warnPercent } = await currentSaasTerms(tx, now)
   for (const trial of trials) {
     const consumption = await getSaasConsumption(tx, trial.orgId, now)
     const daysLeft = trial.endsAt ? Math.ceil((trial.endsAt.getTime() - now.getTime()) / DAY) : null
@@ -695,7 +712,7 @@ export async function getSaasTrialWatch(tx: Db, now = new Date()): Promise<SaasT
     const state: SaasTrialWatchRow["state"] | null =
       consumption.priced && consumption.creditCents > 0 && used >= 1
         ? "en_pausa"
-        : consumption.priced && used >= SAAS_WARN_AT
+        : consumption.priced && used * 100 >= warnPercent
           ? "sin_saldo"
           : daysLeft !== null && daysLeft <= 7
             ? "por_vencer"

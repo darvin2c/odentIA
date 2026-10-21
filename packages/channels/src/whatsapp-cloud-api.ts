@@ -224,6 +224,9 @@ const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   // tiene una forma de pago válida (o su línea de crédito no está activa).
   131042:
     "WhatsApp no envió el mensaje porque la cuenta de WhatsApp de la clínica no tiene una forma de pago. Agrégala en Meta (Configuración de pagos de WhatsApp Business) y vuelve a intentarlo.",
+  // «Error validating access token»: la clave que dio Meta al conectar con
+  // Facebook venció (dura 60 días) o la retiraron (darvin2c/odentIA#121).
+  190: "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
 }
 
 /** Por qué no salió un envío: en palabras si es un caso conocido; si no, `código: motivo de Meta`. */

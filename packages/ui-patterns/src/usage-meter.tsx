@@ -11,16 +11,16 @@ export interface UsageMeterProps {
   /** Lo que conviene saber del medidor: cuándo se acabó, qué pasa al llegar. */
   description?: string
   /**
-   * Desde qué parte del total avisa y alarma. Por defecto 75 % y 90 %, los
-   * mismos niveles de los avisos de cobro.
+   * Desde qué parte del total avisa y alarma (0 a 1): los niveles de los
+   * avisos de cobro, que entrega el servidor con las condiciones comerciales.
    */
-  warnAt?: number
-  alarmAt?: number
+  warnAt: number
+  alarmAt: number
   className?: string
 }
 
 /** Nivel del medidor: también se dice en texto, nunca solo con color. */
-export function usageMeterLevel(value: number, total: number, warnAt = 0.75, alarmAt = 0.9): "normal" | "aviso" | "alarma" | "lleno" {
+export function usageMeterLevel(value: number, total: number, warnAt: number, alarmAt: number): "normal" | "aviso" | "alarma" | "lleno" {
   if (total <= 0) return value > 0 ? "lleno" : "normal"
   const ratio = value / total
   if (ratio >= 1) return "lleno"
@@ -36,7 +36,7 @@ const LEVEL_WORDS = { normal: null, aviso: "Cerca del límite", alarma: "Casi en
  * `meter` accesible (valor, mínimo, máximo y texto), con el nivel también
  * dicho en palabras; el color usa los tokens de estado del tema.
  */
-export function UsageMeter({ label, value, total, valueText, description, warnAt = 0.75, alarmAt = 0.9, className }: UsageMeterProps) {
+export function UsageMeter({ label, value, total, valueText, description, warnAt, alarmAt, className }: UsageMeterProps) {
   const level = usageMeterLevel(value, total, warnAt, alarmAt)
   const ratio = total > 0 ? Math.min(1, Math.max(0, value / total)) : level === "lleno" ? 1 : 0
   const words = LEVEL_WORDS[level]

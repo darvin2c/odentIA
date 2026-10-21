@@ -130,6 +130,11 @@ export function PlanDrawer({
     const timer = setTimeout(() => setChecked(JSON.parse(key) as typeof terms), 400)
     return () => clearTimeout(timer)
   }, [key])
+  // Con cuántos días de aviso termina lo garantizado: las condiciones comerciales (ADR 0074).
+  const notice = useQuery({
+    queryKey: ["admin", "billing", "terms"],
+    queryFn: () => api<{ values: { guaranteeNoticeDays: number } }>("/api/admin/billing/terms"),
+  }).data?.values.guaranteeNoticeDays
   const check = useQuery({
     queryKey: ["admin", "billing", "plan-check", checked],
     queryFn: () =>
@@ -252,7 +257,7 @@ export function PlanDrawer({
           "Condiciones garantizadas (meses)",
           guaranteeMonths,
           setGuaranteeMonths,
-          "Desde que la clínica entra; después pasa al plan por defecto, con aviso 30 días antes.",
+          `Desde que la clínica entra; después pasa al plan por defecto${notice ? `, con aviso ${notice} días antes` : ""}.`,
           "numeric",
         )}
       </fieldset>

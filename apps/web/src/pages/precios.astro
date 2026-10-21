@@ -9,7 +9,7 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 // Precios: pagas por el valor que recibes, no por el software. Todas las cifras salen de lib/pricing.
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
-import { giftOf, money, REVIEW, shownPlan, valuePricesOf } from "../lib/pricing"
+import { businessDays, days, giftOf, money, shownPlan, valuePricesOf } from "../lib/pricing"
 import { ctaOf } from "../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -19,6 +19,8 @@ const prices = valuePricesOf(plan)
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
+// Las condiciones comerciales: de la administración, como los precios (issue 167).
+const terms = pricing.terms
 
 const title = "Precios: pagas por el valor, no por el software"
 const description = !plan
@@ -45,7 +47,11 @@ const faq: FaqItem[] = [
   {
     // ADR 0054: «Pedir revisión», no «reclamo», que es el del Libro de Reclamaciones.
     q: "¿Y si me cobran algo que no debía?",
-    a: `Pides revisión desde la fila, en tu cuenta, de lo de este mes o del anterior. Si era spam, se devuelve al instante, hasta el ${REVIEW.spamRefundPercent} % de tus conversaciones del mes. Lo demás lo revisamos y te respondemos en ${REVIEW.answerDays} días hábiles. Lo que ya estaba facturado vuelve en tu cargo siguiente.`,
+    a: `Pides revisión desde la fila, en tu cuenta, de lo de este mes o del anterior. ${
+      terms.reviewAutoPercent > 0
+        ? `Si era spam, se devuelve al instante, hasta el ${terms.reviewAutoPercent} % de tus conversaciones del mes. Lo demás lo revisamos`
+        : "Lo revisamos"
+    } y te respondemos en ${businessDays(terms.reviewAnswerDays)}. Lo que ya estaba facturado vuelve en tu cargo siguiente.`,
   },
   {
     q: "¿Y si un mes mis agentes gastan mucho?",
@@ -61,11 +67,11 @@ const faq: FaqItem[] = [
     q: "¿La prueba pide tarjeta?",
     a: founder
       ? `No. Pides tu invitación, abres tu clínica y tus agentes empiezan con los ${m(plan?.trialCredit ?? null)} de regalo. La tarjeta no se pide.`
-      : `No. Te registras, conectas tus canales y tus agentes trabajan ${plan?.trialDays ?? 30} días con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
+      : `No. Te registras, conectas tus canales y tus agentes trabajan ${days(plan?.trialDays ?? terms.trialDays)} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
   },
   {
     q: "¿Cada cuánto me cobran?",
-    a: "Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura cada mes o cada 15 días, como prefieras.",
+    a: `Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
   },
   {
     q: "¿WhatsApp cobra aparte?",

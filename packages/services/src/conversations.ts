@@ -1091,6 +1091,27 @@ export async function listMessages(
   }
 }
 
+/**
+ * Mensajes de una conversación por su id: los que citan otros mensajes y
+ * quedaron fuera de la página leída (ADR 0050). Los de otra conversación no
+ * salen.
+ */
+export async function listMessagesById(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  ids: string[],
+): Promise<MessageItem[]> {
+  if (ids.length === 0) return []
+  const rows = await tx
+    .select()
+    .from(message)
+    .where(
+      and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), inArray(message.id, ids)),
+    )
+  return rows.map((row) => toMessageItem(row))
+}
+
 export interface CrossThreadMessage {
   direction: string
   senderKind: string

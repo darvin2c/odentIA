@@ -36,4 +36,4 @@ Con 36 preguntas escritas por un dueño, el Argos de 0070 acertó 17. Falló de 
 
 ## Referencias
 
-`packages/db/drizzle/0050_argos_vistas_del_negocio.sql`, `packages/services/src/argos-query.ts`, `packages/services/src/argos-catalog.ts`, `packages/services/src/argos-answer.ts`, `packages/services/src/argos-views.test.ts`, `packages/agent/src/argos.ts`, `packages/agent/src/decision/eval-argos.ts`, `packages/agent/eval/argos-holdout.json`, `packages/agent/eval/argos-examen.json`, `packages/agent/src/decision/eval-argos-respuestas.ts`.
+`packages/db/drizzle/0052_argos_vistas_del_negocio.sql` (y 0053–0054), `packages/services/src/argos-query.ts`, `packages/services/src/argos-catalog.ts`, `packages/services/src/argos-answer.ts`, `packages/services/src/argos-views.test.ts`, `packages/agent/src/argos.ts`, `packages/agent/src/decision/eval-argos.ts`, `packages/agent/eval/argos-holdout.json`, `packages/agent/eval/argos-examen.json`, `packages/agent/src/decision/eval-argos-respuestas.ts`.

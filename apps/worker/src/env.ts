@@ -6,6 +6,9 @@ const envSchema = z.object({
   /** Rol owner: setup de memoria del agente (paso 7). */
   DATABASE_URL: z.string().min(1),
   SECRETS_KEY: z.string().min(1),
+  /** Los de la API: el enlace «Verificar mi correo» del recordatorio lo firma y lo canjea Better Auth. */
+  BETTER_AUTH_SECRET: z.string().min(32),
+  BETTER_AUTH_URL: z.string().url(),
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
@@ -14,6 +17,12 @@ const envSchema = z.object({
     .string()
     .regex(/^v\d+\.\d+$/, "Se espera la forma v25.0")
     .default("v25.0"),
+  /**
+   * La app de odentIA en Meta, las mismas de la API: con ellas el worker renueva
+   * la clave de «Conectar con Facebook» antes de que venza. Vacías: no se renueva.
+   */
+  META_APP_ID: z.string().default(""),
+  META_APP_SECRET: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**

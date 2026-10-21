@@ -5,13 +5,14 @@ import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
 import { markReviewsCredited, pendingReviewCredits } from "./saas-action-review.js"
 import { listPeriodActions, microsToCents, netMicros, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
 import { AGENT_NAMES } from "./agent-names.js"
+import { saasTermsAt } from "./saas-commercial-terms.js"
 
 /* ---------- Cobrar (ADR 0031, fase 4) ---------- */
 
-/** Días que tiene la clínica para pagar un cargo emitido; después corre la gracia. */
-export const SAAS_PAYMENT_DAYS = 7
-/** Con ciclo quincenal, a los cuántos días del tramo se cobra lo que pasó del crédito. */
-export const SAAS_HALF_DAYS = 15
+// Días para pagar un cargo (`paymentDays`) y día del cobro quincenal
+// (`halfCycleDays`): condiciones comerciales (ADR 0074). El plazo de pago es el
+// que rige al emitir el cargo; el cobro quincenal, el que regía al empezar el
+// tramo.
 
 const DAY = 86_400_000
 
@@ -167,7 +168,7 @@ async function issueCycleCharge(
       // El crédito con que se decidió qué cubre y qué pasa: lo que se lea de este mes después usa este.
       creditCents: plan.creditCents,
       currency: plan.currency,
-      dueAt: new Date(input.now.getTime() + SAAS_PAYMENT_DAYS * DAY),
+      dueAt: new Date(input.now.getTime() + (await saasTermsAt(tx, input.now)).paymentDays * DAY),
       dedupeKey,
     })
     .returning({ id: saasCharge.id })
@@ -208,7 +209,7 @@ export async function closeSaasPeriods(tx: Db, now = new Date()): Promise<{ issu
     let start = sub.currentPeriodStart
     let end = sub.currentPeriodEnd
     if (sub.billingCycle === "quincenal") {
-      const half = new Date(start.getTime() + SAAS_HALF_DAYS * DAY)
+      const half = new Date(start.getTime() + (await saasTermsAt(tx, start)).halfCycleDays * DAY)
       if (now >= half && half < end) {
         if (await issueCycleCharge(tx, sub, plan, { periodStart: start, periodEnd: end, until: half, final: false, now })) issued += 1
       }

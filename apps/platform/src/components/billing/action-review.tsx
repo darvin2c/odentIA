@@ -1,15 +1,16 @@
 /**
  * «Pedir revisión» de una fila de «Cada acción de tus agentes» (issue 77,
  * ADR 0054, tablero 6). El spam de quien no es paciente se devuelve al
- * instante hasta el 10 % de las conversaciones del mes; lo demás lo revisa
- * odentIA y se sigue en Soporte. Lo decide el servidor: esta pantalla solo
- * dice lo que puede pasar.
+ * instante hasta la parte de las conversaciones del mes que dicen las
+ * condiciones comerciales (ADR 0074); lo demás lo revisa odentIA y se sigue en
+ * Soporte. Lo decide el servidor: esta pantalla solo dice lo que puede pasar.
  */
 import { Checkbox, cn, FieldLabel, RadioGroup, RadioGroupItem, Textarea, toast } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { businessDaysWords, type SaasTerms, useSaasTerms } from "../../lib/billing"
 import type { SaasActionKind } from "./consumption"
 import { formatMicros } from "./money"
 
@@ -41,18 +42,25 @@ export interface ReviewTarget {
   conversationId: string | null
 }
 
-const REVIEWED_BY_ODENTIA = "Lo revisa odentIA en 2 días hábiles."
+/** Lo que pasa con cada motivo, con las cifras de las condiciones comerciales (ADR 0074); sin ellas aún, sin cifra. */
+const reviewedByOdentia = (terms: SaasTerms | undefined) =>
+  terms ? `Lo revisa odentIA en ${businessDaysWords(terms.reviewAnswerDays)}.` : "Lo revisa odentIA."
 
-const REASONS: Array<{ value: ReviewReason; label: string; outcome: string; onlyConversation?: boolean }> = [
+const REASONS: Array<{ value: ReviewReason; label: string; outcome: (terms: SaasTerms | undefined) => string; onlyConversation?: boolean }> = [
   {
     value: "spam",
     label: "Era spam, publicidad o un número equivocado",
-    outcome: "Se devuelve al instante, hasta el 10 % de las conversaciones del mes, y la persona pasa a Spam.",
+    outcome: (terms) =>
+      terms && terms.reviewAutoPercent > 0
+        ? `Se devuelve al instante, hasta el ${terms.reviewAutoPercent} % de las conversaciones del mes, y la persona pasa a Spam.`
+        : terms
+          ? `${reviewedByOdentia(terms)} La persona pasa a Spam.`
+          : "Se devuelve al instante y la persona pasa a Spam.",
     onlyConversation: true,
   },
-  { value: "agente", label: "El agente respondió mal o no ayudó", outcome: REVIEWED_BY_ODENTIA },
-  { value: "doble", label: "Se cobró dos veces", outcome: REVIEWED_BY_ODENTIA },
-  { value: "otro", label: "Otro motivo", outcome: REVIEWED_BY_ODENTIA },
+  { value: "agente", label: "El agente respondió mal o no ayudó", outcome: reviewedByOdentia },
+  { value: "doble", label: "Se cobró dos veces", outcome: reviewedByOdentia },
+  { value: "otro", label: "Otro motivo", outcome: reviewedByOdentia },
 ]
 
 const KIND_WORDS: Record<SaasActionKind, string> = {
@@ -92,6 +100,7 @@ export function ActionReviewDrawer({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
+  const terms = useSaasTerms().data
   const reasonId = useId()
   const noteId = useId()
   const readId = useId()
@@ -122,7 +131,9 @@ export function ActionReviewDrawer({
       toast.success(
         result.automatic
           ? "Listo: no se cobra y la persona pasó a Spam"
-          : "Pediste la revisión: odentIA responde en 2 días hábiles y la sigues en Soporte",
+          : terms
+            ? `Pediste la revisión: odentIA responde en ${businessDaysWords(terms.reviewAnswerDays)} y la sigues en Soporte`
+            : "Pediste la revisión: la sigues en Soporte",
       )
       onClose()
     },
@@ -171,7 +182,7 @@ export function ActionReviewDrawer({
               <RadioGroupItem value={option.value} className="mt-0.5" />
               <span className="grid gap-0.5">
                 <span className="font-medium">{option.label}</span>
-                <span className="text-xs text-muted-foreground">{option.outcome}</span>
+                <span className="text-xs text-muted-foreground">{option.outcome(terms)}</span>
               </span>
             </FieldLabel>
           ))}
@@ -196,7 +207,8 @@ export function ActionReviewDrawer({
           <label htmlFor={readId} className="grid gap-0.5 text-sm">
             <span className="font-medium">Dejo que odentIA lea esta conversación</span>
             <span className="text-xs text-muted-foreground">
-              Solo esta, hasta que responda la revisión y como mucho 7 días. Sin esto, odentIA solo ve lo que hizo el agente, sin los mensajes.
+              Solo esta, hasta que responda la revisión{terms ? ` y como mucho ${terms.reviewReadDays} ${terms.reviewReadDays === 1 ? "día" : "días"}` : ""}. Sin esto,
+              odentIA solo ve lo que hizo el agente, sin los mensajes.
             </span>
           </label>
         </div>

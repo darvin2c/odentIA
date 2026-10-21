@@ -32,8 +32,13 @@ import {
   requestActionReview,
   SAAS_REVIEW_REASONS,
   decideSaasNegotiation,
+  getClinicSaasTerms,
   getSaasAlerts,
   getSaasLowMargin,
+  getSaasTermsView,
+  listSaasTermsVersions,
+  SAAS_TERM_KEYS,
+  setSaasTerms,
   getSaasTrialWatch,
   getWhatsappEstimate,
   isChargingPeriod,
@@ -364,6 +369,41 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     return c.json({
       data: { checks: checkActionPricing(parsed.data), margin: planMarginScenario(parsed.data) },
     })
+  })
+
+  // Condiciones comerciales (issue 167, ADR 0074): las frases y los campos los
+  // arma el servicio; cada cambio es una versión nueva con su auditoría.
+  app.get("/terms", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => getSaasTermsView(deps.ownerDb))
+  })
+
+  app.get("/terms/history", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => listSaasTermsVersions(deps.ownerDb))
+  })
+
+  app.put("/terms", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración cambia las condiciones comerciales")
+    const parsed = z
+      .object({
+        values: z.partialRecord(z.enum(SAAS_TERM_KEYS as [string, ...string[]]), z.number().int().min(0).max(1000)),
+        basedOn: z.uuid().nullable(),
+        reason: z.string().max(500).nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) =>
+        setSaasTerms(tx, actor, {
+          values: parsed.data.values,
+          basedOn: parsed.data.basedOn,
+          reason: parsed.data.reason ?? null,
+        }),
+      ),
+    )
   })
 
   // Tarifas de Meta para la estimación de WhatsApp que ve la clínica.
@@ -978,15 +1018,29 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       withOrgContext(deps.db, orgId, async (tx) => {
         const summary = await getOrganizationBillingSummary(tx, orgId)
         const sub = await getSaasSubscription(tx, orgId)
+        const terms = await getClinicSaasTerms(tx)
         return {
           ...(await getSaasConsumption(tx, orgId)),
           spendCapCents: sub?.spendCapCents ?? null,
+          // Los niveles del medidor: los mismos de los avisos (condiciones comerciales).
+          warnPercent: terms.warnPercent,
+          alarmPercent: terms.alarmPercent,
           charging: isChargingPeriod(summary.status, summary.isDemo),
           whatsapp: await getWhatsappEstimate(tx, orgId),
           tax: await saasTaxOf(tx, orgId),
         }
       }),
     )
+  })
+
+  // Las condiciones comerciales que la clínica lee en Plan y pagos, «Pedir
+  // revisión», el tope de gasto y Reportes (ADR 0074): las que rigen hoy.
+  app.get("/terms", async (c) => {
+    const orgId = c.req.query("orgId")
+    if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
+    const membership = await accountOwnerOrAdmin(deps, c, orgId)
+    if (!membership) return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve las condiciones del plan"), 403)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicSaasTerms(tx)))
   })
 
   // C4: avisos de la prueba, del crédito y del tope; solo owner/admin los ve.

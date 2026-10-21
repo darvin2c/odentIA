@@ -6,7 +6,7 @@ import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { encounter, patientContact } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
-import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasAction, saasCommercialTerms, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { recordAgentRun } from "./agent-operations.js"
@@ -18,6 +18,7 @@ import { type IngestDeps, ingestInbound } from "./conversations.js"
 import { confirmDictationSuggestion, saveDictationSuggestions } from "./encounter-dictation.js"
 import { finalizeEncounter } from "./encounters.js"
 import { getSaasConsumption, listPendingRecoveries } from "./saas-actions.js"
+import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -144,7 +145,7 @@ describe("consulta dictada", () => {
 })
 
 describe("cita recuperada", () => {
-  async function scene(source: string, sentDaysBeforeBooking: number, kind = "seguimiento_presupuesto") {
+  async function scene(source: string, sentDaysBeforeBooking: number, kind = "seguimiento_presupuesto", bookedDaysAgo = 2) {
     const fx = await clinicalFixture()
     const [self] = await ownerDb
       .select({ contactId: patientContact.contactId })
@@ -152,7 +153,7 @@ describe("cita recuperada", () => {
       .where(and(eq(patientContact.patientId, fx.patient.id), eq(patientContact.relationship, "self")))
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
     const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental" }).returning()
-    const bookedAt = new Date(Date.now() - 2 * 86_400_000)
+    const bookedAt = new Date(Date.now() - bookedDaysAgo * 86_400_000)
     await ownerDb.insert(automationJob).values({
       organizationId: ORG,
       kind,
@@ -220,6 +221,22 @@ describe("cita recuperada", () => {
     await attend(recovered)
     const counted = (await actionsOf("cita")).find((row) => row.appointmentId === recovered.appointmentId)
     expect(counted?.detail).toBe("Volvió tras «Reprogramar tras una inasistencia» y reservó en la conversación")
+    // Se retira para que «lo que ve la clínica» siga sumando la única cita de la primera prueba.
+    await ownerDb.delete(saasAction).where(eq(saasAction.id, counted!.id))
+  })
+
+  it("usa el plazo que regía al reservar: bajarlo después no le quita la cita a quien ya reservó (ADR 0074)", async () => {
+    const before = (await actionsOf("cita")).length
+    // Hace 36 horas el plazo bajó de 7 a 3 días. Rosa reservó hace 2 días, 5 días después del mensaje de Argos.
+    await ownerDb.insert(saasCommercialTerms).values({ ...SAAS_TERMS_INITIAL, recoveryWindowDays: 3, effectiveFrom: new Date(Date.now() - 36 * 3_600_000) })
+    const rosa = await scene("agent", 5)
+    await attend(rosa)
+    const counted = (await actionsOf("cita")).find((row) => row.appointmentId === rosa.appointmentId)
+    expect(counted).toBeDefined()
+    // Lucía, en la misma situación, reservó hace una hora: con 3 días, ya no cuenta.
+    const lucia = await scene("agent", 5, "seguimiento_presupuesto", 1 / 24)
+    await attend(lucia)
+    expect(await actionsOf("cita")).toHaveLength(before + 1)
     // Se retira para que «lo que ve la clínica» siga sumando la única cita de la primera prueba.
     await ownerDb.delete(saasAction).where(eq(saasAction.id, counted!.id))
   })

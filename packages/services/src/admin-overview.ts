@@ -4,6 +4,7 @@ import { getOrganizationPendingCounts } from "./admin-organizations.js"
 import { getAdminSupportAttention } from "./admin-support.js"
 import { consumerComplaintSummary } from "./consumer-complaints.js"
 import { getSaasAdminAttention } from "./saas-billing.js"
+import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
 import { countWaitlistToReview, type ExpiringTermRow, listExpiringTerms } from "./saas-founders.js"
 
 export interface AdminAttentionItem {
@@ -25,12 +26,13 @@ export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<
   const organizations = await getOrganizationPendingCounts(tx, actor)
   const complaints = await consumerComplaintSummary(tx, actor)
   const waitlist = await countWaitlistToReview(tx)
+  const { waitlistAnswerDays } = await currentSaasTerms(tx)
   const items: AdminAttentionItem[] = [
     {
       key: "waitlist",
       label: "Lista de espera por revisar",
       count: waitlist,
-      description: "Clínicas que pidieron entrar: se responde en 2 días hábiles",
+      description: `Clínicas que pidieron entrar: se responde en ${businessDaysWords(waitlistAnswerDays)}`,
       path: "/waitlist",
     },
     {
