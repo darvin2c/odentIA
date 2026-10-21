@@ -1,3 +1,4 @@
+import { clinicalProfileFor, postalAddressText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   agentKnowledgeEntry,
@@ -610,7 +611,8 @@ export interface ClinicInfoSnapshot {
   /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
   locale: string
   /** Todas las sedes activas: son pocas y el agente necesita el id de cada una. */
-  branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
+  /** `address`: la dirección en una línea, con su distrito y región (issue 36). */
+  branches: Array<{ id: string; name: string; address: string | null; phone: string | null; timezone: string | null }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
   /** Medios que la clínica desactivó: se dicen como no aceptados para que el agente no los ofrezca. */
   refusedPaymentMethods: string[]
@@ -631,6 +633,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       tradeName: orgProfile.tradeName,
       timezone: orgProfile.timezone,
       locale: orgProfile.locale,
+      countryCode: orgProfile.countryCode,
       emergencyPhone: orgProfile.emergencyPhone,
     })
     .from(orgProfile)
@@ -640,9 +643,13 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .select({
       id: branch.id,
       name: branch.name,
-      address: branch.addressLine1,
+      line: branch.addressLine1,
+      city: branch.city,
+      district: branch.district,
+      region: branch.region,
+      postalCode: branch.postalCode,
+      country: branch.country,
       phone: branch.phone,
-      mapsUrl: branch.mapsUrl,
       timezone: branch.timezone,
     })
     .from(branch)
@@ -656,7 +663,13 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     emergencyPhone: profile?.emergencyPhone ?? null,
     timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
     locale: profile?.locale || NEUTRAL_LOCALE,
-    branches: branchRows.map((b) => ({ ...b, address: b.address ?? null })),
+    branches: branchRows.map((b) => ({
+      id: b.id,
+      name: b.name,
+      address: postalAddressText(clinicalProfileFor(profile?.countryCode), b),
+      phone: b.phone,
+      timezone: b.timezone,
+    })),
     paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
     refusedPaymentMethods: allMethods.filter((m) => !m.isActive).map((m) => m.name),
     promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
@@ -764,7 +777,7 @@ export function formatKnowledgeForPrompt(
   if (snapshot.branches.length) {
     lines.push("Sedes:")
     for (const b of snapshot.branches) {
-      const parts = [`- ${b.name} (id ${b.id})`, b.address ? `dir. ${b.address}` : null, b.phone ? `tel. ${b.phone}` : null, b.mapsUrl ? `mapa: ${b.mapsUrl}` : null]
+      const parts = [`- ${b.name} (id ${b.id})`, b.address ? `dir. ${b.address}` : null, b.phone ? `tel. ${b.phone}` : null]
         .filter(Boolean)
         .join(" · ")
       lines.push(parts)

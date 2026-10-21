@@ -5,7 +5,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configurePublicLinks, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -110,16 +110,17 @@ export interface AppDeps {
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
 }
+// La dirección tiene la forma de la del paciente (issue 36); la valida el servicio según el país.
 const branchInput = z.object({
   name: z.string().min(1).max(120),
-  addressLine1: z.string().max(200).nullish(),
-  addressLine2: z.string().max(200).nullish(),
-  department: z.string().max(80).nullish(),
-  province: z.string().max(80).nullish(),
-  district: z.string().max(80).nullish(),
+  addressLine1: z.string().max(300).nullish(),
+  city: z.string().max(100).nullish(),
+  district: z.string().max(100).nullish(),
+  region: z.string().max(100).nullish(),
+  postalCode: z.string().max(20).nullish(),
+  country: z.string().length(2).nullish(),
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
-  mapsUrl: z.string().url().nullish(),
   // `null` = hereda la zona horaria de la organización (columna nullable).
   timezone: z.string().max(60).nullish(),
 })
@@ -591,23 +592,7 @@ export function createApp(deps: AppDeps) {
     }
     const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      const [created] = await tx
-        .insert(branch)
-        .values({ organizationId: orgId, ...parsed.data })
-        .returning()
-      await tx.insert(auditEvent).values({
-        organizationId: orgId,
-        actorUserId: userId,
-        action: "branch.create",
-        entity: "branch",
-        entityId: created.id,
-        metadata: parsed.data,
-      })
-      return created
-    })
-    return c.json({ data: row }, 201)
+    return runService(c, 201, () => withOrgContext(db, orgId, (tx) => createBranch(tx, orgId, userId, parsed.data)))
   })
 
   guarded.patch("/branches/:id", async (c) => {
@@ -618,27 +603,7 @@ export function createApp(deps: AppDeps) {
     const id = c.req.param("id")
     const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      const [updated] = await tx
-        .update(branch)
-        .set({ ...parsed.data, updatedAt: new Date() })
-        .where(and(eq(branch.id, id), eq(branch.organizationId, orgId)))
-        .returning()
-      if (updated) {
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: userId,
-          action: "branch.update",
-          entity: "branch",
-          entityId: id,
-          metadata: parsed.data,
-        })
-      }
-      return updated ?? null
-    })
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sede no encontrada"), 404)
-    return c.json({ data: row })
+    return runService(c, 200, () => withOrgContext(db, orgId, (tx) => updateBranch(tx, orgId, userId, id, parsed.data)))
   })
 
   guarded.delete("/branches/:id", async (c) => {

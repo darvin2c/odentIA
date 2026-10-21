@@ -189,7 +189,7 @@ describe("bloque de conocimiento del prompt", () => {
     paymentMethods: [],
     refusedPaymentMethods: [],
     promotions: [],
-    branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, mapsUrl: null, timezone: null }],
+    branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, timezone: null }],
   }
   const entry = (n: number, body: string, branchName: string | null = null): KnowledgeEntryItem => ({
     id: `e${n}`, kind: "faq", title: `Tema ${n}`, body, branchId: branchName ? "b1" : null, branchName,

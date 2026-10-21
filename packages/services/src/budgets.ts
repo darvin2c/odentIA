@@ -30,6 +30,7 @@ import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
+import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -2124,7 +2125,7 @@ export async function getBudgetPrintPayload(
   // El presupuesto no pertenece a una sede. Si la clínica tiene una sola, la
   // hoja lleva su nombre, dirección y teléfono; con varias, los de la clínica.
   const branches = await tx
-    .select({ name: branch.name, addressLine1: branch.addressLine1, phone: branch.phone })
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
@@ -2167,7 +2168,7 @@ export async function getBudgetPrintPayload(
     clinic: {
       name: profile.tradeName || profile.legalName || "",
       branchName: onlyBranch?.name ?? null,
-      address: onlyBranch?.addressLine1 ?? profile.fiscalAddress ?? null,
+      address: (onlyBranch ? (await branchAddressWriter(tx, orgId))(onlyBranch.address) : null) ?? profile.fiscalAddress ?? null,
       phone: onlyBranch?.phone ?? null,
     },
     patient: patientRow,

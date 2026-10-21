@@ -18,6 +18,7 @@ import {
   ownAppointmentChangeable,
 } from "./own-appointment.js"
 import { listAvailableSlots } from "./availability.js"
+import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -449,7 +450,7 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
       branchId: appointment.branchId,
       serviceName: appointment.serviceName,
       branchName: branch.name,
-      branchAddress: branch.addressLine1,
+      branchAddress: branchAddressColumns,
       branchTimeZone: branch.timezone,
       dentistName: user.name,
     })
@@ -472,7 +473,7 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
     canChange: changeable,
     canConfirm: changeable && row.status === "programada",
     branchName: row.branchName,
-    branchAddress: row.branchAddress,
+    branchAddress: (await branchAddressWriter(tx, orgId))(row.branchAddress),
     dentistName: row.dentistName,
     serviceName: row.serviceName,
   }
@@ -503,15 +504,16 @@ export async function bookingContext(
       )[0] ?? null
     : null
   const sites = await tx
-    .select({ id: branch.id, name: branch.name, address: branch.addressLine1, timezone: branch.timezone, minutes: branch.appointmentDefaultMinutes })
+    .select({ id: branch.id, name: branch.name, address: branchAddressColumns, timezone: branch.timezone, minutes: branch.appointmentDefaultMinutes })
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .orderBy(asc(branch.name), asc(branch.id))
+  const addressText = await branchAddressWriter(tx, orgId)
   return {
     service,
     branches: sites
       .filter((site) => !link.branchId || site.id === link.branchId)
-      .map((site) => ({ id: site.id, name: site.name, address: site.address, timeZone: site.timezone ?? region.timezone, defaultMinutes: site.minutes })),
+      .map((site) => ({ id: site.id, name: site.name, address: addressText(site.address), timeZone: site.timezone ?? region.timezone, defaultMinutes: site.minutes })),
     branchId: link.branchId,
   }
 }

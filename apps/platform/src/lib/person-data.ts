@@ -15,8 +15,9 @@ import {
   type MaritalStatus,
   insuranceScheme,
   REFERRAL_KIND_LABELS,
+  postalAddressText,
   type ReferralKind,
-  regionOption,
+  regionName,
 } from "@odentia/clinical"
 import { countryOptions, normalizeCountry, regionCountry } from "@odentia/ui-patterns"
 import { activeOrgLocale } from "./locale"
@@ -163,15 +164,14 @@ export function referralText(kind: string | null | undefined, source: string | n
 
 /** La región: de la lista del país si la tiene, o como se escribió. */
 export function regionText(profile: ClinicalCountryProfile, region: string | null | undefined): string | null {
-  if (!region) return null
-  return regionOption(profile, region)?.label ?? region
+  return regionName(profile, region)
 }
 
 /**
  * La dirección en una línea: «Jr. Las Begonias 120, dpto. 302 · Miraflores,
  * Lima Metropolitana · Ref.: frente al parque» en Perú; «Av. Providencia 1234
  * · Providencia · Región Metropolitana · 7500000» en Santiago. El país solo se
- * dice si no es el de la clínica.
+ * dice si no es el de la clínica. La misma regla que la sede (`postalAddressText`).
  */
 export function addressLine(
   profile: ClinicalCountryProfile,
@@ -185,13 +185,18 @@ export function addressLine(
     addressReference?: string | null
   },
 ): string | null {
-  const place = [person.addressCity, regionText(profile, person.addressRegion)].filter(Boolean).join(", ")
-  const parts = [
-    person.address,
-    place || null,
-    person.addressPostalCode,
-    person.addressCountry && person.addressCountry !== profile.country ? countryText(person.addressCountry) : null,
-    profile.address.reference && person.addressReference ? `Ref.: ${person.addressReference}` : null,
-  ].filter(Boolean)
-  return parts.length ? parts.join(" · ") : null
+  return postalAddressText(
+    profile,
+    {
+      line: person.address,
+      city: person.addressCity,
+      region: person.addressRegion,
+      postalCode: person.addressPostalCode,
+      country: person.addressCountry,
+    },
+    {
+      reference: profile.address.reference ? person.addressReference : null,
+      language: displayLanguage(activeOrgLocale()),
+    },
+  )
 }

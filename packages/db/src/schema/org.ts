@@ -82,14 +82,21 @@ export const branch = pgTable("branch", {
     .notNull()
     .references(() => organization.id),
   name: text("name").notNull(),
+  /**
+   * Dirección internacional (HL7 FHIR Address), la misma forma que la del
+   * paciente (issue 36): calle y número; ciudad o localidad (`city`); el
+   * nivel entre región y ciudad (`district`, la provincia en Perú); región
+   * ISO 3166-2 (o su nombre, si el país no tiene lista); código postal y
+   * país ISO 3166-1. Etiquetas y obligatoriedad las pone el perfil del país.
+   */
   addressLine1: text("address_line1"),
-  addressLine2: text("address_line2"),
-  department: text("department"),
-  province: text("province"),
+  city: text("city"),
   district: text("district"),
+  region: text("region"),
+  postalCode: text("postal_code"),
+  country: char("country", { length: 2 }),
   phone: text("phone"),
   email: text("email"),
-  mapsUrl: text("maps_url"),
   // null = hereda la zona horaria de la organización
   timezone: text("timezone"),
   // Minutos de una cita regular en la sede: lo que dura cuando no lleva servicio.

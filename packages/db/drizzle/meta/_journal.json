@@ -414,6 +414,20 @@
       "when": 1792601137531,
       "tag": "0058_plan_sin_topes",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792601595319,
+      "tag": "0059_sede_direccion_internacional",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792601612213,
+      "tag": "0060_sede_sin_campos_viejos",
+      "breakpoints": true
     }
   ]
 }

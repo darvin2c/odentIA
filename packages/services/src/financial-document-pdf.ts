@@ -13,7 +13,7 @@
  *   previa nunca lo presenta como entregado. Entregar es un cambio explícito
  *   (`deliverBudget`, propiedad PresupuestosPromociones).
  */
-import { formatMoney } from "@odentia/clinical"
+import { clinicalProfileFor, formatMoney, postalAddressText } from "@odentia/clinical"
 import fontkit from "@pdf-lib/fontkit"
 import type { Font } from "@pdf-lib/fontkit"
 import { readFileSync } from "node:fs"
@@ -23,6 +23,7 @@ import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 import { and, eq } from "drizzle-orm"
 import { type BudgetPrintLine, type BudgetPrintOption, getBudgetPrintPayload } from "./budgets.js"
 import { orgProfile } from "@odentia/db/schema/org"
+import { branchPostal } from "./branches.js"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { getPaymentReturn, getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
@@ -389,7 +390,7 @@ export async function buildTicketSnapshot(
   const org: DocOrg = {
     tradeName: clinic.tradeName || clinic.legalName,
     legalName: clinic.legalName,
-    address: clinic.fiscalAddress ?? receipt.branch?.addressLine1 ?? null,
+    address: clinic.fiscalAddress ?? (receipt.branch ? postalAddressText(clinicalProfileFor(profile.countryCode), branchPostal(receipt.branch)) : null),
     phone: receipt.branch?.phone ?? null,
     branchName: frozen.branch?.name ?? null,
     currency: ticket.currency,

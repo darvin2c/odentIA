@@ -20,6 +20,7 @@ import {
   FormDrawer,
   FormPanel,
   fieldErrorMessages,
+  internationalText,
   isValidE164,
   MasterDetail,
   normalizeCountry,
@@ -38,12 +39,16 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Building2, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
+import { regionName } from "@odentia/clinical"
 import { BranchWarehouses } from "../../components/settings/branch-warehouses"
 import { SettingsNoAccess } from "../../components/settings/no-access"
+import { SearchSelect } from "../../components/settings/search-select"
+import { ChoiceSelect } from "../../components/ui/choice-select"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { useOrgProfile } from "../../lib/org"
+import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
+import { countryChoices } from "../../lib/person-data"
 
 export const Route = createFileRoute("/_org/settings/branches")({
   component: BranchesPage,
@@ -52,11 +57,16 @@ export const Route = createFileRoute("/_org/settings/branches")({
 /** El mismo subtítulo con o sin permiso: el título de la página no cambia. */
 const SUBTITLE = "Los locales de la clínica, con su dirección, su teléfono y su zona horaria."
 
+/** La dirección tiene la forma de la del paciente (issue 36): los nombres de cada nivel los pone el país. */
 interface Branch {
   id: string
   name: string
   addressLine1: string | null
+  city: string | null
   district: string | null
+  region: string | null
+  postalCode: string | null
+  country: string | null
   phone: string | null
   /** `null` = hereda la zona horaria de la clínica. */
   timezone: string | null
@@ -66,7 +76,11 @@ interface Branch {
 const branchSchema = z.object({
   name: z.string().trim().min(1, "Escribe el nombre de la sede"),
   addressLine1: z.string(),
+  city: z.string(),
   district: z.string(),
+  region: z.string(),
+  postalCode: z.string(),
+  country: z.string(),
   // El campo de teléfono emite E.164 (o `null` si se deja vacío).
   phone: z
     .string()
@@ -81,7 +95,11 @@ type BranchFormValues = z.infer<typeof branchSchema>
 const emptyValues: BranchFormValues = {
   name: "",
   addressLine1: "",
+  city: "",
   district: "",
+  region: "",
+  postalCode: "",
+  country: "",
   phone: null,
   timezoneInherited: true,
   timezone: null,
@@ -93,7 +111,11 @@ function branchValues(branch: Branch | null): BranchFormValues {
   return {
     name: branch.name,
     addressLine1: branch.addressLine1 ?? "",
+    city: branch.city ?? "",
     district: branch.district ?? "",
+    region: branch.region ?? "",
+    postalCode: branch.postalCode ?? "",
+    country: branch.country ?? "",
     phone: branch.phone ?? null,
     timezoneInherited: branch.timezone === null,
     timezone: branch.timezone ?? null,
@@ -126,6 +148,9 @@ function BranchesPage() {
   // País y zonas del perfil: definen la máscara del teléfono y las sugerencias.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
+  // Cómo se llama cada nivel de la dirección y si la región se elige de una lista.
+  const clinical = useClinicalProfile()
+  const countries = useMemo(() => countryChoices(clinical.country), [clinical.country])
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -148,7 +173,11 @@ function BranchesPage() {
         // `null` y no omitir: el PATCH es parcial y una clave ausente deja el
         // valor anterior; vaciar un campo debe persistirse como NULL.
         addressLine1: values.addressLine1.trim() || null,
+        city: values.city.trim() || null,
         district: values.district.trim() || null,
+        region: values.region.trim() || null,
+        postalCode: values.postalCode.trim() || null,
+        country: values.country || null,
         phone: values.phone || null,
         // `null` = la sede hereda la zona horaria de la clínica.
         timezone: values.timezoneInherited ? null : values.timezone || null,
@@ -248,15 +277,39 @@ function BranchesPage() {
     () => [
       { accessorKey: "name", header: "Nombre" },
       {
-        accessorKey: "addressLine1",
+        id: "address",
         header: "Dirección",
-        cell: ({ getValue }) => getValue<string | null>() ?? "—",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          // Dos líneas: la calle; el distrito y la región por su nombre.
+          const place = [row.original.city, regionName(clinical, row.original.region)].filter(Boolean).join(", ")
+          if (!row.original.addressLine1 && !place) {
+            return canWrite ? (
+              <span className="flex items-center gap-2">
+                <span className="text-muted-foreground">Sin dirección</span>
+                <Button type="button" variant="link" className="h-auto p-0" onClick={() => openBranchForm(row.original)}>
+                  Agregarla
+                </Button>
+              </span>
+            ) : (
+              "—"
+            )
+          }
+          return (
+            <span className="flex flex-col">
+              <span>{row.original.addressLine1 ?? place}</span>
+              {row.original.addressLine1 && place ? <span className="text-xs text-muted-foreground">{place}</span> : null}
+            </span>
+          )
+        },
       },
       {
-        accessorKey: "district",
-        header: "Ciudad o localidad",
-        meta: { view: { primary: true } },
-        cell: ({ getValue }) => getValue<string | null>() ?? "—",
+        accessorKey: "phone",
+        header: "Teléfono",
+        cell: ({ getValue }) => {
+          const phone = getValue<string | null>()
+          return phone ? internationalText(phone) : "—"
+        },
       },
       {
         accessorKey: "isActive",
@@ -299,12 +352,13 @@ function BranchesPage() {
           ) : null,
       },
     ],
-    [canWrite, openBranchForm, reactivate, reactivating],
+    [canWrite, clinical, openBranchForm, reactivate, reactivating],
   )
   const filtered = useMemo(() => {
     const needle = search.toLowerCase()
     const rows = (branches ?? []).filter((row) => {
-      if (needle && !row.name.toLowerCase().includes(needle)) return false
+      const haystack = [row.name, row.addressLine1, row.city].filter(Boolean).join(" ").toLowerCase()
+      if (needle && !haystack.includes(needle)) return false
       if (estadoFilter === "activa" && !row.isActive) return false
       if (estadoFilter === "inactiva" && row.isActive) return false
       return true
@@ -358,29 +412,105 @@ function BranchesPage() {
       <form.Field name="addressLine1">
         {(field) => (
           <Field>
-            <FieldLabel htmlFor="branch-address">Dirección</FieldLabel>
+            <FieldLabel htmlFor="branch-address">Calle y número</FieldLabel>
             <Input
               id="branch-address"
-              maxLength={200}
+              maxLength={300}
               value={field.state.value}
               onChange={(event) => field.handleChange(event.target.value)}
             />
           </Field>
         )}
       </form.Field>
-      <form.Field name="district">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="branch-district">Ciudad o localidad</FieldLabel>
-            <Input
-              id="branch-district"
-              maxLength={80}
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-          </Field>
-        )}
-      </form.Field>
+      {/* Los mismos niveles que la dirección del paciente, con los nombres del país. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <form.Field name="city">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="branch-city">{clinical.address.cityLabel}</FieldLabel>
+              <Input
+                id="branch-city"
+                maxLength={100}
+                value={field.state.value}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+            </Field>
+          )}
+        </form.Field>
+        {clinical.address.districtLabel ? (
+          <form.Field name="district">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="branch-district">{clinical.address.districtLabel}</FieldLabel>
+                <Input
+                  id="branch-district"
+                  maxLength={100}
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              </Field>
+            )}
+          </form.Field>
+        ) : null}
+        <form.Field name="region">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="branch-region">{clinical.address.regionLabel}</FieldLabel>
+              {clinical.address.regions ? (
+                <ChoiceSelect id="branch-region" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)}>
+                  <option value="">Sin elegir</option>
+                  {/* Lo guardado que no está en la lista se conserva a la vista. */}
+                  {field.state.value && !clinical.address.regions.some((item) => item.code === field.state.value) ? (
+                    <option value={field.state.value}>{field.state.value}</option>
+                  ) : null}
+                  {clinical.address.regions.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </ChoiceSelect>
+              ) : (
+                <Input
+                  id="branch-region"
+                  maxLength={100}
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              )}
+            </Field>
+          )}
+        </form.Field>
+        {clinical.address.postalCode ? (
+          <form.Field name="postalCode">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="branch-postal">Código postal</FieldLabel>
+                <Input
+                  id="branch-postal"
+                  maxLength={20}
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              </Field>
+            )}
+          </form.Field>
+        ) : null}
+        <form.Field name="country">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="branch-country">País</FieldLabel>
+              <SearchSelect
+                id="branch-country"
+                label="País"
+                placeholder="Buscar país…"
+                value={field.state.value || clinical.country || ""}
+                options={countries}
+                onChange={(next) => field.handleChange(next)}
+              />
+            </Field>
+          )}
+        </form.Field>
+      </div>
       <form.Field name="phone">
         {(field) => {
           const errors = fieldErrorMessages(field.state.meta.errors)

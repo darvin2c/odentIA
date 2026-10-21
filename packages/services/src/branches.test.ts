@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { listScheduleResources } from "./appointments.js"
-import { setBranchActive } from "./branches.js"
+import { createBranch, setBranchActive, updateBranch } from "./branches.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -53,4 +53,30 @@ it("una sede se desactiva y se reactiva sin perder nada, y solo dentro de su org
     status: 404,
     message: "Sede no encontrada",
   })
+})
+
+it("la dirección de la sede tiene la forma de la del paciente y se valida con el país (issue 36)", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, orgId)
+  const run = <T>(fn: (tx: Db) => Promise<T>) => withOrgContext(appDb, orgId, fn)
+  const created = await run((tx) =>
+    createBranch(tx, orgId, "config-test", {
+      name: "  Sede Miraflores ",
+      addressLine1: "Av. José Larco 345",
+      city: "Miraflores",
+      district: "Lima",
+      region: "PE-LMA",
+    }),
+  )
+  // El país, si no se eligió, es el de la clínica.
+  expect(created).toMatchObject({ name: "Sede Miraflores", region: "PE-LMA", country: "PE" })
+  // En Perú el departamento se elige de la lista.
+  await expect(run((tx) => updateBranch(tx, orgId, "config-test", created.id, { region: "Lima" }))).rejects.toMatchObject({
+    status: 400,
+    message: "Elige el departamento de la lista",
+  })
+  // Lo que no llega queda como estaba; vaciar un campo lo deja en null.
+  const updated = await run((tx) => updateBranch(tx, orgId, "config-test", created.id, { postalCode: "15074", city: "" }))
+  expect(updated).toMatchObject({ addressLine1: "Av. José Larco 345", city: null, region: "PE-LMA", postalCode: "15074" })
+  await expect(run((tx) => updateBranch(tx, orgId, "config-test", randomUUID(), { name: "X" }))).rejects.toMatchObject({ status: 404 })
 })

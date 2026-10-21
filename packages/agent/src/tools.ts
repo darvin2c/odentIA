@@ -944,7 +944,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const lines = [`Clínica: ${snapshot.clinicName}.`]
       for (const b of snapshot.branches) {
         lines.push(
-          `- Sede ${b.name} (id ${b.id}): ${[b.address, b.phone, b.mapsUrl].filter(Boolean).join(" · ") || "sin datos"}`,
+          `- Sede ${b.name} (id ${b.id}): ${[b.address, b.phone].filter(Boolean).join(" · ") || "sin datos"}`,
         )
       }
       lines.push(...formatAgentClinicData(data, zone))
