@@ -247,8 +247,11 @@ export function demoArgosPlan(question: string): ArgosPlan {
 }
 
 /** El modelo escribe la consulta y las frases. Con `retry`, la corrige con el problema que tuvo la anterior. */
+/** Cuánto piensa el modelo antes de escribir el plan; sin él, no piensa (el modo de siempre). */
+export type ArgosReasoning = "low" | "medium" | "high"
+
 export async function writeArgosPlan(
-  deps: Pick<AgentRuntime, "platform" | "createModel">,
+  deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
   input: ArgosAsk & { retry?: { plan: ArgosPlan; problem: string } },
 ): Promise<ArgosPlan> {
   const spec = resolveLlmSpec(deps.platform)
@@ -258,7 +261,7 @@ export async function writeArgosPlan(
     description: "Entrega la consulta y las frases de la respuesta.",
     schema: planSchema,
   })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0 })
+  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(deps.reasoning ? { reasoning: deps.reasoning } : {}) })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
   const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([answer], { tool_choice: TOOL_NAME }) : model
   const messages = argosMessages(spec.provider, input)
@@ -298,14 +301,14 @@ Si todo está bien, correcta=true y problema vacío. No pidas cambios de estilo 
  * la respuesta sigue sin revisión, nunca se bloquea por ella.
  */
 export async function reviewArgosPlan(
-  deps: Pick<AgentRuntime, "platform" | "createModel">,
+  deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
   input: ArgosAsk,
   plan: ArgosPlan,
 ): Promise<z.infer<typeof reviewSchema> | null> {
   const spec = resolveLlmSpec(deps.platform)
   if (spec.provider === "fake" && !deps.createModel) return null
   const verdict = tool(async () => "revisado", { name: REVIEW_TOOL, description: "Entrega la revisión del plan.", schema: reviewSchema })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0 })
+  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(deps.reasoning ? { reasoning: deps.reasoning } : {}) })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
   const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([verdict], { tool_choice: REVIEW_TOOL }) : model
   const shown = { tipo: plan.tipo, sql: plan.sql, frase: plan.frase, frase_vacia: plan.frase_vacia, como: plan.como, falta: plan.falta }
@@ -432,6 +435,8 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   onProblem?: (problem: string) => void
   /** false: sin la revisión del plan (para medir cuánto aporta). */
   review?: boolean
+  /** Que el modelo piense antes de escribir (y de revisar) el plan; sin él, no piensa. */
+  reasoning?: ArgosReasoning
 }
 
 /**
