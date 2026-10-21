@@ -8,7 +8,7 @@ export function HeaderMoreMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button type="button" variant="outline" size="icon" className="size-11 rounded-full sm:hidden" aria-label="Más opciones" />
+          <Button type="button" variant="outline" size="icon" className="size-9 rounded-full sm:hidden" aria-label="Más opciones" />
         }
       >
         <MoreHorizontal aria-hidden />

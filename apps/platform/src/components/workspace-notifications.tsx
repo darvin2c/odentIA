@@ -44,7 +44,7 @@ export function WorkspaceNotifications() {
       type="button"
       variant="ghost"
       size="icon-lg"
-      className={`elevated relative border border-border hover:bg-accent/50 ${open ? "bg-accent" : "bg-card"}`}
+      className={`elevated relative border border-border hover:bg-accent/50 max-sm:size-9 ${open ? "bg-accent" : "bg-card"}`}
       onClick={() => setOpen(!open)}
       aria-label={`Avisos${unread ? `: ${unread} sin leer` : ""}`}
       aria-expanded={open}

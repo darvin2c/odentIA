@@ -366,7 +366,7 @@ export function AgentPanelButton() {
       ref={buttonRef}
       type="button"
       variant={open ? "default" : "outline"}
-      className="elevated relative h-11 gap-2 rounded-full px-2 sm:pr-4"
+      className="elevated relative h-11 gap-2 rounded-full px-2 sm:pr-4 max-sm:h-9 max-sm:w-9 max-sm:px-0 max-sm:gap-0"
       onClick={() => setOpen(!open)}
       aria-label="Agente"
       aria-expanded={open}

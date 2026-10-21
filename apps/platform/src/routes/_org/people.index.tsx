@@ -320,16 +320,38 @@ function PeoplePage() {
         }
         actions={
           canRegister ? (
-            <ButtonGroup>
-              <Button type="button" onClick={() => setRegistering(true)} className="max-sm:size-11 max-sm:rounded-full max-sm:px-0">
-                <Plus aria-hidden />
-                <span className="max-sm:sr-only">Nuevo paciente</span>
-              </Button>
+            <>
+              <div className="max-sm:hidden">
+                <ButtonGroup>
+                  <Button type="button" onClick={() => setRegistering(true)}>
+                    <Plus aria-hidden />
+                    Nuevo paciente
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={<Button type="button" size="icon" aria-label="Más formas de agregar a alguien" />}
+                    >
+                      <ChevronDown aria-hidden />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-72">
+                      <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
+                        <span className="font-medium">Nuevo paciente</span>
+                        <span className="text-xs text-muted-foreground">Para atenderlo: crea su historia.</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setCreating(true)} className="flex-col items-start gap-0.5">
+                        <span className="font-medium">Nuevo contacto</span>
+                        <span className="text-xs text-muted-foreground">Aún no es paciente: alguien que pregunta o un familiar.</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </ButtonGroup>
+              </div>
+              {/* En el teléfono, un solo «+» redondo: el mismo menú de dos opciones. */}
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  render={<Button type="button" size="icon" aria-label="Más formas de agregar a alguien" />}
+                  render={<Button type="button" size="icon" className="size-9 rounded-full sm:hidden" aria-label="Agregar a alguien" />}
                 >
-                  <ChevronDown aria-hidden />
+                  <Plus aria-hidden />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-72">
                   <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
@@ -342,7 +364,7 @@ function PeoplePage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            </ButtonGroup>
+            </>
           ) : canCreate ? (
             <Button type="button" onClick={() => setCreating(true)}>
               <Plus aria-hidden />

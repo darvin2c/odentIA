@@ -166,7 +166,7 @@ export function GlobalSearchButton() {
     <Button
       type="button"
       variant="outline"
-      className="elevated relative h-11 gap-2 rounded-full px-3 sm:pr-2"
+      className="elevated relative h-11 gap-2 rounded-full px-3 sm:pr-2 max-sm:h-9 max-sm:w-9 max-sm:px-0 max-sm:gap-0"
       onClick={() => setOpen(!open)}
       aria-expanded={open}
       aria-haspopup="dialog"
