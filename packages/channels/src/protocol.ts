@@ -57,6 +57,11 @@ export interface NormalizedInbound {
   replyToExternalId?: string
   /** Lo reenvió: no lo escribió la persona (WhatsApp `context.forwarded`, Telegram `forward_origin`). */
   forwarded?: boolean
+  /**
+   * Prueba del chat web desde Configuración: la conversación nace marcada como
+   * prueba (no se cobra, no crea a nadie en Pacientes, se borra a los 7 días).
+   */
+  test?: boolean
 }
 
 /** Remitentes que por convención no leen respuestas. */
@@ -210,6 +215,8 @@ export interface OutboundMessage {
 
 export interface ChannelAdapterDeps {
   fetch: typeof fetch
+  /** Clave de la conexión para firmar lo que se envía a un tercero (el aviso al sitio del chat web). */
+  webhookSecret?: string
 }
 
 /** La cuenta que el proveedor reconoce con unas credenciales. */

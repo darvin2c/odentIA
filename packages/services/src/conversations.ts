@@ -228,7 +228,8 @@ export async function ingestInbound(
     )
     .limit(1)
   if (!connection) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada")
-  if (connection.status !== "active") {
+  // La prueba del chat web funciona aunque el chat esté desactivado (fase 6 del pulido).
+  if (connection.status !== "active" && !(event.test && connection.provider === "web_chat")) {
     throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada")
   }
 
@@ -342,6 +343,8 @@ export async function ingestInbound(
           : null,
         channelConnectionId: connection.id,
         externalThreadId: event.externalThreadId,
+        // La prueba del chat web desde Configuración nace marcada (fase 6 del pulido).
+        ...(event.test ? { isTest: true } : {}),
       })
       .onConflictDoNothing({
         target: [conversation.channelConnectionId, conversation.externalThreadId],
@@ -997,6 +1000,8 @@ export interface ConversationListItem {
   lastMessageAt: string | null
   /** `screen`: en Spam o bloqueada, con su motivo (ADR 0054); nulo si no. */
   contact: { id: string; displayName: string; isActive: boolean; screen: ContactScreen | null; screenReason: string | null }
+  /** Prueba del chat web desde Configuración: «Prueba» en la Bandeja, no se cobra ni cuenta. */
+  isTest: boolean
   connection: { id: string; channel: string; provider: string; displayName: string }
   /**
    * El último mensaje: su texto y, si no tiene, qué era (`contentType`, el tipo
@@ -1185,6 +1190,7 @@ export async function listConversations(
     unreadCount: r.conversation.unreadCount,
     assignedUserId: r.conversation.assignedUserId,
     lastMessageAt: r.conversation.lastMessageAt ? r.conversation.lastMessageAt.toISOString() : null,
+    isTest: r.conversation.isTest,
     contact: {
       id: r.contact.id,
       displayName: r.contact.displayName,
@@ -1408,6 +1414,8 @@ export interface ConversationDetail {
     unreadCount: number
     assignedUserId: string | null
     lastMessageAt: string | null
+    /** Prueba del chat web desde Configuración (fase 6 del pulido). */
+    isTest: boolean
   }
   /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
   contact: { id: string; displayName: string; isActive: boolean; isPatient: boolean }
@@ -1479,6 +1487,7 @@ export async function getConversationDetail(
       lastMessageAt: row.conversation.lastMessageAt
         ? row.conversation.lastMessageAt.toISOString()
         : null,
+      isTest: row.conversation.isTest,
     },
     contact: {
       id: row.contact.id,

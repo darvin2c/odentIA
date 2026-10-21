@@ -57,6 +57,11 @@ export interface ConversationAttention {
   teamLive: boolean
   /** Temas sin resolver del hilo, el más urgente primero (ADR 0050). */
   topics: InboxTopic[]
+  /**
+   * Chat web con un tema y sin dónde avisarle (R4, decisión 10): si cierra la
+   * pestaña, la respuesta no le llega. «Sin forma de avisarle».
+   */
+  unreachable: boolean
 }
 
 /** Un tema sin resolver: lo que una persona del equipo tiene que contestar. */
@@ -105,6 +110,7 @@ const NO_ATTENTION: ConversationAttention = {
   assignedName: null,
   teamLive: false,
   topics: [],
+  unreachable: false,
 }
 
 function iso(value: Date | string | null): string | null {
@@ -137,11 +143,15 @@ async function conversationAttention(
     closed_at: Date | string | null
     closed_by_name: string | null
     team_live: boolean
+    no_way: boolean
   }>(sql`
     select c.id, ${agentAttendingSql(c)} as agent_attending, ${unansweredSql(c)} as unanswered, ${teamLiveSql(c)} as team_live,
       ${awaitingPatientSinceSql(c)} as awaiting_since, c.nudged_at,
-      ua.name as assigned_name, c.close_reason, c.closed_at, uc.name as closed_by_name
+      ua.name as assigned_name, c.close_reason, c.closed_at, uc.name as closed_by_name,
+      (cn.provider = 'web_chat' and p.phone is null and p.email is null) as no_way
     from conversation c
+    join channel_connection cn on cn.id = c.channel_connection_id
+    join contact p on p.id = c.contact_id
     left join "user" ua on ua.id = c.assigned_user_id
     left join "user" uc on uc.id = c.closed_by_user_id
     where c.organization_id = ${orgId} and c.id in (${list})`)
@@ -162,6 +172,7 @@ async function conversationAttention(
       assignedName: row.assigned_name,
       teamLive: row.team_live === true,
       topics: [],
+      unreachable: row.no_way === true,
     })
     closure.set(
       row.id,
@@ -236,6 +247,8 @@ async function conversationAttention(
   // El más urgente primero; entre iguales, el que más lleva esperando.
   for (const item of attention.values()) {
     item.topics.sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.createdAt.localeCompare(b.createdAt))
+    // Sin tema no hay a quién avisar todavía.
+    if (item.topics.length === 0) item.unreachable = false
   }
   return { attention, closure }
 }

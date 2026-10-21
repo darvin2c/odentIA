@@ -134,12 +134,13 @@ async function insertAction(
  */
 export async function countConversationAction(tx: Db, orgId: string, input: { conversationId: string; at: Date }): Promise<boolean> {
   const [conv] = await tx
-    .select({ contactId: conversation.contactId, channel: channelConnection.channel })
+    .select({ contactId: conversation.contactId, channel: channelConnection.channel, isTest: conversation.isTest })
     .from(conversation)
     .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
     .limit(1)
-  if (!conv) return false
+  // La prueba del chat web desde Configuración no se cobra (fase 6 del pulido).
+  if (!conv || conv.isTest) return false
   // Dos corridas a la vez de la misma persona (dos canales) no cuentan dos.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas-action:${orgId}:${conv.contactId}`}, 0))`)
   const [recent] = await tx

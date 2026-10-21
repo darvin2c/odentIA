@@ -53,6 +53,8 @@ export interface ConversationAttention {
   topics?: InboxTopic[]
   /** Una persona del equipo conversa en vivo: el agente espera. */
   teamLive?: boolean
+  /** Chat web con un tema y sin dónde avisarle (R4): si cierra la pestaña, no le llega la respuesta. */
+  unreachable?: boolean
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
   /** Propuestas pendientes que esperan al interlocutor: las únicas que quedan pendientes. */
@@ -110,6 +112,8 @@ export interface ConversationListItem {
   contact: { id: string; displayName: string; screen?: ContactScreen | null; screenReason?: string | null }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: ConversationPreview | null
+  /** Prueba del chat web desde Configuración: «Prueba», no se cobra ni cuenta. */
+  isTest?: boolean
   /** Ausente en respuestas antiguas en caché: tratar como sin estado. */
   attention?: ConversationAttention
   /** Cómo se cerró; null si está abierta. Ausente en respuestas antiguas en caché. */
@@ -218,6 +222,8 @@ export interface ConversationDetail {
     lastMessageAt: string | null
     /** Por si el servidor lo entrega dentro de la conversación en vez de junto a `attention`. */
     closure?: ConversationClosure | null
+    /** Prueba del chat web desde Configuración (fase 6 del pulido). */
+    isTest?: boolean
   }
   /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
   contact: { id: string; displayName: string; isActive: boolean; isPatient?: boolean }

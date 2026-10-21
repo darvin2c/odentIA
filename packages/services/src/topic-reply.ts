@@ -1,13 +1,16 @@
 import type { Db } from "@odentia/db"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
-import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { and, eq, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { offerHeldReplies, whatsappOf } from "./held-replies.js"
+import { clinicName } from "./automation-routing.js"
+import { claimWhatsAppNumber } from "./contacts.js"
+import { openEmailThread } from "./financial-documents.js"
 import { updateTask } from "./tasks.js"
 import { topicUrgentAt } from "./topic-urgency.js"
 
@@ -49,6 +52,10 @@ export async function sendTeamReply(
     holdIfClosed: replyTo !== null,
   })
   if (sent.held) await offerInSavepoint(tx, orgId, input.conversationId)
+  // En el chat web, la respuesta a su pregunta sale también por donde pidió que le avisen (R4).
+  if (replyTo !== null && input.content.type === "text") {
+    await forwardWebchatReply(tx, orgId, { conversationId: input.conversationId, userId: input.userId, text: input.content.text })
+  }
   if (topic) {
     if (!input.keepPending && topic.taskId) {
       await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
@@ -75,6 +82,78 @@ export async function sendTeamReply(
     return { ...sent, topicId: created.id, topicResolved: false }
   }
   return { ...sent, topicId: null, topicResolved: false }
+}
+
+/**
+ * R4 (decisión 10 del pulido de la Bandeja): en el chat web la respuesta del
+ * equipo a una pregunta sale también por donde el visitante pidió que le
+ * avisen. Por su WhatsApp, «Por entregar» y con «Ver respuesta» si pasaron 24
+ * horas; si no dejó WhatsApp, por correo desde la clínica. Si la pestaña sigue
+ * abierta, también la ve en el chat. Un número que ya es de otra persona no se
+ * usa: nunca se une otra ficha por el número. Una prueba no sale del chat.
+ * Va en su punto de guardado: si no sale, la respuesta del chat queda igual.
+ */
+async function forwardWebchatReply(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; userId: string; text: string },
+): Promise<"whatsapp" | "correo" | null> {
+  const [thread] = await tx
+    .select({ provider: channelConnection.provider, isTest: conversation.isTest, contactId: contact.id, phone: contact.phone, email: contact.email })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread || thread.provider !== "web_chat" || thread.isTest || (!thread.phone && !thread.email)) return null
+  return tx
+    .transaction(async (inner): Promise<"whatsapp" | "correo" | null> => {
+      if (thread.phone) {
+        let whatsapp = await whatsappOf(inner, orgId, thread.contactId)
+        if (!whatsapp) {
+          // Lo dejó para que le respondan y quien responde lo usa: pasa a ser su
+          // WhatsApp, salvo que ya sea de otra persona (ADR 0027).
+          const claimed = await claimWhatsAppNumber(inner, orgId, input.userId, thread.contactId, thread.phone).catch((error: unknown) => {
+            if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") return null
+            throw error
+          })
+          if (claimed) whatsapp = await whatsappOf(inner, orgId, thread.contactId)
+        }
+        if (whatsapp) {
+          const started = await startContactConversation(inner, orgId, input.userId, thread.contactId, whatsapp)
+          const sent = await sendOutbound(inner, orgId, {
+            conversationId: started.id,
+            senderKind: "user",
+            senderUserId: input.userId,
+            content: { type: "text", text: input.text },
+            holdIfClosed: true,
+          })
+          if (sent.held) await offerInSavepoint(inner, orgId, started.id)
+          return "whatsapp"
+        }
+      }
+      if (thread.email) {
+        const [mailbox] = await inner
+          .select({ id: channelConnection.id })
+          .from(channelConnection)
+          .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.channel, "email"), eq(channelConnection.status, "active")))
+          .limit(1)
+        if (!mailbox) return null
+        const mail = await openEmailThread(inner, orgId, input.userId, { contactId: thread.contactId, email: thread.email }, mailbox)
+        await sendOutbound(inner, orgId, {
+          conversationId: mail.id,
+          senderKind: "user",
+          senderUserId: input.userId,
+          content: { type: "text", text: `${await clinicName(inner, orgId)} respondió tu consulta del chat:\n\n${input.text}` },
+        })
+        return "correo"
+      }
+      return null
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ServiceError) return null
+      throw error
+    })
 }
 
 /**

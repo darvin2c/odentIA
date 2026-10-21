@@ -95,8 +95,8 @@ function IntegrationsPage() {
     retry: 1,
   })
   const webchatQuery = useQuery({
-    queryKey: ["webchat-connections", org.slug],
-    queryFn: () => apiFetch<{ data: WebchatSummary[] }>("/api/channels/webchat"),
+    queryKey: ["clinic-webchat", org.slug],
+    queryFn: () => apiFetch<{ data: WebchatSummary }>("/api/channels/webchat"),
     enabled: canRead,
     retry: 1,
   })
@@ -203,11 +203,12 @@ function IntegrationsPage() {
   }
 
   function webchatActions(row: WebchatRow): IntegrationAction[] {
-    if (!row.connection && !canWrite) return []
+    const installed = !!row.connection?.installedOn
+    if (!installed && !canWrite) return []
     return [
       {
-        label: !row.connection ? "Conectar" : canWrite ? "Administrar" : "Ver",
-        emphasis: row.connection ? "secondary" : "primary",
+        label: !installed ? "Instalar" : canWrite ? "Administrar" : "Ver",
+        emphasis: installed ? "secondary" : "primary",
         to: "/settings/integrations/webchat",
       },
     ]

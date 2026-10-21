@@ -57,6 +57,7 @@ import { type ConversationCareDeps, tickConversationCare } from "./conversation-
 import { notFound, ServiceError, validation } from "./errors.js"
 import { offerPendingHeldReplies } from "./held-replies.js"
 import { retakeForgottenTopics } from "./topic-retake.js"
+import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -1392,6 +1393,8 @@ export async function tickAutomations(
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
     summary.tareasCerradas += await withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now))
+    // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
+    await withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now))
     // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver
     // respuesta» sale cuando Meta lo aprueba, dentro del «Horario para escribir».
     summary.respuestasOfrecidas += await withOrgContext(appDb, orgId, (tx) => offerPendingHeldReplies(tx, orgId, now))

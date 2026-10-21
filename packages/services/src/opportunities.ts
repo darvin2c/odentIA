@@ -1116,7 +1116,7 @@ export async function createOpportunity(
   return getOpportunity(tx, orgId, created.id)
 }
 
-export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado"
+export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado" | "prueba"
 
 /**
  * La persona preguntó por un servicio concreto y muestra interés (decisión 15
@@ -1133,6 +1133,15 @@ export async function noteServiceInterest(
   input: { contactId: string; conversationId: string | null; serviceId: string; said: string },
 ): Promise<{ outcome: ServiceInterestOutcome; opportunityId: string | null }> {
   await requireContact(tx, orgId, input.contactId)
+  // Una prueba del chat web no crea oportunidades (fase 6 del pulido de la Bandeja).
+  if (input.conversationId) {
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest })
+      .from(conversation)
+      .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (thread?.isTest) return { outcome: "prueba", opportunityId: null }
+  }
   const [service] = await tx
     .select({ id: serviceCatalog.id, name: serviceCatalog.name })
     .from(serviceCatalog)

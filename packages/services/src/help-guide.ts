@@ -423,9 +423,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/settings/integrations/webchat",
     title: "Chat web",
     parent: INTEGRATIONS,
-    purpose: "El chat que puedes poner en tu página web para que te escriban desde ahí.",
-    terms: ["widget", "chat en mi página", "página web", "sitio web", "burbuja de chat"],
+    purpose: "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el color o el saludo no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
+    terms: ["widget", "chat en mi página", "página web", "sitio web", "burbuja de chat", "instalar el chat", "línea del chat", "wordpress", "wix", "no disponible", "probar el chat"],
     writePermission: "settings.write",
+    faqs: [
+      { q: "¿Cómo pongo el chat en mi sitio?", a: "En Configuración › Integraciones › Chat web, «Copiar código» y pega esa línea en tu sitio, antes de </body>. Si no lo manejas tú, «Enviar a quien hace mi web» copia un mensaje listo para mandárselo. El primer sitio donde carga queda registrado solo." },
+      { q: "¿Por qué en un sitio dice «No disponible»?", a: "El chat responde solo en el primer sitio donde se pegó y en los que permites: si aparece en otro, te llega un aviso y en «Dónde responde» decides «Permitir» o «Bloquear». También dice «No disponible» si el chat está desactivado." },
+      { q: "¿Qué pasa si la persona cierra la pestaña?", a: "Su conversación sigue en ese navegador 30 días. Si Sofi le pasa un tema al equipo, el chat le pide su WhatsApp o su correo para avisarle: tu respuesta le llega por ahí. Si no deja ninguno, en la Bandeja dice «Sin forma de avisarle»." },
+      { q: "¿La prueba se cobra?", a: "No. La conversación de prueba lleva «Prueba» en la Bandeja, no se cobra, no crea a nadie en Pacientes y no cuenta en Reportes. Sofi responde de verdad, pero no reserva nada. Se borra con «Borrar esta prueba» o sola a los 7 días." },
+    ],
   },
 
   {

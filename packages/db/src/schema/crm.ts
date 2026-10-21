@@ -461,6 +461,13 @@ export const conversation = pgTable(
     attentionStartedAt: timestamp("attention_started_at", { withTimezone: true }).notNull().defaultNow(),
     /** El agente ya insistió una vez en esta atención; se limpia con cada entrante y al reabrir. */
     nudgedAt: timestamp("nudged_at", { withTimezone: true }),
+    /**
+     * Prueba del chat web desde Configuración (fase 6 del pulido de la
+     * Bandeja): Sofi responde de verdad, pero no se cobra, no crea a nadie en
+     * Pacientes ni una oportunidad, no avisa al sitio, no cuenta en Reportes y
+     * se borra a los 7 días.
+     */
+    isTest: boolean("is_test").notNull().default(false),
     ...timestamps,
   },
   (table) => [

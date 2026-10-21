@@ -29,6 +29,7 @@ import {
   sendOutbound,
   sendTeamReply,
   replyByWhatsApp,
+  deleteWebchatTest,
   takeTopic,
   resolveTopic,
   setAgentStatus,
@@ -209,6 +210,14 @@ export function createConversationsRoute(deps: CrmDeps) {
           keepPending: parsed.data.keepPending ?? false,
         }),
       ),
+    )
+  })
+
+  // «Borrar esta prueba» (fase 6 del pulido): solo una prueba del chat web, con todo lo que dejó.
+  app.post("/:id/delete-test", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ deleted: await deleteWebchatTest(tx, orgId, { conversationId: c.req.param("id") }) })),
     )
   })
 

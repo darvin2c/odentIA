@@ -149,6 +149,23 @@ export function screenedSql(conv: SQL): SQL {
     where c_scr.organization_id = ${conv}.organization_id and c_scr.id = ${conv}.contact_id and c_scr.screen is not null)`
 }
 
+/**
+ * No cuenta en Reportes: su persona está en Spam o bloqueada, o es una prueba
+ * del chat web desde Configuración (fase 6 del pulido de la Bandeja).
+ */
+export function uncountedSql(conv: SQL): SQL {
+  return sql`(${screenedSql(conv)} or ${conv}.is_test)`
+}
+
+/**
+ * Una persona que solo existe por una prueba del chat web: no sale en
+ * Pacientes ni en el buscador (fase 6 del pulido). `person` es el alias de `contact`.
+ */
+export function testOnlyPersonSql(person: SQL): SQL {
+  return sql`(exists (select 1 from conversation t_only where t_only.organization_id = ${person}.organization_id and t_only.contact_id = ${person}.id and t_only.is_test)
+    and not exists (select 1 from conversation t_real where t_real.organization_id = ${person}.organization_id and t_real.contact_id = ${person}.id and not t_real.is_test))`
+}
+
 /** Días de la lista de Spam: lo más viejo queda en la persona, no en la lista. */
 export const SPAM_VIEW_DAYS = 30
 

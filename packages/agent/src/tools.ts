@@ -383,7 +383,7 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
     const result: unknown = await notify?.invoke({
       reason: "Aviso al interlocutor",
       summary: "Aviso al interlocutor",
-      message: handoffFallbackNotice(treatment ?? null),
+      message: handoffFallbackNotice(treatment ?? null, await conversationChannel(ctx)),
     })
     outcome = typeof result === "string" ? result : ""
   } catch (error) {

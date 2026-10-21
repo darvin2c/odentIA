@@ -1003,6 +1003,7 @@ function ConversationList({
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
               {/* Con el estado a la vista, el canal queda en su icono: el estado no debe recortarse. */}
               <span className={words || screen ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
+              {item.isTest ? <Badge variant="secondary" className="shrink-0">Prueba</Badge> : null}
               {/* En Spam y Bloqueados la fila dice por qué; el estado de atención no aplica. */}
               {screen ? (
                 <span className="truncate">{screenReasonWords(screen, item.contact.screenReason)}</span>
@@ -1472,7 +1473,7 @@ function ThreadView({
         ? "No se pudo completar la acción. Inténtalo de nuevo."
         : null
   // Resolver y cerrar sin resolver confirman antes con lo que dice el servidor que pasará.
-  const [confirming, setConfirming] = useState<"close" | null>(null)
+  const [confirming, setConfirming] = useState<"close" | "deleteTest" | null>(null)
   const previewQuery = useQuery({
     queryKey: ["conversation-resolve-preview", id],
     queryFn: () => apiFetch<{ data: ResolvePreview }>(`/api/conversations/${id}/resolve-preview`),
@@ -1635,6 +1636,7 @@ function ThreadView({
           )}
           <div className="flex min-w-0 items-center gap-x-1.5 text-xs text-muted-foreground">
             <span className="shrink-0">{channelLabel(detail.connection.channel)}</span>
+            {conv.isTest ? <Badge variant="secondary" title="Prueba del chat web: no se cobra ni cuenta, y se borra a los 7 días">Prueba · no se cobra</Badge> : null}
             {words ? <StateLabel words={words} className="min-w-0" /> : null}
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
           </div>
@@ -1674,6 +1676,8 @@ function ThreadView({
                       registrationLink ? pasteRegistrationLink(registrationLink.url) : registrationMutation.mutate(detail.contact.id),
                   }]
                 : []),
+              // Una prueba del chat web se borra entera (fase 6 del pulido).
+              ...(canWrite && conv.isTest ? [{ key: "borrar-prueba", label: "Borrar esta prueba", onSelect: () => setConfirming("deleteTest") }] : []),
               ...(!canWrite
                 ? []
                 : closed
@@ -1725,6 +1729,26 @@ function ThreadView({
         onClose={() => setBlocking(false)}
       />
       <ConfirmDialog
+        open={confirming === "deleteTest"}
+        title="¿Borrar esta prueba?"
+        description="Se borra la conversación de prueba con todo lo que dejó: sus mensajes y sus temas. No se puede deshacer."
+        confirmLabel="Borrar esta prueba"
+        variant="destructive"
+        pending={busy}
+        onClose={() => setConfirming(null)}
+        onConfirm={() =>
+          actionMutation.mutate(
+            { path: "/delete-test" },
+            {
+              onSuccess: () => {
+                toast.success("Prueba borrada.")
+                onBack()
+              },
+            },
+          )
+        }
+      />
+      <ConfirmDialog
         open={confirming === "close"}
         title="¿Cerrar sin resolver?"
         description={closeWithoutResolvingWords(name, receptionName)}
@@ -1758,6 +1782,7 @@ function ThreadView({
       {orderedTopics.length > 0 && !closed ? (
         <TopicBand
           topics={orderedTopics}
+          unreachable={threadAttention?.unreachable === true}
           myUserId={myUserId}
           messages={messages}
           members={conversers}
@@ -2243,6 +2268,7 @@ const TOPIC_DAILY_LIMIT = /^escribió más de \d+ veces hoy/i
 
 function TopicBand({
   topics,
+  unreachable,
   myUserId,
   messages,
   members,
@@ -2258,6 +2284,8 @@ function TopicBand({
   onSpam,
 }: {
   topics: InboxTopic[]
+  /** Chat web sin dónde avisarle (R4): si cierra la pestaña, la respuesta no le llega. */
+  unreachable: boolean
   myUserId: string
   messages: ChatMessage[]
   members: Member[]
@@ -2282,6 +2310,11 @@ function TopicBand({
   const visible = showRest ? topics : [first]
   return (
     <section aria-label="Lo que te toca contestar" className="flex flex-col gap-2 border-b bg-warning-soft/50 px-3.5 py-2">
+      {unreachable ? (
+        <p className="text-xs font-semibold text-foreground">
+          Sin forma de avisarle: no dejó su WhatsApp ni su correo. Si cierra la pestaña del chat, no le llega la respuesta.
+        </p>
+      ) : null}
       {visible.map((topic) => {
         const mine = topic.assigneeUserId === myUserId
         const free = !topic.assigneeUserId

@@ -25,7 +25,7 @@
 import type { Db } from "@odentia/db"
 import { saasCharge, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, isNull, like, sql, type SQL } from "drizzle-orm"
-import { screenedSql } from "./conversation-state.js"
+import { uncountedSql } from "./conversation-state.js"
 import { allocateRefunds } from "./finance.js"
 import { lastMonths } from "./report-periods.js"
 import {
@@ -94,7 +94,7 @@ export async function agentConversationsMany(tx: Db, orgId: string, spans: Span[
       join message m on m.organization_id = ${orgId} and m.created_at >= b.start_at and m.created_at < b.end_at
         and m.created_at >= ${at(hull.start)} and m.created_at < ${at(hull.end)}
         and m.direction = 'out' and m.sender_kind = 'agent' and ${accepted("m")}
-      join conversation c on c.organization_id = ${orgId} and c.id = m.conversation_id and not ${screenedSql(sql.raw("c"))}
+      join conversation c on c.organization_id = ${orgId} and c.id = m.conversation_id and not ${uncountedSql(sql.raw("c"))}
       group by b.idx, b.start_at, b.end_at, m.conversation_id
     ) x
     group by x.idx`)
@@ -563,7 +563,7 @@ export async function firstResponsesMany(tx: Db, orgId: string, spans: Span[]): 
         ) as handed
       from ${spansSql(spans)}
       join first_inbound i on i.created_at >= b.start_at and i.created_at < b.end_at
-      join conversation c on c.id = i.conversation_id and c.organization_id = ${orgId} and not ${screenedSql(sql.raw("c"))}
+      join conversation c on c.id = i.conversation_id and c.organization_id = ${orgId} and not ${uncountedSql(sql.raw("c"))}
       left join channel_connection cc on cc.id = c.channel_connection_id and cc.organization_id = ${orgId}
       left join lateral (
         select m.id, m.sent_at, m.sender_kind from message m
@@ -751,7 +751,7 @@ export async function getAgentReportList(tx: Db, orgId: string, query: ReportQue
           select distinct on (h.conversation_id) h.id, h.created_at, h.reason, h.conversation_id,
             coalesce(h.contact_id, c.contact_id) as contact_id
           from first_inbound i
-          join conversation c on c.organization_id = ${orgId} and c.id = i.conversation_id and not ${screenedSql(sql.raw("c"))}
+          join conversation c on c.organization_id = ${orgId} and c.id = i.conversation_id and not ${uncountedSql(sql.raw("c"))}
           join agent_handoff h on h.organization_id = ${orgId} and h.conversation_id = i.conversation_id and h.created_by = 'agent'
           order by h.conversation_id, h.created_at desc
         )

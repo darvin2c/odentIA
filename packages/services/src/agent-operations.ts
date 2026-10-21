@@ -2610,6 +2610,22 @@ export async function executeProposal(
   if (locked.status !== "aprobada") {
     throw new ServiceError("PROPOSAL_NOT_APPROVED", 409, "La propuesta no está aprobada")
   }
+  // En una prueba del chat web Sofi responde de verdad (`enviar_mensaje`), pero
+  // no reserva, cambia ni anota nada en la clínica (fase 6 del pulido de la Bandeja).
+  if (locked.conversationId && locked.action !== "enviar_mensaje") {
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest })
+      .from(conversation)
+      .where(and(eq(conversation.id, locked.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (thread?.isTest) {
+      throw new ServiceError(
+        "TEST_CONVERSATION",
+        409,
+        "Es una prueba del chat web: no se reserva, cambia ni anota nada de verdad. Díselo así: en la prueba no queda nada hecho.",
+      )
+    }
+  }
   const action = locked.action as ProposalAction
   const payload = locked.payload
   const expected = expectedOf(locked)
@@ -3835,7 +3851,11 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
     error: input.error?.slice(0, 500) ?? null,
   })
   if (input.usage?.length) {
-    await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
+    // Lo que gasta Sofi en una prueba del chat web cuenta como probar, con su tope (fase 6 del pulido).
+    const [thread] = input.conversationId
+      ? await tx.select({ isTest: conversation.isTest }).from(conversation).where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId))).limit(1)
+      : []
+    await recordAiUsage(tx, orgId, { origin: thread?.isTest ? "probar" : "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
   }
   // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0031).
   if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {

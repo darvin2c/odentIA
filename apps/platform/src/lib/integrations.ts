@@ -70,7 +70,7 @@ export const INTEGRATIONS: Record<IntegrationId, IntegrationCopy> = {
     mark: "CW",
     purpose: "El chat de tu sitio web: lo que escriben llega a la misma Bandeja.",
     purposeShort: "El chat de tu sitio web",
-    toConnect: "la dirección de tu sitio web.",
+    toConnect: "pegar una línea en tu sitio web.",
   },
   gmail: {
     name: "Gmail",
@@ -438,53 +438,68 @@ export function channelRows(connections: ConnectionItem[], since: Since): Channe
 
 /* ---------- Chat web ---------- */
 
+/** El chat de la clínica, uno solo (decisión 7 del pulido de la Bandeja): lo que entrega `/api/channels/webchat`. */
 export interface WebchatSummary {
   id: string
-  displayName: string
-  status: string
-  config: { allowedOrigins: string[] }
+  active: boolean
+  installedOn: string | null
+  sites: Array<{ origin: string; status: "permitido" | "pendiente" | "bloqueado" }>
 }
 
 export interface WebchatRow extends IntegrationRowModel {
   connection: WebchatSummary | null
 }
 
-/** El sitio donde está puesto el chat: su dirección sin el «https://». */
-function siteOf(connection: WebchatSummary): string {
-  const [first, ...rest] = connection.config.allowedOrigins
-  if (!first) return connection.displayName
-  let host = first
+/** Un sitio sin el «https://». */
+function hostOf(origin: string): string {
   try {
-    host = new URL(first).host
+    return new URL(origin).host
   } catch {
     // Un origen mal escrito se muestra tal cual, sin romper la fila.
+    return origin
   }
-  return rest.length > 0 ? `${host} y ${plural(rest.length, "sitio más", "sitios más")}` : host
+}
+
+/** Dónde responde: el primer sitio permitido y, si hay más, cuántos. */
+function siteOf(chat: WebchatSummary): string {
+  const allowed = chat.sites.filter((site) => site.status === "permitido")
+  const [first, ...rest] = allowed
+  if (!first) return "Sin sitio"
+  return rest.length > 0 ? `${hostOf(first.origin)} y ${plural(rest.length, "sitio más", "sitios más")}` : hostOf(first.origin)
 }
 
 export function webchatRows(
-  items: WebchatSummary[],
+  chat: WebchatSummary | null,
   lastInboundOf: (id: string) => string | null | undefined,
   since: Since,
 ): WebchatRow[] {
-  if (items.length === 0) return [{ ...notConnected("webchat"), connection: null }]
-  return items.map((connection, index): WebchatRow => {
-    const active = connection.status === "active"
-    return {
-      // Con más de un chat, cada fila lleva el nombre que le dio la clínica.
-      ...base("webchat", `webchat-${index}`, items.length > 1 ? connection.displayName : undefined),
-      connection,
-      tone: active ? "ok" : "off",
-      status: active ? "Activo" : "Desactivado",
-      review: [],
+  // Sin instalar en ningún sitio: lo que falta es pegar la línea.
+  if (!chat || (!chat.installedOn && chat.active)) return [{ ...notConnected("webchat"), status: "Sin instalar", connection: chat }]
+  const pending = chat.sites.filter((site) => site.status === "pendiente")
+  const review: IntegrationReview[] = pending.length
+    ? [
+        {
+          label: `Apareció en ${hostOf(pending[0]?.origin ?? "")}${pending.length > 1 ? ` y ${plural(pending.length - 1, "sitio más", "sitios más")}` : ""}: ¿es tuyo?`,
+          short: "Espera tu sí",
+          tone: "warning",
+        },
+      ]
+    : []
+  return [
+    {
+      ...base("webchat", "webchat-0"),
+      connection: chat,
+      tone: !chat.active ? "off" : review.length ? "attention" : "ok",
+      status: chat.active ? "Activo" : "Desactivado",
+      review,
       detail: {
         kind: "account",
-        account: siteOf(connection),
-        activity: active ? lastInboundWords(lastInboundOf(connection.id), since, "mensaje") : "no recibe mensajes",
+        account: siteOf(chat),
+        activity: chat.active ? lastInboundWords(lastInboundOf(chat.id), since, "mensaje") : "no recibe mensajes",
       },
       problem: null,
-    }
-  })
+    },
+  ]
 }
 
 /* ---------- Correo ---------- */

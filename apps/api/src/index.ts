@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server"
+import type { Context } from "hono"
 import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
@@ -68,6 +69,11 @@ const app = createApp({
   complaintsEmail: env.COMPLAINTS_EMAIL || undefined,
   foundersEmail: env.FOUNDERS_EMAIL || undefined,
   listenUrl: env.APP_DATABASE_URL,
+  // La dirección real de quien llama a las rutas públicas (el chat web, el
+  // registro): detrás del túnel, la conexión es siempre la del túnel.
+  ...(env.CLIENT_IP_HEADER
+    ? { registrationRemoteAddress: (c: Context) => c.req.header(env.CLIENT_IP_HEADER as string)?.split(",")[0]?.trim() || undefined }
+    : {}),
   llm: platformLlmFromEnv(env),
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
