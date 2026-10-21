@@ -44,9 +44,11 @@ function arg(name: string, fallback: string): string {
 const env = process.env
 const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/argos-holdout.json")), "utf8")) as { preguntas: Question[] }
 const goldenPath = arg("golden", "")
-const golden = new Map<string, string>(
-  goldenPath ? (JSON.parse(readFileSync(resolve(goldenPath), "utf8")) as { respuestas: Array<{ id: string; respuesta: string }> }).respuestas.map((row) => [row.id, row.respuesta]) : [],
-)
+const goldenFile = goldenPath ? (JSON.parse(readFileSync(resolve(goldenPath), "utf8")) as { calculado?: string; respuestas: Array<{ id: string; respuesta: string }> }) : null
+const golden = new Map<string, string>(goldenFile ? goldenFile.respuestas.map((row) => [row.id, row.respuesta]) : [])
+// Las respuestas correctas cuentan «hasta esta hora»: Argos responde a esa misma hora, o un cobro de los minutos
+// que tarda la vuelta cambia la cifra de «los mismos días» (pasó con un pago de las 13:15).
+const at = goldenFile?.calculado ? new Date(goldenFile.calculado) : undefined
 const ORG = arg("org", "seed-org-dental-smile")
 const role = arg("role", "owner")
 const only = arg("only", "").split(",").filter(Boolean)
@@ -107,6 +109,13 @@ const [owner] = await withOrgContext(db, ORG, (tx) =>
 )
 if (!owner) throw new Error(`La clínica ${ORG} no tiene propietario`)
 
+/** El periodo como se ve arriba de la respuesta: el botón y «Comparado con…», o «A hoy…». */
+function periodLine(answer: ArgosAskResult): string | null {
+  if (answer.kind !== "respuesta") return null
+  const { period } = answer
+  return [period.label, period.other ? `contra ${period.other.label}` : null, period.compareLabel ? `comparado con ${period.compareLabel}` : null].filter(Boolean).join(" · ")
+}
+
 /** Lo que diría la pantalla, en una línea. */
 function said(answer: ArgosAskResult): string {
   if (answer.kind === "respuesta")
@@ -122,7 +131,8 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   const problems: string[] = []
   const started = Date.now()
   const answer = await withAiMeter(
-    () => askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto }),
+    () =>
+      askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto, ...(at ? { now: at } : {}) }),
     async (entries) => {
       uses.push(...entries)
     },
@@ -136,6 +146,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     espera: question.espera,
     correcta: golden.get(question.id) ?? null,
     kind: answer.kind,
+    periodo: periodLine(answer),
     argos: said(answer),
     como: answer.kind === "respuesta" ? answer.how : null,
     sql: answer.kind === "respuesta" ? answer.query : null,
@@ -147,6 +158,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   out.push(row)
   console.log(`\n### ${row.id} · ${row.texto}${row.espera === "trampa" ? " (trampa)" : ""}`)
   if (row.correcta) console.log(`- Correcta: ${row.correcta}`)
+  if (row.periodo) console.log(`- Periodo (arriba de la respuesta): ${row.periodo}`)
   console.log(`- Argos: ${row.argos}`)
   if (row.como) console.log(`- Cómo: ${row.como}`)
   if (row.sql) console.log(`- SQL: ${String(row.sql).replace(/\s+/g, " ")}`)

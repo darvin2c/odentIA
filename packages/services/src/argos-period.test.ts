@@ -126,5 +126,9 @@ describe("la consulta con el periodo", () => {
     expect(filled.text).toBe("Del 1 al 21 de octubre cobraste S/ 34,818.00; en los mismos días de setiembre, menos.")
     expect(filled.parts.filter((part) => part.strong).map((part) => part.text)).toEqual(["S/ 34,818.00"])
     expect(fillArgosWords("{periodo} no se cobró nada.", resolve("2025-08").words)).toBe("En agosto de 2025 no se cobró nada.")
+    // El periodo ya trae su preposición: la que el modelo escribió delante sobra.
+    expect(fillArgosSentence("En {periodo} se cobró {cobrado_dinero}.", result, { ...ZONE, currency: "PEN" }, period.words).text).toBe("Del 1 al 21 de octubre se cobró S/\u00a034,818.00.")
+    expect(fillArgosWords("Lo cobrado en {periodo}.", period.words)).toBe("Lo cobrado del 1 al 21 de octubre.")
+    expect(fillArgosWords("Lo cobrado durante {periodo}.", resolve("hoy").words)).toBe("Lo cobrado hoy.")
   })
 })

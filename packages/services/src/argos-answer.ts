@@ -95,10 +95,36 @@ export function unknownArgosHoles(template: string, result: Pick<ArgosQueryResul
     .filter((name) => name !== "lista" && name !== "filas" && !names.has(name) && !(name in words))
 }
 
-/** Llena solo el periodo de un texto («Así lo calculé», la frase sin filas) y lo empieza con mayúscula si abre con él. */
+/**
+ * El periodo ya trae su preposición («del 1 al 21 de octubre», «en setiembre»,
+ * «hoy»): si el modelo escribió otra delante («En {periodo}»), sobra y se
+ * quita, para que no quede «En del 1 al 21…».
+ */
+const LEADING_PREPOSITION = /(^|\s)(en|de|durante|desde|para)\s+$/i
+const SAID_WITH_PREPOSITION = /^(del|de|en|el|hoy|ayer)\b/
+
+function withoutExtraPreposition(before: string, said: string): string {
+  return SAID_WITH_PREPOSITION.test(said) ? before.replace(LEADING_PREPOSITION, "$1") : before
+}
+
+/** Al abrir la frase, el periodo va con mayúscula. */
+function opening(before: string, said: string): string {
+  return before.trim() === "" ? said.charAt(0).toLocaleUpperCase() + said.slice(1) : said
+}
+
+/** Llena solo el periodo de un texto («Así lo calculé», la frase sin filas). */
 export function fillArgosWords(text: string, words: ArgosWords): string {
-  const filled = text.replace(HOLE, (whole, name: string) => (name === "periodo" || name === "periodo_antes" ? (words[name] ?? whole) : whole))
-  return /^\{periodo/.test(text) ? filled.charAt(0).toLocaleUpperCase() + filled.slice(1) : filled
+  let out = ""
+  let last = 0
+  for (const match of text.matchAll(HOLE)) {
+    const name = match[1] ?? ""
+    const said = name === "periodo" || name === "periodo_antes" ? words[name] : undefined
+    if (said === undefined) continue
+    const before = withoutExtraPreposition(out + text.slice(last, match.index ?? 0), said)
+    out = before + opening(before, said)
+    last = (match.index ?? 0) + match[0].length
+  }
+  return out + text.slice(last)
 }
 
 /**
@@ -216,10 +242,14 @@ export function fillArgosSentence(
     const name = match[1] ?? ""
     const at = match.index ?? 0
     if (at > last) parts.push({ text: template.slice(last, at) })
-    // El periodo lo dice odentIA, no es una cifra: va sin destacar y, al abrir la frase, con mayúscula.
+    // El periodo lo dice odentIA, no es una cifra: va sin destacar, sin una preposición de más delante y, al abrir la frase, con mayúscula.
     const said = !byName.has(name) && (name === "periodo" || name === "periodo_antes") ? words[name] : undefined
     if (said !== undefined) {
-      parts.push({ text: at === 0 ? said.charAt(0).toLocaleUpperCase() + said.slice(1) : said })
+      const previous = parts.at(-1)
+      if (previous && !previous.strong) previous.text = withoutExtraPreposition(previous.text, said)
+      if (previous && !previous.strong && !previous.text) parts.pop()
+      const before = parts.map((part) => part.text).join("")
+      parts.push({ text: opening(before, said) })
       last = at + match[0].length
       continue
     }
