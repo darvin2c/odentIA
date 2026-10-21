@@ -5,7 +5,8 @@ describe("montos escritos en Plan y pagos (issue 36)", () => {
   it("se leen con los separadores de la clínica, los mismos con que se muestran", () => {
     // En Chile el punto agrupa miles: «50.000» son cincuenta mil, no cincuenta.
     expect(majorToCents("50.000", "CLP", "es-CL")).toBe(50000)
-    expect(majorToCents("1.500.000", "COP", "es-CO")).toBe(150000000)
+    // En dólares: los decimales del peso colombiano cambian según la versión de ICU (0 o 2).
+    expect(majorToCents("1.500.000", "USD", "es-CO")).toBe(150000000)
     expect(majorToCents("1500.50", "USD", "es-PE")).toBe(150050)
     expect(majorToCents("1500,50", "USD", "es-CO")).toBe(150050)
   })
