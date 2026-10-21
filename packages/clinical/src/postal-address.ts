@@ -131,3 +131,27 @@ export function directionsUrl(target: { text: string; placeId?: string | null })
   if (target.placeId) params.set("query_place_id", target.placeId)
   return `https://www.google.com/maps/search/?${params.toString()}`
 }
+
+/**
+ * «Cómo llegar» a un lugar (una sede): su nombre y su dirección completa,
+ * con el país siempre, para que el mapa la encuentre; y su ficha si se eligió
+ * de Google. Sin calle ni ciudad no hay a dónde llevar: null.
+ */
+export function placeDirectionsUrl(
+  profile: ClinicalCountryProfile,
+  place: { name?: string | null; address: PostalAddress; placeId?: string | null },
+): string | null {
+  const { address } = place
+  if (!clean(address.line) && !clean(address.city)) return null
+  const country = clean(address.country)?.toUpperCase() ?? profile.country
+  const text = [
+    clean(place.name),
+    clean(address.line),
+    clean(address.city),
+    regionName(profile, clean(address.region)),
+    country ? countryDisplayName(country) : null,
+  ]
+    .filter(Boolean)
+    .join(", ")
+  return directionsUrl({ text, placeId: place.placeId })
+}

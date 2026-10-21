@@ -9,6 +9,7 @@ import {
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
   getBookingLinkRegistrationForm,
+  getBranchDirections,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkPaper,
@@ -194,6 +195,12 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     if (!query.success) return unavailable(c)
     return answer(c, 200, () => inOrg(c, (tx, orgId) => getPersonalLinkView(tx, orgId, query.data.token)))
   })
+
+  // El enlace corto para llegar a una sede (issue 36): sin sesión ni token, solo
+  // a dónde llevar en el mapa; una sede desactivada o sin dirección no existe.
+  app.get("/:slug/directions/:branch", (c) =>
+    answer(c, 200, () => inOrg(c, (tx, orgId) => getBranchDirections(tx, orgId, c.req.param("branch") ?? ""))),
+  )
 
   app.get("/:slug/slots", async (c) => {
     const query = slotsQuery.safeParse(c.req.query())

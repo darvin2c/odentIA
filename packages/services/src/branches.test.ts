@@ -4,7 +4,7 @@ import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { listScheduleResources } from "./appointments.js"
-import { createBranch, setBranchActive, updateBranch } from "./branches.js"
+import { createBranch, getBranchDirections, setBranchActive, updateBranch } from "./branches.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -79,4 +79,33 @@ it("la dirección de la sede tiene la forma de la del paciente y se valida con e
   const updated = await run((tx) => updateBranch(tx, orgId, "config-test", created.id, { postalCode: "15074", city: "" }))
   expect(updated).toMatchObject({ addressLine1: "Av. José Larco 345", city: null, region: "PE-LMA", postalCode: "15074" })
   await expect(run((tx) => updateBranch(tx, orgId, "config-test", randomUUID(), { name: "X" }))).rejects.toMatchObject({ status: 404 })
+})
+
+it("cada sede tiene su enlace corto para llegar, y lleva a su ficha de Google o a su dirección (issue 36)", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, orgId)
+  const run = <T>(fn: (tx: Db) => Promise<T>) => withOrgContext(appDb, orgId, fn)
+  const first = await run((tx) =>
+    createBranch(tx, orgId, "config-test", { name: "Sede Miraflores", addressLine1: "Av. José Larco 345", city: "Miraflores", region: "PE-LMA" }),
+  )
+  // La base pone el enlace: sin «Sede», sin tildes; dos iguales llevan -2, también si se inserta directo.
+  expect(first.slug).toBe("miraflores")
+  const [twin] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Miraflores" }).returning({ slug: branch.slug })
+  expect(twin?.slug).toBe("miraflores-2")
+  const renamed = await run((tx) => updateBranch(tx, orgId, "config-test", first.id, { name: "Sede Larco" }))
+  expect(renamed.slug).toBe("miraflores")
+
+  const byAddress = await run((tx) => getBranchDirections(tx, orgId, "miraflores"))
+  expect(byAddress.branchName).toBe("Sede Larco")
+  expect(byAddress.url).toBe(
+    "https://www.google.com/maps/search/?api=1&query=Cl%C3%ADnica+" +
+      encodeURIComponent(orgId).replace(/%20/g, "+") +
+      "%2C+Av.+Jos%C3%A9+Larco+345%2C+Miraflores%2C+Lima+Metropolitana%2C+Per%C3%BA",
+  )
+  await ownerDb.update(branch).set({ googlePlaceId: "ChIJ-larco" }).where(eq(branch.id, first.id))
+  expect((await run((tx) => getBranchDirections(tx, orgId, "miraflores"))).url).toContain("&query_place_id=ChIJ-larco")
+  // Sin dirección, o desactivada, el enlace no lleva a ningún lado.
+  await expect(run((tx) => getBranchDirections(tx, orgId, "miraflores-2"))).rejects.toMatchObject({ status: 404 })
+  await run((tx) => setBranchActive(tx, orgId, "config-test", first.id, false))
+  await expect(run((tx) => getBranchDirections(tx, orgId, "miraflores"))).rejects.toMatchObject({ status: 404 })
 })

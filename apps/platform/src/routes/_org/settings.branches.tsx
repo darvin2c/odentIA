@@ -39,7 +39,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Building2, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
-import { regionName } from "@odentia/clinical"
+import { placeDirectionsUrl, regionName } from "@odentia/clinical"
 import { BranchWarehouses } from "../../components/settings/branch-warehouses"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
@@ -67,6 +67,9 @@ interface Branch {
   region: string | null
   postalCode: string | null
   country: string | null
+  /** El enlace corto para llegar (`/llegar/<slug>`), y la ficha de Google si se eligió de la lista. */
+  slug: string
+  googlePlaceId: string | null
   phone: string | null
   /** `null` = hereda la zona horaria de la clínica. */
   timezone: string | null
@@ -151,6 +154,7 @@ function BranchesPage() {
   // Cómo se llama cada nivel de la dirección y si la región se elige de una lista.
   const clinical = useClinicalProfile()
   const countries = useMemo(() => countryChoices(clinical.country), [clinical.country])
+  const clinicName = profile.data?.tradeName || profile.data?.legalName || null
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -273,6 +277,16 @@ function BranchesPage() {
 
   const activeCount = (branches ?? []).filter((row) => row.isActive).length
 
+  /** El enlace corto de la clínica para llegar a la sede: para Instagram o la firma del correo. */
+  async function copyShortLink(site: Branch) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/llegar/${encodeURIComponent(site.slug)}`)
+      toast.success("Enlace para llegar copiado")
+    } catch {
+      toast.error("No pudimos copiar el enlace")
+    }
+  }
+
   const columns = useMemo<ColumnDef<Branch>[]>(
     () => [
       { accessorKey: "name", header: "Nombre" },
@@ -324,35 +338,37 @@ function BranchesPage() {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) =>
-          canWrite ? (
-            <RowActions
-              label={`Acciones de ${row.original.name}`}
-              items={[
-                {
-                  key: "edit",
-                  label: "Editar",
-                  onSelect: () => openBranchForm(row.original),
-                },
-                row.original.isActive
-                  ? {
-                      key: "deactivate",
-                      label: "Desactivar",
-                      tone: "danger" as const,
-                      onSelect: () => setDeactivating(row.original),
-                    }
-                  : {
-                      key: "reactivate",
-                      label: "Reactivar",
-                      disabled: reactivating,
-                      onSelect: () => reactivate(row.original),
-                    },
-              ]}
-            />
-          ) : null,
+        cell: ({ row }) => {
+          const site = row.original
+          // «Cómo llegar» abre su ficha de Google Maps; el enlace corto es el que manda Sofi (issue 36).
+          const directions = site.isActive
+            ? placeDirectionsUrl(clinical, {
+                name: clinicName,
+                address: { line: site.addressLine1, city: site.city, region: site.region, country: site.country },
+                placeId: site.googlePlaceId,
+              })
+            : null
+          const items = [
+            ...(canWrite ? [{ key: "edit", label: "Editar", onSelect: () => openBranchForm(site) }] : []),
+            ...(directions
+              ? [
+                  { key: "directions", label: "Cómo llegar", onSelect: () => window.open(directions, "_blank", "noopener,noreferrer") },
+                  { key: "copy-link", label: "Copiar el enlace para llegar", onSelect: () => void copyShortLink(site) },
+                ]
+              : []),
+            ...(canWrite
+              ? [
+                  site.isActive
+                    ? { key: "deactivate", label: "Desactivar", tone: "danger" as const, onSelect: () => setDeactivating(site) }
+                    : { key: "reactivate", label: "Reactivar", disabled: reactivating, onSelect: () => reactivate(site) },
+                ]
+              : []),
+          ]
+          return items.length ? <RowActions label={`Acciones de ${site.name}`} items={items} /> : null
+        },
       },
     ],
-    [canWrite, clinical, openBranchForm, reactivate, reactivating],
+    [canWrite, clinical, clinicName, openBranchForm, reactivate, reactivating],
   )
   const filtered = useMemo(() => {
     const needle = search.toLowerCase()

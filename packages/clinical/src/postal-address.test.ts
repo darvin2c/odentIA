@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor } from "./country-profiles.js"
-import { directionsUrl, normalizePostalAddress, postalAddressErrors, postalAddressText } from "./postal-address.js"
+import { directionsUrl, normalizePostalAddress, placeDirectionsUrl, postalAddressErrors, postalAddressText } from "./postal-address.js"
 
 const peru = clinicalProfileFor("PE")
 const colombia = clinicalProfileFor("CO")
@@ -50,5 +50,12 @@ describe("dirección internacional de sedes y personas (issue 36)", () => {
     expect(directionsUrl({ text: "Dental Smile", placeId: "ChIJ123" })).toBe(
       "https://www.google.com/maps/search/?api=1&query=Dental+Smile&query_place_id=ChIJ123",
     )
+    // La sede: el nombre de la clínica, su dirección y el país siempre; sin calle ni ciudad, nada.
+    expect(
+      placeDirectionsUrl(peru, { name: "Dental Smile", address: { line: "Av. José Larco 345", city: "Miraflores", region: "PE-LMA" } }),
+    ).toBe(
+      "https://www.google.com/maps/search/?api=1&query=Dental+Smile%2C+Av.+Jos%C3%A9+Larco+345%2C+Miraflores%2C+Lima+Metropolitana%2C+Per%C3%BA",
+    )
+    expect(placeDirectionsUrl(peru, { name: "Dental Smile", address: { region: "PE-LMA" } })).toBeNull()
   })
 })

@@ -3,7 +3,7 @@ import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitB
 import { Switch } from "@odentia/ui/components/switch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { CalendarCheck, ChevronLeft, FileDown } from "lucide-react"
+import { CalendarCheck, ChevronLeft, FileDown, MapPin } from "lucide-react"
 import { useId, useState } from "react"
 import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../components/booking-data-form"
 import { AppointmentBlock } from "../components/public/appointment-block"
@@ -694,6 +694,7 @@ function ChooseSlot({
           id: current.branchId,
           name: current.branchName,
           address: current.branchAddress,
+          directionsUrl: current.branchDirectionsUrl,
           timeZone: current.timeZone,
           defaultMinutes: current.durationMin,
         })
@@ -881,6 +882,18 @@ function ChooseSlot({
                   <span className="font-semibold">Sede {branch.name}</span>
                   {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
                 </div>
+              ) : null}
+              {/* «Cómo llegar» debajo de la sede elegida (issue 36): abre su ficha en Google Maps. */}
+              {branch?.directionsUrl ? (
+                <a
+                  href={branch.directionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-11 items-center gap-1.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  <MapPin aria-hidden className="size-4" />
+                  Cómo llegar
+                </a>
               ) : null}
               {branch !== undefined ? <DentistSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
             </div>

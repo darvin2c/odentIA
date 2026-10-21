@@ -31,6 +31,7 @@ import { Route as BajaTokenRouteImport } from './routes/baja.$token'
 import { Route as CTokenRouteImport } from './routes/c.$token'
 import { Route as EmbedIndexRouteImport } from './routes/embed.index'
 import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
+import { Route as LlegarBranchRouteImport } from './routes/llegar.$branch'
 import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
 import { Route as OrgAgentAdministradorRouteImport } from './routes/_org/agent.administrador'
 import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.approvals'
@@ -187,6 +188,11 @@ const EmbedIndexRoute = EmbedIndexRouteImport.update({
 const EmbedConnectionIdRoute = EmbedConnectionIdRouteImport.update({
   id: '/embed/$connectionId',
   path: '/embed/$connectionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LlegarBranchRoute = LlegarBranchRouteImport.update({
+  id: '/llegar/$branch',
+  path: '/llegar/$branch',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgAgentIndexRoute = OrgAgentIndexRouteImport.update({
@@ -465,6 +471,7 @@ export interface FileRoutesByFullPath {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/llegar/$branch': typeof LlegarBranchRoute
   '/embed/': typeof EmbedIndexRoute
   '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
@@ -534,6 +541,7 @@ export interface FileRoutesByTo {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/llegar/$branch': typeof LlegarBranchRoute
   '/embed': typeof EmbedIndexRoute
   '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
@@ -607,6 +615,7 @@ export interface FileRoutesById {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/llegar/$branch': typeof LlegarBranchRoute
   '/embed/': typeof EmbedIndexRoute
   '/_org/agent/administrador': typeof OrgAgentAdministradorRoute
   '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
@@ -680,6 +689,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/llegar/$branch'
     | '/embed/'
     | '/agent/administrador'
     | '/agent/approvals'
@@ -749,6 +759,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/llegar/$branch'
     | '/embed'
     | '/agent/administrador'
     | '/agent/approvals'
@@ -821,6 +832,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/llegar/$branch'
     | '/embed/'
     | '/_org/agent/administrador'
     | '/_org/agent/approvals'
@@ -881,6 +893,7 @@ export interface RootRouteChildren {
   BajaTokenRoute: typeof BajaTokenRoute
   CTokenRoute: typeof CTokenRoute
   EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
+  LlegarBranchRoute: typeof LlegarBranchRoute
   EmbedIndexRoute: typeof EmbedIndexRoute
   ResumenLunesBajaTokenRoute: typeof ResumenLunesBajaTokenRoute
 }
@@ -1039,6 +1052,13 @@ declare module '@tanstack/react-router' {
       path: '/embed/$connectionId'
       fullPath: '/embed/$connectionId'
       preLoaderRoute: typeof EmbedConnectionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/llegar/$branch': {
+      id: '/llegar/$branch'
+      path: '/llegar/$branch'
+      fullPath: '/llegar/$branch'
+      preLoaderRoute: typeof LlegarBranchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/agent/': {
@@ -1552,6 +1572,7 @@ const rootRouteChildren: RootRouteChildren = {
   BajaTokenRoute: BajaTokenRoute,
   CTokenRoute: CTokenRoute,
   EmbedConnectionIdRoute: EmbedConnectionIdRoute,
+  LlegarBranchRoute: LlegarBranchRoute,
   EmbedIndexRoute: EmbedIndexRoute,
   ResumenLunesBajaTokenRoute: ResumenLunesBajaTokenRoute,
 }

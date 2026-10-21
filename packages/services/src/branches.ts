@@ -1,9 +1,18 @@
-import { clinicalProfileFor, normalizePostalAddress, postalAddressErrors, postalAddressText, type PostalAddress } from "@odentia/clinical"
+import {
+  clinicalProfileFor,
+  normalizePostalAddress,
+  placeDirectionsUrl,
+  postalAddressErrors,
+  postalAddressText,
+  type PostalAddress,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { organization } from "@odentia/db/schema/auth"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
+import { clinicOrigin } from "./public-links.js"
 
 export type BranchRow = typeof branch.$inferSelect
 
@@ -30,6 +39,55 @@ export function branchPostal(row: Pick<BranchRow, "addressLine1" | "city" | "dis
 export async function branchAddressWriter(tx: Db, orgId: string): Promise<(address: PostalAddress) => string | null> {
   const profile = clinicalProfileFor(await findOrgCountry(tx, orgId))
   return (address) => postalAddressText(profile, address)
+}
+
+/**
+ * «Cómo llegar» a una sede de esta clínica (issue 36): su ficha de Google si
+ * se eligió de la lista, o su dirección con el nombre de la clínica. Sin
+ * dirección, null. Se lee la clínica una vez para muchas sedes.
+ */
+export async function branchDirectionsWriter(
+  tx: Db,
+  orgId: string,
+): Promise<(place: { address: PostalAddress; placeId: string | null }) => string | null> {
+  const [org] = await tx
+    .select({ country: orgProfile.countryCode, tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const profile = clinicalProfileFor(org?.country)
+  const name = org?.tradeName ?? org?.legalName ?? null
+  return (place) => placeDirectionsUrl(profile, { name, address: place.address, placeId: place.placeId })
+}
+
+/**
+ * El enlace corto de la clínica para llegar a una sede
+ * (`https://<clínica>/llegar/<sede>`): el que manda Sofi y el que se copia en
+ * Sedes. Nulo sin dirección pública configurada.
+ */
+export async function branchShortLinkWriter(tx: Db, orgId: string): Promise<(branchSlug: string) => string | null> {
+  const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
+  const origin = clinicOrigin(org?.slug ?? "")
+  return (branchSlug) => (origin ? `${origin}/llegar/${encodeURIComponent(branchSlug)}` : null)
+}
+
+/**
+ * Lo que abre el enlace corto: a dónde llevar en Google Maps. Solo sedes
+ * activas y con dirección; lo demás no existe para quien no tiene sesión.
+ */
+export async function getBranchDirections(
+  tx: Db,
+  orgId: string,
+  branchSlug: string,
+): Promise<{ branchName: string; url: string }> {
+  const [row] = await tx
+    .select({ name: branch.name, address: branchAddressColumns, placeId: branch.googlePlaceId })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.slug, branchSlug), eq(branch.isActive, true)))
+    .limit(1)
+  const url = row ? (await branchDirectionsWriter(tx, orgId))(row) : null
+  if (!row || !url) throw notFound("Sede")
+  return { branchName: row.name, url }
 }
 
 /** Lo que se escribe de una sede: nombre, dirección (la forma del paciente), contacto y zona horaria. */

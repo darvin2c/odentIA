@@ -428,6 +428,13 @@
       "when": 1792601612213,
       "tag": "0060_sede_sin_campos_viejos",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792602211924,
+      "tag": "0061_sede_enlace_y_lugar",
+      "breakpoints": true
     }
   ]
 }

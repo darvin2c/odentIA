@@ -10,6 +10,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization } from "./auth.js"
@@ -76,35 +77,49 @@ export const patientRegistrationConfig = pgTable("patient_registration_config", 
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
-export const branch = pgTable("branch", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organization.id),
-  name: text("name").notNull(),
-  /**
-   * Dirección internacional (HL7 FHIR Address), la misma forma que la del
-   * paciente (issue 36): calle y número; ciudad o localidad (`city`); el
-   * nivel entre región y ciudad (`district`, la provincia en Perú); región
-   * ISO 3166-2 (o su nombre, si el país no tiene lista); código postal y
-   * país ISO 3166-1. Etiquetas y obligatoriedad las pone el perfil del país.
-   */
-  addressLine1: text("address_line1"),
-  city: text("city"),
-  district: text("district"),
-  region: text("region"),
-  postalCode: text("postal_code"),
-  country: char("country", { length: 2 }),
-  phone: text("phone"),
-  email: text("email"),
-  // null = hereda la zona horaria de la organización
-  timezone: text("timezone"),
-  // Minutos de una cita regular en la sede: lo que dura cuando no lleva servicio.
-  appointmentDefaultMinutes: integer("appointment_default_minutes").notNull().default(60),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
+export const branch = pgTable(
+  "branch",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id),
+    name: text("name").notNull(),
+    /**
+     * El enlace corto para llegar (`<clínica>/llegar/<slug>`): lo pone la base
+     * al crearla a partir del nombre (`branch_slug_fill`, migración 0061) y no
+     * cambia al renombrarla. Por eso no se escribe al insertar.
+     */
+    slug: text("slug")
+      .notNull()
+      .$defaultFn(() => ""),
+    /**
+     * Dirección internacional (HL7 FHIR Address), la misma forma que la del
+     * paciente (issue 36): calle y número; ciudad o localidad (`city`); el
+     * nivel entre región y ciudad (`district`, la provincia en Perú); región
+     * ISO 3166-2 (o su nombre, si el país no tiene lista); código postal y
+     * país ISO 3166-1. Etiquetas y obligatoriedad las pone el perfil del país.
+     */
+    addressLine1: text("address_line1"),
+    city: text("city"),
+    district: text("district"),
+    region: text("region"),
+    postalCode: text("postal_code"),
+    country: char("country", { length: 2 }),
+    /** La ficha de la sede en Google Maps (Place ID): lo único de Google que se guarda; abre «Cómo llegar». */
+    googlePlaceId: text("google_place_id"),
+    phone: text("phone"),
+    email: text("email"),
+    // null = hereda la zona horaria de la organización
+    timezone: text("timezone"),
+    // Minutos de una cita regular en la sede: lo que dura cuando no lleva servicio.
+    appointmentDefaultMinutes: integer("appointment_default_minutes").notNull().default(60),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("branch_org_slug_uidx").on(table.organizationId, table.slug)],
+)
 
 export const auditEvent = pgTable(
   "audit_event",

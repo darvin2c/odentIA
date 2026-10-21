@@ -16,6 +16,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
+import { branchDirectionsWriter, branchShortLinkWriter } from "./branches.js"
 import { branchNotFound, notFound, validation } from "./errors.js"
 import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
@@ -611,8 +612,18 @@ export interface ClinicInfoSnapshot {
   /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
   locale: string
   /** Todas las sedes activas: son pocas y el agente necesita el id de cada una. */
-  /** `address`: la dirección en una línea, con su distrito y región (issue 36). */
-  branches: Array<{ id: string; name: string; address: string | null; phone: string | null; timezone: string | null }>
+  /**
+   * `address`: la dirección en una línea, con su distrito y región; `directions`:
+   * el enlace para llegar, el corto de la clínica si hay dirección pública (issue 36).
+   */
+  branches: Array<{
+    id: string
+    name: string
+    address: string | null
+    directions?: string | null
+    phone: string | null
+    timezone: string | null
+  }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
   /** Medios que la clínica desactivó: se dicen como no aceptados para que el agente no los ofrezca. */
   refusedPaymentMethods: string[]
@@ -649,6 +660,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       region: branch.region,
       postalCode: branch.postalCode,
       country: branch.country,
+      slug: branch.slug,
+      placeId: branch.googlePlaceId,
       phone: branch.phone,
       timezone: branch.timezone,
     })
@@ -658,6 +671,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
   const allMethods = await listPaymentMethods(tx, orgId, { activeOnly: false })
   const methods = allMethods.filter((m) => m.isActive)
   const promos = await listClinicPromotionSummaries(tx, orgId)
+  const directions = await branchDirectionsWriter(tx, orgId)
+  const shortLink = await branchShortLinkWriter(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
     emergencyPhone: profile?.emergencyPhone ?? null,
@@ -667,6 +682,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       id: b.id,
       name: b.name,
       address: postalAddressText(clinicalProfileFor(profile?.countryCode), b),
+      // Sin dirección no hay a dónde llevar; con ella, el enlace corto y, si no hay, el de Google.
+      directions: directions({ address: b, placeId: b.placeId }) ? (shortLink(b.slug) ?? directions({ address: b, placeId: b.placeId })) : null,
       phone: b.phone,
       timezone: b.timezone,
     })),
@@ -777,7 +794,12 @@ export function formatKnowledgeForPrompt(
   if (snapshot.branches.length) {
     lines.push("Sedes:")
     for (const b of snapshot.branches) {
-      const parts = [`- ${b.name} (id ${b.id})`, b.address ? `dir. ${b.address}` : null, b.phone ? `tel. ${b.phone}` : null]
+      const parts = [
+        `- ${b.name} (id ${b.id})`,
+        b.address ? `dir. ${b.address}` : null,
+        b.directions ? `cómo llegar: ${b.directions}` : null,
+        b.phone ? `tel. ${b.phone}` : null,
+      ]
         .filter(Boolean)
         .join(" · ")
       lines.push(parts)
