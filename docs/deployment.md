@@ -185,6 +185,16 @@ variable. `LLM_OPENAI_BASE_URL` solo hace falta con una pasarela propia. `LLM_MO
 `CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
 arrancan con él.
 
+### Sugerencias de direcciones
+
+Solo la API lee `GOOGLE_MAPS_API_KEY` (la sede: Google Places, Autocomplete y Place
+Details Essentials; la clave se restringe a «Places API (New)» y la cuenta necesita
+la facturación activa) y `GEOAPIFY_API_KEY` (la dirección de la persona). Sin ellas
+los campos son los de siempre. Cada clínica tiene un tope diario (200 búsquedas de
+sede y 600 de pacientes) y, con `GEOAPIFY_DAILY_LIMIT` (3 000 por defecto, el plan
+gratis), la administración ve en su Inicio el día que se acabaron. Motivos y costos
+en la ADR 0077.
+
 ### Búsqueda con vectores del agente
 
 API y worker leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`

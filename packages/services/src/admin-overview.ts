@@ -3,6 +3,7 @@ import type { AdminActor } from "./admin-core.js"
 import { getOrganizationPendingCounts } from "./admin-organizations.js"
 import { getAdminSupportAttention } from "./admin-support.js"
 import { consumerComplaintSummary } from "./consumer-complaints.js"
+import { addressSearchesToday } from "./address-suggestions.js"
 import { getSaasAdminAttention } from "./saas-billing.js"
 import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
 import { countWaitlistToReview, type ExpiringTermRow, listExpiringTerms } from "./saas-founders.js"
@@ -20,8 +21,16 @@ export interface AdminOverview {
   expiring: ExpiringTermRow[]
 }
 
-/** Inicio interno: soporte no recibe ningún importe ni pendiente de cobros. */
-export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<AdminOverview> {
+/**
+ * Inicio interno: soporte no recibe ningún importe ni pendiente de cobros.
+ * `geoapifyDailyLimit`: las búsquedas de direcciones de pacientes que da el plan
+ * de Geoapify al día (decisión 7 del lienzo del issue 36).
+ */
+export async function getBackofficeOverview(
+  tx: Db,
+  actor: AdminActor,
+  options: { geoapifyDailyLimit?: number } = {},
+): Promise<AdminOverview> {
   const support = await getAdminSupportAttention(tx)
   const organizations = await getOrganizationPendingCounts(tx, actor)
   const complaints = await consumerComplaintSummary(tx, actor)
@@ -71,6 +80,9 @@ export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<
   ]
   if (actor.role === "admin") {
     const billing = await getSaasAdminAttention(tx)
+    // Pasado el plan del día, los pacientes escriben su dirección a mano hasta mañana.
+    const addressSearches = options.geoapifyDailyLimit ? await addressSearchesToday(tx, "paciente") : 0
+    const addressesSpent = options.geoapifyDailyLimit !== undefined && addressSearches >= options.geoapifyDailyLimit
     items.push(
       {
         key: "payments",
@@ -99,6 +111,13 @@ export async function getBackofficeOverview(tx: Db, actor: AdminActor): Promise<
         count: billing.pendingCommissionCount,
         description: "Movimientos pendientes de vendedores y socios",
         path: "/commissions",
+      },
+      {
+        key: "address-suggestions",
+        label: "Sugerencias de direcciones agotadas hoy",
+        count: addressesSpent ? addressSearches : 0,
+        description: `Se usaron las ${options.geoapifyDailyLimit ?? 0} búsquedas de Geoapify del día: hasta mañana, los pacientes escriben su dirección a mano`,
+        path: "/billing",
       },
       {
         key: "recovery",

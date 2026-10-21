@@ -105,6 +105,14 @@ const envSchema = z.object({
   EMBEDDINGS_BASE_URL: z.string().url().optional(),
   EMBEDDINGS_API_KEY: z.string().optional().default(""),
   EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
+  /**
+   * Sugerencias de direcciones (issue 36, ADR 0077): Google Places para la
+   * sede y Geoapify para el paciente. Vacías: los campos de siempre.
+   */
+  GOOGLE_MAPS_API_KEY: z.string().optional().default(""),
+  GEOAPIFY_API_KEY: z.string().optional().default(""),
+  /** El plan de Geoapify: búsquedas al día para todo odentIA (el gratis da 3 000). */
+  GEOAPIFY_DAILY_LIMIT: z.coerce.number().int().min(1).default(3000),
   PORT: z.coerce.number().int().default(3001),
 }).superRefine((data, ctx) => {
   // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).

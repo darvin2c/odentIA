@@ -33,6 +33,7 @@ import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createSearchRoute } from "./routes/search.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
+import { type AddressProviders, createAddressRoute } from "./routes/address.js"
 import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
@@ -106,6 +107,10 @@ export interface AppDeps {
   decisions?: PlatformDecisions
   /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
   embedder?: SearchEmbedder
+  /** Quién sugiere direcciones (issue 36): Google para la sede, Geoapify para el paciente. */
+  addressProviders?: AddressProviders
+  /** Búsquedas de Geoapify al día para todo odentIA: la administración lo ve en su Inicio. */
+  geoapifyDailyLimit?: number
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
@@ -119,6 +124,7 @@ const branchInput = z.object({
   region: z.string().max(100).nullish(),
   postalCode: z.string().max(20).nullish(),
   country: z.string().length(2).nullish(),
+  googlePlaceId: z.string().max(300).nullish(),
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
   // `null` = hereda la zona horaria de la organización (columna nullable).
@@ -278,7 +284,11 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelURL: deps.webURL, replyTo: deps.foundersEmail }))
   app.get("/api/admin/overview", (c) => runService(c, 200, () =>
-    deps.ownerDb.transaction((tx) => getBackofficeOverview(tx, adminContextOf(c))),
+    deps.ownerDb.transaction((tx) =>
+      getBackofficeOverview(tx, adminContextOf(c), {
+        ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit ? { geoapifyDailyLimit: deps.geoapifyDailyLimit } : {}),
+      }),
+    ),
   ))
   app.all("/api/admin/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404))
   app.route("/api/account/admin-access", createAccountAdminAccessRoute(deps))
@@ -331,7 +341,12 @@ export function createApp(deps: AppDeps) {
   app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
   app.route(
     "/api/public/booking",
-    createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
+    createPublicBookingRoute({
+      db: deps.db,
+      secretsKey: deps.secretsKey,
+      remoteAddress: deps.registrationRemoteAddress,
+      addressProvider: deps.addressProviders?.paciente ?? null,
+    }),
   )
   app.route(
     "/api/webchat",
@@ -717,6 +732,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/diagnosis-codes", createDiagnosisCodesRoute(crmDeps))
+  guarded.route("/address", createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))

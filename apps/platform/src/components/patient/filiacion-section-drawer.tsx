@@ -12,6 +12,7 @@ import { BirthDateInput, FormDrawer, normalizeCountry, PhoneInput } from "@odent
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
+import { staffAddressSource } from "../../lib/address-suggestions"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useClinicalProfile } from "../../lib/org"
 import type { PersonPage } from "../../lib/people"
@@ -25,12 +26,15 @@ import {
   maritalChoices,
 } from "../../lib/person-data"
 import { filiationGapsText, type Patient } from "../../lib/patients"
+import { AddressStreetField } from "../address/address-street-field"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
 import { PersonalLinkActions } from "./send-personal-link"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
+  /** «Calle y número» con sugerencias de Geoapify (issue 36): llena lo demás de la dirección. */
+  | { kind: "street"; max: number }
   | { kind: "date" }
   | { kind: "select"; options: Array<{ value: string; label: string }> }
   | { kind: "country" }
@@ -74,7 +78,7 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
     const docType = typeof stored.docType === "string" ? stored.docType : null
     const maritalStatus = typeof stored.maritalStatus === "string" ? stored.maritalStatus : null
     const addressFields: SectionField[] = [
-      { key: "address", label: "Calle y número", type: { kind: "text", max: 500, wide: true } },
+      { key: "address", label: "Calle y número", type: { kind: "street", max: 500 } },
       { key: "addressCity", label: address.cityLabel, type: { kind: "text", max: 100 } },
       ...(address.districtLabel
         ? [{ key: "addressDistrict" as const, label: address.districtLabel, type: { kind: "text" as const, max: 100 } }]
@@ -257,6 +261,7 @@ export function FiliacionSectionDrawer({
   const profile = useClinicalProfile()
   const countryCode = normalizeCountry(profile.country ?? undefined)
   const countries = useMemo(() => countryChoices(profile.country), [profile.country])
+  const patientAddressSource = useMemo(() => staffAddressSource("paciente"), [])
   const source = (patient ?? person ?? {}) as unknown as Partial<Record<string, unknown>>
   const sections = useSectionFields(source)
   const completing = section === "completar"
@@ -389,7 +394,7 @@ export function FiliacionSectionDrawer({
           const id = `${uid}-${field.key}`
           const value = values[field.key] ?? ""
           const t = field.type
-          const wide = (t.kind === "text" && t.wide) || t.kind === "insurance"
+          const wide = (t.kind === "text" && t.wide) || t.kind === "insurance" || t.kind === "street"
           return (
             <Field key={field.key} className={wide ? "sm:col-span-2" : undefined}>
               <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
@@ -402,6 +407,23 @@ export function FiliacionSectionDrawer({
                     </option>
                   ))}
                 </ChoiceSelect>
+              ) : t.kind === "street" ? (
+                <AddressStreetField
+                  id={id}
+                  value={value}
+                  maxLength={t.max}
+                  source={patientAddressSource}
+                  placeholder="Escribe la calle; te sugerimos la dirección completa"
+                  pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
+                  onChange={(next) => set(field.key, next)}
+                  onPick={(pick) => {
+                    set("addressCity", pick.city ?? "")
+                    if (profile.address.districtLabel) set("addressDistrict", pick.district ?? "")
+                    set("addressRegion", pick.region ?? "")
+                    if (profile.address.postalCode) set("addressPostalCode", pick.postalCode ?? "")
+                    if (pick.country) set("addressCountry", pick.country)
+                  }}
+                />
               ) : t.kind === "country" ? (
                 <SearchSelect
                   id={id}

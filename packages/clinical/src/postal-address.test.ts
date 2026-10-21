@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor } from "./country-profiles.js"
-import { directionsUrl, normalizePostalAddress, placeDirectionsUrl, postalAddressErrors, postalAddressText } from "./postal-address.js"
+import {
+  directionsUrl,
+  normalizePostalAddress,
+  placeDirectionsUrl,
+  postalAddressErrors,
+  postalAddressText,
+  regionFromMap,
+} from "./postal-address.js"
 
 const peru = clinicalProfileFor("PE")
 const colombia = clinicalProfileFor("CO")
@@ -28,6 +35,20 @@ describe("dirección internacional de sedes y personas (issue 36)", () => {
     expect(postalAddressErrors(colombia, { region: "Antioquia" })).toEqual({})
     expect(postalAddressErrors(colombia, { postalCode: "#" })).toEqual({ postalCode: "El código postal tiene de 2 a 12 letras o números" })
     expect(postalAddressErrors(colombia, { country: "Colombia" })).toEqual({ country: "Elige el país de la lista" })
+  })
+
+  it("la región que dice un mapa se pasa a la de la lista del país, por código o por nombre", () => {
+    expect(regionFromMap(peru, { name: "Provincia de Lima" })).toBe("PE-LMA")
+    expect(regionFromMap(peru, { name: "Lima" })).toBe("PE-LIM")
+    expect(regionFromMap(peru, { name: "Provincia Constitucional del Callao" })).toBe("PE-CAL")
+    expect(regionFromMap(peru, { name: "Departamento de Cusco" })).toBe("PE-CUS")
+    expect(regionFromMap(peru, { name: "Lo que sea", code: "ARE" })).toBe("PE-ARE")
+    expect(regionFromMap(peru, { name: "Lo que sea", code: "PE-PIU" })).toBe("PE-PIU")
+    expect(regionFromMap(peru, { name: "Atlantis" })).toBeNull()
+    // Un lugar de otro país no toma una región de la lista de la clínica.
+    expect(regionFromMap(peru, { name: "Antioquia", country: "CO" })).toBeNull()
+    // Sin lista, el nombre tal cual.
+    expect(regionFromMap(colombia, { name: "Antioquia", code: "ANT" })).toBe("Antioquia")
   })
 
   it("lista para guardar: sin espacios sobrantes y con el país de la clínica si hay dirección", () => {

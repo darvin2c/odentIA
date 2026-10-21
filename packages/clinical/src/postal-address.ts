@@ -4,7 +4,7 @@
  * país (cómo se llama cada nivel, si hay lista de regiones, si se pide código
  * postal) lo dice el perfil del país; aquí no hay nada de un país concreto.
  */
-import { type ClinicalCountryProfile, regionOption } from "./country-profiles.js"
+import { type ClinicalCountryProfile, type RegionOption, regionOption } from "./country-profiles.js"
 import { ISO_COUNTRY_RE } from "./identity.js"
 
 export interface PostalAddress {
@@ -36,6 +36,49 @@ const LIMITS: Record<Exclude<PostalAddressField, "country">, number> = {
 function clean(value: string | null | undefined): string | null {
   const text = value?.trim()
   return text ? text : null
+}
+
+/** Sin tildes ni mayúsculas, para comparar nombres de lugares. */
+function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/** Cómo empiezan los nombres de región en los mapas: «Provincia de…», «Departamento de…». */
+const REGION_PREFIX = /^(departamento|provincia constitucional|provincia|region|estado|municipalidad metropolitana|gobierno regional)( (de|del|de la))? /
+
+/**
+ * La región de la lista del país que corresponde a lo que dice un mapa
+ * (Google o OpenStreetMap): por su código ISO 3166-2, con o sin el país
+ * delante, o por su nombre, primero tal cual (o uno de sus otros nombres) y
+ * después sin «Provincia de…». Sin lista, el nombre tal cual. Sin coincidencia,
+ * o si el lugar es de otro país, null: la persona la elige.
+ */
+export function regionFromMap(
+  profile: ClinicalCountryProfile,
+  found: { name?: string | null; code?: string | null; country?: string | null },
+): string | null {
+  const regions = profile.address.regions
+  if (!regions) return clean(found.name)
+  const country = clean(found.country)?.toUpperCase() ?? profile.country
+  if (country !== profile.country) return null
+  const code = clean(found.code)?.toUpperCase()
+  if (code) {
+    const full = code.includes("-") ? code : `${country}-${code}`
+    const byCode = regions.find((item) => item.code === full)
+    if (byCode) return byCode.code
+  }
+  const name = clean(found.name)
+  if (!name) return null
+  const names = (item: RegionOption) => [item.label, ...(item.aliases ?? [])].map(fold)
+  const exact = regions.find((item) => names(item).includes(fold(name)))
+  if (exact) return exact.code
+  const bare = fold(name).replace(REGION_PREFIX, "")
+  return regions.find((item) => names(item).some((label) => label.replace(REGION_PREFIX, "") === bare))?.code ?? null
 }
 
 /** El nombre de la región: el de la lista del país o, sin lista, lo escrito. */

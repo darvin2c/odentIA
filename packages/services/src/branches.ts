@@ -99,6 +99,8 @@ export interface BranchInput {
   region?: string | null
   postalCode?: string | null
   country?: string | null
+  /** La ficha de la sede en Google Maps, si se eligió de las sugerencias (issue 36). */
+  googlePlaceId?: string | null
   phone?: string | null
   email?: string | null
   /** null = hereda la zona horaria de la clínica. */
@@ -162,6 +164,7 @@ export async function createBranch(tx: Db, orgId: string, actorUserId: string, i
       organizationId: orgId,
       name: cleanName(input.name),
       ...(await branchAddress(tx, orgId, input)),
+      googlePlaceId: input.googlePlaceId?.trim() || null,
       phone: input.phone?.trim() || null,
       email: input.email?.trim() || null,
       timezone: input.timezone ?? null,
@@ -197,6 +200,7 @@ export async function updateBranch(
   const set: Partial<typeof branch.$inferInsert> = { updatedAt: new Date() }
   if (patch.name !== undefined) set.name = cleanName(patch.name)
   if (ADDRESS_KEYS.some((key) => patch[key] !== undefined)) Object.assign(set, await branchAddress(tx, orgId, patch, current))
+  if (patch.googlePlaceId !== undefined) set.googlePlaceId = patch.googlePlaceId?.trim() || null
   if (patch.phone !== undefined) set.phone = patch.phone?.trim() || null
   if (patch.email !== undefined) set.email = patch.email?.trim() || null
   if (patch.timezone !== undefined) set.timezone = patch.timezone

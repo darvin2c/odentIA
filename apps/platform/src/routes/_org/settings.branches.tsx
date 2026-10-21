@@ -36,14 +36,16 @@ import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Building2, Plus } from "lucide-react"
+import { Building2, MapPin, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
 import { placeDirectionsUrl, regionName } from "@odentia/clinical"
+import { AddressStreetField } from "../../components/address/address-street-field"
 import { BranchWarehouses } from "../../components/settings/branch-warehouses"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import { ChoiceSelect } from "../../components/ui/choice-select"
+import { staffAddressSource } from "../../lib/address-suggestions"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
@@ -84,6 +86,7 @@ const branchSchema = z.object({
   region: z.string(),
   postalCode: z.string(),
   country: z.string(),
+  googlePlaceId: z.string().nullable(),
   // El campo de teléfono emite E.164 (o `null` si se deja vacío).
   phone: z
     .string()
@@ -103,6 +106,7 @@ const emptyValues: BranchFormValues = {
   region: "",
   postalCode: "",
   country: "",
+  googlePlaceId: null,
   phone: null,
   timezoneInherited: true,
   timezone: null,
@@ -119,6 +123,7 @@ function branchValues(branch: Branch | null): BranchFormValues {
     region: branch.region ?? "",
     postalCode: branch.postalCode ?? "",
     country: branch.country ?? "",
+    googlePlaceId: branch.googlePlaceId ?? null,
     phone: branch.phone ?? null,
     timezoneInherited: branch.timezone === null,
     timezone: branch.timezone ?? null,
@@ -155,6 +160,9 @@ function BranchesPage() {
   const clinical = useClinicalProfile()
   const countries = useMemo(() => countryChoices(clinical.country), [clinical.country])
   const clinicName = profile.data?.tradeName || profile.data?.legalName || null
+  const sedeAddressSource = useMemo(() => staffAddressSource("sede"), [])
+  /** El nombre con que la sede aparece en Google, si se eligió así (solo mientras se edita). */
+  const [placeName, setPlaceName] = useState<string | null>(null)
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -182,6 +190,7 @@ function BranchesPage() {
         region: values.region.trim() || null,
         postalCode: values.postalCode.trim() || null,
         country: values.country || null,
+        googlePlaceId: values.googlePlaceId,
         phone: values.phone || null,
         // `null` = la sede hereda la zona horaria de la clínica.
         timezone: values.timezoneInherited ? null : values.timezone || null,
@@ -245,6 +254,7 @@ function BranchesPage() {
       // `reset()` sin valores limpia touched/errores y deja que el render
       // siguiente cargue la fila.
       form.reset()
+      setPlaceName(null)
       setEditing(branch)
       setFormOpen(true)
     },
@@ -429,15 +439,57 @@ function BranchesPage() {
         {(field) => (
           <Field>
             <FieldLabel htmlFor="branch-address">Calle y número</FieldLabel>
-            <Input
+            {/* Google sugiere la calle o la sede por su nombre (issue 36); lo escrito a mano sirve igual. */}
+            <AddressStreetField
               id="branch-address"
-              maxLength={300}
               value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
+              source={sedeAddressSource}
+              placeholder="La calle o el nombre de la sede en Google Maps"
+              pickedHint="Lo llenó Google Maps; puedes corregirlo. Agrega el interior en la calle."
+              onChange={(next) => {
+                field.handleChange(next)
+                // Escribir a mano suelta la ficha de Google: «Cómo llegar» buscará lo escrito.
+                if (form.getFieldValue("googlePlaceId")) {
+                  form.setFieldValue("googlePlaceId", null)
+                  setPlaceName(null)
+                }
+              }}
+              onPick={(pick) => {
+                form.setFieldValue("city", pick.city ?? "")
+                form.setFieldValue("district", pick.district ?? "")
+                form.setFieldValue("region", pick.region ?? "")
+                form.setFieldValue("postalCode", pick.postalCode ?? "")
+                if (pick.country) form.setFieldValue("country", pick.country)
+                form.setFieldValue("googlePlaceId", pick.placeId)
+                setPlaceName(pick.placeName)
+              }}
             />
           </Field>
         )}
       </form.Field>
+      <form.Subscribe selector={(state) => state.values}>
+        {(values) => {
+          const url = values.googlePlaceId
+            ? placeDirectionsUrl(clinical, {
+                name: clinicName,
+                address: { line: values.addressLine1, city: values.city, region: values.region, country: values.country },
+                placeId: values.googlePlaceId,
+              })
+            : null
+          return url ? (
+            <div className="flex items-center gap-3 rounded-xl bg-primary-soft px-3 py-2.5 text-primary-soft-foreground">
+              <MapPin aria-hidden className="size-4 shrink-0" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-xs">«Cómo llegar» abre su ficha de Google Maps</span>
+                {placeName ? <span className="truncate text-sm font-semibold">{placeName}</span> : null}
+              </span>
+              <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold underline-offset-4 hover:underline">
+                Ver ↗
+              </a>
+            </div>
+          ) : null
+        }}
+      </form.Subscribe>
       {/* Los mismos niveles que la dirección del paciente, con los nombres del país. */}
       <div className="grid gap-4 sm:grid-cols-2">
         <form.Field name="city">

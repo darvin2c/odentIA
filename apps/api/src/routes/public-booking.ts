@@ -10,6 +10,8 @@ import {
   decideSaasPublicAccess,
   getBookingLinkRegistrationForm,
   getBranchDirections,
+  suggestAddresses,
+  type AddressProvider,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkPaper,
@@ -107,6 +109,8 @@ const messagesBody = z.strictObject({
   tipo: z.enum(["recordatorio", "seguimiento", "novedades", "ninguno"]),
   recibir: z.boolean(),
 })
+// Lo escrito en «Calle y número» del registro o de «Tus datos» (issue 36): va en el cuerpo.
+const addressBody = z.strictObject({ q: z.string().max(200), session: z.uuid() })
 // «Tus papeles»: el token va en el cuerpo, nunca en la dirección (registros de acceso, proxies, Referer).
 const paperBody = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
 export type BookingRemoteAddress = (c: Context) => string | undefined
@@ -117,7 +121,13 @@ export type BookingRemoteAddress = (c: Context) => string | undefined
  * entrega lo guardado. Límites locales de una instancia, sin confiar en
  * cabeceras del cliente.
  */
-export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; remoteAddress?: BookingRemoteAddress }) {
+export function createPublicBookingRoute(deps: {
+  db: Db
+  secretsKey: Buffer
+  remoteAddress?: BookingRemoteAddress
+  /** Quién sugiere la dirección de la persona (Geoapify, issue 36); null: los campos de siempre. */
+  addressProvider?: AddressProvider | null
+}) {
   const app = new Hono<{ Variables: { bookingOrganization: { id: string } } }>()
   const buckets = new Map<string, { expiresAt: number; get: number; post: number }>()
   const unavailable = (c: Context) => c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
@@ -201,6 +211,16 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
   app.get("/:slug/directions/:branch", (c) =>
     answer(c, 200, () => inOrg(c, (tx, orgId) => getBranchDirections(tx, orgId, c.req.param("branch") ?? ""))),
   )
+
+  // Sugerencias para la dirección que escribe la persona (issue 36): sin token,
+  // con el límite por clínica y dirección de esta ruta y el tope diario de la clínica.
+  app.post("/:slug/address", async (c) => {
+    const body = addressBody.safeParse(await bodyOf(c))
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa lo escrito"), 400)
+    return answer(c, 200, () =>
+      inOrg(c, (tx, orgId) => suggestAddresses(tx, orgId, deps.addressProvider, "paciente", { text: body.data.q, session: body.data.session })),
+    )
+  })
 
   app.get("/:slug/slots", async (c) => {
     const query = slotsQuery.safeParse(c.req.query())

@@ -435,6 +435,20 @@
       "when": 1792602211924,
       "tag": "0061_sede_enlace_y_lugar",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792603040589,
+      "tag": "0062_direcciones_sugeridas",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1792603043577,
+      "tag": "0063_direcciones_sugeridas_reglas",
+      "breakpoints": true
     }
   ]
 }

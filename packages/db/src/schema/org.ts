@@ -4,10 +4,12 @@ import {
   boolean,
   char,
   check,
+  date,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -119,6 +121,28 @@ export const branch = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("branch_org_slug_uidx").on(table.organizationId, table.slug)],
+)
+
+/**
+ * Búsquedas de direcciones de cada clínica por día (issue 36): el tope diario
+ * de las sugerencias de la sede (Google) y del paciente (Geoapify). Solo la
+ * cuenta: lo escrito no se guarda.
+ */
+export const addressLookupDay = pgTable(
+  "address_lookup_day",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id),
+    day: date("day").notNull(),
+    purpose: text("purpose").notNull(),
+    searches: integer("searches").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.day, table.purpose] }),
+    check("address_lookup_day_purpose_check", sql`${table.purpose} in ('sede', 'paciente')`),
+    check("address_lookup_day_searches_check", sql`${table.searches} >= 0`),
+  ],
 )
 
 export const auditEvent = pgTable(

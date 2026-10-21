@@ -2,8 +2,9 @@ import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-pat
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { RegistrationQuestionnaire } from "../components/patient/registration-questionnaire"
+import { publicAddressSource } from "../lib/address-suggestions"
 import { ApiError } from "../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
 import { setOrgLocale } from "../lib/locale"
@@ -27,6 +28,8 @@ function PublicRegistrationPage() {
   const { token, via } = Route.useSearch()
   const queryClient = useQueryClient()
   const slug = orgSlugFromHostname(requestHostname())
+  // La dirección se sugiere por la página de la clínica (issue 36).
+  const addressSource = useMemo(() => (slug ? publicAddressSource(slug) : undefined), [slug])
   const [submissionId] = useState(() => crypto.randomUUID())
   /** Lo que dice la pantalla final: la clínica y de quién recibió los datos. */
   const [done, setDone] = useState<{ org: string; name: string; forOther: boolean } | null>(null)
@@ -147,6 +150,7 @@ function PublicRegistrationPage() {
           today={info.today}
           countryCode={info.countryCode ?? null}
           ownRecord={ownRecord}
+          addressSource={addressSource}
           onSubmit={async (answers) => {
             try {
               const result = await submitPublicRegistration(slug, {

@@ -5,7 +5,7 @@ import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, secretsKeyFromEnv } from "@odentia/services"
+import { createStorage, geoapifyProvider, googlePlacesProvider, secretsKeyFromEnv } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -81,6 +81,11 @@ const app = createApp({
   },
   metaSignup: metaSignupFromEnv(env),
   embedder: embedderFromEnv(env),
+  addressProviders: {
+    sede: env.GOOGLE_MAPS_API_KEY ? googlePlacesProvider(env.GOOGLE_MAPS_API_KEY) : null,
+    paciente: env.GEOAPIFY_API_KEY ? geoapifyProvider(env.GEOAPIFY_API_KEY) : null,
+  },
+  geoapifyDailyLimit: env.GEOAPIFY_DAILY_LIMIT,
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
     microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },
