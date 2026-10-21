@@ -465,4 +465,21 @@ describe("Argos sobre las vistas", () => {
       await ownerDb.update(contact).set({ displayName: "Otra persona" }).where(eq(contact.id, twin!.id))
     }
   })
+
+  it("una respuesta junta varios cálculos del mismo periodo en una sola consulta, que se vuelve a correr igual", async () => {
+    const figure = (clave: string) => ({ clave, por: [], filtros: [], parte_del_total: false, limite: null, orden: "mayor" })
+    const calc = (id: string, clave: string) => ({ name: "calcular", args: { id, cifra: figure(clave), sql: "", periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })
+    const model = new ScriptedModel([
+      { tools: [calc("c1", "te_deben"), calc("c2", "deuda_vencida")] },
+      { tipo: "parcial", calculo: "c1, c2", frase: "Te deben {te_deben_dinero}; de eso, hace más de 30 días {c2_deuda_vencida_dinero}.", frase_vacia: "Nadie debe.", falta: "odentIA no da consejos." },
+    ])
+    const answer = await ask(model, "¿A quién cobro primero?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^Te deben S\/\s?0\.00; de eso, hace más de 30 días S\/\s?0\.00\.$/)
+    expect(answer.source).toBe("oficial")
+    expect(answer.query).toMatch(/^with c1 as \(.+\), c2 as \(.+\) select c1\.\*, c2\.deuda_vencida_dinero as c2_deuda_vencida_dinero from c1 left join c2 on true$/)
+    expect(answer.how).toMatch(/Lo que debe cada persona hoy.+más de 30 días/)
+    const again = await rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: {} })
+    expect(again.text).toBe(answer.text)
+  })
 })

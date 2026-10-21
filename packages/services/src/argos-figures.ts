@@ -77,6 +77,7 @@ export const ARGOS_CUT_WORDS: Record<ArgosCut, string> = {
 const TIME_CUTS: Partial<Record<ArgosCut, string>> = {
   mes: "date_trunc('month', dia)::date",
   semana: "date_trunc('week', dia)::date",
+  dia_semana: "(array['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'])[extract(isodow from dia)::int]",
 }
 
 /** Los cortes que se filtran por un nombre de la clínica: se comparan con los de verdad antes de calcular. */
@@ -154,7 +155,7 @@ export interface ArgosFigure {
 // Sin filas, una suma es 0 (como Reportes), no un vacío.
 const COUNT = "coalesce(sum(v), 0)"
 const RATE = "round(100.0 * sum(a) / nullif(sum(n), 0))"
-const WHEN = ["mes", "semana", "dia"] as const satisfies readonly ArgosCut[]
+const WHEN = ["mes", "semana", "dia", "dia_semana"] as const satisfies readonly ArgosCut[]
 
 /** Las vistas de una fuente, con o sin su llave: la cifra que no se puede leer no se ofrece. */
 export const ARGOS_FIGURES: readonly ArgosFigure[] = [
@@ -1277,10 +1278,10 @@ export function compileArgosFigure(
   // En el tiempo, en su orden; lo demás, de mayor a menor (o al revés), y a igual cifra por nombre.
   const first = cuts[0] as ArgosCut | undefined
   const order =
-    first && (WHEN as readonly string[]).includes(first)
-      ? `${first}`
-      : first === "dia_semana"
-        ? WEEKDAY_ORDER
+    first === "dia_semana"
+      ? WEEKDAY_ORDER
+      : first && (WHEN as readonly string[]).includes(first)
+        ? `${first}`
         : first === "hora"
           ? "hora"
           : cuts.length

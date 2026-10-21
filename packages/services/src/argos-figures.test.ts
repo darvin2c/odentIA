@@ -105,7 +105,7 @@ describe("las cifras oficiales de Argos", () => {
     })
     expect(compile({ cifra: "gastos", por: ["profesional"] })).toMatchObject({
       problem: expect.stringMatching(
-        /Lo gastado se separa y filtra solo por mes, semana, dia, sede, categoria/,
+        /Lo gastado se separa y filtra solo por mes, semana, dia, dia_semana, sede, categoria/,
       ),
     })
     expect(compile({ cifra: "cobrado", por: ["color"] })).toMatchObject({
@@ -137,5 +137,14 @@ describe("las cifras oficiales de Argos", () => {
     expect(
       compileArgosFigure({ cifra: "cobrado" }, { key: "recepcion", compare: false, names: NAMES }),
     ).toMatchObject({ problem: expect.stringMatching(/no es una cifra oficial que puedas pedir/) })
+  })
+
+  it("toda cifra con fecha se separa por día de la semana, de lunes a domingo", () => {
+    const out = compile({ cifra: "cobrado", por: ["dia_semana"] })
+    if ("problem" in out) throw new Error(out.problem)
+    expect(out.sql).toContain("from cobros")
+    expect(out.sql).toContain("[extract(isodow from dia)::int] as dia_semana")
+    expect(out.sql).toMatch(/order by case dia_semana when 'lunes' then 1/)
+    expect(reviewArgosQuery(out.sql).ok).toBe(true)
   })
 })

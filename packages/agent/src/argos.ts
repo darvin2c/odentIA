@@ -122,7 +122,10 @@ const planSchema = z.object({
   tipo: z
     .enum(["consulta", "parcial", "no_existe"])
     .describe("consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."),
-  calculo: z.string().default("").describe("El id del cálculo que responde la pregunta; vacío en no_existe."),
+  calculo: z
+    .string()
+    .default("")
+    .describe("El id del cálculo que responde la pregunta; para juntar varios del mismo periodo, sus ids separados por coma («c1, c2»): el primero puede tener varias filas, los demás una. Vacío en no_existe."),
   sql: z.string().default("").describe("Vacía: la consulta es la del cálculo."),
   frase: z
     .string()
@@ -161,7 +164,8 @@ const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de u
 1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
 3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.
-4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos.
+4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos. Para juntar cifras de varios cálculos del mismo periodo (un consejo, una comparación de dos cuentas), pon sus ids («c1, c2») y nombra las columnas de los demás con su id delante: {c2_te_deben_dinero}.
+Si ya calculaste algo que sirve, responde con eso (tipo parcial si falta una parte): no_existe es solo cuando nada de lo que se puede calcular responde la pregunta. «Facturar» se responde con lo cobrado, diciendo que odentIA no emite facturas.
 Tienes 4 turnos como mucho; en el último solo puedes responder.
 
 El periodo (las fechas las pone odentIA):
@@ -675,6 +679,36 @@ export async function askArgos(
   }
 
   /**
+   * Varios cálculos del mismo periodo en una sola consulta (un consejo junta
+   * lo pendiente de varias cuentas): el primero con sus filas y, al lado, las
+   * columnas de los demás, que traen una fila, con su id delante
+   * (`c2_te_deben_dinero`). Es una sola consulta con los mismos huecos: se
+   * vuelve a correr con otro periodo, se fija y se descarga igual.
+   */
+  const joinCalcs = async (parts: ArgosCalc[]): Promise<ArgosCalc | { problem: string }> => {
+    const [main, ...rest] = parts
+    if (!main) return { problem: "no hay cálculos que juntar" }
+    const same = (calc: ArgosCalc) => JSON.stringify(calc.choice) === JSON.stringify(main.choice)
+    if (!rest.every(same)) return { problem: "solo se juntan cálculos del mismo periodo, la misma comparación y la misma sede" }
+    const wide = rest.find((calc) => calc.result.rows.length > 1)
+    if (wide) return { problem: `${wide.id} trae varias filas: al juntar, solo el primero puede tener varias` }
+    const extra = rest.flatMap((calc) => calc.result.columns.map((column) => `${calc.id}.${column.name} as ${calc.id}_${column.name}`))
+    const sql = `with ${parts.map((calc) => `${calc.id} as (${calc.sql})`).join(", ")} select ${[`${main.id}.*`, ...extra].join(", ")} from ${main.id}${rest.map((calc) => ` left join ${calc.id} on true`).join("")}`
+    const bound = bindArgosPeriod(sql, main.binding.period, main.binding.branch?.name ?? null, main.binding.patient)
+    if ("problem" in bound) return bound
+    try {
+      const result = await run(bound.sql)
+      // Una cifra oficial sigue siéndolo si todas lo son; «Así lo calculé» las nombra a todas.
+      const official = parts.every((calc) => calc.figure)
+      const how = parts.map((calc) => calc.how).filter(Boolean).join(" ")
+      return { ...main, id: parts.map((calc) => calc.id).join("+"), sql, result, figure: official ? main.figure : null, how: how || null }
+    } catch (error) {
+      if (error instanceof ArgosQueryError && error.code !== "PERMISO") return { problem: `al juntar, la base no lo aceptó: ${error.message}` }
+      throw error
+    }
+  }
+
+  /**
    * La respuesta del modelo con su cálculo: la frase se revisa contra lo que
    * salió. Una consulta escrita ahí mismo (sin calcular antes) corre como antes
    * de los pasos. `lenient`: la segunda vez, una frase que se lee mal se usa igual.
@@ -683,9 +717,18 @@ export async function askArgos(
     plan: ArgosPlan,
     lenient: boolean,
   ): Promise<{ plan: ArgosPlan; result: ArgosQueryResult; binding: ArgosBinding; calc: ArgosCalc | null } | { problem: string; code: string }> => {
-    const id = plan.calculo.trim()
-    const calc = id ? calcs.get(id) : undefined
-    if (id && !calc) return { problem: `no hay un cálculo «${id}»: usa el id de uno de tus cálculos que corrió`, code: "HUECOS" }
+    const ids = plan.calculo
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+    const missing = ids.find((item) => !calcs.has(item))
+    if (missing) return { problem: `no hay un cálculo «${missing}»: usa el id de uno de tus cálculos que corrió`, code: "HUECOS" }
+    let calc = ids[0] ? calcs.get(ids[0]) : undefined
+    if (calc && ids.length > 1) {
+      const joined = await joinCalcs(ids.map((item) => calcs.get(item) as ArgosCalc))
+      if ("problem" in joined) return { problem: joined.problem, code: "HUECOS" }
+      calc = joined
+    }
     let result: ArgosQueryResult
     let binding: ArgosBinding
     let full: ArgosPlan
@@ -1036,9 +1079,9 @@ function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQuer
   return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone, result.rows.length ? argosRepeatedColumns(plan.frase, result) : new Set()) }
 }
 
-/** Lo que no existe (o existe a medias) puede venir sin consulta: se responde con la frase y lo más cercano. */
+/** Lo que no existe (o existe a medias) puede venir sin consulta ni cálculo: se responde con la frase y lo más cercano. */
 function withoutQuery(plan: ArgosPlan): boolean {
-  return plan.tipo !== "consulta" && !plan.sql.trim()
+  return plan.tipo !== "consulta" && !plan.sql.trim() && !plan.calculo.trim()
 }
 
 /** Lo más cercano que sí existe, desde un cálculo que ya corrió; sin filas o con huecos que no están, no se ofrece. */
