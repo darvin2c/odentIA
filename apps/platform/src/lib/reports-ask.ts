@@ -68,6 +68,8 @@ export interface PinnedArgosAnswer {
   title: string
   screen: ArgosScreen
   how: string
+  /** De dónde sale (D21): la misma cuenta de Reportes o un cálculo de Argos. */
+  source: "oficial" | "argos"
   /** Respondió solo una parte: fijada lo sigue diciendo, con lo que falta. */
   partial: boolean
   missing: string | null

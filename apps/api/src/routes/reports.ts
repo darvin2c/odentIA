@@ -331,6 +331,8 @@ export function createReportsRoute(deps: ReportsDeps) {
             title: pin.answer.titulo,
             screen: pin.answer.pantalla,
             how: shown?.how ?? pin.answer.como,
+            // De dónde sale (D21); las de antes de la fase 6 eran consultas de Argos.
+            source: pin.answer.fuente ?? "argos",
             partial: pin.answer.parcial === true,
             missing: pin.answer.falta?.trim() || null,
             period: shown?.period ?? null,

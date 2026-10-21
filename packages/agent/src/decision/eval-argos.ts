@@ -133,10 +133,11 @@ let total = 0
 for (const question of bank.preguntas.filter((item) => !only.length || only.includes(item.id))) {
   const uses: AiUsageEntry[] = []
   const problems: string[] = []
+  const steps: string[] = []
   const started = Date.now()
   const answer = await withAiMeter(
     () =>
-      askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto, ...(at ? { now: at } : {}) }),
+      askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem), onStep: (step) => steps.push(step) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto, ...(at ? { now: at } : {}) }),
     async (entries) => {
       uses.push(...entries)
     },
@@ -154,6 +155,9 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     argos: said(answer),
     como: answer.kind === "respuesta" ? answer.how : null,
     sql: answer.kind === "respuesta" ? answer.query : null,
+    fuente: answer.kind === "respuesta" ? answer.source : null,
+    elige: answer.kind === "respuesta" && answer.choose ? `${answer.choose.message} (${answer.choose.options.map((option) => option.label).join("; ")})` : null,
+    pasos: steps,
     llamadas: writes,
     problemas: problems,
     usd: micros / 1_000_000,
@@ -163,9 +167,12 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   console.log(`\n### ${row.id} · ${row.texto}${row.espera === "trampa" ? " (trampa)" : ""}`)
   if (row.correcta) console.log(`- Correcta: ${row.correcta}`)
   if (row.periodo) console.log(`- Periodo (arriba de la respuesta): ${row.periodo}`)
+  if (row.elige) console.log(`- Antes de responder, la pantalla pregunta: ${row.elige}`)
   console.log(`- Argos: ${row.argos}`)
+  if (row.fuente) console.log(`- Marca: ${row.fuente === "oficial" ? "Cifra oficial" : "Cálculo de Argos"}`)
   if (row.como) console.log(`- Cómo: ${row.como}`)
   if (row.sql) console.log(`- SQL: ${String(row.sql).replace(/\s+/g, " ")}`)
+  if (steps.length) console.log(`- Pasos: ${steps.join(" → ")}`)
   for (const problem of problems) console.log(`- La base rechazó: ${problem}`)
   console.log(`- ${writes} llamada(s) al modelo que escribe · USD ${row.usd.toFixed(6)} · ${row.ms} ms`)
 }

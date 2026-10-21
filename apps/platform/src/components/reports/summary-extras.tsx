@@ -281,6 +281,9 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
                   ) : null}
                   <ArgosShownView shown={pin.answer} title={pin.title} />
                   {pin.missing ? <p className="text-[13px] text-muted-foreground">Falta: {pin.missing}</p> : null}
+                  <Badge variant={pin.source === "oficial" ? "soft" : "outline"} className="self-start">
+                    {pin.source === "oficial" ? "Cifra oficial · la misma cuenta de Reportes" : "Cálculo de Argos"}
+                  </Badge>
                   {pin.how ? (
                     <p className="text-[13px] text-muted-foreground">
                       <span className="font-bold text-foreground">Así lo calculé:</span> {pin.how}

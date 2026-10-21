@@ -105,6 +105,8 @@ for (const width of [1440, 390]) {
       // El periodo lo dice odentIA: en la frase y en el botón de arriba, con las palabras de Reportes.
       await expect(answers.getByText(/^(Del|El) .+ se cobró S\/\s?400\.00\.$/)).toBeVisible()
       await expect(answers.getByText("Así lo calculé:")).toBeVisible()
+      // De dónde sale (D21): el modelo de demostración consulta por su cuenta.
+      await expect(answers.getByText("Cálculo de Argos")).toBeVisible()
       const period = panel.getByRole("button", { name: /^Periodo: .+, hasta hoy\. Cambiar$/ })
       await expect(period).toBeVisible()
       await observe(page, info, "respuesta")
