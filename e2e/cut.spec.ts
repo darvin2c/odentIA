@@ -194,6 +194,7 @@ test("auth: un no-miembro no entra en otro tenant", async ({ createOwner }) => {
   const first = await createOwner("tenant-a")
   const second = await createOwner("tenant-b")
   await gotoHydrated(second.page, tenant(first.org.slug, "/settings/branches"))
-  await expect(second.page).toHaveURL(`${PANEL}/`)
+  // Vuelve a «Elige tu clínica» sin entrar sola a la suya (`?cambiar=1`, issue 114).
+  await expect(second.page).toHaveURL(`${PANEL}/?cambiar=1`)
   await expect(second.page.getByText(first.org.name)).toHaveCount(0)
 })
