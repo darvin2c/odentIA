@@ -55,6 +55,7 @@ import {
   unpinReportAnswer,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
+import { stream } from "hono/streaming"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -83,7 +84,9 @@ const argosInput = z
 const argosRouteInput = z.object({ text: z.string().trim().min(2).max(500) }).strict()
 
 /** Una respuesta de Argos ya dada: la principal o una de las de seguir. */
-const argosAnswerRef = z.object({ questionId: z.uuid(), option: z.number().int().min(0).max(2).nullable().optional() }).strict()
+const argosAnswerRef = z
+  .object({ questionId: z.uuid(), option: z.number().int().min(0).max(2).nullable().optional(), patientId: z.uuid().optional() })
+  .strict()
 
 const argosPeriod = z.string().refine(isArgosPeriod, "Periodo no reconocido")
 
@@ -92,7 +95,7 @@ const argosPeriod = z.string().refine(isArgosPeriod, "Periodo no reconocido")
  * (D13): sin valor, lo de la pregunta; `branchId: null`, todas las sedes.
  */
 const argosChoiceInput = z
-  .object({ period: argosPeriod.optional(), other: argosPeriod.nullable().optional(), branchId: z.uuid().nullable().optional() })
+  .object({ period: argosPeriod.optional(), other: argosPeriod.nullable().optional(), branchId: z.uuid().nullable().optional(), patientId: z.uuid().optional() })
   .strict()
 
 /** Lo mismo en la dirección de la descarga: `branch=todas` es todas las sedes. */
@@ -100,6 +103,7 @@ const argosChoiceQuery = z.object({
   period: argosPeriod.optional(),
   other: argosPeriod.optional(),
   branch: z.union([z.uuid(), z.literal("todas")]).optional(),
+  patient: z.uuid().optional(),
 })
 
 const goalInput = z
@@ -200,11 +204,11 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = argosInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const body = parsed.data
-    return runService(c, 200, () =>
+    const ask = (onStep?: (text: string) => void) =>
       meterAiUse(deps.db, orgId, "reportes", () =>
         askArgos(
           deps.db,
-          { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey },
+          { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey, ...(onStep ? { onStep } : {}) },
           {
             orgId,
             userId,
@@ -215,8 +219,24 @@ export function createReportsRoute(deps: ReportsDeps) {
             routed: body.routed === true,
           },
         ),
-      ),
-    )
+      )
+    // Quien pide líneas (la pantalla) recibe cada paso a medida que pasa (D22) y al final la respuesta; si no, la respuesta entera.
+    if (!(c.req.header("accept") ?? "").includes("application/x-ndjson")) return runService(c, 200, () => ask())
+    c.header("content-type", "application/x-ndjson; charset=utf-8")
+    c.header("cache-control", "no-store")
+    return stream(c, async (out) => {
+      const send = (value: unknown) => out.write(`${JSON.stringify(value)}\n`)
+      try {
+        const data = await ask((text) => void send({ step: text }))
+        await send({ data })
+      } catch (error) {
+        if (error instanceof ServiceError) await send({ ...errorBody(c, error.code, error.message), status: error.status })
+        else {
+          console.error(error)
+          await send({ ...errorBody(c, "INTERNAL", "No se pudo responder. Prueba de nuevo."), status: 500 })
+        }
+      }
+    })
   })
 
   /** La fila del buscador (D1): Jev decide con solo el texto si es una pregunta de los datos, de la Ayuda o algo para buscar. */
@@ -242,7 +262,9 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = argosAnswerRef.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, async (tx) => pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null))),
+      withOrgContext(deps.db, orgId, async (tx) =>
+        pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null, parsed.data.patientId)),
+      ),
     )
   })
 
@@ -267,11 +289,11 @@ export function createReportsRoute(deps: ReportsDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const seen = argosChoiceQuery.safeParse({ period: c.req.query("period"), other: c.req.query("other"), branch: c.req.query("branch") })
     if (!seen.success) return validationError(c, seen.error.issues)
-    const { branch, ...periods } = seen.data
+    const { branch, patient, ...periods } = seen.data
     const choice = { ...periods, ...(branch === undefined ? {} : { branchId: branch === "todas" ? null : branch }) }
     return sendCsv(c, async () => {
       const { answer, zone, query } = await withOrgContext(deps.db, orgId, async (tx) => {
-        const answer = await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null)
+        const answer = await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null, patient)
         const zone = await getOrgLocale(tx, orgId)
         return { answer, zone, query: boundArgosQuery(answer.sql, await argosChoiceOf(tx, orgId, answer, choice, zone, new Date())) }
       })

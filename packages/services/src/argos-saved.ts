@@ -33,11 +33,24 @@ export interface ArgosStoredAnswer {
   periodo?: ArgosPeriodSpec | null
   /** La sede que nombró la pregunta o la de Reportes (D13), si la consulta la usa. */
   sede?: string | null
+  /** De dónde sale (D21): una cifra oficial (con su clave) o una consulta de Argos. Sin valor: de antes de la fase 6. */
+  fuente?: "oficial" | "argos"
+  cifra?: string | null
+  /** El paciente elegido entre los que se llaman igual (D23), si la consulta usa `:paciente`. */
+  paciente?: string | null
 }
 
 /** Lo que guarda una pregunta además de su consulta: sus frases y las consultas para seguir (null: no se ofreció). */
 export interface ArgosStoredPlan extends Omit<ArgosStoredAnswer, "sql"> {
-  seguir: Array<{ etiqueta: string; sql: string; frase: string; frase_vacia: string; como?: string } | null>
+  seguir: Array<{ etiqueta: string; sql: string; frase: string; frase_vacia: string; como?: string; fuente?: "oficial" | "argos"; cifra?: string | null } | null>
+  /** Los pacientes que se llaman como el de la pregunta (D23): la pantalla pregunta cuál, sin volver al modelo. */
+  pacientes?: ArgosPatientOption[]
+}
+
+/** Un paciente para elegir entre los que se llaman igual: su id y lo que lo distingue, sin datos clínicos. */
+export interface ArgosPatientOption {
+  id: string
+  label: string
 }
 
 /** La consulta y el plan guardados de una pregunta; solo los ve quien preguntó. */
@@ -57,9 +70,18 @@ export async function getArgosPlan(tx: Db, orgId: string, userId: string, questi
  * La respuesta guardada de una pregunta de la clínica: la principal o, con
  * `option`, una de las de seguir (con el título y la pantalla de la pregunta).
  */
-export async function getArgosAnswer(tx: Db, orgId: string, userId: string, questionId: string, option: number | null = null): Promise<ArgosStoredAnswer> {
+export async function getArgosAnswer(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  questionId: string,
+  option: number | null = null,
+  /** El paciente elegido entre los que se llaman igual (D23): solo uno de los que se ofrecieron. */
+  patientId?: string,
+): Promise<ArgosStoredAnswer> {
   const row = await getArgosPlan(tx, orgId, userId, questionId)
-  const plan = row.plan
+  if (patientId !== undefined && !row.plan.pacientes?.some((item) => item.id === patientId)) throw validation("Ese paciente no es uno de los que se ofrecieron")
+  const plan = patientId === undefined ? row.plan : { ...row.plan, paciente: patientId }
   if (option === null)
     return {
       sql: row.query,
@@ -71,6 +93,8 @@ export async function getArgosAnswer(tx: Db, orgId: string, userId: string, ques
       ...(plan.parcial ? { parcial: true, falta: plan.falta ?? "" } : {}),
       ...(plan.periodo !== undefined ? { periodo: plan.periodo } : {}),
       ...(plan.sede !== undefined ? { sede: plan.sede } : {}),
+      ...(plan.fuente ? { fuente: plan.fuente, cifra: plan.cifra ?? null } : {}),
+      ...(plan.paciente ? { paciente: plan.paciente } : {}),
     }
   const follow = plan.seguir[option]
   if (!follow) throw notFound("Opción de la respuesta")
@@ -81,9 +105,11 @@ export async function getArgosAnswer(tx: Db, orgId: string, userId: string, ques
     como: follow.como?.trim() || plan.como,
     titulo: `${plan.titulo} · ${follow.etiqueta}`,
     pantalla: plan.pantalla,
-    // Las de seguir comparten el periodo y la sede de la respuesta.
+    // Las de seguir comparten el periodo, la sede y el paciente de la respuesta.
     ...(plan.periodo !== undefined ? { periodo: plan.periodo } : {}),
     ...(plan.sede !== undefined ? { sede: plan.sede } : {}),
+    ...(follow.fuente ? { fuente: follow.fuente, cifra: follow.cifra ?? null } : {}),
+    ...(plan.paciente ? { paciente: plan.paciente } : {}),
   }
 }
 
@@ -139,6 +165,8 @@ export interface ArgosChoice {
   other?: string | null | undefined
   /** null: todas las sedes; sin valor: la de la pregunta. */
   branchId?: string | null | undefined
+  /** El paciente elegido entre los que se llaman igual (D23). */
+  patientId?: string | undefined
 }
 
 /** El periodo y la sede con que se corre una respuesta guardada. */
@@ -148,6 +176,8 @@ export interface ArgosBound {
   period: ArgosResolvedPeriod | null
   branch: { id: string; name: string } | null
   branches: Array<{ id: string; name: string }>
+  /** El paciente de `:paciente`, si la consulta lo usa. */
+  patient: string | null
 }
 
 /**
@@ -160,13 +190,16 @@ export interface ArgosBound {
 export async function argosChoiceOf(
   tx: Db,
   orgId: string,
-  stored: Pick<ArgosStoredAnswer, "periodo" | "sede">,
+  stored: Pick<ArgosStoredAnswer, "periodo" | "sede" | "paciente"> & { pacientes?: ArgosPatientOption[] | undefined },
   choice: ArgosChoice,
   zone: { timezone: string; locale: string },
   now: Date,
 ): Promise<ArgosBound> {
   const branches = await listArgosBranches(tx, orgId)
-  if (!stored.periodo) return { legacy: true, period: null, branch: null, branches }
+  if (!stored.periodo) return { legacy: true, period: null, branch: null, branches, patient: null }
+  // Solo uno de los que se ofrecieron: un id cualquiera no sirve.
+  if (choice.patientId !== undefined && !stored.pacientes?.some((option) => option.id === choice.patientId)) throw validation("Ese paciente no es uno de los que se ofrecieron")
+  const patient = choice.patientId ?? stored.paciente ?? null
   const spec = stored.periodo
   const period =
     spec.periodo === "a_hoy"
@@ -186,13 +219,13 @@ export async function argosChoiceOf(
     branch = branches.find((item) => item.id === choice.branchId) ?? null
     if (!branch) throw validation("Esa sede no existe o está desactivada")
   }
-  return { legacy: false, period, branch, branches }
+  return { legacy: false, period, branch, branches, patient }
 }
 
 /** La consulta guardada con el periodo y la sede puestos; la de antes de la fase 5, tal cual. */
 export function boundArgosQuery(query: string, bound: ArgosBound): string {
   if (bound.legacy) return query
-  const result = bindArgosPeriod(query, bound.period, bound.branch?.name ?? null)
+  const result = bindArgosPeriod(query, bound.period, bound.branch?.name ?? null, bound.patient)
   if ("problem" in result) throw new ServiceError("ARGOS_QUERY", 409, "Esta respuesta no se puede ver con ese periodo")
   return result.sql
 }

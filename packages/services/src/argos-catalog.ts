@@ -209,8 +209,8 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "equipo",
-    about: "Las personas del equipo de la clínica, con su rol y las especialidades que atienden.",
-    columns: "profesional, rol ('propietario'|'administración'|'odontología'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene)",
+    about: "Las personas del equipo de la clínica, con su rol y las especialidades que atienden. Quien atiende pacientes (los odontólogos, los profesionales) es atiende, no el rol: la propietaria también puede atender.",
+    columns: "profesional, rol ('propietario'|'administración'|'odontología'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene), atiende (bool: tiene horario o citas como profesional)",
     keys: ALL,
   },
 ]

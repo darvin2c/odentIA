@@ -32,10 +32,13 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 
+/** Un turno con herramientas: buscar nombres o calcular, antes de responder (D17). */
+type ToolTurn = { tools: Array<{ name: string; args: Record<string, unknown> }> }
+
 /** Modelo que responde con el plan del guion en cada llamada y guarda lo que recibió. */
 class ScriptedModel extends BaseChatModel {
   calls: BaseMessage[][] = []
-  constructor(private readonly plans: Array<Partial<ArgosPlan> | Error>) {
+  constructor(private readonly plans: Array<Partial<ArgosPlan> | ToolTurn | Error>) {
     super({})
   }
   _llmType(): string {
@@ -48,6 +51,13 @@ class ScriptedModel extends BaseChatModel {
     this.calls.push(messages)
     const next = this.plans[this.calls.length - 1]
     if (!next || next instanceof Error) throw next ?? new Error("sin guion")
+    if ("tools" in next) {
+      const message = new AIMessage({
+        content: "",
+        tool_calls: next.tools.map((call, index) => ({ name: call.name, args: call.args, id: `call-${this.calls.length}-${index}`, type: "tool_call" as const })),
+      })
+      return { generations: [{ text: "", message }] }
+    }
     const args = {
       tipo: "consulta",
       sql: "",
@@ -352,6 +362,107 @@ describe("Argos sobre las vistas", () => {
     } finally {
       // Una sede no se borra (tiene su almacén): se desactiva, y deja de ofrecerse.
       await ownerDb.update(branch).set({ isActive: false }).where(eq(branch.organizationId, ORG))
+    }
+  })
+
+  it("por pasos: pide la cifra oficial, ve el resultado sin el paciente y responde con ella, que se marca oficial (D17 a D21)", async () => {
+    const model = new ScriptedModel([
+      {
+        tools: [
+          {
+            name: "calcular",
+            args: {
+              id: "c1",
+              cifra: { clave: "cobrado", por: ["medio"], filtros: [], parte_del_total: false, limite: null, orden: "mayor" },
+              sql: "",
+              periodo: "este_mes",
+              compara: "no",
+              otro_periodo: "",
+              sede: "",
+            },
+          },
+        ],
+      },
+      { calculo: "c1", frase: "{periodo} se cobró así: {lista}.", frase_vacia: "{periodo} no se cobró nada.", titulo: "Lo cobrado por medio", pantalla: "finanzas" },
+    ])
+    const steps: string[] = []
+    const answer = await askArgos(appDb, { ...deps(model), onStep: (text) => steps.push(text) }, { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cómo nos pagaron este mes?" })
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.source).toBe("oficial")
+    expect(answer.text).toMatch(/se cobró así: Efectivo \(S\/\s?1,250\.50\)\.$/)
+    expect(answer.how).toMatch(/^Pagos del periodo menos lo anulado y lo devuelto\..* Separado por medio de pago\.$/)
+    expect(steps).toEqual(["Calculé lo cobrado, por medio de pago", "Revisando el resultado"])
+    // Argos ve la cifra para revisar su cuenta (D20), pero nunca al paciente.
+    expect(model.calls).toHaveLength(2)
+    expect(model.sent()).toMatch(/Efectivo \| 1250\.50?(\D|$)/)
+    expect(model.sent()).not.toContain(PATIENT_NAME)
+    expect((await lastQuestion())?.plan).toMatchObject({ fuente: "oficial", cifra: "cobrado" })
+  })
+
+  it("un filtro con un nombre que la clínica no tiene vuelve al modelo con los que sí tiene, sin calcular", async () => {
+    const model = new ScriptedModel([
+      {
+        tools: [
+          {
+            name: "calcular",
+            args: {
+              id: "c1",
+              cifra: { clave: "cobrado", por: [], filtros: [{ corte: "especialidad", valores: ["implantes"] }], parte_del_total: false, limite: null, orden: "mayor" },
+              sql: "",
+              periodo: "este_mes",
+              compara: "no",
+              otro_periodo: "",
+              sede: "",
+            },
+          },
+        ],
+      },
+      { tipo: "no_existe", frase: "La clínica no tiene implantes.", falta: "No hay una especialidad de implantes." },
+    ])
+    const answer = await ask(model, "¿Cuánto vendimos en implantes?")
+    expect(answer).toMatchObject({ kind: "no_existe" })
+    expect(model.sent()).toMatch(/c1: no se pudo: «implantes» no es una especialidad de la clínica/)
+  })
+
+  it("con dos pacientes que se llaman igual, la pantalla pregunta cuál; elegir no llama al modelo y solo vale uno de los ofrecidos (D23)", async () => {
+    const [twin] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: PATIENT_NAME }).returning({ id: contact.id })
+    await ownerDb.insert(patient).values({ organizationId: ORG, personId: twin!.id, patientNumber: 2 })
+    try {
+      const model = new ScriptedModel([
+        { tools: [{ name: "buscar_nombres", args: { textos: [PATIENT_NAME] } }] },
+        {
+          tools: [
+            {
+              name: "calcular",
+              args: {
+                id: "c1",
+                cifra: null,
+                sql: "select coalesce(sum(importe), 0) as pagado_dinero from cobros where paciente_id = :paciente",
+                periodo: "a_hoy",
+                compara: "no",
+                otro_periodo: "",
+                sede: "",
+              },
+            },
+          ],
+        },
+        { calculo: "c1", frase: "Pagó {pagado_dinero}.", frase_vacia: "No pagó nada.", titulo: "Lo que pagó" },
+      ])
+      const answer = await ask(model, `¿Cuánto pagó ${PATIENT_NAME}?`)
+      if (answer.kind !== "respuesta") throw new Error(answer.kind)
+      expect(answer.source).toBe("argos")
+      expect(answer.choose?.message).toBe(`Hay 2 pacientes que se llaman ${PATIENT_NAME}. ¿De cuál?`)
+      expect(answer.choose?.options.map((option) => option.label)).toEqual([expect.stringMatching(/^Paciente desde .+, sin citas atendidas$/), expect.stringMatching(/^Paciente desde .+, sin citas atendidas$/)])
+      expect(model.sent()).toMatch(/hay 2 pacientes con ese nombre/)
+      const [first, second] = answer.choose?.options ?? []
+      const pick = (patientId: string) => rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { patientId } })
+      expect((await pick(first!.id)).text).toMatch(/^Pagó S\/\s?1,250\.50\.$/)
+      expect((await pick(second!.id)).text).toMatch(/^Pagó S\/\s?0\.00\.$/)
+      expect(model.calls).toHaveLength(3)
+      await expect(pick("00000000-0000-0000-0000-000000000000")).rejects.toThrow(/no es uno de los que se ofrecieron/)
+    } finally {
+      // Sin borrar (tiene vínculos que se crean solos): deja de llamarse igual.
+      await ownerDb.update(contact).set({ displayName: "Otra persona" }).where(eq(contact.id, twin!.id))
     }
   })
 })

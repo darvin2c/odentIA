@@ -85,6 +85,22 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
   expect(await ownerDb.select().from(aiUsage).where(eq(aiUsage.organizationId, ORG))).toEqual([])
 })
 
+it("quien pide líneas recibe la respuesta al final del flujo, en el mismo formato (D22)", async () => {
+  await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
+  const response = await buildApp("owner").request("/reports/argos", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+    body: JSON.stringify({ text: "¿Cuánto cobramos este mes?" }),
+  })
+  expect(response.headers.get("content-type")).toContain("application/x-ndjson")
+  const lines = (await response.text())
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+  // El de demostración responde sin pasos: solo la línea final, como la respuesta entera.
+  expect(lines.at(-1)).toMatchObject({ data: { kind: "respuesta", source: "argos", choose: null } })
+})
+
 it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar el texto", async () => {
   await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
   const asked = await ask("owner", { text: "¿Cuánto cobramos este mes?", routed: true })

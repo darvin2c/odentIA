@@ -388,7 +388,7 @@ export function argosTodayLabel(zone: Zone, now: Date = new Date()): string {
 // --- La consulta con el periodo y la sede -----------------------------------------------
 
 /** Los nombres que el modelo escribe en la consulta; odentIA pone su valor. */
-const PLACEHOLDER = /(?<![:\w]):(dia_desde_antes|dia_hasta_antes|desde_antes|hasta_antes|dia_desde|dia_hasta|desde|hasta|sede)\b/g
+const PLACEHOLDER = /(?<![:\w]):(dia_desde_antes|dia_hasta_antes|desde_antes|hasta_antes|dia_desde|dia_hasta|desde|hasta|sede|paciente)\b/g
 const LITERAL_SPLIT = /('(?:[^']|'')*')/
 
 /** Los nombres de periodo y sede que usa una consulta, fuera de los textos entre comillas. */
@@ -417,8 +417,11 @@ export function bindArgosPeriod(
   query: string,
   period: ArgosResolvedPeriod | null,
   sede: string | null,
+  /** El paciente elegido (D23): su id va en `:paciente`. */
+  paciente: string | null = null,
 ): { sql: string } | { problem: string } {
   const used = argosPlaceholders(query)
+  if (used.has("paciente") && !paciente) return { problem: "la consulta usa :paciente, pero no hay un paciente elegido: búscalo antes con buscar_nombres" }
   const usesNow = ["desde", "hasta", "dia_desde", "dia_hasta"].some((name) => used.has(name))
   const usesBefore = ["desde_antes", "hasta_antes", "dia_desde_antes", "dia_hasta_antes"].some((name) => used.has(name))
   if (!period && (usesNow || usesBefore)) return { problem: "el periodo es a_hoy: la consulta no usa :desde ni :hasta (o elige el periodo que pide la pregunta)" }
@@ -428,6 +431,8 @@ export function bindArgosPeriod(
   const instant = (at: Date) => `timestamptz '${at.toISOString()}'`
   const day = (value: string) => `date '${value}'`
   const values: Record<string, string> = { sede: sede === null ? "null::text" : `'${sede.replace(/'/g, "''")}'` }
+  // Un id es un uuid: lo que no lo sea no llega a la consulta.
+  if (paciente && /^[0-9a-f-]{36}$/i.test(paciente)) values.paciente = `'${paciente}'::uuid`
   if (period) {
     values.desde = instant(period.span.start)
     values.hasta = instant(period.span.end)

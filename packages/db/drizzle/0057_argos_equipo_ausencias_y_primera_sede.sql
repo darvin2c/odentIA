@@ -1,6 +1,7 @@
 -- Argos (ADR 0075): lo que decía que «no se registra» y sí se registra, y la sede de la primera visita.
 -- Pacientes nuevos de una sede = los de su primera cita atendida en esa sede (primera_sede), como Reportes.
--- La unidad dental de cada cita; las ausencias del equipo (sin el motivo, que es texto libre); el equipo con su rol y sus especialidades.
+-- La unidad dental de cada cita; las ausencias del equipo (sin el motivo, que es texto libre); el equipo con su rol, sus especialidades
+-- y si atiende (tiene horario o citas): la propietaria también puede atender.
 -- Las columnas nuevas van al final: una vista se reemplaza sin cambiar sus columnas de antes.
 GRANT SELECT ON TABLE public.schedule_chair, public.professional_specialty TO argos_dueno;--> statement-breakpoint
 CREATE OR REPLACE VIEW argos.pacientes AS
@@ -64,7 +65,9 @@ SELECT u.name AS profesional,
     WHEN 'reception' THEN 'recepción' WHEN 'cashier' THEN 'caja' ELSE 'otro' END FROM unnest(string_to_array(m.role, ',')) r), ', ') AS rol,
   (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM public.professional_specialty ps
     JOIN public.org_specialty s ON s.organization_id = ps.organization_id AND s.id = ps.specialty_id
-    WHERE ps.organization_id = m.organization_id AND ps.user_id = m.user_id) AS especialidades
+    WHERE ps.organization_id = m.organization_id AND ps.user_id = m.user_id) AS especialidades,
+  (EXISTS (SELECT 1 FROM public.professional_schedule s WHERE s.organization_id = m.organization_id AND s.dentist_user_id = m.user_id)
+    OR EXISTS (SELECT 1 FROM public.appointment a WHERE a.organization_id = m.organization_id AND a.dentist_user_id = m.user_id)) AS atiende
 FROM public.member m
 JOIN auth."user" u ON u.id = m.user_id
 WHERE m.organization_id = NULLIF(current_setting('app.org_id', true), '');--> statement-breakpoint

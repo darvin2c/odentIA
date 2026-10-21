@@ -43,7 +43,7 @@ const ALLOWED_CALLS = new Set([
   "bool_and", "bool_or", "every", "row_number", "rank", "dense_rank", "ntile", "lag", "lead", "first_value", "last_value",
   // Números, textos y fechas.
   "round", "trunc", "abs", "ceil", "ceiling", "floor", "coalesce", "nullif", "greatest", "least", "upper", "lower", "initcap", "trim",
-  "length", "concat", "concat_ws", "substring", "left", "right", "replace", "position", "split_part", "date_trunc", "date_part",
+  "length", "concat", "concat_ws", "substring", "left", "right", "replace", "translate", "position", "split_part", "date_trunc", "date_part",
   "extract", "to_char", "to_date", "make_date", "make_interval", "age", "now", "unnest", "array_length", "cardinality",
   // Palabras del lenguaje.
   // `within group (order by …)` de la mediana: «group» va antes de un paréntesis y no es una función.
