@@ -15,6 +15,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  type FilterDef,
   internationalText,
   PageHeader,
   PageShell,
@@ -159,6 +160,20 @@ function PeoplePage() {
   const nextCursor = query.data?.nextCursor ?? null
   const porRegistrar = query.data?.counts.porRegistrar
   const shortcuts = query.data?.shortcuts ?? null
+  // Los atajos viven en un solo filtro «Qué necesita algo», con su cuenta en cada opción.
+  const shortcutFilters: FilterDef[] =
+    view === "pacientes" && shortcuts
+      ? [
+          {
+            type: "select",
+            key: "atajo",
+            label: "Qué necesita algo",
+            options: PEOPLE_SHORTCUTS.flatMap((item) =>
+              shortcuts[item.id] === null ? [] : [{ value: item.id, label: item.label, count: shortcuts[item.id] ?? undefined }],
+            ),
+          },
+        ]
+      : []
 
   const columns = useMemo<ColumnDef<PersonListItem>[]>(() => {
     // En el atajo «Por invitar a volver», anotar la invitación que se hizo por teléfono o en persona.
@@ -374,7 +389,7 @@ function PeoplePage() {
         }
       />
       <div className="flex flex-col gap-2 py-4">
-        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
+        <fieldset className="flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap [&::-webkit-scrollbar]:hidden">
           <legend className="sr-only">Qué personas ver</legend>
           {views.map((item) => {
             const pressed = view === item.id
@@ -385,7 +400,7 @@ function PeoplePage() {
                 size="sm"
                 variant={pressed ? "default" : "outline"}
                 aria-pressed={pressed}
-                className="min-h-11 rounded-full sm:min-h-9"
+                className="min-h-11 shrink-0 rounded-full sm:min-h-9"
                 onClick={() =>
                   listSearch.setParam("ver", item.id === "pacientes" ? undefined : item.id, {
                     replace: true,
@@ -400,29 +415,9 @@ function PeoplePage() {
             )
           })}
         </fieldset>
-        {shortcuts ? (
-          <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-            <legend className="sr-only">Atajos de pacientes</legend>
-            {PEOPLE_SHORTCUTS.filter((item) => shortcuts[item.id] !== null).map((item) => {
-              const pressed = atajo === item.id
-              return (
-                <Button
-                  key={item.id}
-                  type="button"
-                  size="sm"
-                  variant={pressed ? "default" : "outline"}
-                  aria-pressed={pressed}
-                  className="min-h-11 rounded-full sm:min-h-9"
-                  onClick={() => listSearch.setParam("atajo", pressed ? undefined : item.id, { replace: true })}
-                >
-                  {`${item.label} · ${shortcuts[item.id]}`}
-                </Button>
-              )
-            })}
-          </fieldset>
-        ) : null}
         <FilterBar
-          filters={[]}
+          filters={shortcutFilters}
+          resetKeys={["atajo"]}
           sortOptions={[]}
           searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
           searchPending={query.isFetching && filtered}
