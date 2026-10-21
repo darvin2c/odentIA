@@ -745,7 +745,11 @@ export async function listPeople(
     if (isPatient && plan && r.patient_id) {
       const step = await getPlanNextStep(tx, orgId, r.patient_id, can)
       const item = items[items.length - 1]!
-      item.nextStep = { text: step.text, actionLabel: step.action?.label ?? null }
+      // Sin nada en el plan y sin volver desde hace 6 meses: lo que sigue es invitarla (decisión 15).
+      const invite = toInvite.has(r.patient_id) && step.kind === "ninguno"
+      item.nextStep = invite
+        ? { text: "Toca invitarla a volver", actionLabel: null }
+        : { text: step.text, actionLabel: step.action?.label ?? null }
       // Quien tiene que volver a verla lo lleva la línea de invitar, si está prendida.
       item.attention = toInvite.has(r.patient_id) ? (lines.has("invitar_a_volver") ? "agente" : "persona") : attentionOf(step.kind, lines)
     }

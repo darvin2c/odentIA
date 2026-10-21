@@ -277,6 +277,8 @@ export function situationAction(situation: PersonSituation | null): string {
       return "Escribirle"
     case "sin_conversacion":
       return "Registrar"
+    case "sin_pendientes":
+      return "Ver ficha"
     default:
       return "Ver conversación"
   }
