@@ -260,7 +260,8 @@ function Install({ chat, clinicName }: { chat: ClinicWebchat; clinicName: string
         </h2>
         <p className="text-sm text-muted-foreground">Copia esta línea y pégala en tu sitio, antes de &lt;/body&gt;. Cambiar el color o el saludo no obliga a volver a pegarla.</p>
       </div>
-      <pre className="overflow-x-auto rounded-xl border bg-muted px-4 py-3 font-mono text-sm">{script}</pre>
+      {/* La línea se parte en renglones: se lee entera también en el celular, sin barra. */}
+      <pre className="whitespace-pre-wrap break-all rounded-xl border bg-muted px-4 py-3 font-mono text-sm">{script}</pre>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void copy(script, "Línea copiada.")}>
           <Copy className="size-4" /> Copiar código
