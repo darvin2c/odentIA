@@ -843,6 +843,18 @@ function ChooseSlot({
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+                {/* «Cómo llegar» debajo de la sede elegida (issue 36), a la vista también en el teléfono. */}
+                {branch?.directionsUrl ? (
+                  <a
+                    href={branch.directionsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-11 items-center gap-1.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    <MapPin aria-hidden className="size-4" />
+                    Cómo llegar
+                  </a>
+                ) : null}
                 {changing && current ? (
                   <p className="text-sm text-muted-foreground">
                     Hoy la tienes el {longDay(current.startsAt, current.timeZone).toLowerCase()}, {timeLabel(current.startsAt, current.timeZone)}.
@@ -882,18 +894,6 @@ function ChooseSlot({
                   <span className="font-semibold">Sede {branch.name}</span>
                   {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
                 </div>
-              ) : null}
-              {/* «Cómo llegar» debajo de la sede elegida (issue 36): abre su ficha en Google Maps. */}
-              {branch?.directionsUrl ? (
-                <a
-                  href={branch.directionsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-11 items-center gap-1.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  <MapPin aria-hidden className="size-4" />
-                  Cómo llegar
-                </a>
               ) : null}
               {branch !== undefined ? <DentistSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
             </div>

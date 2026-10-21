@@ -60,13 +60,17 @@ export function AddressStreetField({
   // Sin proveedor o pasado el tope, no se vuelve a preguntar en esta pantalla.
   useEffect(() => {
     if (results.data && !results.data.available) setOff(true)
-  }, [results.data])
+    // Si la respuesta llega cuando ya se salió del campo (Esc, otro campo), la lista no se abre encima.
+    if (results.data && typeof document !== "undefined" && document.activeElement?.id !== id) setOpen(false)
+  }, [results.data, id])
   const items = results.data?.available ? results.data.suggestions : []
   const attribution = results.data?.attribution ?? null
 
   async function choose(item: AddressSuggestion) {
     setOpen(false)
+    // Sin esto, la sesión nueva repetiría la última búsqueda (y el proveedor la cobraría).
     setTyped("")
+    setDebounced("")
     const address = item.address ?? (source?.resolve ? await source.resolve({ id: item.id, session }).catch(() => null) : null)
     setSession(crypto.randomUUID())
     if (!address) {
@@ -75,8 +79,9 @@ export function AddressStreetField({
       return
     }
     setPicked(true)
-    onPick({ ...address, placeName: item.isPlace ? item.main : null })
+    // Primero lo escrito y después lo elegido: quien escucha `onChange` puede soltar lo que traía la elección anterior.
     onChange(address.line ?? item.main)
+    onPick({ ...address, placeName: item.isPlace ? item.main : null })
   }
 
   return (
@@ -107,7 +112,7 @@ export function AddressStreetField({
           maxLength={maxLength}
           autoComplete={autoComplete}
           aria-invalid={invalid || undefined}
-          aria-describedby={hintId}
+          aria-describedby={picked || (source && !off) ? hintId : undefined}
           showTrigger={false}
         />
         <ComboboxContent aria-label="Direcciones sugeridas">
@@ -126,9 +131,11 @@ export function AddressStreetField({
           {attribution ? <p className="px-4 pb-2 text-right text-[11px] text-muted-foreground">{attribution}</p> : null}
         </ComboboxContent>
       </Combobox>
-      <FieldDescription id={hintId}>
-        {picked ? pickedHint : source && !off ? "Si no aparece en la lista, sigue escribiendo: se guarda tal cual." : null}
-      </FieldDescription>
+      {picked || (source && !off) ? (
+        <FieldDescription id={hintId}>
+          {picked ? pickedHint : "Si no aparece en la lista, sigue escribiendo: se guarda tal cual."}
+        </FieldDescription>
+      ) : null}
     </>
   )
 }

@@ -270,6 +270,45 @@ export function googlePlacesProvider(apiKey: string, fetchImpl: Fetch = fetch): 
   }
 }
 
+/**
+ * Proveedor de demostración para desarrollo y e2e (`GOOGLE_MAPS_API_KEY=fake`,
+ * `GEOAPIFY_API_KEY=fake`): sin red, devuelve lo escrito con un número y un
+ * barrio fijo de Lima. Como Google, el de la sede ofrece también un negocio y
+ * su dirección llega al elegirlo. No acredita a ningún proveedor real.
+ */
+export function fakeAddressProvider(kind: "google" | "geoapify"): AddressProvider {
+  const address = (line: string): MapAddress => ({
+    line,
+    city: "Miraflores",
+    district: "Lima",
+    regionName: "Provincia de Lima",
+    regionCode: null,
+    postalCode: "15074",
+    country: "PE",
+    placeId: kind === "google" ? "fake-place" : null,
+  })
+  const street = (input: string) => `${input.replace(/\d+\s*$/, "").trim()} 345`
+  return {
+    attribution: kind === "google" ? "Google Maps (prueba)" : "Powered by Geoapify · © OpenStreetMap (prueba)",
+    async suggest({ text: input }) {
+      const line = street(input)
+      const found: MapSuggestion[] = [
+        { id: `fake:${line}`, main: line, secondary: "Miraflores, Lima, Perú", isPlace: false, address: kind === "geoapify" ? address(line) : null },
+      ]
+      if (kind === "google")
+        found.unshift({ id: "fake-place", main: "Clínica de prueba Miraflores", secondary: `${line}, Miraflores, Perú`, isPlace: true, address: null })
+      return found
+    },
+    ...(kind === "google"
+      ? {
+          async resolve({ id }: { id: string }) {
+            return address(id === "fake-place" ? "Av. José Larco 345" : id.replace(/^fake:/, ""))
+          },
+        }
+      : {}),
+  }
+}
+
 /** Geoapify (OpenStreetMap): cada sugerencia ya trae la dirección; no hay un detalle aparte. */
 export function geoapifyProvider(apiKey: string, fetchImpl: Fetch = fetch): AddressProvider {
   return {

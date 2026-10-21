@@ -5,7 +5,7 @@ import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, geoapifyProvider, googlePlacesProvider, secretsKeyFromEnv } from "@odentia/services"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, secretsKeyFromEnv } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -81,9 +81,10 @@ const app = createApp({
   },
   metaSignup: metaSignupFromEnv(env),
   embedder: embedderFromEnv(env),
+  // `fake`: el proveedor de demostración de dev y e2e (sin red); el entorno lo impide con canales reales.
   addressProviders: {
-    sede: env.GOOGLE_MAPS_API_KEY ? googlePlacesProvider(env.GOOGLE_MAPS_API_KEY) : null,
-    paciente: env.GEOAPIFY_API_KEY ? geoapifyProvider(env.GEOAPIFY_API_KEY) : null,
+    sede: env.GOOGLE_MAPS_API_KEY === "fake" ? fakeAddressProvider("google") : env.GOOGLE_MAPS_API_KEY ? googlePlacesProvider(env.GOOGLE_MAPS_API_KEY) : null,
+    paciente: env.GEOAPIFY_API_KEY === "fake" ? fakeAddressProvider("geoapify") : env.GEOAPIFY_API_KEY ? geoapifyProvider(env.GEOAPIFY_API_KEY) : null,
   },
   geoapifyDailyLimit: env.GEOAPIFY_DAILY_LIMIT,
   mailbox: {

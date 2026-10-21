@@ -118,6 +118,13 @@ const envSchema = z.object({
   // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).
   const problem = fakeModelStartProblem(data, data.CHANNEL_VALIDATE_EXTERNAL !== "false")
   if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
+  // Ni con las direcciones de demostración: un paciente real no recibe sugerencias inventadas.
+  const channelsLive = data.NODE_ENV === "production" && data.CHANNEL_VALIDATE_EXTERNAL !== "false"
+  for (const key of ["GOOGLE_MAPS_API_KEY", "GEOAPIFY_API_KEY"] as const) {
+    if (channelsLive && data[key] === "fake") {
+      ctx.addIssue({ code: "custom", path: [key], message: `${key}=fake sugiere direcciones de demostración: en producción, con canales reales, el servidor no arranca con él` })
+    }
+  }
 })
 
 function loadEnv() {
