@@ -918,7 +918,7 @@ export async function createAppointment(
       input.notice === false || !standing ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")
     // Su oportunidad «Interesado» pasa sola a «Evaluación agendada» (ADR 0028).
     if (standing && startsAt.getTime() > Date.now()) {
-      await advanceForAppointment(tx, orgId, { patientId: input.patientId, serviceId: service?.id ?? null, startsAt })
+      await advanceForAppointment(tx, orgId, { patientId: input.patientId, serviceId: service?.id ?? null, startsAt, source: input.source })
     }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, created.id)

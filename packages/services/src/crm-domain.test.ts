@@ -391,7 +391,7 @@ it("oportunidades: summary agregado por filtros; el valor solo suma lo abierto",
   const empty = await withOrgContext(appDb, "org_a", (tx) =>
     getOpportunitySummary(tx, "org_a", { contactId: randomUUID() }),
   )
-  expect(empty).toEqual({ total: 0, open: 0, openAmounts: [], stages: [] })
+  expect(empty).toEqual({ total: 0, open: 0, won: 0, lost: 0, openAmounts: [], stages: [] })
   // Paginación recorre todo el conjunto del contacto.
   const all: string[] = []
   let cursor: string | undefined
