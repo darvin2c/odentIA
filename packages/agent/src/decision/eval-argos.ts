@@ -6,6 +6,8 @@
  *
  *   pnpm --filter @odentia/agent eval:argos -- --file=eval/argos-holdout.json [--golden=respuestas.json --role=owner --org=seed-org-dental-smile --json=salida.json --only=r1,r6]
  *
+ *   Con ARGOS_REVISION=0 corre sin la revisión del plan.
+ *
  * Imprime, pregunta por pregunta, lo que respondió Argos al lado de la
  * respuesta correcta (`eval:argos-respuestas --json=`) y lo que costó cada
  * una con `AI_PRICES`. La calificación la hace una persona con esa lista: una
@@ -55,6 +57,8 @@ const deps: ArgosDeps = {
   platform,
   decisions: { jev: { apiKey: env.JEV_API_KEY, ...(env.JEV_BASE_URL ? { baseUrl: env.JEV_BASE_URL } : {}), ...(env.JEV_MODEL ? { model: env.JEV_MODEL } : {}) }, timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 5000) },
   secretsKey: secretsKeyFromEnv(env.SECRETS_KEY ?? ""),
+  // ARGOS_REVISION=0: sin la revisión del plan, para medir cuánto aporta.
+  review: env.ARGOS_REVISION !== "0",
 }
 const [owner] = await withOrgContext(db, ORG, (tx) =>
   tx.execute<{ userId: string }>(sql`select user_id as "userId" from member where organization_id = ${ORG} and role in ('owner', 'admin') order by role = 'owner' desc, created_at limit 1`),

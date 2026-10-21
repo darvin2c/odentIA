@@ -276,6 +276,47 @@ export async function writeArgosPlan(
   return parsed.data
 }
 
+const REVIEW_TOOL = "revisar"
+
+/** Lo que devuelve la revisión del plan: si responde la pregunta tal como la frase lo dice. */
+const reviewSchema = z.object({
+  correcta: z.boolean().describe("true si la consulta y la frase responden la pregunta sin errores; false si hay que corregir algo."),
+  problema: z.string().describe("Si no es correcta: qué hay que cambiar, en una o dos frases concretas. Vacío si es correcta."),
+})
+
+const REVIEW = `Revisa el plan que escribió Argos para la pregunta de arriba, con las reglas, las vistas y los periodos con nombre. No ves los datos. Marca correcta=false solo si hay un error claro que cambie la cifra o lo que se entiende:
+1. La consulta no responde lo que se preguntó: otra medida, otro grupo, otro periodo, o una regla de las cifras que no aplicó.
+2. La frase no dice lo que calcula la consulta: otro periodo (los nombres son los de los periodos con nombre), otra cosa contada, algo que la consulta no calcula (si sube o baja, «el mayor», un total) o una cifra escrita a mano.
+3. Los huecos están mal usados: un {columna} que es la primera fila cuando la frase habla de todas, {lista} en medio o dos veces, una lista sin su total.
+4. Es no_existe o parcial y sí se puede responder con las vistas; o responde como dato lo que está en «Lo que odentIA no registra».
+Si todo está bien, correcta=true y problema vacío. No pidas cambios de estilo ni de redacción.`
+
+/**
+ * La revisión del plan, antes de correrlo: el mismo modelo, sin ver los datos,
+ * mira si la consulta responde lo que se preguntó y si la frase dice lo que la
+ * consulta calcula. Si no puede revisar (sin modelo, falla, otra forma), null:
+ * la respuesta sigue sin revisión, nunca se bloquea por ella.
+ */
+export async function reviewArgosPlan(
+  deps: Pick<AgentRuntime, "platform" | "createModel">,
+  input: ArgosAsk,
+  plan: ArgosPlan,
+): Promise<z.infer<typeof reviewSchema> | null> {
+  const spec = resolveLlmSpec(deps.platform)
+  if (spec.provider === "fake" && !deps.createModel) return null
+  const verdict = tool(async () => "revisado", { name: REVIEW_TOOL, description: "Entrega la revisión del plan.", schema: reviewSchema })
+  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0 })
+  type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
+  const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools([verdict], { tool_choice: REVIEW_TOOL }) : model
+  const shown = { tipo: plan.tipo, sql: plan.sql, frase: plan.frase, frase_vacia: plan.frase_vacia, como: plan.como, falta: plan.falta }
+  const messages = [...argosMessages(spec.provider, input), new HumanMessage({ content: `${REVIEW}\n\nEl plan:\n${JSON.stringify(shown, null, 2)}` })]
+  const reply = await bound.invoke(messages)
+  reportReplyUse(spec.provider, spec.modelName, reply)
+  const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === REVIEW_TOOL) : undefined
+  const parsed = reviewSchema.safeParse(call?.args)
+  return parsed.success ? parsed.data : null
+}
+
 /** La fila del buscador (decisión D1): Jev la decide con solo el texto. */
 export const ARGOS_ROUTE_QUESTION: DecisionQuestion = {
   id: "argos.fila",
@@ -387,8 +428,10 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
-  /** Cada vez que la base rechaza una consulta del modelo (para medir; el error no trae datos). */
+  /** Cada vez que la base rechaza una consulta del modelo o la revisión la corrige (para medir; no trae datos). */
   onProblem?: (problem: string) => void
+  /** false: sin la revisión del plan (para medir cuánto aporta). */
+  review?: boolean
 }
 
 /**
@@ -441,6 +484,12 @@ export async function askArgos(
   let timedOut = false
   try {
     plan = await writeArgosPlan(deps, ask)
+    // La revisión, sin datos: si la consulta no responde lo preguntado o la frase no dice lo que calcula, se reescribe una vez.
+    const review = deps.review === false ? null : await reviewArgosPlan(deps, ask, plan).catch(() => null)
+    if (review && !review.correcta && review.problema.trim()) {
+      deps.onProblem?.(`revisión: ${review.problema.trim()}`)
+      plan = await writeArgosPlan(deps, { ...ask, retry: { plan, problem: review.problema.trim() } })
+    }
     // Una sola corrección: si la segunda tampoco corre, se dice que no se pudo.
     for (let tries = 0; tries < 2 && !withoutQuery(plan); tries += 1) {
       const outcome = await attempt(plan)

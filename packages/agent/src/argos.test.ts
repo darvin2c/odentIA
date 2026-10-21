@@ -31,9 +31,17 @@ let ownerDb: Db
 let appDb: Db
 
 /** Modelo que responde con el plan del guion en cada llamada y guarda lo que recibió. */
+/**
+ * Un modelo con guion: entrega los planes en orden y responde la revisión del
+ * plan con los veredictos en orden (si no hay, «correcta»), sin gastar un plan.
+ */
 class ScriptedModel extends BaseChatModel {
   calls: BaseMessage[][] = []
-  constructor(private readonly plans: Array<Partial<ArgosPlan> | Error>) {
+  reviews: BaseMessage[][] = []
+  constructor(
+    private readonly plans: Array<Partial<ArgosPlan> | Error>,
+    private readonly verdicts: Array<{ correcta: boolean; problema: string }> = [],
+  ) {
     super({})
   }
   _llmType(): string {
@@ -43,6 +51,13 @@ class ScriptedModel extends BaseChatModel {
     return this
   }
   async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    const last = messages.at(-1)?.content
+    if (typeof last === "string" && last.startsWith("Revisa el plan")) {
+      this.reviews.push(messages)
+      const args = this.verdicts[this.reviews.length - 1] ?? { correcta: true, problema: "" }
+      const message = new AIMessage({ content: "", tool_calls: [{ name: "revisar", args, id: `review-${this.reviews.length}`, type: "tool_call" }] })
+      return { generations: [{ text: "", message }] }
+    }
     this.calls.push(messages)
     const next = this.plans[this.calls.length - 1]
     if (!next || next instanceof Error) throw next ?? new Error("sin guion")
@@ -183,6 +198,22 @@ describe("Argos sobre las vistas", () => {
     const correction = model.calls[1]?.at(-1)?.content
     expect(String(correction)).toContain("No se pudo usar")
     expect(String(correction)).toContain("monto")
+  })
+
+  it("la revisión del plan, sin datos, lo corrige una vez si la frase no dice lo que calcula la consulta", async () => {
+    const lying = { ...COBRADO, frase: "En setiembre se cobró {cobrado_dinero} en {pagos} pago." }
+    const model = new ScriptedModel([lying, COBRADO], [{ correcta: false, problema: "la frase dice setiembre y la consulta mira el mes en curso" }])
+    const problems: string[] = []
+    const answer = await askArgos(appDb, { ...deps(model), onProblem: (problem) => problems.push(problem) }, { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cuánto cobramos este mes?" })
+    expect(answer).toMatchObject({ kind: "respuesta" })
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^Este mes se cobró/)
+    // La revisión recibió el plan, nunca el resultado; el modelo que escribe recibió el problema.
+    expect(model.reviews).toHaveLength(1)
+    expect(String(model.reviews[0]?.at(-1)?.content)).toContain("setiembre")
+    expect(String(model.reviews[0]?.at(-1)?.content)).not.toMatch(/1[.,]?250/)
+    expect(String(model.calls[1]?.at(-1)?.content)).toContain("la frase dice setiembre")
+    expect(problems).toEqual(["revisión: la frase dice setiembre y la consulta mira el mes en curso"])
   })
 
   it("una frase con un hueco que no está en el resultado también se corrige; si vuelve a fallar, lo dice", async () => {

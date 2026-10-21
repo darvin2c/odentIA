@@ -2,7 +2,7 @@
  * Las respuestas correctas del examen de Argos (issue 192, fase 0) sobre la
  * base de desarrollo con su semilla. Uso:
  *
- *   pnpm --filter @odentia/agent eval:argos-respuestas [-- --file=eval/argos-examen.json --org=seed-org-dental-smile --json=salida.json]
+ *   pnpm --filter @odentia/agent eval:argos-respuestas [-- --file=eval/argos-examen.json --org=seed-org-dental-smile --json=salida.json --only=f1,f2]
  *
  * Cada pregunta del banco se calcula aquí, sin modelo: con la misma función de
  * Reportes si la cifra ya existe y, si no, con una consulta escrita con las
@@ -35,6 +35,7 @@ import {
   reportScope,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
+import { ownerSolvers } from "./argos-golden/index.js"
 
 interface Question {
   id: string
@@ -1478,8 +1479,13 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
     },
   } satisfies Record<string, () => Promise<Answer>>)
 
+  // --- Preguntas nuevas del dueño (eval/argos-owner.json): una carpeta por área --------------
+  Object.assign(solve, ownerSolvers({ tx, org: ORG, now, scope, ctx, tz, money, fig, show, today, dayOf, monthStart, joinPerson, conceptName, conceptJoins, listOf }))
+
   const out: Array<Question & Answer> = []
-  for (const question of bank.preguntas) {
+  // `--only=f1,f2`: solo esas preguntas del banco.
+  const only = arg("only", "").split(",").filter(Boolean)
+  for (const question of bank.preguntas.filter((item) => !only.length || only.includes(item.id))) {
     const run = solve[question.id]
     if (!run) throw new Error(`Falta el cálculo de la pregunta ${question.id}`)
     out.push({ ...question, ...(await run()) })
