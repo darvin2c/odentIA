@@ -25,9 +25,9 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "ventas",
     about:
-      "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado. «Ticket promedio de venta» (o por venta) es el promedio de «importe» de estas filas.",
+      "Lo cargado a cada paciente: tratamientos hechos y productos vendidos. Una fila es una venta (un concepto), sin anuladas; lo devuelto ya está descontado.",
     columns:
-      "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta), sede, profesional (quien atendió), promocion, especialidad (de la clínica, la del tratamiento; null en productos)",
+      "venta_id, cargado_en (timestamptz), dia (date), paciente_id, paciente, concepto (nombre del tratamiento o producto), tipo ('tratamiento'|'producto'), cantidad, importe, pagado, saldo (lo que falta pagar de esa venta; con algo pagado, es un pago parcial), sede, profesional (quien atendió), promocion, especialidad (de la clínica, la del tratamiento; null en productos)",
     keys: ["gestion", "caja"],
   },
   {
@@ -59,7 +59,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "gastos",
     about:
-      "Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento.",
+      "Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.",
     columns:
       "momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»), monto, sede",
     keys: ["gestion", "caja"],
@@ -73,7 +73,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "citas",
-    about: "Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron (atendidas, no vinieron, canceladas, «terminan realizándose») se divide entre todas las de ya_paso, canceladas incluidas.",
+    about: "Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron se divide entre todas las de ya_paso, canceladas incluidas.",
     columns:
       "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la unidad dental de la cita)",
     keys: ["gestion", "recepcion", "clinico"],
@@ -81,13 +81,13 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "agenda_por_dia",
     about:
-      "Las horas de cada profesional por día, de 400 días atrás a 60 adelante: su horario, lo disponible (horario menos bloqueos y feriados) y lo ocupado por citas no canceladas. «Agenda ocupada» = minutos_ocupados ÷ minutos_disponibles; «horas libres» = disponibles − ocupados.",
+      "Las horas de cada profesional por día, de 400 días atrás a 60 adelante: su horario, lo disponible (horario menos bloqueos y feriados) y lo ocupado por citas no canceladas.",
     columns: "dia, dia_semana, sede, profesional, minutos_horario, minutos_disponibles, minutos_ocupados, horario_supuesto (bool: antes de su primer horario guardado se usa el de hoy)",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
     name: "agenda_por_hora",
-    about: "Lo mismo por hora del día (solo las horas con algo disponible): para saber en qué horarios hay más espacio, agrupa por dia_semana y hora.",
+    about: "Lo mismo por hora del día (solo las horas con algo disponible).",
     columns: "dia, dia_semana, hora (0-23), sede, profesional, minutos_disponibles, minutos_ocupados",
     keys: ["gestion", "recepcion", "clinico"],
   },
@@ -115,7 +115,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "planes",
     about:
-      "Una fila por tratamiento indicado en un plan (no por plan: para contar planes, count(distinct plan_id)), con la decisión del paciente y su avance. «En proceso» = estado 'en_curso'; un tratamiento «no iniciado» = decision 'aceptado' y estado 'pendiente' o 'programado'; un plan sin iniciar = sus tratamientos aceptados (sin los cancelados) siguen todos sin empezar (cuántos: select count(*) from (select plan_id from planes where decision = 'aceptado' and estado <> 'cancelado' group by plan_id having bool_and(estado in ('pendiente', 'programado') and iniciado_en is null)) as sin_iniciar). «Pendientes» = decision 'aceptado' y estado 'pendiente', 'programado' o 'en_curso'. Cuánto dura un tratamiento = terminado_en − iniciado_en de los 'realizado' con terminado_en en los últimos 12 meses; «por tipo» es por especialidad. No hay fecha prevista de término.",
+      "Una fila por tratamiento indicado en un plan (no por plan: para contar planes, count(distinct plan_id)), con la decisión del paciente y su avance. «Pendiente» = aceptado y por empezar, programado o en curso; un plan sin iniciar = sus tratamientos aceptados (sin los cancelados) siguen todos por empezar o programados, sin ninguno iniciado. No hay fecha prevista de término.",
     columns:
       "plan_id, paciente, paciente_id, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
     keys: ["gestion", "clinico"],
@@ -129,7 +129,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "presupuestos",
     about:
-      "Un presupuesto por fila; los importes son de la opción que vale (nunca sumar opciones). Entregados = estado 'presentado', 'aceptado', 'parcial', 'pospuesto' o 'rechazado' ('sustituido' y 'cancelado' no cuentan). «Aceptaron» = estado 'aceptado' o 'parcial' sobre los entregados. El valor de un presupuesto aceptado es lo aceptado (columna aceptado), no su valor entero. Los que esperan respuesta (pendientes, sin aceptar) son los de espera_respuesta, a hoy; lo que esperan, en dinero, es sum(sin_decidir), no el valor entero. Cuánto tardan en aceptar = decidido_en − presentado_en de los aceptados o parciales, en días, de los últimos 12 meses.",
+      "Un presupuesto por fila; los importes son de la opción que vale (nunca sumar opciones). Entregados = estado 'presentado', 'aceptado', 'parcial', 'pospuesto' o 'rechazado' ('sustituido' y 'cancelado' no cuentan). El valor de un presupuesto aceptado es lo aceptado (columna aceptado), no su valor entero. Los que esperan respuesta (pendientes, sin aceptar) son los de espera_respuesta, a hoy; lo que esperan, en dinero, es sum(sin_decidir), no el valor entero.",
     columns:
       "presupuesto_id, numero, paciente, paciente_id, presentado_en (timestamptz), presentado_dia, estado ('presentado'|'aceptado'|'parcial'|'pospuesto'|'rechazado'|'sustituido'|'cancelado'), decidido_en, profesional (quien lo armó), valor, aceptado (lo aceptado), sin_decidir (pendiente o pospuesto), espera_respuesta (bool)",
     keys: ALL,
@@ -163,7 +163,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "inventario",
     about: "Un producto activo por sede, a hoy. Sin costos.",
     columns:
-      "producto, unidad (la unidad en que se cuenta: guante, frasco…), sede, hay (en esa unidad, nunca en cajas; negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida, insumo (bool: se usa en las atenciones), se_vende (bool)",
+      "producto, unidad (la unidad en que se cuenta: guante, frasco…), sede, hay (en esa unidad, nunca en cajas; negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida, insumo (bool: se usa en las atenciones), se_vende (bool: se vende; un producto puede ser las dos cosas)",
     keys: ["gestion", "recepcion"],
   },
   {
@@ -215,45 +215,10 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
 ]
 
-/**
- * Cómo salen las cifras de Reportes con estas vistas: la misma cuenta que la
- * pantalla (cada una tiene su prueba de cuadre).
- */
-export const ARGOS_FIGURE_RULES: readonly string[] = [
-  "Lo cobrado = sum(cobros.importe) del periodo.",
-  "Lo que deja (lo que ganó la clínica) = lo cobrado − sum(comisiones.comision) − sum(gastos.monto) con tipo <> 'pago_de_comisiones', del mismo periodo. Solo cuenta los gastos registrados. Margen = lo que deja ÷ lo cobrado, en %. Por sede: cobros.sede, comisiones.sede y gastos.sede.",
-  "Gastos operativos = gastos.monto con tipo <> 'pago_de_comisiones', por categoria. Materiales (insumos) = la categoria 'Materiales', que ya incluye lo pagado de las compras (tipo 'pago_de_compra').",
-  "Lo que se va de lo cobrado (porcentaje de los ingresos en gastos, costos) = (sum(gastos.monto) con tipo <> 'pago_de_comisiones' + sum(comisiones.comision)) ÷ lo cobrado; dilo «en gastos y comisiones».",
-  "Medios de pago (cuánto por efectivo, tarjeta, Yape…; los más usados) = por cobros.medio con todas sus filas, como Reportes: cuánto = sum(cobros.importe) (pagos menos anulaciones y devoluciones; una devolución resta del medio del pago devuelto) y cuántos pagos = las filas 'pago' menos las 'anulacion'. No pagos_por_venta.",
-  "De lo cargado, cuánto se cobró = sum(ventas.pagado) ÷ sum(ventas.importe) de las ventas del periodo.",
-  "Ticket promedio por tratamiento = una sola cifra: el promedio de ventas.importe con ventas.tipo 'tratamiento'; de cada tratamiento solo si lo pide.",
-  "Fuentes de ingresos (de dónde viene lo que entra) = primero por tipo: lo pagado de tratamientos y de productos (sum(pagos_por_venta.importe) por pagos_por_venta.tipo) con su % de lo cobrado, y lo cobrado que aún no se aplica a una venta (adelantos y saldo a favor: lo cobrado − sum(pagos_por_venta.importe)); después, los tratamientos que más aportan.",
-  "Lo que se cotiza mucho y se vende poco = de lineas_presupuesto del periodo (por presentado_en), por tratamiento: cuántas veces se cotizó y cuántas con decision 'aceptado', y su % aceptado; «mucho» = al menos el 5 % de las líneas cotizadas y 3 veces; «poco» = su % aceptado por debajo del % aceptado de todas las líneas, que la frase dice. De menor a mayor % aceptado.",
-  "Lo cobrado por especialidad (qué especialidad genera más ingresos) = sum(pagos_por_venta.importe) con pagos_por_venta.tipo 'tratamiento', por pagos_por_venta.especialidad (null es «Sin especialidad»); los productos no son de una especialidad: si los dices, aparte. Lo cargado por especialidad, con ventas.especialidad.",
-  "Pacientes que perdemos (dejan de venir) cada mes = los «Sin venir» de hoy (pacientes), por el mes en que cumplieron 6 meses sin venir (date_trunc('month', pacientes.ultima_atencion + interval '6 months'), entre :dia_desde y :dia_hasta; sin periodo en la pregunta, ultimos_6_meses), por mes y su promedio por mes. Es la regla de «Sin venir» de Reportes repartida por mes: dilo así.",
-  "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida. deudas es solo a hoy: la deuda de meses pasados no está en las vistas.",
-  "Insumos = productos con insumo (se usan en las atenciones); los productos a la venta, con se_vende. Un producto puede ser las dos cosas: en una pregunta de insumos van solo los insumo, y en una de productos que se venden, solo los se_vende.",
-  "Lo aceptado que no tiene cita = de «Lo que viene», lo de los paciente_id sin pacientes.proxima_cita (null): cuánto y cuántos pacientes, como Reportes.",
-  "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
-  "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo; de una sede, con pacientes.primera_sede = :sede (o la sede nombrada). Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
-  "Volvieron (retención, periodo a_hoy) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses (llevaba N meses sin venir) = una cita atendida en el periodo cuya cita atendida inmediatamente anterior, la última antes de esa, fue hace más de N meses; tener alguna cita vieja no basta.",
-  "Inasistencia (no vinieron) y canceladas = citas con ese citas.estado ÷ citas del periodo con citas.ya_paso, en %.",
-  "Espera en sala = mediana de citas.espera_min de las atendidas.",
-  "Agenda ocupada = sum(agenda_por_dia.minutos_ocupados) ÷ sum(agenda_por_dia.minutos_disponibles), en %. Horas libres = (minutos_disponibles − minutos_ocupados) ÷ 60.",
-  "Horas clínicas de un profesional = sum(citas.duracion_min) ÷ 60 de sus citas atendidas. Su productividad = sus citas atendidas y lo cobrado de lo que atendió (pagos_por_venta.profesional).",
-  "Tratamientos realizados = sum(tratamientos_hechos.cantidad).",
-  "Vinieron a su control = controles.estado 'realizado' ÷ los controles con vence_dia en el periodo.",
-  "Presupuestos aceptados = presupuestos.estado 'aceptado' o 'parcial' ÷ presupuestos entregados en el periodo, en %.",
-  "Pago parcial = una venta con ventas.pagado > 0 y saldo > 0.",
-  "Valor de un paciente según cómo nos conoció = de los pacientes nuevos del periodo (pacientes.primera_atencion entre :dia_desde y :dia_hasta; sin periodo en la pregunta, ultimos_365_dias), lo que pagó cada uno hasta hoy (sum(cobros.importe) por paciente_id), en promedio por pacientes.como_nos_conocio.",
-  "Cada cuánto vuelven = los días entre una cita atendida y la siguiente del mismo paciente (lag sobre citas.inicio por paciente_id), solo con citas del periodo (sin periodo en la pregunta, ultimos_365_dias), también la anterior; mediana y promedio.",
-  "Personas que nos buscaron por primera vez (prospectos, el embudo) = filas de embudo con embudo.dia en el periodo; cuántas agendaron, vinieron, recibieron presupuesto, aceptaron o pagaron = embudo.agendo, embudo.vino, embudo.recibio_presupuesto, embudo.acepto, embudo.pago. Por canal: embudo.canal.",
-]
-
 /** Lo que odentIA no registra: la respuesta lo dice y ofrece lo más cercano, nunca otra cifra como si fuera la pedida. */
 export const ARGOS_NOT_RECORDED: readonly string[] = [
   "Facturas o boletas: solo tickets de pago.",
-  "Una fecha prevista para cada tratamiento: no se sabe cuáles están atrasados ni cuáles se abandonaron. Lo más cercano: lo aceptado que sigue sin empezar y desde cuándo, y de lo aceptado el % suspendido o cancelado, de todo el historial (planes). Lo que sí está es cuánto duró cada tratamiento terminado.",
+  "Una fecha prevista para cada tratamiento: no se sabe cuáles están atrasados ni cuáles se abandonaron. Lo más cercano: los tratamientos pendientes, los planes sin iniciar o parados y cuánto dura un tratamiento.",
   "Quién hará un tratamiento: solo quién lo indicó (planes.indicado_por).",
   "Costos por tratamiento o por profesional (laboratorio, materiales de cada tratamiento, costos fijos): su rentabilidad no se puede saber. Lo más cercano: por tratamiento, lo cobrado de cada uno (pagos_por_venta), sin restarle nada, porque las comisiones y los gastos no se ligan a cada tratamiento; por profesional, lo cobrado de lo que atendió menos su comisión.",
   "Quién canceló una cita (la persona o la clínica) ni si se reprogramó.",
@@ -271,16 +236,12 @@ export function argosViewsOf(key: ArgosKey): readonly ArgosView[] {
   return ARGOS_CATALOG.filter((view) => view.keys.includes(key))
 }
 
-/** El catálogo en texto, para el modelo: solo las vistas de la llave y las reglas que usan solo esas vistas. */
+/** El catálogo en texto, para el modelo: solo las vistas de la llave. */
 export function argosCatalogText(key: ArgosKey): string {
   const views = argosViewsOf(key)
-  const names = new Set(views.map((view) => view.name))
-  // Una regla nombra sus vistas como «vista.columna»; va solo si la llave las lee todas.
-  const rules = ARGOS_FIGURE_RULES.filter((rule) => [...rule.matchAll(/\b([a-z_]+)\.[a-z_]/g)].every((match) => names.has(match[1] ?? "")))
   return [
     "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
     ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
-    ...(rules.length ? ["\nCifras de Reportes con estas vistas:", ...rules.map((rule) => `- ${rule}`)] : []),
     "\nLo que odentIA no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
     ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
   ].join("\n")

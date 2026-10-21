@@ -15,7 +15,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { argosEmptyHoleProblem, argosNamesText, argosSentenceProblem, fillArgosSentence } from "./argos-answer.js"
-import { ARGOS_CATALOG, ARGOS_FIGURE_RULES, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
+import { ARGOS_CATALOG, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
 import { listArgosNames } from "./argos-figures.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -110,11 +110,10 @@ describe("las llaves de Argos", () => {
     }
   })
 
-  it("cada llave recibe las reglas de sus vistas, y solo esas", () => {
-    expect(ARGOS_FIGURE_RULES.every((rule) => argosCatalogText("gestion").includes(rule))).toBe(true)
+  it("cada llave recibe sus vistas, y solo esas", () => {
     const cashier = argosCatalogText("caja")
-    expect(cashier).toContain(ARGOS_FIGURE_RULES[0])
-    expect(cashier).not.toContain("comisiones.comision")
+    expect(cashier).toContain("\ncobros:")
+    expect(cashier).not.toContain("\ncomisiones:")
     expect(cashier).not.toContain("\ncitas:")
     expect(cashier).toContain("Lo que odentIA no registra")
   })

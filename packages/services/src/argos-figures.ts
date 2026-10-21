@@ -62,7 +62,7 @@ export const ARGOS_CUT_WORDS: Record<ArgosCut, string> = {
   especialidad: "por especialidad",
   servicio: "por servicio",
   producto: "por producto",
-  tipo: "por tipo (tratamiento o producto)",
+  tipo: "por tipo",
   medio: "por medio de pago",
   canal: "por canal",
   como_nos_conocio: "por cómo nos conocieron",
@@ -78,6 +78,23 @@ const TIME_CUTS: Partial<Record<ArgosCut, string>> = {
   mes: "date_trunc('month', dia)::date",
   semana: "date_trunc('week', dia)::date",
   dia_semana: "(array['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'])[extract(isodow from dia)::int]",
+}
+
+/** Una fila sin nombre en un corte de texto se dice así; también junta lo de ahora con lo de antes. */
+const NULL_WORDS: Partial<Record<ArgosCut, string>> = {
+  sede: "Sin sede",
+  profesional: "Sin profesional",
+  especialidad: "Sin especialidad",
+  servicio: "Sin servicio",
+  producto: "Sin producto",
+  tipo: "Sin tipo",
+  medio: "Sin medio",
+  canal: "Sin canal",
+  como_nos_conocio: "No lo dijo",
+  categoria: "Sin categoría",
+  area: "Sin área",
+  proveedor: "Sin proveedor",
+  etapa: "Sin etapa",
 }
 
 /** Los cortes que se filtran por un nombre de la clínica: se comparan con los de verdad antes de calcular. */
@@ -164,8 +181,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "cobrado",
     name: "Lo cobrado",
     describes:
-      "Cuánto se cobró, «cuánto vendimos», «cuánto entró», los ingresos; por medio de pago, por profesional, por especialidad o por servicio.",
-    how: "Pagos del periodo menos lo anulado y lo devuelto. Por profesional, especialidad, servicio o tipo: lo pagado de lo que se atendió o vendió, sin los adelantos que aún no se aplican a una venta.",
+      "Cuánto se cobró, «cuánto vendimos», «cuánto entró», los ingresos; por medio de pago, profesional, especialidad, servicio o tipo (tratamiento, producto y lo que aún no se aplica a una venta).",
+    how: "Pagos del periodo menos lo anulado y lo devuelto. Por tipo, lo pagado de tratamientos y de productos, y aparte lo cobrado que aún no se aplica a una venta (adelantos, saldo a favor). Por profesional, especialidad o servicio: lo pagado de lo que se atendió o vendió, sin esos adelantos.",
     unit: "dinero",
     column: "cobrado_dinero",
     time: "instante",
@@ -179,8 +196,13 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
         cuts: [...WHEN, "sede", "medio"],
       },
       {
+        views: ["cobros", "pagos_por_venta"],
+        rows: "select momento as t, dia, sede, medio, 'sin aplicar a una venta' as tipo, importe as v from cobros union all select pagado_en, dia, sede, medio, 'sin aplicar a una venta', -importe from pagos_por_venta union all select pagado_en, dia, sede, medio, tipo, importe from pagos_por_venta",
+        cuts: [...WHEN, "sede", "medio", "tipo"],
+      },
+      {
         views: ["pagos_por_venta"],
-        rows: "select pagado_en as t, dia, sede, medio, profesional, especialidad, concepto as servicio, tipo, importe as v from pagos_por_venta",
+        rows: "select pagado_en as t, dia, sede, medio, profesional, coalesce(especialidad, case when tipo = 'producto' then 'Productos' end) as especialidad, concepto as servicio, tipo, importe as v from pagos_por_venta",
         cuts: [...WHEN, "sede", "medio", "profesional", "especialidad", "servicio", "tipo"],
       },
     ],
@@ -189,7 +211,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "ticket_promedio",
     name: "Ticket promedio por paciente",
     describes:
-      "El ticket promedio sin más: lo cobrado ÷ pacientes distintos que pagaron. Por sede, profesional o especialidad.",
+      "El ticket promedio sin más: lo cobrado ÷ pacientes distintos que pagaron; la frase dice «por paciente». No es el promedio de los tickets de pago. Por sede, profesional o especialidad.",
     how: "Lo cobrado entre los pacientes distintos que pagaron en el periodo. Por profesional o especialidad, con lo pagado de lo que atendió cada uno.",
     unit: "dinero",
     column: "ticket_promedio_dinero",
@@ -204,7 +226,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
       },
       {
         views: ["pagos_por_venta"],
-        rows: "select pagado_en as t, dia, sede, profesional, especialidad, paciente_id, true as pago, importe as v from pagos_por_venta",
+        rows: "select pagado_en as t, dia, sede, profesional, coalesce(especialidad, case when tipo = 'producto' then 'Productos' end) as especialidad, paciente_id, true as pago, importe as v from pagos_por_venta",
         cuts: [...WHEN, "sede", "profesional", "especialidad"],
       },
     ],
@@ -223,7 +245,25 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["ventas"],
-        rows: "select cargado_en as t, dia, sede, profesional, especialidad, concepto as servicio, tipo, importe as v from ventas",
+        rows: "select cargado_en as t, dia, sede, profesional, coalesce(especialidad, case when tipo = 'producto' then 'Productos' end) as especialidad, concepto as servicio, tipo, importe as v from ventas",
+        cuts: [...WHEN, "sede", "profesional", "especialidad", "servicio", "tipo"],
+      },
+    ],
+  },
+  {
+    key: "cobrado_de_lo_cargado",
+    name: "Cobrado de lo cargado",
+    describes: "De lo cargado en el periodo (lo más cercano a lo facturado), qué parte ya se pagó, en %.",
+    how: "Lo ya pagado de las ventas del periodo entre lo cargado en ellas.",
+    unit: "pct",
+    column: "cobrado_pct",
+    time: "instante",
+    value: RATE,
+    additive: false,
+    sources: [
+      {
+        views: ["ventas"],
+        rows: "select cargado_en as t, dia, sede, profesional, coalesce(especialidad, case when tipo = 'producto' then 'Productos' end) as especialidad, concepto as servicio, tipo, pagado as a, importe as n from ventas",
         cuts: [...WHEN, "sede", "profesional", "especialidad", "servicio", "tipo"],
       },
     ],
@@ -232,7 +272,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "ticket_por_venta",
     name: "Ticket promedio por venta",
     describes:
-      "El ticket promedio «de venta» o «por venta»: el importe promedio de cada cosa cargada.",
+      "El ticket promedio «de venta» o «por venta»: el importe promedio de cada cosa cargada; la frase dice «por venta». De tratamientos o de productos, con el filtro tipo.",
     how: "El promedio del importe de cada venta (un tratamiento o un producto cargado) del periodo.",
     unit: "dinero",
     column: "ticket_por_venta_dinero",
@@ -242,8 +282,26 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["ventas"],
-        rows: "select cargado_en as t, dia, sede, profesional, especialidad, concepto as servicio, tipo, importe as v from ventas",
+        rows: "select cargado_en as t, dia, sede, profesional, coalesce(especialidad, case when tipo = 'producto' then 'Productos' end) as especialidad, concepto as servicio, tipo, importe as v from ventas",
         cuts: [...WHEN, "sede", "profesional", "especialidad", "servicio", "tipo"],
+      },
+    ],
+  },
+  {
+    key: "pagos",
+    name: "Pagos recibidos",
+    describes: "Cuántos pagos se recibieron, sin los anulados; por medio de pago (los más usados) o sede.",
+    how: "Los pagos del periodo menos los anulados en el periodo.",
+    unit: "cantidad",
+    column: "pagos",
+    time: "instante",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["cobros"],
+        rows: "select momento as t, dia, sede, medio, case tipo when 'pago' then 1 when 'anulacion' then -1 else 0 end as v from cobros",
+        cuts: [...WHEN, "sede", "medio"],
       },
     ],
   },
@@ -262,6 +320,42 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
       {
         views: ["cobros", "comisiones", "gastos"],
         rows: "select momento as t, dia, sede, importe as v from cobros union all select momento, dia, sede, -comision from comisiones union all select momento, dia, sede, -monto from gastos where tipo <> 'pago_de_comisiones'",
+        cuts: [...WHEN, "sede"],
+      },
+    ],
+  },
+  {
+    key: "margen",
+    name: "Margen",
+    describes: "Qué parte de lo cobrado le queda a la clínica: lo que deja ÷ lo cobrado, en %.",
+    how: "Lo que deja (lo cobrado menos las comisiones y los gastos registrados) entre lo cobrado del periodo.",
+    unit: "pct",
+    column: "margen_pct",
+    time: "instante",
+    value: "round(100.0 * sum(v) / nullif(sum(c), 0))",
+    additive: false,
+    sources: [
+      {
+        views: ["cobros", "comisiones", "gastos"],
+        rows: "select momento as t, dia, sede, importe as v, importe as c from cobros union all select momento, dia, sede, -comision, 0 from comisiones union all select momento, dia, sede, -monto, 0 from gastos where tipo <> 'pago_de_comisiones'",
+        cuts: [...WHEN, "sede"],
+      },
+    ],
+  },
+  {
+    key: "gasto_sobre_cobrado",
+    name: "Gastos sobre lo cobrado",
+    describes: "Qué parte de lo cobrado se va en gastos y comisiones, en %.",
+    how: "Las comisiones y los gastos registrados del periodo entre lo cobrado del periodo.",
+    unit: "pct",
+    column: "gastos_pct",
+    time: "instante",
+    value: "round(100.0 * sum(g) / nullif(sum(c), 0))",
+    additive: false,
+    sources: [
+      {
+        views: ["cobros", "comisiones", "gastos"],
+        rows: "select momento as t, dia, sede, 0 as g, importe as c from cobros union all select momento, dia, sede, comision, 0 from comisiones union all select momento, dia, sede, monto, 0 from gastos where tipo <> 'pago_de_comisiones'",
         cuts: [...WHEN, "sede"],
       },
     ],
@@ -409,6 +503,44 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "pacientes_atendidos",
+    name: "Pacientes atendidos",
+    describes: "Cuántos pacientes distintos se atendieron; por tipo: nuevo (su primera cita atendida fue en el periodo) o recurrente.",
+    how: "Pacientes distintos con una cita atendida en el periodo; nuevos los de primera cita atendida en el periodo y recurrentes los demás.",
+    unit: "cantidad",
+    column: "pacientes",
+    time: "instante",
+    value: "count(distinct paciente_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["citas"],
+        // Nuevo si su primera cita atendida, de todas, cae en el periodo (como pacientes.primera_atencion_en).
+        rows: (r) =>
+          `select inicio as t, dia, hora, sede, profesional, servicio, paciente_id, case when min(inicio) over (partition by paciente_id) >= ${r.desde} then 'nuevo' else 'recurrente' end as tipo from citas where estado = 'atendida'`,
+        cuts: [...WHEN, "hora", "sede", "profesional", "servicio", "tipo"],
+      },
+    ],
+  },
+  {
+    key: "valor_paciente_nuevo",
+    name: "Lo que paga un paciente nuevo",
+    describes: "De los pacientes nuevos del periodo, cuánto pagó cada uno desde que llegó hasta hoy, en promedio; por cómo nos conocieron o sede.",
+    how: "Lo pagado hasta hoy por cada paciente cuya primera cita atendida fue en el periodo, en promedio; por sede, la de esa primera cita.",
+    unit: "dinero",
+    column: "por_paciente_dinero",
+    time: "instante",
+    value: "round(avg(v), 2)",
+    additive: false,
+    sources: [
+      {
+        views: ["pacientes", "cobros"],
+        rows: "select p.primera_atencion_en as t, p.primera_atencion as dia, p.primera_sede as sede, p.como_nos_conocio, coalesce(c.pagado, 0) as v from pacientes p left join (select paciente_id, sum(importe) as pagado from cobros group by paciente_id) as c on c.paciente_id = p.paciente_id where p.primera_atencion_en is not null",
+        cuts: [...WHEN, "sede", "como_nos_conocio"],
+      },
+    ],
+  },
+  {
     key: "nos_buscaron",
     name: "Nos buscaron por primera vez",
     describes: "Personas que escribieron o se registraron por primera vez (prospectos), por canal.",
@@ -469,6 +601,43 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "reactivados",
+    name: "Pacientes reactivados",
+    describes: "Pacientes que volvieron tras más de 6 meses sin venir: su cita atendida del periodo llegó más de 6 meses después de la anterior.",
+    how: "Pacientes con una cita atendida en el periodo cuya cita atendida anterior fue más de 6 meses antes.",
+    unit: "cantidad",
+    column: "pacientes",
+    time: "instante",
+    value: "count(distinct paciente_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["citas"],
+        rows: "select inicio as t, dia, sede, profesional, paciente_id from (select inicio, dia, sede, profesional, paciente_id, lag(inicio) over (partition by paciente_id order by inicio) as anterior from citas where estado = 'atendida') as c where anterior < inicio - interval '6 months'",
+        cuts: [...WHEN, "sede", "profesional"],
+      },
+    ],
+  },
+  {
+    key: "dias_entre_visitas",
+    name: "Cada cuánto vuelven",
+    describes: "Cuántos días pasan entre una cita atendida y la siguiente del mismo paciente (la mediana), con las dos en el periodo.",
+    how: "La mediana de los días entre cada cita atendida y la anterior del mismo paciente, las dos en el periodo.",
+    unit: "cantidad",
+    column: "dias",
+    time: "instante",
+    value: "round(percentile_cont(0.5) within group (order by v))",
+    additive: false,
+    sources: [
+      {
+        views: ["citas"],
+        rows: (r) =>
+          `select inicio as t, dia, sede, profesional, extract(epoch from inicio - lag(inicio) over (partition by paciente_id order by inicio)) / 86400.0 as v from citas where estado = 'atendida' and inicio >= ${r.desde} and inicio < ${r.hasta}`,
+        cuts: [...WHEN, "sede", "profesional"],
+      },
+    ],
+  },
+  {
     key: "sin_venir",
     name: "Sin venir hace más de 6 meses",
     describes:
@@ -523,6 +692,42 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
       {
         views: ["presupuestos"],
         rows: "select presentado_en as t, presentado_dia as dia, profesional, (estado in ('aceptado', 'parcial'))::int as a, 1 as n from presupuestos where estado in ('presentado', 'aceptado', 'parcial', 'pospuesto', 'rechazado')",
+        cuts: [...WHEN, "profesional"],
+      },
+    ],
+  },
+  {
+    key: "aceptaron_tratamiento",
+    name: "Aceptaron el tratamiento",
+    describes: "De las veces que se presupuestó cada tratamiento, qué parte se aceptó; por tratamiento.",
+    how: "Tratamientos aceptados entre los presupuestados en los presupuestos entregados del periodo (la opción que vale de cada uno).",
+    unit: "pct",
+    column: "aceptado_pct",
+    time: "instante",
+    value: RATE,
+    additive: false,
+    sources: [
+      {
+        views: ["lineas_presupuesto"],
+        rows: "select presentado_en as t, presentado_dia as dia, tratamiento as servicio, (decision = 'aceptado')::int as a, 1 as n from lineas_presupuesto where estado_presupuesto in ('presentado', 'aceptado', 'parcial', 'pospuesto', 'rechazado')",
+        cuts: [...WHEN, "servicio"],
+      },
+    ],
+  },
+  {
+    key: "dias_para_aceptar",
+    name: "Cuánto tardan en aceptar",
+    describes: "Cuántos días pasan entre que se entrega un presupuesto y se acepta (la mediana), de los aceptados entregados en el periodo.",
+    how: "La mediana de los días entre la entrega y la decisión de los presupuestos aceptados (enteros o en parte) entregados en el periodo.",
+    unit: "cantidad",
+    column: "dias",
+    time: "instante",
+    value: "round(percentile_cont(0.5) within group (order by v))",
+    additive: false,
+    sources: [
+      {
+        views: ["presupuestos"],
+        rows: "select presentado_en as t, presentado_dia as dia, profesional, extract(epoch from decidido_en - presentado_en) / 86400.0 as v from presupuestos where estado in ('aceptado', 'parcial') and decidido_en is not null",
         cuts: [...WHEN, "profesional"],
       },
     ],
@@ -625,6 +830,18 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "presupuestos_esperando",
+    name: "Presupuestos sin respuesta",
+    describes: "Cuántos presupuestos esperan la respuesta del paciente, hoy.",
+    how: "Presupuestos entregados que esperan la decisión del paciente, hoy.",
+    unit: "cantidad",
+    column: "presupuestos",
+    time: "a_hoy",
+    value: COUNT,
+    additive: true,
+    sources: [{ views: ["presupuestos"], rows: "select profesional, 1 as v from presupuestos where espera_respuesta", cuts: ["profesional"] }],
+  },
+  {
     key: "tratamientos_hechos",
     name: "Tratamientos hechos",
     describes:
@@ -681,6 +898,42 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "planes_sin_iniciar",
+    name: "Planes sin iniciar",
+    describes: "Planes con tratamientos aceptados que siguen todos sin empezar, hoy.",
+    how: "Planes cuyos tratamientos aceptados (sin los cancelados) siguen todos por empezar o programados, sin ninguno iniciado, hoy.",
+    unit: "cantidad",
+    column: "planes",
+    time: "a_hoy",
+    value: "count(distinct plan_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["planes"],
+        rows: "select plan_id from planes where decision = 'aceptado' and estado <> 'cancelado' group by plan_id having bool_and(estado in ('pendiente', 'programado') and iniciado_en is null)",
+        cuts: [],
+      },
+    ],
+  },
+  {
+    key: "tratamientos_pendientes",
+    name: "Tratamientos pendientes",
+    describes: "Cuántos tratamientos aceptados falta hacer, hoy (por empezar, programados o en curso); por especialidad, tratamiento o quien lo indicó.",
+    how: "Tratamientos aceptados por empezar, programados o en curso, hoy, sin los suspendidos.",
+    unit: "cantidad",
+    column: "tratamientos",
+    time: "a_hoy",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["planes"],
+        rows: "select especialidad, tratamiento as servicio, indicado_por as profesional, 1 as v from planes where decision = 'aceptado' and estado in ('pendiente', 'programado', 'en_curso')",
+        cuts: ["especialidad", "servicio", "profesional"],
+      },
+    ],
+  },
+  {
     key: "planes_terminados",
     name: "Planes terminados",
     describes: "Cuántos planes de tratamiento se terminaron: ya no les queda nada por hacer y su último tratamiento se hizo en el periodo.",
@@ -696,6 +949,24 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
         rows:
           "select plan_id, max(terminado_en) as t from planes where decision = 'aceptado' group by plan_id having bool_and(estado in ('realizado', 'cancelado')) and bool_or(estado = 'realizado')",
         cuts: [],
+      },
+    ],
+  },
+  {
+    key: "duracion_tratamiento",
+    name: "Cuánto dura un tratamiento",
+    describes: "Cuántos días pasan entre que empieza y termina un tratamiento (la mediana), de los terminados en el periodo; por especialidad o tratamiento.",
+    how: "La mediana de los días entre el inicio y el término de los tratamientos realizados que terminaron en el periodo.",
+    unit: "cantidad",
+    column: "dias",
+    time: "instante",
+    value: "round(percentile_cont(0.5) within group (order by v))",
+    additive: false,
+    sources: [
+      {
+        views: ["planes"],
+        rows: "select terminado_en as t, especialidad, tratamiento as servicio, extract(epoch from terminado_en - iniciado_en) / 86400.0 as v from planes where estado = 'realizado' and iniciado_en is not null and terminado_en is not null",
+        cuts: ["especialidad", "servicio"],
       },
     ],
   },
@@ -739,6 +1010,24 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "horas_atendidas",
+    name: "Horas clínicas",
+    describes: "Cuántas horas de citas se atendieron (la duración de las citas atendidas); por profesional, sede o servicio.",
+    how: "La duración agendada de las citas atendidas del periodo, en horas.",
+    unit: "horas",
+    column: "horas",
+    time: "instante",
+    value: "round(sum(v) / 60.0, 1)",
+    additive: true,
+    sources: [
+      {
+        views: ["citas"],
+        rows: "select inicio as t, dia, hora, sede, profesional, servicio, duracion_min as v from citas where estado = 'atendida'",
+        cuts: [...WHEN, "hora", "sede", "profesional", "servicio"],
+      },
+    ],
+  },
+  {
     key: "citas",
     name: "Citas agendadas",
     describes:
@@ -755,6 +1044,24 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
         views: ["citas"],
         rows: "select inicio as t, dia, dia_semana, hora, sede, profesional, servicio, 1 as v from citas where estado <> 'cancelada'",
         cuts: [...WHEN, "dia_semana", "hora", "sede", "profesional", "servicio"],
+      },
+    ],
+  },
+  {
+    key: "asistieron",
+    name: "Asistieron",
+    describes: "La asistencia: qué parte de las citas que ya pasaron se atendió.",
+    how: "Citas atendidas entre las citas del periodo que ya pasaron, canceladas incluidas.",
+    unit: "pct",
+    column: "asistieron_pct",
+    time: "instante",
+    value: RATE,
+    additive: false,
+    sources: [
+      {
+        views: ["citas"],
+        rows: "select inicio as t, dia, hora, sede, profesional, servicio, (estado = 'atendida')::int as a, ya_paso::int as n from citas",
+        cuts: [...WHEN, "hora", "sede", "profesional", "servicio"],
       },
     ],
   },
@@ -1276,7 +1583,10 @@ export function compileArgosFigure(
       ? ["(:sede is null or sede = :sede)"]
       : []),
   ]
-  const select = cuts.map((cut) => `${TIME_CUTS[cut as ArgosCut] ?? cut} as ${cut}`)
+  const select = cuts.map((cut) => {
+    const empty = NULL_WORDS[cut as ArgosCut]
+    return `${TIME_CUTS[cut as ArgosCut] ?? (empty ? `coalesce(${cut}, ${quote(empty)})` : cut)} as ${cut}`
+  })
   const block = (name: string, range: Range) => {
     const where = [time(range), ...conditions].filter(Boolean)
     return `${name} as (select ${[...select, `${figure.value} as v`].join(", ")} from (${rowsOf(range)}) as filas${where.length ? ` where ${where.join(" and ")}` : ""}${cuts.length ? ` group by ${cuts.map((_, index) => index + 1).join(", ")}` : ""})`

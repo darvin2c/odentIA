@@ -9,7 +9,8 @@ Con 0075 el modelo escribía la consulta y la frase de una vez y sin ver lo que 
 ## Decisión y motivo
 
 - **Por pasos, con herramientas (D17).** Hasta cuatro turnos: `buscar_nombres` (cómo se llama en la clínica lo que nombra la pregunta, o si es un paciente), `calcular` (una cifra oficial o una consulta propia) y `responder` (el cálculo que responde y la frase con huecos). Trabaja como quien analiza datos: busca, calcula, mira y responde.
-- **Cifras oficiales escritas una vez (D18, D19).** `argos-figures.ts` declara unas 40 cifras sobre las vistas, cada una con su «Así lo calculé», sus cortes y sus filtros; el modelo pide la cifra y odentIA arma la consulta con los mismos huecos de periodo y sede, así que cambiar el periodo, fijar y descargar no cambian. Las que también están en Reportes se comparan con él (`eval:argos-cifras`). Si una cifra oficial responde, se usa; la consulta propia es para lo que ninguna cubre. Un filtro por nombre se compara con los de la clínica antes de calcular.
+- **Cifras oficiales escritas una vez (D18, D19).** `argos-figures.ts` declara unas 60 cifras sobre las vistas, cada una con su «Así lo calculé», sus cortes y sus filtros; el modelo pide la cifra y odentIA arma la consulta con los mismos huecos de periodo y sede, así que cambiar el periodo, fijar y descargar no cambian. Las que también están en Reportes se comparan con él (`eval:argos-cifras`). Si una cifra oficial responde, se usa; la consulta propia es para lo que ninguna cubre. Un filtro por nombre se compara con los de la clínica antes de calcular.
+- **Las cuentas del negocio, solo como cifras oficiales.** El texto que lee el modelo lleva reglas generales: cómo trabajar, el periodo, qué es no_existe y cómo se arma la frase. Una definición (el margen, la asistencia, cada cuánto vuelven) no se escribe en prosa: es una cifra con sus cortes. Nada se escribe a la medida de una pregunta (`ARGOS_FIGURE_RULES` se retiró el 2026-10-21): eso subía las preguntas ya vistas y no las nuevas.
 - **Ve el resultado, sin personas (D20).** Para revisar su cuenta, el modelo recibe las cifras, las fechas y los nombres de la clínica; las personas llegan como «Paciente 1» y otros textos como «texto 1» (`argos-observe.ts`). Las cifras de la frase siguen saliendo de los huecos: el modelo las lee, no las escribe.
 - **La respuesta dice de dónde sale (D21)**, los pasos se ven mientras trabaja (D22), dos pacientes con el mismo nombre se eligen con botones sin volver al modelo (D23) y lo que viene tiene su periodo (D26).
 
@@ -26,6 +27,7 @@ Con 0075 el modelo escribía la consulta y la frase de una vez y sin ver lo que 
 - La agenda va por día: con un periodo que llega a hoy, Argos cuenta hoy entero y Reportes hasta este minuto; «Así lo calculé» lo dice.
 - Una cifra nueva se agrega en `argos-figures.ts` con su «Así lo calculé» y, si está en Reportes, entra en `eval:argos-cifras`.
 - Revisar si una pregunta frecuente cae siempre en la consulta propia: es una cifra oficial que falta.
+- Una pregunta que falla no se arregla con una regla para ella: o falta una cifra general, o falla cómo trabaja el modelo. Se mide con preguntas que el texto no conoce; las que sirvieron para ajustarlo ya no miden.
 
 ## Referencias
 
