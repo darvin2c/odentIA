@@ -91,7 +91,9 @@ const figureAskSchema = z.object({
     .describe("Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«Ortodoncia y Ortopedia Maxilar»]}]."),
   parte_del_total: z.boolean().describe("Con cortes: la parte de cada fila en el total (parte_pct)."),
   limite: z.number().int().nullable().describe("Solo si la pregunta pide un número de filas («los 5 que más…»)."),
-  orden: z.enum(["mayor", "menor"]).describe("De mayor a menor (lo de siempre) o al revés («los que menos…»)."),
+  orden: z
+    .enum(["tiempo", "mayor", "menor"])
+    .describe("tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."),
 })
 
 const periodFields = {

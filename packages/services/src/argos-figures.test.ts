@@ -146,5 +146,9 @@ describe("las cifras oficiales de Argos", () => {
     expect(out.sql).toContain("[extract(isodow from dia)::int] as dia_semana")
     expect(out.sql).toMatch(/order by case dia_semana when 'lunes' then 1/)
     expect(reviewArgosQuery(out.sql).ok).toBe(true)
+    // «¿Qué días cobramos más?»: de mayor a menor.
+    const most = compile({ cifra: "cobrado", por: ["dia_semana"], orden: "mayor" })
+    if ("problem" in most) throw new Error(most.problem)
+    expect(most.sql).toMatch(/order by ahora\.v desc, dia_semana$/)
   })
 })

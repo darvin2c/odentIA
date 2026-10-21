@@ -1145,7 +1145,8 @@ export interface ArgosFigureAsk {
   filtros?: Partial<Record<string, string[]>>
   parte_del_total?: boolean
   limite?: number | null
-  orden?: "mayor" | "menor"
+  /** «tiempo»: en el tiempo, en su orden (lo de siempre con mes, día de la semana u hora); si no, de mayor a menor o al revés. */
+  orden?: "tiempo" | "mayor" | "menor"
 }
 
 export interface ArgosFigureCompiled {
@@ -1277,16 +1278,16 @@ export function compileArgosFigure(
     : "ahora"
   // En el tiempo, en su orden; lo demás, de mayor a menor (o al revés), y a igual cifra por nombre.
   const first = cuts[0] as ArgosCut | undefined
-  const order =
-    first === "dia_semana"
+  const inTime = first !== undefined && ((WHEN as readonly string[]).includes(first) || first === "hora")
+  // Lo que pregunta «qué día más…» va de mayor a menor aunque sea un corte de tiempo; «por mes», en su orden.
+  const byValue = cuts.length > 0 && (ask.orden === "mayor" || ask.orden === "menor" || (!inTime && ask.orden !== "tiempo"))
+  const order = byValue
+    ? `ahora.v ${ask.orden === "menor" ? "asc" : "desc"}, ${first}`
+    : first === "dia_semana"
       ? WEEKDAY_ORDER
-      : first && (WHEN as readonly string[]).includes(first)
+      : first
         ? `${first}`
-        : first === "hora"
-          ? "hora"
-          : cuts.length
-            ? `ahora.v ${ask.orden === "menor" ? "asc" : "desc"}, ${first}`
-            : null
+        : null
   const limit =
     ask.limite && ask.limite > 0 ? ` limit ${Math.min(Math.floor(ask.limite), 200)}` : ""
   const sql = `with ${[block("ahora", NOW), ...(before ? [block("antes", BEFORE)] : [])].join(", ")} select ${columns.join(", ")} from ${from}${order ? ` order by ${order}` : ""}${limit}`
