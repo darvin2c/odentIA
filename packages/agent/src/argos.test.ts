@@ -495,4 +495,21 @@ describe("Argos sobre las vistas", () => {
     expect(answer.query).toMatch(/from c1 left join c2 using \(medio\)$/)
     expect(answer.table.columns.map((column) => column.label)).toEqual(["Medio", "Cobrado", "Pagos"])
   })
+
+  it("un resumen de una fila y una lista se juntan con la lista de base, aunque el resumen se nombre primero", async () => {
+    const sqlCalc = (id: string, sql: string) => ({ name: "calcular", args: { id, cifra: null, sql, periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })
+    const model = new ScriptedModel([
+      {
+        tools: [
+          sqlCalc("c1", "select sum(importe) as total_dinero from cobros"),
+          sqlCalc("c2", "select medio, sum(importe) as cobrado_dinero from cobros group by medio union all select 'Yape', 0"),
+        ],
+      },
+      { calculo: "c1, c2", frase: "Se cobró {c1_total_dinero}; el primero es {c2_medio}. Por medio: {lista}.", frase_vacia: "Nada.", titulo: "Por medio" },
+    ])
+    const answer = await ask(model, "¿Cómo nos pagan?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^Se cobró S\/\s?1,250\.50; el primero es Efectivo\. Por medio: Efectivo \(S\/\s?1,250\.50\); Yape \(S\/\s?0\.00\)\.$/)
+    expect(answer.query).toMatch(/^with c2 as \(.+\), c1 as \(.+\) select c2\.\*, c1\.total_dinero as c1_total_dinero from c2 left join c1 on true$/)
+  })
 })

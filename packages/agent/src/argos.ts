@@ -689,7 +689,11 @@ export async function askArgos(
    * (`c2_te_deben_dinero`). Es una sola consulta con los mismos huecos: se
    * vuelve a correr con otro periodo, se fija y se descarga igual.
    */
-  const joinCalcs = (parts: ArgosCalc[]): ArgosCalc | { problem: string } => {
+  const joinCalcs = (named: ArgosCalc[]): (ArgosCalc & { base: string }) | { problem: string } => {
+    // La base es la lista: un resumen de una fila va al lado de ella, aunque se haya nombrado primero.
+    const lists = named.filter((calc) => calc.result.rows.length > 1)
+    const first = lists.length === 1 && lists[0] ? lists[0] : named[0]
+    const parts = first ? [first, ...named.filter((calc) => calc !== first)] : named
     const [main, ...rest] = parts
     if (!main) return { problem: "no hay cálculos que juntar" }
     const same = (calc: ArgosCalc) => JSON.stringify(calc.choice) === JSON.stringify(main.choice)
@@ -717,7 +721,7 @@ export async function askArgos(
     // Una cifra oficial sigue siéndolo si todas lo son; «Así lo calculé» las nombra a todas.
     const official = parts.every((calc) => calc.figure)
     const how = parts.map((calc) => calc.how).filter(Boolean).join(" ")
-    return { ...main, id: parts.map((calc) => calc.id).join("+"), sql, result: { ...main.result, columns, rows }, figure: official ? main.figure : null, how: how || null }
+    return { ...main, id: parts.map((calc) => calc.id).join("+"), base: main.id, sql, result: { ...main.result, columns, rows }, figure: official ? main.figure : null, how: how || null }
   }
 
   /**
@@ -740,6 +744,9 @@ export async function askArgos(
       const joined = joinCalcs(ids.map((item) => calcs.get(item) as ArgosCalc))
       if ("problem" in joined) return { problem: joined.problem, code: "HUECOS" }
       calc = joined
+      // Las columnas de la base van sin su id: {c2_concepto} es {concepto}.
+      const own = new RegExp(`\{${joined.base.replace(/[^\w]/g, "")}_`, "g")
+      plan = { ...plan, frase: plan.frase.replace(own, "{"), frase_vacia: plan.frase_vacia.replace(own, "{") }
     }
     let result: ArgosQueryResult
     let binding: ArgosBinding
