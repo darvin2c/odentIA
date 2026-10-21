@@ -588,6 +588,25 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "tratamientos_presupuestados",
+    name: "Tratamientos presupuestados",
+    describes: "Cuántas veces se presupuestó cada tratamiento (lo más solicitado o cotizado), en los presupuestos entregados del periodo.",
+    how: "Las veces que cada tratamiento aparece en la opción que vale de los presupuestos entregados en el periodo (sin los reemplazados ni los cancelados).",
+    unit: "cantidad",
+    column: "veces",
+    time: "instante",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["lineas_presupuesto"],
+        rows:
+          "select presentado_en as t, presentado_dia as dia, tratamiento as servicio, 1 as v from lineas_presupuesto where estado_presupuesto in ('presentado', 'aceptado', 'parcial', 'pospuesto', 'rechazado')",
+        cuts: [...WHEN, "servicio"],
+      },
+    ],
+  },
+  {
     key: "esperan_respuesta",
     name: "Presupuestos esperando respuesta",
     describes: "Lo que esperan los presupuestos sin decidir, hoy (lo pendiente en dinero).",
