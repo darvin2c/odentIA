@@ -32,6 +32,7 @@ import {
   getArgosPlan,
   getOrgLocale,
   listArgosBranches,
+  listArgosNames,
   resolveArgosPeriod,
   validation,
   isArgosHiddenColumn,
@@ -454,7 +455,7 @@ export async function askArgos(
     ...(await prepareArgosQuestion(tx, input.orgId, now)),
     screen: input.screen ? await argosScreen(tx, input.orgId, input.screen, now) : null,
     branches: await listArgosBranches(tx, input.orgId),
-    names: await argosNamesText(tx, input.orgId, key),
+    names: await listArgosNames(tx, input.orgId, key),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
@@ -466,7 +467,7 @@ export async function askArgos(
     return { kind: route, message: ARGOS_WORDS[route] }
   }
 
-  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: ready.names }
+  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key) }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
   /** El periodo y la sede del plan: los que eligió el modelo y, si la pregunta no nombra una sede, la de Reportes (D7). */
   const bindingOf = (plan: ArgosPlan): ArgosBinding | { problem: string; code: "PERIODO" } => {

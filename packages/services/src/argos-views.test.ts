@@ -16,6 +16,7 @@ import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { argosEmptyHoleProblem, argosNamesText, argosSentenceProblem, fillArgosSentence } from "./argos-answer.js"
 import { ARGOS_CATALOG, ARGOS_FIGURE_RULES, argosCatalogText, argosViewsOf } from "./argos-catalog.js"
+import { listArgosNames } from "./argos-figures.js"
 import { ArgosQueryError, reviewArgosQuery, runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createExpense, setCommissionRate } from "./finance.js"
@@ -502,10 +503,11 @@ describe("cuadre con Reportes", () => {
     await expect(rows("select count(*) as v from ausencias", "cashier")).rejects.toBeInstanceOf(ArgosQueryError)
     expect(await rows("select distinct unidad_dental from citas where sede = 'Sede Sur'")).toEqual([{ unidad_dental: "Unidad dental 2" }])
 
-    const names = await withOrgContext(appDb, orgId, (tx) => argosNamesText(tx, orgId, "gestion"))
-    expect(names).toContain("Sedes: Sede Norte, Sede Sur.")
-    expect(names).toContain("Equipo: Dra. Sur.")
-    expect(names).toMatch(/Ortodoncia y Ortopedia Maxilar: Control de ortodoncia\./)
-    expect(await withOrgContext(appDb, orgId, (tx) => argosNamesText(tx, orgId, "clinico"))).not.toContain("Productos:")
+    const names = await withOrgContext(appDb, orgId, (tx) => listArgosNames(tx, orgId, "gestion"))
+    const text = argosNamesText(names, "gestion")
+    expect(text).toContain("Sedes: Sede Norte, Sede Sur.")
+    expect(text).toContain("Equipo: Dra. Sur.")
+    expect(text).toMatch(/Ortodoncia y Ortopedia Maxilar: Control de ortodoncia\./)
+    expect(argosNamesText(await withOrgContext(appDb, orgId, (tx) => listArgosNames(tx, orgId, "clinico")), "clinico")).not.toContain("Productos:")
   })
 })

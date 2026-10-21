@@ -11,14 +11,11 @@
  * no (decisión D6: el costo lo asume odentIA).
  */
 import type { Db } from "@odentia/db"
-import { member, user } from "@odentia/db/schema/auth"
-import { product } from "@odentia/db/schema/inventory"
 import { reportQuestion } from "@odentia/db/schema/reports"
-import { and, asc, count, eq, gte, ne } from "drizzle-orm"
+import { and, count, eq, gte, ne } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
-import { formatServiceIndex, listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
-import { listArgosBranches } from "./argos-period.js"
+import type { ArgosNames } from "./argos-figures.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
@@ -67,31 +64,21 @@ export async function prepareArgosQuestion(
  * Maxilar», «extrac» por «Exodoncia simple», «Surco» por «Sede Surco») y la
  * cifra sale en cero sin que nada falle. Son nombres, no datos de pacientes.
  */
-export async function argosNamesText(tx: Db, orgId: string, key: ArgosKey): Promise<string> {
-  const [branches, team, services] = await Promise.all([
-    listArgosBranches(tx, orgId),
-    tx
-      .selectDistinct({ name: user.name })
-      .from(member)
-      .innerJoin(user, eq(user.id, member.userId))
-      .where(eq(member.organizationId, orgId))
-      .orderBy(asc(user.name)),
-    listAgentServices(tx, orgId),
-  ])
+export function argosNamesText(names: ArgosNames, key: ArgosKey): string {
+  const groups = new Map<string, string[]>()
+  for (const service of names.servicios) {
+    const list = groups.get(service.specialty ?? "Otros") ?? []
+    list.push(service.name)
+    groups.set(service.specialty ?? "Otros", list)
+  }
+  const services = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "es")).map(([name, list]) => `  - ${name}: ${list.join(", ")}.`)
   const seesStock = argosViewsOf(key).some((view) => view.name === "inventario")
-  const products = seesStock
-    ? await tx
-        .select({ name: product.name })
-        .from(product)
-        .where(and(eq(product.organizationId, orgId), eq(product.isActive, true)))
-        .orderBy(asc(product.name))
-    : []
   const lines = [
     "Los nombres de esta clínica, como están en las vistas. En la consulta escríbelos tal cual aunque la pregunta los diga de otra forma («Surco» es la sede que lo lleva, «extracciones» son los servicios de exodoncia, «ortodoncia» es la especialidad que la nombra). Para un tipo de tratamiento, filtra por su especialidad si es toda una, o por los nombres de sus servicios.",
-    `- Sedes: ${branches.map((item) => item.name).join(", ") || "ninguna"}.`,
-    `- Equipo: ${team.map((item) => item.name).join(", ")}.`,
-    services.length ? `- Servicios por especialidad:\n${formatServiceIndex(services).map((line) => `  ${line}`).join("\n")}` : "- Servicios: ninguno.",
-    seesStock ? `- Productos: ${products.map((item) => item.name).join(", ") || "ninguno"}.` : "",
+    `- Sedes: ${names.sedes.join(", ") || "ninguna"}.`,
+    `- Equipo: ${names.equipo.join(", ")}.`,
+    services.length ? `- Servicios por especialidad:\n${services.join("\n")}` : "- Servicios: ninguno.",
+    seesStock ? `- Productos: ${names.productos.join(", ") || "ninguno"}.` : "",
   ]
   return lines.filter(Boolean).join("\n")
 }
