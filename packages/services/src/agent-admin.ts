@@ -50,6 +50,7 @@ import {
   settleTasks,
   syncOpportunityFollowUps,
   syncVisitFollowUps,
+  syncLapsedInvites,
 } from "./automation.js"
 import type { TemplateDeps } from "./channel-templates.js"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
@@ -61,6 +62,7 @@ import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
+import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 
 /* ---------- Argos: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
@@ -327,6 +329,27 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
   }
 }
 
+/** «Invitar a volver»: quien no viene hace 6 meses y toca invitarlo (decisión 15). */
+async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
+  const all = await lapsedToInvite(tx, orgId, zone.timezone, new Date())
+  const total = all.length
+  return {
+    total,
+    items: all.slice(0, limit).map((row) => ({
+      ...blank,
+      id: row.patientId,
+      personName: row.personName,
+      line: `Última visita ${dayOf(new Date(row.lastVisitAt), zone)}`,
+      patientId: row.patientId,
+      contactId: row.personId,
+      appointmentId: row.appointmentId,
+    })),
+    title: `${total} ${plural(total, "persona", "personas")} sin venir hace 6 meses ${plural(total, "le toca", "les toca")} una invitación`,
+    detail: "Ordenadas de la visita más antigua a la más reciente.",
+    how: "Pacientes cuya última cita atendida fue hace más de 6 meses, sin cita, presupuesto que espere respuesta ni control pendiente. Quien ya recibió una invitación en los últimos 6 meses, o pidió no recibir mensajes de seguimiento, no aparece.",
+  }
+}
+
 async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; total: number }>(sql`
     select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
@@ -496,6 +519,7 @@ async function casesOf(
   if (key === "seguimiento_presupuesto") return budgetsWithoutAnswer(tx, orgId, zone, days ?? 2, limit)
   if (key === "seguimiento_comercial") return overdueOpportunities(tx, orgId, zone, limit)
   if (key === "seguimiento_no_asistencia") return noShowsWithoutAppointment(tx, orgId, zone, limit)
+  if (key === "invitar_a_volver") return lapsedInvites(tx, orgId, zone, limit)
   if (key === "cita_cancelada") return cancelledWithoutAppointment(tx, orgId, zone, limit)
   if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7, scope, limit)
   if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone, days ?? 2, scope, limit)
@@ -743,6 +767,7 @@ const ANSWERED_WORD: Partial<Record<AdminLineKey, [string, string]>> = {
   recordatorio_control: ["respondió o agendó", "respondieron o agendaron"],
   seguimiento_presupuesto: ["respondió", "respondieron"],
   seguimiento_no_asistencia: ["respondió o reservó otra cita", "respondieron o reservaron otra cita"],
+  invitar_a_volver: ["volvió o reservó", "volvieron o reservaron"],
   cita_cancelada: ["respondió o reservó otra cita", "respondieron o reservaron otra cita"],
 }
 
@@ -1366,6 +1391,7 @@ const AGENT_SYNCS: Array<[AdminLineKey, (tx: Db, orgId: string, now: Date) => Pr
   ["seguimiento_presupuesto", syncBudgetFollowUps],
   ["seguimiento_comercial", syncOpportunityFollowUps],
   ["seguimiento_no_asistencia", syncVisitFollowUps],
+  ["invitar_a_volver", syncLapsedInvites],
   ["cita_cancelada", syncCancelledAppointments],
 ]
 

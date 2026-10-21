@@ -8,7 +8,13 @@ import { describe, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
-import { createPatient, requirePatient, setPatientContact, updatePatient } from "./patients.js"
+import {
+  createPatient,
+  declareEmergencyContact,
+  requirePatient,
+  setPatientContact,
+  updatePatient,
+} from "./patients.js"
 import {
   createPerson,
   getPersonPage,
@@ -306,17 +312,16 @@ describe("una lista y un buscador", () => {
       )
     expect(await names("pacientes")).toEqual(["Carlos Mendoza", "Sofía Salas"])
     expect(await names("por_registrar")).toEqual(["Rosa Quispe"])
-    expect(await names("responsables")).toEqual(["Martín Salas"])
     expect(await names("archivados")).toEqual(["Zoe Archivada"])
     expect(await names("todos")).toHaveLength(5)
     expect(await names("todos", "987 654")).toEqual(["Rosa Quispe"])
     expect(await names("pacientes", "45879632")).toEqual(["Carlos Mendoza"])
-    const page = await c.run((tx) => listPeople(tx, c.orgId, { view: "responsables" }, everything))
-    expect(page.counts.porRegistrar).toBe(1)
-    expect(page.items[0]).toMatchObject({
+    const everyoneRows = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos" }, everything))
+    expect(everyoneRows.counts.porRegistrar).toBe(1)
+    expect(everyoneRows.items.find((row) => row.displayName === "Martín Salas")).toMatchObject({
       kind: "responsable",
-      responsibleFor: ["Sofía Salas"],
-      responsibleCount: 1,
+      vinculos: ["Tutor de Sofía Salas"],
+      vinculoCount: 1,
     })
     const patients = await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes" }, everything))
     expect(patients.items[0]).toMatchObject({
@@ -335,7 +340,8 @@ describe("una lista y un buscador", () => {
     const first = await c.run((tx) =>
       listPeople(tx, c.orgId, { view: "por_registrar", limit: 2 }, everything),
     )
-    expect(first.items.map((row) => row.displayName)).toEqual(["Ana", "Beto"])
+    // Contactos nuevos: del que llegó más reciente al más antiguo.
+    expect(first.items.map((row) => row.displayName)).toEqual(["Carla", "Beto"])
     expect(first.nextCursor).toBeTruthy()
     const second = await c.run((tx) =>
       listPeople(
@@ -345,7 +351,7 @@ describe("una lista y un buscador", () => {
         everything,
       ),
     )
-    expect(second.items.map((row) => row.displayName)).toEqual(["Carla"])
+    expect(second.items.map((row) => row.displayName)).toEqual(["Ana"])
     expect(second.nextCursor).toBeNull()
     await expect(
       c.run((tx) =>
@@ -377,5 +383,63 @@ describe("un sitio para las notas", () => {
     expect(notes).toEqual([
       expect.objectContaining({ body: "Llamó por el precio", authorName: "Ana Recepción" }),
     ])
+  })
+})
+
+describe("contactos nuevos, lista por apellido y vínculos en palabras", () => {
+  it("contactos nuevos del que llegó más reciente al más antiguo; el resto por apellido; el contacto de emergencia se dice como tal", async () => {
+    const c = await clinic()
+    const ana = await c.run((tx) => createContact(tx, c.orgId, { displayName: "Ana Torres" }))
+    const beto = await c.run((tx) => createContact(tx, c.orgId, { displayName: "Beto Ríos" }))
+    await ownerDb.insert(contactIdentity).values([
+      {
+        organizationId: c.orgId,
+        contactId: ana.id,
+        channel: "whatsapp",
+        externalUserId: "wa:51911111111",
+        createdAt: new Date("2026-10-10T10:00:00Z"),
+      },
+      {
+        organizationId: c.orgId,
+        contactId: beto.id,
+        channel: "web",
+        externalUserId: "web:beto",
+        createdAt: new Date("2026-10-01T10:00:00Z"),
+      },
+    ])
+    const nuevos = await c.run((tx) => listPeople(tx, c.orgId, { view: "por_registrar" }, everything))
+    expect(nuevos.items.map((row) => row.displayName)).toEqual(["Ana Torres", "Beto Ríos"])
+    expect(nuevos.items[0]?.firstContact).toMatchObject({ channel: "whatsapp" })
+    // Sin conversación todavía: nada de lo que pasa en el hilo, solo que nadie le ha escrito.
+    expect(nuevos.items[0]?.situation).toBe("sin_conversacion")
+
+    await c.run((tx) =>
+      createContact(tx, c.orgId, { displayName: "Rosa Quispe", givenNames: "Rosa", familyName: "Quispe" }),
+    )
+    await c.run((tx) =>
+      createContact(tx, c.orgId, { displayName: "Marco Torres", givenNames: "Marco", familyName: "Torres" }),
+    )
+    await c.run((tx) => createContact(tx, c.orgId, { displayName: "Adriana" }))
+    const todos = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos" }, everything))
+    expect(todos.items.map((row) => row.displayName)).toEqual([
+      "Adriana",
+      "Ana Torres",
+      "Beto Ríos",
+      "Rosa Quispe",
+      "Marco Torres",
+    ])
+
+    const sofia = await c.run((tx) => createPatient(tx, c.orgId, c.actor, { displayName: "Sofía Salas" }))
+    await c.run((tx) =>
+      declareEmergencyContact(tx, c.orgId, c.actor, sofia.id, { name: "Lucía Salas", phone: "+51988000111", kinship: "SIB" }),
+    )
+    const withEmergency = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos" }, everything))
+    expect(withEmergency.items.find((row) => row.displayName === "Lucía Salas")).toMatchObject({
+      kind: "responsable",
+      vinculos: ["Contacto de emergencia de Sofía Salas"],
+    })
+    // Quien es contacto de emergencia no es contacto nuevo: lo dice su vínculo.
+    const stillNew = await c.run((tx) => listPeople(tx, c.orgId, { view: "por_registrar" }, everything))
+    expect(stillNew.items.map((row) => row.displayName)).not.toContain("Lucía Salas")
   })
 })

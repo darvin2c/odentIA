@@ -30,7 +30,7 @@ import { orgFk, timestamps } from "./crm.js"
  */
 
 /**
- * Las líneas. Las ocho primeras vienen armadas: cinco escriben a la persona
+ * Las líneas. Las nueve primeras vienen armadas: seis escriben a la persona
  * (el agente Recepción) y tres dejan trabajo a una persona del equipo. Las
  * de `CUSTOM_AUTOMATION_KINDS` son piezas que el sistema también sabe hacer y
  * que solo existen en una clínica cuando ella las crea pidiéndoselas al
@@ -47,6 +47,7 @@ export const AUTOMATION_KINDS = [
   "presupuestos_sin_cita",
   "atenciones_sin_firmar",
   "cobranza_vencida",
+  "invitar_a_volver",
   ...CUSTOM_AUTOMATION_KINDS,
 ] as const
 export type AutomationKind = (typeof AUTOMATION_KINDS)[number]

@@ -129,7 +129,7 @@ describe("ajustes", () => {
 })
 
 describe("su página", () => {
-  it("es una sola lista de ocho líneas y cada una dice quién lo hace", async () => {
+  it("es una sola lista de nueve líneas y cada una dice quién lo hace", async () => {
     const c = await clinic()
     const page = await run(c, (tx) => getAdminPage(tx, c.orgId, all))
     expect(page.lines.map((line) => [line.key, line.actor])).toEqual([
@@ -138,6 +138,7 @@ describe("su página", () => {
       ["seguimiento_presupuesto", "agente"],
       ["seguimiento_comercial", "agente"],
       ["seguimiento_no_asistencia", "agente"],
+      ["invitar_a_volver", "agente"],
       ["presupuestos_sin_cita", "persona"],
       ["atenciones_sin_firmar", "persona"],
       ["cobranza_vencida", "persona"],

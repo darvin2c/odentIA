@@ -8,8 +8,14 @@
  * conversaciones y sus notas. Cada bloque de la página se pide aparte con su
  * propio permiso; ninguna función de este módulo entrega todo junto.
  */
-import { testOnlyPersonSql } from "./conversation-state.js"
-import { clinicalProfileFor, documentIssuerCountry, validateDemographics } from "@odentia/clinical"
+import { awaitingPatientSinceSql, conversationViewSql, testOnlyPersonSql } from "./conversation-state.js"
+import {
+  clinicalProfileFor,
+  documentIssuerCountry,
+  KINSHIP_LABELS,
+  type Kinship,
+  validateDemographics,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
@@ -29,8 +35,14 @@ import {
 } from "./contacts.js"
 import { type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCountry } from "./locale.js"
+import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { personSearchCondition } from "./person-search.js"
+import { getPlanNextStep } from "./plan-next.js"
+import {
+  PEOPLE_SHORTCUTS,
+  type PeopleShortcut,
+  peopleShortcutMembers,
+} from "./people-shortcuts.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import {
   assertDocumentFree,
@@ -316,43 +328,70 @@ export async function getPersonPage(
 /* ------------------------------------------------------------------ */
 
 /**
- * Vistas de la lista: las cinco de la pantalla y `activos` (todas las personas
- * sin archivar), que usa el buscador de personas al elegir a alguien.
+ * Vistas de la lista: las cuatro de la pantalla (Pacientes, Contactos nuevos,
+ * Archivados y Todos) y `activos` (todas las personas sin archivar), que usa el
+ * buscador de personas al elegir a alguien.
  */
 export const PEOPLE_VIEWS = [
   "pacientes",
   "por_registrar",
-  "responsables",
   "archivados",
   "todos",
   "activos",
 ] as const
 export type PeopleView = (typeof PEOPLE_VIEWS)[number]
 
+/** En qué está quien aún no es paciente (tablero 3): gana la primera que se cumple. */
+export type PersonSituation =
+  | "responder"
+  | "agente"
+  | "enlace"
+  | "oportunidad"
+  | "sin_respuesta"
+  | "esperamos"
+  | "sin_conversacion"
+  | "sin_pendientes"
+
 export interface PersonListItem {
   id: string
   displayName: string
+  /** Apellidos: la lista ordena por ellos (decisión 11b). */
+  familyName: string | null
   kind: PersonKind
   archived: boolean
   patient: { id: string; patientNumber: number } | null
+  /** Edad hoy, si la fecha de nacimiento está. */
+  age: number | null
   docType: string | null
   docNumber: string | null
   sex: string | null
   phone: string | null
   /** En Spam o bloqueada (ADR 0054); solo para quien lee conversaciones. */
   screen: ContactScreen | null
-  /** Hasta dos nombres de los pacientes de los que es responsable, y cuántos son. */
-  responsibleFor: string[]
-  responsibleCount: number
+  /** Vínculos con pacientes en palabras («Madre de Mateo Vargas»): hasta dos, y cuántos son (decisión 16). */
+  vinculos: string[]
+  vinculoCount: number
   /** Próxima cita por venir; solo para quien ve la agenda. */
   nextAppointmentAt: string | null
+  /** Última visita atendida; solo para quien ve la agenda. */
+  lastVisitAt: string | null
   /** Último mensaje con la persona; solo para quien lee conversaciones. */
   lastInteractionAt: string | null
+  /** Cómo llegó: su primer canal (`channel` nulo si lo registró el equipo); solo para quien lee conversaciones. */
+  firstContact: { channel: string | null; at: string } | null
+  /** En qué está, solo para quien aún no es paciente y lee conversaciones. */
+  situation: PersonSituation | null
+  /** Desde cuándo espera su respuesta, si la clínica le escribió y no contesta. */
+  waitingSince: string | null
+  /** Qué sigue del plan y el texto de su botón; solo para quien ve el plan. */
+  nextStep: { text: string; actionLabel: string | null } | null
 }
 
 export interface PeopleListInput {
   view?: string
   q?: string
+  /** Atajo de «Pacientes» (`PEOPLE_SHORTCUTS`): solo con la vista Pacientes. */
+  atajo?: string
   cursor?: string
   limit?: number
 }
@@ -362,6 +401,14 @@ const PEOPLE_PAGE = 30
 /** Archivada entera: la persona, con su ficha si es paciente (ADR 0044). */
 const ARCHIVED_SQL = sql`(not c.is_active)`
 const RESPONSIBLE_SQL = sql`exists (select 1 from patient_contact r join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active)`
+/** Cuándo llegó: su primer mensaje por cualquier canal o, si nunca escribió, su alta en la clínica. */
+const FIRST_CONTACT_SQL = sql`coalesce((select min(ci.created_at) from contact_identity ci where ci.organization_id = c.organization_id and ci.contact_id = c.id), c.created_at)`
+const FIRST_CONTACT_TEXT_SQL = sql`to_char(${FIRST_CONTACT_SQL} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+/** Un enlace de registro o de cita que todavía sirve (tablero 3, decisión 2). */
+const USABLE_LINK_SQL = sql`(exists (select 1 from patient_registration_link l where l.organization_id = c.organization_id and l.contact_id = c.id and l.consumed_at is null and l.revoked_at is null and l.expires_at > now()) or exists (select 1 from appointment_booking_link b where b.organization_id = c.organization_id and b.contact_id = c.id and b.used_at is null and b.revoked_at is null and b.expires_at > now()))`
+const OPEN_OPPORTUNITY_SQL = sql`exists (select 1 from opportunity o where o.organization_id = c.organization_id and o.contact_id = c.id and o.status = 'open')`
+/** Quien es de un paciente pero pide algo para sí mismo: aparece entre los contactos nuevos (decisión 2). */
+const OWN_REQUEST_SQL = sql`(${OPEN_OPPORTUNITY_SQL} or ${USABLE_LINK_SQL})`
 
 function viewCondition(view: PeopleView) {
   switch (view) {
@@ -369,9 +416,7 @@ function viewCondition(view: PeopleView) {
       return sql`p.id is not null and not ${ARCHIVED_SQL}`
     case "por_registrar":
       // Spam y bloqueados no son contactos nuevos (ADR 0054): se encuentran en «Todos».
-      return sql`p.id is null and not ${RESPONSIBLE_SQL} and not ${ARCHIVED_SQL} and c.screen is null`
-    case "responsables":
-      return sql`${RESPONSIBLE_SQL} and not ${ARCHIVED_SQL}`
+      return sql`p.id is null and (not ${RESPONSIBLE_SQL} or ${OWN_REQUEST_SQL}) and not ${ARCHIVED_SQL} and c.screen is null`
     case "archivados":
       return ARCHIVED_SQL
     case "todos":
@@ -391,8 +436,8 @@ function searchCondition(q: string) {
   })
 }
 
-function encodePeopleCursor(name: string, id: string, fingerprint: string): string {
-  return Buffer.from(JSON.stringify({ n: name, id, f: fingerprint }), "utf8").toString("base64url")
+function encodePeopleCursor(key: string, id: string, fingerprint: string): string {
+  return Buffer.from(JSON.stringify({ n: key, id, f: fingerprint }), "utf8").toString("base64url")
 }
 
 function decodePeopleCursor(cursor: string): { n: string; id: string; f: string } | null {
@@ -409,12 +454,118 @@ function decodePeopleCursor(cursor: string): { n: string; id: string; f: string 
   }
 }
 
+/** Un vínculo de la persona con un paciente, tal como lo lee la consulta. */
+interface VinculoRow {
+  name: string
+  kinship: string | null
+  relationship: string
+  detail: string | null
+  emergency: boolean
+}
+
+/**
+ * Cómo se dice el vínculo en la lista: «Madre de Mateo Vargas». Un contacto de
+ * emergencia no es responsable ni tutor: se dice por su marca (decisión 16).
+ */
+function vinculoText(v: VinculoRow): string {
+  if (v.emergency) return `Contacto de emergencia de ${v.name}`
+  if (v.kinship && v.kinship in KINSHIP_LABELS)
+    return `${KINSHIP_LABELS[v.kinship as Kinship]} de ${v.name}`
+  if (v.relationship === "guardian") return `Tutor de ${v.name}`
+  if (v.relationship === "family") return `Familiar de ${v.name}`
+  return v.detail ? `${v.detail} de ${v.name}` : `Vinculado a ${v.name}`
+}
+
+type PeopleRow = {
+  id: string
+  display_name: string
+  family_name: string | null
+  is_active: boolean
+  patient_id: string | null
+  patient_number: number | null
+  doc_type: string | null
+  doc_number: string | null
+  sex: string | null
+  phone: string | null
+  screen: ContactScreen | null
+  age: number | null
+  last_interaction_at: string | null
+  sort_key: string
+  vinculos: VinculoRow[] | string | null
+  vinculo_count: number
+  next_appointment_at: string | null
+  last_visit_at: string | null
+}
+
+interface ContactExtra {
+  firstChannel: string | null
+  firstAt: string
+  situation: PersonSituation
+  waitingSince: string | null
+}
+
+/**
+ * Cómo llegó y en qué está, de la última conversación y de los enlaces y
+ * oportunidades de la persona. Solo para las filas de la página, no para toda
+ * la clínica; quien no lee conversaciones no llama a esta consulta.
+ */
+async function contactExtras(tx: Db, orgId: string, ids: string[]): Promise<Map<string, ContactExtra>> {
+  const out = new Map<string, ContactExtra>()
+  if (ids.length === 0) return out
+  const waiting = awaitingPatientSinceSql(sql.raw("cv"))
+  const idList = sql.join(
+    ids.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  )
+  const rows = await tx.execute<{
+    id: string
+    first_channel: string | null
+    first_at: string
+    situation: PersonSituation
+    waiting_since: string | null
+  }>(sql`
+    select c.id,
+      (select ci.channel from contact_identity ci
+        where ci.organization_id = c.organization_id and ci.contact_id = c.id
+        order by ci.created_at asc limit 1) as first_channel,
+      ${FIRST_CONTACT_TEXT_SQL} as first_at,
+      case
+        when cv.id is not null and ${conversationViewSql(sql.raw("cv"), "attend")} then 'responder'
+        when cv.id is not null and ${conversationViewSql(sql.raw("cv"), "agent")} then 'agente'
+        when ${USABLE_LINK_SQL} then 'enlace'
+        when ${OPEN_OPPORTUNITY_SQL} then 'oportunidad'
+        when cv.id is not null and ${conversationViewSql(sql.raw("cv"), "awaiting_patient")} then
+          case when ${waiting} <= now() - interval '7 days' then 'sin_respuesta' else 'esperamos' end
+        when cv.id is null then 'sin_conversacion'
+        else 'sin_pendientes'
+      end as situation,
+      to_char(${waiting} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as waiting_since
+    from contact c
+    left join lateral (
+      select cv.* from conversation cv
+      where cv.organization_id = c.organization_id and cv.contact_id = c.id
+      order by coalesce(cv.last_message_at, cv.created_at) desc limit 1
+    ) cv on true
+    where c.organization_id = ${orgId} and c.id in (${idList})
+  `)
+  for (const r of rows) {
+    out.set(r.id, {
+      firstChannel: r.first_channel,
+      firstAt: r.first_at,
+      situation: r.situation,
+      waitingSince: r.waiting_since,
+    })
+  }
+  return out
+}
+
 /**
  * La lista de personas de la clínica, una sola: los filtros son vistas de la
- * misma persona («Pacientes» por defecto). Búsqueda, orden por nombre y
- * páginas los hace el servidor; el total de «Por registrar» es de toda la
- * clínica, no de la página cargada. Quien no ve a quien aún no es paciente
- * (`seesNonPatients`) recibe solo pacientes, en cualquier vista que tenga.
+ * misma persona («Pacientes» por defecto). Búsqueda y páginas las hace el
+ * servidor. Contactos nuevos va del que llegó más reciente al más antiguo; las
+ * demás vistas, por apellido (decisión 11b). El total de «Contactos nuevos» es
+ * de toda la clínica. Quien no ve a quien aún no es paciente (`seesNonPatients`)
+ * recibe solo pacientes, en cualquier vista que tenga.
  */
 export async function listPeople(
   tx: Db,
@@ -425,76 +576,139 @@ export async function listPeople(
   items: PersonListItem[]
   nextCursor: string | null
   counts: { porRegistrar: number }
+  /** Cuántos hay en cada atajo que quien mira ve; nulo fuera de Pacientes. */
+  shortcuts: Record<PeopleShortcut, number | null> | null
 }> {
   const view = (input.view ?? "pacientes") as PeopleView
   if (!PEOPLE_VIEWS.includes(view)) throw validation("Vista inválida")
-  // Caja y odontología solo ven pacientes: sin las vistas de quien aún no lo es.
+  // Caja y odontología solo ven pacientes: sin la vista de quien aún no lo es.
   const everyone = seesNonPatients(can)
-  if (!everyone && (view === "por_registrar" || view === "responsables"))
+  if (!everyone && view === "por_registrar")
     throw new ServiceError("FORBIDDEN", 403, "Esta vista es de quien lleva la relación con las personas")
   const onlyPatients = everyone ? sql`true` : sql`p.id is not null`
   const limit = Math.min(Math.max(input.limit ?? PEOPLE_PAGE, 1), 100)
   const q = input.q?.trim() ?? ""
-  const fingerprint = JSON.stringify({ view, q })
+  if (input.atajo !== undefined && !(PEOPLE_SHORTCUTS as readonly string[]).includes(input.atajo))
+    throw validation("Atajo inválido")
+  if (input.atajo && view !== "pacientes") throw validation("Los atajos son de la vista Pacientes")
+  const atajo = (input.atajo || null) as PeopleShortcut | null
+  const fingerprint = JSON.stringify({ view, q, atajo })
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const members = view === "pacientes" ? await peopleShortcutMembers(tx, orgId, can, timezone, new Date()) : null
+  if (atajo && members?.[atajo] === undefined) throw new ServiceError("FORBIDDEN", 403, "Este atajo no es para quien lo pide")
+  const atajoIds = atajo ? (members?.[atajo] ?? []) : []
+  const inAtajo = atajo
+    ? atajoIds.length > 0
+      ? sql`p.id in (${sql.join(atajoIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+      : sql`false`
+    : sql`true`
+  const newest = view === "por_registrar"
+  const sortKey = newest ? FIRST_CONTACT_TEXT_SQL : sql`coalesce(nullif(c.family_name, ''), c.display_name)`
+  const direction = sql.raw(newest ? "desc" : "asc")
   let after = sql`true`
   if (input.cursor) {
     const decoded = decodePeopleCursor(input.cursor)
     if (!decoded) throw validation("Cursor inválido")
     if (decoded.f !== fingerprint)
       throw validation("El cursor no corresponde a los filtros actuales")
-    after = sql`(c.display_name, c.id) > (${decoded.n}, ${decoded.id}::uuid)`
+    after = sql`(${sortKey}, c.id) ${sql.raw(newest ? "<" : ">")} (${decoded.n}, ${decoded.id}::uuid)`
   }
   const agenda = can("appointments.read")
   const chats = can("conversations.read") || can("crm.read")
-  const rows = await tx.execute<{
-    id: string
-    display_name: string
-    is_active: boolean
-    patient_id: string | null
-    patient_number: number | null
-    doc_type: string | null
-    doc_number: string | null
-    sex: string | null
-    phone: string | null
-    screen: ContactScreen | null
-    last_interaction_at: string | null
-    responsible_names: string[] | null
-    responsible_count: number
-    next_appointment_at: string | null
-  }>(sql`
-    select c.id, c.display_name, c.is_active, p.id as patient_id, p.patient_number,
+  const plan = ["clinical.read", "budgets.read", "appointments.read"].some((permission) => can(permission))
+  const rows = await tx.execute<PeopleRow>(sql`
+    select c.id, c.display_name, c.family_name, c.is_active, p.id as patient_id, p.patient_number,
       c.doc_type, c.doc_number, c.sex, c.phone, c.screen,
+      extract(year from age(c.birth_date))::int as age,
       to_char(c.last_interaction_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as last_interaction_at,
-      (select array_agg(n order by n) from (
-        select rc.display_name as n from patient_contact r
+      ${sortKey} as sort_key,
+      (select coalesce(json_agg(v.j order by v.name), '[]'::json) from (
+        select rc.display_name as name, json_build_object('name', rc.display_name, 'kinship', r.kinship,
+          'relationship', r.relationship, 'detail', r.relationship_detail, 'emergency', r.is_emergency) as j
+        from patient_contact r
           join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id
           join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id
-          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active
-          order by rc.display_name limit 2) names) as responsible_names,
+        where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active
+        order by rc.display_name limit 2) v) as vinculos,
       (select count(*)::int from patient_contact r
           join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id
           join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id
-          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active) as responsible_count,
+          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active) as vinculo_count,
       ${
         agenda
           ? sql`(select to_char(min(a.starts_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') from appointment a
               where a.organization_id = c.organization_id and a.patient_id = p.id and a.starts_at > now()
                 and a.status in ('programada', 'confirmada'))`
           : sql`null`
-      } as next_appointment_at
+      } as next_appointment_at,
+      ${
+        agenda
+          ? sql`(select to_char(max(a.starts_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') from appointment a
+              where a.organization_id = c.organization_id and a.patient_id = p.id and a.status = 'atendida')`
+          : sql`null`
+      } as last_visit_at
     from contact c
     left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
     where c.organization_id = ${orgId}
       and ${viewCondition(view)}
       and not ${testOnlyPersonSql(sql.raw("c"))}
       and ${onlyPatients}
+      and ${inAtajo}
       and ${searchCondition(q)}
       and ${after}
-    order by c.display_name asc, c.id asc
+    order by ${sortKey} ${direction}, c.id ${direction}
     limit ${limit + 1}
   `)
   const list = [...rows]
   const page = list.slice(0, limit)
+  const extras = chats
+    ? await contactExtras(
+        tx,
+        orgId,
+        page.map((r) => r.id),
+      )
+    : new Map<string, ContactExtra>()
+  const items: PersonListItem[] = []
+  for (const r of page) {
+    const isPatient = r.patient_id !== null
+    const extra = extras.get(r.id)
+    const vinculoCount = Number(r.vinculo_count ?? 0)
+    const vinculos = (typeof r.vinculos === "string" ? JSON.parse(r.vinculos) : (r.vinculos ?? [])) as VinculoRow[]
+    const situation = !isPatient && extra ? extra.situation : null
+    items.push({
+      id: r.id,
+      displayName: r.display_name,
+      familyName: r.family_name,
+      kind: isPatient ? "paciente" : vinculoCount > 0 ? "responsable" : "por_registrar",
+      archived: !r.is_active,
+      patient:
+        r.patient_id && r.patient_number !== null
+          ? { id: r.patient_id, patientNumber: Number(r.patient_number) }
+          : null,
+      age: r.age === null ? null : Number(r.age),
+      docType: r.doc_type,
+      docNumber: r.doc_number,
+      sex: r.sex,
+      phone: r.phone,
+      // Lo dicen solo a quien lee conversaciones: es lo que ve la Bandeja.
+      screen: chats ? r.screen : null,
+      vinculos: vinculos.slice(0, 2).map(vinculoText),
+      vinculoCount,
+      nextAppointmentAt: agenda ? r.next_appointment_at : null,
+      lastVisitAt: agenda ? r.last_visit_at : null,
+      lastInteractionAt: chats ? r.last_interaction_at : null,
+      firstContact: chats && extra ? { channel: extra.firstChannel, at: extra.firstAt } : null,
+      situation: chats ? situation : null,
+      waitingSince:
+        chats && (situation === "sin_respuesta" || situation === "esperamos") ? (extra?.waitingSince ?? null) : null,
+      nextStep: null,
+    })
+    if (isPatient && plan && r.patient_id) {
+      const step = await getPlanNextStep(tx, orgId, r.patient_id, can)
+      items[items.length - 1].nextStep = { text: step.text, actionLabel: step.action?.label ?? null }
+    }
+  }
+  const last = page[page.length - 1]
   const [counted] = everyone
     ? await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from contact c
@@ -502,38 +716,15 @@ export async function listPeople(
     where c.organization_id = ${orgId} and ${viewCondition("por_registrar")} and not ${testOnlyPersonSql(sql.raw("c"))}
   `)
     : [{ count: 0 }]
-  const items: PersonListItem[] = page.map((r) => {
-    const responsibleCount = Number(r.responsible_count ?? 0)
-    const archived = !r.is_active
-    return {
-      id: r.id,
-      displayName: r.display_name,
-      kind: r.patient_id ? "paciente" : responsibleCount > 0 ? "responsable" : "por_registrar",
-      archived,
-      patient:
-        r.patient_id && r.patient_number !== null
-          ? { id: r.patient_id, patientNumber: Number(r.patient_number) }
-          : null,
-      docType: r.doc_type,
-      docNumber: r.doc_number,
-      sex: r.sex,
-      phone: r.phone,
-      // Lo dice solo a quien lee conversaciones: es lo que ve la Bandeja.
-      screen: chats ? r.screen : null,
-      responsibleFor: r.responsible_names ?? [],
-      responsibleCount,
-      nextAppointmentAt: agenda ? r.next_appointment_at : null,
-      lastInteractionAt: chats ? r.last_interaction_at : null,
-    }
-  })
-  const last = page[page.length - 1]
+  const shortcuts = members
+    ? (Object.fromEntries(PEOPLE_SHORTCUTS.map((name) => [name, members[name]?.length ?? null])) as Record<PeopleShortcut, number | null>)
+    : null
   return {
     items,
     nextCursor:
-      list.length > limit && last
-        ? encodePeopleCursor(last.display_name, last.id, fingerprint)
-        : null,
+      list.length > limit && last ? encodePeopleCursor(last.sort_key, last.id, fingerprint) : null,
     counts: { porRegistrar: Number(counted?.count ?? 0) },
+    shortcuts,
   }
 }
 

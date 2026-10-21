@@ -14,8 +14,8 @@ export type PersonKind = "paciente" | "responsable" | "por_registrar"
 
 export const PERSON_KIND_LABELS: Record<PersonKind, string> = {
   paciente: "Paciente",
-  responsable: "Responsable",
-  por_registrar: "Por registrar",
+  responsable: "Vinculada a un paciente",
+  por_registrar: "Contacto nuevo",
 }
 
 export interface PersonResponsibleFor {
@@ -80,32 +80,70 @@ export interface PersonPage {
 
 export type { PhoneWhatsApp } from "./phone-whatsapp"
 
+/** En qué está quien aún no es paciente (tablero 3 del lienzo). */
+export type PersonSituation =
+  | "responder"
+  | "agente"
+  | "enlace"
+  | "oportunidad"
+  | "sin_respuesta"
+  | "esperamos"
+  | "sin_conversacion"
+  | "sin_pendientes"
+
 export interface PersonListItem {
   id: string
   displayName: string
+  familyName: string | null
   kind: PersonKind
   archived: boolean
   /** En Spam o bloqueada (ADR 0054); solo llega a quien lee conversaciones. */
   screen?: "spam" | "blocked" | null
   patient: { id: string; patientNumber: number } | null
+  age: number | null
   docType: string | null
   docNumber: string | null
   sex: string | null
   phone: string | null
-  responsibleFor: string[]
-  responsibleCount: number
+  /** Vínculos con pacientes en palabras («Madre de Mateo Vargas»), hasta dos. */
+  vinculos: string[]
+  vinculoCount: number
   nextAppointmentAt: string | null
+  lastVisitAt: string | null
   lastInteractionAt: string | null
+  /** Cómo llegó: su primer canal (nulo si lo registró el equipo). */
+  firstContact: { channel: string | null; at: string } | null
+  situation: PersonSituation | null
+  waitingSince: string | null
+  nextStep: { text: string; actionLabel: string | null } | null
 }
 
 export const PEOPLE_VIEWS = [
   { id: "pacientes", label: "Pacientes" },
-  { id: "por_registrar", label: "Por registrar" },
-  { id: "responsables", label: "Responsables" },
+  { id: "por_registrar", label: "Contactos nuevos" },
   { id: "archivados", label: "Archivados" },
   { id: "todos", label: "Todos" },
 ] as const
 export type PeopleView = (typeof PEOPLE_VIEWS)[number]["id"]
+
+/** Los atajos de Pacientes, con las palabras de la pantalla (decisión 6). */
+export const PEOPLE_SHORTCUTS = [
+  { id: "por_agendar", label: "Por agendar" },
+  { id: "presupuesto_sin_enviar", label: "Presupuesto sin enviar" },
+  { id: "presupuesto_sin_respuesta", label: "Presupuesto sin respuesta" },
+  { id: "control_por_reservar", label: "Control por reservar" },
+  { id: "faltan_datos", label: "Faltan datos" },
+  { id: "por_invitar_a_volver", label: "Por invitar a volver" },
+  { id: "deben", label: "Deben" },
+] as const
+export type PeopleShortcut = (typeof PEOPLE_SHORTCUTS)[number]["id"]
+
+/** Cuántos hay en cada atajo que quien mira ve; nulo si no lo ve. */
+export type PeopleShortcutCounts = Record<PeopleShortcut, number | null>
+
+export function isPeopleShortcut(value: unknown): value is PeopleShortcut {
+  return PEOPLE_SHORTCUTS.some((shortcut) => shortcut.id === value)
+}
 
 export function isPeopleView(value: unknown): value is PeopleView {
   return PEOPLE_VIEWS.some((view) => view.id === value)
@@ -196,4 +234,56 @@ export function lastPatientSection(patientId: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Lo que dice «En qué está», con las mismas palabras de la Bandeja (tablero 3). */
+export function situationText(item: Pick<PersonListItem, "situation" | "waitingSince">, now = Date.now()): string {
+  switch (item.situation) {
+    case "responder":
+      return "Espera al equipo"
+    case "agente":
+      return "Habla con el agente"
+    case "enlace":
+      return "Le enviamos su enlace"
+    case "oportunidad":
+      return "Tiene una oportunidad abierta"
+    case "sin_respuesta": {
+      const days = daysSince(item.waitingSince, now)
+      return days === null ? "Sin respuesta" : `Sin respuesta hace ${days} ${days === 1 ? "día" : "días"}`
+    }
+    case "esperamos":
+      return "Esperamos su respuesta"
+    case "sin_conversacion":
+      return "Sin conversación"
+    case "sin_pendientes":
+      return "Sin pendientes"
+    default:
+      return ""
+  }
+}
+
+/** El botón de la fila según lo que está pasando: abre donde se resuelve. */
+export function situationAction(situation: PersonSituation | null): string {
+  switch (situation) {
+    case "responder":
+      return "Responder"
+    case "enlace":
+      return "Reenviar enlace"
+    case "oportunidad":
+      return "Ver oportunidad"
+    case "sin_respuesta":
+      return "Escribirle"
+    case "sin_conversacion":
+      return "Registrar"
+    default:
+      return "Ver conversación"
+  }
+}
+
+/** Días enteros desde una fecha ISO; nulo si no hay fecha. */
+export function daysSince(iso: string | null, now = Date.now()): number | null {
+  if (!iso) return null
+  const time = Date.parse(iso)
+  if (Number.isNaN(time)) return null
+  return Math.max(0, Math.floor((now - time) / 86_400_000))
 }

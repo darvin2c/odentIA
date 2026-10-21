@@ -73,6 +73,7 @@ import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conver
 import { notFound, ServiceError, validation } from "./errors.js"
 import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
@@ -1211,6 +1212,38 @@ export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Prom
   return { programados, omitidos }
 }
 
+/**
+ * Casos de «Invitar a volver» (decisión 15): quien no viene hace 6 meses, sin
+ * cita ni pendientes y sin invitación reciente. Un caso por ciclo: la clave
+ * cambia con la última visita y con cuántas veces se la invitó.
+ */
+export async function syncLapsedInvites(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
+  const rule = await enabledLine(tx, orgId, "invitar_a_volver")
+  let programados = 0
+  let omitidos = 0
+  if (!rule) return { programados, omitidos }
+  const { timezone } = await findOrgLocale(tx, orgId)
+  for (const row of await lapsedToInvite(tx, orgId, timezone, now, { limit: BATCH_LIMIT })) {
+    const contactId = await preferredContact(tx, orgId, row.patientId)
+    if (!contactId) {
+      omitidos++
+      continue
+    }
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "invitar_a_volver",
+      dedupeKey: `invitar_a_volver:${row.patientId}:${row.appointmentId}:${row.invites}`,
+      scheduledFor: sendTimeFor(now, now, await writingScheduleOf(tx, orgId, timezone)) ?? now,
+      contactId,
+      appointmentId: row.appointmentId,
+      patientId: row.patientId,
+      payload: { timeZone: timezone },
+    })
+    if (job) programados++
+  }
+  return { programados, omitidos }
+}
+
 /** El día siguiente a `date`, a la hora dada, en la zona de la sede. */
 export function nextDayAt(date: Date, timeZone: string, hour: number): Date {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
@@ -1388,6 +1421,12 @@ async function stillValid(
     if (!["programada", "confirmada"].includes(appt.status)) {
       return { valid: false, reason: `La cita ya está ${APPOINTMENT_STATUS_WORDS[appt.status] ?? appt.status}` }
     }
+    return { valid: true }
+  }
+  if (job.kind === "invitar_a_volver" && job.patientId) {
+    const { timezone } = await findOrgLocale(tx, orgId)
+    const [still] = await lapsedToInvite(tx, orgId, timezone, now, { patientId: job.patientId, limit: 1 })
+    if (!still) return { valid: false, reason: "Ya no toca invitarla: volvió, tiene una cita o ya la invitaron" }
     return { valid: true }
   }
   if (job.kind === "seguimiento_presupuesto" && job.budgetId) {
@@ -2356,6 +2395,7 @@ export async function deliverJob(
         },
       })
     }
+    if (job.kind === "invitar_a_volver" && job.patientId) await recordInvitation(tx, orgId, null, job.patientId, "agente")
     await linkOpportunityThread(tx, orgId, job, route.conversationId)
     // El agente ya le escribió: la tarea de la oportunidad se da por hecha.
     if (job.kind === "seguimiento_comercial") {

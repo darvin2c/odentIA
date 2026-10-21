@@ -49,6 +49,8 @@ export async function seedChannelTemplates(
     seguimiento_presupuesto: { status: "en_revision" },
     seguimiento_comercial: { status: "aprobada", since: lastWeek },
     seguimiento_no_asistencia: { status: "rechazada", reason: "INVALID_FORMAT" },
+    // «Invitar a volver» (issue 139): plantilla recién pedida; mientras tanto sale como tarea.
+    invitar_a_volver: { status: "en_revision" },
     // WhatsApp lo pasó a promoción (ADR 0040): la lista lo marca y «Te espera» pide cambiar el texto.
     cita_cancelada: { status: "aprobada", since: lastWeek, category: "marketing" },
     aviso_cita_reservada: { status: "aprobada", since: lastWeek },

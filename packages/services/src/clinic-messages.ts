@@ -913,6 +913,7 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
   seguimiento_presupuesto: (days) =>
     `Cuando un presupuesto lleva ${days === 1 ? "1 día" : `${days ?? 2} días`} sin respuesta.`,
   seguimiento_comercial: () => "Cuando una oportunidad tiene su próxima acción vencida.",
+  invitar_a_volver: () => "Cuando una persona lleva seis meses sin venir, sin cita ni pendientes.",
   seguimiento_no_asistencia: (_, timing) =>
     `Al día siguiente de que una persona falta a su cita${timing.hour === undefined ? "" : `, a las ${hourPhrase(timing.hour)}`}.`,
   cita_cancelada: (_, timing) =>
