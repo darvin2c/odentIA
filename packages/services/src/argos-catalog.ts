@@ -163,7 +163,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "inventario",
     about: "Un producto activo por sede, a hoy. Sin costos.",
     columns:
-      "producto, unidad, sede, hay (negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida, insumo (bool: se usa en las atenciones), se_vende (bool)",
+      "producto, unidad (la unidad en que se cuenta: guante, frasco…), sede, hay (en esa unidad, nunca en cajas; negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida, insumo (bool: se usa en las atenciones), se_vende (bool)",
     keys: ["gestion", "recepcion"],
   },
   {
@@ -175,7 +175,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "compras",
-    about: "Órdenes de compra a proveedores. Los lotes no guardan su costo: el inventario no se puede valorizar.",
+    about: "Órdenes de compra a proveedores. Lo comprado son las hechas: sin 'borrador' ni 'cancelada'. Los lotes no guardan su costo: el inventario no se puede valorizar.",
     columns: "numero, proveedor, sede, estado ('borrador'|'confirmada'|'parcialmente_recibida'|'recibida'|'cerrada'|'cancelada'), creada_en, dia, total, recibido, pagado",
     keys: ["gestion"],
   },

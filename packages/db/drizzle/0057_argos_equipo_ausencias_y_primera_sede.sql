@@ -2,6 +2,7 @@
 -- Pacientes nuevos de una sede = los de su primera cita atendida en esa sede (primera_sede), como Reportes.
 -- La unidad dental de cada cita; las ausencias del equipo (sin el motivo, que es texto libre); el equipo con su rol, sus especialidades
 -- y si atiende (tiene horario o citas): la propietaria también puede atender.
+-- El inventario, solo de las sedes con almacén.
 -- Las columnas nuevas van al final: una vista se reemplaza sin cambiar sus columnas de antes.
 GRANT SELECT ON TABLE public.schedule_chair, public.professional_specialty TO argos_dueno;--> statement-breakpoint
 CREATE OR REPLACE VIEW argos.pacientes AS
@@ -71,6 +72,31 @@ SELECT u.name AS profesional,
 FROM public.member m
 JOIN auth."user" u ON u.id = m.user_id
 WHERE m.organization_id = NULLIF(current_setting('app.org_id', true), '');--> statement-breakpoint
+CREATE OR REPLACE VIEW argos.inventario AS
+SELECT pr.name AS producto, pr.unit AS unidad, b.name AS sede,
+  coalesce(lot.hay, 0) - coalesce(sh.falta, 0) AS hay, coalesce(m.min_quantity, 0) AS minimo,
+  CASE WHEN coalesce(sh.falta, 0) > 0 THEN 'faltante'
+    WHEN coalesce(m.min_quantity, 0) > 0 AND coalesce(lot.hay, 0) <= 0 THEN 'no_hay'
+    WHEN coalesce(lot.hay, 0) < coalesce(m.min_quantity, 0) THEN 'hace_falta' ELSE 'ok' END AS estado,
+  (coalesce(sh.falta, 0) > 0 OR coalesce(lot.hay, 0) < coalesce(m.min_quantity, 0)) AS hay_que_reponer,
+  coalesce(lot.por_vencer, 0) AS cantidad_por_vencer, lot.vence_primero, coalesce(lot.vencido, 0) AS cantidad_vencida,
+  pr.used_in_care AS insumo, pr.for_sale AS se_vende
+FROM public.product pr
+JOIN public.branch b ON b.organization_id = pr.organization_id AND b.is_active
+  -- Solo las sedes con almacén: una sede sin almacén no tiene inventario que reponer.
+  AND EXISTS (SELECT 1 FROM public.warehouse wh WHERE wh.organization_id = b.organization_id AND wh.branch_id = b.id)
+LEFT JOIN public.org_profile op ON op.organization_id = pr.organization_id
+LEFT JOIN LATERAL (SELECT sum(l.quantity_on_hand)::int AS hay,
+    sum(l.quantity_on_hand) FILTER (WHERE l.expires_at >= (now() AT TIME ZONE coalesce(b.timezone, op.timezone, 'UTC'))::date
+      AND l.expires_at <= (now() AT TIME ZONE coalesce(b.timezone, op.timezone, 'UTC'))::date + 30)::int AS por_vencer,
+    sum(l.quantity_on_hand) FILTER (WHERE l.expires_at < (now() AT TIME ZONE coalesce(b.timezone, op.timezone, 'UTC'))::date)::int AS vencido,
+    min(l.expires_at) FILTER (WHERE l.quantity_on_hand > 0 AND l.expires_at >= (now() AT TIME ZONE coalesce(b.timezone, op.timezone, 'UTC'))::date) AS vence_primero
+  FROM public.product_lot l JOIN public.warehouse w ON w.organization_id = l.organization_id AND w.id = l.warehouse_id
+  WHERE l.organization_id = pr.organization_id AND l.product_id = pr.id AND w.branch_id = b.id) lot ON true
+LEFT JOIN LATERAL (SELECT sum(s.quantity)::int AS falta FROM public.stock_shortage s JOIN public.warehouse w ON w.organization_id = s.organization_id AND w.id = s.warehouse_id
+  WHERE s.organization_id = pr.organization_id AND s.product_id = pr.id AND w.branch_id = b.id) sh ON true
+LEFT JOIN public.product_minimum m ON m.organization_id = pr.organization_id AND m.product_id = pr.id AND m.branch_id = b.id
+WHERE pr.is_active;--> statement-breakpoint
 ALTER VIEW argos.ausencias OWNER TO argos_dueno;--> statement-breakpoint
 ALTER VIEW argos.equipo OWNER TO argos_dueno;--> statement-breakpoint
 -- Las ausencias, a quien ve la agenda; el equipo, a todos.

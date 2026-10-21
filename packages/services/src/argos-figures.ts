@@ -41,6 +41,8 @@ export const ARGOS_CUTS = [
   "categoria",
   "antiguedad",
   "area",
+  "proveedor",
+  "etapa",
 ] as const
 export type ArgosCut = (typeof ARGOS_CUTS)[number]
 
@@ -67,6 +69,8 @@ export const ARGOS_CUT_WORDS: Record<ArgosCut, string> = {
   categoria: "por tipo de gasto",
   antiguedad: "por antigüedad de la deuda",
   area: "por área",
+  proveedor: "por proveedor",
+  etapa: "por etapa de venta",
 }
 
 /** Los cortes de tiempo salen de `dia`, la fecha en la zona de la clínica. */
@@ -620,6 +624,62 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    key: "planes_en_curso",
+    name: "Planes en curso",
+    describes: "Cuántos planes de tratamiento siguen en curso hoy: con tratamientos aceptados que aún falta hacer (por empezar, programados o en marcha).",
+    how: "Planes con al menos un tratamiento aceptado por empezar, programado o en curso, hoy.",
+    unit: "cantidad",
+    column: "planes",
+    time: "a_hoy",
+    value: "count(distinct plan_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["planes"],
+        rows: "select plan_id, especialidad, indicado_por as profesional from planes where decision = 'aceptado' and estado in ('pendiente', 'programado', 'en_curso')",
+        cuts: ["especialidad", "profesional"],
+      },
+    ],
+  },
+  {
+    key: "planes_parados",
+    name: "Planes parados",
+    describes: "Planes con tratamientos aceptados por hacer de pacientes sin ninguna cita por venir, hoy.",
+    how: "Planes con tratamientos aceptados por empezar, programados, en curso o suspendidos, de pacientes sin una cita por venir, hoy.",
+    unit: "cantidad",
+    column: "planes",
+    time: "a_hoy",
+    value: "count(distinct plan_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["planes", "pacientes"],
+        rows:
+          "select l.plan_id, l.especialidad, l.indicado_por as profesional from planes l join pacientes p on p.paciente_id = l.paciente_id where l.decision = 'aceptado' and l.estado in ('pendiente', 'programado', 'en_curso', 'suspendido') and p.proxima_cita is null",
+        cuts: ["especialidad", "profesional"],
+      },
+    ],
+  },
+  {
+    key: "planes_terminados",
+    name: "Planes terminados",
+    describes: "Cuántos planes de tratamiento se terminaron: ya no les queda nada por hacer y su último tratamiento se hizo en el periodo.",
+    how: "Planes cuyos tratamientos aceptados están todos realizados o cancelados, con al menos uno realizado, y cuyo último tratamiento terminó en el periodo.",
+    unit: "cantidad",
+    column: "planes",
+    time: "instante",
+    value: "count(distinct plan_id)",
+    additive: false,
+    sources: [
+      {
+        views: ["planes"],
+        rows:
+          "select plan_id, max(terminado_en) as t from planes where decision = 'aceptado' group by plan_id having bool_and(estado in ('realizado', 'cancelado')) and bool_or(estado = 'realizado')",
+        cuts: [],
+      },
+    ],
+  },
+  {
     key: "conversaciones",
     name: "Conversaciones",
     describes: "Cuántas conversaciones empezaron, por canal (WhatsApp, Instagram…).",
@@ -728,7 +788,6 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     value: "round(100.0 * sum(o) / nullif(sum(d), 0))",
     additive: false,
     report: "agenda_ocupada",
-    ahead: true,
     sources: [
       {
         views: ["agenda_por_dia"],
@@ -754,7 +813,6 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     value: "round(sum(d - o) / 60.0, 1)",
     additive: true,
     report: "horas_libres",
-    ahead: true,
     sources: [
       {
         views: ["agenda_por_dia"],
@@ -806,6 +864,57 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
           `select profesional, sede, (least(ultimo_dia, ${r.dia_hasta} - 1) - greatest(primer_dia, ${r.dia_desde}) + 1) as v from ausencias where primer_dia < ${r.dia_hasta} and ultimo_dia >= ${r.dia_desde}`,
         cuts: ["profesional", "sede"],
       },
+    ],
+  },
+  // ---------------- Compras y oportunidades ----------------
+  {
+    key: "compras",
+    name: "Lo comprado",
+    describes: "Cuánto se compró a proveedores: las órdenes de compra hechas (sin borradores ni canceladas), por proveedor.",
+    how: "El total de las órdenes de compra hechas en el periodo, sin borradores ni canceladas.",
+    unit: "dinero",
+    column: "comprado_dinero",
+    time: "instante",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["compras"],
+        rows: "select creada_en as t, dia, sede, proveedor, total as v from compras where estado not in ('borrador', 'cancelada')",
+        cuts: [...WHEN, "sede", "proveedor"],
+      },
+    ],
+  },
+  {
+    key: "ordenes_de_compra",
+    name: "Órdenes de compra",
+    describes: "Cuántas órdenes de compra se hicieron (sin borradores ni canceladas), por proveedor.",
+    how: "Las órdenes de compra hechas en el periodo, sin borradores ni canceladas.",
+    unit: "cantidad",
+    column: "ordenes",
+    time: "instante",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["compras"],
+        rows: "select creada_en as t, dia, sede, proveedor, 1 as v from compras where estado not in ('borrador', 'cancelada')",
+        cuts: [...WHEN, "sede", "proveedor"],
+      },
+    ],
+  },
+  {
+    key: "oportunidades_abiertas",
+    name: "Oportunidades abiertas",
+    describes: "Cuántas ventas en curso del CRM siguen abiertas hoy, por servicio, etapa o responsable.",
+    how: "Las oportunidades abiertas hoy (el interés de una persona por un servicio que aún no se decide).",
+    unit: "cantidad",
+    column: "oportunidades",
+    time: "a_hoy",
+    value: COUNT,
+    additive: true,
+    sources: [
+      { views: ["oportunidades"], rows: "select servicio, etapa, responsable as profesional, 1 as v from oportunidades where estado = 'open'", cuts: ["servicio", "etapa", "profesional"] },
     ],
   },
   // ---------------- Inventario y tareas ----------------
