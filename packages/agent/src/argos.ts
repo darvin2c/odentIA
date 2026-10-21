@@ -673,7 +673,9 @@ export async function askArgos(
       const result = await run(bound.sql)
       calcs.set(id, { id, sql, choice, binding, result, figure, how: compiled?.how ?? null })
       const named = compiled?.resolved.length ? `\nNombres de la clínica que usé: ${compiled.resolved.map((item) => `«${item.written}» → ${item.name}`).join("; ")}.` : ""
-      return `${argosResultForModel(id, result, ready.names)}${named}`
+      // Al juntarlo con otro cálculo, sus columnas llevan su id delante: se lo dice con su nombre, no con un número.
+      const join = calcs.size > 1 ? `\nSi lo juntas con otro cálculo, sus columnas son: ${result.columns.map((column) => `{${id}_${column.name}}`).join(", ")}.` : ""
+      return `${argosResultForModel(id, result, ready.names)}${named}${join}`
     } catch (error) {
       if (error instanceof ArgosQueryError && error.code !== "PERMISO") return `${id}: la base no la aceptó: ${error.message}`
       throw error
