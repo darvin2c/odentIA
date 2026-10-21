@@ -680,14 +680,8 @@ function StageLoader({
     positions.current = next
   }, [cards, incoming, pendingId, feedback])
   const decided = stage.moment === "decidio"
-  return (
-    <section
-      ref={setNodeRef}
-      aria-label={`Paso ${stage.name}`}
-      className={`flex min-w-0 flex-col rounded-2xl border p-2 transition-colors duration-200 motion-reduce:transition-none ${embedded ? "min-h-0 flex-1" : COLUMN_WIDTH_CLASS} ${
-        incoming ? "border-primary/50 bg-primary/5 ring-2 ring-primary/10" : "border-transparent bg-muted/45"
-      }`}
-    >
+  const content = (
+    <>
       <header className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-3 rounded-t-xl bg-muted px-2 pb-4 pt-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -698,7 +692,7 @@ function StageLoader({
           <p className="mt-1.5 pl-4.5 text-xs tabular-nums text-muted-foreground">{decided ? [amount, "Últimos 30 días"].filter(Boolean).join(" · ") : (amount ?? "Sin valor estimado")}</p>
         </div>
       </header>
-      <div ref={listRef} className={embedded ? "relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-0.5 pb-1" : "relative flex min-h-32 flex-1 flex-col gap-3 px-0.5 pb-1"}>
+      <div ref={listRef} className="relative flex min-h-32 flex-1 flex-col gap-3 px-0.5 pb-1">
         {incoming && (
           <div
             className="flex shrink-0 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/40 bg-background/65 p-4 text-center text-sm text-primary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
@@ -760,6 +754,17 @@ function StageLoader({
           </Button>
         )}
       </div>
+    </>
+  )
+  return (
+    <section
+      ref={setNodeRef}
+      aria-label={`Paso ${stage.name}`}
+      className={`flex min-w-0 flex-col rounded-2xl border p-2 transition-colors duration-200 motion-reduce:transition-none ${embedded ? "min-h-0 flex-1" : COLUMN_WIDTH_CLASS} ${
+        incoming ? "border-primary/50 bg-primary/5 ring-2 ring-primary/10" : "border-transparent bg-muted/45"
+      }`}
+    >
+      {embedded ? <ScrollArea className="min-h-0 flex-1">{content}</ScrollArea> : content}
     </section>
   )
 }
