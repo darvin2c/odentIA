@@ -10,7 +10,41 @@ export interface ConversationPreview {
   body: string | null
   direction: string
   senderKind: string
+  /** Para decir qué era un mensaje sin texto; ausentes en respuestas antiguas en caché. */
+  contentType?: string
+  attachmentMime?: string | null
+  templateName?: string | null
   createdAt: string
+}
+
+/**
+ * Un mensaje sin texto, en palabras: «Foto», «Nota de voz», «Video»,
+ * «Documento», «Ubicación» o «Mensaje aprobado». Nunca «Adjunto» ni un código.
+ */
+export function attachmentWords(input: {
+  contentType?: string | null
+  mimeType?: string | null
+  templateName?: string | null
+}): string {
+  if (input.contentType === "location") return "Ubicación"
+  if (input.contentType === "template") return "Mensaje aprobado"
+  const mime = input.mimeType ?? ""
+  if (mime.startsWith("image/")) return "Foto"
+  if (mime.startsWith("audio/")) return "Nota de voz"
+  if (mime.startsWith("video/")) return "Video"
+  if (mime) return "Documento"
+  return "Mensaje sin texto"
+}
+
+/** Lo que dice la fila de la Bandeja del último mensaje. */
+export function previewWords(preview: ConversationPreview | null): string {
+  if (!preview) return "Sin mensajes todavía"
+  if (preview.body) return preview.body
+  return attachmentWords({
+    contentType: preview.contentType,
+    mimeType: preview.attachmentMime,
+    templateName: preview.templateName,
+  })
 }
 
 /** Lo que una conversación espera del equipo o del agente (lo calcula el servidor). */

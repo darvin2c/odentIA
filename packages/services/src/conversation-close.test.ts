@@ -503,6 +503,13 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     await c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId, toUserId: c.receptionId }))
     const again = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))
     expect(again.map((n) => n.title)).toContain("Dueña te pasó el tema de Jorge Mamani")
+    // Un tema se contesta en la conversación: no se le pasa a quien no atiende conversaciones (caja).
+    const cashierId = `caja-${c.orgId}`
+    await ownerDb.insert(user).values({ id: cashierId, name: "Carla de Caja", email: `${cashierId}@cierre.test`, emailVerified: true })
+    await ownerDb.insert(member).values({ id: `m-${cashierId}`, userId: cashierId, organizationId: c.orgId, role: "cashier", createdAt: new Date() })
+    await expect(
+      c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId, toUserId: cashierId })),
+    ).rejects.toThrow("Esa persona no atiende conversaciones")
     // Un tema de otra conversación no se toma por esta.
     const other = await c.thread("Otro")
     await expect(c.run((tx) => takeTopic(tx, c.orgId, { conversationId: other.id, topicId: topic.id, userId: c.ownerId }))).rejects.toMatchObject({ status: 404 })

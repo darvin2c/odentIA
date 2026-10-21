@@ -10,7 +10,8 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // `resizes-content`: al abrir el teclado del celular la página se achica y la caja de texto queda a la vista.
+      { name: "viewport", content: "width=device-width, initial-scale=1, interactive-widget=resizes-content" },
       { title: "odentIA" },
     ],
     links: [

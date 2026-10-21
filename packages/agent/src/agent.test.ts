@@ -240,7 +240,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .where(eq(crmTask.conversationId, conversationId)),
   )
   // Un solo nombre para lo que el agente pasa al equipo, sin la prioridad en código.
-  expect(tasks.some((t) => t.title.startsWith("Te lo pasó el agente: "))).toBe(true)
+  expect(tasks.some((t) => t.title.startsWith("Te lo pasó Sofi: "))).toBe(true)
   const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({

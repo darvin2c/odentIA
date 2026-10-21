@@ -53,6 +53,7 @@ import {
   AgentMark,
   ConfirmDialog,
   DataRefreshMarker,
+  DetailDrawer,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -75,7 +76,7 @@ import {
   Bot,
   CheckCheck,
   CheckCircle2,
-  ClipboardList,
+  ChevronDown,
   ChevronLeft,
   Clock,
   Copy,
@@ -95,6 +96,7 @@ import {
   type ConversationListItem,
   type InboxSummary,
   type InboxTopic,
+  previewWords,
   type ResolvePreview,
   timeAgo,
   usePermission,
@@ -133,16 +135,18 @@ import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/
 import { filiationGapsText } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
 import {
+  clockWords,
   closeWithoutResolvingWords,
   closureBand,
   type ConversationWords,
   conversationWords,
+  dayWords,
   fullWhenWords,
+  listTimeWords,
+  messageDayKey,
   topicQuote,
   topicWords,
-  messageTimeWords,
   pendingWords,
-  resolveWords,
 } from "../../lib/conversation-state"
 
 export const Route = createFileRoute("/_org/inbox")({
@@ -486,7 +490,8 @@ function InboxPage() {
         key={`${workspaceContactId}:${selectedId}`}
         contactId={workspaceContactId}
         conversationId={selectedId}
-        onClose={mode === "panel" ? requestCloseContext : closeContextMobile}
+        bare={mode !== "panel"}
+        onClose={mode === "panel" ? requestCloseContext : undefined}
         onRefresh={refreshAfterWorkspace}
         onDraftChange={setWsDraft}
       />
@@ -506,18 +511,22 @@ function InboxPage() {
     // abre desde aquí va en cajón, no en la columna lateral.
     <SideDockScopeProvider value="fixed">
     <PageShell fill className="gap-4">
-      <PageHeader
-        title="Bandeja"
-        subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)}
-        actions={
-          canWrite && canReadCrm ? (
-            <Button className="min-h-11 sm:min-h-9" onClick={() => setNewConversation(true)}>
-              <SquarePen className="size-4" aria-hidden />
-              Nueva conversación
-            </Button>
-          ) : undefined
-        }
-      />
+      {/* En el celular, con una conversación abierta, la pantalla es de la conversación:
+          la cabecera de la Bandeja vuelve con la lista (tablero 3 del pulido). */}
+      {mode === "panel" || !selectedId ? (
+        <PageHeader
+          title="Bandeja"
+          subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)}
+          actions={
+            canWrite && canReadCrm ? (
+              <Button className="min-h-11 sm:min-h-9" onClick={() => setNewConversation(true)}>
+                <SquarePen className="size-4" aria-hidden />
+                Nueva conversación
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : null}
       <NewConversationDialog
         open={newConversation}
         onClose={() => setNewConversation(false)}
@@ -671,7 +680,7 @@ function InboxPage() {
         </ResizablePanelGroup>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
-          {!selectedId || (!showContext && !thread) ? (
+          {!selectedId || !thread ? (
             <ConversationList
               items={items}
               myUserId={myUserId}
@@ -691,37 +700,29 @@ function InboxPage() {
               onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
               onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
             />
-          ) : showContext ? (
-            (workspace ??
-              // Sin «Contexto» que mostrar (sin `crm.read` o sin la persona del hilo) siempre hay salida al hilo.
-              (!canReadCrm ? (
-                <EmptyState
-                  title="Sin acceso al contexto"
-                  description="Tu rol no ve los datos de la persona en el CRM."
-                  actionLabel="Volver a la conversación"
-                  onAction={closeContextMobile}
-                />
-              ) : contactFallbackQuery.isError ? (
-                <div className="flex flex-col gap-2">
-                  <ErrorState
-                    message="No se pudo cargar el contexto de la persona."
-                    onRetry={() => void contactFallbackQuery.refetch()}
-                  />
-                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
-                    Volver a la conversación
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <LoadingState message="Cargando contexto…" />
-                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
-                    Volver a la conversación
-                  </Button>
-                </div>
-              )))
           ) : (
             thread
           )}
+          {/* «Contexto» en angosto: el cajón estándar de los formularios, encima del hilo; cerrarlo vuelve a la conversación. */}
+          <DetailDrawer
+            open={showContext && !!selectedId}
+            onClose={closeContextMobile}
+            isDirty={wsDraft}
+            title="Contexto"
+            closeLabel="Volver a la conversación"
+          >
+            {workspace ??
+              (!canReadCrm ? (
+                <EmptyState title="Sin acceso al contexto" description="Tu rol no ve los datos de la persona en el CRM." />
+              ) : contactFallbackQuery.isError ? (
+                <ErrorState
+                  message="No se pudo cargar el contexto de la persona."
+                  onRetry={() => void contactFallbackQuery.refetch()}
+                />
+              ) : (
+                <LoadingState message="Cargando contexto…" />
+              ))}
+          </DetailDrawer>
         </div>
       )}
       <UnblockDialog
@@ -796,13 +797,17 @@ function AgentPendingBand({
   conversationId,
   attention,
   canSeeProposals,
+  personName,
 }: {
   conversationId: string
   /** Lo que dice la lista; ausente si el hilo se abrió por enlace y no está en la página cargada. */
   attention: ConversationAttention | undefined
   canSeeProposals: boolean
+  /** De quién se espera el sí: se dice su nombre de pila, nunca «el interlocutor». */
+  personName: string
 }) {
   const { setOpen } = useAgentPanel()
+  const receptionName = useReceptionName()
   const queryClient = useQueryClient()
   const canDecide = usePermission("agent.decide")
   const canConversations = usePermission("conversations.write")
@@ -839,10 +844,11 @@ function AgentPendingBand({
   const label = first ? (ACTION_LABEL[first.action] ?? first.action) : null
   const what =
     total > 1 ? `${total} cambios` : label ? label.charAt(0).toLowerCase() + label.slice(1) : "un cambio"
+  const firstName = personName.split(/\s+/)[0] || personName
   const outcome =
     total === 1
-      ? "Espera la confirmación del interlocutor en este hilo."
-      : "Esperan la confirmación del interlocutor en este hilo."
+      ? `Espera el sí de ${firstName} en esta conversación.`
+      : `Esperan el sí de ${firstName} en esta conversación.`
   // Registrar aquí la única propuesta pendiente: quien decide por el agente y puede hacer el acto.
   const needed = first ? permissionForAction(first.action) : null
   const canRegister =
@@ -858,12 +864,14 @@ function AgentPendingBand({
         : failed
   return (
     <div
+      id="cita-espera"
       role="status"
-      className="flex flex-wrap items-center gap-2.5 border-t border-agent-border bg-agent-soft px-3.5 py-2.5 text-[13px]"
+      tabIndex={-1}
+      className="flex flex-wrap items-center gap-2.5 border-t border-agent-border bg-agent-soft px-3.5 py-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <AgentMark size="sm" />
       <p className="min-w-0 flex-1 basis-48">
-        El agente propuso <span className="font-semibold">{what}</span>. {outcome}
+        {receptionName} propuso <span className="font-semibold">{what}</span>. {outcome}
       </p>
       {canRegister && first ? (
         <SubmitButton
@@ -960,7 +968,7 @@ function ConversationList({
         const topic = item.attention?.topics?.[0]
         const preview = topic
           ? `${!topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca: " : ""}«${topicQuote(topic)}»`
-          : (item.preview?.body ?? (item.preview ? "Adjunto" : "Sin mensajes todavía"))
+          : previewWords(item.preview)
         const screen = item.contact.screen ?? null
         const row = (
         <button
@@ -985,7 +993,7 @@ function ConversationList({
               <span className={`truncate text-sm ${item.unreadCount > 0 ? "font-bold" : "font-semibold"}`}>
                 {item.contact.displayName}
               </span>
-              <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{listTimeWords(item.lastMessageAt ?? item.preview?.createdAt ?? null)}</span>
             </span>
             <span className={`truncate text-[13px] ${topic ? "font-medium text-foreground" : "text-muted-foreground"}`}>
               {preview}
@@ -1268,23 +1276,26 @@ function ThreadView({
     mutationFn: (contactId: string) =>
       detail?.contact.isPatient ? createRegistrationLink(contactId, id) : createPersonalLinkForContact(contactId, id),
     onSuccess: (result) => {
-      const url = result.data.url
       setRegistrationLink(result.data)
       setRegistrationError(null)
       setCopied(false)
-      // Preparar el borrador en el composer existente; el operador revisa y envía.
-      // Nunca se envía automáticamente al generar el enlace. Quien ya es paciente
-      // lo recibe para registrar a un familiar: el enlace no le ofrece registrarse.
-      setComposer(
-        detail?.contact.isPatient
-          ? `Aquí puedes registrar a tu hijo o a un familiar en ${orgName}: ${url}`
-          : `Aquí puedes elegir tu cita y dejarnos tus datos en ${orgName}: ${url}`,
-      )
+      pasteRegistrationLink(result.data.url)
     },
     onError: (error) => {
       setRegistrationError(error instanceof ApiError ? error.message : "No se pudo crear el enlace")
     },
   })
+
+  // Preparar el borrador en el composer existente; el operador revisa y envía.
+  // Nunca se envía automáticamente al generar el enlace. Quien ya es paciente
+  // lo recibe para registrar a un familiar: el enlace no le ofrece registrarse.
+  function pasteRegistrationLink(url: string) {
+    setComposer(
+      detail?.contact.isPatient
+        ? `Aquí puedes registrar a tu hijo o a un familiar en ${orgName}: ${url}`
+        : `Aquí puedes elegir tu cita y dejarnos tus datos en ${orgName}: ${url}`,
+    )
+  }
 
   // A la paciente le faltan datos: su enlace se escribe en el mensaje y quien
   // atiende lo revisa y lo envía (nunca sale solo). Dentro de la conversación
@@ -1592,26 +1603,15 @@ function ThreadView({
           ) : (
             <span className="block truncate text-[15px] font-bold">{detail.contact.displayName}</span>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-            <span>{channelLabel(detail.connection.channel)}</span>
-            {words ? (
-              <>
-                <span aria-hidden>·</span>
-                <StateLabel words={words} />
-              </>
-            ) : null}
+          <div className="flex min-w-0 items-center gap-x-1.5 text-xs text-muted-foreground">
+            <span className="shrink-0">{channelLabel(detail.connection.channel)}</span>
+            {words ? <StateLabel words={words} className="min-w-0" /> : null}
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
           </div>
         </div>
         {/* Un botón principal por estado vive en el tema (ADR 0050); aquí solo lo de la conversación. */}
         <div className="flex flex-wrap items-center gap-1.5">
-        {topics.length > 0 || threadAttention?.handoffPriority ? (
-          <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setBriefFor(conv.id)}>
-            <ClipboardList className="size-4" />
-            Resumen del caso
-          </Button>
-        ) : null}
-        {onToggleContext && (
+        {onToggleContext && !showBack && (
           <Button
             variant={contextOpen ? "secondary" : "outline"}
             size="sm"
@@ -1624,17 +1624,24 @@ function ThreadView({
             Contexto
           </Button>
         )}
-        {canWrite || canRegister ? (
+        {canWrite || canRegister || onToggleContext || topics.length > 0 || threadAttention?.handoffPriority ? (
           <RowActions
             label="Más acciones de la conversación"
             items={[
+              // En el celular «Contexto» no cabe junto al nombre: va primero en «…».
+              ...(onToggleContext && showBack ? [{ key: "contexto", label: "Contexto", onSelect: onToggleContext }] : []),
+              ...(topics.length > 0 || threadAttention?.handoffPriority
+                ? [{ key: "resumen", label: "Resumen del caso", onSelect: () => setBriefFor(conv.id) }]
+                : []),
               // Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar.
               ...(canRegister
                 ? [{
                     key: "enlace",
-                    label: detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviarle su enlace",
+                    label: detail.contact.isPatient ? "Enviar enlace de registro" : "Enviarle su enlace",
                     disabled: registrationMutation.isPending,
-                    onSelect: () => registrationMutation.mutate(detail.contact.id),
+                    // El enlace ya preparado en esta conversación se vuelve a usar: tocar dos veces no crea otro.
+                    onSelect: () =>
+                      registrationLink ? pasteRegistrationLink(registrationLink.url) : registrationMutation.mutate(detail.contact.id),
                   }]
                 : []),
               ...(!canWrite
@@ -1747,7 +1754,7 @@ function ThreadView({
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         {/* El historial conserva siempre un alto útil: la zona de escritura (p. ej. los
             mensajes aprobados) no puede dejarlo en cero. */}
-        <MessageScroller className="min-h-32 flex-1">
+        <MessageScroller className="min-h-32 flex-1 basis-1/2">
           <MessageScrollerViewport preserveScrollOnPrepend className="bg-canvas/60 p-4">
             {(olderCursor ?? detail.messagesCursor) && (
               <Button
@@ -1768,7 +1775,24 @@ function ThreadView({
               </Button>
             )}
             <MessageScrollerContent className="gap-2">
-              {shown.map((item) =>
+              {shown.map((item, index) => {
+                // Un separador cada vez que cambia el día, en la zona de la clínica.
+                const at = item.kind === "message" ? item.msg.createdAt : null
+                const before = shown.slice(0, index).reverse().find((other) => other.kind === "message")
+                const newDay =
+                  at !== null && (!before || before.kind !== "message" || messageDayKey(before.msg.createdAt) !== messageDayKey(at))
+                const separator =
+                  newDay && at ? (
+                    <MessageScrollerItem key={`dia-${messageDayKey(at)}`} messageId={`dia-${messageDayKey(at)}`}>
+                      <div className="flex justify-center py-1">
+                        <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                          {dayWords(at)}
+                        </span>
+                      </div>
+                    </MessageScrollerItem>
+                  ) : null
+                return [
+                  separator,
                 item.kind === "fold" ? (
                   <MessageScrollerItem key={`plegado-${item.firstId}`} messageId={`plegado-${item.firstId}`}>
                     <div className="flex justify-center">
@@ -1800,7 +1824,8 @@ function ThreadView({
                     </div>
                   </MessageScrollerItem>
                 ),
-              )}
+                ]
+              })}
             </MessageScrollerContent>
             {screenView?.screen === "spam" ? (
               <div className="mt-3 flex justify-center">
@@ -1854,17 +1879,16 @@ function ThreadView({
       />
       <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
       <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
-      <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
-      {/* Como mucho el 60 % del hilo y con su propio desplazamiento: con la ventana de WhatsApp
+      <AgentPendingBand
+        conversationId={id}
+        attention={threadAttention}
+        canSeeProposals={canSeeProposals}
+        personName={detail.contact.displayName}
+      />
+      {/* Como mucho el 45 % del hilo y con su propio desplazamiento: con la ventana de WhatsApp
           cerrada, el aviso y los mensajes aprobados no se comen el historial (antes quedaba en 0 px). */}
-      <ScrollArea className="flex max-h-[60%] min-h-0 flex-col border-t [&_[data-slot=scroll-area-viewport]]:h-auto [&_[data-slot=scroll-area-viewport]]:min-h-0 [&_[data-slot=scroll-area-viewport]]:flex-1">
+      <ScrollArea className="flex max-h-[45%] min-h-0 flex-col border-t [&_[data-slot=scroll-area-viewport]]:h-auto [&_[data-slot=scroll-area-viewport]]:min-h-0 [&_[data-slot=scroll-area-viewport]]:flex-1">
       <div className="flex flex-col p-3">
-        {detail.contact.isActive === false && (
-          <p className="mb-2 text-xs text-muted-foreground">
-            Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para iniciar
-            nuevos envíos o crear relaciones.
-          </p>
-        )}
         {registrationError && (
           <p className="mb-2 text-sm text-destructive" role="alert">
             {registrationError}
@@ -2155,11 +2179,13 @@ function TopicBand({
 }) {
   const [first, ...rest] = topics
   const [showRest, setShowRest] = useState(false)
+  // «Lo que ya se le dijo» queda plegado: la franja mide tres líneas y el hilo se ve (tablero 2 del pulido).
+  const [toldOpen, setToldOpen] = useState<string | null>(null)
   const receptionName = useReceptionName()
   if (!first) return null
   const visible = showRest ? topics : [first]
   return (
-    <section aria-label="Lo que te toca contestar" className="flex flex-col gap-2 border-b bg-warning-soft/50 px-3.5 py-2.5">
+    <section aria-label="Lo que te toca contestar" className="flex flex-col gap-2 border-b bg-warning-soft/50 px-3.5 py-2">
       {visible.map((topic) => {
         const mine = topic.assigneeUserId === myUserId
         const free = !topic.assigneeUserId
@@ -2171,28 +2197,55 @@ function TopicBand({
         const told = topic.source
           ? messages.filter((item) => item.direction === "out" && Date.parse(item.createdAt) > Date.parse(topic.source?.createdAt ?? "")).slice(-2)
           : []
+        const showTold = toldOpen === topic.id || !canWrite
+        const since = topic.source ? timeAgo(topic.source.createdAt) : ""
         return (
-          <div key={topic.id} className="flex flex-col gap-1.5 text-[13px]">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className={`font-semibold ${topic.urgent ? "text-destructive" : "text-warning"}`}>
-                {mine || free ? "Te toca contestar" : topicWords(topic, myUserId, receptionName)}
-              </span>
-              <span className="text-muted-foreground">
-                {free ? (topic.urgent ? "· Ahora · nadie lo tomó" : "· nadie lo tomó") : mine ? "· lo tienes tú" : ""}
-                {topic.askedAgainAt ? ` · volvió a preguntar ${timeAgo(topic.askedAgainAt)}` : ""}
-              </span>
+          <div key={topic.id} className="flex flex-col gap-1 text-[13px]">
+            <div className="flex min-w-0 items-start gap-2">
+              <p className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
+                <span className={`font-semibold ${topic.urgent ? "text-destructive" : "text-warning"}`}>
+                  {mine || free ? "Te toca contestar" : topicWords(topic, myUserId, receptionName)}
+                </span>
+                <span className="text-muted-foreground">
+                  {free ? (topic.urgent ? "· Ahora · nadie lo tomó" : "· nadie lo tomó") : mine ? "· lo tienes tú" : ""}
+                  {since ? ` · ${since}` : ""}
+                  {topic.askedAgainAt ? ` · volvió a preguntar ${timeAgo(topic.askedAgainAt)}` : ""}
+                </span>
+              </p>
+              {/* «…» del tema arriba a la derecha, como el de la conversación: la fila de botones no se parte en el celular. */}
+              {canWrite ? (
+            <RowActions
+              label="Más acciones del tema"
+              items={[
+                ...(topic.source
+                  ? [{ key: "ver", label: "Ver en la conversación", onSelect: () => onJump(topic.source?.id ?? "") }]
+                  : []),
+                { key: "vista", label: onlyTopic ? "Ver toda la conversación" : "Ver solo este tema", onSelect: onToggleOnlyTopic },
+                // Pasó el límite del día: suele ser un envío automático, y se resuelve en un toque.
+                ...(onSpam && TOPIC_DAILY_LIMIT.test(topic.reason)
+                  ? [{ key: "spam", label: "Es spam", disabled: pending, onSelect: onSpam }]
+                  : []),
+                ...members
+                  .filter((member) => member.userId !== topic.assigneeUserId)
+                  .map((member) => ({
+                    key: `pasar-${member.userId}`,
+                    label: member.userId === myUserId ? "Pasármelo" : `Pasar este tema a ${member.user.name}`,
+                    disabled: pending,
+                    onSelect: () => (member.userId === myUserId ? onTake(topic) : onPass(topic, member.userId)),
+                  })),
+                { key: "resuelto", label: "Marcar resuelto", disabled: pending, onSelect: () => onResolve(topic) },
+              ]}
+            />
+              ) : null}
             </div>
-            <p className="min-w-0 font-medium">
-              «{topicQuote(topic, 200)}»
-              {topic.source ? <span className="font-normal text-muted-foreground"> · {timeAgo(topic.source.createdAt)}</span> : null}
-            </p>
-            {told.length > 0 ? (
+            <p className="line-clamp-2 min-w-0 font-medium">«{topicQuote(topic, 200)}»</p>
+            {showTold && told.length > 0 ? (
               <p className="text-xs text-muted-foreground">
                 Ya se le dijo: {told.map((item) => `${item.senderKind === "agent" ? receptionName : "el equipo"}, «${(item.body ?? "").slice(0, 80)}»`).join(" · ")}
               </p>
             ) : null}
             {canWrite ? (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {mine || free ? (
                   <Button size="sm" className="min-h-11 sm:min-h-8" disabled={pending} onClick={() => onAnswer(topic)}>
                     Responder
@@ -2203,32 +2256,18 @@ function TopicBand({
                     Tomar este tema
                   </Button>
                 )}
-                {/* Pasó el límite del día: suele ser un envío automático, y se resuelve en un toque. */}
-                {onSpam && TOPIC_DAILY_LIMIT.test(topic.reason) ? (
-                  <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={pending} onClick={onSpam}>
-                    Es spam
+                {told.length > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="min-h-11 text-primary sm:min-h-8"
+                    aria-expanded={toldOpen === topic.id}
+                    onClick={() => setToldOpen((value) => (value === topic.id ? null : topic.id))}
+                  >
+                    Lo que ya se le dijo
+                    <ChevronDown className={`size-4 transition-transform motion-reduce:transition-none ${toldOpen === topic.id ? "rotate-180" : ""}`} aria-hidden />
                   </Button>
                 ) : null}
-                {topic.source ? (
-                  <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => onJump(topic.source?.id ?? "")}>
-                    Ver en la conversación
-                  </Button>
-                ) : null}
-                <RowActions
-                  label="Más acciones del tema"
-                  items={[
-                    { key: "vista", label: onlyTopic ? "Ver toda la conversación" : "Ver solo este tema", onSelect: onToggleOnlyTopic },
-                    ...members
-                      .filter((member) => member.userId !== topic.assigneeUserId)
-                      .map((member) => ({
-                        key: `pasar-${member.userId}`,
-                        label: member.userId === myUserId ? "Pasármelo" : `Pasar este tema a ${member.user.name}`,
-                        disabled: pending,
-                        onSelect: () => (member.userId === myUserId ? onTake(topic) : onPass(topic, member.userId)),
-                      })),
-                    { key: "resuelto", label: "Marcar resuelto", disabled: pending, onSelect: () => onResolve(topic) },
-                  ]}
-                />
                 {ownerLive && !mine && topic.assigneeName ? (
                   <span className="text-xs text-muted-foreground">{topic.assigneeName} le escribió {timeAgo(lastByOwner?.createdAt ?? null)}</span>
                 ) : null}
@@ -2352,7 +2391,12 @@ function MessageBubble({
         {byAgent && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold text-primary-soft-foreground">
             <span className="flex items-center gap-1">
-              <Bot className="size-3.5" aria-hidden /> {msg.automatic ? `Automático · ${msg.automatic.name}` : receptionName}
+              <Bot className="size-3.5" aria-hidden />{" "}
+              {msg.automatic
+                ? `Automático · ${msg.automatic.name}`
+                : msg.contentType === "template"
+                  ? "Mensaje automático"
+                  : receptionName}
             </span>
             {/* Un mensaje automático no es una respuesta de la conversación: dice de qué línea salió. */}
             {msg.automatic && canOpenLine ? (
@@ -2400,7 +2444,7 @@ function MessageBubble({
         >
           {/* Fecha cuando no es de hoy y siempre en la zona de la clínica; el título la dice completa. */}
           <time dateTime={msg.createdAt} title={fullWhenWords(msg.createdAt)}>
-            {messageTimeWords(msg.createdAt)}
+            {clockWords(msg.createdAt)}
           </time>
           {out && statusIcon(msg.status)}
         </div>

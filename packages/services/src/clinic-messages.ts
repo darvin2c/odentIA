@@ -21,7 +21,14 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
-import { adminLineOf, beforePhrase, hourPhrase, type LineTiming, lineOfJobKind } from "./admin-lines.js"
+import { templateTitle } from "./message-words.js"
+import {
+  adminLineOf,
+  beforePhrase,
+  hourPhrase,
+  type LineTiming,
+  lineOfJobKind,
+} from "./admin-lines.js"
 import { lineDays, lineTiming } from "./automation.js"
 import {
   AUTOMATION_MESSAGE_KEYS,
@@ -92,6 +99,20 @@ import { personalLinkButtonUrl } from "./public-links.js"
 
 type MessageRow = typeof clinicMessage.$inferSelect
 type VersionRow = typeof clinicMessageVersion.$inferSelect
+
+/** «Primer dato del mensaje de Meta», «Segundo…»: los datos de un mensaje creado en Meta, en orden. */
+const ORDINAL_WORDS = [
+  "Primer",
+  "Segundo",
+  "Tercer",
+  "Cuarto",
+  "Quinto",
+  "Sexto",
+  "Séptimo",
+  "Octavo",
+  "Noveno",
+  "Décimo",
+]
 
 /** Dónde se administran: los avisos y la Bandeja llevan ahí. */
 export const MESSAGES_HREF = "/settings/integrations/whatsapp"
@@ -1685,14 +1706,16 @@ async function sendables(
     if (template.status !== "aprobada" || template.unsupported) continue
     options.push({
       id: template.id,
-      title: template.name,
+      // El nombre técnico de Meta («bienvenida_v2») se dice en palabras.
+      title: templateTitle(template.name),
       // Ya estaba en la cuenta: vale la categoría que le dio WhatsApp.
       category: template.category === "marketing" || template.category === "authentication" ? template.category : "utility",
       previewParts: positionalPreview(template.body),
       buttons: template.buttons,
+      // De un mensaje creado en Meta no se sabe qué va en cada dato: se dice cuál es, en orden.
       fields: Array.from({ length: template.variables }, (_, index) => ({
         index: index + 1,
-        label: `Dato ${index + 1}`,
+        label: `${ORDINAL_WORDS[index] ?? `Dato ${index + 1}`} dato del mensaje de Meta`,
       })),
       name: template.name,
       language: template.language,

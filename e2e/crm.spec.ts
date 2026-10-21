@@ -277,7 +277,9 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: qué pide, lo que ya se sabe y lo que falta.
   await call(page, "POST", `/api/contacts/${conversation.contact.id}/agent-memory`, org.slug, { text: "Prefiere citas por la tarde" }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   const brief = surface(page, { name: "Resumen del caso" })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
@@ -294,7 +296,9 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   await expect(page.getByRole("dialog", { name: "Resumen del caso" })).toContainText("Lo que ya se sabe")
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })

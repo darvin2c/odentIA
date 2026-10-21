@@ -1,7 +1,8 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
-import { eq, sql } from "drizzle-orm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createConnection } from "./connections.js"
@@ -608,7 +609,7 @@ it("hilo compartido conserva interlocutor e identidad ante otro remitente", asyn
   expect(ident?.externalUserId).toBe("tg:920001")
 })
 
-it("ingesta reutiliza el contacto archivado sin crear otro", async () => {
+it("ingesta reutiliza el contacto archivado sin crear otro y escribir lo saca del archivo (decisión 2 del pulido)", async () => {
   const connId = await makeTelegramConnection("org_a")
   const event = textEvent({
     externalEventId: "evt-arch-1",
@@ -640,9 +641,15 @@ it("ingesta reutiliza el contacto archivado sin crear otro", async () => {
     getConversationDetail(tx, "org_a", again.conversationId),
   )
   expect(after.contact.id).toBe(before.contact.id)
-  expect(after.contact.isActive).toBe(false)
+  // Archivar ordena la lista: si vuelve a escribir, sale sola del archivo y se le responde como a cualquiera.
+  expect(after.contact.isActive).toBe(true)
   const listed = await withOrgContext(appDb, "org_a", (tx) => listConversations(tx, "org_a", {}))
-  expect(listed.items.find((c) => c.id === first.conversationId)?.contact.isActive).toBe(false)
+  expect(listed.items.find((c) => c.id === first.conversationId)?.contact.isActive).toBe(true)
+  const [audit] = await ownerDb
+    .select({ action: auditEvent.action, actorUserId: auditEvent.actorUserId })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, "org_a"), eq(auditEvent.entityId, before.contact.id), eq(auditEvent.action, "contact.reactivated")))
+  expect(audit).toMatchObject({ action: "contact.reactivated", actorUserId: null })
 })
 
 it("cursores manipulados de bandeja y mensajes se rechazan antes de consultar PostgreSQL", async () => {

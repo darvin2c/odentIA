@@ -163,9 +163,11 @@ export function agentStateDescription(agent: CrmAgentStatus, receptionName: stri
         ? `La atiende una persona: ${receptionName} no responde en este hilo.`
         : `${receptionName} no atiende este hilo.`
     case "approval":
-      return `Hay ${agent.pendingProposalIds.length} propuesta(s) de ${receptionName} esperando la confirmación del interlocutor.`
+      return agent.pendingProposalIds.length === 1
+        ? `${receptionName} propuso una cita y espera su sí en la conversación.`
+        : `${receptionName} propuso ${agent.pendingProposalIds.length} cambios y espera su sí en la conversación.`
     case "handoff":
-      return `${receptionName} te pasó este caso: falta resolverlo.`
+      return `${receptionName} te pasó un tema: respóndelo desde la conversación.`
     case "closed":
       return "Si le escribes, la conversación se vuelve a abrir."
   }
@@ -178,11 +180,17 @@ export function agentStateDescription(agent: CrmAgentStatus, receptionName: stri
 export function agentNextSteps(agent: CrmAgentStatus, receptionName: string): string[] {
   switch (agent.state) {
     case "approval":
-      return [`Revisa lo que propuso ${receptionName}`, "Si confirmó en el chat, registra su confirmación"]
+      return [
+        `Revisa lo que propuso ${receptionName}`,
+        "Si ya dijo que sí en el chat, regístralo en la franja de la conversación",
+      ]
     case "handoff":
-      return ["Lee qué pide y lo que se le dijo", "Tómalo y responde"]
+      return ["Lee qué pide y lo que se le dijo", "Responde desde el tema"]
     case "human":
-      return ["Responde el mensaje pendiente", `Al terminar, resuélvela o devuélvesela a ${receptionName}`]
+      return [
+        "Responde el mensaje pendiente",
+        `Al responder, el tema se resuelve. ${receptionName} sigue con lo demás.`,
+      ]
     case "agent":
       return ["Supervisa; interviene solo si el caso lo pide"]
     case "closed":

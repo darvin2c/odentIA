@@ -24,6 +24,7 @@ import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
 import {
+  applyContactActive,
   claimWhatsAppNumber,
   findChannelIdentity,
   isDirectThread,
@@ -218,8 +219,17 @@ export async function ingestInbound(
   let contactId: string
   if (identity) {
     // El archivado no bloquea la recepción entrante ni crea un contacto
-    // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
+    // nuevo: se reutiliza el contacto, y escribir lo saca del archivo
+    // (decisión 2 del pulido de la Bandeja): archivar ordena la lista; para
+    // no responderle a alguien está «Bloquear».
     contactId = identity.contactId
+    const [person] = await tx
+      .select({ isActive: contact.isActive })
+      .from(contact)
+      .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+      .limit(1)
+    if (person && !person.isActive)
+      await applyContactActive(tx, orgId, contactId, true, { userId: null })
     // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
     if (identity.noWhatsappAt) {
       await tx
@@ -847,7 +857,19 @@ export interface ConversationListItem {
   /** `screen`: en Spam o bloqueada, con su motivo (ADR 0054); nulo si no. */
   contact: { id: string; displayName: string; isActive: boolean; screen: ContactScreen | null; screenReason: string | null }
   connection: { id: string; channel: string; provider: string; displayName: string }
-  preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
+  /**
+   * El último mensaje: su texto y, si no tiene, qué era (`contentType`, el tipo
+   * del primer adjunto y el nombre del mensaje aprobado) para decirlo en palabras.
+   */
+  preview: {
+    body: string | null
+    direction: string
+    senderKind: string
+    contentType: string
+    attachmentMime: string | null
+    templateName: string | null
+    createdAt: string
+  } | null
 }
 /** Estados de una conversación: abierta o cerrada (con su motivo, ADR 0024). */
 export const CONVERSATION_STATUSES = ["open", "closed"] as const
@@ -986,7 +1008,8 @@ export async function listConversations(
   if (page.length > 0) {
     const ids = page.map((r) => r.conversation.id)
     const previewRows = (await tx.execute(sql`
-      select distinct on ("conversation_id") "conversation_id", "body", "direction", "sender_kind", "created_at"
+      select distinct on ("conversation_id") "conversation_id", "body", "direction", "sender_kind", "content_type",
+        "attachments"->0->>'mimeType' as "attachment_mime", "template_name", "created_at"
       from "message"
       where "conversation_id" in (${sql.join(
         ids.map((id) => sql`${id}::uuid`),
@@ -997,6 +1020,9 @@ export async function listConversations(
       body: string | null
       direction: string
       sender_kind: string
+      content_type: string
+      attachment_mime: string | null
+      template_name: string | null
       created_at: Date
     }[]
     for (const p of previewRows) {
@@ -1004,6 +1030,9 @@ export async function listConversations(
         body: p.body,
         direction: p.direction,
         senderKind: p.sender_kind,
+        contentType: p.content_type,
+        attachmentMime: p.attachment_mime,
+        templateName: p.template_name,
         createdAt: p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at),
       })
     }

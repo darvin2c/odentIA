@@ -5,6 +5,8 @@ import {
   closureBand,
   closureWords,
   conversationWords,
+  dayWords,
+  listTimeWords,
   messageTimeWords,
   resolveWords,
   whenWords,
@@ -123,7 +125,7 @@ describe("confirmaciones de cierre", () => {
     })
     expect(resolveWords("Ana Ruiz", { farewell: false, farewellText: null, handoffs: 0, pendingContact: 0 }, "Sofi")).toEqual({
       description:
-        "Se cerrará la conversación con Ana Ruiz, pero no se le puede escribir: pasaron más de 23 horas desde su último mensaje. Se cerrará sin enviarle nada.",
+        "Se cerrará la conversación con Ana Ruiz sin enviarle nada: ya no se le puede escribir, porque su último mensaje fue hace casi 24 horas o más.",
       also: [],
     })
   })
@@ -139,5 +141,24 @@ describe("confirmaciones de cierre", () => {
     expect(closeAfterHoursIssue("24")).not.toBeNull()
     expect(closeAfterHoursIssue("12.5")).not.toBeNull()
     expect(closeAfterHoursIssue("")).not.toBeNull()
+  })
+})
+
+describe("la hora de una fila y el día de un mensaje (pulido de la Bandeja)", () => {
+  // NOW es el jueves 15 de octubre de 2026 a las 10:00 en Lima.
+  it("la fila dice la hora si fue hoy, «ayer», el día de la semana o el día y el mes; nunca queda vacía con fecha", () => {
+    expect(listTimeWords("2026-10-15T14:42:00.000Z", NOW)).toBe("09:42")
+    expect(listTimeWords("2026-10-14T20:00:00.000Z", NOW)).toBe("ayer")
+    expect(listTimeWords("2026-10-12T20:00:00.000Z", NOW)).toBe("lun")
+    expect(listTimeWords("2026-08-08T20:00:00.000Z", NOW)).toBe("8 ago")
+    expect(listTimeWords("2025-08-08T20:00:00.000Z", NOW)).toBe("8 ago 2025")
+    expect(listTimeWords(null, NOW)).toBe("")
+  })
+
+  it("el separador del hilo dice «Hoy», «Ayer» o el día con su nombre, en la zona de la clínica", () => {
+    expect(dayWords("2026-10-15T14:00:00.000Z", NOW)).toBe("Hoy")
+    // 00:30 UTC del 15 es todavía el 14 en Lima.
+    expect(dayWords("2026-10-15T00:30:00.000Z", NOW)).toBe("Ayer")
+    expect(dayWords("2026-10-13T15:00:00.000Z", NOW)).toBe("Martes, 13 de octubre")
   })
 })

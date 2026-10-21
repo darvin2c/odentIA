@@ -1,3 +1,4 @@
+import { canAccess } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
@@ -68,7 +69,13 @@ import { getAccountSummary } from "./payments.js"
 import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
-import { formatOrgMoney, formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
+import {
+  formatOrgMoney,
+  formatZoned,
+  formatZonedShort,
+  getOrgLocale,
+  type OrgLocale,
+} from "./locale.js"
 
 export { CONFIRM_TTL_HOURS }
 /** Ventana en ms derivada del plazo (una sola fuente de verdad). */
@@ -1239,6 +1246,27 @@ function payloadDate(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale"
   return formatZoned(date, zone)
 }
 
+/** El día y la hora de una cita como se dicen («lun 19 oct, 3:00 p. m.»). */
+function payloadWhen(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
+  const date =
+    value instanceof Date ? value : typeof value === "string" && value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) return null
+  return formatZonedShort(date, zone)
+}
+
+/** Cómo se dice el estado de una oportunidad o de una cita, sin su código. */
+const STATUS_WORDS: Record<string, string> = {
+  open: "abierta",
+  won: "ganada",
+  lost: "perdida",
+  programada: "programada",
+  confirmada: "confirmada",
+  atendida: "atendida",
+  no_asistio: "no vino",
+  cancelada: "cancelada",
+}
+const statusWords = (status: string): string => STATUS_WORDS[status] ?? status.replace(/_/g, " ")
+
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value)
 }
@@ -1323,10 +1351,9 @@ async function summarizeAfter(
     const answer = await readBudgetAnswer(tx, orgId, payload)
     return answer ? budgetAnswerSummary(answer, zone) : label
   }
-  const startsAt = payloadDate(payload.startsAt, zone)
-  const appointmentId = typeof payload.appointmentId === "string" ? payload.appointmentId.slice(0, 8) : null
-  const line = [startsAt, appointmentId ? `cita ${appointmentId}…` : null].filter(Boolean).join(" · ")
-  return line || label
+  // La cita se dice con su día y su hora, nunca con su identificador.
+  const startsAt = payloadWhen(payload.startsAt, zone)
+  return startsAt ? `Cita: ${startsAt}` : label
 }
 
 /**
@@ -1433,7 +1460,7 @@ async function captureExpectedState(
     if (!opp || opp.contactId !== contactId) return null
     // Sin 'Abierta' fija en la evidencia: el estado ya cerrado se rechaza al
     // crear en vez de congelar un antes falso.
-    if (opp.status !== "open") throw validation(`La oportunidad ya está ${opp.status}`)
+    if (opp.status !== "open") throw validation(`La oportunidad ya está ${statusWords(opp.status)}`)
     return {
       opportunityId: opp.id,
       stageId: opp.stageId,
@@ -1505,8 +1532,10 @@ function oppCurrentSummary(
     const line = [payloadText(live.nextActionNote), payloadDate(live.nextActionAt, zone)].filter(Boolean).join(" · ")
     return line ? `Tarea actual: ${line}` : "Sin tarea"
   }
-  const stage = stageName ?? `etapa ${live.stageId.slice(0, 8)}…`
-  return live.status === "open" ? `Etapa actual: ${stage}` : `Cerrada (${live.status}): ${stage}`
+  const stage = stageName ?? "una etapa que ya no existe"
+  return live.status === "open"
+    ? `Etapa actual: ${stage}`
+    : `${statusWords(live.status).charAt(0).toUpperCase()}${statusWords(live.status).slice(1)}: ${stage}`
 }
 
 function oppFreshness(
@@ -1519,7 +1548,12 @@ function oppFreshness(
   const currentSummary = oppCurrentSummary(action, live, stageName, zone)
   if (!expected?.opportunityId) return { isStale: false, currentSummary, reason: "" }
   if (!live) return { isStale: true, currentSummary, reason: "la oportunidad ya no existe" }
-  if (live.status !== "open") return { isStale: true, currentSummary, reason: `la oportunidad ya está ${live.status}` }
+  if (live.status !== "open")
+    return {
+      isStale: true,
+      currentSummary,
+      reason: `la oportunidad ya está ${statusWords(live.status)}`,
+    }
   if (
     (action === "mover_oportunidad" || action === "cerrar_oportunidad") &&
     expected.stageId != null &&
@@ -1545,15 +1579,26 @@ function apptFreshness(
   if (!live) {
     return { isStale: true, currentSummary: "La cita ya no está disponible", reason: "la cita ya no existe" }
   }
-  const currentSummary = `Cita actual: ${payloadDate(live.startsAt, zone) ?? live.startsAt.toISOString()} (${live.status})`
+  const currentSummary = apptSummary(live, zone)
   const version = expected?.appointmentVersion ?? payloadExpectedVersion
   if (version != null && live.version !== version) {
     return { isStale: true, currentSummary, reason: "la cita cambió desde la propuesta" }
   }
   if (live.status !== "programada" && live.status !== "confirmada") {
-    return { isStale: true, currentSummary, reason: `la cita ya está ${live.status}` }
+    return { isStale: true, currentSummary, reason: `la cita ya está ${statusWords(live.status)}` }
   }
   return { isStale: false, currentSummary, reason: "" }
+}
+
+/** La cita como está hoy: «Cita actual: lun 19 oct, 3:00 p. m.» y, si ya no está en pie, cómo quedó. */
+function apptSummary(
+  live: { startsAt: Date; status: string },
+  zone: Pick<OrgLocale, "timezone" | "locale">,
+): string {
+  const when = payloadWhen(live.startsAt, zone) ?? live.startsAt.toISOString()
+  return live.status === "programada" || live.status === "confirmada"
+    ? `Cita actual: ${when}`
+    : `Cita actual: ${when} · ${statusWords(live.status)}`
 }
 
 /**
@@ -1565,8 +1610,13 @@ function budgetFreshness(
   live: { status: string; updatedAt: Date } | null,
   number: number | null,
 ): { isStale: boolean; currentSummary: string | null; reason: string } {
-  if (!live) return { isStale: true, currentSummary: "El presupuesto ya no está disponible", reason: "el presupuesto ya no existe" }
-  const currentSummary = `Presupuesto ${number === null ? "" : `${budgetNumberText(number)} `}(${live.status})`
+  if (!live)
+    return {
+      isStale: true,
+      currentSummary: "El presupuesto ya no está disponible",
+      reason: "el presupuesto ya no existe",
+    }
+  const currentSummary = `Presupuesto ${number === null ? "" : `${budgetNumberText(number)} `}· ${statusWords(live.status)}`
   if (!expected?.budgetId) return { isStale: false, currentSummary, reason: "" }
   if (live.status !== expected.budgetStatus || live.updatedAt.toISOString() !== expected.budgetUpdatedAt) {
     return { isStale: true, currentSummary, reason: "el presupuesto cambió desde la propuesta" }
@@ -2615,7 +2665,7 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          apptSummary(liveAppt, zone),
         )
       }
       const fresh = apptFreshness(
@@ -2653,7 +2703,7 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          apptSummary(liveAppt, zone),
         )
       }
       const fresh = apptFreshness(expected, null, {
@@ -3371,7 +3421,11 @@ export async function createHandoff(
   const createdBy = input.createdBy === "user" ? "user" : "agent"
   task ??= await createTask(tx, orgId, {
     // Un solo nombre en toda la aplicación (decisión 1): la prioridad la dice la fila, no el título.
-    title: (createdBy === "user" ? `Tema pendiente: ${reason}` : `Te lo pasó el agente: ${reason}`).slice(0, 200),
+    // «Sofi» se dice con el nombre que le puso la clínica al mostrarlo (`withReceptionName`).
+    title: (createdBy === "user"
+      ? `Tema pendiente: ${reason}`
+      : `Te lo pasó Sofi: ${reason}`
+    ).slice(0, 200),
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
@@ -3544,11 +3598,17 @@ export async function claimHandoff(
 ): Promise<HandoffItem> {
   const target = opts.toUserId ?? userId
   const [membership] = await tx
-    .select({ userId: member.userId })
+    .select({ userId: member.userId, role: member.role })
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, target)))
     .limit(1)
   if (!membership) throw validation("Solo un miembro de la organización puede tener el tema")
+  // Un tema se contesta en la conversación: solo lo recibe quien puede escribir en ella (caja no).
+  if (!canAccess(membership.role, "conversations.write")) {
+    throw validation(
+      "Esa persona no atiende conversaciones: elige a alguien de recepción o del equipo clínico",
+    )
+  }
   const [before] = await tx
     .select({ assigneeUserId: agentHandoff.assigneeUserId })
     .from(agentHandoff)

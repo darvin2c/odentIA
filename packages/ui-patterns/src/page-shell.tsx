@@ -22,8 +22,10 @@ export interface PageShellProps {
 export function PageShell({ children, className, maxWidth, fill }: PageShellProps) {
   // El fondo cubre todo el viewport; la columna interior acota y paddingea.
   // Evita la "banda" gris recortada que producía bg-muted + mx-auto en el mismo div.
+  // `fill` se mide con el alto visible (dvh): en el celular, el teclado no tapa
+  // lo que queda pegado abajo (la caja de la Bandeja).
   return (
-    <div className={cn("bg-canvas w-full", fill ? "h-[calc(100svh-var(--notice-strip-h,0px))] overflow-hidden" : "min-h-[calc(100svh-var(--notice-strip-h,0px))]")}>
+    <div className={cn("bg-canvas w-full", fill ? "h-[calc(100dvh-var(--notice-strip-h,0px))] overflow-hidden" : "min-h-[calc(100svh-var(--notice-strip-h,0px))]")}>
       <div
         className={cn(
           "mx-auto w-full p-4",

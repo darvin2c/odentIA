@@ -669,7 +669,7 @@ describe("Bandeja, pasadas las 24 horas", () => {
     expect(data.map((item) => [item.title, item.buttons, item.fields])).toEqual([
       ["Retomar la conversación", ["Sí, continuemos"], []],
       ["Tu trabajo ya está listo", ["Quiero mi cita"], []],
-      ["promo_mes", [], [{ index: 1, label: "Dato 1" }]],
+      ["Promo mes", [], [{ index: 1, label: "Primer dato del mensaje de Meta" }]],
     ])
     expect(data[0]).toMatchObject({ id: "retomar_conversacion" })
     expect(data[0]!.previewParts).toEqual([
@@ -690,7 +690,7 @@ describe("Bandeja, pasadas las 24 horas", () => {
     await expect(send(c, id, data[2]!.id)).rejects.toThrow("Completa el dato del mensaje.")
     // A quien nunca escribió no se le ofrece «Retomar»: no hay consulta que continuar.
     const cold = await thread(c, "Jorge Salas", null)
-    expect((await offered(c, cold)).data.map((item) => item.title)).toEqual(["Tu trabajo ya está listo", "promo_mes"])
+    expect((await offered(c, cold)).data.map((item) => item.title)).toEqual(["Tu trabajo ya está listo", "Promo mes"])
   })
 
   it("envía el mensaje con el texto armado, y no deja enviar otro hasta que responda o pase un día", async () => {
