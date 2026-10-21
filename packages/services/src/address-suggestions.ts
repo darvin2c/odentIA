@@ -83,7 +83,8 @@ export interface AddressSuggestions {
   suggestions: AddressSuggestion[]
 }
 
-function fit(country: string | null, found: MapAddress): SuggestedAddress {
+/** La región del mapa, llevada a la lista del país de la clínica (ISO 3166-2). */
+function toCountryList(country: string | null, found: MapAddress): SuggestedAddress {
   const profile = clinicalProfileFor(country)
   return {
     line: found.line,
@@ -118,12 +119,28 @@ function quiet(error: unknown): void {
   console.error(`address-suggestions: ${error instanceof Error ? error.name : "error desconocido"}`)
 }
 
+/** Abre una transacción en el contexto de la clínica (`withOrgContext`). */
+export type OrgRun = <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+
+/**
+ * Cuenta la búsqueda y lee el país y el idioma de la clínica en una
+ * transacción corta: el contador del día queda bloqueado mientras se cuenta,
+ * no mientras responde el proveedor. Null si ya pasó el tope.
+ */
+function prepare(run: OrgRun, orgId: string, purpose: AddressPurpose) {
+  return run(async (tx) => {
+    if (!(await spend(tx, orgId, purpose))) return null
+    return { country: await findOrgCountry(tx, orgId), language: await languageOf(tx, orgId) }
+  })
+}
+
 /**
  * Sugerencias para lo escrito en «Calle y número». Desde la tercera letra;
- * cada llamada cuenta para el tope del día de la clínica.
+ * cada llamada cuenta para el tope del día de la clínica. El proveedor se
+ * llama fuera de la transacción.
  */
 export async function suggestAddresses(
-  tx: Db,
+  run: OrgRun,
   orgId: string,
   provider: AddressProvider | null | undefined,
   purpose: AddressPurpose,
@@ -132,10 +149,11 @@ export async function suggestAddresses(
   if (!provider) return { available: false, attribution: null, suggestions: [] }
   const text = input.text.trim().slice(0, 200)
   if (text.length < 3) return { available: true, attribution: provider.attribution, suggestions: [] }
-  if (!(await spend(tx, orgId, purpose))) return { available: false, attribution: null, suggestions: [] }
-  const country = await findOrgCountry(tx, orgId)
+  const ready = await prepare(run, orgId, purpose)
+  if (!ready) return { available: false, attribution: null, suggestions: [] }
+  const { country, language } = ready
   try {
-    const found = await provider.suggest({ text, country, language: await languageOf(tx, orgId), session: input.session })
+    const found = await provider.suggest({ text, country, language, session: input.session })
     return {
       available: true,
       attribution: provider.attribution,
@@ -144,7 +162,7 @@ export async function suggestAddresses(
         main: item.main,
         secondary: item.secondary,
         isPlace: item.isPlace,
-        address: item.address ? fit(country, item.address) : null,
+        address: item.address ? toCountryList(country, item.address) : null,
       })),
     }
   } catch (error) {
@@ -155,17 +173,18 @@ export async function suggestAddresses(
 
 /** La dirección de la sugerencia elegida, cuando no vino con ella (Google). */
 export async function resolveAddress(
-  tx: Db,
+  run: OrgRun,
   orgId: string,
   provider: AddressProvider | null | undefined,
   purpose: AddressPurpose,
   input: { id: string; session: string },
 ): Promise<SuggestedAddress | null> {
   if (!provider?.resolve) return null
-  if (!(await spend(tx, orgId, purpose))) return null
+  const ready = await prepare(run, orgId, purpose)
+  if (!ready) return null
   try {
-    const found = await provider.resolve({ id: input.id, language: await languageOf(tx, orgId), session: input.session })
-    return found ? fit(await findOrgCountry(tx, orgId), found) : null
+    const found = await provider.resolve({ id: input.id, language: ready.language, session: input.session })
+    return found ? toCountryList(ready.country, found) : null
   } catch (error) {
     quiet(error)
     return null

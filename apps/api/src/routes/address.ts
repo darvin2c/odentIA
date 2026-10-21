@@ -33,7 +33,7 @@ export function createAddressRoute(deps: { db: Db; providers: AddressProviders }
     }
     const { q, for: what, session } = parsed.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => suggestAddresses(tx, orgId, deps.providers[what], what, { text: q, session })),
+      suggestAddresses((fn) => withOrgContext(deps.db, orgId, fn), orgId, deps.providers[what], what, { text: q, session }),
     )
   })
 
@@ -47,7 +47,7 @@ export function createAddressRoute(deps: { db: Db; providers: AddressProviders }
     }
     const { id, for: what, session } = parsed.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => resolveAddress(tx, orgId, deps.providers[what], what, { id, session })),
+      resolveAddress((fn) => withOrgContext(deps.db, orgId, fn), orgId, deps.providers[what], what, { id, session }),
     )
   })
   return app

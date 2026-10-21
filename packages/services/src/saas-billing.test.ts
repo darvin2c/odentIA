@@ -277,17 +277,21 @@ it("elegir plan no reescribe el cargo histórico", async () => {
     periodStart: new Date("2026-01-01T00:00:00Z"),
     periodEnd: new Date("2026-02-01T00:00:00Z"),
   })
-  await createSaasPlan(ownerDb, f.admin, {
+  // La clínica elige el plan de lista (el por defecto): es el único que se le ofrece.
+  const plus = await createSaasPlan(ownerDb, f.admin, {
     code: `plus-${f.orgId}`,
     name: "Plus",
     currency: "PEN",
     priceCents: 20000,
+    isDefault: true,
   })
   await f.run((tx) => chooseSaasPlan(tx, f.orgId, f.admin, `plus-${f.orgId}`))
   const summary = await f.run((tx) => getOrganizationBillingSummary(tx, f.orgId))
   expect(summary.plan?.code).toBe(`plus-${f.orgId}`)
   expect(charge.planCode).toBe(`base-${f.orgId}`)
   expect(charge.amountCents).toBe(10000)
+  // El plan por defecto es uno para toda la base: se deja como estaba.
+  await updateSaasPlan(ownerDb, f.admin, plus.id, { isDefault: false })
 })
 it("el plan no limita personas ni sedes (ADR 0031)", async () => {
   const f = await billingFixture("bil-09")
@@ -493,6 +497,10 @@ it("la clínica ve el plan de lista y el suyo, nada más (issue 104)", async () 
   // Con un plan especial: el de lista primero y el suyo; «Otro», activo, no se ofrece.
   const withSpecial = await f.run((tx) => listClinicPlans(tx, f.orgId))
   expect(withSpecial.map((plan) => plan.code)).toEqual([`lista-${f.orgId}`, `base-${f.orgId}`])
+  // Lo que no se ofrece tampoco se elige por la API.
+  await expect(f.run((tx) => chooseSaasPlan(tx, f.orgId, f.admin, `otro-${f.orgId}`))).rejects.toMatchObject({
+    code: "SAAS_PLAN_NOT_OFFERED",
+  })
   await f.run((tx) => chooseSaasPlan(tx, f.orgId, f.admin, `lista-${f.orgId}`))
   const onList = await f.run((tx) => listClinicPlans(tx, f.orgId))
   expect(onList.map((plan) => plan.code)).toEqual([`lista-${f.orgId}`])

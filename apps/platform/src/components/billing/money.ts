@@ -1,4 +1,4 @@
-import { currencyFractionDigits, formatMoney } from "@odentia/clinical"
+import { currencyFractionDigits, formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { activeOrgLocale } from "../../lib/locale"
 
 /**
@@ -26,17 +26,27 @@ export function currencyDigits(currency: string): number {
   }
 }
 
-/** Texto en unidades mayores → unidad menor. null si no es un importe válido. */
-export function majorToCents(text: string, currency: string): number | null {
-  const amount = Number(text.trim().replace(/\s/g, "").replace(",", "."))
-  if (!Number.isFinite(amount) || amount <= 0) return null
-  const cents = Math.round(amount * 10 ** currencyDigits(currency))
-  return Number.isSafeInteger(cents) && cents > 0 ? cents : null
+/**
+ * Lo escrito en unidades mayores → unidad menor, con los separadores de la
+ * clínica, los mismos con que se muestra: «50.000» son cincuenta mil en Chile.
+ * null si no es un importe válido.
+ */
+export function majorToCents(text: string, currency: string, locale?: string): number | null {
+  try {
+    const cents = parseMoney(text, currency, clinicLocale(locale))
+    return cents > 0 ? cents : null
+  } catch {
+    return null
+  }
 }
 
-/** Unidad menor → texto en unidades mayores. */
-export function centsToMajor(cents: number, currency: string): string {
-  return String(cents / 10 ** currencyDigits(currency))
+/** Unidad menor → texto para editar, el que lee `majorToCents`. */
+export function centsToMajor(cents: number, currency: string, locale?: string): string {
+  try {
+    return formatMoneyInput(cents, currency, clinicLocale(locale))
+  } catch {
+    return String(cents / 10 ** currencyDigits(currency))
+  }
 }
 
 /** Precio por acción en millonésimas: hasta tres decimales (USD 0,425). */

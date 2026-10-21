@@ -947,6 +947,10 @@ export async function chooseSaasPlan(
       "Tus condiciones de Fundador siguen vigentes: si quieres cambiar de plan, escríbenos desde Soporte",
     )
   }
+  // Solo se elige lo que ofrece Plan y pagos (`listClinicPlans`): el de lista o el que ya tiene.
+  if (!plan.isDefault && current?.planId !== plan.id) {
+    throw new ServiceError("SAAS_PLAN_NOT_OFFERED", 409, "Ese plan lo asigna la administración")
+  }
   if (!current) return startSaasTrial(tx, orgId, { planCode }, now)
   await assertSaasCurrencyChange(tx, orgId, plan.currency)
   // Fuera de la prueba, elegir el primer plan lo activa: el mes empieza hoy.

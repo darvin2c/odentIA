@@ -80,7 +80,8 @@ export function AddressStreetField({
     }
     setPicked(true)
     // Primero lo escrito y después lo elegido: quien escucha `onChange` puede soltar lo que traía la elección anterior.
-    onChange(address.line ?? item.main)
+    // Una ciudad, un distrito o un negocio sin calle no son «Calle y número»: queda vacía para escribirla.
+    onChange(address.line ?? "")
     onPick({ ...address, placeName: item.isPlace ? item.main : null })
   }
 

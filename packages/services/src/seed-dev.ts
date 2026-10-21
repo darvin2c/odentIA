@@ -408,6 +408,8 @@ async function wipeSeed(): Promise<void> {
     "portal_grant",
     "portal_policy",
     "portal_access_log",
+    // El contador diario de sugerencias de direcciones (ADR 0077).
+    "address_lookup_day",
     // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
     "clinical_access_log",
     "portal_session",

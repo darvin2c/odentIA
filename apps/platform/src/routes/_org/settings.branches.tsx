@@ -163,6 +163,8 @@ function BranchesPage() {
   const sedeAddressSource = useMemo(() => staffAddressSource("sede"), [])
   /** El nombre con que la sede aparece en Google, si se eligió así (solo mientras se edita). */
   const [placeName, setPlaceName] = useState<string | null>(null)
+  /** Cambia cada vez que se abre el formulario: «Calle y número» empieza sin lo elegido en otra sede. */
+  const [opening, setOpening] = useState(0)
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -255,6 +257,7 @@ function BranchesPage() {
       // siguiente cargue la fila.
       form.reset()
       setPlaceName(null)
+      setOpening((count) => count + 1)
       setEditing(branch)
       setFormOpen(true)
     },
@@ -441,6 +444,7 @@ function BranchesPage() {
             <FieldLabel htmlFor="branch-address">Calle y número</FieldLabel>
             {/* Google sugiere la calle o la sede por su nombre (issue 36); lo escrito a mano sirve igual. */}
             <AddressStreetField
+              key={opening}
               id="branch-address"
               value={field.state.value}
               source={sedeAddressSource}

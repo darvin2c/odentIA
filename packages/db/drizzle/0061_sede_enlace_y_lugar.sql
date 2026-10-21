@@ -10,36 +10,45 @@ AS $$ SELECT coalesce(
   nullif(trim(both '-' from regexp_replace(public.search_fold(regexp_replace(coalesce(value, ''), '^\s*sede\s+', '', 'i')), '[^a-z0-9]+', '-', 'g')), ''),
   'sede'
 ) $$;--> statement-breakpoint
--- Dos iguales en una clínica llevan -2, -3…
-CREATE FUNCTION public.branch_slug_fill() RETURNS trigger
+-- Dos iguales en una clínica llevan -2, -3…: el primero libre, aunque otra
+-- sede ya se llame así («Sede Norte» dos veces y «Norte 2»).
+CREATE FUNCTION public.branch_slug_free(org text, stem text) RETURNS text
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  stem text;
-  candidate text;
+  candidate text := stem;
   n integer := 1;
+BEGIN
+  WHILE EXISTS (SELECT 1 FROM public.branch WHERE organization_id = org AND slug = candidate) LOOP
+    n := n + 1;
+    candidate := stem || '-' || n;
+  END LOOP;
+  RETURN candidate;
+END;
+$$;--> statement-breakpoint
+CREATE FUNCTION public.branch_slug_fill() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
 BEGIN
   IF NEW.slug IS NOT NULL AND NEW.slug <> '' THEN
     RETURN NEW;
   END IF;
-  stem := public.branch_slug_stem(NEW.name);
-  candidate := stem;
-  WHILE EXISTS (SELECT 1 FROM public.branch WHERE organization_id = NEW.organization_id AND slug = candidate) LOOP
-    n := n + 1;
-    candidate := stem || '-' || n;
-  END LOOP;
-  NEW.slug := candidate;
+  -- Dos altas a la vez en la misma clínica no eligen el mismo hueco.
+  PERFORM pg_advisory_xact_lock(hashtext('branch_slug:' || NEW.organization_id));
+  NEW.slug := public.branch_slug_free(NEW.organization_id, public.branch_slug_stem(NEW.name));
   RETURN NEW;
 END;
 $$;--> statement-breakpoint
 CREATE TRIGGER branch_slug_fill BEFORE INSERT ON public.branch FOR EACH ROW EXECUTE FUNCTION public.branch_slug_fill();--> statement-breakpoint
-WITH numbered AS (
-  SELECT "id", public.branch_slug_stem("name") AS "stem",
-    row_number() OVER (PARTITION BY "organization_id", public.branch_slug_stem("name") ORDER BY "created_at", "id") AS "n"
-  FROM "branch"
-)
-UPDATE "branch" AS b SET "slug" = CASE WHEN n."n" = 1 THEN n."stem" ELSE n."stem" || '-' || n."n" END
-  FROM numbered AS n
-  WHERE n."id" = b."id";--> statement-breakpoint
+DO $$
+DECLARE
+  item record;
+BEGIN
+  FOR item IN SELECT "id", "organization_id", "name" FROM "branch" ORDER BY "created_at", "id" LOOP
+    UPDATE "branch" SET "slug" = public.branch_slug_free(item."organization_id", public.branch_slug_stem(item."name"))
+      WHERE "id" = item."id";
+  END LOOP;
+END;
+$$;--> statement-breakpoint
 ALTER TABLE "branch" ALTER COLUMN "slug" SET NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "branch_org_slug_uidx" ON "branch" USING btree ("organization_id","slug");

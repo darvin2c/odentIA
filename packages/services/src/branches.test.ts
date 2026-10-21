@@ -94,6 +94,16 @@ it("cada sede tiene su enlace corto para llegar, y lleva a su ficha de Google o 
   expect(twin?.slug).toBe("miraflores-2")
   const renamed = await run((tx) => updateBranch(tx, orgId, "config-test", first.id, { name: "Sede Larco" }))
   expect(renamed.slug).toBe("miraflores")
+  // El primero libre, aunque otra sede ya se llame como el siguiente número.
+  await ownerDb.insert(branch).values({ organizationId: orgId, name: "Miraflores 3" })
+  const [fourth] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Sede Miraflores" }).returning({ slug: branch.slug })
+  expect(fourth?.slug).toBe("miraflores-4")
+  // Dos altas a la vez con el mismo nombre: la segunda espera a la primera y toma el siguiente.
+  const both = await Promise.all([
+    run((tx) => createBranch(tx, orgId, "config-test", { name: "Sede Sur" })),
+    run((tx) => createBranch(tx, orgId, "config-test", { name: "Sede Sur" })),
+  ])
+  expect(both.map((row) => row.slug).sort()).toEqual(["sur", "sur-2"])
 
   const byAddress = await run((tx) => getBranchDirections(tx, orgId, "miraflores"))
   expect(byAddress.branchName).toBe("Sede Larco")
