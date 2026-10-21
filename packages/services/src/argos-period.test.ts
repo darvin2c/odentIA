@@ -18,6 +18,24 @@ const resolve = (periodo: string, compara: "no" | "anterior" | "año_anterior" |
 }
 
 describe("el periodo de una respuesta", () => {
+  it("lo que viene (D26): el día, la semana y el mes enteros, mañana, lo que queda del mes y el próximo", () => {
+    expect(resolve("hoy_entero")).toMatchObject({ grain: "dia", label: "Hoy, el día entero", words: { periodo: "hoy" } })
+    expect(resolve("hoy_entero").span).toMatchObject({ partial: false, end: new Date("2026-10-22T05:00:00.000Z") })
+    expect(resolve("manana")).toMatchObject({ grain: "dia", label: "Mañana, 22 de octubre", words: { periodo: "mañana" } })
+    expect(resolve("semana_entera")).toMatchObject({ grain: "semana", label: "Esta semana, de lunes a domingo", words: { periodo: "esta semana" } })
+    expect(resolve("semana_entera").span).toMatchObject({ firstDay: "2026-10-19", lastDay: "2026-10-25", partial: false })
+    expect(resolve("proxima_semana")).toMatchObject({ label: "La próxima semana, del 26 de octubre al 1 de noviembre", words: { periodo: "la próxima semana" } })
+    expect(resolve("mes_entero", "anterior")).toMatchObject({
+      grain: "mes",
+      label: "Octubre de 2026, el mes entero",
+      words: { periodo: "en octubre", periodo_antes: "en setiembre" },
+    })
+    expect(resolve("mes_entero").span).toMatchObject({ firstDay: "2026-10-01", lastDay: "2026-10-31" })
+    expect(resolve("resto_del_mes")).toMatchObject({ label: "Lo que queda de octubre, desde hoy", words: { periodo: "en lo que queda de octubre" } })
+    expect(resolve("resto_del_mes").span.start).toEqual(NOW)
+    expect(resolve("proximo_mes")).toMatchObject({ label: "Noviembre de 2026", words: { periodo: "en noviembre" } })
+  })
+
   it("este mes contra el anterior: las fechas de Reportes, hasta la misma hora en los dos lados", () => {
     const period = resolve("este_mes", "anterior")
     const screen = resolveReportWindow(ZONE.timezone, "este_mes", NOW)

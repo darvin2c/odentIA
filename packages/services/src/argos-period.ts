@@ -44,7 +44,23 @@ export interface ArgosPeriodSpec {
 }
 
 /** Los periodos que no son de Reportes: un día, una semana, los últimos N días o meses y «a hoy». */
-const ARGOS_ONLY_PERIOD = /^(a_hoy|hoy|ayer|esta_semana|semana_pasada|ultimos_([1-9]\d{0,2})_dias|ultimos_([1-9]|1\d|2[0-4])_meses|\d{4}-\d{2}-\d{2})$/
+const ARGOS_ONLY_PERIOD = /^(a_hoy|hoy|ayer|esta_semana|semana_pasada|hoy_entero|manana|semana_entera|proxima_semana|mes_entero|resto_del_mes|proximo_mes|ultimos_([1-9]\d{0,2})_dias|ultimos_([1-9]|1\d|2[0-4])_meses|\d{4}-\d{2}-\d{2})$/
+
+/**
+ * Lo que viene (D26): periodos que también cuentan lo que falta. Hoy «este mes»
+ * se corta en este momento, como Reportes; para citas, ausencias, controles y
+ * vencimientos se mira el día, la semana o el mes enteros, o lo que sigue.
+ */
+export const ARGOS_AHEAD_PERIODS = ["hoy_entero", "manana", "semana_entera", "proxima_semana", "mes_entero", "resto_del_mes", "proximo_mes"] as const
+
+/** El mismo tramo entero, para lo que viene: «hoy» → todo hoy, «esta semana» → de lunes a domingo, «este mes» → el mes entero. */
+export function argosAheadOf(periodo: string): string {
+  return periodo === "hoy" ? "hoy_entero" : periodo === "esta_semana" ? "semana_entera" : periodo === "este_mes" ? "mes_entero" : periodo
+}
+
+export function isArgosAheadPeriod(periodo: string): boolean {
+  return (ARGOS_AHEAD_PERIODS as readonly string[]).includes(periodo)
+}
 
 export function isArgosPeriod(value: string): boolean {
   return ARGOS_ONLY_PERIOD.test(value) || REPORT_PERIOD_PATTERN.test(value)
@@ -134,6 +150,27 @@ function weekday(day: string): number {
 function resolveSpan(key: string, zone: Zone, now: Date): Resolved {
   const { timezone } = zone
   const today = reportDayOf(timezone, now)
+  // Lo que viene (D26): enteros o hacia adelante, sin cortar en este momento.
+  if (key === "hoy_entero" || key === "manana") {
+    const day = key === "manana" ? addDays(today, 1) : today
+    const span = spanOfInstants(timezone, startOfDay(timezone, day), startOfDay(timezone, addDays(day, 1)), false)
+    return { key, kind: "dia", grain: "dia", span, previous: shiftDays(timezone, span, 1), rolling: false }
+  }
+  if (key === "semana_entera" || key === "proxima_semana") {
+    const monday = addDays(today, -weekday(today) + (key === "proxima_semana" ? 7 : 0))
+    const span = spanOfInstants(timezone, startOfDay(timezone, monday), startOfDay(timezone, addDays(monday, 7)), false)
+    return { key, kind: "semana", grain: "semana", span, previous: shiftDays(timezone, span, 7), rolling: false }
+  }
+  if (key === "mes_entero" || key === "resto_del_mes" || key === "proximo_mes") {
+    const current = currentMonthIn(timezone, now)
+    const month = key === "proximo_mes" ? addMonths(current, 1) : current
+    const after = addMonths(month, 1)
+    const before = addMonths(month, -1)
+    const first = monthStart(timezone, month.year, month.month)
+    const span = spanOfInstants(timezone, key === "resto_del_mes" ? now : first, monthStart(timezone, after.year, after.month), false)
+    const previous = spanOfInstants(timezone, monthStart(timezone, before.year, before.month), first, false)
+    return { key, kind: key === "resto_del_mes" ? "fechas" : "meses", grain: "mes", span, previous, rolling: key === "resto_del_mes" }
+  }
   if (key === "hoy" || key === "ayer" || /^\d{4}-\d{2}-\d{2}$/.test(key)) {
     const day = key === "hoy" ? today : key === "ayer" ? addDays(today, -1) : key
     if (!validDay(day)) throw validation("Periodo no reconocido")
@@ -268,6 +305,13 @@ function labelOf(resolved: Resolved, zone: Zone, now: Date): string {
   const { locale, timezone } = zone
   const { span } = resolved
   const today = reportDayOf(timezone, now)
+  const thisYear = partsOf(today).year
+  if (resolved.key === "hoy_entero") return "Hoy, el día entero"
+  if (resolved.key === "manana") return `Mañana, ${dayWords(locale, span.firstDay, false)}`
+  if (resolved.key === "semana_entera") return "Esta semana, de lunes a domingo"
+  if (resolved.key === "proxima_semana") return `La próxima semana, del ${rangeWords(locale, span, thisYear)}`
+  if (resolved.key === "mes_entero") return `${capitalize(monthsWords(locale, span, -1, true), locale)}, el mes entero`
+  if (resolved.key === "resto_del_mes") return `Lo que queda de ${monthWords(locale, partsOf(span.lastDay).year, partsOf(span.lastDay).month, false)}, desde hoy`
   if (resolved.kind === "dia") {
     if (span.firstDay === today) return `Hoy, hasta las ${timeWords(locale, timezone, now)}`
     if (span.firstDay === addDays(today, -1)) return `Ayer, ${dayWords(locale, span.firstDay, false)}`
@@ -305,17 +349,23 @@ function compareLabelOf(resolved: Resolved, compare: ArgosCompare, before: Argos
 }
 
 /** `{periodo}`: «del 1 al 21 de octubre», «en setiembre», «hoy», «esta semana». */
-function phraseOf(resolved: Pick<Resolved, "kind" | "span">, zone: Zone, now: Date, forceYear = false): string {
+function phraseOf(resolved: Pick<Resolved, "kind" | "span"> & { key?: string }, zone: Zone, now: Date, forceYear = false): string {
   const { locale, timezone } = zone
   const { span } = resolved
   const today = reportDayOf(timezone, now)
   const thisYear = partsOf(today).year
   if (resolved.kind === "dia" || span.firstDay === span.lastDay) {
     if (!forceYear && span.firstDay === today) return "hoy"
+    if (!forceYear && span.firstDay === addDays(today, 1)) return "mañana"
     if (!forceYear && span.firstDay === addDays(today, -1)) return "ayer"
     return `el ${dayWords(locale, span.firstDay, forceYear || partsOf(span.firstDay).year !== thisYear)}`
   }
-  if (resolved.kind === "semana" && !forceYear) return span.partial ? "esta semana" : "la semana pasada"
+  if (resolved.kind === "semana" && !forceYear) {
+    if ("key" in resolved && resolved.key === "proxima_semana") return "la próxima semana"
+    if ("key" in resolved && resolved.key === "semana_entera") return "esta semana"
+    return span.partial ? "esta semana" : "la semana pasada"
+  }
+  if ("key" in resolved && resolved.key === "resto_del_mes" && !forceYear) return `en lo que queda de ${monthWords(locale, partsOf(span.lastDay).year, partsOf(span.lastDay).month, false)}`
   if (monthAligned(span) && !span.partial) {
     const single = span.firstDay.slice(0, 7) === span.lastDay.slice(0, 7)
     return `${single ? "en" : "de"} ${monthsWords(locale, span, thisYear, forceYear)}`
@@ -478,6 +528,8 @@ export interface ArgosPeriodView {
   rolling: boolean
   /** Hoy en la clínica (`AAAA-MM-DD`): el último día que se puede elegir. */
   today: string
+  /** Mira hacia adelante (D26): el selector ofrece los periodos de lo que viene. */
+  ahead: boolean
   /** La sede elegida (null: todas) y las de la clínica, solo si la consulta la usa y hay más de una (D13). */
   branch: { id: string | null; options: Array<{ id: string; name: string }> } | null
 }
@@ -485,7 +537,8 @@ export interface ArgosPeriodView {
 /** Las opciones que ofrece el selector según el periodo que pidió la pregunta (D16): se quedan aunque se elijan otras fechas. */
 export function argosGrainOf(periodo: string): ArgosGrain {
   if (periodo === "hoy" || periodo === "ayer" || /^\d{4}-\d{2}-\d{2}$/.test(periodo)) return "dia"
-  if (periodo === "esta_semana" || periodo === "semana_pasada") return "semana"
+  if (periodo === "hoy_entero" || periodo === "manana") return "dia"
+  if (periodo === "esta_semana" || periodo === "semana_pasada" || periodo === "semana_entera" || periodo === "proxima_semana") return "semana"
   return "mes"
 }
 
@@ -499,7 +552,8 @@ export function argosPeriodView(
 ): ArgosPeriodView {
   const today = reportDayOf(zone.timezone, now)
   const branchView = branch.used && branch.options.length > 1 ? { id: branch.chosen?.id ?? null, options: branch.options } : null
-  if (!period) return { value: "a_hoy", grain: null, label: argosTodayLabel(zone, now), compare: "no", compareLabel: null, other: null, rolling: false, today, branch: branchView }
+  if (!period)
+    return { value: "a_hoy", grain: null, label: argosTodayLabel(zone, now), compare: "no", compareLabel: null, other: null, rolling: false, ahead: false, today, branch: branchView }
   return {
     value: period.spec.periodo,
     grain: grain ?? period.grain,
@@ -508,6 +562,7 @@ export function argosPeriodView(
     compareLabel: period.compareLabel,
     other: period.spec.compara === "otro" && period.spec.otro && period.otherLabel ? { value: period.spec.otro, label: period.otherLabel } : null,
     rolling: period.rolling,
+    ahead: isArgosAheadPeriod(period.spec.periodo),
     today,
     branch: branchView,
   }

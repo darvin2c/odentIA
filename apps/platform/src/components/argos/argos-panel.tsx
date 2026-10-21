@@ -12,7 +12,7 @@ import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAd
 import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ArrowRight, Download, LoaderCircle, Pin, Search } from "lucide-react"
+import { ArrowRight, Check, Download, LoaderCircle, Pin, Search } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { ADMIN_NAME } from "../../lib/agent-names"
@@ -61,6 +61,34 @@ interface Exchange {
   recalcError?: string | null
   /** Lo último que se pidió, para «Intentar de nuevo». */
   lastChoice?: ArgosChoice
+  /** Lo que Argos va haciendo mientras responde (D22). */
+  steps?: string[]
+  /** El paciente elegido entre los que se llaman igual (D23); sin él, se pregunta. */
+  patientId?: string
+  /** Ya llegó la respuesta del paciente elegido: antes no se muestra nada (la del otro no se ve ni atenuada). */
+  patientReady?: boolean
+}
+
+/** Mientras Argos trabaja: los pasos hechos con su marca y el que va, con su espera (D22). */
+function ArgosSteps({ steps }: { steps: string[] }) {
+  const done = steps.slice(0, -1)
+  const current = steps.at(-1)
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {done.map((step, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: los pasos solo se agregan al final.
+        <p key={index} className="flex items-start gap-2">
+          <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
+          {step}
+        </p>
+      ))}
+      <p className="flex items-center gap-2 font-semibold text-primary-soft-foreground">
+        <LoaderCircle aria-hidden className="size-4 shrink-0 animate-spin motion-reduce:animate-none" />
+        {current ?? "Consultando los datos…"}
+      </p>
+      <span className="text-[13px] text-muted-foreground">Suele tardar entre 20 y 40 segundos. Se puede seguir trabajando en la página.</span>
+    </div>
+  )
 }
 
 function Sentence({ parts }: { parts: ArgosShown["sentence"] }) {
@@ -219,10 +247,12 @@ function ArgosAnswer({
   exchange,
   onOption,
   onPeriod,
+  onPatient,
 }: {
   exchange: Exchange
   onOption: (option: number | null) => void
   onPeriod: (choice: ArgosChoice) => void
+  onPatient: (patientId: string | undefined) => void
 }) {
   const result = exchange.result
   const role = useMyRole()
@@ -231,7 +261,7 @@ function ArgosAnswer({
   const [pinned, setPinned] = useState<Array<number | null>>([])
   const pin = useMutation({
     retry: false,
-    mutationFn: (option: number | null) => (result?.kind === "respuesta" ? pinArgos(result.questionId, option) : Promise.reject(new Error("sin respuesta"))),
+    mutationFn: (option: number | null) => (result?.kind === "respuesta" ? pinArgos(result.questionId, option, exchange.patientId) : Promise.reject(new Error("sin respuesta"))),
     onSuccess: (_data, option) => {
       setPinned((current) => [...current, option])
       toast.success("Fijada en el Resumen: se vuelve a calcular cada vez que lo abres")
@@ -242,10 +272,41 @@ function ArgosAnswer({
     retry: false,
     mutationFn: (input: { option: number | null; title: string }) =>
       // Se descarga lo que se ve: la opción, con su periodo y su sede.
-      result?.kind === "respuesta" ? downloadArgos(result.questionId, input.option, input.title, choiceOf(result.period)) : Promise.resolve(),
+      result?.kind === "respuesta"
+        ? downloadArgos(result.questionId, input.option, input.title, { ...choiceOf(result.period), ...(exchange.patientId ? { patientId: exchange.patientId } : {}) })
+        : Promise.resolve(),
     onError: (error) => toast.error(mutationErrorMessage(error)),
   })
   if (result?.kind !== "respuesta") return null
+  // Dos pacientes que se llaman igual (D23): primero se elige; elegir vuelve a calcular sin el modelo.
+  if (result.choose && exchange.patientId && !exchange.patientReady)
+    return exchange.recalcError ? (
+      <div role="alert" className={ANSWER}>
+        <p>{exchange.recalcError}</p>
+        <Button type="button" size="sm" className="min-h-11 self-start sm:min-h-8" onClick={() => onPatient(undefined)}>
+          Elegir otra vez
+        </Button>
+      </div>
+    ) : (
+      <p className="flex items-center gap-1.5 text-[13px] font-semibold text-primary-soft-foreground">
+        <LoaderCircle aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+        Calculando…
+      </p>
+    )
+  if (result.choose && !exchange.patientId)
+    return (
+      <div className={ANSWER}>
+        <p className="text-[15px] leading-6">{result.choose.message}</p>
+        <div className="flex flex-col gap-2">
+          {result.choose.options.map((item) => (
+            <Button key={item.id} type="button" variant="outline" className="h-auto min-h-11 justify-start whitespace-normal text-left" onClick={() => onPatient(item.id)}>
+              {item.label}
+            </Button>
+          ))}
+        </div>
+        <p className="text-[13px] text-muted-foreground">Elegir no vuelve a preguntarle a Argos.</p>
+      </div>
+    )
   const option = exchange.option === null ? null : (result.options.find((item) => item.index === exchange.option) ?? null)
   const shown: ArgosShown = option ? option.answer : result
   const title = option ? `${result.title} · ${option.label}` : result.title
@@ -260,7 +321,7 @@ function ArgosAnswer({
         period={result.period}
         locale={locale}
         disabled={exchange.recalculating === true}
-        onChange={(change) => onPeriod({ ...choiceOf(result.period), ...change })}
+        onChange={(change) => onPeriod({ ...choiceOf(result.period), ...change, ...(exchange.patientId ? { patientId: exchange.patientId } : {}) })}
       />
       {exchange.recalculating ? (
         <p className="flex items-center gap-1.5 text-[13px] font-semibold text-primary-soft-foreground">
@@ -290,10 +351,19 @@ function ArgosAnswer({
         <ArgosShownView shown={shown} title={title} />
       </div>
       {partial?.missing ? <p className="text-[13px] text-muted-foreground">Falta: {partial.missing}</p> : null}
+      {/* De dónde sale (D21): la misma cuenta de Reportes o una lectura de Argos, que se revisa en «Así lo calculé». */}
+      <Badge variant={result.source === "oficial" ? "soft" : "outline"} className="self-start">
+        {result.source === "oficial" ? "Cifra oficial · la misma cuenta de Reportes" : "Cálculo de Argos"}
+      </Badge>
       {how ? (
         <p className="text-[13px] text-muted-foreground">
           <span className="font-bold text-foreground">Así lo calculé:</span> {how}
         </p>
+      ) : null}
+      {result.choose && exchange.patientId ? (
+        <Button type="button" variant="ghost" size="sm" className="min-h-11 self-start text-primary-soft-foreground sm:min-h-8" onClick={() => onPatient(undefined)}>
+          Era otro paciente
+        </Button>
       ) : null}
       <div className="flex flex-wrap gap-2">
         {isPinned ? (
@@ -436,7 +506,8 @@ export function ArgosPanel() {
   const update = (id: number, patch: Partial<Exchange>) => setExchanges((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const ask = useMutation({
     retry: false,
-    mutationFn: (input: { id: number; body: Parameters<typeof askArgos>[0] }) => askArgos(input.body),
+    mutationFn: (input: { id: number; body: Parameters<typeof askArgos>[0] }) =>
+      askArgos(input.body, (step) => setExchanges((current) => current.map((item) => (item.id === input.id ? { ...item, steps: [...(item.steps ?? []), step] } : item)))),
     onSuccess: (response, input) => update(input.id, { result: response.data }),
     onError: (error, input) =>
       update(input.id, {
@@ -458,8 +529,10 @@ export function ArgosPanel() {
           return {
             ...item,
             recalculating: false,
+            // La respuesta ya es la del paciente elegido, si se eligió uno.
+            patientReady: item.patientId !== undefined,
             option,
-            result: { ...item.result, text: data.text, sentence: data.sentence, table: data.table, how: data.how, options: data.options, period: data.period },
+            result: { ...item.result, text: data.text, sentence: data.sentence, table: data.table, how: data.how, options: data.options, period: data.period, source: data.source },
           }
         }),
       ),
@@ -528,7 +601,7 @@ export function ArgosPanel() {
     : last.error
       ? ""
       : !last.result
-        ? "Consultando los datos…"
+        ? (last.steps?.at(-1) ?? "Consultando los datos…")
         : last.recalculating
           ? "Calculando…"
           : last.recalcError
@@ -571,16 +644,18 @@ export function ArgosPanel() {
                     </Button>
                   </div>
                 ) : !exchange.result ? (
-                  <div className="flex flex-col gap-0.5 text-sm">
-                    <span className="font-semibold">Consultando los datos…</span>
-                    <span className="text-[13px] text-muted-foreground">Suele tardar entre 10 y 30 segundos. Se puede seguir trabajando en la página.</span>
-                  </div>
+                  <ArgosSteps steps={exchange.steps ?? []} />
                 ) : exchange.result.kind === "respuesta" ? (
                   <ArgosAnswer
                     exchange={exchange}
                     onOption={(option) => update(exchange.id, { option })}
                     onPeriod={(choice) => {
                       if (exchange.result?.kind === "respuesta") recalc.mutate({ id: exchange.id, questionId: exchange.result.questionId, choice })
+                    }}
+                    onPatient={(patientId) => {
+                      if (exchange.result?.kind !== "respuesta") return
+                      update(exchange.id, { patientId, patientReady: false, recalcError: null })
+                      if (patientId) recalc.mutate({ id: exchange.id, questionId: exchange.result.questionId, choice: { ...choiceOf(exchange.result.period), patientId } })
                     }}
                   />
                 ) : (

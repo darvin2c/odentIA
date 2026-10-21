@@ -26,6 +26,7 @@ import {
   argosChoiceOf,
   argosEmptyHoleProblem,
   argosColumnLabel,
+  argosAheadOf,
   argosFigure,
   argosFiguresText,
   argosPlaceholders,
@@ -97,7 +98,7 @@ const periodFields = {
   periodo: z
     .string()
     .describe(
-      "El periodo (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD o a_hoy.",
+      "El periodo (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD, a_hoy o, para lo que viene, hoy_entero, manana, semana_entera, proxima_semana, mes_entero, resto_del_mes o proximo_mes.",
     ),
   compara: z.enum(ARGOS_COMPARES).describe("no, anterior, año_anterior u otro (la pregunta nombra dos periodos)."),
   otro_periodo: z.string().describe("Con compara otro: el segundo periodo. Vacío si no."),
@@ -159,7 +160,7 @@ export type ArgosPlan = z.infer<typeof planSchema>
 const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
 1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
-3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige.
+3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.
 4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos.
 Tienes 4 turnos como mucho; en el último solo puedes responder.
 
@@ -167,6 +168,7 @@ El periodo (las fechas las pone odentIA):
 - Elige en «periodo» el que pide la pregunta y filtra la consulta con :desde y :hasta (instantes; :hasta no entra) sobre la fecha y hora de la vista (momento, pagado_en, cargado_en, inicio, fecha, emitido_en, presentado_en, indicado_en, creada_en…), o con :dia_desde y :dia_hasta (:dia_hasta no entra) si la vista solo tiene días. Nunca escribas fechas, current_date ni now() para el periodo: odentIA pone las mismas fechas que Reportes y, si el periodo llega a hoy, corta los dos lados a la misma hora. La pantalla deja cambiar el periodo y vuelve a correr tu consulta con otras fechas.
 - «periodo» es uno de: este_mes, mes_pasado, ultimos_N_meses (N meses completos antes del actual), este_ano, AAAA-MM (un mes), hoy, ayer, AAAA-MM-DD (un día), esta_semana, semana_pasada, ultimos_N_dias (hasta hoy), AAAA-MM-DD..AAAA-MM-DD (unas fechas) o a_hoy.
 - Sin periodo en la pregunta: el de la pantalla si se indica; si no, este_mes. Una tendencia («¿estamos creciendo?», «¿cómo vamos?»): ultimos_3_meses comparado con el anterior. Lo mes a mes y el mejor o el peor mes, sin periodo: ultimos_12_meses (solo meses completos). Lo que mide frecuencia o tiempo («más frecuentes», «cada cuánto vuelven», «cuánto tardan», «cuánto dura un tratamiento») y el valor de un paciente según cómo llegó: ultimos_365_dias.
+- Lo que viene (citas, agenda, ausencias, controles, vencimientos) también cuenta lo que falta: hoy_entero, manana, semana_entera (de lunes a domingo), proxima_semana, mes_entero, resto_del_mes (de ahora al fin de mes) o proximo_mes. «¿Cuántas citas hay esta semana?» es semana_entera; «¿se nos vence algo este mes?» es mes_entero.
 - a_hoy es lo que se mide a hoy y no por periodo: lo que deben, los presupuestos que esperan respuesta, lo aceptado que falta hacer, el inventario, las citas por venir, los pacientes sin venir. Con a_hoy la consulta no usa :desde ni :hasta (current_date y now() ya están en la zona de la clínica).
 - «compara»: no; anterior si compara con el periodo anterior («contra el mes anterior», una tendencia), y odentIA pone los mismos días de antes; año_anterior si compara con el año pasado; otro si la pregunta nombra dos periodos («¿marzo o julio?»), con el segundo en «otro_periodo». Lo de antes se filtra con :desde_antes y :hasta_antes (o :dia_desde_antes y :dia_hasta_antes), en la misma fila que lo de ahora.
 - La sede la pone odentIA: si la vista tiene sede y la respuesta no va por sede, filtra con (:sede is null or <vista>.sede = :sede). Si la pregunta nombra una sede, va en «sede» tal cual; si no, vacío.
@@ -628,8 +630,9 @@ export async function askArgos(
     const wanted = args.cifra
     let choice: Pick<ArgosPlan, "periodo" | "compara" | "otro_periodo" | "sede"> = { periodo: args.periodo, compara: args.compara, otro_periodo: args.otro_periodo, sede: args.sede }
     const known = wanted ? argosFigure(wanted.clave) : null
-    // Lo que es a hoy no lleva periodo (D12); lo demás sí.
+    // Lo que es a hoy no lleva periodo (D12); lo demás sí. Lo que viene (D26) cuenta el día, la semana o el mes enteros.
     if (known?.time === "a_hoy") choice = { ...choice, periodo: "a_hoy", compara: "no", otro_periodo: "" }
+    else if (known?.ahead) choice = { ...choice, periodo: argosAheadOf(choice.periodo.trim()) }
     else if (known && choice.periodo.trim() === "a_hoy") return `${id}: no se pudo: ${known.name} va en un periodo; elige uno`
     const binding = bindingOf(choice)
     if ("problem" in binding) return `${id}: no se pudo: ${binding.problem}`

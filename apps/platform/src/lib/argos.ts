@@ -5,7 +5,7 @@
  * opciones para seguir las entrega el servidor; la pantalla solo las dibuja.
  * La conversación vive en el panel y no se guarda (decisiones D2 y D4).
  */
-import { apiDownload, apiFetch } from "./api"
+import { ApiError, apiDownload, apiFetch, apiLines } from "./api"
 import type { ReportQuery } from "./reports"
 
 export type ArgosSentence = Array<{ text: string; strong?: boolean }>
@@ -41,6 +41,8 @@ export interface ArgosPeriod {
   /** El segundo periodo cuando la pregunta nombra dos (D15). */
   other: { value: string; label: string } | null
   rolling: boolean
+  /** Mira hacia adelante (D26): el selector ofrece lo que viene. */
+  ahead: boolean
   /** Hoy en la clínica (`AAAA-MM-DD`). */
   today: string
   /** Solo si la respuesta va por sede y hay más de una (D13); `id` null: todas. */
@@ -52,6 +54,14 @@ export interface ArgosChoice {
   period?: string
   other?: string
   branchId?: string | null
+  /** El paciente elegido entre los que se llaman igual (D23). */
+  patientId?: string
+}
+
+/** Un paciente para elegir entre los que se llaman igual: lo que lo distingue, sin datos clínicos. */
+export interface ArgosPatientOption {
+  id: string
+  label: string
 }
 
 /** Las pantallas adonde una respuesta puede llevar («Abrir Finanzas»). */
@@ -70,6 +80,10 @@ export type ArgosResult =
       /** Cada opción con su «Así lo calculé» y su consulta: la siguiente pregunta parte de la que se ve. */
       options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
       period: ArgosPeriod
+      /** De dónde sale (D21): la misma cuenta de Reportes o un cálculo de Argos. */
+      source: "oficial" | "argos"
+      /** Varios pacientes se llaman como el de la pregunta (D23): se elige antes de ver la respuesta. */
+      choose: { message: string; options: ArgosPatientOption[] } | null
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: (ArgosShown & { query: string }) | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
@@ -84,8 +98,22 @@ export interface ArgosAskBody {
   routed?: boolean
 }
 
-export function askArgos(body: ArgosAskBody): Promise<{ data: ArgosResult }> {
-  return apiFetch("/api/reports/argos", { method: "POST", body: JSON.stringify(body) })
+/**
+ * Pregunta y, mientras Argos trabaja, entrega cada paso (D22): «Busqué
+ * «ortodoncia»: …», «Calculé lo cobrado». La respuesta llega al final.
+ */
+export async function askArgos(body: ArgosAskBody, onStep?: (text: string) => void): Promise<{ data: ArgosResult }> {
+  let answer: { data: ArgosResult } | null = null
+  let failure: ApiError | null = null
+  await apiLines("/api/reports/argos", { method: "POST", body: JSON.stringify(body) }, (line) => {
+    const item = line as { step?: string; data?: ArgosResult; error?: { code?: string; message?: string }; status?: number }
+    if (typeof item.step === "string") onStep?.(item.step)
+    else if (item.data) answer = { data: item.data }
+    else if (item.error) failure = new ApiError(item.status ?? 500, item.error)
+  })
+  if (failure) throw failure
+  if (!answer) throw new ApiError(500, {})
+  return answer
 }
 
 /** «negocio»: primero «Preguntarle a Argos»; «ayuda»: primero la Ayuda; «buscar»: primero los resultados. */
@@ -95,13 +123,14 @@ export function routeArgos(text: string, signal?: AbortSignal): Promise<{ data: 
   return apiFetch("/api/reports/argos/route", { method: "POST", body: JSON.stringify({ text }), ...(signal ? { signal } : {}) })
 }
 
-export function pinArgos(questionId: string, option: number | null): Promise<{ data: { id: string } }> {
-  return apiFetch("/api/reports/argos/pins", { method: "POST", body: JSON.stringify({ questionId, option }) })
+export function pinArgos(questionId: string, option: number | null, patientId?: string): Promise<{ data: { id: string } }> {
+  return apiFetch("/api/reports/argos/pins", { method: "POST", body: JSON.stringify({ questionId, option, ...(patientId ? { patientId } : {}) }) })
 }
 
 /** La misma respuesta con otro periodo o sede (D9): la principal y las de seguir, sin el modelo ni el tope. */
 export interface ArgosRerun extends ArgosShown {
   how: string
+  source: "oficial" | "argos"
   options: Array<{ index: number; label: string; how: string; query: string; answer: ArgosShown }>
   period: ArgosPeriod
 }
@@ -123,6 +152,7 @@ export function downloadArgos(questionId: string, option: number | null, title: 
   if (choice.period) params.set("period", choice.period)
   if (choice.other) params.set("other", choice.other)
   if (choice.branchId !== undefined) params.set("branch", choice.branchId ?? "todas")
+  if (choice.patientId) params.set("patient", choice.patientId)
   const query = params.toString()
   return apiDownload(`/api/reports/argos/${questionId}/csv${query ? `?${query}` : ""}`, `${title}.csv`)
 }

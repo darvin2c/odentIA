@@ -26,6 +26,68 @@ const SHORT_OPTIONS = {
   ],
 } as const
 
+/** Lo que viene (D26): el día, la semana o el mes enteros, o lo que sigue; y el anterior, para comparar. */
+const AHEAD_OPTIONS = {
+  dia: [
+    { value: "hoy_entero", title: "Hoy", detail: "El día entero" },
+    { value: "manana", title: "Mañana", detail: "El día entero" },
+    { value: "ayer", title: "Ayer", detail: "El día entero" },
+  ],
+  semana: [
+    { value: "semana_entera", title: "Esta semana", detail: "De lunes a domingo" },
+    { value: "proxima_semana", title: "La próxima semana", detail: "De lunes a domingo" },
+    { value: "semana_pasada", title: "La semana pasada", detail: "De lunes a domingo" },
+  ],
+  mes: [
+    { value: "mes_entero", title: "Este mes", detail: "El mes entero" },
+    { value: "resto_del_mes", title: "Lo que queda del mes", detail: "Desde hoy" },
+    { value: "proximo_mes", title: "El próximo mes", detail: "El mes entero" },
+    { value: "mes_pasado", title: "El mes pasado", detail: "El mes entero" },
+  ],
+} as const
+
+/** Lo que viene: una lista corta, sin calendario (las fechas por venir no se eligen día por día). */
+function AheadPeriodPicker({ grain, value, label, onChange }: { grain: "dia" | "semana" | "mes"; value: string; label: string; onChange: (next: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button type="button" variant="outline" aria-label={`Periodo: ${label}. Cambiar`} />}>
+        <span className="truncate">{label}</span>
+        <ChevronDown aria-hidden />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 gap-1 p-1.5">
+        <fieldset aria-label="Periodo" className="flex min-w-0 flex-col">
+          {AHEAD_OPTIONS[grain].map((option) => {
+            const selected = value === option.value
+            return (
+              <Button
+                key={option.value}
+                type="button"
+                variant="ghost"
+                aria-pressed={selected}
+                onClick={() => {
+                  onChange(option.value)
+                  setOpen(false)
+                }}
+                className={cn(
+                  "h-auto min-h-12 w-full justify-start gap-2 whitespace-normal rounded-lg px-2.5 py-1.5 text-left font-normal",
+                  selected ? "bg-primary-soft text-primary-soft-foreground hover:bg-primary-soft" : "",
+                )}
+              >
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className={cn("text-sm", selected ? "font-bold" : "font-semibold")}>{option.title}</span>
+                  <span className={cn("text-[13px]", selected ? "" : "text-muted-foreground")}>{option.detail}</span>
+                </span>
+                {selected ? <Check aria-hidden className="size-4 shrink-0" strokeWidth={2.5} /> : null}
+              </Button>
+            )
+          })}
+        </fieldset>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /** Las opciones de un día o de una semana (D16) y su calendario: un día, o unas fechas. */
 function ShortPeriodPicker({
   grain,
@@ -146,7 +208,24 @@ function ShortPeriodPicker({
 }
 
 /** Un selector del periodo con las opciones que tocan a la pregunta (D16). */
-function PeriodPicker({ grain, value, label, today, locale, onChange }: { grain: ArgosPeriod["grain"]; value: string; label: string; today: string; locale: string; onChange: (next: string) => void }) {
+function PeriodPicker({
+  grain,
+  ahead,
+  value,
+  label,
+  today,
+  locale,
+  onChange,
+}: {
+  grain: ArgosPeriod["grain"]
+  ahead: boolean
+  value: string
+  label: string
+  today: string
+  locale: string
+  onChange: (next: string) => void
+}) {
+  if (ahead && grain) return <AheadPeriodPicker grain={grain} value={value} label={label} onChange={onChange} />
   if (grain === "dia" || grain === "semana") return <ShortPeriodPicker grain={grain} value={value} label={label} today={today} locale={locale} onChange={onChange} />
   const [year, month] = today.split("-").map(Number)
   return <ReportPeriodPicker value={value} label={label} currentMonth={{ year: year ?? 2000, month: month ?? 1 }} today={today} locale={locale} onChange={onChange} />
@@ -178,11 +257,19 @@ export function ArgosPeriodRow({
   return (
     <fieldset disabled={disabled} className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 disabled:opacity-70">
       <legend className="sr-only">Periodo de la respuesta</legend>
-      <PeriodPicker grain={period.grain} value={period.value} label={period.label} today={period.today} locale={locale} onChange={(next) => onChange({ period: next })} />
+      <PeriodPicker grain={period.grain} ahead={period.ahead} value={period.value} label={period.label} today={period.today} locale={locale} onChange={(next) => onChange({ period: next })} />
       {period.other ? (
         <>
           <span className="text-[13px] text-muted-foreground">contra</span>
-          <PeriodPicker grain={period.grain} value={period.other.value} label={period.other.label} today={period.today} locale={locale} onChange={(next) => onChange({ other: next })} />
+          <PeriodPicker
+            grain={period.grain}
+            ahead={period.ahead}
+            value={period.other.value}
+            label={period.other.label}
+            today={period.today}
+            locale={locale}
+            onChange={(next) => onChange({ other: next })}
+          />
         </>
       ) : null}
       {period.branch ? (
