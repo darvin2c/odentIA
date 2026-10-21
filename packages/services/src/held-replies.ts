@@ -1,8 +1,10 @@
 import type { Db } from "@odentia/db"
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
-import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm"
 import { ANSWER_READY_MESSAGE_KEY, NOTICE_PURPOSE, renderMessage, replyId } from "./automation-messages.js"
-import { clinicName, firstName } from "./automation-routing.js"
+import { clinicName } from "./automation-routing.js"
+import { greetingName } from "./conversation-close.js"
 import { currentCatalogMessage, findMessageTemplate } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { ServiceError } from "./errors.js"
@@ -45,6 +47,8 @@ export async function offerHeldReplies(
   opts: { now?: Date; systemTurn?: boolean } = {},
 ): Promise<HeldOffer> {
   const now = opts.now ?? new Date()
+  // Una respuesta del equipo y el ciclo a la vez no envían dos «Ver respuesta»: Meta cobra cada uno.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`ver-respuesta:${conversationId}`}))`)
   const [first] = await tx
     .select({ createdAt: message.createdAt })
     .from(message)
@@ -63,7 +67,8 @@ export async function offerHeldReplies(
         eq(message.conversationId, conversationId),
         eq(message.direction, "out"),
         eq(message.contentType, "template"),
-        ne(message.status, "failed"),
+        // Uno que falló se vuelve a intentar al día siguiente, no en cada ciclo.
+        or(ne(message.status, "failed"), gt(message.createdAt, new Date(now.getTime() - RETRY_FAILED_MS))),
         gt(message.createdAt, first.createdAt),
         sql`${message.replyButtons} @> ${JSON.stringify([{ id: button }])}::jsonb`,
       ),
@@ -82,13 +87,27 @@ export async function offerHeldReplies(
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
   if (!person) return "sin_pendientes"
-  if (!(await mayWriteFirst(tx, orgId, person.contactId, NOTICE_PURPOSE))) return "sin_permiso"
+  if (!(await mayWriteFirst(tx, orgId, person.contactId, NOTICE_PURPOSE))) {
+    // El ciclo no vuelve a mirarla hasta mañana: no le quita el lugar a otras.
+    if (opts.systemTurn) {
+      await tx.insert(auditEvent).values({
+        organizationId: orgId,
+        actorUserId: null,
+        action: "held_reply.sin_permiso",
+        entity: "conversation",
+        entityId: conversationId,
+        metadata: {},
+      })
+    }
+    return "sin_permiso"
+  }
   if (opts.systemTurn && !isWritingTime(now, await writingScheduleOf(tx, orgId))) return "fuera_de_horario"
   const template = await findMessageTemplate(tx, orgId, person.connectionId, ANSWER_READY_MESSAGE_KEY)
   if (template?.status !== "aprobada") return "sin_aprobar"
   const spec = await currentCatalogMessage(tx, orgId, ANSWER_READY_MESSAGE_KEY)
   const { params, text } = renderMessage(spec, {
-    persona: firstName(person),
+    // Sin un nombre de verdad (un visitante del chat web, un número): «Hola, te escribimos de nuevo.»
+    persona: greetingName(person.givenNames?.trim() || person.displayName) ?? "te escribimos de nuevo",
     clinica: await clinicName(tx, orgId),
   })
   await sendTemplateOutbound(tx, orgId, Buffer.alloc(0), {
@@ -111,11 +130,25 @@ export async function offerHeldReplies(
  * puede salir no frena a las demás.
  */
 export async function offerPendingHeldReplies(tx: Db, orgId: string, now: Date): Promise<number> {
-  const rows = await tx
-    .selectDistinct({ conversationId: message.conversationId })
-    .from(message)
-    .where(and(eq(message.organizationId, orgId), eq(message.status, "held")))
-    .limit(50)
+  // Las que todavía no tienen su aviso, la más antigua primero: las que ya lo tienen,
+  // o no tienen permiso, no ocupan el lugar de las nuevas.
+  const since = new Date(now.getTime() - RETRY_FAILED_MS).toISOString()
+  const rows = (await tx.execute<{ conversation_id: string }>(sql`
+    select held.conversation_id from (
+      select m.conversation_id, min(m.created_at) as first_at from message m
+      where m.organization_id = ${orgId} and m.status = 'held'
+      group by m.conversation_id
+    ) held
+    where not exists (select 1 from message o
+        where o.organization_id = ${orgId} and o.conversation_id = held.conversation_id
+          and o.direction = 'out' and o.content_type = 'template' and o.created_at > held.first_at
+          and (o.status <> 'failed' or o.created_at > ${since}::timestamptz)
+          and o.reply_buttons::text like ${`%:ver_respuesta:${"%"}`})
+      and not exists (select 1 from audit_event a
+        where a.organization_id = ${orgId} and a.entity_id = held.conversation_id::text
+          and a.action = 'held_reply.sin_permiso' and a.created_at > ${since}::timestamptz)
+    order by held.first_at
+    limit 50`)).map((row) => ({ conversationId: row.conversation_id }))
   let sent = 0
   for (const row of rows) {
     const outcome = await tx
@@ -128,6 +161,9 @@ export async function offerPendingHeldReplies(tx: Db, orgId: string, now: Date):
   }
   return sent
 }
+
+/** Un «Ver respuesta» que falló se vuelve a intentar pasado este tiempo. */
+const RETRY_FAILED_MS = 24 * 3_600_000
 
 /** Lo que dice la zona de escritura antes de responder pasadas las 24 horas (R1 y tablero 4b). */
 export interface LateReply {

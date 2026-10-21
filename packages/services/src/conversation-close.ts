@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { isWebchatPlaceholderName } from "@odentia/channels"
 import { agentCaseMemory, agentHandoff, agentProposal, type AgentCaseNote } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
@@ -80,6 +81,8 @@ export function clinicVoiceOf(cfg: Pick<AgentConfig, "treatment" | "tone" | "emo
  * un nombre: un número de teléfono o un correo no se usan como saludo.
  */
 export function greetingName(displayName: string | null | undefined): string | null {
+  // «Visitante del chat web» no es su nombre: no se le dice «Hola, Visitante».
+  if (isWebchatPlaceholderName(displayName)) return null
   const first = displayName?.trim().split(/\s+/)[0] ?? ""
   if (!first || first.length > 30 || /[\d@+_]/.test(first) || !/\p{L}/u.test(first)) return null
   return first

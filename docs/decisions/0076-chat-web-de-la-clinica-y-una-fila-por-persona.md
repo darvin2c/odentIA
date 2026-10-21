@@ -14,17 +14,33 @@ En la Bandeja, Rosa aparecía dos veces si escribía por WhatsApp y por Telegram
 
 - **Un chat por clínica, servido desde su dirección** (decisión 7): `<script src="https://<clínica>.<dominio>/chat.js" async></script>`. La línea no cambia aunque cambien el color o el saludo. Sirve igual si la clínica tiene dos sitios. No hay un dominio propio del chat (`chat.<dominio>` chocaría con una clínica llamada «chat») ni identificadores en la línea.
 - **Responde en los sitios que la clínica permite** (decisión 8). El primer sitio donde carga se registra solo. Si aparece en otro, la clínica ve «¿Es tuyo? Permitir · Bloquear», y mientras tanto ahí dice «No disponible».
+  - El sitio es el que dice el navegador (cabecera `Origin`), no lo que diga la página.
+  - La API devuelve un ticket firmado de ese sitio. La ventana del chat lo presenta al abrir la conversación, así que abrir `/embed?site=…` desde otra página no basta.
   - El navegador solo deja mostrar el chat en los sitios permitidos (`frame-ancestors`).
+  - El primero también se avisa en la campana y se puede bloquear: alguien pudo registrarse antes que la clínica.
+  - Pendientes, como mucho 20.
+  - Mirar la lista de Integraciones no crea el chat: nace al abrir su pantalla.
   - Los sitios se guardan aparte de la conexión (`webchat_site`).
-- **Se escribe sin dar el nombre** (decisión 9): el saludo es la primera burbuja de Sofi. La conversación sigue 30 días en ese navegador, con un token que solo vale para ella. «Generar un código nuevo» no deja a nadie sin su conversación: la clave anterior vale 30 días más.
-- **Dónde avisarle** (decisión 10). Cuando hay un tema con el equipo, el chat pide el WhatsApp o el correo, «Solo lo usamos para responderte». La respuesta del equipo sale por ahí: por WhatsApp, «Por entregar» con «Ver respuesta» si pasaron 24 horas (ADR 0050), o por correo. Sin ninguno de los dos, el equipo ve «Sin forma de avisarle». Un número que ya es de otra persona no se usa: nunca se une otra ficha por el número.
+- **Se escribe sin dar el nombre** (decisión 9): el saludo es la primera burbuja de Sofi. La conversación sigue 30 días en ese navegador, con un token que solo vale para ella.
+  - El token se firma con una clave que sale de la clave de secretos del servidor y nunca se muestra (`webchatSessionKey`).
+  - El código que se entrega a quien hace la web solo firma los avisos al sitio. Por eso con él no se lee ni se escribe ninguna conversación, y «Generar un código nuevo» no deja a nadie sin la suya.
+  - Por lo mismo, el chat no recibe mensajes por un webhook firmado con ese código: entran solo con la sesión del visitante.
+- **Dónde avisarle** (decisión 10). Cuando hay un tema con el equipo y la clínica tiene WhatsApp o un buzón conectado, el chat pide el WhatsApp o el correo, «Solo lo usamos para responderte».
+  - La respuesta del equipo sale por ahí: por WhatsApp, «Por entregar» con «Ver respuesta» si pasaron 24 horas (ADR 0050), o por correo. Si «Ver respuesta» no sale y dejó un correo, va también por correo.
+  - Una sola regla dice por dónde (`webchatReplyRoutes`): la usan el reenvío, «Sin forma de avisarle» en la Bandeja y lo que se acepta en el formulario.
+  - Un número no se usa si ya es de otra persona, como identidad o como teléfono de otra ficha, ni si WhatsApp lo rechazó. Al visitante se le pide otro, sin decirle por qué. Nunca se une otra ficha por el número.
+  - Usar el número que dejó es como «Escribirle» con el número de su ficha: lo decide quien responde (ADR 0027).
+  - Lo que deja solo cambia la ficha de quien nació en ese chat: no la de un paciente ni la de quien escribe por otro canal.
+  - Sofi dice «aquí abajo» solo si el chat va a pedirlo; si ya lo dejó, que le avisan por ahí; sin WhatsApp ni buzón en la clínica, que le responden en el chat.
 - **Lo que recibe el visitante** es solo quién lo dijo en palabras (Sofi o la clínica), el texto y la hora. Nunca quién del equipo escribió por dentro, errores ni identificadores internos.
 - **Probar sin publicar.** La conversación de prueba lleva «Prueba» en la Bandeja y Sofi responde de verdad. En cambio:
   - No se cobra.
-  - No crea a nadie en Pacientes ni una oportunidad, no ejecuta reservas.
-  - No avisa al sitio y no cuenta en Reportes.
+  - No crea a nadie en Pacientes ni una oportunidad, no ejecuta reservas y no envía enlaces de reserva ni de registro (`TEST_CONVERSATION`).
+  - No avisa al sitio, no cuenta en Reportes, ni en «Por revisar», ni en el Resumen del agente.
   - Lo que gasta cuenta como «probar», con su tope.
   - Se borra con «Borrar esta prueba» o sola a los 7 días. Lo borra una función de la base que solo acepta una prueba de la clínica en contexto.
+  - Lo aprendido de una corrección queda. Lo que no debería haber dejado, como una cita, se suelta de la conversación y no se borra.
+  - Si borrar falla en una clínica, el ciclo sigue con las demás.
 
 ### Una fila por persona
 
@@ -32,7 +48,8 @@ En la Bandeja, Rosa aparecía dos veces si escribía por WhatsApp y por Telegram
 - **La fila muestra esa conversación**: su tema o su último mensaje y su estado. La hora y «sin leer» son de todos sus canales, y la fila lleva un icono por canal.
 - **El hilo es una línea de tiempo** con los mensajes de todos sus canales y el canal en cada mensaje. Abrirla la deja leída en todos.
 - **Por dónde sale la respuesta** (decisión 6):
-  - Por la conversación que muestra la fila: la que más pide y, entre iguales, la del último mensaje. Si es un tema, es el canal del tema.
+  - Por la conversación que muestra la fila: la que más pide; en «Por atender», la que tiene el tema; entre iguales, la del último mensaje. Si es un tema, es el canal del tema.
+  - La lista pagina por persona: si cambia la conversación que muestra, la persona no se repite ni se pierde entre páginas.
   - «Responder por» dice si cada canal está abierto (24 horas en WhatsApp, Instagram y Messenger) y deja cambiarlo sin perder lo escrito.
   - Un tema de otro canal se dice arriba con «Responder por <canal>»: se responde por ahí.
 - **Se queda por canal, sin verse**: Sofi responde donde le escribieron, cada tema vive en su canal, el cierre a las 22 horas, la espera de 15 minutos y «sin leer» siguen por conversación. Cerrar o reabrir desde el hilo es de la conversación que responde.

@@ -1,11 +1,10 @@
-import { createHash, randomUUID } from "node:crypto"
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import {
   assertValidWebchatConfig,
   createWebchatToken,
   isWebchatSessionId,
   newWebchatSessionId,
   normalizeOrigin,
-  readWebchatToken,
   verifyWebchatToken,
   WEBCHAT_CHANNEL,
   type WebchatConnectionConfig,
@@ -27,6 +26,7 @@ import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
 import { clinicOrigin } from "./public-links.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
+import { webchatCanNotify, webchatReplyRoutes } from "./webchat-reply.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -145,6 +145,15 @@ export async function getClinicWebchat(
   return clinicWebchatView(tx, orgId, row, readConfig(row, secretsKey))
 }
 
+/**
+ * El chat de la clínica sin crearlo: la lista de Integraciones lo mira sin
+ * dejarlo encendido. Nulo si la clínica nunca abrió Configuración › Chat web.
+ */
+export async function peekClinicWebchat(tx: Db, orgId: string, secretsKey: Buffer): Promise<ClinicWebchat | null> {
+  const row = await clinicWebchatRow(tx, orgId)
+  return row ? clinicWebchatView(tx, orgId, row, readConfig(row, secretsKey)) : null
+}
+
 async function clinicWebchatView(
   tx: Db,
   orgId: string,
@@ -241,14 +250,11 @@ export async function rotateClinicWebchatSecret(
   actorUserId: string | null,
 ): Promise<ClinicWebchat> {
   const row = await requireClinicWebchat(tx, orgId)
-  const config: WebchatConnectionConfig = {
-    ...readConfig(row, secretsKey),
-    previousSecret: row.webhookSecret,
-    rotatedAt: new Date().toISOString(),
-  }
+  const config = readConfig(row, secretsKey)
+  // Solo cambia el código de los avisos: las sesiones de los visitantes tienen su propia clave (`webchatSessionKey`).
   const [updated] = await tx
     .update(channelConnection)
-    .set({ webhookSecret: randomUUID(), configEncrypted: encryptJson(secretsKey, config), updatedAt: new Date() })
+    .set({ webhookSecret: randomUUID(), updatedAt: new Date() })
     .where(and(eq(channelConnection.id, row.id), eq(channelConnection.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Chat web")
@@ -306,6 +312,18 @@ export interface PublicWebchat {
   orgId: string
   connection: typeof channelConnection.$inferSelect
   config: WebchatConnectionConfig
+  /** Firma las sesiones de los visitantes (`webchatSessionKey`); nunca se muestra. */
+  sessionKey: string
+}
+
+/**
+ * La clave de las sesiones del chat: sale de la clave de secretos del
+ * servidor y del chat, no del código de los avisos que se entrega a quien
+ * hace la web. Por eso «Generar un código nuevo» no deja a nadie sin su
+ * conversación, y quien conoce el código no puede leer ninguna.
+ */
+export function webchatSessionKey(secretsKey: Buffer, connectionId: string): string {
+  return createHmac("sha256", secretsKey).update(`webchat-session:${connectionId}`, "utf8").digest("hex")
 }
 
 /** Con el rol owner: la ruta pública todavía no sabe de qué clínica es. */
@@ -314,7 +332,7 @@ export async function findClinicWebchat(ownerDb: Db, secretsKey: Buffer, slug: s
   if (!org) return null
   const row = await clinicWebchatRow(ownerDb, org.id)
   if (!row) return null
-  return { orgId: org.id, connection: row, config: readConfig(row, secretsKey) }
+  return { orgId: org.id, connection: row, config: readConfig(row, secretsKey), sessionKey: webchatSessionKey(secretsKey, row.id) }
 }
 
 /** Lo que el visitante ve antes de escribir: cómo se llama, quién responde y el saludo. */
@@ -365,6 +383,14 @@ export async function admitWebchatSite(
   if (known) return { origin, status: known.status }
   const [any] = await tx.select({ id: webchatSite.id }).from(webchatSite).where(eq(webchatSite.connectionId, connectionId)).limit(1)
   const status: WebchatSiteStatus = any ? "pendiente" : "permitido"
+  // Sitios inventados no llenan la lista ni la campana: pasado el tope, uno nuevo no se anota y dice «No disponible».
+  if (status === "pendiente") {
+    const [pending] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(webchatSite)
+      .where(and(eq(webchatSite.connectionId, connectionId), eq(webchatSite.status, "pendiente")))
+    if ((pending?.count ?? 0) >= MAX_PENDING_SITES) return null
+  }
   const [site] = await tx.insert(webchatSite).values({ organizationId: orgId, connectionId, origin, status }).returning()
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -374,24 +400,59 @@ export async function admitWebchatSite(
     entityId: site?.id ?? null,
     metadata: { origin },
   })
-  if (status === "pendiente") {
-    const admins = await tx
-      .select({ userId: member.userId })
-      .from(member)
-      .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
-    const host = new URL(origin).host
-    for (const admin of admins) {
-      await createWorkspaceNotification(tx, orgId, {
-        userId: admin.userId,
-        dedupeKey: `webchat-site:${origin}`,
-        title: `El chat de tu sitio apareció en ${host}`,
-        body: "Mientras no lo permitas, ahí dice «No disponible». ¿Es tuyo?",
-        href: SETTINGS_HREF,
-        permission: "settings.write",
-      })
-    }
+  // El primero también se avisa: si no es de la clínica, se bloquea desde Configuración.
+  const admins = await tx
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
+  const host = new URL(origin).host
+  for (const admin of admins) {
+    await createWorkspaceNotification(tx, orgId, {
+      userId: admin.userId,
+      dedupeKey: `webchat-site:${origin}`,
+      title: status === "pendiente" ? `El chat de tu sitio apareció en ${host}` : `El chat de tu sitio quedó instalado en ${host}`,
+      body:
+        status === "pendiente"
+          ? "Mientras no lo permitas, ahí dice «No disponible». ¿Es tuyo?"
+          : "Es el primer sitio donde cargó. Si no es tuyo, bloquéalo en Configuración › Chat web.",
+      href: SETTINGS_HREF,
+      permission: "settings.write",
+    })
   }
   return { origin, status }
+}
+
+/** Sitios esperando el sí de la clínica, como mucho. */
+const MAX_PENDING_SITES = 20
+const SITE_TICKET_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
+ * El sitio donde cargó `chat.js`, visto por la API en la cabecera `Origin` y
+ * firmado. La ventana del chat lo presenta al abrir la sesión: abrir
+ * `/embed?site=…` desde otra página no basta para conversar en nombre de un
+ * sitio permitido.
+ */
+export function webchatSiteTicket(sessionKey: string, origin: string, now: number = Date.now()): string {
+  const payload = `${origin}|${now + SITE_TICKET_TTL_MS}`
+  const sig = createHmac("sha256", sessionKey).update(`site:${payload}`, "utf8").digest("hex")
+  return Buffer.from(`${payload}|${sig}`, "utf8").toString("base64url")
+}
+
+/** El sitio de un ticket vigente y bien firmado; nulo si no. */
+export function readWebchatSiteTicket(sessionKey: string, ticket: string, now: number = Date.now()): string | null {
+  let decoded: string
+  try {
+    decoded = Buffer.from(ticket, "base64url").toString("utf8")
+  } catch {
+    return null
+  }
+  const parts = decoded.split("|")
+  if (parts.length !== 3) return null
+  const [origin, exp, sig] = parts as [string, string, string]
+  if (!Number.isInteger(Number(exp)) || Number(exp) <= now) return null
+  const expected = createHmac("sha256", sessionKey).update(`site:${origin}|${exp}`, "utf8").digest("hex")
+  if (expected.length !== sig.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null
+  return normalizeOrigin(origin)
 }
 
 /**
@@ -409,30 +470,21 @@ export async function webchatFrameAncestors(tx: Db, orgId: string, connectionId:
 
 /** Una sesión de visitante: dura 30 días en su navegador. La prueba lleva su propia marca. */
 export function openWebchatSession(
-  connection: typeof channelConnection.$inferSelect,
+  sessionKey: string,
   opts: { test?: boolean } = {},
 ): { sessionId: string; token: string; expiresAt: number } {
   const sessionId = newWebchatSessionId(opts)
-  const token = createWebchatToken(connection.webhookSecret, sessionId)
-  const verified = verifyWebchatToken(connection.webhookSecret, token)
+  const token = createWebchatToken(sessionKey, sessionId)
+  const verified = verifyWebchatToken(sessionKey, token)
   if (!verified) throw new Error("No se pudo emitir la sesión del chat")
   return { sessionId, token, expiresAt: verified.expiresAt }
 }
 
-/**
- * La sesión de un token; nula si no es válida. Con la clave anterior (tras
- * «Generar un código nuevo») sigue valiendo y trae uno nuevo (`renewed`).
- */
-export function readVisitorSession(
-  found: PublicWebchat,
-  token: string,
-): { sessionId: string; renewed: string | null } | null {
-  const read = readWebchatToken(found.config, found.connection.webhookSecret, token)
+/** La sesión de un token; nula si no es válida o venció. */
+export function readVisitorSession(found: PublicWebchat, token: string): { sessionId: string } | null {
+  const read = verifyWebchatToken(found.sessionKey, token)
   if (!read || !isWebchatSessionId(read.sessionId)) return null
-  return {
-    sessionId: read.sessionId,
-    renewed: read.renew ? createWebchatToken(found.connection.webhookSecret, read.sessionId) : null,
-  }
+  return { sessionId: read.sessionId }
 }
 
 /**
@@ -560,9 +612,23 @@ export async function pollWebchatVisitor(
   return {
     messages,
     typing: !!last && last.direction === "in" && attends && now.getTime() - last.createdAt.getTime() < TYPING_MS,
-    askContact: !!topic && !conv.phone && !conv.email,
+    // Se pide solo si la clínica tiene por dónde avisarle (WhatsApp o un buzón).
+    askContact: !!topic && !conv.phone && !conv.email && (await webchatCanNotify(tx, orgId)),
     contact: masked(conv.phone, conv.email),
   }
+}
+
+/**
+ * Qué dice Sofi al pasar un tema en el chat web: «aquí abajo» solo si el chat
+ * va a pedir dónde avisarle; si ya lo dejó, que le avisan por ahí; si la
+ * clínica no tiene por dónde, que le responden en el chat.
+ */
+export async function webchatHandoffWhere(tx: Db, orgId: string, conversationId: string): Promise<"preguntar" | "ya_dejo" | "aqui"> {
+  const [row] = await tx.execute<{ phone: string | null; email: string | null }>(sql`
+    select p.phone, p.email from conversation c join contact p on p.id = c.contact_id
+    where c.organization_id = ${orgId} and c.id = ${conversationId}::uuid`)
+  if (row?.phone || row?.email) return "ya_dejo"
+  return (await webchatCanNotify(tx, orgId)) ? "preguntar" : "aqui"
 }
 
 function hashKey(id: string): string {
@@ -585,6 +651,13 @@ export async function saveWebchatVisitorContact(
 ): Promise<VisitorPoll["contact"]> {
   const conv = await sessionConversation(tx, orgId, connectionId, sessionId)
   if (!conv) throw notFound("Conversación")
+  // Solo la persona que nació en este chat: la ficha de un paciente, o de quien
+  // también escribe por otro canal, no se cambia desde un navegador.
+  const [known] = await tx.execute<{ known: boolean }>(sql`
+    select exists (select 1 from patient_contact pc where pc.organization_id = ${orgId} and pc.contact_id = ${conv.contactId})
+      or exists (select 1 from conversation c2 join channel_connection cn on cn.id = c2.channel_connection_id
+        where c2.organization_id = ${orgId} and c2.contact_id = ${conv.contactId} and cn.provider <> ${WEBCHAT_PROVIDER}) as known`)
+  if (known?.known) throw new ServiceError("WEBCHAT_CONTACT_KNOWN", 409, "Ya tenemos cómo avisarte.")
   const typedPhone = input.whatsapp?.trim() || null
   const typedEmail = input.email?.trim() || null
   if (!typedPhone && !typedEmail) throw validation("Escribe tu WhatsApp o tu correo.")
@@ -599,6 +672,15 @@ export async function saveWebchatVisitorContact(
     { ...(phone ? { phone } : {}), ...(email?.success ? { email: email.data } : {}) },
     { userId: null },
   )
+  // Lo que deja tiene que servir para avisarle: un número que ya es de otra persona no se usa, y se le pide otro.
+  const routes = await webchatReplyRoutes(tx, orgId, conv.contactId)
+  if (!routes.whatsapp && !routes.correo) {
+    throw validation(
+      typedEmail
+        ? "No podemos avisarte por ahí. Revisa tu correo o déjanos tu WhatsApp."
+        : "No podemos avisarte por ese WhatsApp. Déjanos otro número o tu correo.",
+    )
+  }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId: null,
@@ -621,7 +703,7 @@ export async function openWebchatTest(
 ): Promise<{ sessionId: string; token: string }> {
   await getClinicWebchat(tx, orgId, secretsKey, actorUserId)
   const row = await requireClinicWebchat(tx, orgId)
-  const { sessionId, token } = openWebchatSession(row, { test: true })
+  const { sessionId, token } = openWebchatSession(webchatSessionKey(secretsKey, row.id), { test: true })
   return { sessionId, token }
 }
 

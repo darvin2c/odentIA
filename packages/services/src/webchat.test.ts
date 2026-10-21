@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { buildWebchatInbound, createWebchatToken, webChatAdapter } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
+import { agentAnswerTrace, agentLesson, agentReviewItem } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import {
   agentConfig,
   channelConnection,
   channelTemplate,
   contact,
+  contactIdentity,
   conversation,
   message,
 } from "@odentia/db/schema/crm"
@@ -14,7 +16,9 @@ import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { createHandoff } from "./agent-operations.js"
+import { createBookingLink } from "./booking-links.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
+import { getInboxConversationDetail } from "./inbox.js"
 import { listPeople } from "./people.js"
 import { countConversationAction } from "./saas-actions.js"
 import type { Storage } from "./storage.js"
@@ -26,13 +30,18 @@ import {
   deleteWebchatTest,
   findClinicWebchat,
   getClinicWebchat,
+  openWebchatSession,
   openWebchatTest,
+  peekClinicWebchat,
   pollWebchatVisitor,
   purgeOldWebchatTests,
   readVisitorSession,
+  readWebchatSiteTicket,
   rotateClinicWebchatSecret,
   saveWebchatVisitorContact,
   webchatFrameAncestors,
+  webchatSigningCode,
+  webchatSiteTicket,
 } from "./webchat.js"
 
 /**
@@ -108,7 +117,23 @@ async function clinic() {
         deps,
       ),
     )
-  return { orgId, slug, ownerId, receptionId, chat, run, visitorSays }
+  /** Conecta un canal por donde avisarle al visitante. */
+  const connect = async (channel: "whatsapp" | "email") => {
+    const [row] = await ownerDb
+      .insert(channelConnection)
+      .values({
+        organizationId: orgId,
+        channel,
+        provider: channel === "whatsapp" ? "whatsapp_cloud_api" : "gmail",
+        displayName: channel === "whatsapp" ? "WA" : "Correo",
+        configEncrypted: "x",
+        webhookSecret: `s-${channel}-${orgId}`,
+        status: "active",
+      })
+      .returning()
+    return row!
+  }
+  return { orgId, slug, ownerId, receptionId, chat, run, visitorSays, connect }
 }
 
 describe("un solo chat por clínica y los sitios donde responde (decisiones 7 y 8)", () => {
@@ -126,12 +151,14 @@ describe("un solo chat por clínica y los sitios donde responde (decisiones 7 y 
     expect(
       await c.run((tx) => admitWebchatSite(tx, c.orgId, c.chat.id, "javascript:alert(1)")),
     ).toBeNull()
+    // El primero también se avisa: si no es de la clínica, se bloquea.
     const notices = await ownerDb
       .select()
       .from(workspaceNotification)
       .where(eq(workspaceNotification.organizationId, c.orgId))
-    expect(notices.map((row) => [row.userId, row.title])).toEqual([
+    expect(notices.map((row) => [row.userId, row.title]).sort()).toEqual([
       [c.ownerId, "El chat de tu sitio apareció en promo-dental.net"],
+      [c.ownerId, "El chat de tu sitio quedó instalado en sonrisa.pe"],
     ])
     expect(await c.run((tx) => webchatFrameAncestors(tx, c.orgId, c.chat.id))).toEqual([
       "https://sonrisa.pe",
@@ -154,12 +181,60 @@ describe("un solo chat por clínica y los sitios donde responde (decisiones 7 y 
       "https://sonrisa.pe",
       "https://promo-dental.net",
     ])
+    // El primero también se puede bloquear: alguien pudo registrarse antes que la clínica.
+    await c.run((tx) =>
+      decideWebchatSite(tx, c.orgId, KEY, c.ownerId, view.sites[0]!.id, "bloqueado"),
+    )
+    expect(await c.run((tx) => webchatFrameAncestors(tx, c.orgId, c.chat.id))).toEqual([
+      "https://promo-dental.net",
+    ])
+  })
+
+  it("mirar la lista de Integraciones no crea el chat, y los sitios inventados tienen tope", async () => {
+    const orgId = randomUUID()
+    await insertOrg(ownerDb, orgId, `sin-chat-${orgId.slice(0, 8)}`)
+    expect(await withOrgContext(appDb, orgId, (tx) => peekClinicWebchat(tx, orgId, KEY))).toBeNull()
+    expect(
+      await ownerDb
+        .select()
+        .from(channelConnection)
+        .where(eq(channelConnection.organizationId, orgId)),
+    ).toEqual([])
+    const c = await clinic()
+    await c.run((tx) => admitWebchatSite(tx, c.orgId, c.chat.id, "https://sonrisa.pe"))
+    for (let i = 0; i < 20; i++) {
+      await c.run((tx) => admitWebchatSite(tx, c.orgId, c.chat.id, `https://copia-${i}.example`))
+    }
+    expect(
+      await c.run((tx) => admitWebchatSite(tx, c.orgId, c.chat.id, "https://copia-20.example")),
+    ).toBeNull()
+  })
+
+  it("abrir la sesión pide el sitio que vio la API al cargar el chat, firmado y vigente", async () => {
+    const c = await clinic()
+    const found = (await findClinicWebchat(ownerDb, KEY, c.slug))!
+    const ticket = webchatSiteTicket(found.sessionKey, "https://sonrisa.pe")
+    expect(readWebchatSiteTicket(found.sessionKey, ticket)).toBe("https://sonrisa.pe")
+    // Otra clínica, un ticket vencido o uno tocado no sirven.
+    const other = (await findClinicWebchat(ownerDb, KEY, (await clinic()).slug))!
+    expect(readWebchatSiteTicket(other.sessionKey, ticket)).toBeNull()
+    expect(
+      readWebchatSiteTicket(
+        found.sessionKey,
+        webchatSiteTicket(found.sessionKey, "https://sonrisa.pe", Date.now() - 25 * 3_600_000),
+      ),
+    ).toBeNull()
+    const forged = Buffer.from(
+      Buffer.from(ticket, "base64url").toString("utf8").replace("sonrisa.pe", "copia.example"),
+    ).toString("base64url")
+    expect(readWebchatSiteTicket(found.sessionKey, forged)).toBeNull()
   })
 })
 
 describe("lo que ve el visitante", () => {
   it("su conversación sin nada interno, «escribiendo…» y, con un tema, dónde avisarle (R4)", async () => {
     const c = await clinic()
+    await c.connect("whatsapp")
     const found = (await findClinicWebchat(ownerDb, KEY, c.slug))!
     const sessionId = `webchat:${randomUUID()}`
     const asked = await c.visitorSays(sessionId, "¿Hacen ortodoncia invisible?")
@@ -245,32 +320,22 @@ describe("lo que ve el visitante", () => {
     expect(poll).toMatchObject({ askContact: false, contact: { whatsapp: "•••• 4321" } })
   })
 
-  it("«Generar un código nuevo» no deja a nadie sin su conversación: la clave anterior vale y se renueva", async () => {
+  it("las sesiones no se firman con el código de los avisos, y «Generar un código nuevo» no deja a nadie sin su conversación", async () => {
     const c = await clinic()
     const before = (await findClinicWebchat(ownerDb, KEY, c.slug))!
-    const sessionId = `webchat:${randomUUID()}`
-    const token = createWebchatToken(before.connection.webhookSecret, sessionId)
+    const { sessionId, token } = openWebchatSession(before.sessionKey)
+    // Quien hace la web conoce el código de los avisos: con él no se fabrica la sesión de un visitante.
+    const code = await c.run((tx) => webchatSigningCode(tx, c.orgId))
+    expect(readVisitorSession(before, createWebchatToken(code, sessionId))).toBeNull()
     await c.run((tx) => rotateClinicWebchatSecret(tx, c.orgId, KEY, c.ownerId))
     const after = (await findClinicWebchat(ownerDb, KEY, c.slug))!
-    const read = readVisitorSession(after, token)
-    expect(read).toMatchObject({ sessionId, renewed: expect.any(String) })
-    expect(readVisitorSession(after, read!.renewed!)).toEqual({ sessionId, renewed: null })
+    expect(after.connection.webhookSecret).not.toBe(before.connection.webhookSecret)
+    expect(readVisitorSession(after, token)).toEqual({ sessionId })
   })
 
   it("la respuesta del equipo a un tema sale también por el WhatsApp que dejó, por entregar y con «Ver respuesta»", async () => {
     const c = await clinic()
-    const [whatsapp] = await ownerDb
-      .insert(channelConnection)
-      .values({
-        organizationId: c.orgId,
-        channel: "whatsapp",
-        provider: "whatsapp_cloud_api",
-        displayName: "WA",
-        configEncrypted: "x",
-        webhookSecret: "s",
-        status: "active",
-      })
-      .returning()
+    const whatsapp = await c.connect("whatsapp")
     await ownerDb.insert(channelTemplate).values({
       organizationId: c.orgId,
       connectionId: whatsapp!.id,
@@ -322,6 +387,73 @@ describe("lo que ve el visitante", () => {
       ["text", "held", "Está en S/ 350."],
       ["template", "queued", expect.stringContaining("Hola")],
     ])
+    // No se le dice «Hola, Visitante»: no es su nombre.
+    expect(sent[1]?.body).toContain("Hola, te escribimos de nuevo.")
+  })
+
+  it("un número que ya es de otra persona no se usa para avisarle: se le pide otro, y el correo sirve", async () => {
+    const c = await clinic()
+    await c.connect("whatsapp")
+    // Rosa es de la clínica, con su teléfono anotado, aunque nunca escribió por WhatsApp.
+    await ownerDb
+      .insert(contact)
+      .values({ organizationId: c.orgId, displayName: "Rosa Quispe", phone: "+51911111111" })
+    const sessionId = `webchat:${randomUUID()}`
+    const asked = await c.visitorSays(sessionId, "¿Atienden niños?")
+    await c.run((tx) =>
+      createHandoff(tx, c.orgId, null, {
+        conversationId: asked.conversationId,
+        reason: "Niños",
+        summary: "Niños",
+        createdBy: "agent",
+        kind: "otro",
+      }),
+    )
+    await expect(
+      c.run((tx) =>
+        saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { whatsapp: "911 111 111" }),
+      ),
+    ).rejects.toThrow("No podemos avisarte por ese WhatsApp")
+    // Sin buzón de la clínica el correo tampoco sirve; con buzón, sí.
+    await expect(
+      c.run((tx) =>
+        saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { email: "vale@correo.pe" }),
+      ),
+    ).rejects.toThrow("No podemos avisarte por ahí")
+    const mailbox = await c.connect("email")
+    expect(
+      await c.run((tx) =>
+        saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { email: "vale@correo.pe" }),
+      ),
+    ).toMatchObject({ email: expect.stringContaining("@") })
+    const detail = await c.run((tx) =>
+      getInboxConversationDetail(tx, c.orgId, asked.conversationId),
+    )
+    expect(detail.attention.unreachable).toBe(false)
+    await c.run((tx) =>
+      sendTeamReply(tx, c.orgId, {
+        conversationId: asked.conversationId,
+        userId: c.receptionId,
+        content: { type: "text", text: "Sí, desde los 3 años." },
+        replyToMessageId: asked.messageId,
+      }),
+    )
+    const [mail] = await ownerDb
+      .select()
+      .from(conversation)
+      .where(
+        and(
+          eq(conversation.organizationId, c.orgId),
+          eq(conversation.channelConnectionId, mailbox.id),
+        ),
+      )
+    expect(mail).toBeTruthy()
+    // El número de Rosa no pasó a ser de nadie más.
+    const identities = await ownerDb
+      .select()
+      .from(contactIdentity)
+      .where(eq(contactIdentity.organizationId, c.orgId))
+    expect(identities.some((row) => row.externalUserId === "wa:51911111111")).toBe(false)
   })
 })
 
@@ -351,7 +483,53 @@ describe("la prueba de Configuración no se cobra ni cuenta", () => {
     ).toBe(false)
     const people = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos" }, () => true))
     expect(people.items.some((item) => item.id === thread!.contactId)).toBe(false)
+    // Una prueba no envía su enlace: no reserva ni crea a nadie de verdad.
+    await expect(
+      c.run((tx) =>
+        createBookingLink(
+          tx,
+          c.orgId,
+          { conversationId: said.conversationId },
+          { secretsKey: KEY },
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "TEST_CONVERSATION" })
+    // Lo que dejó al corregir a Sofi (un caso por revisar y su lección) no impide borrarla; la lección queda.
+    const [trace] = await ownerDb
+      .insert(agentAnswerTrace)
+      .values({
+        organizationId: c.orgId,
+        conversationId: said.conversationId,
+        outcome: "enviada",
+        replyText: "Hola",
+      })
+      .returning()
+    const [item] = await ownerDb
+      .insert(agentReviewItem)
+      .values({
+        organizationId: c.orgId,
+        conversationId: said.conversationId,
+        traceId: trace!.id,
+        reason: "marcada",
+        reply: "Hola",
+      })
+      .returning()
+    const [lesson] = await ownerDb
+      .insert(agentLesson)
+      .values({
+        organizationId: c.orgId,
+        kind: "regla",
+        title: "Saludo",
+        body: "Saluda",
+        reviewItemId: item!.id,
+        conversationId: said.conversationId,
+        proposedBy: c.ownerId,
+      })
+      .returning()
     expect(await c.run((tx) => deleteWebchatTest(tx, c.orgId, { sessionId }))).toBe(true)
+    expect(
+      await ownerDb.select().from(agentLesson).where(eq(agentLesson.id, lesson!.id)),
+    ).toMatchObject([{ reviewItemId: null, conversationId: null }])
     expect(
       await ownerDb.select().from(conversation).where(eq(conversation.id, said.conversationId)),
     ).toEqual([])

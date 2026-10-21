@@ -77,6 +77,14 @@ export async function retakeForgottenTopics(
       and h.kind in (${sql.join(kinds.map((kind) => sql`${kind}`), sql`, `)})
       and (h.created_at at time zone ${zone.timezone})::date < (${now.toISOString()}::timestamptz at time zone ${zone.timezone})::date
       and conv.status = 'open' and conv.agent_status = 'on' and c.screen is null
+      -- El chat web no tiene a nadie mirando al día siguiente: la respuesta va por donde dejó (forwardWebchatReply), no aquí.
+      and conn.provider <> 'web_chat' and not conv.is_test
+      ${cfg.channels !== null ? sql`and conn.channel in (${sql.join([...cfg.channels, ""].map((channel) => sql`${channel}`), sql`, `)})` : sql``}
+      -- Instagram y Messenger cerrados no admiten «Retomar»: no ocupan lugar en la fila.
+      and not (conn.provider in ('instagram', 'messenger') and (conv.last_inbound_at is null or conv.last_inbound_at < ${now.toISOString()}::timestamptz - interval '24 hours'))
+      -- Uno que no pudo salir hoy no se vuelve a intentar hasta mañana.
+      and not exists (select 1 from audit_event a where a.organization_id = h.organization_id and a.entity_id = h.id::text
+        and a.action = 'agent.handoff_retake_skipped' and a.created_at > ${now.toISOString()}::timestamptz - interval '20 hours')
       and not exists (select 1 from message m where m.organization_id = h.organization_id and m.conversation_id = h.conversation_id
         and m.direction = 'out' and m.sender_kind = 'user' and m.created_at > h.created_at)
     order by h.created_at
@@ -88,7 +96,6 @@ export async function retakeForgottenTopics(
     // Cada tema en su punto de guardado: uno que no puede salir no frena a los demás.
     const done = await tx
       .transaction(async (inner) => {
-        if (cfg.channels !== null && !cfg.channels.includes(row.channel)) return false
         const thread = {
           provider: row.provider,
           connectionStatus: row.connection_status,
@@ -99,6 +106,7 @@ export async function retakeForgottenTopics(
             day: dayWords(new Date(row.created_at), now, zone),
             quote: shortQuote(row.quote),
             kind: row.kind,
+            canBook: kinds.includes("cita"),
           })
           await sendOutbound(inner, orgId, {
             conversationId: row.conversation_id,
@@ -143,6 +151,16 @@ export async function retakeForgottenTopics(
         throw error
       })
     if (done) retaken++
+    else {
+      await tx.insert(auditEvent).values({
+        organizationId: orgId,
+        actorUserId: null,
+        action: "agent.handoff_retake_skipped",
+        entity: "agent_handoff",
+        entityId: row.id,
+        metadata: { origin: "agent", conversationId: row.conversation_id },
+      })
+    }
   }
   return retaken
 }
@@ -155,7 +173,7 @@ export async function retakeForgottenTopics(
 export function retakeText(
   voice: ClinicVoice,
   name: string | null,
-  input: { day: string; quote: string | null; kind: TopicKind },
+  input: { day: string; quote: string | null; kind: TopicKind; canBook?: boolean },
 ): string {
   const usted = voice.treatment === "usted"
   const hello = name ? `Hola, ${name}.` : "Hola."
@@ -165,9 +183,13 @@ export function retakeText(
       ? usted
         ? "¿Le ayudo a reservar su cita? Dígame qué día le queda mejor."
         : "¿Te ayudo a reservar tu cita? Dime qué día te queda mejor."
-      : usted
-        ? "¿Le ayudo con eso ahora? Si desea, también le reservo una evaluación."
-        : "¿Te ayudo con eso ahora? Si quieres, también te reservo una evaluación."
+      : input.canBook === false
+        ? usted
+          ? "¿Le ayudo con eso ahora?"
+          : "¿Te ayudo con eso ahora?"
+        : usted
+          ? "¿Le ayudo con eso ahora? Si desea, también le reservo una evaluación."
+          : "¿Te ayudo con eso ahora? Si quieres, también te reservo una evaluación."
   return `${hello} ${pending} ${offer}`
 }
 

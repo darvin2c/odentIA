@@ -540,7 +540,9 @@ function InboxPage() {
             ) : undefined
           }
         />
-      ) : null}
+      ) : (
+        <h1 className="sr-only">Bandeja</h1>
+      )}
       <NewConversationDialog
         open={newConversation}
         onClose={() => setNewConversation(false)}
@@ -1189,6 +1191,8 @@ function ThreadView({
   // canal elegido en «Responder por». El historial es el de toda la persona.
   const [id, setId] = useState(openId)
   const switchingRef = useRef(false)
+  // Si el último cambio de `id` fue «Responder por»: lo leen los efectos que vienen después.
+  const lastSwitchRef = useRef(false)
   const [composer, setComposer] = useState("")
   const [older, setOlder] = useState<ChatMessage[]>([])
   const [olderCursor, setOlderCursor] = useState<string | null>(null)
@@ -1279,17 +1283,19 @@ function ThreadView({
     // Cambiar de canal con «Responder por» conserva lo escrito y el historial ya cargado: es la misma persona.
     const switching = switchingRef.current
     switchingRef.current = false
+    lastSwitchRef.current = switching
     if (!switching) {
       setOlder([])
       setOlderCursor(null)
       setComposer("")
+      // El enlace ya preparado es de la persona: al cambiar de canal se vuelve a usar.
+      setRegistrationLink(null)
+      setRegistrationError(null)
+      setCopied(false)
     }
     setWindowClosed(false)
     setMarkedRef(null)
-    setRegistrationLink(null)
-    setRegistrationError(null)
     setSendError(null)
-    setCopied(false)
     setOpenTrace(null)
     setCorrecting(null)
     setConfirming(null)
@@ -1357,8 +1363,9 @@ function ThreadView({
   // atiende lo revisa y lo envía (nunca sale solo). Dentro de la conversación
   // abierta no hace falta mensaje aprobado.
   const [linkPasted, setLinkPasted] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de persona, no de canal.
   useEffect(() => {
-    setLinkPasted(false)
+    if (!lastSwitchRef.current) setLinkPasted(false)
   }, [id])
   const ownLinkMutation = useMutation({
     mutationFn: (input: { contactId: string; patientId: string }) =>
@@ -1463,6 +1470,8 @@ function ThreadView({
     const text = message.text.trim()
     const files = message.files ?? []
     if (!text && files.length === 0) return
+    // Todavía se ve el canal anterior: se conserva lo escrito y se envía cuando llegue.
+    if (detailQuery.isPlaceholderData) throw new Error("Cambiando de canal")
     setUploading(true)
     try {
       if (text) {
@@ -1640,7 +1649,8 @@ function ThreadView({
   const focusComposer = () => window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus(), 0)
   // Promete responder después: se sugiere dejar el tema pendiente.
   const promises = replyTopic !== null && /\b(te (confirmo|aviso|escribo|respondo|cuento|averiguo)|consult|averigu|lo veo)/i.test(composer)
-  const conversers = members.filter((member) => ["owner", "admin", "reception", "dentist"].includes(member.role))
+  // Caja también, para devolverle un pago (decisión 3): `TopicBand` se lo ofrece solo en los pagos.
+  const conversers = members.filter((member) => ["owner", "admin", "reception", "dentist", "cashier"].includes(member.role))
   // «Responder por» (decisión 6 del pulido): otro canal de la persona, sin perder lo escrito.
   const switchTo = (next: string) => {
     if (next === id) return
@@ -1648,12 +1658,21 @@ function ThreadView({
     setId(next)
   }
   const multiChannel = personChannels.length > 1
+  // Lo que se ve es todavía el canal anterior: no se actúa hasta que llegue el elegido.
+  const switching = detailQuery.isPlaceholderData
+  // Dos conversaciones del mismo canal (dos hilos de correo) se distinguen por su cuenta o su hora.
+  const channelName = (item: PersonChannel) => {
+    const twins = personChannels.filter((other) => other.channel === item.channel)
+    if (twins.length < 2) return channelLabel(item.channel)
+    const sameAccount = twins.some((other) => other !== item && other.connectionName === item.connectionName)
+    return `${channelLabel(item.channel)} · ${sameAccount ? listTimeWords(item.lastMessageAt) : item.connectionName}`
+  }
   const channelOf = (conversationId: string | undefined) =>
     personChannels.find((item) => item.conversationId === conversationId)?.channel ?? detail.connection.channel
   const activeChannel = personChannels.find((item) => item.conversationId === id) ?? null
   // Un tema de otro canal se responde por ese canal: se dice y se ofrece pasar a él.
   const otherTopics = personChannels.filter((item) => item.conversationId !== id && item.topics > 0)
-  const busy = actionMutation.isPending
+  const busy = actionMutation.isPending || switching
   const name = detail.contact.displayName
   const preview = previewQuery.data?.data
   const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar", receptionName) : []
@@ -1847,11 +1866,12 @@ function ThreadView({
           topics={orderedTopics}
           unreachable={threadAttention?.unreachable === true}
           myUserId={myUserId}
-          messages={messages}
+          // «Lo que ya se le dijo» es de este canal: lo de otro no responde este tema.
+          messages={messages.filter((item) => (item.conversationId ?? id) === id)}
           members={conversers}
           canWrite={canWrite}
           onlyTopic={showOnlyTopic}
-          pending={topicMutation.isPending}
+          pending={topicMutation.isPending || switching}
           onToggleOnlyTopic={() => setOnlyTopic((value) => !value)}
           onAnswer={(topic) => {
             setReplyTo(topic.source?.id ?? null)
@@ -2035,10 +2055,10 @@ function ThreadView({
             <span>Responder por:</span>
             <DropdownMenu>
               <DropdownMenuTrigger
-                aria-label={`Responder por ${channelLabel(detail.connection.channel)}, ${replyWindowWords(activeChannel?.replyWindow ?? null)}. Cambiar de canal`}
+                aria-label={`Responder por ${activeChannel ? channelName(activeChannel) : channelLabel(detail.connection.channel)}, ${replyWindowWords(activeChannel?.replyWindow ?? null)}. Cambiar de canal`}
                 className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {channelLabel(detail.connection.channel)}
+                {activeChannel ? channelName(activeChannel) : channelLabel(detail.connection.channel)}
                 <span className="font-normal text-muted-foreground">· {replyWindowWords(activeChannel?.replyWindow ?? null)}</span>
                 <ChevronDown className="size-3.5" aria-hidden />
               </DropdownMenuTrigger>
@@ -2047,7 +2067,7 @@ function ThreadView({
                 {personChannels.map((item) => (
                   <DropdownMenuItem key={item.conversationId} onClick={() => switchTo(item.conversationId)}>
                     <span className="whitespace-nowrap">
-                      <span className="font-medium">{channelLabel(item.channel)}</span>
+                      <span className="font-medium">{channelName(item)}</span>
                       <span className="text-muted-foreground">
                         {" "}· {replyWindowWords(item.replyWindow)}
                         {item.topics > 0 ? " · tema por responder" : ""}
@@ -2296,7 +2316,7 @@ function ThreadView({
                       variant="outline"
                       size="sm"
                       className="min-h-11 sm:min-h-8"
-                      disabled={sendMutation.isPending || uploading}
+                      disabled={sendMutation.isPending || uploading || switching}
                       onClick={() => {
                         keepPendingRef.current = true
                       }}
@@ -2307,7 +2327,7 @@ function ThreadView({
                   <PromptInputSubmit
                     aria-label={replyTopic ? "Enviar y resolver" : "Enviar"}
                     title={replyTopic ? "Enviar y resolver (Enter)" : "Enviar (Enter)"}
-                    disabled={sendMutation.isPending || uploading}
+                    disabled={sendMutation.isPending || uploading || switching}
                   />
                 </div>
               </PromptInputFooter>
@@ -2432,7 +2452,7 @@ function TopicBand({
     <section aria-label="Lo que te toca contestar" className="flex flex-col gap-2 border-b bg-warning-soft/50 px-3.5 py-2">
       {unreachable ? (
         <p className="text-xs font-semibold text-foreground">
-          Sin forma de avisarle: no dejó su WhatsApp ni su correo. Si cierra la pestaña del chat, no le llega la respuesta.
+          Sin forma de avisarle: no hay un WhatsApp ni un correo suyo por donde llegarle. Si cierra la pestaña del chat, no le llega la respuesta.
         </p>
       ) : null}
       {visible.map((topic) => {
@@ -2475,7 +2495,8 @@ function TopicBand({
                   ? [{ key: "spam", label: "Es spam", disabled: pending, onSelect: onSpam }]
                   : []),
                 ...members
-                  .filter((member) => member.userId !== topic.assigneeUserId)
+                  // Caja solo recibe pagos (decisión 3); el servidor también lo exige.
+                  .filter((member) => member.userId !== topic.assigneeUserId && (member.role !== "cashier" || topic.kind === "pago"))
                   .map((member) => ({
                     key: `pasar-${member.userId}`,
                     label: member.userId === myUserId ? "Pasármelo" : `Pasar este tema a ${member.user.name}`,

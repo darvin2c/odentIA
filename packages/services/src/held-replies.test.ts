@@ -176,6 +176,9 @@ describe("R1: responder pasadas las 24 horas de WhatsApp", () => {
     expect(await tick(new Date("2026-10-13T04:00:00Z"))).toBe(0)
     expect(await tick(new Date("2026-10-13T15:00:00Z"))).toBe(1)
     expect(await tick(new Date("2026-10-13T15:01:00Z"))).toBe(0)
+    // Si falla (un número sin WhatsApp, por ejemplo), no se reenvía en cada ciclo: se espera un día.
+    await ownerDb.update(message).set({ status: "failed" }).where(and(eq(message.conversationId, conv), eq(message.contentType, "template")))
+    expect(await tick(new Date("2026-10-13T15:02:00Z"))).toBe(0)
     // Si vuelve a escribir sin tocar el botón, la respuesta sale igual.
     expect(await c.run((tx) => deliverHeldReplies(tx, c.orgId, conv))).toBe(1)
     expect((await c.messages(conv)).find((row) => row.held)?.status).toBe("queued")
@@ -308,5 +311,8 @@ describe("decisión 5: Sofi se ofrece al día siguiente", () => {
   it("habla en la voz de la clínica", () => {
     expect(retakeText({ treatment: "usted", tone: "formal", emojis: "no" }, null, { day: "ayer", quote: null, kind: "cita" }))
       .toBe("Hola. Ayer quedó pendiente su consulta. ¿Le ayudo a reservar su cita? Dígame qué día le queda mejor.")
+    // Si Sofi no agenda, no ofrece reservar una evaluación.
+    expect(retakeText({ treatment: "tu", tone: "cercano", emojis: "no" }, "Carlos", { day: "ayer", quote: null, kind: "precio", canBook: false }))
+      .toBe("Hola, Carlos. Ayer quedó pendiente tu consulta. ¿Te ayudo con eso ahora?")
   })
 })

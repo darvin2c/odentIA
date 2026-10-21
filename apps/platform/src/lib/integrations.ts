@@ -473,9 +473,9 @@ export function webchatRows(
   lastInboundOf: (id: string) => string | null | undefined,
   since: Since,
 ): WebchatRow[] {
-  // Sin instalar en ningún sitio: lo que falta es pegar la línea.
-  if (!chat || (!chat.installedOn && chat.active)) return [{ ...notConnected("webchat"), status: "Sin instalar", connection: chat }]
-  const pending = chat.sites.filter((site) => site.status === "pendiente")
+  const pending = chat?.sites.filter((site) => site.status === "pendiente") ?? []
+  // Sin instalar en ningún sitio y sin ninguno que espere su sí: lo que falta es pegar la línea.
+  if (!chat || (!chat.installedOn && chat.active && pending.length === 0)) return [{ ...notConnected("webchat"), status: "Sin instalar", connection: chat }]
   const review: IntegrationReview[] = pending.length
     ? [
         {

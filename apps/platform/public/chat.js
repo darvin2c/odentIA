@@ -116,7 +116,7 @@
             "iframe",
             { width: "100%", height: "100%", border: "0", display: "block" },
             {
-              src: `${src.origin}/embed?site=${encodeURIComponent(site)}`,
+              src: `${src.origin}/embed?site=${encodeURIComponent(site)}&ticket=${encodeURIComponent(info.ticket || "")}`,
               title: `Chat de ${name}`,
               allow: "clipboard-write",
             },
@@ -168,9 +168,8 @@
   function boot() {
     fetch(`${api}/api/webchat/${encodeURIComponent(slug)}/site`, {
       method: "POST",
-      // Texto y sin credenciales: el navegador no pregunta antes (sin preflight).
-      headers: { "content-type": "text/plain" },
-      body: JSON.stringify({ site: site }),
+      // Sin cuerpo ni credenciales: el navegador no pregunta antes (sin preflight)
+      // y el sitio lo dice él mismo, en la cabecera Origin.
       credentials: "omit",
     })
       .then((response) => response.json())

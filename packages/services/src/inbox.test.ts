@@ -246,3 +246,31 @@ it("una fila por persona: sus canales juntos, en su estado más urgente, y un gr
     .where(inArray(conversation.id, [wa.id, tg.id, group.id]))
   expect(Object.fromEntries(unread.map((item) => [item.id, item.unread]))).toEqual({ [wa.id]: 0, [tg.id]: 0, [group.id]: 4 })
 })
+
+it("en «Por atender» la fila de la persona muestra la conversación del tema, aunque escribiera después por otro canal", async () => {
+  const { orgId, handoff } = await seedInbox()
+  const [telegram] = await ownerDb.select().from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.channel, "telegram")))
+  const [whatsapp] = await ownerDb.insert(channelConnection).values({
+    organizationId: orgId, channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WhatsApp",
+    configEncrypted: "config", webhookSecret: "secret-wa-2", status: "active",
+  }).returning()
+  const [rosa] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Rosa Quispe" }).returning()
+  if (!telegram || !whatsapp || !rosa) throw new Error("semilla")
+  const [withTopic] = await ownerDb.insert(conversation).values({
+    organizationId: orgId, contactId: rosa.id, channelConnectionId: whatsapp.id, externalThreadId: "wa:51900000001",
+    agentStatus: "on", lastMessageAt: new Date(Date.now() - 3_600_000),
+  }).returning()
+  // Después escribe por un canal que Sofi no atiende en ese hilo: también pide a una persona, pero sin tema.
+  const [later] = await ownerDb.insert(conversation).values({
+    organizationId: orgId, contactId: rosa.id, channelConnectionId: telegram.id, externalThreadId: "tg:900",
+    agentStatus: "off", lastMessageAt: new Date(),
+  }).returning()
+  if (!withTopic || !later) throw new Error("conversaciones")
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: later.id, direction: "in", senderKind: "contact", body: "¿Y?", status: "received" })
+  await handoff(withTopic, "media")
+  const { items } = await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { view: "attend" }))
+  const row = items.find((item) => item.contact.id === rosa.id)
+  expect(row?.id).toBe(withTopic.id)
+  expect(row?.attention.topics).toHaveLength(1)
+})

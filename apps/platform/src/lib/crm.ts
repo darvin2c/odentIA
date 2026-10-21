@@ -162,6 +162,8 @@ export interface InboxTopic {
   priority: "alta" | "media" | "baja"
   /** «Ahora»: prioridad alta o más de dos horas sin resolverse. */
   urgent: boolean
+  /** De qué trata (R3): dice a quién le llega; un pago puede pasarse a caja. Ausente en respuestas antiguas. */
+  kind?: "cita" | "precio" | "clinico" | "pago" | "otro"
   assigneeUserId: string | null
   assigneeName: string | null
   createdBy: "agent" | "user"

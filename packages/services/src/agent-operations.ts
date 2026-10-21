@@ -3597,10 +3597,25 @@ export async function annotateHandoff(
 export async function listHandoffs(
   tx: Db,
   orgId: string,
-  input: { conversationId?: string; limit?: number; open?: boolean; order?: "reciente" | "urgencia"; visibleTo?: string } = {},
+  input: {
+    conversationId?: string
+    limit?: number
+    open?: boolean
+    order?: "reciente" | "urgencia"
+    visibleTo?: string
+    /** Solo los de esta persona o de estos tipos (Inicio de caja y del odontólogo), antes del límite. */
+    only?: { assignee?: string; kinds?: string[] }
+  } = {},
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
+  if (input.only) {
+    const either = [
+      ...(input.only.assignee ? [eq(agentHandoff.assigneeUserId, input.only.assignee)] : []),
+      ...(input.only.kinds?.length ? [inArray(agentHandoff.kind, input.only.kinds)] : []),
+    ]
+    if (either.length > 0) conditions.push(or(...either)!)
+  }
   if (input.open) conditions.push(handoffStillOpen())
   if (input.visibleTo) {
     conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, input.visibleTo))!)

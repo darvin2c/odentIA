@@ -87,7 +87,12 @@ export async function processInbound(
       // Una reacción (👍) no es un mensaje: no despierta al agente. Sobre una cita
       // propuesta, Sofi le pide el sí una vez con un texto fijo (decisión 7).
       if (result.reaction) {
-        await askConfirmationAfterReaction(tx, orgId, { ...result, emoji: result.reaction.emoji })
+        // En su punto de guardado: si no se le puede escribir, la reacción queda guardada igual.
+        await tx
+          .transaction((inner) => askConfirmationAfterReaction(inner, orgId, { ...result, emoji: result.reaction?.emoji ?? null }))
+          .catch((error: unknown) => {
+            if (!(error instanceof ServiceError)) throw error
+          })
         return
       }
       if (!result.created) return

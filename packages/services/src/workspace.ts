@@ -473,17 +473,18 @@ async function waitingCases(
   // Quien no ve los casos del agente (el odontólogo) recibe solo los temas que
   // le pasaron, como una duda clínica de su paciente (ADR 0050); caja, los de
   // pagos (R3 y decisión 3 del pulido).
-  const listed = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
-  const onlyMine = scope.onlyMine === true
-  const rows = listed.filter((row) =>
-    onlyMine && scope.onlyPayments
-      ? row.assigneeUserId === userId || row.kind === "pago"
-      : onlyMine
-        ? row.assigneeUserId === userId
-        : scope.onlyPayments
-          ? row.kind === "pago"
-          : true,
-  )
+  // Lo suyo se filtra antes del límite: con una cola grande, sus pagos y sus dudas clínicas no quedan fuera.
+  const only =
+    scope.onlyMine || scope.onlyPayments
+      ? { ...(scope.onlyMine ? { assignee: userId } : {}), ...(scope.onlyPayments ? { kinds: ["pago"] } : {}) }
+      : undefined
+  const rows = await listHandoffs(tx, orgId, {
+    limit: 100,
+    open: true,
+    order: "urgencia",
+    ...(all ? {} : { visibleTo: userId }),
+    ...(only ? { only } : {}),
+  })
   // Se responde desde Inicio lo propio, y caja los pagos que nadie tomó. No
   // donde Instagram o Messenger ya no dejan escribir: eso se responde en la
   // Bandeja, con «Escribirle por WhatsApp» (tablero 4b del pulido).
@@ -520,7 +521,7 @@ async function waitingCases(
       quote: replies(row) && row.sourceMessageId ? (quotes.get(row.sourceMessageId) ?? null) : null,
     }))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  const total = onlyMine || scope.onlyPayments || rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
+  const total = scope.onlyMine || scope.onlyPayments || rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
   return { items, total }
 }
 

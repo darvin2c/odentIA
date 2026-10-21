@@ -50,13 +50,15 @@ export type WebchatConnectionConfig = {
   greeting?: string
   /** Aviso opcional al sitio: POST firmado al responder el equipo o Sofi. */
   notifyUrl?: string
-  /**
-   * La clave anterior tras «Generar un código nuevo», con cuándo se cambió:
-   * los visitantes que ya estaban siguen en su conversación 30 días.
-   */
-  previousSecret?: string
-  rotatedAt?: string
 }
+/** Cómo se llama en la Bandeja quien escribe sin decir su nombre. No es un nombre: nunca se le saluda así. */
+export const WEBCHAT_PLACEHOLDER_NAMES = { visitor: "Visitante del chat web", test: "Prueba del chat web" } as const
+
+export function isWebchatPlaceholderName(name: string | null | undefined): boolean {
+  const trimmed = name?.trim()
+  return trimmed === WEBCHAT_PLACEHOLDER_NAMES.visitor || trimmed === WEBCHAT_PLACEHOLDER_NAMES.test
+}
+
 /** Sesión de visitante: el chat la recuerda en su navegador 30 días (fase 6 del pulido). */
 export const WEBCHAT_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -102,12 +104,6 @@ export function assertValidWebchatConfig(config: Record<string, unknown>): Webch
   const out: WebchatConnectionConfig = {}
   const color = pickString(config, "widgetColor")
   const greeting = pickString(config, "greeting")
-  const previousSecret = pickString(config, "previousSecret")
-  const rotatedAt = pickString(config, "rotatedAt")
-  if (previousSecret !== null && rotatedAt !== null) {
-    out.previousSecret = previousSecret
-    out.rotatedAt = rotatedAt
-  }
   if (color !== null) {
     if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error("Elige un color de la lista")
     out.widgetColor = color
@@ -120,39 +116,25 @@ export function assertValidWebchatConfig(config: Record<string, unknown>): Webch
   return out
 }
 
-/** Token de sesión: `v1.<sessionId>.<exp>.<hmac>` (clave = webhookSecret). */
+/**
+ * Token de sesión: `v1.<sessionId>.<exp>.<hmac>`. La clave de las sesiones
+ * no es el código de los avisos (`webhookSecret`), que conoce quien hace la
+ * web: con él podría fabricar la sesión de un visitante y leer su
+ * conversación. La deriva el servidor y nunca se muestra.
+ */
 export function createWebchatToken(
-  webhookSecret: string,
+  sessionKey: string,
   sessionId: string,
   ttlMs: number = WEBCHAT_TOKEN_TTL_MS,
 ): string {
   const exp = String(Date.now() + ttlMs)
-  const sig = createHmac("sha256", webhookSecret).update(`${sessionId}.${exp}`, "utf8").digest("hex")
+  const sig = createHmac("sha256", sessionKey).update(`${sessionId}.${exp}`, "utf8").digest("hex")
   return `v1.${sessionId}.${exp}.${sig}`
-}
-
-/**
- * La sesión de un token con la clave vigente o, hasta 30 días después de
- * «Generar un código nuevo», con la anterior (`renew`: la ruta le entrega uno
- * nuevo). Así nadie pierde su conversación por cambiar el código.
- */
-export function readWebchatToken(
-  config: Pick<WebchatConnectionConfig, "previousSecret" | "rotatedAt">,
-  webhookSecret: string,
-  token: string,
-  now: number = Date.now(),
-): { sessionId: string; expiresAt: number; renew: boolean } | null {
-  const current = verifyWebchatToken(webhookSecret, token)
-  if (current) return { ...current, renew: false }
-  if (!config.previousSecret || !config.rotatedAt) return null
-  if (now - Date.parse(config.rotatedAt) > WEBCHAT_TOKEN_TTL_MS) return null
-  const previous = verifyWebchatToken(config.previousSecret, token)
-  return previous ? { ...previous, renew: true } : null
 }
 
 /** Verifica alcance (formato + firma + expiración). Null = inválido. */
 export function verifyWebchatToken(
-  webhookSecret: string,
+  sessionKey: string,
   token: string,
 ): { sessionId: string; expiresAt: number } | null {
   const parts = token.split(".")
@@ -160,7 +142,7 @@ export function verifyWebchatToken(
   const sessionId = parts[1]
   const exp = Number(parts[2])
   if (!isWebchatSessionId(sessionId) || !Number.isInteger(exp) || exp <= Date.now()) return null
-  const expected = createHmac("sha256", webhookSecret)
+  const expected = createHmac("sha256", sessionKey)
     .update(`${sessionId}.${parts[2]}`, "utf8")
     .digest("hex")
   if (expected.length !== parts[3].length) return null
@@ -211,8 +193,8 @@ export function buildWebchatInbound(sessionId: string, payload: WebchatVisitorPa
     senderDisplayName: payload.displayName?.trim()
       ? payload.displayName.trim().slice(0, 80)
       : isWebchatTestSession(sessionId)
-        ? "Prueba del chat web"
-        : "Visitante del chat web",
+        ? WEBCHAT_PLACEHOLDER_NAMES.test
+        : WEBCHAT_PLACEHOLDER_NAMES.visitor,
     content: { type: "text", text },
     sentAt,
     ...(isWebchatTestSession(sessionId) ? { test: true } : {}),
@@ -270,7 +252,8 @@ export const webChatAdapter: ChannelAdapter = {
     if (!body || typeof body !== "object") return empty
     const record = body as Record<string, unknown>
     const sessionId = record["sessionId"]
-    if (typeof sessionId !== "string" || !isWebchatSessionId(sessionId)) return empty
+    // Una prueba solo nace en Configuración, con su sesión: nunca por un aviso.
+    if (typeof sessionId !== "string" || !isWebchatSessionId(sessionId) || isWebchatTestSession(sessionId)) return empty
     const wire: unknown[] = Array.isArray(record["messages"])
       ? (record["messages"] as unknown[])
       : record["message"] !== undefined

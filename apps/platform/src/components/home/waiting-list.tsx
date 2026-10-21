@@ -258,6 +258,9 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
   const key = waitingKey(row)
   const busy = handlers.busyKey === key
   const busyId = busy ? (handlers.busyAction ?? actions[0]?.id) : null
+  // Quien no abre el resumen del caso (caja) y ya no puede responder desde aquí
+  // (Instagram o Messenger cerrados): la fila lo dice, sin un botón que no lleva a nada.
+  const stuck = row.kind === "case" && !row.canReply && handlers.noCaseBrief === true
   const content = (
     <>
       {iconOf(row)}
@@ -276,14 +279,18 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
       {actions.length > 0 || replying ? (
         <span className="sr-only">{waitingOpenText(row, context)}</span>
       ) : (
-        <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
+        <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">
+          {stuck ? "Lo responde recepción en la Bandeja" : text.action}
+        </span>
       )}
     </>
   )
   const link = linkOf(row, context, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
     <li className={cn("flex flex-wrap items-center gap-2", className)}>
-      {link ?? (
+      {link ?? (stuck ? (
+        <div className={cn(ROW, "cursor-default hover:bg-transparent")}>{content}</div>
+      ) : (
         <Button
           type="button"
           variant="ghost"
@@ -292,7 +299,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         >
           {content}
         </Button>
-      )}
+      ))}
       {actions.length > 0 ? (
         <span className="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center">
           {actions.map((action) => (

@@ -4,6 +4,7 @@ import {
   CONVERSATION_VIEWS,
   type ConversationView,
   conversationViewSql,
+  handoffOpenExistsSql,
   personKeySql,
   VIEW_URGENCY,
 } from "./conversation-state.js"
@@ -53,6 +54,7 @@ function filteredCtes(orgId: string, filters: ConversationFilters): SQL {
   const parts = VIEW_URGENCY.map(
     (view, index) => sql`
     select b.id, ${personKeySql(base)} as person_key, ${sql.raw(String(index))} as rank,
+      ${view === "attend" ? handoffOpenExistsSql(base) : sql`false`} as topic,
       coalesce(b.last_message_at, b.created_at) as at, b.unread_count as unread, b.channel
     from b where ${conversationViewSql(base, view)}`,
   )
@@ -93,10 +95,11 @@ export async function listPersonRows(
   if (cursor) {
     const decoded = conversationCursor(cursor)
     const ts = sql`${decoded.ts}::timestamptz`
-    conditions.push(sql`(g.at < ${ts} or (g.at = ${ts} and l.id < ${decoded.id}::uuid))`)
+    conditions.push(sql`(g.at < ${ts} or (g.at = ${ts} and l.person_key < ${decoded.id}::uuid))`)
   }
   const found = await tx.execute<{
     id: string
+    person_key: string
     channel: string
     unread: number
     channels: string[]
@@ -105,19 +108,21 @@ export async function listPersonRows(
   }>(sql`
     with ${filteredCtes(orgId, filters)},
     l as (
+      -- La más urgente; en «Por atender», primero la que tiene el tema: es la que hay que responder.
       select distinct on (person_key) person_key, id, rank, channel
-      from f order by person_key, rank, at desc, id desc
+      from f order by person_key, rank, topic desc, at desc, id desc
     ),
     g as (
       select person_key, max(at) as at, sum(unread)::int as unread,
         array_agg(distinct channel) as channels, array_agg(id) as ids
       from f group by person_key
     )
-    select l.id, l.channel, g.unread, g.channels, g.ids,
+    select l.id, l.person_key, l.channel, g.unread, g.channels, g.ids,
       to_char(g.at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
     from l join g on g.person_key = l.person_key
     ${conditions.length > 0 ? sql`where ${and(...conditions)}` : sql``}
-    order by g.at desc, l.id desc
+    -- La persona es la fila: el cursor sigue a la persona, aunque cambie la conversación que la muestra.
+    order by g.at desc, l.person_key desc
     limit ${limit + 1}`)
   const page = found.slice(0, limit)
   const rows = page.map((row) => ({
@@ -128,7 +133,10 @@ export async function listPersonRows(
     lastAt: row.at,
   }))
   const last = page[page.length - 1]
-  return { rows, nextCursor: found.length > limit && last ? encodeCursor(last.at, last.id) : null }
+  return {
+    rows,
+    nextCursor: found.length > limit && last ? encodeCursor(last.at, last.person_key) : null,
+  }
 }
 
 /** Cuántas personas hay en cada vista con los filtros dados (sin el estado: cada vista lo dice). */

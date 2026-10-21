@@ -1346,6 +1346,19 @@ export interface TickSummary {
   temasRetomados: number
 }
 
+/**
+ * Un paso del ciclo que no detiene a los demás: si falla en una clínica, se
+ * registra y el ciclo sigue con lo suyo y con las demás clínicas.
+ */
+async function apart<T>(orgId: string, what: string, fallback: T, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    console.warn(`[ciclo] ${what} de ${orgId}: ${error instanceof Error ? error.message : String(error)}`)
+    return fallback
+  }
+}
+
 /** Las líneas que escriben a la persona, cada una con quien anota sus casos. */
 const AGENT_SYNCS: Array<[AdminLineKey, (tx: Db, orgId: string, now: Date) => Promise<{ programados: number }>]> = [
   ["recordatorio_cita", syncAppointmentReminders],
@@ -1387,17 +1400,21 @@ export async function tickAutomations(
     summary.insistidas += care.nudged
     summary.cerradas += care.closed
     // «Sofi se ofrece» (decisión 5 del pulido de la Bandeja): es de Recepción, como insistir y cerrar.
-    summary.temasRetomados += await withOrgContext(appDb, orgId, (tx) =>
-      retakeForgottenTopics(tx, orgId, now, { secretsKey: deps.secretsKey, ...(deps.format ? { format: deps.format } : {}) }),
+    summary.temasRetomados += await apart(orgId, "temas retomados", 0, () =>
+      withOrgContext(appDb, orgId, (tx) =>
+        retakeForgottenTopics(tx, orgId, now, { secretsKey: deps.secretsKey, ...(deps.format ? { format: deps.format } : {}) }),
+      ),
     )
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
     summary.tareasCerradas += await withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now))
     // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
-    await withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now))
+    await apart(orgId, "pruebas del chat web", 0, () => withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now)))
     // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver
     // respuesta» sale cuando Meta lo aprueba, dentro del «Horario para escribir».
-    summary.respuestasOfrecidas += await withOrgContext(appDb, orgId, (tx) => offerPendingHeldReplies(tx, orgId, now))
+    summary.respuestasOfrecidas += await apart(orgId, "«Ver respuesta»", 0, () =>
+      withOrgContext(appDb, orgId, (tx) => offerPendingHeldReplies(tx, orgId, now)),
+    )
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {

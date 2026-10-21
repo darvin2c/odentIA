@@ -101,6 +101,14 @@ export async function issuePersonalLink(
   deps: { secretsKey: Buffer },
 ): Promise<IssuedPersonalLink> {
   const patientId = input.patientId ?? null
+  if (input.conversationId) {
+    const [conv] = await tx
+      .select({ isTest: conversation.isTest })
+      .from(conversation)
+      .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
+      .limit(1)
+    if (conv?.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba del chat web: no se envían enlaces ni se reserva o registra a nadie de verdad.")
+  }
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`su-enlace:${orgId}:${input.contactId}:${patientId ?? ""}`}))`,
   )
@@ -181,11 +189,13 @@ export async function createBookingLink(
   deps: { secretsKey: Buffer },
 ): Promise<{ token: string; expiresAt: Date; patientName: string | null; needsRegistration: boolean }> {
   const [conv] = await tx
-    .select({ contactId: conversation.contactId })
+    .select({ contactId: conversation.contactId, isTest: conversation.isTest })
     .from(conversation)
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
+  // Una prueba del chat web no reserva ni crea a nadie (fase 6 del pulido).
+  if (conv.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba del chat web: no se envían enlaces ni se reserva o registra a nadie de verdad.")
   const linked = (await listPatientsByContact(tx, orgId, conv.contactId)).filter((item) => item.isActive)
   // Quien recién se contacta aún no tiene ficha: la crea él mismo en la página,
   // con el registro de pacientes de la clínica. Sin ese registro activo no hay

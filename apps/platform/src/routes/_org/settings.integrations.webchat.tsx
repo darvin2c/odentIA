@@ -211,7 +211,7 @@ function WebchatSettingsPage() {
                             </Button>
                           ) : null}
                         </span>
-                      ) : canWrite && item.status === "permitido" && !item.first ? (
+                      ) : canWrite && item.status === "permitido" ? (
                         <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-8" disabled={site.isPending} onClick={() => site.mutate({ id: item.id, allow: false })}>
                           Bloquear
                         </Button>
@@ -308,6 +308,7 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
   const reveal = useMutation({
     mutationFn: () => apiFetch<{ data: { code: string } }>("/api/channels/webchat/code"),
     onSuccess: (data) => setCode(data.data.code),
+    onError: (cause) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo mostrar el código."),
   })
   const rotate = useMutation({
     mutationFn: () => apiFetch<{ data: ClinicWebchat }>("/api/channels/webchat/rotate", { method: "POST", body: "{}" }),
@@ -317,6 +318,7 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
       setCode(null)
       toast.success("Código nuevo. Quien ya conversaba sigue en su conversación.")
     },
+    onError: (cause) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo generar el código nuevo."),
   })
   return (
     <Collapsible>
@@ -400,6 +402,7 @@ function Preview({ chatId }: { chatId: string }) {
       setSession(null)
       open.mutate()
     },
+    onError: () => toast.error("No se pudo borrar la prueba. Vuelve a intentarlo."),
   })
   // biome-ignore lint/correctness/useExhaustiveDependencies: una sesión de prueba por chat, al abrir la página.
   useEffect(() => {
@@ -424,6 +427,13 @@ function Preview({ chatId }: { chatId: string }) {
       <div className={`mx-auto w-full overflow-hidden rounded-2xl border shadow-sm ${size === "celular" ? "max-w-[360px]" : "max-w-[400px]"}`} style={{ height: size === "celular" ? 640 : 600 }}>
         {session ? (
           <iframe key={session.sessionId} title="Vista previa del chat" className="size-full border-0" src={`/embed?prueba=1#t=${encodeURIComponent(session.token)}`} />
+        ) : open.isError ? (
+          <div className="flex size-full flex-col items-center justify-center gap-2 p-4 text-center text-sm">
+            <p role="alert">No se pudo abrir la prueba del chat.</p>
+            <Button variant="outline" size="sm" onClick={() => open.mutate()}>
+              Reintentar
+            </Button>
+          </div>
         ) : (
           <div className="size-full animate-pulse bg-muted" />
         )}

@@ -94,9 +94,10 @@ function IntegrationsPage() {
     enabled: canRead,
     retry: 1,
   })
+  // Solo lo mira: el chat se crea al abrir su pantalla, no al pasar por la lista.
   const webchatQuery = useQuery({
-    queryKey: ["clinic-webchat", org.slug],
-    queryFn: () => apiFetch<{ data: WebchatSummary }>("/api/channels/webchat"),
+    queryKey: ["clinic-webchat", org.slug, "peek"],
+    queryFn: () => apiFetch<{ data: WebchatSummary | null }>("/api/channels/webchat?peek=1"),
     enabled: canRead,
     retry: 1,
   })

@@ -30,6 +30,9 @@ export interface WebhookDeps {
   metaApp?: { appSecret: string; verifyToken: string } | undefined
 }
 
+// El chat web no entra por aquí: sus mensajes llegan por `/api/webchat` con la
+// sesión del visitante. Su código firma los avisos que salen al sitio y lo
+// conoce quien hace la web: no puede servir para escribir como un visitante.
 const providerParam = z.enum([
   "whatsapp_cloud_api",
   "telegram_bot_api",
@@ -37,7 +40,6 @@ const providerParam = z.enum([
   "instagram",
   "gmail",
   "microsoft365",
-  "web_chat",
 ])
 
 /** La conexión a la que pertenece un aviso: lo justo para repartirlo. */

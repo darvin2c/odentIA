@@ -17,6 +17,7 @@ import { lateReplyOf } from "./held-replies.js"
 import { findOrgLocale } from "./locale.js"
 import { insideAgentHours } from "./opportune-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
+import { webchatReplyRoutes } from "./webchat-reply.js"
 
 /**
  * Bandeja: una fila por persona (fase 4 del pulido, `inbox-person.ts`) con lo
@@ -147,12 +148,12 @@ async function conversationAttention(
     closed_at: Date | string | null
     closed_by_name: string | null
     team_live: boolean
-    no_way: boolean
+    webchat_contact: string | null
   }>(sql`
     select c.id, ${agentAttendingSql(c)} as agent_attending, ${unansweredSql(c)} as unanswered, ${teamLiveSql(c)} as team_live,
       ${awaitingPatientSinceSql(c)} as awaiting_since, c.nudged_at,
       ua.name as assigned_name, c.close_reason, c.closed_at, uc.name as closed_by_name,
-      (cn.provider = 'web_chat' and p.phone is null and p.email is null) as no_way
+      (case when cn.provider = 'web_chat' and not c.is_test then c.contact_id end) as webchat_contact
     from conversation c
     join channel_connection cn on cn.id = c.channel_connection_id
     join contact p on p.id = c.contact_id
@@ -176,7 +177,7 @@ async function conversationAttention(
       assignedName: row.assigned_name,
       teamLive: row.team_live === true,
       topics: [],
-      unreachable: row.no_way === true,
+      unreachable: false,
     })
     closure.set(
       row.id,
@@ -251,8 +252,13 @@ async function conversationAttention(
   // El más urgente primero; entre iguales, el que más lleva esperando.
   for (const item of attention.values()) {
     item.topics.sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.createdAt.localeCompare(b.createdAt))
-    // Sin tema no hay a quién avisar todavía.
-    if (item.topics.length === 0) item.unreachable = false
+  }
+  // Chat web con un tema: «Sin forma de avisarle» si no hay por dónde, con la misma regla que el reenvío (R4).
+  for (const row of rows) {
+    const item = attention.get(row.id)
+    if (!item || !row.webchat_contact || item.topics.length === 0) continue
+    const routes = await webchatReplyRoutes(tx, orgId, row.webchat_contact)
+    item.unreachable = !routes.whatsapp && !routes.correo
   }
   return { attention, closure }
 }

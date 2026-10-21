@@ -2,12 +2,12 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
 import {
+  assertValidWebchatConfig,
   buildWebchatInbound,
   createWebchatToken,
   isWebchatSessionId,
   newWebchatSessionId,
   normalizeOrigin,
-  readWebchatToken,
   verifyWebchatToken,
   webChatAdapter,
 } from "./web-chat.js"
@@ -162,12 +162,6 @@ it("el token de sesión es válido, expira y tiene alcance de sesión", () => {
   expect(verifyWebchatToken("secreto-webhook", expired)).toBeNull()
 })
 
-it("tras «Generar un código nuevo» la sesión sigue 30 días con la clave anterior y se renueva", () => {
-  const token = createWebchatToken("clave-vieja", sessionId)
-  const rotated = { previousSecret: "clave-vieja", rotatedAt: new Date().toISOString() }
-  expect(readWebchatToken(rotated, "clave-nueva", token)).toMatchObject({ sessionId, renew: true })
-  expect(readWebchatToken({}, "clave-nueva", token)).toBeNull()
-  const old = { previousSecret: "clave-vieja", rotatedAt: new Date(Date.now() - 31 * 24 * 3_600_000).toISOString() }
-  expect(readWebchatToken(old, "clave-nueva", token)).toBeNull()
-  expect(readWebchatToken(rotated, "clave-vieja", token)).toMatchObject({ renew: false })
+it("la configuración ya no guarda claves anteriores: las sesiones no dependen del código de los avisos", () => {
+  expect(assertValidWebchatConfig({ previousSecret: "clave-vieja", rotatedAt: new Date().toISOString() })).toEqual({})
 })

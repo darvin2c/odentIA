@@ -7,11 +7,12 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
 import { handoffOpenSql } from "./handoff-state.js"
-import { offerHeldReplies, whatsappOf } from "./held-replies.js"
+import { type HeldOffer, offerHeldReplies, whatsappOf } from "./held-replies.js"
 import { clinicName } from "./automation-routing.js"
 import { claimWhatsAppNumber } from "./contacts.js"
 import { openEmailThread } from "./financial-documents.js"
 import { updateTask } from "./tasks.js"
+import { webchatReplyRoutes } from "./webchat-reply.js"
 import { topicUrgentAt } from "./topic-urgency.js"
 
 /**
@@ -108,17 +109,15 @@ async function forwardWebchatReply(
   if (!thread || thread.provider !== "web_chat" || thread.isTest || (!thread.phone && !thread.email)) return null
   return tx
     .transaction(async (inner): Promise<"whatsapp" | "correo" | null> => {
-      if (thread.phone) {
-        let whatsapp = await whatsappOf(inner, orgId, thread.contactId)
-        if (!whatsapp) {
-          // Lo dejó para que le respondan y quien responde lo usa: pasa a ser su
-          // WhatsApp, salvo que ya sea de otra persona (ADR 0027).
-          const claimed = await claimWhatsAppNumber(inner, orgId, input.userId, thread.contactId, thread.phone).catch((error: unknown) => {
-            if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") return null
-            throw error
-          })
-          if (claimed) whatsapp = await whatsappOf(inner, orgId, thread.contactId)
+      // Por dónde, con la misma regla que «Sin forma de avisarle» (`webchatReplyRoutes`).
+      const routes = await webchatReplyRoutes(inner, orgId, thread.contactId)
+      if (routes.whatsapp) {
+        if (routes.whatsapp.claim) {
+          // Lo dejó para que le respondan y quien responde lo usa, como «Escribirle»
+          // con el número de su ficha (ADR 0027): nadie más tiene ese número.
+          await claimWhatsAppNumber(inner, orgId, input.userId, thread.contactId, routes.whatsapp.phone)
         }
+        const whatsapp = await whatsappOf(inner, orgId, thread.contactId)
         if (whatsapp) {
           const started = await startContactConversation(inner, orgId, input.userId, thread.contactId, whatsapp)
           const sent = await sendOutbound(inner, orgId, {
@@ -128,18 +127,15 @@ async function forwardWebchatReply(
             content: { type: "text", text: input.text },
             holdIfClosed: true,
           })
-          if (sent.held) await offerInSavepoint(inner, orgId, started.id)
-          return "whatsapp"
+          if (!sent.held) return "whatsapp"
+          const offer = await offerInSavepoint(inner, orgId, started.id)
+          // Si «Ver respuesta» no salió (Meta aún no lo aprueba, por ejemplo) y dejó un correo, también va por ahí.
+          if (offer === "enviado" || offer === "ya_ofrecido" || !routes.correo) return "whatsapp"
         }
       }
-      if (thread.email) {
-        const [mailbox] = await inner
-          .select({ id: channelConnection.id })
-          .from(channelConnection)
-          .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.channel, "email"), eq(channelConnection.status, "active")))
-          .limit(1)
-        if (!mailbox) return null
-        const mail = await openEmailThread(inner, orgId, input.userId, { contactId: thread.contactId, email: thread.email }, mailbox)
+      if (routes.correo) {
+        const mailbox = { id: routes.correo.mailboxId }
+        const mail = await openEmailThread(inner, orgId, input.userId, { contactId: thread.contactId, email: routes.correo.email }, mailbox)
         await sendOutbound(inner, orgId, {
           conversationId: mail.id,
           senderKind: "user",
@@ -161,11 +157,12 @@ async function forwardWebchatReply(
  * recategorizó, por ejemplo), la respuesta queda guardada igual y el ciclo lo
  * vuelve a intentar.
  */
-async function offerInSavepoint(tx: Db, orgId: string, conversationId: string): Promise<void> {
-  await tx
+async function offerInSavepoint(tx: Db, orgId: string, conversationId: string): Promise<HeldOffer | null> {
+  return tx
     .transaction((inner) => offerHeldReplies(inner, orgId, conversationId))
     .catch((error: unknown) => {
       if (!(error instanceof ServiceError)) throw error
+      return null
     })
 }
 

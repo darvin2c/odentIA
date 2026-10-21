@@ -39,8 +39,10 @@ const allowFrameAncestors = createIsomorphicFn()
   .client(async (_slug: string | null) => {})
 
 export const Route = createFileRoute("/embed/")({
-  validateSearch: (search: Record<string, unknown>): { site?: string; prueba?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { site?: string; ticket?: string; prueba?: string } => ({
     ...(typeof search.site === "string" ? { site: search.site } : {}),
+    // El sitio firmado por la API cuando cargó `chat.js`: lo pide abrir la sesión.
+    ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),
     ...(search.prueba === "1" || search.prueba === 1 ? { prueba: "1" } : {}),
   }),
   head: () => ({
@@ -80,7 +82,6 @@ interface Poll {
   typing: boolean
   askContact: boolean
   contact: { whatsapp: string | null; email: string | null } | null
-  token?: string
 }
 
 class ChatError extends Error {
@@ -140,7 +141,7 @@ const clock = (iso: string) =>
   new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(iso))
 
 function WebchatWindow() {
-  const { site, prueba } = Route.useSearch()
+  const { site, ticket, prueba } = Route.useSearch()
   const test = prueba === "1"
   const slug = orgSlugFromHostname(requestHostname())
   const [appearance, setAppearance] = useState<Appearance | null>(null)
@@ -172,10 +173,6 @@ function WebchatWindow() {
     if (!slug || !token) return
     try {
       const data = await call<Poll>(`/api/webchat/${slug}/messages`, {}, token)
-      if (data.token) {
-        setToken(data.token)
-        if (!test) storeToken(slug, data.token)
-      }
       setPoll(data)
       setPending((items) => items.filter((item) => !data.messages.some((m) => m.key === item.key)))
     } catch (cause) {
@@ -240,7 +237,7 @@ function WebchatWindow() {
         // La sesión nace con el primer mensaje: mirar el sitio no crea conversaciones.
         const opened = await call<{ token: string }>(`/api/webchat/${slug}/session`, {
           method: "POST",
-          body: JSON.stringify({ site: site ?? "" }),
+          body: JSON.stringify({ site: site ?? "", ticket: ticket ?? "" }),
         })
         session = opened.token
         storeToken(slug, session)
