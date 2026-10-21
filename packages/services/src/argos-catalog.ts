@@ -94,9 +94,9 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "pacientes",
     about:
-      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion. «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion hace más de 6 meses, sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion <= current_date − N, sin más condiciones.",
+      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion. «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '6 months' (más de 6 meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.",
     columns:
-      "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en",
+      "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en, ultima_atencion_en (timestamptz: la hora de su última cita atendida)",
     keys: ALL,
   },
   {
@@ -157,14 +157,14 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "inventario",
     about: "Un producto activo por sede, a hoy. Sin costos.",
     columns:
-      "producto, unidad, sede, hay (negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida",
+      "producto, unidad, sede, hay (negativo si se usó sin haber), minimo, estado ('ok'|'hace_falta': bajo el mínimo|'no_hay'|'faltante': se usó sin haber), hay_que_reponer (bool), cantidad_por_vencer (en 30 días), vence_primero (date), cantidad_vencida, insumo (bool: se usa en las atenciones), se_vende (bool)",
     keys: ["gestion", "recepcion"],
   },
   {
     name: "movimientos_inventario",
     about: "Lo que entró y salió del inventario. El consumo se registra por atención, no por procedimiento.",
     columns:
-      "fecha (timestamptz), dia, tipo ('consumo': usado en una atención|'venta'|'ingreso': compra recibida|'ajuste'|'traslado'|'devolucion'|'cobertura'), producto, unidad, cantidad (negativa si salió), sede, profesional (en el consumo, quien atendió), paciente",
+      "fecha (timestamptz), dia, tipo ('consumo': usado en una atención|'venta'|'ingreso': compra recibida|'ajuste'|'traslado'|'devolucion'|'cobertura'), producto, unidad, cantidad (negativa si salió), sede, profesional (en el consumo, quien atendió), paciente, insumo (bool: se usa en las atenciones), se_vende (bool)",
     keys: ["gestion", "recepcion"],
   },
   {
@@ -220,6 +220,8 @@ export const ARGOS_FIGURE_RULES: readonly string[] = [
   "Lo cobrado por especialidad (qué especialidad genera más ingresos) = sum(pagos_por_venta.importe) con pagos_por_venta.tipo 'tratamiento', por pagos_por_venta.especialidad (null es «Sin especialidad»); los productos no son de una especialidad: si los dices, aparte. Lo cargado por especialidad, con ventas.especialidad.",
   "Pacientes que perdemos (dejan de venir) cada mes = los «Sin venir» de hoy (pacientes), por el mes en que cumplieron 6 meses sin venir (date_trunc('month', pacientes.ultima_atencion + interval '6 months'), entre :dia_desde y :dia_hasta; sin periodo en la pregunta, ultimos_6_meses), por mes y su promedio por mes. Es la regla de «Sin venir» de Reportes repartida por mes: dilo así.",
   "Te deben = sum(deudas.saldo); vencido = la misma suma con vencida. deudas es solo a hoy: la deuda de meses pasados no está en las vistas.",
+  "Insumos = productos con insumo (se usan en las atenciones); los productos a la venta, con se_vende. Un producto puede ser las dos cosas: en una pregunta de insumos van solo los insumo, y en una de productos que se venden, solo los se_vende.",
+  "Lo aceptado que no tiene cita = de «Lo que viene», lo de los paciente_id sin pacientes.proxima_cita (null): cuánto y cuántos pacientes, como Reportes.",
   "Lo que viene (lo aceptado que falta hacer, el valor de los tratamientos pendientes) = sum(lineas_presupuesto.importe) con decision 'aceptado', estado_presupuesto 'aceptado' o 'parcial' y estado_tratamiento null o distinto de 'realizado' y 'cancelado'.",
   "Pacientes nuevos del periodo = pacientes con pacientes.primera_atencion en el periodo. Pacientes atendidos = paciente_id distintos de citas.estado 'atendida' del periodo: nuevos los de primera_atencion en el periodo y el resto recurrentes.",
   "Volvieron (retención, periodo a_hoy) = de los paciente_id con una cita atendida hace 12 a 24 meses, cuántos tuvieron otra atendida en los últimos 12 (citas.paciente_id). Volvió tras más de N meses (llevaba N meses sin venir) = una cita atendida en el periodo cuya cita atendida inmediatamente anterior, la última antes de esa, fue hace más de N meses; tener alguna cita vieja no basta.",

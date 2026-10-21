@@ -393,6 +393,13 @@
       "when": 1792543670780,
       "tag": "0055_argos_especialidad",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1792543670781,
+      "tag": "0056_argos_insumos_y_ultima_atencion",
+      "breakpoints": true
     }
   ]
 }

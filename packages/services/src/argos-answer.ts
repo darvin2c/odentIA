@@ -157,6 +157,19 @@ export function isArgosHiddenColumn(name: string): boolean {
   return /(^|_)id$/.test(name) || /^total_general(_|$)/.test(name)
 }
 
+/**
+ * Las columnas que la frase ya dice con su hueco y valen lo mismo en todas las
+ * filas: son totales («la variación general», «lo cobrado del mes») que en
+ * cada fila de la lista o de la tabla solo estorban. Con una sola fila no hay
+ * lista que limpiar.
+ */
+export function argosRepeatedColumns(template: string, result: Pick<ArgosQueryResult, "columns" | "rows">): Set<string> {
+  if (result.rows.length < 2) return new Set()
+  const holes = new Set([...template.matchAll(HOLE)].map((match) => match[1] ?? ""))
+  const first = result.rows[0] ?? {}
+  return new Set(result.columns.filter((column) => holes.has(column.name) && result.rows.every((row) => row[column.name] === first[column.name])).map((column) => column.name))
+}
+
 /** «cobrado_dinero» → «Cobrado»: el nombre de una columna dicho para la pantalla. */
 export function argosColumnLabel(name: string): string {
   const text = name.replace(/_(dinero|pct|mes)$/, "").replace(/_/g, " ").trim()
@@ -221,7 +234,8 @@ export function fillArgosSentence(
     const column = byName.get(name)
     return column ? formatArgosValue(row[name] ?? null, column, zone) : "—"
   }
-  const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
+  const repeated = argosRepeatedColumns(template, result)
+  const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name))
   // El dinero y el porcentaje solos se entienden; dos de lo mismo en una fila llevan su nombre («cobrado: S/ 284,045.00, dejo: S/ 15,946.50»).
   const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? null
   const twice = (unit: string | null) => unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1

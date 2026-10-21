@@ -132,4 +132,22 @@ describe("la consulta con el periodo", () => {
     expect(fillArgosWords("Lo cobrado durante {periodo}.", resolve("hoy").words)).toBe("Lo cobrado hoy.")
     expect(fillArgosSentence("No hay facturas. {periodo} se cobró {cobrado_dinero}.", result, { ...ZONE, currency: "PEN" }, period.words).text).toMatch(/^No hay facturas\. Del 1 al 21/)
   })
+
+  it("un total que la frase ya dice no se repite en cada fila de la lista", () => {
+    const result = {
+      columns: [
+        { name: "concepto", kind: "text" as const },
+        { name: "cobrado_dinero", kind: "number" as const },
+        { name: "total_dinero", kind: "number" as const },
+        { name: "variacion_pct", kind: "number" as const },
+      ],
+      rows: [
+        { concepto: "Corona", cobrado_dinero: 9000, total_dinero: 34818, variacion_pct: -33 },
+        { concepto: "Obturación", cobrado_dinero: 4500, total_dinero: 34818, variacion_pct: -33 },
+      ],
+      truncated: false,
+    }
+    const filled = fillArgosSentence("Se cobró {total_dinero} ({variacion_pct}). Por concepto: {lista}.", result, { ...ZONE, currency: "PEN" })
+    expect(filled.text).toBe("Se cobró S/\u00a034,818.00 (-33 %). Por concepto: Corona (S/\u00a09,000.00); Obturación (S/\u00a04,500.00).")
+  })
 })

@@ -23,6 +23,7 @@ import {
   argosColumnLabel,
   argosGrainOf,
   argosPeriodView,
+  argosRepeatedColumns,
   argosUsesBranch,
   fillArgosWords,
   findArgosBranch,
@@ -397,9 +398,10 @@ export type ArgosAskResult =
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
   | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
 
-function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2]): ArgosTable {
-  // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre.
-  const shownColumns = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
+function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2], repeated: Set<string> = new Set()): ArgosTable {
+  // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre;
+  // un total que la frase ya dice tampoco se repite en cada fila.
+  const shownColumns = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name))
   const columns = shownColumns.map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
   const display = result.rows.map((row) => Object.fromEntries(shownColumns.map((column) => [column.name, formatArgosValue(row[column.name] ?? null, column, zone)])))
   return { columns, rows: result.rows, display, truncated: result.truncated }
@@ -699,7 +701,7 @@ async function runPlan(
 function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2], words: ArgosWords): ArgosShown {
   const empty = fillArgosWords(plan.frase_vacia, words)
   const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone, words) : { text: empty, parts: [{ text: empty }] }
-  return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone) }
+  return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone, result.rows.length ? argosRepeatedColumns(plan.frase, result) : new Set()) }
 }
 
 /** Lo que no existe (o existe a medias) puede venir sin consulta: se responde con la frase y lo más cercano. */
