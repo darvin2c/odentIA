@@ -2,16 +2,17 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
 import {
+  assertValidWebchatConfig,
+  buildWebchatInbound,
   createWebchatToken,
-  isOriginAllowed,
+  isWebchatSessionId,
+  newWebchatSessionId,
+  normalizeOrigin,
   verifyWebchatToken,
   webChatAdapter,
 } from "./web-chat.js"
 
-const config = {
-  allowedOrigins: ["https://tienda.example.test", "https://*.odentia.localhost"],
-  widgetTitle: "Clínica Sonrisa",
-}
+const config = { widgetColor: "#0f766e", greeting: "Hola, ¿en qué podemos ayudarte?" }
 
 function sig(rawBody: string): string {
   return `sha256=${createHmac("sha256", "secreto-webhook").update(rawBody, "utf8").digest("hex")}`
@@ -51,6 +52,7 @@ const fx: ContractFixtures = {
             externalMessageId: `webchat:11111111-1111-4111-8111-111111111111:cli-1`,
             externalThreadId: sessionId,
             senderExternalId: sessionId,
+            senderDisplayName: "Visitante del chat web",
             content: { type: "text", text: "Hola, ¿tienen citas?" },
             sentAt: "2026-09-28T10:00:00.000Z",
           },
@@ -123,12 +125,31 @@ it("rechaza destinos sin sesión válida antes de fingir entrega", async () => {
   ).rejects.toThrow(/sesión válida/)
 })
 
-it("valida orígenes exactos y comodín local", () => {
-  expect(isOriginAllowed(config, "https://tienda.example.test")).toBe(true)
-  expect(isOriginAllowed(config, "https://tienda.example.test/")).toBe(true)
-  expect(isOriginAllowed(config, "https://smile.odentia.localhost")).toBe(true)
-  expect(isOriginAllowed(config, "https://evil.test")).toBe(false)
-  expect(isOriginAllowed(config, "https://tienda.example.test.evil.test")).toBe(false)
+it("el sitio se guarda como lo dice el navegador; en claro solo en local", () => {
+  expect(normalizeOrigin("https://Sonrisa.pe/")).toBe("https://sonrisa.pe")
+  expect(normalizeOrigin("https://sonrisa.pe:8443/contacto")).toBe("https://sonrisa.pe:8443")
+  expect(normalizeOrigin("http://localhost:3000")).toBe("http://localhost:3000")
+  expect(normalizeOrigin("http://sonrisa.pe")).toBeNull()
+  expect(normalizeOrigin("javascript:alert(1)")).toBeNull()
+  expect(normalizeOrigin("no es una dirección")).toBeNull()
+})
+
+it("el aviso al sitio va firmado con la clave de la conexión; una prueba no avisa", async () => {
+  const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = []
+  const fetchStub = (async (url: string, init: RequestInit) => {
+    calls.push({ url, headers: init.headers as Record<string, string>, body: String(init.body) })
+    return new Response("{}", { status: 200 })
+  }) as unknown as typeof fetch
+  const withPush = { ...config, notifyUrl: "https://tienda.example.test/webchat/eventos" }
+  await webChatAdapter.sendMessage(withPush, { to: sessionId, kind: { type: "text", text: "Hola" } }, { fetch: fetchStub, webhookSecret: "secreto-webhook" })
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.headers["x-webchat-signature"]).toBe(sig(calls[0]!.body))
+  const test = newWebchatSessionId({ test: true })
+  expect(isWebchatSessionId(test)).toBe(true)
+  expect(buildWebchatInbound(test, { clientMessageId: "c1", text: "hola" })).toMatchObject({ test: true, externalThreadId: test })
+  const got = await webChatAdapter.sendMessage(withPush, { to: test, kind: { type: "text", text: "Hola" } }, { fetch: fetchStub, webhookSecret: "secreto-webhook" })
+  expect(got.externalId.startsWith("webchat:local:")).toBe(true)
+  expect(calls).toHaveLength(1)
 })
 
 it("el token de sesión es válido, expira y tiene alcance de sesión", () => {
@@ -139,4 +160,8 @@ it("el token de sesión es válido, expira y tiene alcance de sesión", () => {
   expect(verifyWebchatToken("secreto-webhook", "v1.malo.999.abc")).toBeNull()
   const expired = createWebchatToken("secreto-webhook", sessionId, -1000)
   expect(verifyWebchatToken("secreto-webhook", expired)).toBeNull()
+})
+
+it("la configuración ya no guarda claves anteriores: las sesiones no dependen del código de los avisos", () => {
+  expect(assertValidWebchatConfig({ previousSecret: "clave-vieja", rotatedAt: new Date().toISOString() })).toEqual({})
 })

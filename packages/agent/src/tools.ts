@@ -32,6 +32,7 @@ import {
   closeConversationWith,
   closurePendingReason,
   createHandoff,
+  topicKindOf,
   recordTopicAskedAgain,
   createProposal,
   createTask,
@@ -75,6 +76,7 @@ import {
   searchPublishedKnowledge,
   ServiceError,
   updateContact,
+  webchatHandoffWhere,
 } from "@odentia/services"
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
@@ -382,7 +384,14 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
     const result: unknown = await notify?.invoke({
       reason: "Aviso al interlocutor",
       summary: "Aviso al interlocutor",
-      message: handoffFallbackNotice(treatment ?? null),
+      message: await (async () => {
+        const channel = await conversationChannel(ctx)
+        const where =
+          channel === "webchat"
+            ? await withOrgContext(ctx.db, ctx.orgId, (tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "preguntar" as const)
+            : undefined
+        return handoffFallbackNotice(treatment ?? null, channel, where)
+      })(),
     })
     outcome = typeof result === "string" ? result : ""
   } catch (error) {
@@ -1223,6 +1232,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const data = link.needsRegistration ? " Como aún no es paciente, la página le pedirá sus datos antes de reservar: díselo." : ""
         return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje, y ofrece también seguir por aquí si lo prefiere.${data} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
+        if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
+          return "Es una prueba del chat web: no se envía el enlace. Dile que en la prueba no se reserva nada y ofrece seguir por aquí."
+        }
         if (error instanceof ServiceError && error.code === "BOOKING_NEEDS_PATIENT") {
           return "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea: no puede reservar desde un enlace. Sigue por aquí o pasa el caso a una persona para completar sus datos."
         }
@@ -1900,7 +1912,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean }) => {
+    async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
@@ -1941,6 +1953,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           pending,
           sourceMessageId: ctx.triggerId,
           clinical: clinical === true,
+          kind: topicKindOf(kind),
         }),
       )
       ctx.handedOff = true

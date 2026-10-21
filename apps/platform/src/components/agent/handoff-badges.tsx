@@ -20,8 +20,12 @@ const URGENCY = {
 /** La palabra del nivel, para donde no cabe la insignia (una fila de la Bandeja). */
 export const urgencyLabel = urgencyWord
 
-export function HandoffUrgency({ priority }: { priority: string }) {
-  const urgency = URGENCY[priority as keyof typeof URGENCY] ?? URGENCY.media
+/**
+ * `urgent`: el servidor ya dice si es «Ahora» (alta, o dos horas de clínica
+ * abierta esperando; decisión 1 del pulido de la Bandeja). Sin él, la prioridad.
+ */
+export function HandoffUrgency({ priority, urgent }: { priority: string; urgent?: boolean }) {
+  const urgency = urgent ? URGENCY.alta : (URGENCY[priority as keyof typeof URGENCY] ?? URGENCY.media)
   return (
     <Badge variant={urgency.variant} className="gap-1 font-semibold">
       <urgency.Icon className="size-3.5" aria-hidden />
@@ -86,7 +90,7 @@ export function HandoffNotice({
   return (
     <div className="flex min-w-0 flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <HandoffUrgency priority={handoff.priority} />
+        <HandoffUrgency priority={handoff.priority} urgent={handoff.urgent} />
         {/* El motivo se parte en líneas en vez de cortarse en la columna angosta. */}
         <Badge variant="secondary" className="h-auto max-w-full whitespace-normal text-left">
           {reason}

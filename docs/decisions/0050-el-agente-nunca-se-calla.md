@@ -1,6 +1,6 @@
 # 0050 · El agente nunca se calla: lo derivado es un tema, no la conversación
 
-Fecha: 2026-10-18 · Estado: aceptada · Modifica a [0024](0024-ninguna-conversacion-queda-abierta.md) en «Lo que tiene una persona» · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md)
+Fecha: 2026-10-18, precisada el 2026-10-20 · Estado: aceptada · Modifica a [0024](0024-ninguna-conversacion-queda-abierta.md) en «Lo que tiene una persona» · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md)
 
 ## Problema
 
@@ -15,7 +15,17 @@ Derivar a una persona apagaba al agente en toda la conversación (`agent_status 
 - **Una sola regla de estado**, en `conversation-state.ts`, con cuatro vistas que no se superponen: «Por atender» (un tema abierto, o un mensaje sin responder que el agente no atiende), «Las atiende el agente», «Esperan al paciente» y «Cerradas».
 - `agent_status` queda solo como el interruptor manual del agente en una conversación.
 
+### Precisado por el pulido de la Bandeja (2026-10-20, issues 94, 96 y 111)
+
+- **«Ahora» cuenta horas de clínica abierta.** Dos horas de reloj marcaban en rojo, el lunes, un tema del sábado a las 18:30. El tema guarda cuándo pasa a «Ahora» (`urgent_at`) con las horas en que atiende alguna sede, y la Bandeja, Inicio y el panel lo leen de ahí.
+- **Cada tema dice de qué trata** (cita, precio, clínico, pago u otro). Un pago va a caja, que lo responde desde Inicio sin ver la Bandeja (un permiso estrecho, `conversations.topics`). Una duda clínica va a quien atendió por última vez, que también la responde desde Inicio.
+- **Pasadas las 24 horas de WhatsApp el equipo responde igual.** La respuesta queda «Por entregar» y sale un mensaje aprobado, «Ver respuesta». Al tocarlo, o al volver a escribir, la persona recibe la respuesta citando su pregunta. El tema se da por resuelto al escribir: no depende de que la persona toque el botón. Instagram y Messenger no admiten mensajes aprobados: la respuesta va a su WhatsApp, si tiene uno marcado como suyo.
+- **El agente se ofrece al día siguiente** con un texto fijo, en la primera hora del horario para escribir. Solo lo hace con citas y precios de lista: retoma la conversación y lo que la persona conteste lo atiende él. Una duda clínica, un descuento o un pago siempre esperan a una persona.
+
 ## Alternativas descartadas
+
+- *Dar el tema por resuelto cuando la persona toca «Ver respuesta»*: quien respondió quedaría con un pendiente que no depende de su trabajo.
+- *Que el agente espere a que la persona vuelva a escribir*: quien preguntó un precio el sábado probablemente ya no vuelve.
 
 - *Callar al agente mientras haya un caso abierto* (lo de antes): la persona se queda sin respuesta por cosas que el agente sí sabe, a menudo hasta el día siguiente.
 - *Que el agente responda todo, también el tema derivado*: en una duda clínica o un descuento, la decisión es de una persona.
@@ -30,4 +40,4 @@ Derivar a una persona apagaba al agente en toda la conversación (`agent_status 
 
 ## Referencias
 
-`packages/services/src/agent-operations.ts` (`createHandoff`), `packages/services/src/conversation-state.ts`, `packages/agent/src/tools.ts` (`request_human_handoff`, `recordar_tema`), `packages/db/drizzle/0014_temas_para_el_equipo.sql`.
+`packages/services/src/agent-operations.ts` (`createHandoff`), `packages/services/src/conversation-state.ts`, `packages/agent/src/tools.ts` (`request_human_handoff`, `recordar_tema`), `packages/db/drizzle/0014_temas_para_el_equipo.sql`. Pulido: `topic-urgency.ts`, `held-replies.ts`, `topic-retake.ts`, `topic-reply.ts` (`replyToTopic`, `replyByWhatsApp`) y las migraciones 0053 a 0055.

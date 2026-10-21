@@ -1,25 +1,29 @@
-import {
-  buildWebchatInbound,
-  isOriginAllowed,
-  type NormalizedInbound,
-} from "@odentia/channels"
+import { buildWebchatInbound, isWebchatTestSession, type NormalizedInbound, normalizeOrigin } from "@odentia/channels"
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { inboundEvent } from "@odentia/db/schema/crm"
 import {
+  admitWebchatSite,
   checkWebchatRateLimit,
-  createWebchatConnection,
-  findPublicWebchatConnection,
-  getWebchatConnection,
-  issueWebchatSession,
-  listWebchatConnections,
-  pollWebchat,
-  type PublicWebchatConnection,
-  readWebchatSession,
-  rotateWebchatSecret,
-  setWebchatConnectionStatus,
-  toWidgetConfig,
-  updateWebchatConnection,
+  decideWebchatSite,
+  deleteWebchatTest,
+  findClinicWebchat,
+  getClinicWebchat,
+  openWebchatSession,
+  openWebchatTest,
+  peekClinicWebchat,
+  pollWebchatVisitor,
+  type PublicWebchat,
+  readVisitorSession,
+  readWebchatSiteTicket,
+  rotateClinicWebchatSecret,
+  saveWebchatVisitorContact,
   ServiceError,
+  setClinicWebchatActive,
+  updateClinicWebchat,
+  webchatAppearance,
+  webchatFrameAncestors,
+  webchatSigningCode,
+  webchatSiteTicket,
 } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { type Context, Hono } from "hono"
@@ -30,20 +34,22 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface WebchatPublicDeps {
-  /** Rol owner: lookup de org/conexión por slug+id (sin RLS) y ledger/cola. */
+  /** Rol owner: la clínica por su dirección (sin RLS) y el libro de duplicados y la cola. */
   ownerDb: Db
-  /** Rol app: polls dentro del contexto RLS de la org. */
+  /** Rol app: lo demás, dentro del contexto RLS de la clínica. */
   db: Db
-  /** Cifrado de configs (el padre la inyecta igual que en CrmDeps). */
   secretsKey: Buffer
-  /** Dominio base (`odentia.localhost`): orígenes `*.base` siempre aceptados. */
-  cookieDomain: string
+  /**
+   * La dirección real del visitante (`CLIENT_IP_HEADER` detrás del túnel). Sin
+   * ella, la de la conexión: detrás del túnel todos compartirían el límite.
+   */
   remoteAddress?: (c: Context) => string | undefined
 }
 
 const WINDOW_MS = 60 * 1000
-/** Ráfagas cortas de widget, no scraping. Clave: conexión + ip/sesión + op. */
-const LIMITS = { session: 10, post: 30, poll: 120 } as const
+/** Ráfagas cortas de widget, no scraping. Clave: clínica + ip/sesión + op. */
+const LIMITS = { site: 60, session: 10, post: 30, poll: 120, contact: 10 } as const
+const UNAVAILABLE = "No disponible"
 
 function addressOf(deps: WebchatPublicDeps, c: Context): string {
   try {
@@ -52,20 +58,6 @@ function addressOf(deps: WebchatPublicDeps, c: Context): string {
   } catch {
     return "shared"
   }
-}
-
-/** Origen aceptado: mismo tenant/plataforma o sitio en la allowlist. */
-function originAccepted(cookieDomain: string, config: { allowedOrigins: string[] }, origin: string | null): boolean {
-  if (!origin) return true
-  let hostname = ""
-  try {
-    hostname = new URL(origin).hostname.toLowerCase()
-  } catch {
-    return false
-  }
-  const base = cookieDomain.toLowerCase()
-  if (hostname === base || hostname.endsWith(`.${base}`)) return true
-  return isOriginAllowed(config, origin)
 }
 
 function bearerToken(c: Context): string | null {
@@ -78,20 +70,22 @@ function bearerToken(c: Context): string | null {
 const visitorMessageInput = z.object({
   clientMessageId: z.string().regex(/^[A-Za-z0-9_-]{1,120}$/),
   text: z.string().trim().min(1).max(2000),
-  displayName: z.string().trim().max(80).optional(),
 })
 
-const pollQuery = z.object({
-  before: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional(),
+const sessionInput = z.object({ site: z.string().trim().min(1).max(300), ticket: z.string().trim().min(1).max(1000) })
+
+const contactInput = z.object({
+  whatsapp: z.string().trim().max(40).nullish(),
+  email: z.string().trim().max(320).nullish(),
 })
 
 /**
- * API pública del widget. Sin sesión: el visitante se autentica con el token
- * de sesión (alcance = su sesión, expiración 24 h). Aislamiento por
- * org (slug) + conexión (id) + origen permitido.
+ * API pública del chat web (fase 6 del pulido de la Bandeja). Un chat por
+ * clínica: se nombra por su dirección (`/api/webchat/<clínica>/…`), sin ids.
+ * El visitante se autentica con el token de su sesión (30 días, solo su
+ * conversación). Lo que recibe no trae nada interno (`pollWebchatVisitor`).
  *
- * Monta ANTES de los guards (como /api/webhooks): `padre: app.route("/api/webchat", ...)`.
+ * Monta ANTES de los guards (como /api/webhooks).
  */
 export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
   const app = new Hono()
@@ -99,44 +93,15 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
   app.use("*", bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json(errorBody(c, "BODY_TOO_LARGE", "El mensaje excede el tamaño permitido"), 413) }))
   app.onError((_error, c) => c.json(errorBody(c, "INTERNAL", "No pudimos completar la solicitud"), 500))
 
-  // Preflight para sitios externos en la allowlist.
-  app.options("/*", async (c) => {
-    const origin = c.req.header("origin") ?? null
-    if (origin) {
-      c.header("Access-Control-Allow-Origin", origin)
-      c.header("Vary", "Origin")
-    }
-    c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    c.header("Access-Control-Allow-Headers", "authorization, content-type")
-    c.header("Access-Control-Max-Age", "600")
-    return c.body(null, 204)
-  })
-
-  async function resolve(
-    c: Context,
-  ): Promise<{ ok: true; found: PublicWebchatConnection } | { ok: false; response: Response }> {
+  async function resolve(c: Context): Promise<PublicWebchat | null> {
     const slug = c.req.param("slug")
-    const connectionId = c.req.param("connectionId")
-    if (!slug || !connectionId) {
-      return { ok: false, response: c.json(errorBody(c, "NOT_FOUND", "Chat no disponible"), 404) }
-    }
-    let found: PublicWebchatConnection
-    try {
-      found = await findPublicWebchatConnection(deps.ownerDb, deps.secretsKey, slug, connectionId)
-    } catch (e) {
-      if (e instanceof ServiceError) {
-        return { ok: false, response: c.json(errorBody(c, e.code, "Chat no disponible"), e.status) }
-      }
-      throw e
-    }
-    const origin = c.req.header("origin") ?? null
-    if (!originAccepted(deps.cookieDomain, found.config, origin)) {
-      return { ok: false, response: c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403) }
-    }
-    return { ok: true, found }
+    return slug ? findClinicWebchat(deps.ownerDb, deps.secretsKey, slug) : null
   }
 
-  // CORS restringido al origen verificado (no `*`: el token viaja en header).
+  /**
+   * Cualquier sitio puede preguntar (lo decide `admitWebchatSite`), sin
+   * credenciales: el token viaja en la cabecera, nunca en una cookie.
+   */
   function cors(c: Context): void {
     const origin = c.req.header("origin")
     if (origin) {
@@ -145,62 +110,98 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
     }
   }
 
-  app.get("/:slug/:connectionId/config", async (c) => {
-    const resolved = await resolve(c)
-    if (!resolved.ok) return resolved.response
-    cors(c)
-    const { found } = resolved
-    return c.json({
-      data: toWidgetConfig({ orgName: found.orgName, displayName: found.connection.displayName, config: found.config }),
-    })
-  })
+  async function limited(c: Context, key: string, max: number): Promise<Response | null> {
+    const rl = await checkWebchatRateLimit(deps.ownerDb, key, max, WINDOW_MS)
+    if (rl.allowed) return null
+    c.header("Retry-After", String(rl.retryAfter))
+    return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente en un momento"), 429)
+  }
 
-  app.post("/:slug/:connectionId/session", async (c) => {
-    const resolved = await resolve(c)
-    if (!resolved.ok) return resolved.response
-    cors(c)
-    const rl = await checkWebchatRateLimit(
-      deps.ownerDb,
-      `webchat:session:${c.req.param("connectionId")}:${addressOf(deps, c)}`,
-      LIMITS.session,
-      WINDOW_MS,
-    )
-    if (!rl.allowed) {
-      c.header("Retry-After", String(rl.retryAfter))
-      return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
-    }
-    return c.json({ data: issueWebchatSession(resolved.found.connection) }, 201)
-  })
-
-  app.post("/:slug/:connectionId/messages", async (c) => {
-    const resolved = await resolve(c)
-    if (!resolved.ok) return resolved.response
-    cors(c)
+  /** La sesión del token; responde 401 si no vale y «No disponible» si el chat se desactivó (salvo una prueba). */
+  async function session(c: Context, found: PublicWebchat): Promise<{ sessionId: string } | Response> {
     const token = bearerToken(c)
     if (!token) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+    const read = readVisitorSession(found, token)
+    if (!read) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión inválida o vencida"), 401)
+    if (found.connection.status !== "active" && !isWebchatTestSession(read.sessionId)) {
+      return c.json(errorBody(c, "WEBCHAT_DISABLED", UNAVAILABLE), 409)
+    }
+    return read
+  }
+
+  /**
+   * `chat.js` pregunta al cargar si el chat responde en este sitio y cómo se
+   * ve. El sitio es el de la cabecera `Origin` que pone el navegador, no lo
+   * que diga el cuerpo; si responde, lleva un ticket firmado de ese sitio que
+   * la ventana presenta al abrir la sesión.
+   */
+  app.post("/:slug/site", async (c) => {
+    cors(c)
+    const found = await resolve(c)
+    if (!found) return c.json({ data: { available: false } })
+    const tooMany = await limited(c, `webchat:site:${found.orgId}:${addressOf(deps, c)}`, LIMITS.site)
+    if (tooMany) return tooMany
+    const origin = normalizeOrigin(c.req.header("origin") ?? "")
+    const result = await withOrgContext(deps.db, found.orgId, async (tx) => {
+      const site =
+        origin && found.connection.status === "active" ? await admitWebchatSite(tx, found.orgId, found.connection.id, origin) : null
+      const appearance = await webchatAppearance(tx, found.orgId, found)
+      const available = site?.status === "permitido"
+      return {
+        available,
+        color: appearance.color,
+        clinicName: appearance.clinicName,
+        ...(available && origin ? { ticket: webchatSiteTicket(found.sessionKey, origin) } : {}),
+      }
+    })
+    return c.json({ data: result })
+  })
+
+  /** La página del chat (`/embed`) pide cómo se ve. Solo presentación: nada de sitios ni claves. */
+  app.get("/:slug/config", async (c) => {
+    cors(c)
+    const found = await resolve(c)
+    if (!found) return c.json(errorBody(c, "NOT_FOUND", UNAVAILABLE), 404)
+    const appearance = await withOrgContext(deps.db, found.orgId, (tx) => webchatAppearance(tx, found.orgId, found))
+    return c.json({ data: { ...appearance, active: found.connection.status === "active" } })
+  })
+
+  /** Los sitios donde el navegador deja mostrar el chat; la plataforma los pone en `frame-ancestors`. */
+  app.get("/:slug/frame", async (c) => {
+    const found = await resolve(c)
+    if (!found) return c.json({ data: { ancestors: [] } })
+    const ancestors = await withOrgContext(deps.db, found.orgId, (tx) => webchatFrameAncestors(tx, found.orgId, found.connection.id))
+    return c.json({ data: { ancestors } })
+  })
+
+  app.post("/:slug/session", async (c) => {
+    cors(c)
+    const found = await resolve(c)
+    if (!found) return c.json(errorBody(c, "NOT_FOUND", UNAVAILABLE), 404)
+    const tooMany = await limited(c, `webchat:session:${found.orgId}:${addressOf(deps, c)}`, LIMITS.session)
+    if (tooMany) return tooMany
+    const parsed = sessionInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Falta el sitio"), 400)
+    if (found.connection.status !== "active") return c.json(errorBody(c, "WEBCHAT_DISABLED", UNAVAILABLE), 409)
+    // El sitio tiene que ser el que vio la API al cargar `chat.js` (su ticket), no uno escrito en la dirección.
+    const seen = readWebchatSiteTicket(found.sessionKey, parsed.data.ticket)
+    if (!seen || seen !== normalizeOrigin(parsed.data.site)) return c.json(errorBody(c, "WEBCHAT_SITE", UNAVAILABLE), 403)
+    const site = await withOrgContext(deps.db, found.orgId, (tx) => admitWebchatSite(tx, found.orgId, found.connection.id, seen))
+    if (site?.status !== "permitido") return c.json(errorBody(c, "WEBCHAT_SITE", UNAVAILABLE), 403)
+    return c.json({ data: openWebchatSession(found.sessionKey) }, 201)
+  })
+
+  app.post("/:slug/messages", async (c) => {
+    cors(c)
+    const found = await resolve(c)
+    if (!found) return c.json(errorBody(c, "NOT_FOUND", UNAVAILABLE), 404)
+    const read = await session(c, found)
+    if (read instanceof Response) return read
     const parsed = visitorMessageInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Revisa el mensaje"), 400)
-    const { found } = resolved
-    const verified = readWebchatSession(found.connection, token)
-    if (!verified) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión inválida o vencida"), 401)
-    const sessionId = verified.sessionId
-    const rl = await checkWebchatRateLimit(
-      deps.ownerDb,
-      `webchat:post:${found.connection.id}:${sessionId}`,
-      LIMITS.post,
-      WINDOW_MS,
-    )
-    if (!rl.allowed) {
-      c.header("Retry-After", String(rl.retryAfter))
-      return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
-    }
-    // Nunca vincular paciente por nombre/teléfono escrito: el displayName solo
-    // nombra el contacto del canal al crearse (ver ingestInbound).
-    const event: NormalizedInbound = buildWebchatInbound(sessionId, {
-      clientMessageId: parsed.data.clientMessageId,
-      text: parsed.data.text,
-      ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
-    })
+    const tooMany = await limited(c, `webchat:post:${found.connection.id}:${read.sessionId}`, LIMITS.post)
+    if (tooMany) return tooMany
+    const event: NormalizedInbound = buildWebchatInbound(read.sessionId, parsed.data)
     // Ledger de dedupe + encolado en la MISMA transacción: si cae entre medias,
     // nada confirma y el visitante puede reintentar sin perder el mensaje.
     const duplicate = await deps.ownerDb.transaction(async (tx) => {
@@ -211,176 +212,144 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
         .returning({ id: inboundEvent.id })
       if (inserted.length === 0) return true
       // Misma tubería que el resto de canales: ingesta + agent_runs en el worker.
-      await sendInboundMessage(tx, {
-        orgId: found.orgId,
-        connectionId: found.connection.id,
-        event,
-      })
+      await sendInboundMessage(tx, { orgId: found.orgId, connectionId: found.connection.id, event })
       return false
     })
-    if (duplicate) return c.json({ data: { duplicate: true } }, 200)
-    return c.json({ data: { queued: true } }, 202)
+    return c.json({ data: { queued: !duplicate } }, duplicate ? 200 : 202)
   })
 
-  app.get("/:slug/:connectionId/messages", async (c) => {
-    const resolved = await resolve(c)
-    if (!resolved.ok) return resolved.response
+  app.get("/:slug/messages", async (c) => {
     cors(c)
-    const token = bearerToken(c)
-    if (!token) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    const query = pollQuery.safeParse(c.req.query())
-    if (!query.success) return c.json(errorBody(c, "VALIDATION", "Parámetros inválidos"), 400)
-    const { found } = resolved
-    const verified = readWebchatSession(found.connection, token)
-    if (!verified) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión inválida o vencida"), 401)
-    const sessionId = verified.sessionId
-    const rl = await checkWebchatRateLimit(
-      deps.ownerDb,
-      `webchat:poll:${found.connection.id}:${sessionId}`,
-      LIMITS.poll,
-      WINDOW_MS,
-    )
-    if (!rl.allowed) {
-      c.header("Retry-After", String(rl.retryAfter))
-      return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
-    }
+    const found = await resolve(c)
+    if (!found) return c.json(errorBody(c, "NOT_FOUND", UNAVAILABLE), 404)
+    const read = await session(c, found)
+    if (read instanceof Response) return read
+    const tooMany = await limited(c, `webchat:poll:${found.connection.id}:${read.sessionId}`, LIMITS.poll)
+    if (tooMany) return tooMany
     // Recién aquí lo `sent` pasa a `delivered`: el visitante lo recibió.
-    const poll = await withOrgContext(deps.db, found.orgId, (tx) =>
-      pollWebchat(tx, found.orgId, found.connection.id, sessionId, {
-        ...(query.data.before ? { before: query.data.before } : {}),
-        ...(query.data.limit ? { limit: query.data.limit } : {}),
-      }),
-    )
+    const poll = await withOrgContext(deps.db, found.orgId, (tx) => pollWebchatVisitor(tx, found.orgId, found.connection.id, read.sessionId))
     return c.json({ data: poll })
+  })
+
+  /** «¿Dónde te avisamos?» (R4): su WhatsApp o su correo, solo para responderle. */
+  app.post("/:slug/contact", async (c) => {
+    cors(c)
+    const found = await resolve(c)
+    if (!found) return c.json(errorBody(c, "NOT_FOUND", UNAVAILABLE), 404)
+    const read = await session(c, found)
+    if (read instanceof Response) return read
+    const tooMany = await limited(c, `webchat:contact:${found.connection.id}:${read.sessionId}`, LIMITS.contact)
+    if (tooMany) return tooMany
+    const parsed = contactInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Escribe tu WhatsApp o tu correo."), 400)
+    try {
+      const contact = await withOrgContext(deps.db, found.orgId, (tx) =>
+        saveWebchatVisitorContact(tx, found.orgId, found.connection.id, read.sessionId, parsed.data),
+      )
+      return c.json({ data: { contact } })
+    } catch (e) {
+      // Solo el motivo en palabras: nada interno al visitante.
+      if (e instanceof ServiceError) return c.json(errorBody(c, e.code, e.message), e.status)
+      throw e
+    }
   })
 
   return app
 }
 
-const adminCreateInput = z.object({
-  displayName: z.string().trim().min(1).max(120),
-  allowedOrigins: z.array(z.string().trim().min(1)).min(1).max(50),
-  widgetTitle: z.string().trim().max(80).optional(),
-  widgetColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  greeting: z.string().trim().max(500).optional(),
-  notifyUrl: z.string().url().optional(),
-})
-
-const adminPatchInput = z.object({
-  displayName: z.string().trim().min(1).max(120).optional(),
-  allowedOrigins: z.array(z.string().trim().min(1)).min(1).max(50).optional(),
-  widgetTitle: z.string().trim().max(80).optional(),
-  widgetColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  greeting: z.string().trim().max(500).optional(),
-  notifyUrl: z.string().url().optional(),
-})
-
-function configOf(data: z.infer<typeof adminPatchInput>): Record<string, unknown> {
-  const config: Record<string, unknown> = {}
-  if (data.allowedOrigins !== undefined) config["allowedOrigins"] = data.allowedOrigins
-  for (const key of ["widgetTitle", "widgetColor", "greeting", "notifyUrl"] as const) {
-    if (data[key] !== undefined) config[key] = data[key]
-  }
-  return config
-}
+const adminPatchInput = z
+  .object({
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    greeting: z.string().trim().max(500).nullable().optional(),
+    notifyUrl: z.string().trim().max(500).nullable().optional(),
+  })
+  .strict()
 
 /**
- * Admin del chat web (sesión + membresía + `settings.read/write`).
- * Monta bajo guards: `padre: guarded.route("/channels/webchat", ...)`.
+ * El chat de la clínica en Configuración (`settings.read` para verlo,
+ * `settings.write` para cambiarlo). Monta bajo guards en `/channels/webchat`.
  */
 export function createWebchatAdminRoute(deps: CrmDeps) {
   const app = new Hono()
 
+  function forbidden(c: Context, write: boolean): Response | null {
+    const { memberRole } = orgContextOf(c)
+    return canAccess(memberRole, write ? "settings.write" : "settings.read")
+      ? null
+      : c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
+  }
+
   app.get("/", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
+    const denied = forbidden(c, false)
+    if (denied) return denied
+    const { orgId, userId } = orgContextOf(c)
+    // `?peek=1` (lista de Integraciones): mirarlo no lo crea ni lo deja encendido.
+    if (c.req.query("peek") === "1") {
+      return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => peekClinicWebchat(tx, orgId, deps.secretsKey)))
     }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listWebchatConnections(tx, orgId, deps.secretsKey)),
-    )
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicWebchat(tx, orgId, deps.secretsKey, userId)))
   })
 
-  app.post("/", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
-    const parsed = adminCreateInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { displayName, ...rest } = parsed.data
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        createWebchatConnection(tx, orgId, deps.secretsKey, userId, { displayName, config: rest }, { fetch }),
-      ),
-    )
-  })
-
-  app.get("/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getWebchatConnection(tx, orgId, deps.secretsKey, c.req.param("id"))),
-    )
-  })
-
-  app.patch("/:id", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
+  app.patch("/", async (c) => {
+    const denied = forbidden(c, true)
+    if (denied) return denied
+    const { orgId, userId } = orgContextOf(c)
     const parsed = adminPatchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { displayName, ...rest } = parsed.data
-    const patch: { displayName?: string; config?: unknown } = {}
-    if (displayName !== undefined) patch.displayName = displayName
-    if (Object.keys(rest).length > 0) {
-      const current = await withOrgContext(deps.db, orgId, (tx) => getWebchatConnection(tx, orgId, deps.secretsKey, c.req.param("id")))
-      patch.config = { ...current.config, ...configOf(rest) }
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        updateWebchatConnection(tx, orgId, deps.secretsKey, userId, c.req.param("id"), patch),
-      ),
-    )
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => updateClinicWebchat(tx, orgId, deps.secretsKey, userId, parsed.data)))
   })
 
-  app.post("/:id/enable", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setWebchatConnectionStatus(tx, orgId, deps.secretsKey, c.req.param("id"), "active"),
-      ),
-    )
+  for (const [path, active] of [["/enable", true], ["/disable", false]] as const) {
+    app.post(path, async (c) => {
+      const denied = forbidden(c, true)
+      if (denied) return denied
+      const { orgId } = orgContextOf(c)
+      return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => setClinicWebchatActive(tx, orgId, deps.secretsKey, active)))
+    })
+  }
+
+  app.get("/code", async (c) => {
+    const denied = forbidden(c, true)
+    if (denied) return denied
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => ({ code: await webchatSigningCode(tx, orgId) })))
   })
 
-  app.post("/:id/disable", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setWebchatConnectionStatus(tx, orgId, deps.secretsKey, c.req.param("id"), "disabled"),
-      ),
-    )
+  // «Generar un código nuevo»: quien ya conversaba sigue 30 días con el anterior.
+  app.post("/rotate", async (c) => {
+    const denied = forbidden(c, true)
+    if (denied) return denied
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => rotateClinicWebchatSecret(tx, orgId, deps.secretsKey, userId)))
   })
 
-  // Revoca todas las sesiones de visitante (rotación del secreto HMAC).
-  app.post("/:id/rotate", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
-    }
+  for (const [action, status] of [["allow", "permitido"], ["block", "bloqueado"]] as const) {
+    app.post(`/sites/:id/${action}`, async (c) => {
+      const denied = forbidden(c, true)
+      if (denied) return denied
+      const { orgId, userId } = orgContextOf(c)
+      const id = z.string().uuid().safeParse(c.req.param("id"))
+      if (!id.success) return validationError(c, id.error.issues)
+      return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => decideWebchatSite(tx, orgId, deps.secretsKey, userId, id.data, status)))
+    })
+  }
+
+  // «Probar sin publicar»: Sofi responde de verdad, aunque el chat esté desactivado.
+  app.post("/test", async (c) => {
+    const denied = forbidden(c, true)
+    if (denied) return denied
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => openWebchatTest(tx, orgId, deps.secretsKey, userId)))
+  })
+
+  app.post("/test/delete", async (c) => {
+    const denied = forbidden(c, true)
+    if (denied) return denied
+    const { orgId } = orgContextOf(c)
+    const parsed = z.object({ sessionId: z.string().min(1).max(200) }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        rotateWebchatSecret(tx, orgId, deps.secretsKey, userId, c.req.param("id")),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => ({ deleted: await deleteWebchatTest(tx, orgId, { sessionId: parsed.data.sessionId }) })),
     )
   })
 

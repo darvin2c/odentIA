@@ -277,7 +277,9 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: qué pide, lo que ya se sabe y lo que falta.
   await call(page, "POST", `/api/contacts/${conversation.contact.id}/agent-memory`, org.slug, { text: "Prefiere citas por la tarde" }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   const brief = surface(page, { name: "Resumen del caso" })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
@@ -289,12 +291,14 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(brief).toContainText("Prefiere citas por la tarde")
   await expect(brief).toContainText("Le dijo: «Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.»")
   await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(brief.getByRole("button", { name: "Tomar", exact: true })).toBeVisible()
+  await expect(brief.getByRole("button", { name: "Tomar este tema", exact: true })).toBeVisible()
   await expect(brief.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   await expect(page.getByRole("dialog", { name: "Resumen del caso" })).toContainText("Lo que ya se sabe")
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
@@ -323,7 +327,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(fromRow.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(fromRow).toBeHidden()
-  // «Tomar» toma la conversación del caso: queda a su nombre y el caso, con responsable.
+  // «Tomar este tema» toma el tema, no la conversación: el caso queda con responsable.
   await takeButton.click()
   await expect(caseRow.getByRole("button", { name: /^Tomar/ })).toHaveCount(0)
 

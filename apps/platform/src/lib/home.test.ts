@@ -26,10 +26,14 @@ describe("textos de «Te espera»", () => {
       createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", unclaimed: true,
     }
     expect(waitingText(row, context)).toEqual({
-      title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min · Ahora", action: "Tomar",
+      title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min · Ahora", action: "Tomar este tema",
     })
     expect(waitingText({ ...row, priority: "baja", unclaimed: false }, context)).toMatchObject({ action: "Ver el caso" })
     expect(waitingText({ ...row, priority: "baja" }, context).detail).toContain("Sin apuro")
+    // «Ahora» lo dice el servidor: dos horas de clínica abierta esperando, aunque sea «Hoy» (decisión 1 del pulido).
+    expect(waitingText({ ...row, priority: "media", urgent: true }, context).detail).toContain("Ahora")
+    // Lo que se responde aquí mismo (una duda clínica, un pago de caja) dice «Responder».
+    expect(waitingText({ ...row, canReply: true }, context)).toMatchObject({ action: "Responder" })
   })
 
   it("con «Tomar» o «Hecha» en su propio botón, la fila sigue diciendo a dónde lleva", () => {

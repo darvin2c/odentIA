@@ -15,6 +15,10 @@ export function supportsBold(channel: string | null | undefined): boolean {
 
 /** Lo que se le dice al modelo sobre el formato de este canal. */
 export function channelFormatRule(channel: string | null | undefined): string {
+  // El chat web no sigue abierto: si pasas un tema, el chat le pide dónde avisarle (R4 del pulido de la Bandeja).
+  if (channel === "webchat") {
+    return "Este canal es el chat del sitio de la clínica y se envía sin formato: no uses asteriscos, almohadillas ni otras marcas; destaca con las palabras. Si pasas un tema al equipo, no digas que le responden «por aquí»: el chat le pide su WhatsApp o su correo para avisarle; dile que lo deje ahí."
+  }
   return supportsBold(channel)
     ? "Este canal es WhatsApp: usa negrita con un asterisco a cada lado, *así*, nunca dos asteriscos, almohadillas ni otro formato. Al ofrecer una promoción pon en negrita, cada uno por separado, la palabra promoción con su nombre (*promoción «nombre»*), su precio (*el importe con su moneda*) y su fecha de fin (*hasta el día que vence*); nada más en negrita. Si el precio es «desde», la palabra va dentro de la misma negrita (*desde el importe*), nunca el importe solo."
     : "Este canal se envía sin formato: no uses asteriscos, almohadillas ni otras marcas; destaca con las palabras."

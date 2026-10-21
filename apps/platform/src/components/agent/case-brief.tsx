@@ -109,11 +109,11 @@ export function CaseBriefDrawer({
     enabled: conversationId !== null,
     retry: false,
   })
-  // «Tomar» es la misma acción de la Bandeja: la conversación pasa a quien la toma,
-  // el agente deja de responder en el hilo y sus casos derivados quedan tomados.
+  // «Tomar este tema» es la misma acción de la Bandeja: el tema pasa a quien lo
+  // toma y el agente sigue con lo demás (tablero 4d del pulido).
   const claim = useMutation({
     retry: false,
-    mutationFn: (id: string) => apiFetch(`/api/conversations/${id}/take`, { method: "POST" }),
+    mutationFn: (handoffId: string) => apiFetch(`/api/workspace/topics/${handoffId}/take`, { method: "POST" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
       void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
@@ -163,8 +163,8 @@ export function CaseBriefDrawer({
               </Link>
             )}
             {handoff?.status === "abierta" && canTake ? (
-              <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(brief.conversationId)}>
-                Tomar
+              <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(handoff.id)}>
+                Tomar este tema
               </SubmitButton>
             ) : null}
           </>

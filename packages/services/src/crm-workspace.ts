@@ -17,10 +17,16 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, or, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { getMessagePermissions } from "./automation.js"
+import { messageWithoutTextWords } from "./message-words.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
 import { notFound, validation } from "./errors.js"
-import { agentAttendingSql, handoffOpenExistsSql, proposalPendingExistsSql } from "./conversation-state.js"
+import {
+  agentAttendingSql,
+  handoffOpenExistsSql,
+  proposalPendingExistsSql,
+} from "./conversation-state.js"
+import { handoffOpenSql } from "./handoff-state.js"
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import type { TaskItem } from "./tasks.js"
@@ -333,11 +339,19 @@ async function resolveAgentState(
   // El mismo orden que la Bandeja (`conversationWords`): el caso que pasó el
   // agente, después una persona a cargo y luego la cita que espera el sí.
   if (shared?.handoff) {
+    // La insignia ya dice «Te lo pasó Sofi»: aquí va una sola vez el motivo del tema más antiguo.
+    const topic = (await tx.execute(sql`
+      select h.asks, h.reason from agent_handoff h
+      where h.organization_id = ${orgId} and h.conversation_id = ${convRow.id} and ${handoffOpenSql(sql.raw("h"))}
+      order by h.created_at limit 1`)) as unknown as { asks: string | null; reason: string }[]
+    const motive = (topic[0]?.asks ?? topic[0]?.reason ?? "").trim()
     return {
       state: "handoff",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Te lo pasó el agente; falta resolverlo",
+      reason: motive
+        ? `${motive.charAt(0).toUpperCase()}${motive.slice(1)}${/[.!?]$/.test(motive) ? "" : "."}`
+        : null,
       pendingProposalIds,
       awaitingContact,
     }
@@ -357,7 +371,7 @@ async function resolveAgentState(
       state: "approval",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: `Propuesta de ${sofi} que espera la confirmación del interlocutor`,
+      reason: `${sofi} propuso una cita y espera su sí en la conversación.`,
       pendingProposalIds,
       awaitingContact,
     }
@@ -524,6 +538,8 @@ export async function listContactActivity(
   const perSource = limit + 1
   const merged: CrmActivityItem[] = []
   const convIds = await contactConversationIds(tx, orgId, contactId)
+  // El agente de recepción se nombra como lo llama la clínica (Sofi, o el que eligió).
+  const sofi = (await getAgentConfig(tx, orgId)).personaName
 
   // Mensajes de todos los canales con procedencia (solo con conversations.read).
   if (caps.conversations) {
@@ -556,15 +572,17 @@ export async function listContactActivity(
         title: inbound ? "Mensaje entrante" : "Mensaje saliente",
         body:
           msg.body ??
-          (msg.contentType === "template"
-            ? `Plantilla ${msg.templateName ?? ""}`.trim()
-            : "[adjunto]"),
+          messageWithoutTextWords({
+            contentType: msg.contentType,
+            templateName: msg.templateName,
+            attachments: msg.attachments,
+          }),
         actorName: msg.senderUserId
           ? (names.get(msg.senderUserId) ?? null)
           : inbound
             ? own.displayName
             : msg.senderKind === "agent"
-              ? "Agente"
+              ? sofi
               : null,
         channel,
         conversationId: msg.conversationId,
@@ -782,9 +800,9 @@ export async function listContactActivity(
         id: `proposal:${row.id}`,
         kind: "proposal",
         at,
-        title: row.afterSummary ? `Propuesta: ${row.afterSummary}` : "Propuesta del agente",
+        title: row.afterSummary ? `Propuesta: ${row.afterSummary}` : `Propuesta de ${sofi}`,
         body: row.decidedAt === null ? row.reason : null,
-        actorName: row.proposedBy === "agent" ? "Agente" : "Equipo",
+        actorName: row.proposedBy === "agent" ? sofi : "Equipo",
         channel: null,
         conversationId: row.conversationId,
         opportunityId: linkedOpp,
@@ -817,11 +835,17 @@ export async function listContactActivity(
         title: proposal.afterSummary ? `${event.title}: ${proposal.afterSummary}` : event.title,
         body: typeof metadata?.["reason"] === "string" ? metadata["reason"] : null,
         actorName: audit.actorUserId
-          ? names.get(audit.actorUserId) ?? (audit.actorUserId === "agent" ? "Agente" : "Equipo")
-          : audit.action === "agent.proposal_confirmed" ? own.displayName
-          : proposal.proposedBy === "agent" ? "Agente" : "Equipo",
-        channel: null, conversationId: proposal.conversationId,
-        opportunityId: linkedOpp, taskId: null, status: event.status,
+          ? (names.get(audit.actorUserId) ?? (audit.actorUserId === "agent" ? sofi : "Equipo"))
+          : audit.action === "agent.proposal_confirmed"
+            ? own.displayName
+            : proposal.proposedBy === "agent"
+              ? sofi
+              : "Equipo",
+        channel: null,
+        conversationId: proposal.conversationId,
+        opportunityId: linkedOpp,
+        taskId: null,
+        status: event.status,
       })
     }
   }
@@ -844,9 +868,9 @@ export async function listContactActivity(
         id: `handoff:${row.id}`,
         kind: "handoff",
         at,
-        title: "Te lo pasó el agente",
+        title: `Te lo pasó ${sofi}`,
         body: row.summary,
-        actorName: "Agente",
+        actorName: sofi,
         channel: null,
         conversationId: row.conversationId,
         opportunityId: null,

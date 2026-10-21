@@ -165,22 +165,32 @@ describe("mensajería", () => {
 })
 
 describe("chat web", () => {
-  const chat = { id: "w1", displayName: "Chat del sitio", status: "active", config: { allowedOrigins: ["https://clinica.test", "https://tienda.clinica.test"] } }
+  const chat = {
+    id: "w1",
+    active: true,
+    installedOn: "https://clinica.test",
+    sites: [
+      { origin: "https://clinica.test", status: "permitido" as const },
+      { origin: "https://tienda.clinica.test", status: "permitido" as const },
+    ],
+  }
 
-  it("sin chat, dice cómo conectarlo; con chat, su sitio y su actividad", () => {
-    expect(webchatRows([], () => undefined, since)[0]).toMatchObject({ status: "Sin conectar", detail: { kind: "connect" } })
-    const [row] = webchatRows([chat], () => minutesAgo(90), since)
+  it("sin instalar, dice que falta pegar la línea; instalado, su sitio y su actividad", () => {
+    expect(webchatRows({ ...chat, installedOn: null, sites: [] }, () => undefined, since)[0]).toMatchObject({ status: "Sin instalar", detail: { kind: "connect" } })
+    const [row] = webchatRows(chat, () => minutesAgo(90), since)
     expect(row).toMatchObject({
       name: "Chat web",
       status: "Activo",
       detail: { kind: "account", account: "clinica.test y 1 sitio más", activity: "último mensaje hace 1 hora" },
     })
     // Sin fecha del servidor, solo el sitio.
-    expect(webchatRows([chat], () => undefined, since)[0]?.detail).toMatchObject({ activity: null })
+    expect(webchatRows(chat, () => undefined, since)[0]?.detail).toMatchObject({ activity: null })
   })
 
-  it("desactivado no recibe mensajes", () => {
-    const [row] = webchatRows([{ ...chat, status: "disabled" }], () => minutesAgo(5), since)
+  it("un sitio nuevo espera el sí de la clínica; desactivado no recibe mensajes", () => {
+    const pending = { ...chat, sites: [...chat.sites, { origin: "https://promo-dental.net", status: "pendiente" as const }] }
+    expect(webchatRows(pending, () => undefined, since)[0]).toMatchObject({ tone: "attention", review: [{ label: "Apareció en promo-dental.net: ¿es tuyo?" }] })
+    const [row] = webchatRows({ ...chat, active: false }, () => minutesAgo(5), since)
     expect(row).toMatchObject({ tone: "off", status: "Desactivado", detail: { activity: "no recibe mensajes" } })
   })
 })

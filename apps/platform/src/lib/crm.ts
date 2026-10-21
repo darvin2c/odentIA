@@ -10,7 +10,41 @@ export interface ConversationPreview {
   body: string | null
   direction: string
   senderKind: string
+  /** Para decir qué era un mensaje sin texto; ausentes en respuestas antiguas en caché. */
+  contentType?: string
+  attachmentMime?: string | null
+  templateName?: string | null
   createdAt: string
+}
+
+/**
+ * Un mensaje sin texto, en palabras: «Foto», «Nota de voz», «Video»,
+ * «Documento», «Ubicación» o «Mensaje aprobado». Nunca «Adjunto» ni un código.
+ */
+export function attachmentWords(input: {
+  contentType?: string | null
+  mimeType?: string | null
+  templateName?: string | null
+}): string {
+  if (input.contentType === "location") return "Ubicación"
+  if (input.contentType === "template") return "Mensaje aprobado"
+  const mime = input.mimeType ?? ""
+  if (mime.startsWith("image/")) return "Foto"
+  if (mime.startsWith("audio/")) return "Nota de voz"
+  if (mime.startsWith("video/")) return "Video"
+  if (mime) return "Documento"
+  return "Mensaje sin texto"
+}
+
+/** Lo que dice la fila de la Bandeja del último mensaje. */
+export function previewWords(preview: ConversationPreview | null): string {
+  if (!preview) return "Sin mensajes todavía"
+  if (preview.body) return preview.body
+  return attachmentWords({
+    contentType: preview.contentType,
+    mimeType: preview.attachmentMime,
+    templateName: preview.templateName,
+  })
 }
 
 /** Lo que una conversación espera del equipo o del agente (lo calcula el servidor). */
@@ -19,6 +53,8 @@ export interface ConversationAttention {
   topics?: InboxTopic[]
   /** Una persona del equipo conversa en vivo: el agente espera. */
   teamLive?: boolean
+  /** Chat web con un tema y sin dónde avisarle (R4): si cierra la pestaña, no le llega la respuesta. */
+  unreachable?: boolean
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
   /** Propuestas pendientes que esperan al interlocutor: las únicas que quedan pendientes. */
@@ -76,10 +112,16 @@ export interface ConversationListItem {
   contact: { id: string; displayName: string; screen?: ContactScreen | null; screenReason?: string | null }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: ConversationPreview | null
+  /** Prueba del chat web desde Configuración: «Prueba», no se cobra ni cuenta. */
+  isTest?: boolean
   /** Ausente en respuestas antiguas en caché: tratar como sin estado. */
   attention?: ConversationAttention
   /** Cómo se cerró; null si está abierta. Ausente en respuestas antiguas en caché. */
   closure?: ConversationClosure | null
+  /** La fila es la persona (fase 4 del pulido): sus canales, primero el de esta conversación. */
+  channels?: string[]
+  /** Sus conversaciones: abrir cualquiera es abrir esta fila. */
+  conversationIds?: string[]
 }
 
 /** Totales de los chips de la Bandeja para los filtros vigentes (sin `status`). */
@@ -120,6 +162,8 @@ export interface InboxTopic {
   priority: "alta" | "media" | "baja"
   /** «Ahora»: prioridad alta o más de dos horas sin resolverse. */
   urgent: boolean
+  /** De qué trata (R3): dice a quién le llega; un pago puede pasarse a caja. Ausente en respuestas antiguas. */
+  kind?: "cita" | "precio" | "clinico" | "pago" | "otro"
   assigneeUserId: string | null
   assigneeName: string | null
   createdBy: "agent" | "user"
@@ -135,6 +179,8 @@ export interface InboxTopic {
 
 export interface ChatMessage {
   id: string
+  /** Su conversación: el hilo junta los canales de la persona (fase 4). Ausente en respuestas antiguas. */
+  conversationId?: string
   direction: string
   senderKind: string
   /** Quién del equipo lo escribió; nulo si no fue una persona del equipo. */
@@ -152,6 +198,19 @@ export interface ChatMessage {
   automatic?: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado. */
   replyToMessageId?: string | null
+  /**
+   * Respuesta del equipo que quedó por entregar pasadas las 24 horas (R1):
+   * con `status` «held» dice «Por entregar»; después, «Entregada» con `sentAt`.
+   */
+  held?: boolean
+  /** Cuándo lo aceptó el proveedor; nulo si aún no salió. */
+  sentAt?: string | null
+  /** Lo reenvió la persona: no lo escribió ella. */
+  forwarded?: boolean
+  /** La reacción de la persona a este mensaje (👍…); no confirma nada. */
+  contactReaction?: string | null
+  /** Ubicación que mandó la persona. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró: era spam y pasaron 90 días. */
   redactedAt?: string | null
   createdAt: string
@@ -171,6 +230,8 @@ export interface ConversationDetail {
     lastMessageAt: string | null
     /** Por si el servidor lo entrega dentro de la conversación en vez de junto a `attention`. */
     closure?: ConversationClosure | null
+    /** Prueba del chat web desde Configuración (fase 6 del pulido). */
+    isTest?: boolean
   }
   /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
   contact: { id: string; displayName: string; isActive: boolean; isPatient?: boolean }
@@ -192,12 +253,41 @@ export interface ConversationDetail {
    * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
    */
   whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
+  /**
+   * Responder pasadas las 24 horas: si Meta aprobó «Ver respuesta» (WhatsApp)
+   * y la ventana de Instagram y Messenger, con si tiene un WhatsApp suyo.
+   * Ausente en respuestas antiguas en caché.
+   */
+  lateReply?: {
+    answerReady: boolean
+    metaWindow: { open: boolean; lastInboundAt: string | null; whatsapp: boolean; whatsappOpen?: boolean } | null
+  }
   /** Paciente al que le faltan datos: la Bandeja ofrece pegar su enlace. Ausente en respuestas antiguas. */
   missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
   /** Spam o bloqueada (ADR 0054); ausente en respuestas antiguas en caché. */
   screen?: ContactScreenView
+  /**
+   * Los canales de la persona, del último que usó al primero, para «Responder
+   * por» (fase 4 del pulido). Los mensajes son de todos ellos. Ausente en
+   * respuestas antiguas en caché.
+   */
+  person?: { channels: PersonChannel[]; unreadCount: number }
   messages: ChatMessage[]
   messagesCursor: string | null
+}
+
+/** Un canal de la persona en el hilo: por dónde se le puede responder. */
+export interface PersonChannel {
+  conversationId: string
+  channel: string
+  provider: string
+  connectionName: string
+  status: string
+  /** WhatsApp, Instagram y Messenger: si escribió en las últimas 24 horas. Nulo en los demás. */
+  replyWindow: "open" | "closed" | null
+  /** Temas sin resolver en ese canal. */
+  topics: number
+  lastMessageAt: string | null
 }
 
 export interface TaskItem {

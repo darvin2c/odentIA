@@ -15,7 +15,7 @@
  * - Paciente ≠ interlocutor: quien escribe por un paciente (su madre, quien lo
  *   registró desde su conversación o con su enlace) no es otra persona que
  *   nos buscó. Su mensaje es el primer contacto del paciente, con su canal, y
- *   nadie se cuenta dos veces. Spam y bloqueados no cuentan (`screenedSql`).
+ *   nadie se cuenta dos veces. Spam, bloqueados y las pruebas del chat web no cuentan (`uncountedSql`).
  * - La aceptación es la del Resumen (`budgetAcceptanceMany`) y los pacientes
  *   nuevos, la de siempre (`newPatientsMany`): no hay dos definiciones.
  * - Las personas, sus conversaciones, presupuestos y controles no son de una
@@ -28,7 +28,7 @@
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
-import { screenedSql } from "./conversation-state.js"
+import { uncountedSql } from "./conversation-state.js"
 import { budgetAcceptanceMany } from "./report-summary.js"
 import { lastMonths } from "./report-periods.js"
 import {
@@ -102,7 +102,7 @@ export function firstContactSql(orgId: string): SQL {
         order by m.created_at, m.id limit 1
       ) fi on true
       left join channel_connection cc on cc.organization_id = c.organization_id and cc.id = c.channel_connection_id
-      where c.organization_id = ${orgId} and not ${screenedSql(sql.raw("c"))}
+      where c.organization_id = ${orgId} and not ${uncountedSql(sql.raw("c"))}
       order by c.contact_id, fi.created_at, c.id
     ), registered as (
       select p.id as patient_id, p.person_id, p.created_at, r.conversation_id,
@@ -124,7 +124,7 @@ export function firstContactSql(orgId: string): SQL {
         where g.writer_id is not null and m.organization_id = ${orgId} and m.conversation_id = g.conversation_id
           and m.direction = 'in' and m.created_at <= g.created_at
           and m.created_at > g.created_at - make_interval(days => ${WRITER_LOOKBACK_DAYS})
-          and not ${screenedSql(sql.raw("wc"))}
+          and not ${uncountedSql(sql.raw("wc"))}
         order by m.created_at, m.id limit 1
       ) w on true
       cross join lateral (

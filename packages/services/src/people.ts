@@ -8,6 +8,7 @@
  * conversaciones y sus notas. Cada bloque de la página se pide aparte con su
  * propio permiso; ninguna función de este módulo entrega todo junto.
  */
+import { testOnlyPersonSql } from "./conversation-state.js"
 import { clinicalProfileFor, documentIssuerCountry, validateDemographics } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
@@ -485,6 +486,7 @@ export async function listPeople(
     left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
     where c.organization_id = ${orgId}
       and ${viewCondition(view)}
+      and not ${testOnlyPersonSql(sql.raw("c"))}
       and ${onlyPatients}
       and ${searchCondition(q)}
       and ${after}
@@ -497,7 +499,7 @@ export async function listPeople(
     ? await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from contact c
     left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
-    where c.organization_id = ${orgId} and ${viewCondition("por_registrar")}
+    where c.organization_id = ${orgId} and ${viewCondition("por_registrar")} and not ${testOnlyPersonSql(sql.raw("c"))}
   `)
     : [{ count: 0 }]
   const items: PersonListItem[] = page.map((r) => {

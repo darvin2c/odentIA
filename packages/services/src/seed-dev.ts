@@ -81,7 +81,8 @@ import {
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
-import { createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
+import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
+import { ANSWER_READY_MESSAGE, replyId } from "./automation-messages.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
@@ -188,7 +189,7 @@ import { seedClinicNoticesDemo, seedSaasBillingDemo } from "./seed-saas-billing.
 import { createService, quickAddServices, updateService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 import { createStorage } from "./storage.js"
-import { completeTask, createTask, settleTask } from "./tasks.js"
+import { completeTask, createTask, settleTask, updateTask } from "./tasks.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
@@ -359,7 +360,9 @@ const CORA_ID = "seed-user-cora"
 const ROJAS_ID = "seed-user-rojas"
 /** El odontólogo de la Sede San Isidro: la segunda sede con historia en Reportes. */
 const SALAS_ID = "seed-user-salas"
-const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID]
+/** Caja de Dental Smile: responde desde Inicio los temas de pagos que le pasa Sofi (decisión 3 del pulido de la Bandeja). */
+const CAJA_ID = "seed-user-caja"
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -714,6 +717,15 @@ async function seedMessage(args: {
   externalId: string
   status: string
   createdAt: Date
+  /** Fase 7 de la Bandeja: reenviado, la reacción de la persona y una ubicación. */
+  forwarded?: boolean
+  contactReaction?: string | null
+  location?: { latitude: number; longitude: number; name?: string; address?: string } | null
+  /** Fase 3 de la Bandeja: la pregunta que cita, la respuesta por entregar y «Ver respuesta». */
+  replyToMessageId?: string | null
+  held?: boolean
+  templateName?: string | null
+  replyButtons?: { id: string; title: string }[] | null
 }): Promise<{ id: string }> {
   const [row] = await db
     .insert(message)
@@ -728,6 +740,15 @@ async function seedMessage(args: {
       attachments: args.attachments ?? [],
       externalId: args.externalId,
       status: args.status,
+      forwarded: args.forwarded ?? false,
+      contactReaction: args.contactReaction ?? null,
+      contactReactionAt: args.contactReaction ? args.createdAt : null,
+      location: args.location ?? null,
+      replyToMessageId: args.replyToMessageId ?? null,
+      held: args.held ?? false,
+      templateName: args.templateName ?? null,
+      templateLanguage: args.templateName ? "es" : null,
+      replyButtons: args.replyButtons ?? null,
       createdAt: args.createdAt,
     })
     .returning({ id: message.id })
@@ -801,6 +822,15 @@ await db.insert(user).values([
     emailVerified: true,
     ...SEED_TERMS,
   },
+  {
+    id: CAJA_ID,
+    name: "Paula Ríos",
+    firstName: "Paula",
+    lastName: "Ríos",
+    email: "caja@odentia.dev",
+    emailVerified: true,
+    ...SEED_TERMS,
+  },
 ])
 const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
@@ -835,6 +865,7 @@ await db.insert(member).values([
     role: "dentist",
     createdAt: new Date(),
   },
+  { id: randomUUID(), organizationId: ORG_A, userId: CAJA_ID, role: "cashier", createdAt: new Date() },
   {
     id: randomUUID(),
     organizationId: ORG_B,
@@ -1178,6 +1209,43 @@ await seedMessage({
   status: "received",
   createdAt: hoursAgo(1),
 })
+// Fase 7 de la Bandeja: lo que antes se perdía se ve. Sofi le propuso un horario
+// y Rosa reaccionó con 👍 (no confirma nada), reenvió una promoción ajena y mandó
+// su ubicación.
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "¿Te acomoda mañana a las 17:30 con la Dra. Ana Torres?",
+  externalId: "seed-msg-rosa-propuesta",
+  status: "read",
+  createdAt: new Date(hoursAgo(1).getTime() + 60_000),
+  contactReaction: "👍",
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Promo 2x1 en blanqueamiento hasta el viernes",
+  externalId: "seed-msg-rosa-reenvio",
+  status: "received",
+  createdAt: new Date(hoursAgo(1).getTime() + 120_000),
+  forwarded: true,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Ubicación: Av. Larco 345, Miraflores",
+  contentType: "location",
+  externalId: "seed-msg-rosa-ubicacion",
+  status: "received",
+  createdAt: new Date(hoursAgo(1).getTime() + 180_000),
+  location: { latitude: -12.1219, longitude: -77.0297, address: "Av. Larco 345, Miraflores" },
+})
 
 const convJorge = await seedConversation({
   orgId: ORG_A,
@@ -1472,6 +1540,7 @@ const carlosTopic = await createHandoff(db, ORG_A, null, {
     "Carlos consultó el costo de una extracción de muela del juicio; Sofi no da precios inventados y derivó con prioridad alta.",
   priority: "alta",
   createdBy: "agent",
+  kind: "precio",
 })
 // El agente no se calla (ADR 0050): responde lo que sabe y anota cuando vuelve a preguntar por el tema.
 await seedMessage({
@@ -1522,6 +1591,176 @@ await createHandoff(db, ORG_A, null, {
   priority: "media",
   assigneeUserId: LUIS_ID,
   createdBy: "agent",
+})
+
+// R3 del pulido de la Bandeja: un pago le llega a caja (Paula), que lo responde desde Inicio.
+const convAndres = await seedConversation({
+  orgId: ORG_A,
+  contactId: contactIdByName.get("Andrés Vega")!,
+  connectionId: connA.id,
+  thread: "seed-thread-andres",
+  unreadCount: 1,
+  lastInboundAt: hoursAgo(1),
+  lastOutboundAt: new Date(hoursAgo(1).getTime() + 60_000),
+  lastMessageAt: new Date(hoursAgo(1).getTime() + 60_000),
+})
+const andresAsked = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convAndres.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Ya les transferí S/ 180 por la limpieza, ¿les llegó?",
+  externalId: "seed-msg-andres-1",
+  status: "received",
+  createdAt: hoursAgo(1),
+})
+await createHandoff(db, ORG_A, null, {
+  conversationId: convAndres.id,
+  reason: "Pregunta si llegó su transferencia",
+  summary: "Escribió: «Ya les transferí S/ 180 por la limpieza, ¿les llegó?»",
+  priority: "media",
+  createdBy: "agent",
+  kind: "pago",
+  sourceMessageId: andresAsked.id,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convAndres.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Eso lo revisa caja de Dental Smile: te confirman hoy.",
+  externalId: "seed-msg-andres-2",
+  status: "read",
+  createdAt: new Date(hoursAgo(1).getTime() + 60_000),
+})
+
+// R1: Ana respondió a Patricia pasadas las 24 horas. La respuesta queda «Por
+// entregar» y salió «Ver respuesta»; el tema ya está resuelto (decisión 4).
+const convPatricia = await seedConversation({
+  orgId: ORG_A,
+  contactId: contactIdByName.get("Patricia León")!,
+  connectionId: connA.id,
+  thread: "seed-thread-patricia",
+  lastInboundAt: hoursAgo(30),
+  lastOutboundAt: new Date(hoursAgo(2).getTime() + 60_000),
+  lastMessageAt: new Date(hoursAgo(2).getTime() + 60_000),
+})
+const patriciaAsked = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convPatricia.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿La limpieza incluye la aplicación de flúor?",
+  externalId: "seed-msg-patricia-1",
+  status: "read",
+  createdAt: hoursAgo(30),
+})
+const patriciaTopic = await createHandoff(db, ORG_A, null, {
+  conversationId: convPatricia.id,
+  reason: "Pregunta si la limpieza incluye flúor",
+  summary: "Escribió: «¿La limpieza incluye la aplicación de flúor?»",
+  priority: "baja",
+  createdBy: "agent",
+  sourceMessageId: patriciaAsked.id,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convPatricia.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Eso te lo confirma el equipo de Dental Smile.",
+  externalId: "seed-msg-patricia-2",
+  status: "read",
+  createdAt: new Date(hoursAgo(30).getTime() + 60_000),
+})
+await claimHandoff(db, ORG_A, ANA_ID, patriciaTopic.id)
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convPatricia.id,
+  direction: "out",
+  senderKind: "user",
+  senderUserId: ANA_ID,
+  body: "Sí, Patricia: la limpieza incluye la aplicación de flúor, sin costo adicional.",
+  externalId: "seed-msg-patricia-3",
+  status: "held",
+  held: true,
+  replyToMessageId: patriciaAsked.id,
+  createdAt: hoursAgo(2),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convPatricia.id,
+  direction: "out",
+  senderKind: "agent",
+  contentType: "template",
+  body: "Hola, Patricia. Dental Smile respondió tu consulta. Toca «Ver respuesta» para leerla.",
+  templateName: ANSWER_READY_MESSAGE.template,
+  replyButtons: [{ id: replyId("ver_respuesta", convPatricia.id), title: "Ver respuesta" }],
+  externalId: "seed-msg-patricia-4",
+  status: "delivered",
+  createdAt: new Date(hoursAgo(2).getTime() + 60_000),
+})
+if (patriciaTopic.taskId) await updateTask(db, ORG_A, patriciaTopic.taskId, { status: "done", actorUserId: ANA_ID })
+
+// Tablero 4b: Lucía escribió por Instagram hace más de un día y nadie le
+// respondió. Instagram ya no deja escribirle; tiene su WhatsApp marcado, así
+// que la Bandeja ofrece «Escribirle por WhatsApp». Nada se envía.
+const igConnection = await createConnection(
+  db,
+  ORG_A,
+  secretsKey,
+  {
+    channel: "instagram",
+    provider: "instagram",
+    displayName: "Instagram Dental Smile",
+    config: { instagramId: "seed-ig", accessToken: "seed-dev", appSecret: "seed-dev" },
+  },
+  { fetch, validateExternal: false },
+)
+await db.insert(contactIdentity).values({
+  organizationId: ORG_A,
+  contactId: contactIdByName.get("Lucía Fernández")!,
+  channel: "instagram",
+  externalUserId: "ig:lucia.fernandez",
+  displayName: "Lucía Fernández",
+})
+const convLuciaIg = await seedConversation({
+  orgId: ORG_A,
+  contactId: contactIdByName.get("Lucía Fernández")!,
+  connectionId: igConnection.id,
+  thread: "ig:lucia.fernandez",
+  unreadCount: 1,
+  lastInboundAt: hoursAgo(28),
+  lastMessageAt: new Date(hoursAgo(28).getTime() + 60_000),
+})
+const luciaIgAsked = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLuciaIg.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Hola, ¿hacen descuento en el blanqueamiento si vamos dos?",
+  externalId: "seed-ig-lucia-1",
+  status: "received",
+  createdAt: hoursAgo(28),
+})
+await createHandoff(db, ORG_A, null, {
+  conversationId: convLuciaIg.id,
+  reason: "Pide descuento en el blanqueamiento para dos",
+  summary: "Escribió: «Hola, ¿hacen descuento en el blanqueamiento si vamos dos?»",
+  priority: "media",
+  assigneeUserId: ANA_ID,
+  createdBy: "agent",
+  sourceMessageId: luciaIgAsked.id,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLuciaIg.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Eso lo ve el equipo de Dental Smile: te escriben por aquí.",
+  externalId: "seed-ig-lucia-2",
+  status: "read",
+  createdAt: new Date(hoursAgo(28).getTime() + 60_000),
 })
 
 // --- Pacientes + clínica (org A) ---
@@ -3493,6 +3732,33 @@ const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
 if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
+
+// R3: la duda clínica de Rosa le llega a quien la atendió por última vez, que
+// la responde desde «Te espera» de Inicio, sin entrar a la Bandeja.
+const rosaClinicalAt = new Date(Date.now() - 40 * 60_000)
+const rosaAsked = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿Puedo tomar ibuprofeno después de la extracción?",
+  externalId: "seed-msg-rosa-ibuprofeno",
+  status: "received",
+  createdAt: rosaClinicalAt,
+})
+await db
+  .update(conversation)
+  .set({ lastInboundAt: rosaClinicalAt, lastMessageAt: rosaClinicalAt })
+  .where(eq(conversation.id, convRosa.id))
+await createHandoff(db, ORG_A, null, {
+  conversationId: convRosa.id,
+  reason: "Duda clínica: ibuprofeno después de la extracción",
+  summary: "Escribió: «¿Puedo tomar ibuprofeno después de la extracción?»",
+  priority: "media",
+  createdBy: "agent",
+  clinical: true,
+  sourceMessageId: rosaAsked.id,
+})
 for (const seed of [
   seedAgent,
   seedAutomation,

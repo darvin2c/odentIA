@@ -353,16 +353,16 @@ describe("la conexión, en palabras", () => {
 describe("Bandeja, pasadas las 24 horas", () => {
   it("dice cuándo escribió la persona por última vez, antes de escribir", () => {
     expect(closedWindowNotice("Lucía Paredes", minutesAgo(60 * 24 * 2), since)).toEqual({
-      lead: "Lucía Paredes escribió por última vez hace 2 días.",
-      rest: "Pasadas 24 horas, WhatsApp solo deja enviarle un mensaje aprobado. Cuando responda, podrás escribirle con libertad.",
+      lead: "Pasaron 24 horas desde su último mensaje: Lucía Paredes escribió hace 2 días.",
+      rest: "Ahora WhatsApp solo deja enviarle un mensaje aprobado. Cuando responda, podrás escribirle con libertad.",
     })
   })
 
   it("si nunca escribió lo dice; si el servidor no dio la fecha, no supone ninguna de las dos cosas", () => {
     expect(closedWindowNotice("Lucía Paredes", null, since).lead).toBe("Lucía Paredes todavía no escribió por aquí.")
-    expect(closedWindowNotice("Lucía Paredes", undefined, since).lead).toBe("Pasaron más de 24 horas desde que Lucía Paredes escribió.")
+    expect(closedWindowNotice("Lucía Paredes", undefined, since).lead).toBe("Pasaron 24 horas desde su último mensaje.")
     expect(closedWindowNotice("Lucía Paredes", "no es una fecha", since).lead).toBe(
-      "Pasaron más de 24 horas desde que Lucía Paredes escribió.",
+      "Pasaron 24 horas desde su último mensaje.",
     )
   })
 

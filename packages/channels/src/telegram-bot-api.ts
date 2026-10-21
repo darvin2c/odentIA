@@ -48,6 +48,12 @@ interface TelegramMessage {
   video_note?: TelegramFile
   /** Mensaje que la persona citó al responder. */
   reply_to_message?: { message_id: number }
+  /** Viene reenviado de otro chat (Bot API 7: `forward_origin`; antes, `forward_date`). */
+  forward_origin?: unknown
+  forward_date?: number
+  location?: { latitude: number; longitude: number }
+  /** Un lugar con nombre: trae su ubicación, título y dirección. */
+  venue?: { location?: { latitude: number; longitude: number }; title?: string; address?: string }
 }
 
 /** Archivo de Bot API (Document, Voice, Audio, Video, VideoNote). */
@@ -110,7 +116,25 @@ function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound
   const name = displayNameOf(sender)
   const withName = {
     ...(name ? { senderDisplayName: name } : {}),
-    ...(msg.reply_to_message ? { replyToExternalId: `tg:${threadId}:${msg.reply_to_message.message_id}` } : {}),
+    ...(msg.reply_to_message
+      ? { replyToExternalId: `tg:${threadId}:${msg.reply_to_message.message_id}` }
+      : {}),
+    ...(msg.forward_origin || msg.forward_date ? { forwarded: true } : {}),
+  }
+  // Un lugar (con nombre y dirección) o una ubicación suelta.
+  const place = msg.venue?.location ?? msg.location
+  if (place && typeof place.latitude === "number" && typeof place.longitude === "number") {
+    return {
+      ...base,
+      ...withName,
+      content: {
+        type: "location",
+        latitude: place.latitude,
+        longitude: place.longitude,
+        ...(msg.venue?.title ? { name: msg.venue.title } : {}),
+        ...(msg.venue?.address ? { address: msg.venue.address } : {}),
+      },
+    }
   }
   if (typeof msg.text === "string" && msg.text) {
     return { ...base, ...withName, content: { type: "text", text: msg.text } }
@@ -129,7 +153,7 @@ function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound
       },
     }
   }
-  // Sin texto ni media soportada (sticker, encuesta, ubicación, contacto…):
+  // Sin texto ni media soportada (sticker, encuesta, contacto…):
   // no entra a la bandeja ni despierta al agente.
   return null
 }

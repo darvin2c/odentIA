@@ -29,6 +29,7 @@ import { Route as OrgSettingsRouteImport } from './routes/_org/settings'
 import { Route as OrgTasksRouteImport } from './routes/_org/tasks'
 import { Route as BajaTokenRouteImport } from './routes/baja.$token'
 import { Route as CTokenRouteImport } from './routes/c.$token'
+import { Route as EmbedIndexRouteImport } from './routes/embed.index'
 import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
 import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
 import { Route as OrgAgentAdministradorRouteImport } from './routes/_org/agent.administrador'
@@ -176,6 +177,11 @@ const BajaTokenRoute = BajaTokenRouteImport.update({
 const CTokenRoute = CTokenRouteImport.update({
   id: '/c/$token',
   path: '/c/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmbedIndexRoute = EmbedIndexRouteImport.update({
+  id: '/embed/',
+  path: '/embed/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmbedConnectionIdRoute = EmbedConnectionIdRouteImport.update({
@@ -459,6 +465,7 @@ export interface FileRoutesByFullPath {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/embed/': typeof EmbedIndexRoute
   '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
@@ -527,6 +534,7 @@ export interface FileRoutesByTo {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/embed': typeof EmbedIndexRoute
   '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
@@ -599,6 +607,7 @@ export interface FileRoutesById {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/embed/': typeof EmbedIndexRoute
   '/_org/agent/administrador': typeof OrgAgentAdministradorRoute
   '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
   '/_org/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
@@ -671,6 +680,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/embed/'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -739,6 +749,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/embed'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -810,6 +821,7 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/embed/'
     | '/_org/agent/administrador'
     | '/_org/agent/approvals'
     | '/_org/agent/asistente-clinico'
@@ -869,6 +881,7 @@ export interface RootRouteChildren {
   BajaTokenRoute: typeof BajaTokenRoute
   CTokenRoute: typeof CTokenRoute
   EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
+  EmbedIndexRoute: typeof EmbedIndexRoute
   ResumenLunesBajaTokenRoute: typeof ResumenLunesBajaTokenRoute
 }
 
@@ -1012,6 +1025,13 @@ declare module '@tanstack/react-router' {
       path: '/c/$token'
       fullPath: '/c/$token'
       preLoaderRoute: typeof CTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/embed/': {
+      id: '/embed/'
+      path: '/embed'
+      fullPath: '/embed/'
+      preLoaderRoute: typeof EmbedIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/embed/$connectionId': {
@@ -1532,6 +1552,7 @@ const rootRouteChildren: RootRouteChildren = {
   BajaTokenRoute: BajaTokenRoute,
   CTokenRoute: CTokenRoute,
   EmbedConnectionIdRoute: EmbedConnectionIdRoute,
+  EmbedIndexRoute: EmbedIndexRoute,
   ResumenLunesBajaTokenRoute: ResumenLunesBajaTokenRoute,
 }
 export const routeTree = rootRouteImport

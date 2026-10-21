@@ -1,9 +1,10 @@
-import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
+import { Badge, Button, buttonVariants, cn, Textarea } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
+import { channelLabel } from "../../lib/channels"
 import type { WaitingRow } from "../../lib/workspace"
 import { HandoffUrgency } from "../agent/handoff-badges"
 
@@ -14,8 +15,15 @@ export interface WaitingHandlers {
   onAdvice: (row: RowOf<"advice">) => void
   onUnreached: () => void
   onBudgets: (row: RowOf<"budgets">) => void
-  /** «Tomar» un caso que nadie ha tomado; sin esto (sin permiso) la fila solo abre el caso. */
+  /** «Tomar este tema» de un caso que nadie ha tomado; sin esto (sin permiso) la fila solo abre el caso. */
   onTake?: (row: RowOf<"case">) => void
+  /**
+   * «Responder» un tema aquí mismo (R3 y decisión 3 del pulido de la Bandeja):
+   * el odontólogo, su duda clínica; caja, un pago. Devuelve el error en palabras, o nulo.
+   */
+  onReply?: (row: RowOf<"case">, text: string) => Promise<string | null>
+  /** Quien no abre el resumen del caso (caja): la fila de un tema que responde abre la respuesta. */
+  noCaseBrief?: boolean
   /** «Hecha» en una tarea; sin esto (sin permiso) la fila solo la abre. */
   onDone?: (row: RowOf<"task">) => void
   /** «Revisada» una posible ficha repetida: cierra la tarea que la recuerda. */
@@ -62,7 +70,7 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
 
 function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "unreached") return <AgentMark className="rounded-full" />
-  if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
+  if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.urgent ?? row.priority === "alta"} />
   if (row.kind === "staleEncounter") return <TypeIcon icon={Stethoscope} />
   if (row.kind === "registrationDone") return <TypeIcon icon={UsersRound} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
@@ -81,7 +89,7 @@ function iconOf(row: WaitingRow): ReactNode {
 
 /** La insignia que acompaña al título: la urgencia de un caso o una tarea vencida. */
 function badgeOf(row: WaitingRow): ReactNode {
-  if (row.kind === "case") return <HandoffUrgency priority={row.priority} />
+  if (row.kind === "case") return <HandoffUrgency priority={row.priority} urgent={row.urgent} />
   if (row.kind === "task" && row.due === "overdue") return <Badge variant="destructive">Vencida</Badge>
   return null
 }
@@ -156,11 +164,15 @@ type QuickAction = { id: string; label: string; run: () => void; primary: boolea
  * confirmar. Son botones aparte de la fila, que sigue abriendo el caso, la
  * tarea o la persona.
  */
-function quickActions(row: WaitingRow, handlers: WaitingHandlers): QuickAction[] {
-  // «Tomar» toma la conversación del caso, como en la Bandeja: sin conversación la fila lleva a su tarea.
+function quickActions(row: WaitingRow, handlers: WaitingHandlers, reply: { open: boolean; toggle: () => void }): QuickAction[] {
+  // Lo que se responde aquí no se toma antes: responder ya lo toma (decisión 3 del pulido).
+  if (row.kind === "case" && row.canReply && handlers.onReply) {
+    return reply.open ? [] : [{ id: "responder", label: "Responder", run: reply.toggle, primary: true }]
+  }
+  // «Tomar este tema» toma el tema, como en la Bandeja: sin conversación la fila lleva a su tarea.
   if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
     const take = handlers.onTake
-    return [{ id: "tomar", label: "Tomar", run: () => take(row), primary: true }]
+    return [{ id: "tomar", label: "Tomar este tema", run: () => take(row), primary: true }]
   }
   if (row.kind === "registrationDone" && handlers.onArrived) {
     const arrived = handlers.onArrived
@@ -189,13 +201,66 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers): QuickAction[]
   return []
 }
 
+/**
+ * Responder un tema sin salir de Inicio (tablero 4d del pulido de la Bandeja):
+ * su pregunta, la respuesta y «Enviar y resolver». Es la misma respuesta de la
+ * Bandeja: cita su pregunta y el tema queda resuelto.
+ */
+function TopicReply({ row, context, onReply, onClose }: { row: RowOf<"case">; context: HomeTextContext; onReply: NonNullable<WaitingHandlers["onReply"]>; onClose: () => void }) {
+  const id = useId()
+  const [text, setText] = useState("")
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
+  return (
+    <form
+      className="flex basis-full flex-col gap-2 pb-3 pl-11 pr-2"
+      onSubmit={async (event) => {
+        event.preventDefault()
+        if (!text.trim() || pending) return
+        setPending(true)
+        const failed = await onReply(row, text.trim())
+        setPending(false)
+        setError(failed)
+        if (!failed) setText("")
+      }}
+    >
+      {row.quote ? <p className="text-sm">«{row.quote}»</p> : null}
+      <label htmlFor={id} className="sr-only">
+        Tu respuesta para {first}
+      </label>
+      <Textarea id={id} rows={2} value={text} placeholder={`Escribe tu respuesta para ${first}…`} onChange={(event) => setText(event.target.value)} />
+      <p className="text-xs text-muted-foreground">
+        Se envía por {row.channel ? channelLabel(row.channel) : "su conversación"}, citando su pregunta. {context.receptionName} sigue con lo demás.
+      </p>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <span className="flex flex-wrap gap-2">
+        <Button type="submit" size="sm" className="min-h-11 sm:min-h-8" disabled={pending || !text.trim()}>
+          {pending ? "Enviando…" : "Enviar y resolver"}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" disabled={pending} onClick={onClose}>
+          Cancelar
+        </Button>
+      </span>
+    </form>
+  )
+}
+
 function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow; context: HomeTextContext; handlers: WaitingHandlers; className?: string }) {
   const text = waitingText(row, context)
   const badge = badgeOf(row)
-  const actions = quickActions(row, handlers)
+  const [replying, setReplying] = useState(false)
+  const actions = quickActions(row, handlers, { open: replying, toggle: () => setReplying(true) })
   const key = waitingKey(row)
   const busy = handlers.busyKey === key
   const busyId = busy ? (handlers.busyAction ?? actions[0]?.id) : null
+  // Quien no abre el resumen del caso (caja) y ya no puede responder desde aquí
+  // (Instagram o Messenger cerrados): la fila lo dice, sin un botón que no lleva a nada.
+  const stuck = row.kind === "case" && !row.canReply && handlers.noCaseBrief === true
   const content = (
     <>
       {iconOf(row)}
@@ -211,21 +276,30 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         </span>
       </span>
       {/* Con un botón propio, la fila solo abre: a la vista lo dice el botón, y la fila sigue nombrando a dónde lleva para el lector de pantalla. En teléfono la acción no ocupa sitio, pero sigue nombrando la fila. */}
-      {actions.length > 0 ? (
+      {actions.length > 0 || replying ? (
         <span className="sr-only">{waitingOpenText(row, context)}</span>
       ) : (
-        <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
+        <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">
+          {stuck ? "Lo responde recepción en la Bandeja" : text.action}
+        </span>
       )}
     </>
   )
   const link = linkOf(row, context, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
-    <li className={cn("flex items-center gap-2", className)}>
-      {link ?? (
-        <Button type="button" variant="ghost" className={ROW} onClick={() => open(row, handlers)}>
+    <li className={cn("flex flex-wrap items-center gap-2", className)}>
+      {link ?? (stuck ? (
+        <div className={cn(ROW, "cursor-default hover:bg-transparent")}>{content}</div>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          className={ROW}
+          onClick={() => (row.kind === "case" && row.canReply && handlers.onReply && handlers.noCaseBrief ? setReplying(true) : open(row, handlers))}
+        >
           {content}
         </Button>
-      )}
+      ))}
       {actions.length > 0 ? (
         <span className="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center">
           {actions.map((action) => (
@@ -243,6 +317,9 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
             </Button>
           ))}
         </span>
+      ) : null}
+      {replying && row.kind === "case" && handlers.onReply ? (
+        <TopicReply row={row} context={context} onReply={handlers.onReply} onClose={() => setReplying(false)} />
       ) : null}
     </li>
   )

@@ -338,7 +338,7 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       db,
       secretsKey: deps.secretsKey,
-      cookieDomain: deps.cookieDomain,
+      ...(deps.registrationRemoteAddress ? { remoteAddress: deps.registrationRemoteAddress } : {}),
     }),
   )
   app.route(

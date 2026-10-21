@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
+import { configureMetaGraphVersion } from "./meta-graph.js"
 import { instagramAdapter } from "./meta-messaging.js"
 
 // Flujo Instagram API con Instagram Login (docs primarias):
@@ -124,6 +125,27 @@ it("rechaza texto mayor a 1000 bytes y exige instagramId", async () => {
   await expect(
     instagramAdapter.sendMessage({}, { to: "ig:1", kind: { type: "text", text: "hola" } }, { fetch }),
   ).rejects.toThrow("instagramId")
+})
+
+it("Instagram usa la misma versión de Meta que WhatsApp y el botón de Facebook", async () => {
+  const urls: string[] = []
+  const stub = (async (url: string) => {
+    urls.push(String(url))
+    return new Response(JSON.stringify({ recipient_id: "IGSID9", message_id: "mid.v26" }), {
+      status: 200,
+    })
+  }) as unknown as typeof fetch
+  configureMetaGraphVersion("v26.0")
+  try {
+    await instagramAdapter.sendMessage(
+      config,
+      { to: "ig:IGSID9", kind: { type: "text", text: "Hola" } },
+      { fetch: stub },
+    )
+  } finally {
+    configureMetaGraphVersion(null)
+  }
+  expect(urls).toEqual(["https://graph.instagram.com/v26.0/IG1/messages"])
 })
 
 it("validateConnection usa username de la cuenta", async () => {

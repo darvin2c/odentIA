@@ -86,6 +86,8 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
       select distinct conversation_id as id from agent_run_ledger
       where organization_id = ${orgId} and conversation_id is not null
         and started_at >= ${at}::timestamptz and status in ('ok', 'handoff')
+        -- Las pruebas del chat web no son conversaciones atendidas (fase 6 del pulido).
+        and conversation_id not in (select id from conversation where organization_id = ${orgId} and is_test)
     ), corrected as (
       select a.id from attended a
       where exists (

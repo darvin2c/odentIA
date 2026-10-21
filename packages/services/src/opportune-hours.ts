@@ -191,3 +191,23 @@ export function insideAgentHours(at: Date, timeZone: string, agent: OpportuneSch
     ? minute >= agent.fromMin && minute < agent.untilMin
     : minute >= agent.fromMin || minute < agent.untilMin
 }
+
+/**
+ * El instante en que se cumplen `minutes` minutos oportunos desde `at`,
+ * contando solo dentro de los tramos del horario (lo que pasa con la clínica
+ * cerrada no cuenta). Nulo si el horario no tiene tramos en un mes.
+ */
+export function addOpportuneMinutes(at: Date, minutes: number, schedule: OpportuneSchedule): Date | null {
+  let left = minutes * 60_000
+  if (left <= 0) return at
+  for (let offset = 0; offset < 32; offset++) {
+    for (const window of windowsOf(schedule, shiftedDay(at, schedule.timeZone, offset))) {
+      const start = Math.max(window.start.getTime(), at.getTime())
+      const end = window.end.getTime()
+      if (end <= start) continue
+      if (end - start >= left) return new Date(start + left)
+      left -= end - start
+    }
+  }
+  return null
+}

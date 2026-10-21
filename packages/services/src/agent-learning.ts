@@ -186,6 +186,8 @@ export async function syncReviewQueue(tx: Db, orgId: string): Promise<number> {
     ) nxt on true
     where t.organization_id = ${orgId} and t.outcome = 'enviada'
       and t.created_at >= now() - make_interval(days => ${REVIEW_WINDOW_DAYS})
+      -- Una prueba del chat web no es una respuesta a una persona (fase 6 del pulido).
+      and not exists (select 1 from conversation tc where tc.organization_id = t.organization_id and tc.id = t.conversation_id and tc.is_test)
       and not exists (
         select 1 from agent_review_item r where r.organization_id = t.organization_id and r.trace_id = t.id)
     order by t.created_at desc

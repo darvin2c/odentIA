@@ -181,7 +181,7 @@ it("un video y un video redondo entran como media de video", () => {
   })
 })
 
-it("sticker, encuesta y ubicación no entran como un mensaje vacío", () => {
+it("sticker y encuesta no entran como un mensaje vacío", () => {
   const sticker = parseTelegram({
     sticker: {
       width: 512,
@@ -211,10 +211,42 @@ it("sticker, encuesta y ubicación no entran como un mensaje vacío", () => {
       allows_multiple_answers: false,
     },
   })
-  const location = parseTelegram({ location: { latitude: -12.0464, longitude: -77.0428 } })
-  for (const got of [sticker, poll, location]) {
+  for (const got of [sticker, poll]) {
     expect(got).toEqual({ messages: [], statuses: [] })
   }
+})
+
+it("una ubicación y un lugar entran como ubicación; un reenviado se marca", () => {
+  const location = parseTelegram({ location: { latitude: -12.0464, longitude: -77.0428 } })
+  expect(location.messages[0]?.content).toEqual({
+    type: "location",
+    latitude: -12.0464,
+    longitude: -77.0428,
+  })
+  const venue = parseTelegram({
+    location: { latitude: -12.12, longitude: -77.03 },
+    venue: {
+      location: { latitude: -12.12, longitude: -77.03 },
+      title: "Dental Smile",
+      address: "Av. Larco 345, Miraflores",
+    },
+  })
+  expect(venue.messages[0]?.content).toEqual({
+    type: "location",
+    latitude: -12.12,
+    longitude: -77.03,
+    name: "Dental Smile",
+    address: "Av. Larco 345, Miraflores",
+  })
+  const forwarded = parseTelegram({
+    text: "Promo 2x1",
+    forward_origin: { type: "user", date: 1735689000, sender_user: { id: 9 } },
+  })
+  expect(forwarded.messages[0]).toMatchObject({
+    forwarded: true,
+    content: { type: "text", text: "Promo 2x1" },
+  })
+  expect(parseTelegram({ text: "Hola" }).messages[0]?.forwarded).toBeUndefined()
 })
 
 it("un documento sin tipo declarado no se toma por foto", () => {

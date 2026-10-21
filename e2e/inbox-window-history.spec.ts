@@ -69,10 +69,10 @@ test("con la ventana cerrada, los mensajes aprobados no tapan lo que la persona 
     await send.scrollIntoViewIfNeeded()
     await expect(send).toBeInViewport()
     await expect(lastSaid).toBeInViewport()
-    // Un mensaje de otro día dice cuándo, no solo la hora.
+    // Un mensaje de otro día: el separador dice qué día fue y la hora lleva la fecha completa en su título (fase 2 del pulido).
     const stamp = page.locator("time[datetime]").filter({ hasText: /\d/ }).last()
     await expect(stamp).toHaveAttribute("title", /\d{4}/)
-    expect(await stamp.textContent()).not.toMatch(/^\s*\d{1,2}:\d{2}\s*(a|p)\.\s?m\.\s*$/)
+    await expect(page.getByText(/^(Ayer|\p{Lu}\p{Ll}+, \d{1,2} de \p{Ll}+)$/u).last()).toBeVisible()
     await info.attach(`ventana-cerrada-${label}`, { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   }
 })

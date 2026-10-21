@@ -9,6 +9,8 @@ import {
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  askConfirmationAfterReaction,
+  deliverHeldReplies,
   handleAutomationReply,
   ingestInbound,
   isStopWord,
@@ -82,6 +84,17 @@ export async function processInbound(
         secretsKey: deps.secretsKey,
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
+      // Una reacción (👍) no es un mensaje: no despierta al agente. Sobre una cita
+      // propuesta, Sofi le pide el sí una vez con un texto fijo (decisión 7).
+      if (result.reaction) {
+        // En su punto de guardado: si no se le puede escribir, la reacción queda guardada igual.
+        await tx
+          .transaction((inner) => askConfirmationAfterReaction(inner, orgId, { ...result, emoji: result.reaction?.emoji ?? null }))
+          .catch((error: unknown) => {
+            if (!(error instanceof ServiceError)) throw error
+          })
+        return
+      }
       if (!result.created) return
       // Spam y bloqueados (ADR 0054): lo que escriben queda guardado, pero el
       // agente no lo atiende y el sistema no les responde. A quien está en
@@ -109,6 +122,9 @@ export async function processInbound(
       }
       if (screen.screen === "blocked") return
       if (screen.screen === "spam" && !screen.recheck) return
+      // Volvió a escribir: WhatsApp deja escribirle otra vez y salen las
+      // respuestas del equipo que quedaron por entregar (R1), antes que nada.
+      await tx.transaction((inner) => deliverHeldReplies(inner, orgId, result.conversationId))
       // Un botón de un mensaje automático («Confirmar», «No más recordatorios»)
       // y «BAJA» o «STOP» los resuelve el sistema: no llegan al modelo ni gastan
       // una corrida. Va en su propio punto de guardado: si su respuesta no puede

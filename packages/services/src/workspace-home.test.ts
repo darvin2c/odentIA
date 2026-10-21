@@ -1,9 +1,10 @@
 import { expect, it } from "vitest"
 import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingTask, type WaitingUnconfirmed } from "./workspace-home.js"
 
+// «Ahora» lo dice `urgent` (decisión 1 del pulido): aquí, la prioridad alta.
 const caseOf = (id: string, priority: string): WaitingCase => ({
-  id, priority, reason: `Caso ${id}`, contactName: "Elena Castro", channel: "whatsapp",
-  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null, unclaimed: true,
+  id, priority, urgent: priority === "alta", topicKind: "otro", reason: `Caso ${id}`, contactName: "Elena Castro", channel: "whatsapp",
+  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null, unclaimed: true, canReply: false, quote: null,
 })
 const taskOf = (id: string, due: WaitingTask["due"]): WaitingTask => ({
   id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null, opportunityTitle: null,

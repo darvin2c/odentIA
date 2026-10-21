@@ -505,8 +505,8 @@ export function closedWindowNotice(
   }
   const when = lastInboundAt ? since(lastInboundAt) : ""
   return {
-    lead: when ? `${name} escribió por última vez ${when}.` : `Pasaron más de 24 horas desde que ${name} escribió.`,
-    rest: "Pasadas 24 horas, WhatsApp solo deja enviarle un mensaje aprobado. Cuando responda, podrás escribirle con libertad.",
+    lead: when ? `Pasaron 24 horas desde su último mensaje: ${name} escribió ${when}.` : `Pasaron 24 horas desde su último mensaje.`,
+    rest: "Ahora WhatsApp solo deja enviarle un mensaje aprobado. Cuando responda, podrás escribirle con libertad.",
   }
 }
 

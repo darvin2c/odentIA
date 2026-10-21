@@ -260,6 +260,19 @@ export const agentHandoff = pgTable(
     askedMessageIds: jsonb("asked_message_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     /** Última vez que la persona volvió a preguntar por el tema. */
     askedAgainAt: timestamp("asked_again_at", { withTimezone: true }),
+    /**
+     * De qué trata, para saber a quién le llega (R3 de la Bandeja): una cita,
+     * un precio, una duda clínica (al odontólogo que la atiende), un pago (a
+     * caja) u otra cosa (a recepción). También dice qué puede retomar Sofi.
+     */
+    kind: text("kind").notNull().default("otro"),
+    /**
+     * Cuándo pasa a «Ahora»: dos horas de clínica abierta desde que espera una
+     * respuesta del equipo (decisión 1 del pulido). Vuelve a contar si el equipo
+     * responde con «Enviar, sigue pendiente». Una sola regla para la Bandeja,
+     * Inicio y el panel del agente.
+     */
+    urgentAt: timestamp("urgent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -270,6 +283,7 @@ export const agentHandoff = pgTable(
     index("agent_handoff_org_idx").on(table.organizationId, table.createdAt),
     index("agent_handoff_conversation_idx").on(table.conversationId),
     check("agent_handoff_priority_check", sql`${table.priority} in ('alta','media','baja')`),
+    check("agent_handoff_kind_check", sql`${table.kind} in ('cita','precio','clinico','pago','otro')`),
   ],
 )
 

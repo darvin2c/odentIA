@@ -17,7 +17,7 @@ import {
   getResolvePreview,
   listApprovedMessages,
   listInboxConversations,
-  listMessages,
+  listPersonMessages,
   markRead,
   OUTBOUND_MEDIA_MAX_BYTES,
   OUTBOUND_MEDIA_MIME_EXT,
@@ -28,6 +28,8 @@ import {
   sendApprovedMessage,
   sendOutbound,
   sendTeamReply,
+  replyByWhatsApp,
+  deleteWebchatTest,
   takeTopic,
   resolveTopic,
   setAgentStatus,
@@ -152,13 +154,14 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
+  // «Cargar anteriores» del hilo: la línea de tiempo de todos los canales de la persona (fase 4 del pulido).
   app.get("/:id/messages", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = messagesQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
-        listMessages(tx, orgId, c.req.param("id"), parsed.data),
+        listPersonMessages(tx, orgId, c.req.param("id"), parsed.data),
       )
       return c.json({ data: items, nextCursor })
     } catch (e) {
@@ -204,6 +207,33 @@ export function createConversationsRoute(deps: CrmDeps) {
           conversationId: c.req.param("id"),
           userId,
           content: { type: "text", text: parsed.data.text },
+          replyToMessageId: parsed.data.replyToMessageId ?? null,
+          keepPending: parsed.data.keepPending ?? false,
+        }),
+      ),
+    )
+  })
+
+  // «Borrar esta prueba» (fase 6 del pulido): solo una prueba del chat web, con todo lo que dejó.
+  app.post("/:id/delete-test", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ deleted: await deleteWebchatTest(tx, orgId, { conversationId: c.req.param("id") }) })),
+    )
+  })
+
+  // «Escribirle por WhatsApp» (tablero 4b del pulido): desde Instagram o
+  // Messenger pasadas las 24 horas, a su WhatsApp con «Ver respuesta».
+  app.post("/:id/messages/whatsapp", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = textInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        replyByWhatsApp(tx, orgId, {
+          conversationId: c.req.param("id"),
+          userId,
+          text: parsed.data.text,
           replyToMessageId: parsed.data.replyToMessageId ?? null,
           keepPending: parsed.data.keepPending ?? false,
         }),

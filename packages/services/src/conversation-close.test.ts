@@ -28,6 +28,7 @@ import {
   tickConversationCare,
 } from "./conversation-close.js"
 import { reopenConversation, sendOutbound } from "./conversations.js"
+import { askConfirmationAfterReaction, REACTION_CONFIRM_TEXT } from "./reactions.js"
 import { answerToTeamMember, resolveTopic, sendTeamReply, takeTopic } from "./topic-reply.js"
 import { recordTopicAskedAgain } from "./agent-operations.js"
 import { listInboxConversations } from "./inbox.js"
@@ -503,6 +504,13 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     await c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId, toUserId: c.receptionId }))
     const again = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))
     expect(again.map((n) => n.title)).toContain("Dueña te pasó el tema de Jorge Mamani")
+    // Un tema se contesta en la conversación: no se le pasa a quien no atiende conversaciones (caja).
+    const cashierId = `caja-${c.orgId}`
+    await ownerDb.insert(user).values({ id: cashierId, name: "Carla de Caja", email: `${cashierId}@cierre.test`, emailVerified: true })
+    await ownerDb.insert(member).values({ id: `m-${cashierId}`, userId: cashierId, organizationId: c.orgId, role: "cashier", createdAt: new Date() })
+    await expect(
+      c.run((tx) => takeTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.ownerId, toUserId: cashierId })),
+    ).rejects.toThrow("Esa persona no atiende conversaciones")
     // Un tema de otra conversación no se toma por esta.
     const other = await c.thread("Otro")
     await expect(c.run((tx) => takeTopic(tx, c.orgId, { conversationId: other.id, topicId: topic.id, userId: c.ownerId }))).rejects.toMatchObject({ status: 404 })
@@ -541,5 +549,32 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     await tick(c, new Date("2026-10-14T17:00:00Z"))
     const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!))
     expect(task).toMatchObject({ status: "done", settledReason: "Respondido por el equipo; la persona no volvió a preguntar" })
+  })
+})
+
+describe("una reacción no confirma una cita (decisión 7 de la Bandeja)", () => {
+  it("un 👍 a la cita propuesta pide el sí una sola vez, con texto fijo; sin propuesta o quitada, no dice nada", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Rosa Quispe", { lastInboundAt: new Date() })
+    await c.say(conv.id, "in", "¿Tienen el viernes?", new Date(Date.now() - 120_000))
+    const [offer] = await c.say(conv.id, "out", "¿Te acomoda el viernes 23 a las 15:00?", new Date(Date.now() - 60_000))
+    // Sin propuesta esperando su sí, una reacción no despierta a nadie.
+    expect(await c.run((tx) => askConfirmationAfterReaction(tx, c.orgId, { conversationId: conv.id, messageId: offer!.id, emoji: "👍" }))).toBe(false)
+    await ownerDb.insert(agentProposal).values({
+      organizationId: c.orgId,
+      conversationId: conv.id,
+      contactId: conv.contactId,
+      action: "reservar_cita",
+      payload: {},
+      idempotencyKey: randomUUID(),
+    })
+    // Quitar la reacción tampoco.
+    expect(await c.run((tx) => askConfirmationAfterReaction(tx, c.orgId, { conversationId: conv.id, messageId: offer!.id, emoji: null }))).toBe(false)
+    expect(await c.run((tx) => askConfirmationAfterReaction(tx, c.orgId, { conversationId: conv.id, messageId: offer!.id, emoji: "👍" }))).toBe(true)
+    const said = (await c.messages(conv.id)).filter((m) => m.direction === "out")
+    expect(said.at(-1)).toMatchObject({ body: REACTION_CONFIRM_TEXT, senderKind: "agent" })
+    // Otra reacción no lo repite; la propuesta sigue esperando, nada se confirmó.
+    expect(await c.run((tx) => askConfirmationAfterReaction(tx, c.orgId, { conversationId: conv.id, messageId: offer!.id, emoji: "❤️" }))).toBe(false)
+    expect((await ownerDb.select().from(agentProposal).where(eq(agentProposal.conversationId, conv.id)))[0]?.status).toBe("propuesta")
   })
 })

@@ -498,7 +498,7 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   }))
   // La tarea del caso lleva el nombre de siempre, sin la prioridad en código.
   const [caseTask] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!))
-  expect(caseTask?.title).toBe("Te lo pasó el agente: Pregunta por un reembolso")
+  expect(caseTask?.title).toBe("Te lo pasó Sofi: Pregunta por un reembolso")
   const access: WorkspaceAccess = { ...full, appointments: false, finance: false, clinical: false, configure: false }
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, rita, access))
   expect(rowsOf(home.waiting, "case")).toMatchObject([{ id: handoff.id, reason: "Pregunta por un reembolso", unclaimed: true }])

@@ -4,9 +4,14 @@
 // ingesta y el outbound usen el mismo pipeline que el resto de canales.
 //
 // Entrega honesta: `sendMessage` acepta el mensaje para entrega local y, si la
-// conexión configura `notifyUrl`, avisa con un POST al backend del sitio (útil
-// para refrescar el widget). El visitante lo recibe al hacer poll y recién
-// entonces el mensaje pasa a `delivered`. Nunca se finge lectura del visitante.
+// conexión configura `notifyUrl`, avisa con un POST firmado al backend del
+// sitio (útil para refrescar el widget). El visitante lo recibe al hacer poll y
+// recién entonces el mensaje pasa a `delivered`. Nunca se finge lectura del
+// visitante.
+//
+// Un solo chat por clínica (decisión 7 del pulido de la Bandeja), servido desde
+// su dirección: los sitios donde responde los guarda `webchat_site`, no la
+// configuración.
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import type {
   ChannelAdapter,
@@ -19,56 +24,61 @@ import type {
 /** Canal lógico de las identidades e hilos del widget. */
 export const WEBCHAT_CHANNEL = "webchat"
 
-/** El hilo y el remitente del visitante son su sesión: `webchat:<uuid>`. */
-export function newWebchatSessionId(): string {
-  return `webchat:${randomUUID()}`
+/**
+ * El hilo y el remitente del visitante son su sesión: `webchat:<uuid>`. La
+ * prueba desde Configuración lleva `webchat:prueba:<uuid>`: así lo sabe todo el
+ * camino (ingesta, aviso al sitio) sin consultar nada.
+ */
+export function newWebchatSessionId(opts: { test?: boolean } = {}): string {
+  return `webchat:${opts.test ? "prueba:" : ""}${randomUUID()}`
 }
 
 /** ¿Identificador de sesión/hilo del widget con formato válido? */
 export function isWebchatSessionId(value: string): boolean {
-  return /^webchat:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
+  return /^webchat:(prueba:)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
+}
+
+/** ¿Es una sesión de prueba de Configuración? */
+export function isWebchatTestSession(value: string): boolean {
+  return value.startsWith("webchat:prueba:")
 }
 
 export type WebchatConnectionConfig = {
-  /** Orígenes permitidos a incrustar el widget. Exactos (`https://tienda.test`)
-   * o `*.` + base (`https://*.odentia.localhost`, solo dev local). */
-  allowedOrigins: string[]
-  widgetTitle?: string
+  /** Color del botón y de la cabecera del chat (#rrggbb). */
   widgetColor?: string
+  /** El saludo: la primera burbuja de Sofi. */
   greeting?: string
-  /** Webhook opcional del sitio: POST al responder el operador/agente. */
+  /** Aviso opcional al sitio: POST firmado al responder el equipo o Sofi. */
   notifyUrl?: string
 }
-/** Sesión de visitante: 24 h de validez, alcance limitado a la sesión. */
-export const WEBCHAT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000
+/** Cómo se llama en la Bandeja quien escribe sin decir su nombre. No es un nombre: nunca se le saluda así. */
+export const WEBCHAT_PLACEHOLDER_NAMES = { visitor: "Visitante del chat web", test: "Prueba del chat web" } as const
 
-function readOrigins(config: Record<string, unknown>): string[] {
-  const raw = config["allowedOrigins"]
-  if (!Array.isArray(raw)) return []
-  return raw.filter((o): o is string => typeof o === "string")
+export function isWebchatPlaceholderName(name: string | null | undefined): boolean {
+  const trimmed = name?.trim()
+  return trimmed === WEBCHAT_PLACEHOLDER_NAMES.visitor || trimmed === WEBCHAT_PLACEHOLDER_NAMES.test
 }
 
-/** Normaliza un Origin (`https://tienda.test`, sin barra final, minúsculas). */
-export function normalizeOrigin(origin: string): string {
-  return origin.trim().toLowerCase().replace(/\/+$/, "")
-}
+/** Sesión de visitante: el chat la recuerda en su navegador 30 días (fase 6 del pulido). */
+export const WEBCHAT_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-/** ¿El Origin puede usar el widget de esta conexión? */
-export function isOriginAllowed(config: Record<string, unknown>, origin: string): boolean {
-  const want = normalizeOrigin(origin)
-  if (!want) return false
-  for (const entry of readOrigins(config)) {
-    const allowed = normalizeOrigin(entry)
-    if (allowed.startsWith("https://*.")) {
-      const base = allowed.slice("https://*.".length)
-      if (want.startsWith("https://") && (want === `https://${base}` || want.endsWith(`.${base}`))) {
-        return true
-      }
-    } else if (want === allowed) {
-      return true
+/**
+ * El sitio donde se cargó el chat, como lo dice el navegador (`location.origin`):
+ * esquema, dominio y puerto, en minúsculas. Nulo si no es una dirección web; en
+ * claro (`http:`) solo para pruebas locales.
+ */
+export function normalizeOrigin(origin: string): string | null {
+  try {
+    const url = new URL(origin.trim())
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null
+    if (url.protocol === "http:") {
+      const host = url.hostname.toLowerCase()
+      if (host !== "localhost" && host !== "127.0.0.1" && !host.endsWith(".localhost")) return null
     }
+    return url.origin.toLowerCase()
+  } catch {
+    return null
   }
-  return false
 }
 
 function pickString(config: Record<string, unknown>, key: string): string | null {
@@ -76,76 +86,55 @@ function pickString(config: Record<string, unknown>, key: string): string | null
   return typeof v === "string" && v.length > 0 ? v : null
 }
 
-function validOriginEntry(entry: string): boolean {
-  const v = entry.trim()
-  if (v.startsWith("https://*.")) return v.length > "https://*.".length && !v.includes("/", 9)
-  try {
-    const url = new URL(v)
-    if (url.protocol !== "https:" && url.protocol !== "http:") return false
-    // http solo en local: nunca un widget en claro en producción.
-    if (url.protocol === "http:") {
-      const host = url.hostname.toLowerCase()
-      if (host !== "localhost" && host !== "127.0.0.1" && !host.endsWith(".localhost")) return false
-    }
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Valida la config del widget; lanza con mensaje en español si es inválida. */
+/**
+ * Valida la config del widget; lanza con mensaje en español si es inválida. Lo
+ * que ya no se usa (orígenes y título: el chat se llama como la clínica y los
+ * sitios están en `webchat_site`) se descarta sin error.
+ */
 export function assertValidWebchatConfig(config: Record<string, unknown>): WebchatConnectionConfig {
-  const origins = readOrigins(config).map((o) => o.trim()).filter(Boolean)
-  if (origins.length === 0) {
-    throw new Error("El chat web exige al menos un origen permitido (allowedOrigins)")
-  }
-  if (origins.length > 50) throw new Error("El chat web admite hasta 50 orígenes permitidos")
-  for (const o of origins) {
-    if (!validOriginEntry(o)) throw new Error(`Origen permitido inválido: ${o}`)
-  }
   const notifyUrl = pickString(config, "notifyUrl")
   if (notifyUrl !== null) {
     try {
       const url = new URL(notifyUrl)
       if (url.protocol !== "https:") throw new Error()
     } catch {
-      throw new Error("notifyUrl debe ser una URL https válida")
+      throw new Error("La dirección del aviso al sitio debe empezar con https://")
     }
   }
-  const out: WebchatConnectionConfig = { allowedOrigins: [...new Set(origins)] }
-  const title = pickString(config, "widgetTitle")
+  const out: WebchatConnectionConfig = {}
   const color = pickString(config, "widgetColor")
   const greeting = pickString(config, "greeting")
-  if (title !== null) {
-    if (title.length > 80) throw new Error("El título del widget admite hasta 80 caracteres")
-    out.widgetTitle = title
-  }
   if (color !== null) {
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error("El color del widget debe ser hex (#rrggbb)")
+    if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error("Elige un color de la lista")
     out.widgetColor = color
   }
   if (greeting !== null) {
-    if (greeting.length > 500) throw new Error("El saludo del widget admite hasta 500 caracteres")
+    if (greeting.length > 500) throw new Error("El saludo admite hasta 500 caracteres")
     out.greeting = greeting
   }
   if (notifyUrl !== null) out.notifyUrl = notifyUrl
   return out
 }
 
-/** Token de sesión: `v1.<sessionId>.<exp>.<hmac>` (clave = webhookSecret). */
+/**
+ * Token de sesión: `v1.<sessionId>.<exp>.<hmac>`. La clave de las sesiones
+ * no es el código de los avisos (`webhookSecret`), que conoce quien hace la
+ * web: con él podría fabricar la sesión de un visitante y leer su
+ * conversación. La deriva el servidor y nunca se muestra.
+ */
 export function createWebchatToken(
-  webhookSecret: string,
+  sessionKey: string,
   sessionId: string,
   ttlMs: number = WEBCHAT_TOKEN_TTL_MS,
 ): string {
   const exp = String(Date.now() + ttlMs)
-  const sig = createHmac("sha256", webhookSecret).update(`${sessionId}.${exp}`, "utf8").digest("hex")
+  const sig = createHmac("sha256", sessionKey).update(`${sessionId}.${exp}`, "utf8").digest("hex")
   return `v1.${sessionId}.${exp}.${sig}`
 }
 
 /** Verifica alcance (formato + firma + expiración). Null = inválido. */
 export function verifyWebchatToken(
-  webhookSecret: string,
+  sessionKey: string,
   token: string,
 ): { sessionId: string; expiresAt: number } | null {
   const parts = token.split(".")
@@ -153,7 +142,7 @@ export function verifyWebchatToken(
   const sessionId = parts[1]
   const exp = Number(parts[2])
   if (!isWebchatSessionId(sessionId) || !Number.isInteger(exp) || exp <= Date.now()) return null
-  const expected = createHmac("sha256", webhookSecret)
+  const expected = createHmac("sha256", sessionKey)
     .update(`${sessionId}.${parts[2]}`, "utf8")
     .digest("hex")
   if (expected.length !== parts[3].length) return null
@@ -187,7 +176,7 @@ export interface WebchatVisitorPayload {
 /** Normaliza un mensaje del visitante (misma conversación del pipeline). */
 export function buildWebchatInbound(sessionId: string, payload: WebchatVisitorPayload): NormalizedInbound {
   const text = payload.text.trim()
-  const externalMessageId = `webchat:${sessionId.slice("webchat:".length)}:${payload.clientMessageId}`
+  const externalMessageId = `webchat:${sessionId.slice("webchat:".length).replace("prueba:", "prueba-")}:${payload.clientMessageId}`
   let sentAt = new Date().toISOString()
   if (payload.sentAt) {
     const parsed = new Date(payload.sentAt)
@@ -200,9 +189,15 @@ export function buildWebchatInbound(sessionId: string, payload: WebchatVisitorPa
     externalMessageId,
     externalThreadId: sessionId,
     senderExternalId: sessionId,
-    ...(payload.displayName?.trim() ? { senderDisplayName: payload.displayName.trim().slice(0, 80) } : {}),
+    // Sin pedirle el nombre (decisión 9): mientras no lo diga, es un visitante del chat.
+    senderDisplayName: payload.displayName?.trim()
+      ? payload.displayName.trim().slice(0, 80)
+      : isWebchatTestSession(sessionId)
+        ? WEBCHAT_PLACEHOLDER_NAMES.test
+        : WEBCHAT_PLACEHOLDER_NAMES.visitor,
     content: { type: "text", text },
     sentAt,
+    ...(isWebchatTestSession(sessionId) ? { test: true } : {}),
   }
 }
 
@@ -257,7 +252,8 @@ export const webChatAdapter: ChannelAdapter = {
     if (!body || typeof body !== "object") return empty
     const record = body as Record<string, unknown>
     const sessionId = record["sessionId"]
-    if (typeof sessionId !== "string" || !isWebchatSessionId(sessionId)) return empty
+    // Una prueba solo nace en Configuración, con su sesión: nunca por un aviso.
+    if (typeof sessionId !== "string" || !isWebchatSessionId(sessionId) || isWebchatTestSession(sessionId)) return empty
     const wire: unknown[] = Array.isArray(record["messages"])
       ? (record["messages"] as unknown[])
       : record["message"] !== undefined
@@ -296,7 +292,8 @@ export const webChatAdapter: ChannelAdapter = {
     const text = msg.kind.type === "text" ? msg.kind.text : ""
     if (!text.trim()) throw new Error("Chat web: texto vacío, no se envía")
     const notifyUrl = pickString(config, "notifyUrl")
-    if (!notifyUrl) {
+    // Una prueba de Configuración nunca avisa al sitio (fase 6 del pulido).
+    if (!notifyUrl || isWebchatTestSession(msg.to)) {
       // Sin push configurado el visitante lo recibe por polling; el id
       // local marca aceptación para entrega (delivered real al hacer poll).
       return { externalId: `webchat:local:${randomUUID()}` }
@@ -312,9 +309,14 @@ export const webChatAdapter: ChannelAdapter = {
     const rawBody = JSON.stringify(payload)
     let response: Response
     try {
+      // Firmado con la clave de la conexión (`x-webchat-signature`, la misma
+      // firma que se exige al sitio cuando escribe): el sitio sabe que es nuestro.
       response = await deps.fetch(notifyUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(deps.webhookSecret ? { "x-webchat-signature": signWebchatBody(deps.webhookSecret, rawBody) } : {}),
+        },
         body: rawBody,
       })
     } catch {
@@ -345,12 +347,8 @@ export const webChatAdapter: ChannelAdapter = {
   },
 
   async validateConnection(config) {
-    const valid = assertValidWebchatConfig(config)
-    // Sin red externa: la "validación" es la config de orígenes. El externalId
-    // deriva del set canónico de orígenes (único por conexión típica; el índice
-    // único provider+external lo protege ante duplicados exactos).
-    const canonical = JSON.stringify([...valid.allowedOrigins].sort())
-    const externalId = `webchat:${createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 16)}`
-    return { externalId, displayName: valid.widgetTitle ?? "Chat web" }
+    assertValidWebchatConfig(config)
+    // Sin red externa ni cuenta de proveedor: un id propio, sin choques entre clínicas.
+    return { externalId: `webchat:${randomUUID()}`, displayName: "Chat web" }
   },
 }
