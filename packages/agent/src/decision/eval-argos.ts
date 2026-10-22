@@ -8,8 +8,9 @@
  *
  *   Con ARGOS_RAZONAMIENTO=none|low|medium|high cambia cuánto piensa el modelo antes de escribir
  *   (sin ella, lo de la pantalla: `ARGOS_REASONING`). Con ARGOS_MODELO=deepseek-flash|deepseek-v4-pro (y
- *   DEEPSEEK_API_KEY) escribe DeepSeek en vez del modelo de Argos: solo para comparar, el modelo de
- *   Argos lo fija ADR 0052. Su costo sale de los precios de hora pico de DeepSeek.
+ *   DEEPSEEK_API_KEY) escribe DeepSeek en vez del modelo de Argos, y con ARGOS_MODELO=gpt-6-sol otro modelo
+ *   de OpenAI con la misma cuenta: solo para comparar, el modelo de Argos lo fija ADR 0052. Su costo sale de
+ *   los precios de hora pico de DeepSeek o de `OPENAI_PRICES`.
  *
  * Imprime, pregunta por pregunta, lo que respondió Argos al lado de la
  * respuesta correcta (`eval:argos-respuestas --json=`) y lo que costó cada
@@ -27,7 +28,7 @@ import { type AiUsageEntry, knownCostMicros, secretsKeyFromEnv } from "@odentia/
 import { sql } from "drizzle-orm"
 import { withAiMeter } from "../ai-usage.js"
 import { ARGOS_REASONING, type ArgosAskResult, type ArgosDeps, askArgos } from "../argos.js"
-import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
+import { createConfiguredChatModel, type LlmSpec, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 
 interface Question {
   id: string
@@ -66,8 +67,27 @@ const DEEPSEEK_PRICES = {
   "deepseek-flash": { hit: 0.006, miss: 0.3, out: 1.2 },
   "deepseek-v4-pro": { hit: 0.044, miss: 1.32, out: 3.96 },
 } as const
+/**
+ * Otro modelo de OpenAI para comparar, con la misma cuenta y el mismo camino que el de Argos (USD por millón;
+ * de sitios de terceros leídos el 2026-10-22, sin verificar en la página de OpenAI).
+ */
+const OPENAI_PRICES = {
+  "gpt-6-sol": { input: 2, cachedInput: 0.2, output: 10 },
+} as const
 const deepseek = (Object.keys(DEEPSEEK_PRICES) as Array<keyof typeof DEEPSEEK_PRICES>).find((name) => name === env.ARGOS_MODELO)
-if (env.ARGOS_MODELO && !deepseek) throw new Error("ARGOS_MODELO es deepseek-flash o deepseek-v4-pro")
+const openaiModel = (Object.keys(OPENAI_PRICES) as Array<keyof typeof OPENAI_PRICES>).find((name) => name === env.ARGOS_MODELO)
+if (env.ARGOS_MODELO && !deepseek && !openaiModel) throw new Error("ARGOS_MODELO es deepseek-flash, deepseek-v4-pro o gpt-6-sol")
+/** Lo que costó con el otro modelo de OpenAI: lo que escribió a su precio (se anota con el nombre del de Argos) y Jev al suyo. */
+const openaiMicros = (uses: AiUsageEntry[]) => {
+  const price = openaiModel ? OPENAI_PRICES[openaiModel] : null
+  if (!price) return 0
+  const written = uses.filter((use) => use.provider === "openai")
+  const rest = knownCostMicros(uses.filter((use) => use.provider !== "openai")) ?? 0
+  return written.reduce((sum, use) => {
+    const cached = use.cachedInputTokens ?? 0
+    return sum + ((use.inputTokens ?? 0) - cached) * price.input + cached * price.cachedInput + (use.outputTokens ?? 0) * price.output
+  }, rest)
+}
 if (deepseek && !env.DEEPSEEK_API_KEY) throw new Error("Falta DEEPSEEK_API_KEY")
 /** Lo que costó con DeepSeek: lo leído de su caché a su precio y el resto como no leído. */
 const deepseekMicros = (uses: AiUsageEntry[]) => {
@@ -85,6 +105,15 @@ const deps: ArgosDeps = {
   secretsKey: secretsKeyFromEnv(env.SECRETS_KEY ?? ""),
   // ARGOS_RAZONAMIENTO=none|low|medium|high: cuánto piensa el modelo antes de escribir.
   ...(reasoning ? { reasoning } : {}),
+  ...(openaiModel
+    ? {
+        // El mismo camino que `argosModel`, con otro modelo: con razonamiento va por /v1/responses.
+        createModel: (spec: LlmSpec) => {
+          const effort = reasoning ?? ARGOS_REASONING
+          return createConfiguredChatModel({ ...spec, modelName: openaiModel }, { explicitCache: true, temperature: 0, ...(effort === "none" ? {} : { reasoning: effort }) })
+        },
+      }
+    : {}),
   ...(deepseek
     ? {
         createModel: async () => {
@@ -143,7 +172,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
       uses.push(...entries)
     },
   )
-  const micros = deepseek ? deepseekMicros(uses) : (knownCostMicros(uses) ?? 0)
+  const micros = deepseek ? deepseekMicros(uses) : openaiModel ? openaiMicros(uses) : (knownCostMicros(uses) ?? 0)
   total += micros
   const writes = uses.filter((use) => use.provider === "openai").reduce((sum, use) => sum + use.calls, 0)
   const row = {
@@ -181,5 +210,5 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
 }
 console.log(`\n${out.length} preguntas · USD ${(total / 1_000_000).toFixed(5)} en total · USD ${(total / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta`)
 const jsonPath = arg("json", "")
-if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
+if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? openaiModel ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
 process.exit(0)
