@@ -160,6 +160,11 @@ export interface ConsentDocument {
   revokeSignature: { strokes?: number[][][] } | null
   pdfDocumentId: string | null
   pdfSha256: string | null
+  /** PDF de la revocación: el firmado no se toca. */
+  revokePdfDocumentId?: string | null
+  revokePdfSha256?: string | null
+  /** Declaración que aceptó al firmar; nula en lo firmado antes de guardarla. */
+  declarationSnapshot?: string | null
   /** Cómo se firmó; nulo en un pendiente y en lo firmado antes (se lee «en la clínica»). */
   signatureMethod: "clinica" | "papel" | "enlace" | null
   signatureLevel: "simple" | null

@@ -49,7 +49,7 @@ import {
 import { contactDecides } from "./responsibilities.js"
 import { listBudgets } from "./budgets.js"
 import { serviceRecipient } from "./budget-send.js"
-import { signConsentByLink } from "./clinical-forms.js"
+import { type SignatureEvidence, signConsentByLink } from "./clinical-forms.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { createContactNote } from "./crm-workspace.js"
@@ -820,11 +820,12 @@ export async function signPersonalLinkConsent(
   token: string,
   consentId: string,
   input: { docNumber: string; comprehensionConfirmed: boolean; signatureData: unknown },
+  evidence: SignatureEvidence = {},
 ): Promise<{ signed: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
   if (!link.patientId) throw linkExpired()
   await requireLinkConsent(tx, orgId, link, consentId)
-  await signConsentByLink(tx, orgId, link.row.contactId, consentId, input)
+  await signConsentByLink(tx, orgId, link.row.contactId, consentId, input, evidence)
   return { signed: true }
 }
 

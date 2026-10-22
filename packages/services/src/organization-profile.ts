@@ -29,13 +29,12 @@ export type SheetSize = (typeof SHEET_SIZES)[number]
 export interface RegionDefaults {
   /** ISO 4217 de curso legal; `null` si el país no está en la tabla. */
   currency: string | null
-  /** BCP 47: idioma principal del país (o el indicado) con su región. */
-  locale: string
   /**
-   * BCP 47 que se ofrecen para ese país, el propuesto primero. Quien los
-   * muestra escribe su nombre («Español (Perú)»); nadie teclea el código.
+   * BCP 47: español con la región del país (`es-PE`, `es-BR`). odentIA, sus
+   * mensajes y sus documentos están en español: una fecha escrita en otro
+   * idioma quedaría en medio de una frase en español (#48).
    */
-  locales: string[]
+  locale: string
   /** IANA; `null` cuando el país tiene varias zonas o no está en la tabla. */
   timezone: string | null
   sheetSize: SheetSize
@@ -63,23 +62,6 @@ const COUNTRY_CURRENCY: Record<string, string> = {
   ZA: "ZAR",
 }
 
-/** Idioma principal para el formato de números y fechas (no traduce la interfaz). */
-const COUNTRY_LANGUAGE: Record<string, string> = {
-  AR: "es", BO: "es", CL: "es", CO: "es", CR: "es", CU: "es", DO: "es", EC: "es", ES: "es",
-  GQ: "es", GT: "es", HN: "es", MX: "es", NI: "es", PA: "es", PE: "es", PR: "es", PY: "es",
-  SV: "es", UY: "es", VE: "es",
-  AO: "pt", BR: "pt", MZ: "pt", PT: "pt",
-  AU: "en", BB: "en", BS: "en", BZ: "en", CA: "en", GB: "en", GY: "en", IE: "en", IN: "en",
-  JM: "en", KE: "en", NG: "en", NZ: "en", PH: "en", SG: "en", TT: "en", US: "en", ZA: "en",
-  AT: "de", DE: "de", FR: "fr", HT: "fr", IT: "it", NL: "nl",
-}
-
-/**
- * Idiomas en los que se ofrece escribir fechas y números, combinados con el
- * país de la clínica. No traducen la interfaz; son los de `COUNTRY_LANGUAGE`.
- */
-const FORMAT_LANGUAGES = ["es", "en", "pt", "fr", "de", "it", "nl"] as const
-
 /** Países donde la hoja habitual es Carta (CLDR `paperSize` US-Letter); el resto usa A4 (ISO 216). */
 const LETTER_COUNTRIES = new Set([
   "BZ", "CA", "CL", "CO", "CR", "GT", "MX", "NI", "PA", "PH", "PR", "SV", "US", "VE",
@@ -95,17 +77,12 @@ const COUNTRY_TIMEZONE: Record<string, string> = {
   SV: "America/El_Salvador", UY: "America/Montevideo", VE: "America/Caracas",
 }
 
-/**
- * Lo que se propone al elegir país. `language` es el idioma de respaldo
- * cuando el país no tiene uno principal conocido (el del perfil actual).
- */
-export function regionPresetForCountry(countryCode: string, language = "es"): RegionDefaults {
+/** Lo que se propone al elegir país. */
+export function regionPresetForCountry(countryCode: string): RegionDefaults {
   const code = countryCode.trim().toUpperCase()
-  const locale = `${COUNTRY_LANGUAGE[code] ?? language}-${code}`
   return {
     currency: COUNTRY_CURRENCY[code] ?? null,
-    locale,
-    locales: [...new Set([locale, ...FORMAT_LANGUAGES.map((item) => `${item}-${code}`)])],
+    locale: `es-${code}`,
     timezone: COUNTRY_TIMEZONE[code] ?? null,
     sheetSize: LETTER_COUNTRIES.has(code) ? "Letter" : "A4",
   }
@@ -132,8 +109,11 @@ function assertLocale(value: string | null | undefined): string {
   try {
     const canonical = Intl.getCanonicalLocales(locale)[0]
     if (!canonical) throw new Error("Idioma vacío")
+    if (new Intl.Locale(canonical).language !== "es")
+      throw validation("odentIA está en español: el formato es el español del país de la clínica")
     return canonical
-  } catch {
+  } catch (error) {
+    if (error instanceof ServiceError) throw error
     throw validation("El idioma y formato debe ser una etiqueta BCP 47 válida")
   }
 }
@@ -202,15 +182,7 @@ export function initialOrgRegion(
 ): InitialOrgRegion {
   if (!input.countryCode?.trim()) throw validation("Indica el país de la clínica")
   const countryCode = assertCountryCode(input.countryCode)
-  let language = "es"
-  if (input.locale) {
-    try {
-      language = new Intl.Locale(input.locale).language
-    } catch {
-      // Se valida abajo con su propio mensaje.
-    }
-  }
-  const preset = regionPresetForCountry(countryCode, language)
+  const preset = regionPresetForCountry(countryCode)
   if (!input.currency && !preset.currency) {
     throw validation("Indica la moneda de la clínica: no la conocemos para ese país")
   }
@@ -287,13 +259,7 @@ export async function updateOrgRegion(
   if (input.applyCountryPreset) {
     // Lo que el país propone; cada valor indicado a mano lo reemplaza abajo.
     // Sirve para cualquier país: solo se pide lo que no se puede deducir.
-    let language = "es"
-    try {
-      language = new Intl.Locale(current.locale).language
-    } catch {
-      // Idioma guardado ilegible: vale el de respaldo.
-    }
-    const preset = regionPresetForCountry(countryCode, language)
+    const preset = regionPresetForCountry(countryCode)
     if (preset.currency) {
       set.currency = preset.currency
       fields.push("currency")

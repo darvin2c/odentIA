@@ -52,7 +52,7 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
   await link.click()
   const detail = page.getByRole("dialog", { name: "En qué se basó" })
   await expect(detail).toContainText(real!.replyText)
-  await expect(detail).toContainText("No consultó ninguna fuente en este turno")
+  await expect(detail).toContainText("No consultó ninguna fuente para esta respuesta")
   await expect(detail).toContainText("no llevaba precios, fechas ni horas que comprobar")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("traza-sin-fuentes", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })

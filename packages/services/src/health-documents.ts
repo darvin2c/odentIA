@@ -13,12 +13,13 @@
  *   PDF queda en la conversación de la persona y vuelve encolado; el worker lo
  *   entrega. Encolado nunca se presenta como entregado.
  */
+import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
+import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
-import { renderConsentPdf } from "./consent-pdf.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
   deliverDocumentPdf,
@@ -31,6 +32,7 @@ import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
+import type { Storage } from "./storage.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
@@ -328,13 +330,18 @@ export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPri
   return pdf.save({ useObjectStreams: false })
 }
 
-/** El PDF de un papel de salud, para enviarlo; imprimir usa su hoja en pantalla. */
+/**
+ * El PDF de un papel de salud, para enviarlo; imprimir usa su hoja en
+ * pantalla. Receta y orden se generan; el consentimiento es el guardado.
+ */
 export async function renderHealthDocumentPdf(
   tx: Db,
   orgId: string,
   patientId: string,
   type: HealthDocumentType,
   documentId: string,
+  /** Para leer el consentimiento guardado; receta y orden no lo usan. */
+  storage: Pick<Storage, "getAttachment"> = {},
 ): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
   if (type === "prescription") {
     const data = await getPrescriptionPrint(tx, orgId, patientId, documentId)
@@ -355,10 +362,24 @@ export async function renderHealthDocumentPdf(
   }
   const data = await getConsentPrint(tx, orgId, documentId)
   if (data.document.patientId !== patientId) throw notFound("Consentimiento")
+  const doc = data.document
+  // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).
+  if (!doc.pdfDocumentId || !doc.pdfSha256)
+    throw new ServiceError("CONSENT_PDF_MISSING", 409, "El consentimiento aún no tiene su PDF guardado")
+  if (!storage.getAttachment) throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el PDF guardado")
+  const [file] = await tx
+    .select({ storageKey: patientDocument.storageKey })
+    .from(patientDocument)
+    .where(and(eq(patientDocument.id, doc.pdfDocumentId), eq(patientDocument.organizationId, orgId)))
+    .limit(1)
+  if (!file) throw notFound("PDF del consentimiento")
+  const bytes = await storage.getAttachment(file.storageKey)
+  if (createHash("sha256").update(bytes).digest("hex") !== doc.pdfSha256)
+    throw new ServiceError("CONSENT_PDF_ALTERED", 409, "El PDF guardado no coincide con su huella: no se envía")
   return {
-    bytes: await renderConsentPdf(data),
-    filename: `Consentimiento-${data.document.titleSnapshot}.pdf`,
-    label: `Consentimiento · ${data.document.titleSnapshot}`,
+    bytes,
+    filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+    label: `Consentimiento · ${doc.titleSnapshot}`,
   }
 }
 
@@ -484,7 +505,7 @@ export async function sendHealthDocument(
       }
     }
   }
-  const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId)
+  const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId, deps.storage)
   const message = input.message?.trim()
   if (message && message.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
   const person = await requirePatient(tx, orgId, input.patientId)

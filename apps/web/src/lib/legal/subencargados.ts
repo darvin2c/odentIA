@@ -36,6 +36,24 @@ const PLATAFORMA: string[][] = [
     "Estados Unidos",
   ],
   [
+    "OpenAI, L.L.C. (transcripción)",
+    "Pasar a texto las notas de voz que llegan por los canales y los dictados de la consulta.",
+    "Audios de las notas de voz y de los dictados, que pueden incluir datos de salud.",
+    "Estados Unidos",
+  ],
+  [
+    "Geoapify GmbH",
+    "Sugerir la dirección mientras se escribe en los datos de un paciente o en su registro.",
+    "Solo el texto de la dirección que se escribe, sin el nombre de la persona.",
+    "Alemania",
+  ],
+  [
+    "Google LLC (Google Maps Platform, Places)",
+    "Sugerir y ubicar la dirección de las sedes de la clínica.",
+    "Solo el texto de la dirección de la sede que se escribe.",
+    "Estados Unidos",
+  ],
+  [
     "Embeddings: [Por completar: proveedor]",
     "Convertir el conocimiento de la clínica en vectores para buscar en él.",
     "Textos que la clínica carga como conocimiento y consultas de búsqueda.",
@@ -82,7 +100,7 @@ export const SUBENCARGADOS: LegalDoc = {
   path: "/subencargados",
   title: "Subencargados del tratamiento",
   description:
-    "Proveedores que tratan datos por cuenta de odentIA: alojamiento, almacenamiento, correo, modelos de inteligencia artificial y canales de mensajería. Para qué, qué datos y en qué país.",
+    "Proveedores que tratan datos por cuenta de odentIA: alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción, direcciones y canales de mensajería. Para qué, qué datos y en qué país.",
   intro: [
     "Para prestar el servicio, odentIA recurre a los proveedores de esta lista, que tratan datos de las clínicas y de sus pacientes por cuenta de odentIA. Esta página forma parte del [contrato de encargo de tratamiento](/encargo-de-tratamiento).",
   ],

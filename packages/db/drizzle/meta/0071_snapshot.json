@@ -1,5 +1,5 @@
 {
-  "id": "1935892c-1222-49bc-ae3e-8b062e00dd90",
+  "id": "d27d4728-3ad7-450b-8665-e8f69caf3669",
   "prevId": "5772edf1-bd27-49fe-b849-2769a70a1ffb",
   "version": "7",
   "dialect": "postgresql",
@@ -2139,14 +2139,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "professional_user_id": {
-          "name": "professional_user_id",
+        "dentist_user_id": {
+          "name": "dentist_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "room_id": {
-          "name": "room_id",
+        "chair_id": {
+          "name": "chair_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -2323,8 +2323,8 @@
           "method": "btree",
           "with": {}
         },
-        "appointment_org_professional_range_idx": {
-          "name": "appointment_org_professional_range_idx",
+        "appointment_org_dentist_range_idx": {
+          "name": "appointment_org_dentist_range_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2333,7 +2333,7 @@
               "nulls": "last"
             },
             {
-              "expression": "professional_user_id",
+              "expression": "dentist_user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2412,13 +2412,13 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "appointment_professional_user_id_user_id_fk": {
-          "name": "appointment_professional_user_id_user_id_fk",
+        "appointment_dentist_user_id_user_id_fk": {
+          "name": "appointment_dentist_user_id_user_id_fk",
           "tableFrom": "appointment",
           "tableTo": "user",
           "schemaTo": "auth",
           "columnsFrom": [
-            "professional_user_id"
+            "dentist_user_id"
           ],
           "columnsTo": [
             "id"
@@ -2426,12 +2426,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "appointment_room_id_schedule_room_id_fk": {
-          "name": "appointment_room_id_schedule_room_id_fk",
+        "appointment_chair_id_schedule_chair_id_fk": {
+          "name": "appointment_chair_id_schedule_chair_id_fk",
           "tableFrom": "appointment",
-          "tableTo": "schedule_room",
+          "tableTo": "schedule_chair",
           "columnsFrom": [
-            "room_id"
+            "chair_id"
           ],
           "columnsTo": [
             "id"
@@ -2803,8 +2803,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.schedule_room": {
-      "name": "schedule_room",
+    "public.schedule_chair": {
+      "name": "schedule_chair",
       "schema": "",
       "columns": {
         "id": {
@@ -2855,8 +2855,8 @@
         }
       },
       "indexes": {
-        "schedule_room_org_id_uidx": {
-          "name": "schedule_room_org_id_uidx",
+        "schedule_chair_org_id_uidx": {
+          "name": "schedule_chair_org_id_uidx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2876,8 +2876,8 @@
           "method": "btree",
           "with": {}
         },
-        "schedule_room_org_branch_idx": {
-          "name": "schedule_room_org_branch_idx",
+        "schedule_chair_org_branch_idx": {
+          "name": "schedule_chair_org_branch_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2899,9 +2899,9 @@
         }
       },
       "foreignKeys": {
-        "schedule_room_organization_id_organization_id_fk": {
-          "name": "schedule_room_organization_id_organization_id_fk",
-          "tableFrom": "schedule_room",
+        "schedule_chair_organization_id_organization_id_fk": {
+          "name": "schedule_chair_organization_id_organization_id_fk",
+          "tableFrom": "schedule_chair",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -2912,9 +2912,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "schedule_room_branch_id_branch_id_fk": {
-          "name": "schedule_room_branch_id_branch_id_fk",
-          "tableFrom": "schedule_room",
+        "schedule_chair_branch_id_branch_id_fk": {
+          "name": "schedule_chair_branch_id_branch_id_fk",
+          "tableFrom": "schedule_chair",
           "tableTo": "branch",
           "columnsFrom": [
             "branch_id"
@@ -7110,8 +7110,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "professional_user_id": {
-          "name": "professional_user_id",
+        "dentist_user_id": {
+          "name": "dentist_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -7197,8 +7197,8 @@
           "method": "btree",
           "with": {}
         },
-        "professional_schedule_org_branch_professional_idx": {
-          "name": "professional_schedule_org_branch_professional_idx",
+        "professional_schedule_org_branch_dentist_idx": {
+          "name": "professional_schedule_org_branch_dentist_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -7213,7 +7213,7 @@
               "nulls": "last"
             },
             {
-              "expression": "professional_user_id",
+              "expression": "dentist_user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -7273,13 +7273,13 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "professional_schedule_professional_user_id_user_id_fk": {
-          "name": "professional_schedule_professional_user_id_user_id_fk",
+        "professional_schedule_dentist_user_id_user_id_fk": {
+          "name": "professional_schedule_dentist_user_id_user_id_fk",
           "tableFrom": "professional_schedule",
           "tableTo": "user",
           "schemaTo": "auth",
           "columnsFrom": [
-            "professional_user_id"
+            "dentist_user_id"
           ],
           "columnsTo": [
             "id"
@@ -7340,14 +7340,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "professional_user_id": {
-          "name": "professional_user_id",
+        "dentist_user_id": {
+          "name": "dentist_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "room_id": {
-          "name": "room_id",
+        "chair_id": {
+          "name": "chair_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -7475,13 +7475,13 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "schedule_block_professional_user_id_user_id_fk": {
-          "name": "schedule_block_professional_user_id_user_id_fk",
+        "schedule_block_dentist_user_id_user_id_fk": {
+          "name": "schedule_block_dentist_user_id_user_id_fk",
           "tableFrom": "schedule_block",
           "tableTo": "user",
           "schemaTo": "auth",
           "columnsFrom": [
-            "professional_user_id"
+            "dentist_user_id"
           ],
           "columnsTo": [
             "id"
@@ -7489,12 +7489,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "schedule_block_room_id_schedule_room_id_fk": {
-          "name": "schedule_block_room_id_schedule_room_id_fk",
+        "schedule_block_chair_id_schedule_chair_id_fk": {
+          "name": "schedule_block_chair_id_schedule_chair_id_fk",
           "tableFrom": "schedule_block",
-          "tableTo": "schedule_room",
+          "tableTo": "schedule_chair",
           "columnsFrom": [
-            "room_id"
+            "chair_id"
           ],
           "columnsTo": [
             "id"
@@ -8795,6 +8795,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "revoke_pdf_document_id": {
+          "name": "revoke_pdf_document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoke_pdf_sha256": {
+          "name": "revoke_pdf_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "declaration_snapshot": {
+          "name": "declaration_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "signature_method": {
           "name": "signature_method",
           "type": "text",
@@ -8822,6 +8840,18 @@
         "person_signed_at": {
           "name": "person_signed_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "person_signed_ip": {
+          "name": "person_signed_ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "person_signed_user_agent": {
+          "name": "person_signed_user_agent",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -11002,8 +11032,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "professional_user_id": {
-          "name": "professional_user_id",
+        "dentist_user_id": {
+          "name": "dentist_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -11279,13 +11309,13 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "encounter_professional_user_id_user_id_fk": {
-          "name": "encounter_professional_user_id_user_id_fk",
+        "encounter_dentist_user_id_user_id_fk": {
+          "name": "encounter_dentist_user_id_user_id_fk",
           "tableFrom": "encounter",
           "tableTo": "user",
           "schemaTo": "auth",
           "columnsFrom": [
-            "professional_user_id"
+            "dentist_user_id"
           ],
           "columnsTo": [
             "id"
@@ -11736,8 +11766,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "professional_user_id": {
-          "name": "professional_user_id",
+        "dentist_user_id": {
+          "name": "dentist_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -11876,13 +11906,13 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "encounter_dictation_suggestion_professional_user_id_user_id_fk": {
-          "name": "encounter_dictation_suggestion_professional_user_id_user_id_fk",
+        "encounter_dictation_suggestion_dentist_user_id_user_id_fk": {
+          "name": "encounter_dictation_suggestion_dentist_user_id_user_id_fk",
           "tableFrom": "encounter_dictation_suggestion",
           "tableTo": "user",
           "schemaTo": "auth",
           "columnsFrom": [
-            "professional_user_id"
+            "dentist_user_id"
           ],
           "columnsTo": [
             "id"
@@ -36739,8 +36769,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "professionals": {
-          "name": "professionals",
+        "dentists": {
+          "name": "dentists",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -36970,9 +37000,9 @@
           "name": "saas_waitlist_request_status_check",
           "value": "\"admin\".\"saas_waitlist_request\".\"status\" IN ('por_revisar','invitada','entro','descartada')"
         },
-        "saas_waitlist_request_professionals_check": {
-          "name": "saas_waitlist_request_professionals_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"professionals\" IN ('1','2-3','4-9','10+')"
+        "saas_waitlist_request_dentists_check": {
+          "name": "saas_waitlist_request_dentists_check",
+          "value": "\"admin\".\"saas_waitlist_request\".\"dentists\" IN ('1','2-3','4-9','10+')"
         },
         "saas_waitlist_request_tool_check": {
           "name": "saas_waitlist_request_tool_check",

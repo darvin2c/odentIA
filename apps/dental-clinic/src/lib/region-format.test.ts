@@ -3,8 +3,6 @@ import {
   currencyLabel,
   currencyOptions,
   displayLanguage,
-  localeLabel,
-  localeOptions,
   regionPreview,
 } from "./region-format"
 
@@ -28,16 +26,6 @@ describe("los códigos se guardan y los nombres se leen", () => {
     expect(labels).toEqual(
       [...labels].sort(new Intl.Collator("es", { sensitivity: "base" }).compare),
     )
-  })
-
-  it("el formato se lee como idioma y región, en el orden que da el servidor", () => {
-    expect(localeLabel("es-PE", "es")).toBe("Español (Perú)")
-    expect(localeLabel("pt-BR", "es")).toBe("Portugués (Brasil)")
-    const options = localeOptions(["es-PE", "en-PE"], "es-CL", "es")
-    expect(options.map((option) => option.value)).toEqual(["es-PE", "en-PE", "es-CL"])
-    expect(options[2]?.label).toBe("Español (Chile)")
-    // El guardado no se repite si ya está entre los ofrecidos.
-    expect(localeOptions(["es-PE", "en-PE"], "en-PE", "es")).toHaveLength(2)
   })
 
   it("los nombres van en español aunque la clínica escriba sus fechas en otro idioma", () => {

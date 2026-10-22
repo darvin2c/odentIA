@@ -328,7 +328,11 @@ export function createPublicBookingRoute(deps: {
     const body = signBody.safeParse(await bodyOf(c))
     if (!params.success || !body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tu firma"), 400)
     const { token: linkToken, ...input } = body.data
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => signPersonalLinkConsent(tx, orgId, linkToken, params.data.consentId, input)))
+    // Desde dónde firma: la evidencia de una firma a distancia (#47).
+    const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
+    return answer(c, 200, () =>
+      inOrg(c, (tx, orgId) => signPersonalLinkConsent(tx, orgId, linkToken, params.data.consentId, input, evidence)),
+    )
   })
 
   // Antes de tu cita: el cuestionario se envía una vez, completo.

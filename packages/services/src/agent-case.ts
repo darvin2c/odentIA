@@ -214,12 +214,12 @@ ${state.topics
   }
   if (own.length) {
     sections.push(
-      `Notas del caso (las dejaste tú en turnos anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
+      `Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
     )
   }
   if (state.lookups.length) {
     sections.push(
-      `Consultas de turnos anteriores (ya las hiciste: úsalas para responder y para elegir, y vuelve a consultar solo si el interlocutor pide otro día, otra sede u otra persona, o si son de hace más de una hora; al proponer o reservar el sistema comprueba la disponibilidad y te avisa si el horario ya no está):\n${state.lookups
+      `Consultas de mensajes anteriores (ya las hiciste: úsalas para responder y para elegir, y vuelve a consultar solo si el interlocutor pide otro día, otra sede u otra persona, o si son de hace más de una hora; al proponer o reservar el sistema comprueba la disponibilidad y te avisa si el horario ya no está):\n${state.lookups
         .map((l) => `[${l.tool} · ${when(l.at)}]\n${l.text}`)
         .join("\n")}`,
     )

@@ -214,16 +214,18 @@ export function ConsentDetail({
     },
     onError: (e) => setActionError(errorMessage(e)),
   })
+  // Revocado, el PDF que se ve es el de la revocación (lleva el documento entero).
+  const pdfIdOf = (doc: ConsentDocument) =>
+    doc.status === "revocado" ? (doc.revokePdfDocumentId ?? null) : doc.pdfDocumentId
+  const pdfId = pdfIdOf(document)
   const pdf = useMutation({
     mutationFn: async () => {
-      const current = document.pdfDocumentId
-        ? document
-        : (await generateConsentPdf(document.id)).data
-      if (!current.pdfDocumentId) throw new Error("Sin PDF")
+      const id = pdfId ?? pdfIdOf((await generateConsentPdf(document.id)).data)
+      if (!id) throw new Error("Sin PDF")
       const signed = await apiFetch<{ data: { url: string } }>(
-        `/api/patients/${document.patientId}/documents/${current.pdfDocumentId}/url`,
+        `/api/patients/${document.patientId}/documents/${id}/url`,
       )
-      return { url: signed.data.url, generated: !document.pdfDocumentId }
+      return { url: signed.data.url, generated: !pdfId }
     },
     onSuccess: async ({ url, generated }) => {
       window.open(url, "_blank", "noopener")
@@ -246,7 +248,7 @@ export function ConsentDetail({
         </Link>
         {signed ? (
           <Button size="sm" variant="outline" disabled={pdf.isPending} onClick={() => pdf.mutate()}>
-            {document.pdfDocumentId ? "Ver PDF" : pdf.isPending ? "Generando PDF…" : "Generar PDF"}
+            {pdfId ? "Ver PDF" : pdf.isPending ? "Generando PDF…" : "Generar PDF"}
           </Button>
         ) : null}
         {canWrite && document.status === "pendiente" ? (

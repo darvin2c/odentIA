@@ -94,7 +94,7 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
   // El PDF de un consentimiento firmado y la foto de una hoja en papel ya están
   // en su consentimiento: no salen dos veces.
   const consentFileIds = new Set(
-    (consents.data?.data ?? []).flatMap((doc) => [doc.pdfDocumentId, doc.paperDocumentId].filter(Boolean) as string[]),
+    (consents.data?.data ?? []).flatMap((doc) => [doc.pdfDocumentId, doc.revokePdfDocumentId, doc.paperDocumentId].filter(Boolean) as string[]),
   )
   const files = detail.documents.filter((doc) => !doc.retiredAt && !consentFileIds.has(doc.id))
   const ownOrders = (orders.data?.data ?? []).filter((order) => order.encounterId === encounterId)

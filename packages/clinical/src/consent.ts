@@ -39,6 +39,15 @@ export const CONSENT_SECTION_LABELS = {
 export const CONSENT_DECLARATION =
   "He leído y comprendido la información, pude hacer preguntas y fueron respondidas. Autorizo el procedimiento descrito y sé que puedo revocar este consentimiento antes de que se realice."
 
+/**
+ * Lo que dice el documento sobre su firma: es simple, y no es la firma
+ * digital certificada que reconoce la ley de firmas del país
+ * (`ClinicalCountryProfile.signatureLaw`), si tiene una (#47).
+ */
+export function consentSignatureNote(signatureLaw: string | null): string {
+  return `Firma electrónica simple: firmas manuscritas capturadas como evidencia; no constituyen firma digital certificada${signatureLaw ? ` (${signatureLaw})` : ""}.`
+}
+
 function cleanText(value: unknown, label: string, min: number, max: number): string {
   if (typeof value !== "string") throw new Error(`${label}: texto obligatorio`)
   const text = value.trim()

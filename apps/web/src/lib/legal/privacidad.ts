@@ -131,7 +131,7 @@ export const PRIVACIDAD: LegalDoc = {
       id: "destinatarios",
       title: "Con quién los compartimos y flujo transfronterizo",
       blocks: [
-        "No vendemos datos personales. Los compartimos solo con proveedores que nos ayudan a prestar el servicio (alojamiento, almacenamiento, correo, modelos de inteligencia artificial) y con las autoridades cuando la ley lo exige. La lista de proveedores, lo que hace cada uno y su país está en la página de [subencargados](/subencargados).",
+        "No vendemos datos personales. Los compartimos solo con proveedores que nos ayudan a prestar el servicio (alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción de audios y sugerencia de direcciones) y con las autoridades cuando la ley lo exige. La lista de proveedores, lo que hace cada uno y su país está en la página de [subencargados](/subencargados).",
         "Varios de esos proveedores están fuera del Perú, por ejemplo en los Estados Unidos. Esos envíos constituyen flujo transfronterizo de datos personales. odentIA los realiza con proveedores que ofrecen niveles de protección adecuados o garantías contractuales suficientes, conforme a la Ley 29733 y su Reglamento [Por confirmar: garantías contractuales con cada proveedor y comunicación a la ANPD si corresponde].",
         ENTRENAMIENTO,
       ],

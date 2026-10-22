@@ -4,6 +4,7 @@
 // Con `--html <carpeta>` los deja como archivos para abrirlos en el navegador,
 // con el logotipo puesto en línea en vez de adjunto.
 import { reportDigestEmail } from "./report-digest.js"
+import { formatFigure } from "./report-figures.js"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
@@ -79,6 +80,9 @@ const sheet: ConsumerComplaintSheet = {
 const complaintOptions = { replyTo: "reclamos@odentia.localhost", reviewUrl: `${adminUrl}/complaints` }
 const received = consumerComplaintEmails({ ...sheet, providerResponse: null, respondedAt: null }, complaintOptions)
 const answered = consumerComplaintResponseEmails(sheet, complaintOptions)
+
+/** Lo cobrado de la semana del ejemplo, en la clínica de ejemplo (Perú). */
+const sampleCollected = formatFigure(1_160_000, "money", { currency: "PEN", locale: "es-PE" })
 
 const MAILS: Record<string, MailTemplate> = {
   "01-verifica-tu-correo": verifyEmailTemplate({ url }),
@@ -171,9 +175,10 @@ const MAILS: Record<string, MailTemplate> = {
     firstName: "Ana",
     clinic,
     week: "del 12 al 18 de octubre de 2026",
-    collected: "S/ 11,600.00",
+    // El importe con el mismo formato que el resumen real: la moneda y el formato de la clínica.
+    collected: sampleCollected,
     facts: [
-      { label: "Cobrado", value: "S/ 11,600.00 · 6 % más que la semana anterior" },
+      { label: "Cobrado", value: `${sampleCollected} · 6 % más que la semana anterior` },
       { label: "Citas atendidas", value: "94 · 4 más que la semana anterior" },
       { label: "Pacientes nuevos", value: "9 · Igual que la semana anterior" },
       { label: "No vinieron", value: "8 % · 2 puntos más que la semana anterior" },

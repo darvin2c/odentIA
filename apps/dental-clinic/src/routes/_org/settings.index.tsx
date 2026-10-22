@@ -23,7 +23,7 @@ import {
   zonesForCountry,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
@@ -52,7 +52,6 @@ import {
   countryName,
   currencyOptions,
   displayLanguage,
-  localeOptions,
   type NamedOption,
   type RegionPreview,
   regionPreview,
@@ -99,7 +98,8 @@ const profileSchema = z.object({
   countryCode: z.string().length(2, "Elige el país"),
   currency: z.string().length(3, "Elige la moneda"),
   timezone: z.string().min(1, "Elige la zona horaria"),
-  locale: z.string().min(2, "Elige el idioma y formato"),
+  // Siempre el español del país (#48): sale del país, no se elige aparte.
+  locale: z.string().min(2, "Elige el país"),
 })
 
 type ProfileValues = z.infer<typeof profileSchema>
@@ -174,11 +174,6 @@ function toInput(values: ProfileValues): OrgProfileInput {
     timezone: values.timezone,
     locale: values.locale,
   }
-}
-
-/** Idioma de un formato (`es` de `es-PE`), para proponer el de otro país. */
-function languageOf(locale: string): string | undefined {
-  return locale.split("-")[0] || undefined
 }
 
 /**
@@ -259,7 +254,7 @@ function OrgProfilePage() {
 /** Las dos tarjetas del formulario y sus campos, para reservar su hueco. */
 const SKELETON_CARDS = [
   { id: "identidad", fields: ["razon", "comercial", "documento", "numero", "direccion"] },
-  { id: "region", fields: ["pais", "zona", "moneda", "formato"] },
+  { id: "region", fields: ["pais", "zona", "moneda"] },
 ]
 
 /** El hueco del formulario mientras llega el perfil: las dos tarjetas con sus campos. */
@@ -320,40 +315,24 @@ function ProfileForm({
   const dirty = !sameDraft(currentValues, baseline)
   const { countryCode: country, timezone, currency, locale } = currentValues
   const countryZones = useMemo(() => zonesForCountry(country), [country])
-  // Idioma de respaldo para proponer el formato de otro país: el guardado, que
-  // no cambia mientras se edita.
-  const fallbackLanguage = languageOf(baseline.locale)
-
-  // Qué formatos se ofrecen para el país elegido. Es un dato auxiliar: llega
-  // después y solo llena la lista, nunca toca lo que la persona ya eligió.
-  const defaultsQuery = useQuery({
-    queryKey: regionDefaultsKey(country, fallbackLanguage),
-    queryFn: () => fetchRegionDefaults(country, fallbackLanguage),
-    staleTime: REGION_DEFAULTS_STALE_MS,
-    enabled: country.length === 2,
-  })
-
   const countries = useMemo(() => countryChoices(country, language), [country, language])
   const currencies = useMemo(() => currencyOptions(language, currency), [language, currency])
-  const formats = useMemo(
-    () => localeOptions(defaultsQuery.data?.locales ?? [], locale, language),
-    [defaultsQuery.data, locale, language],
-  )
 
   // Al elegir país se propone lo que cambia con él. Queda escrito en el
   // formulario, a la vista, y nada se guarda hasta pulsar Guardar.
   const proposeRegion = async (nextCountry: string) => {
+    // Fechas y números en el español del país, aunque la propuesta no llegue (#48).
+    form.setFieldValue("locale", `es-${nextCountry}`)
     try {
       const proposal = await queryClient.fetchQuery({
-        queryKey: regionDefaultsKey(nextCountry, fallbackLanguage),
-        queryFn: () => fetchRegionDefaults(nextCountry, fallbackLanguage),
+        queryKey: regionDefaultsKey(nextCountry),
+        queryFn: () => fetchRegionDefaults(nextCountry),
         staleTime: REGION_DEFAULTS_STALE_MS,
       })
       // Si mientras tanto se eligió otro país, esta propuesta ya no vale.
       if (form.state.values.countryCode !== nextCountry) return
       // Una moneda que no se conoce queda como estaba: la elige la persona.
       if (proposal.currency) form.setFieldValue("currency", proposal.currency)
-      form.setFieldValue("locale", proposal.locale)
       // La zona solo se propone si es una sola; con varias, vale la que ya
       // estaba si es de ese país y, si no, queda por elegir.
       const zones = zonesForCountry(nextCountry)
@@ -361,7 +340,7 @@ function ProfileForm({
       if (zone) form.setFieldValue("timezone", zone)
       else if (!zones.includes(form.state.values.timezone)) form.setFieldValue("timezone", "")
     } catch {
-      toast.error("No pudimos proponer la zona, la moneda y el formato de ese país: elígelos aquí.")
+      toast.error("No pudimos proponer la zona y la moneda de ese país: elígelas aquí.")
     }
   }
   // El ejemplo usa la hora de este momento: se escribe ya en el navegador, para
@@ -569,32 +548,6 @@ function ProfileForm({
                   <FieldDescription id="org-currency-help">
                     Con ella se cobra. Si la clínica ya tiene cobros o presupuestos en otra moneda,
                     no se puede cambiar: los importes anteriores no se convierten.
-                  </FieldDescription>
-                  <FieldError>{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="locale">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-locale">Idioma y formato</FieldLabel>
-                  <SearchSelect
-                    id="org-locale"
-                    label="Idioma y formato"
-                    placeholder="Buscar idioma…"
-                    value={field.state.value}
-                    options={formats}
-                    invalid={Boolean(error)}
-                    aria-describedby="org-locale-help"
-                    onChange={(next) => field.handleChange(next)}
-                  />
-                  <FieldDescription id="org-locale-help">
-                    {defaultsQuery.isError
-                      ? "No pudimos cargar los demás formatos de ese país. El elegido se conserva."
-                      : "Cómo se escriben las fechas y los números. No cambia el idioma de odentIA."}
                   </FieldDescription>
                   <FieldError>{error ?? null}</FieldError>
                 </Field>

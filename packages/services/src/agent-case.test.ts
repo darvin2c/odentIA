@@ -133,7 +133,7 @@ it("solo se conserva la última consulta de las herramientas previstas, recortad
   expect(state.lookups).toHaveLength(1)
   expect(state.lookups[0]?.tool).toBe("buscar_huecos")
   expect(state.lookups[0]?.text.endsWith("(recortado: vuelve a consultar)")).toBe(true)
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Consultas de turnos anteriores")
+  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Consultas de mensajes anteriores")
 
   // Pasadas unas horas la consulta ya no se muestra: la agenda pudo cambiar.
   const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()

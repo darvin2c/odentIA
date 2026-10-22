@@ -1,4 +1,4 @@
--- Reglas de la 0071 (ADR 0079): lo que drizzle no declara y nombraba al
+-- Reglas de la 0072 (ADR 0079): lo que drizzle no declara y nombraba al
 -- dentista o a la unidad dental.
 
 -- 1. La guarda de la atención cerrada nombra la columna dentro de su código, y

@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db"
 import {
+  CONSENT_DECLARATION,
   type ConsentSections,
   consentSectionsToText,
   isValidTooth,
@@ -2005,6 +2006,7 @@ export async function signConsentDocument(
       signedAt: now,
       signatureMethod: method,
       signatureLevel: "simple",
+      declarationSnapshot: CONSENT_DECLARATION,
       paperDocumentId,
       updatedAt: now,
     })
@@ -2085,6 +2087,12 @@ export async function markConsentSentByLink(
   return row
 }
 
+/** Desde dónde firmó la persona en su enlace: evidencia de una firma a distancia. */
+export interface SignatureEvidence {
+  ip?: string | null
+  userAgent?: string | null
+}
+
 export interface SignConsentByLinkInput {
   /** Su documento, escrito por la persona: se compara con el de su registro. */
   docNumber: string
@@ -2106,6 +2114,8 @@ export async function signConsentByLink(
   signerContactId: string,
   documentId: string,
   input: SignConsentByLinkInput,
+  /** Desde dónde firma (IP y navegador), si la ruta los conoce. */
+  evidence: SignatureEvidence = {},
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2155,7 +2165,10 @@ export async function signConsentByLink(
       comprehensionConfirmed: true,
       signatureMethod: "enlace",
       signatureLevel: "simple",
+      declarationSnapshot: CONSENT_DECLARATION,
       personSignedAt: now,
+      personSignedIp: evidence.ip?.slice(0, 64) || null,
+      personSignedUserAgent: evidence.userAgent?.slice(0, 500) || null,
       updatedAt: now,
     })
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
@@ -2374,6 +2387,37 @@ export async function attachConsentPdf(
   return row!
 }
 
+/** Asocia el PDF de la revocación y su huella, una sola vez; el firmado queda como estaba. */
+export async function attachConsentRevokePdf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+  input: { pdfDocumentId: string; sha256: string },
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "revocado")
+    throw conflict("CONSENT_STATUS", "Solo un consentimiento revocado genera el PDF de su revocación")
+  if (current.revokePdfDocumentId) throw conflict("PDF_EXISTS", "La revocación ya tiene su PDF")
+  if (!/^[0-9a-f]{64}$/.test(input.sha256)) throw validation("Huella SHA-256 inválida")
+  const [row] = await tx
+    .update(consentDocument)
+    .set({ revokePdfDocumentId: input.pdfDocumentId, revokePdfSha256: input.sha256, updatedAt: new Date() })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "consent.revoke_pdf", "consent_document", documentId, {
+    pdfDocumentId: input.pdfDocumentId,
+    sha256: input.sha256,
+  })
+  return row!
+}
+
 /** Datos del documento para imprimir o generar el PDF. */
 export async function getConsentPrint(tx: Db, orgId: string, documentId: string) {
   const [doc] = await tx
@@ -2401,6 +2445,8 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
       fiscalDocType: orgProfile.fiscalDocType,
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
+      // La ley de firmas que se nombra en la nota del documento (#47).
+      country: orgProfile.countryCode,
       // Con qué formato y en qué zona se escriben las fechas del documento.
       locale: orgProfile.locale,
       timezone: orgProfile.timezone,
