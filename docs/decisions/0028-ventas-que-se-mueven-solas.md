@@ -33,5 +33,5 @@ La próxima acción vivía en tres sitios (un campo de la oportunidad, una tarea
 ## Referencias
 
 - `packages/services/src/opportunities.ts`, `pipelines.ts`, `tasks.ts` (`pageTasks`, `settleTask`), `automation.ts` (`syncOpportunityFollowUps`, `settleTasks`, `leaveTask`), `appointments.ts`, `budgets.ts`, `admin-lines.ts`.
-- `apps/platform/src/routes/_org/pipeline.tsx`, `components/crm/opportunity-panel.tsx`, `close-opportunity-dialog.tsx`, `routes/_org/tasks.tsx`.
+- `apps/dental-clinic/src/routes/_org/pipeline.tsx`, `components/crm/opportunity-panel.tsx`, `close-opportunity-dialog.tsx`, `routes/_org/tasks.tsx`.
 - Migración `0086_ventas_que_se_mueven_solas`.

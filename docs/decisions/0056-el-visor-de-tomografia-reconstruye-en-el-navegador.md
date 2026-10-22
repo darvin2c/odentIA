@@ -28,6 +28,6 @@ La odontóloga necesita ver la tomografía en tres cortes (desde arriba, de fren
 
 ## Referencias
 
-- `apps/platform/src/lib/cbct-volume.ts`, `apps/platform/src/lib/cbct-arch.ts`
-- `apps/platform/src/components/patient/tomography-viewer.tsx`
+- `apps/dental-clinic/src/lib/cbct-volume.ts`, `apps/dental-clinic/src/lib/cbct-arch.ts`
+- `apps/dental-clinic/src/components/patient/tomography-viewer.tsx`
 - Lienzo «Visor de tomografía», tableros 5 a 8 y decisiones 1 a 3 y 7 a 9; ADR 0055

@@ -14,7 +14,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/panel/package.json apps/panel/
 COPY apps/admin/package.json apps/admin/
-COPY apps/platform/package.json apps/platform/
+COPY apps/dental-clinic/package.json apps/dental-clinic/
 COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
@@ -33,7 +33,7 @@ RUN pnpm install --frozen-lockfile \
   --filter @odentia/worker... \
   --filter @odentia/panel... \
   --filter @odentia/admin... \
-  --filter @odentia/platform... \
+  --filter @odentia/dental-clinic... \
   --filter @odentia/web...
 
 FROM deps AS build
@@ -44,7 +44,7 @@ ARG VITE_API_URL
 ARG VITE_BASE_DOMAIN
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_BASE_DOMAIN=$VITE_BASE_DOMAIN
-RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/platform build \
+RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/dental-clinic build \
   && pnpm --filter @odentia/web build
 
 FROM base AS runtime

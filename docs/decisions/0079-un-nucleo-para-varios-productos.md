@@ -20,6 +20,7 @@ Copiar el núcleo duplicaría cada arreglo. Mezclar los dos productos haría que
 - **El dónde es un sitio estándar.** Las tablas comunes guardan sistema, código y calificadores, como `bodySite` en FHIR. Odontología usa ISO 3950 para piezas y áreas, con las caras como calificadores. Qué códigos valen lo valida el producto, no la base.
 - **Lo común se nombra en neutro.** El profesional que atiende es `professional_user_id`, el recurso reservable de la sede es `room` (`schedule_room`, `room_id`) y el rol clínico es `clinician`. Lo que ve el usuario lo pone el producto: «Odontólogo» y «Unidad dental» en odentIA, «Médico» y «Consultorio» en la app médica.
 - **Los agentes, por producto.** Sofi y Argos tienen una parte común y un bloque de su producto (alcance, urgencias, ejemplos). Clío dicta con un prompt, un formato y un extractor propios de cada producto.
+- **Una app y un paquete de dominio por producto.** `apps/dental-clinic` es la app de la clínica dental (antes `apps/platform`; en producción el servicio sigue llamándose `platform`) y la médica será `apps/medical-clinic`. Su dominio puro va en `packages/dental` y `packages/medical`. Lo compartido (`admin`, `api`, `worker`, `panel` y los demás paquetes) no cambia de nombre.
 - **Entregas verticales.** Cada concepto pasa entero (base, código, pantallas y pruebas) en su propio PR, con la CI en verde. En odentIA no cambia nada de lo que se ve.
 
 ## Alternativas descartadas

@@ -30,4 +30,4 @@ La misma persona tenía dos páginas: la de contacto (`/contacts/:id`, a la que 
 
 ## Referencias
 
-`packages/services/src/people.ts`, `apps/api/src/routes/people.ts` (y sus pruebas por rol), `apps/platform/src/routes/_org/people.$personId.tsx`, `apps/platform/src/lib/patient-areas.ts`, ADR 0001 y 0004.
+`packages/services/src/people.ts`, `apps/api/src/routes/people.ts` (y sus pruebas por rol), `apps/dental-clinic/src/routes/_org/people.$personId.tsx`, `apps/dental-clinic/src/lib/patient-areas.ts`, ADR 0001 y 0004.

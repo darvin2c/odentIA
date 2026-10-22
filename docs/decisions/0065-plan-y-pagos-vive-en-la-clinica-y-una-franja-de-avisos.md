@@ -41,4 +41,4 @@ Los avisos de la clínica eran cuatro barras hechas a mano: dos de cobro, «Sopo
 
 ## Referencias
 
-`packages/services/src/clinic-notices.ts`, `packages/ui-patterns/src/notice-strip.tsx`, `apps/platform/src/components/clinic-notices.tsx`, `apps/platform/src/routes/_org/settings.plan.index.tsx`, `packages/services/src/saas-billing.ts` (`decideSaasAccess`, ciclo de avisos).
+`packages/services/src/clinic-notices.ts`, `packages/ui-patterns/src/notice-strip.tsx`, `apps/dental-clinic/src/components/clinic-notices.tsx`, `apps/dental-clinic/src/routes/_org/settings.plan.index.tsx`, `packages/services/src/saas-billing.ts` (`decideSaasAccess`, ciclo de avisos).

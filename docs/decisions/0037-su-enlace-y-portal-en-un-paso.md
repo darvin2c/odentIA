@@ -29,4 +29,4 @@ Había cinco páginas públicas y cuatro tipos de enlace, además de un código 
 
 ## Referencias
 
-- `packages/services/src/su-enlace.ts`, `booking-links.ts`, `portal-access.ts`, `portal-policy.ts`; `apps/api/src/routes/public-booking.ts`, `portal.ts`; `apps/platform/src/routes/reserva.tsx`, `portal.tsx`, `components/portal/portal-access-section.tsx`; migración `0096`; lienzo de la fase 3, tablero 6 v2 y decisiones 8 y 9.
+- `packages/services/src/su-enlace.ts`, `booking-links.ts`, `portal-access.ts`, `portal-policy.ts`; `apps/api/src/routes/public-booking.ts`, `portal.ts`; `apps/dental-clinic/src/routes/reserva.tsx`, `portal.tsx`, `components/portal/portal-access-section.tsx`; migración `0096`; lienzo de la fase 3, tablero 6 v2 y decisiones 8 y 9.

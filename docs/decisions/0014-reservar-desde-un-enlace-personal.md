@@ -36,4 +36,4 @@ Reservar una cita conversando con el agente exige varias idas y vueltas (para qu
 
 ## Referencias
 
-- `packages/services/src/booking-links.ts` (`registerFromBookingLink`), `packages/services/src/patient-registration.ts` y `packages/clinical/src/patient-registration.ts` (alcance `essentials`), `apps/api/src/routes/public-booking.ts`, `apps/platform/src/routes/reserva.tsx`, `apps/platform/src/components/booking-data-form.tsx`, herramienta `enviar_enlace_cita` (`packages/agent/src/tools.ts`), migración `0056`.
+- `packages/services/src/booking-links.ts` (`registerFromBookingLink`), `packages/services/src/patient-registration.ts` y `packages/clinical/src/patient-registration.ts` (alcance `essentials`), `apps/api/src/routes/public-booking.ts`, `apps/dental-clinic/src/routes/reserva.tsx`, `apps/dental-clinic/src/components/booking-data-form.tsx`, herramienta `enviar_enlace_cita` (`packages/agent/src/tools.ts`), migración `0056`.

@@ -35,4 +35,4 @@ El equipo de una clínica necesita saber dónde se configura algo, dónde se ve 
 
 ## Referencias
 
-- `packages/services/src/help-guide.ts`, `packages/services/src/help.ts`, `packages/services/src/help.test.ts` (guía contra el código), `apps/api/src/routes/help.ts`, `apps/platform/src/components/help-panel.tsx`, migración `0055`.
+- `packages/services/src/help-guide.ts`, `packages/services/src/help.ts`, `packages/services/src/help.test.ts` (guía contra el código), `apps/api/src/routes/help.ts`, `apps/dental-clinic/src/components/help-panel.tsx`, migración `0055`.

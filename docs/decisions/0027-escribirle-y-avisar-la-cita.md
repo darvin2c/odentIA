@@ -37,4 +37,4 @@ A la vez, la regla raíz prohíbe verificar identidad por coincidencia de teléf
 ## Referencias
 
 - `packages/services/src/conversations.ts` (`writeToPerson`), `contacts.ts` (identidad de canal), `automation.ts` (`enqueueAppointmentNotice`, `rescheduleAppointmentReminders`, `appointmentConfirmationPlan`), `automation-messages.ts` (`APPOINTMENT_NOTICE_KEYS`), `appointments.ts` (`notice`).
-- `apps/platform/src/components/write-to-person.tsx`, `components/inbox-new-conversation.tsx`, `components/agenda/appointment-drawer.tsx`.
+- `apps/dental-clinic/src/components/write-to-person.tsx`, `components/inbox-new-conversation.tsx`, `components/agenda/appointment-drawer.tsx`.

@@ -31,4 +31,4 @@ Con 0075 el modelo escribía la consulta y la frase de una vez y sin ver lo que 
 
 ## Referencias
 
-`packages/services/src/argos-figures.ts`, `argos-observe.ts`, `argos-period.ts` (D26), `packages/agent/src/argos.ts` (`askArgos`), `packages/agent/src/decision/eval-argos-cifras.ts`, `apps/platform/src/components/argos/argos-panel.tsx`, migración `0069_argos_equipo_ausencias_y_primera_sede.sql`.
+`packages/services/src/argos-figures.ts`, `argos-observe.ts`, `argos-period.ts` (D26), `packages/agent/src/argos.ts` (`askArgos`), `packages/agent/src/decision/eval-argos-cifras.ts`, `apps/dental-clinic/src/components/argos/argos-panel.tsx`, migración `0069_argos_equipo_ausencias_y_primera_sede.sql`.

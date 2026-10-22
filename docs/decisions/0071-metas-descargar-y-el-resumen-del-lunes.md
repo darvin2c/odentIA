@@ -40,4 +40,4 @@ Reportes dice cómo va la clínica, pero no contra qué. Lo que muestra no se po
 
 ## Referencias
 
-`packages/services/src/report-goals.ts`, `report-csv.ts`, `report-digest.ts`, `apps/worker/src/report-digests.ts`, `apps/api/src/routes/report-digest-public.ts`, `apps/platform/src/components/reports/summary-extras.tsx`, `apps/platform/src/routes/resumen-lunes.baja.$token.tsx`.
+`packages/services/src/report-goals.ts`, `report-csv.ts`, `report-digest.ts`, `apps/worker/src/report-digests.ts`, `apps/api/src/routes/report-digest-public.ts`, `apps/dental-clinic/src/components/reports/summary-extras.tsx`, `apps/dental-clinic/src/routes/resumen-lunes.baja.$token.tsx`.

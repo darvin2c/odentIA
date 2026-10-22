@@ -14,7 +14,7 @@ import { expect, test } from "vitest"
  * `scroll-nativo: <por qué>` en la misma línea o en las seis anteriores (la apertura de su etiqueta).
  */
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "../../..")
-const SCANNED = ["apps/platform/src", "apps/panel/src", "apps/admin/src", "packages/ui-patterns/src"]
+const SCANNED = ["apps/dental-clinic/src", "apps/panel/src", "apps/admin/src", "packages/ui-patterns/src"]
 const NATIVE = /\boverflow(?:-[xy])?-(?:auto|scroll)\b/
 const MARKER = "scroll-nativo:"
 

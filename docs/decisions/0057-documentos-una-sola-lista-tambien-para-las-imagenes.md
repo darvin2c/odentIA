@@ -30,4 +30,4 @@ Una sola forma de buscar y abrir un papel es lo que pedía el 0035 («Documentos
 
 ## Referencias
 
-Lienzo «Documentos e Imágenes» (issue 149, decisiones 1 a 11). Interfaz: `apps/platform/src/components/patient/documentos-panel.tsx` (la lista), `document-viewer.tsx` (el visor de archivos y `DocumentViewerHost`), `apps/platform/src/lib/document-list.ts` (filtros, buscador, cada papel una vez) y `lib/patient-areas.ts` (`DOCUMENT_FILTERS`).
+Lienzo «Documentos e Imágenes» (issue 149, decisiones 1 a 11). Interfaz: `apps/dental-clinic/src/components/patient/documentos-panel.tsx` (la lista), `document-viewer.tsx` (el visor de archivos y `DocumentViewerHost`), `apps/dental-clinic/src/lib/document-list.ts` (filtros, buscador, cada papel una vez) y `lib/patient-areas.ts` (`DOCUMENT_FILTERS`).
