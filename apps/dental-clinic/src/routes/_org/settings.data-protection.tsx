@@ -1,3 +1,4 @@
+import { ScrollArea } from "@odentia/ui"
 import { LoadingState, PageHeader } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
@@ -154,7 +155,7 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
             </li>
           ))}
         </ul>
-        <div className="hidden overflow-x-auto sm:block">
+        <ScrollArea horizontal className="hidden sm:block">
           <table className="w-full min-w-[640px] border-collapse text-sm">
             <thead>
               <tr className="text-left text-muted-foreground">
@@ -175,7 +176,7 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       </section>
 
       <section aria-labelledby="dp-processors" className="flex flex-col gap-4 rounded-2xl border p-5">
