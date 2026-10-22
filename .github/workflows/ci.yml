@@ -11,10 +11,57 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Tests unitarios y de integración repartidos en partes paralelas; los
+  # recorridos E2E se ejecutan por separado. Cada archivo de prueba arranca su
+  # propio PostgreSQL con testcontainers, así que cada parte es independiente.
+  # Un paquete nuevo cae en la parte general salvo que se le asigne otra.
   check:
+    name: check (${{ matrix.parte }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Tipos de todo el repo y las pruebas de los paquetes sin parte propia.
+          - parte: general
+            tipos: true
+            postgres: true
+            paquetes: --filter=!@odentia/e2e --filter=!@odentia/services --filter=!@odentia/api --filter=!@odentia/ui-patterns --filter=!@odentia/platform
+          # `--only` omite el `^build` (tsc --noEmit): ya lo comprueba la parte general.
+          # Pruebas de interfaz con jsdom: sin base de datos, pero mucha CPU.
+          - parte: interfaz
+            paquetes: --filter=@odentia/ui-patterns --filter=@odentia/platform
+            opciones: --only
+          - parte: api
+            postgres: true
+            paquetes: --filter=@odentia/api
+            opciones: --only
+          - parte: services-1
+            postgres: true
+            paquetes: --filter=@odentia/services
+            opciones: --only -- --shard=1/3
+          - parte: services-2
+            postgres: true
+            paquetes: --filter=@odentia/services
+            opciones: --only -- --shard=2/3
+          - parte: services-3
+            postgres: true
+            paquetes: --filter=@odentia/services
+            opciones: --only -- --shard=3/3
     steps:
       - uses: actions/checkout@v4
+        with:
+          # En un PR, HEAD es la fusión con main y HEAD^1 la punta de main.
+          fetch-depth: 2
+      # La imagen se construye en segundo plano mientras se instala y se
+      # comprueban los tipos; el paso de pruebas la espera.
+      - name: Preparar PostgreSQL para las pruebas de integración
+        if: matrix.postgres
+        run: |
+          # Toda la salida al log: el paso no debe quedar atado a la del proceso.
+          (set +e
+           docker build --tag dentalagent-postgres:18.6 ./infra/dev/postgres
+           echo $? > "$RUNNER_TEMP/postgres.exit") > "$RUNNER_TEMP/postgres.log" 2>&1 &
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -23,11 +70,41 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - name: Preparar PostgreSQL para las pruebas de integración
-        run: docker build --tag dentalagent-postgres:18.6 ./infra/dev/postgres
-      # Tests unitarios y de integración; los recorridos E2E se ejecutan por separado.
-      - run: pnpm test --filter=!@odentia/e2e
+      # En main corre todo. En un PR, solo los paquetes cambiados y los que
+      # dependen de ellos, salvo que cambie algo que Turbo no atribuye a ningún
+      # paquete pero que afecta a todos: dependencias, configuración, parches,
+      # la imagen de PostgreSQL de las pruebas o este mismo workflow.
+      - name: Decidir el alcance
+        id: alcance
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "Push a main: suite completa."
+            exit 0
+          fi
+          globales=$(git diff --name-only HEAD^1 HEAD | grep -E '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|turbo\.json|tsconfig\.base\.json|patches/|infra/dev/postgres/|\.github/workflows/ci\.yml)' || true)
+          if [ -n "$globales" ]; then
+            echo "Cambian archivos globales; suite completa:"
+            echo "$globales"
+            exit 0
+          fi
+          echo "afectados=--affected" >> "$GITHUB_OUTPUT"
+          echo "TURBO_SCM_BASE=HEAD^1" >> "$GITHUB_ENV"
+      - if: matrix.tipos
+        run: pnpm exec turbo run typecheck ${{ steps.alcance.outputs.afectados }}
+      - name: Buscar paquetes con pruebas
+        id: pruebas
+        run: |
+          total=$(pnpm exec turbo ls ${{ steps.alcance.outputs.afectados }} ${{ matrix.paquetes }} --output=json | jq '.packages.count')
+          echo "Paquetes a probar: $total"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+      - name: Esperar la imagen de PostgreSQL
+        if: matrix.postgres && steps.pruebas.outputs.total != '0'
+        run: |
+          timeout 600 sh -c 'while [ ! -f "$RUNNER_TEMP/postgres.exit" ]; do sleep 2; done'
+          cat "$RUNNER_TEMP/postgres.log"
+          exit "$(cat "$RUNNER_TEMP/postgres.exit")"
+      - if: steps.pruebas.outputs.total != '0'
+        run: pnpm exec turbo run test ${{ steps.alcance.outputs.afectados }} ${{ matrix.paquetes }} ${{ matrix.opciones }}
 
   docker-build:
     # También en cada PR: es lo único que comprueba la imagen antes de fusionar,
