@@ -56,7 +56,7 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
-import { odontogramLines } from "./clinical.js"
+import { odontogramLines, toothAndSurfaces } from "./clinical.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -71,6 +71,9 @@ import { listPlanItems } from "./plan.js"
 import { getPatient, requirePatient } from "./patients.js"
 import { MUTED, when } from "./pdf-writer.js"
 import { listDecisionRecipients } from "./responsibilities.js"
+
+/** La pieza y las caras de un diagnóstico o procedimiento, sacadas de su sitio. */
+type RecordSite = { toothNumber: number | null; surfaces: string[] }
 
 export interface PatientRecord {
   generatedAt: Date
@@ -95,8 +98,8 @@ export interface PatientRecord {
   medications: Array<typeof patientMedication.$inferSelect>
   encounters: Array<{
     row: typeof encounter.$inferSelect
-    diagnoses: Array<typeof encounterDiagnosis.$inferSelect & { title: string | null }>
-    procedures: Array<typeof encounterProcedure.$inferSelect>
+    diagnoses: Array<typeof encounterDiagnosis.$inferSelect & RecordSite & { title: string | null }>
+    procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
   }>
   odontogram: Array<{ tooth: number; label: string; surfaces: string[] }>
   planItems: Array<{ title: string; status: string; toothNumber: number | null }>
@@ -208,8 +211,8 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
       row,
       diagnoses: diagnoses
         .filter((d) => d.encounterId === row.id)
-        .map((d) => ({ ...d, title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
-      procedures: procedures.filter((p) => p.encounterId === row.id),
+        .map((d) => ({ ...d, ...toothAndSurfaces(d), title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
+      procedures: procedures.filter((p) => p.encounterId === row.id).map((p) => ({ ...p, ...toothAndSurfaces(p) })),
     })),
     odontogram,
     planItems: planItems.map((item) => ({ title: item.title, status: item.status, toothNumber: item.toothNumber })),

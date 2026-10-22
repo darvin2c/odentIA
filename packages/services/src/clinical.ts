@@ -32,9 +32,11 @@ import {
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
+  ISO_3950,
   isValidTooth,
   MANUAL_SIGNED_ODONTOGRAM_PURPOSES,
   type SignedOdontogramPurpose,
+  toothSiteCode,
   validateFinding,
 } from "@odentia/dental"
 import type { Db } from "@odentia/db"
@@ -44,7 +46,7 @@ import {
   encounter,
   encounterPlanItem,
   encounterProcedure,
-  encounterTooth,
+  encounterSite,
   imagingStudy,
   imagingStudyFile,
   odontogramAssessment,
@@ -70,6 +72,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { orgDentalProfile } from "./dental/profile.js"
+import { type SiteColumns, siteCodesColumns, siteColumns, teethOfCodes, withDentalSite } from "./dental/site.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 
@@ -1219,14 +1222,14 @@ export async function addClinicalNote(
       patientId,
       authorUserId: actorUserId,
       note,
-      toothNumber,
+      ...siteColumns({ toothNumber }),
       encounterId: input.encounterId ?? null,
       kind: "evolucion",
     })
     .returning()
   if (!row) throw new Error("No se pudo guardar la nota")
   await audit(tx, orgId, actorUserId, "note.created", "clinical_note", row.id, { patientId })
-  return row
+  return withDentalSite(row)
 }
 
 export async function listClinicalNotes(
@@ -1390,8 +1393,8 @@ export async function insertOdontogramFinding(
   const teethTouched = related ?? [input.toothNumber]
   for (const tooth of teethTouched) {
     await tx
-      .insert(encounterTooth)
-      .values({ organizationId: orgId, encounterId, toothNumber: tooth })
+      .insert(encounterSite)
+      .values({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(tooth) })
       .onConflictDoNothing()
   }
   await audit(
@@ -1956,6 +1959,15 @@ export async function odontogramLines(tx: Db, orgId: string, patientId: string) 
 }
 
 /**
+ * La pieza y las caras de una fila con sitio, para la copia de la historia: la
+ * copia no lee el sitio común por su cuenta (ADR 0079 y 0080).
+ */
+export function toothAndSurfaces(row: SiteColumns): { toothNumber: number | null; surfaces: string[] } {
+  const { toothNumber, surfaces } = withDentalSite(row)
+  return { toothNumber, surfaces }
+}
+
+/**
  * Hoja neutra del odontograma de hoy, sin norma de ningún país: numeración FDI
  * y los hallazgos vigentes por pieza. Es lo que se imprime donde no hay
  * odontograma firmado.
@@ -1981,7 +1993,7 @@ export async function getOdontogramPrint(tx: Db, orgId: string, patientId: strin
 // vigente (PatientDocumentWithContext).
 
 /** Revisión inmutable del contexto clínico de un documento. */
-export type DocumentContextRow = typeof patientDocumentContext.$inferSelect
+export type DocumentContextRow = typeof patientDocumentContext.$inferSelect & { toothNumbers: number[] }
 
 /** Entrada de contexto al registrar o corregir un documento. `null` libera el
  * vínculo; `undefined` (solo en corrección) conserva el valor vigente. */
@@ -2127,7 +2139,7 @@ function normalizeDocumentTags(input: readonly string[] | null | undefined): str
 
 /** Atención visible del mismo paciente y org, en cualquier estado. Las
  * correcciones pueden vincular atenciones cerradas como corrección documental
- * auditada sin mutar la clínica (sin inserts en encounter_tooth ni cambios de estado). */
+ * auditada sin mutar la clínica (sin inserts en encounter_site ni cambios de estado). */
 async function requireVisibleEncounter(
   tx: Db,
   orgId: string,
@@ -2194,7 +2206,12 @@ async function currentDocumentContext(
     )
     .orderBy(desc(patientDocumentContext.version))
   const [row] = await base.limit(1)
-  return row ?? null
+  return row ? withTeeth(row) : null
+}
+
+/** El contexto con sus piezas a la vista, como lo devolvía la API (ADR 0079). */
+function withTeeth(row: typeof patientDocumentContext.$inferSelect): DocumentContextRow {
+  return { ...row, toothNumbers: teethOfCodes(row) }
 }
 
 /** Fusión explícita por columnas estables: nunca filtra encounterId/toothNumber
@@ -2401,7 +2418,7 @@ export async function registerPatientDocument(
       encounterId: input.encounterId ?? null,
       planItemId: input.planItemId ?? null,
       ...extendedDocumentLinks(input),
-      toothNumbers,
+      ...siteCodesColumns(toothNumbers),
       tags,
       authorUserId: actorUserId,
     })
@@ -2409,12 +2426,13 @@ export async function registerPatientDocument(
   if (!ctx) throw new Error("No se pudo registrar el contexto del documento")
   if (input.encounterId && toothNumbers.length) {
     await tx
-      .insert(encounterTooth)
+      .insert(encounterSite)
       .values(
         toothNumbers.map((toothNumber) => ({
           organizationId: orgId,
           encounterId: input.encounterId!,
-          toothNumber,
+          siteSystem: ISO_3950,
+          siteCode: toothSiteCode(toothNumber),
         })),
       )
       .onConflictDoNothing()
@@ -2427,7 +2445,7 @@ export async function registerPatientDocument(
     encounterId: input.encounterId ?? null,
     planItemId: input.planItemId ?? null,
   })
-  return mergeDocumentContext(row, ctx)
+  return mergeDocumentContext(row, withTeeth(ctx))
 }
 
 /** Contexto vigente por documento (una fila por documento) acotado a org y
@@ -2445,11 +2463,12 @@ async function latestDocumentContexts(
   if (documentIds) {
     conditions.push(inArray(patientDocumentContext.documentId, [...new Set(documentIds)]))
   }
-  return tx
+  const rows = await tx
     .selectDistinctOn([patientDocumentContext.documentId])
     .from(patientDocumentContext)
     .where(and(...conditions))
     .orderBy(patientDocumentContext.documentId, desc(patientDocumentContext.version))
+  return rows.map(withTeeth)
 }
 
 /** Filtros del archivo clínico. Sin `includeRetired` los retirados no aparecen. */
@@ -2616,7 +2635,7 @@ export async function listDocumentContextHistory(
 ): Promise<DocumentContextRow[]> {
   await requirePatient(tx, orgId, patientId)
   await requireDocumentRow(tx, orgId, patientId, documentId)
-  return tx
+  const rows = await tx
     .select()
     .from(patientDocumentContext)
     .where(
@@ -2627,6 +2646,7 @@ export async function listDocumentContextHistory(
       ),
     )
     .orderBy(asc(patientDocumentContext.version))
+  return rows.map(withTeeth)
 }
 
 /** Documento fusionado con su historial de contextos (detalle para el visor). */
@@ -2683,9 +2703,9 @@ export async function correctDocumentContext(
   if (planItemId) await requirePatientPlanItem(tx, orgId, patientId, planItemId)
   const extended = extendedDocumentLinks(input, current)
   await validateExtendedDocumentLinks(tx, orgId, patientId, extended)
-  let next: DocumentContextRow | undefined
+  let inserted: typeof patientDocumentContext.$inferSelect | undefined
   try {
-    ;[next] = await tx
+    ;[inserted] = await tx
       .insert(patientDocumentContext)
       .values({
         organizationId: orgId,
@@ -2695,7 +2715,7 @@ export async function correctDocumentContext(
         encounterId,
         planItemId,
         ...extended,
-        toothNumbers,
+        ...siteCodesColumns(toothNumbers),
         tags,
         authorUserId: actorUserId,
       })
@@ -2710,7 +2730,8 @@ export async function correctDocumentContext(
     }
     throw e
   }
-  if (!next) throw new Error("No se pudo corregir el contexto del documento")
+  if (!inserted) throw new Error("No se pudo corregir el contexto del documento")
+  const next = withTeeth(inserted)
   await audit(
     tx,
     orgId,

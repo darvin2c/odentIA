@@ -3,23 +3,63 @@
  * maxilares (hueso cortical y esponjoso, 27 piezas con esmalte, dentina y
  * pulpa, la 36 ausente con su reborde, los dos conductos dentarios hasta el
  * agujero mentoniano y los senos maxilares), guardado como serie CT de PS3.3
- * A.3, un archivo por corte axial. No es de un paciente: sirve para la semilla
- * y las pruebas del visor.
+ * A.3, un archivo por corte axial. Con `dentition: "primary"` es la boca de un
+ * niño: las 20 piezas de leche (51 a 85) en un arco más chico. No es de un
+ * paciente: sirve para la semilla y las pruebas del visor.
  *
  * Coordenadas del paciente en mm según DICOM (LPS: +x a la izquierda del
  * paciente, +y hacia atrás, +z hacia arriba), con el plano oclusal en z = 0.
  * Valores en unidades Hounsfield; se guardan como HU + 1000 en 12 bits.
  */
 
-/** Ancho mesiodistal de cada pieza desde la línea media (incisivo central a segundo molar), en mm. */
-const TOOTH_WIDTHS = [5.5, 6, 7, 7, 7, 10, 9.5]
-const ROOT_LENGTHS = { upper: [13, 13, 17, 14, 14, 13, 13], lower: [12.5, 12.5, 16, 14, 14, 14, 13.5] }
-/** Arco: y = ARCH_FRONT + ARCH_CURVE · x² (parábola), en el plano axial. */
-const ARCH_FRONT = -20
-const ARCH_CURVE = 0.035
-const ARCH_MAX_X = 34
-/** Pieza ausente (FDI): la del ejemplo del implante. */
-const MISSING = new Set([36])
+export type CbctDentition = "permanent" | "primary"
+
+/** Arco: y = front + curve · x² (parábola), en el plano axial, hasta |x| = maxX. */
+interface ArchShape {
+  front: number
+  curve: number
+  maxX: number
+}
+
+interface DentitionShape {
+  /** Ancho mesiodistal de cada pieza desde la línea media, en mm. */
+  widths: { upper: readonly number[]; lower: readonly number[] }
+  rootLengths: { upper: readonly number[]; lower: readonly number[] }
+  /** Alto de la corona, en mm. */
+  crown: number
+  /** Posición (1 = incisivo central) desde la que las piezas son molares. */
+  molarFrom: number
+  /** Cuadrantes FDI: derecha del paciente (−x) e izquierda. */
+  quadrants: { upper: readonly [number, number]; lower: readonly [number, number] }
+  /** Piezas ausentes (FDI) y el tramo del arco donde queda su reborde. */
+  missing: ReadonlySet<number>
+  arch: ArchShape
+}
+
+const DENTITIONS: Record<CbctDentition, DentitionShape> = {
+  permanent: {
+    widths: { upper: [5.5, 6, 7, 7, 7, 10, 9.5], lower: [5.5, 6, 7, 7, 7, 10, 9.5] },
+    rootLengths: { upper: [13, 13, 17, 14, 14, 13, 13], lower: [12.5, 12.5, 16, 14, 14, 14, 13.5] },
+    crown: 7.6,
+    molarFrom: 6,
+    quadrants: { upper: [1, 2], lower: [4, 3] },
+    // La del ejemplo del implante.
+    missing: new Set([36]),
+    arch: { front: -20, curve: 0.035, maxX: 34 },
+  },
+  primary: {
+    // Medias de 52 niños (Martínez de Pinillos, Zenodo, doi:10.5281/zenodo.17619010,
+    // CC BY 4.0): las mismas de «Ir a la pieza» en el visor.
+    widths: { upper: [5.03, 4.87, 6.18, 7.12, 8.93], lower: [3.82, 4.29, 5.65, 8.24, 10.06] },
+    // Raíces y coronas de leche: más cortas que las permanentes.
+    rootLengths: { upper: [10, 11, 13, 10, 11], lower: [9, 10, 11.5, 9.5, 11] },
+    crown: 6,
+    molarFrom: 4,
+    quadrants: { upper: [5, 6], lower: [8, 7] },
+    missing: new Set(),
+    arch: { front: -16, curve: 0.06, maxX: 24 },
+  },
+}
 
 export interface ArchPoint {
   x: number
@@ -29,13 +69,13 @@ export interface ArchPoint {
 }
 
 /** Puntos de la línea media del arco, cada 0,1 mm de x, de derecha a izquierda. */
-function archTable(): ArchPoint[] {
+function archTable(arch: ArchShape): ArchPoint[] {
   const out: ArchPoint[] = []
   let s = 0
   let prev: { x: number; y: number } | null = null
   const half: ArchPoint[] = []
-  for (let x = 0; x <= ARCH_MAX_X + 1e-9; x += 0.1) {
-    const y = ARCH_FRONT + ARCH_CURVE * x * x
+  for (let x = 0; x <= arch.maxX + 1e-9; x += 0.1) {
+    const y = arch.front + arch.curve * x * x
     if (prev) s += Math.hypot(x - prev.x, y - prev.y)
     half.push({ x, y, s })
     prev = { x, y }
@@ -55,26 +95,47 @@ export interface DemoTooth {
   s: number
   width: number
   rootLength: number
+  crown: number
+  molar: boolean
 }
 
-/** Las piezas del fantoma con su posición sobre el arco (la ausente no figura). */
-export function cbctDemoTeeth(): DemoTooth[] {
+/** Las piezas del fantoma con su posición sobre el arco (las ausentes no figuran). */
+export function cbctDemoTeeth(dentition: CbctDentition = "permanent"): DemoTooth[] {
+  const shape = DENTITIONS[dentition]
   const teeth: DemoTooth[] = []
   for (const jaw of ["upper", "lower"] as const) {
     for (const side of [-1, 1] as const) {
       let s = 0
-      TOOTH_WIDTHS.forEach((width, i) => {
+      shape.widths[jaw].forEach((width, i) => {
         const center = s + width / 2
         s += width
-        // Derecha del paciente (−x): cuadrantes 1 y 4; izquierda: 2 y 3.
-        const quadrant = jaw === "upper" ? (side < 0 ? 1 : 2) : side < 0 ? 4 : 3
+        const quadrant = shape.quadrants[jaw][side < 0 ? 0 : 1]!
         const fdi = quadrant * 10 + i + 1
-        if (MISSING.has(fdi)) return
-        teeth.push({ fdi, jaw, s: side * center, width, rootLength: ROOT_LENGTHS[jaw][i]! })
+        if (shape.missing.has(fdi)) return
+        teeth.push({
+          fdi,
+          jaw,
+          s: side * center,
+          width,
+          rootLength: shape.rootLengths[jaw][i]!,
+          crown: shape.crown,
+          molar: i + 1 >= shape.molarFrom,
+        })
       })
     }
   }
   return teeth
+}
+
+/** Tramos del arco (|s|, del lado izquierdo) donde falta una pieza de abajo: ahí queda el reborde. */
+function lowerGaps(shape: DentitionShape): Array<[number, number]> {
+  const gaps: Array<[number, number]> = []
+  let s = 0
+  shape.widths.lower.forEach((width, i) => {
+    if (shape.missing.has(shape.quadrants.lower[1] * 10 + i + 1)) gaps.push([s + 0.5, s + width + 0.5])
+    s += width
+  })
+  return gaps
 }
 
 export interface CbctPhantomOptions {
@@ -83,6 +144,8 @@ export interface CbctPhantomOptions {
   slices?: number
   voxelMm?: number
   seed?: number
+  /** «primary»: la boca de un niño, con las piezas de leche. */
+  dentition?: CbctDentition
 }
 
 export interface CbctPhantom {
@@ -117,11 +180,20 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
   const slices = options.slices ?? 180
   const v = options.voxelMm ?? 0.4
   const random = rng(options.seed ?? 34)
+  const dentition = options.dentition ?? "permanent"
+  const shape = DENTITIONS[dentition]
+  const { front, curve, maxX } = shape.arch
   const x0 = -(size * v) / 2
   const y0 = -(size * v) / 2 + 2
   const zBottom = -38
-  const arch = archTable()
-  const teeth = cbctDemoTeeth()
+  const arch = archTable(shape.arch)
+  const teeth = cbctDemoTeeth(dentition)
+  // Detrás del último molar ya no hay reborde.
+  const archEnd = Math.max(...teeth.map((t) => Math.abs(t.s) + t.width / 2))
+  // En las proporciones del adulto: el conducto desde los 22 mm de 52 y el borde inferior sube hasta los 50.
+  const canalFrom = (archEnd * 22) / 52
+  const chinTo = (archEnd * 50) / 52
+  const gaps = lowerGaps(shape)
 
   // Por cada columna (x, y): punto más cercano del arco, distancia con signo
   // (positiva hacia afuera, del lado de la mejilla) y piezas cercanas.
@@ -137,7 +209,7 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
       let bestS = 0
       let bestY = 0
       // El arco es monótono en x: basta mirar alrededor de la misma x.
-      const center = Math.round((x + ARCH_MAX_X) / 0.1)
+      const center = Math.round((x + maxX) / 0.1)
       for (let k = Math.max(0, center - 400); k < Math.min(arch.length, center + 400); k += 2) {
         const p = arch[k]!
         const d = (p.x - x) ** 2 + (p.y - y) ** 2
@@ -150,10 +222,10 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
       const at = r * size + c
       archS[at] = bestS
       // Afuera del arco = delante de la curva (y menor que la curva en esa x).
-      const curveY = ARCH_FRONT + ARCH_CURVE * x * x
+      const curveY = front + curve * x * x
       const outward = y < curveY ? 1 : -1
       archD[at] = Math.sqrt(best) * outward
-      inside[at] = y > curveY && Math.abs(x) < ARCH_MAX_X && y < bestY + 30 ? 1 : 0
+      inside[at] = y > curveY && Math.abs(x) < maxX && y < bestY + 30 ? 1 : 0
     }
   }
 
@@ -171,7 +243,7 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
         const s = archS[at]!
         const d = archD[at]!
         const sideS = Math.abs(s)
-        const beyondArch = sideS > 52 // detrás del último molar
+        const beyondArch = sideS > archEnd // detrás del último molar
         let hu = -1000
         // Partes blandas: la cara, más ancha arriba.
         if ((x / 46) ** 2 + ((y - 4) / 44) ** 2 + (z / 52) ** 2 < 1) hu = 35
@@ -193,16 +265,16 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
         }
 
         // Mandíbula: cuerpo con su cortical y el conducto dentario.
-        const ridge = sideS > 33 && sideS < 43 && s > 0 ? -11.5 : -9.5 // reborde de la 36
-        const bottom = -36 + 2 * smoothstep(0, 50, sideS)
+        const ridge = s > 0 && gaps.some(([from, to]) => sideS > from && sideS < to) ? -11.5 : -9.5 // reborde de la ausente
+        const bottom = -36 + 2 * smoothstep(0, chinTo, sideS)
         if (z < ridge && z > bottom && !beyondArch) {
           const half = 3.5 + 2.6 * smoothstep(ridge, ridge - 11, z) - 0.6 * smoothstep(bottom + 5, bottom, z)
           if (Math.abs(d) < half) {
             const shell = Math.abs(d) > half - 1.7 || z < bottom + 1.8 || z > ridge - 0.9
             hu = shell ? 1450 : 470
-            // Conducto: de la rama (atrás) al agujero mentoniano, entre los premolares.
-            if (sideS > 22) {
-              const zc = -27 + (sideS - 22) * 0.12
+            // Conducto: de la rama (atrás) al agujero mentoniano.
+            if (sideS > canalFrom) {
+              const zc = -27 + (sideS - canalFrom) * 0.12
               const dc = Math.hypot(d + 0.6, z - zc)
               if (dc < 1.3) hu = 60
               else if (dc < 1.8) hu = 950
@@ -217,11 +289,11 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
           const upper = tooth.jaw === "upper"
           // Altura medida desde el plano oclusal hacia la raíz.
           const h = upper ? z - 0.4 : -z - 0.4
-          const crown = 7.6
+          const crown = tooth.crown
           if (h < 0 || h > crown + tooth.rootLength) continue
-          const molar = tooth.width >= 9
+          const molar = tooth.molar
           const mdHalf = tooth.width / 2 - 0.4
-          const blHalf = molar ? 5 : tooth.width <= 6 ? 3.2 : 3.8
+          const blHalf = molar ? (dentition === "primary" ? 4.2 : 5) : tooth.width <= 6 ? 3.2 : 3.8
           let inTooth = false
           let pulp = false
           let enamel = false
@@ -231,7 +303,7 @@ export function generateCbctPhantom(options: CbctPhantomOptions = {}): CbctPhant
             const e = (ds / (mdHalf * taper)) ** 2 + (d / (blHalf * taper)) ** 2
             inTooth = e < 1
             enamel = inTooth && (e > 0.62 || h < 1.2)
-            pulp = (ds / (mdHalf * 0.3)) ** 2 + (d / (blHalf * 0.32)) ** 2 < 1 && h > 3.5
+            pulp = (ds / (mdHalf * 0.3)) ** 2 + (d / (blHalf * 0.32)) ** 2 < 1 && h > crown * 0.46
           } else {
             const t = (h - crown) / tooth.rootLength
             const shrink = 0.62 * (1 - t) + 0.18

@@ -1,3 +1,4 @@
+import type { DentalSite } from "@odentia/dental"
 import {
   assertTreatmentSite,
   phaseForKind,
@@ -30,6 +31,7 @@ import { requireServiceForIndication, type ServiceRow } from "./service-catalog.
 import { serviceKindOf } from "./specialties.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
+import { siteColumns, withDentalSite } from "./dental/site.js"
 import { drawTreatedFinding } from "./dental/treated-findings.js"
 
 /**
@@ -70,9 +72,10 @@ export const PLAN_ITEM_DECISIONS = [
 ] as const
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
-export type PlanItemRow = typeof treatmentPlanItem.$inferSelect
+/** El ítem con su sitio dental a la vista (ADR 0079: la tabla guarda el sitio común). */
+export type PlanItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite
 export type TreatmentPlanRow = typeof treatmentPlan.$inferSelect
-type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect
+type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & DentalSite
 
 /** Cabecera de presupuesto (lectura acotada a org+paciente). */
 export type BudgetHeaderRow = typeof treatmentBudget.$inferSelect
@@ -285,7 +288,7 @@ async function lockItemRow(
     .limit(1)
     .for("update")
   if (!item) throw notFound("Ítem del plan")
-  return item
+  return withDentalSite(item)
 }
 
 /** Lookup del presupuesto acotado a org + paciente (anti-traversal). */
@@ -356,7 +359,7 @@ async function currentLine(
       asc(treatmentBudgetOption.position),
     )
     .limit(1)
-  return row?.line ?? null
+  return row?.line ? withDentalSite(row.line) : null
 }
 
 export async function itemDecision(
@@ -375,8 +378,9 @@ export async function itemDecision(
 async function withDecisions(
   tx: Db,
   orgId: string,
-  items: PlanItemRow[],
+  rows: Array<typeof treatmentPlanItem.$inferSelect>,
 ): Promise<PlanItemWithProgress[]> {
+  const items = rows.map(withDentalSite)
   const ids = items.map((item) => item.id)
   const done = ids.length
     ? await tx
@@ -722,11 +726,8 @@ export async function addPlanItem(
       plannedSessions,
       sortOrder,
       odontogramEntryId: input.odontogramEntryId ?? null,
-      toothNumber: site.toothNumber,
       scope,
-      surfaces: site.surfaces,
-      quadrant: site.quadrant,
-      arch: site.arch,
+      ...siteColumns(site),
       title: service.name,
       detail,
       ...diagnosis,
@@ -749,7 +750,7 @@ export async function addPlanItem(
     priceCents: service.priceCents,
     currency: service.currency,
   })
-  return { ...row, decision: "pendiente" }
+  return { ...withDentalSite(row), decision: "pendiente" }
 }
 
 export interface AddPlanItemsBatchInput {
@@ -816,11 +817,8 @@ export async function addPlanItemsBatch(
         budgetId: null,
         phase,
         sortOrder: sortOrder++,
-        toothNumber: tooth,
         scope,
-        surfaces: [],
-        quadrant: null,
-        arch: null,
+        ...siteColumns({ toothNumber: tooth }),
         title: service.name,
         detail,
         ...diagnosis,
@@ -833,7 +831,7 @@ export async function addPlanItemsBatch(
       })
       .returning()
     if (!row) throw new Error("No se pudo crear el ítem del plan")
-    rows.push(row)
+    rows.push(withDentalSite(row))
   }
   await audit(
     tx,
@@ -973,10 +971,7 @@ export async function updatePlanItem(
     fields.push("site")
   }
   if (fields.includes("serviceId") || fields.includes("site")) {
-    set.toothNumber = site.toothNumber
-    set.surfaces = site.surfaces
-    set.quadrant = site.quadrant
-    set.arch = site.arch
+    Object.assign(set, siteColumns(site))
     if (fields.includes("site") && !fields.includes("serviceId")) {
       // El sitio se valida contra el scope vigente del ítem.
     }
@@ -1019,10 +1014,9 @@ export async function updatePlanItem(
         serviceId: updated.serviceId,
         title: updated.title,
         scope: updated.scope,
-        toothNumber: updated.toothNumber,
-        surfaces: updated.surfaces,
-        quadrant: updated.quadrant,
-        arch: updated.arch,
+        siteSystem: updated.siteSystem,
+        siteCode: updated.siteCode,
+        siteQualifiers: updated.siteQualifiers,
         codings: updated.codings,
         priceCents: updated.priceCents,
         tariffPriceCents: updated.priceCents,
@@ -1047,7 +1041,8 @@ export async function updatePlanItem(
     patientId,
     fields,
   })
-  return { ...updated, decision: await itemDecision(tx, orgId, updated) }
+  const item = withDentalSite(updated)
+  return { ...item, decision: await itemDecision(tx, orgId, item) }
 }
 
 export async function setPlanItemStatus(
@@ -1143,8 +1138,8 @@ export async function setPlanItemStatus(
   // Lo tratado queda dibujado: lo que su servicio deja en la pieza (la resina,
   // una restauración) se registra en esta atención, una sola vez.
   if (input.status === "realizado" && input.encounterId)
-    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, updated)
-  return { ...updated, decision: updated.decisionStatus as PlanItemDecision }
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, withDentalSite(updated))
+  return { ...withDentalSite(updated), decision: updated.decisionStatus as PlanItemDecision }
 }
 
 export async function revisePlanItem(
@@ -1194,7 +1189,7 @@ export async function revisePlanItem(
     reason,
     supersededBy: revised.id,
   })
-  return { ...revised, decision: revised.decisionStatus as PlanItemDecision }
+  return { ...withDentalSite(revised), decision: revised.decisionStatus as PlanItemDecision }
 }
 
 export interface PlanItemPlanningInput {

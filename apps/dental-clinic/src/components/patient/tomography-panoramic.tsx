@@ -13,6 +13,8 @@ import {
   panoramaRows,
   type Point,
   sampleCurve,
+  dentitionOf,
+  jawOf,
   toothAt,
   toothIndex,
 } from "../../lib/cbct-arch"
@@ -150,7 +152,9 @@ export function PanoramicView({
   const perMm = Math.max(1, Math.round(1 / step))
   const teeth = doc.toothNumbers
   const [tooth, setTooth] = useState<number | null>(teeth[0] ?? null)
-  const jaw = tooth && Math.floor(tooth / 10) <= 2 ? "upper" : "lower"
+  const jaw = tooth ? jawOf(tooth) : "lower"
+  // La pieza que se nombra al medir es de la dentición de la pieza elegida: un niño da «55».
+  const dentition = tooth ? dentitionOf(tooth) : "permanent"
   const [index, setIndex] = useState(0)
   const placed = useRef(false)
   useEffect(() => {
@@ -204,7 +208,7 @@ export function PanoramicView({
       // La pieza a la altura de la medida: el corte transversal o la columna de la panorámica.
       toothNumber:
         curve.length && view !== "axial"
-          ? toothAt(curve, view === "transversal" ? at : Math.round(points[0]!.x), jaw)
+          ? toothAt(curve, view === "transversal" ? at : Math.round(points[0]!.x), jaw, dentition)
           : null,
     })
   }
@@ -300,7 +304,7 @@ export function PanoramicView({
     }
   }
 
-  const teethLabel = curve.length ? toothAt(curve, clampIndex(index), jaw) : null
+  const teethLabel = curve.length ? toothAt(curve, clampIndex(index), jaw, dentition) : null
   const tick = useCallback(
     (ctx: CanvasRenderingContext2D, image: PlaneImage) => {
       if (!curve.length) return

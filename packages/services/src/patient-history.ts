@@ -1,5 +1,6 @@
 import { budgetStateText, diagnosisCodeLabel } from "@odentia/clinical"
-import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
+import { dentalSiteOfRow, toothOfRow } from "./dental/site.js"
+import { ISO_3950, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS, toothSiteCode } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -8,7 +9,7 @@ import {
   encounterPlanItem,
   encounterDiagnosis,
   encounterProcedure,
-  encounterTooth,
+  encounterSite,
   odontogramAssessment,
   odontogramEntry,
   patientAnamnesis,
@@ -112,7 +113,7 @@ interface LastVisit {
   finalizedAt: Date | null
   teeth: number[]
   procedures: Array<
-    Pick<typeof encounterProcedure.$inferSelect, "description" | "toothNumber" | "diagnosisCode" | "diagnosisSystem">
+    Pick<typeof encounterProcedure.$inferSelect, "description" | "diagnosisCode" | "diagnosisSystem"> & { toothNumber: number | null }
   >
   diagnoses: string[]
   plannedItems: PlannedLink[]
@@ -153,7 +154,8 @@ async function loadPlannedForEncounters(
       encounterId: encounterPlanItem.encounterId,
       id: treatmentPlanItem.id,
       title: treatmentPlanItem.title,
-      toothNumber: treatmentPlanItem.toothNumber,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
       status: treatmentPlanItem.status,
       planId: treatmentPlanItem.planId,
       budgetId: treatmentPlanItem.budgetId,
@@ -178,7 +180,7 @@ async function loadPlannedForEncounters(
     list.push({
       id: row.id,
       title: row.title,
-      toothNumber: row.toothNumber,
+      toothNumber: toothOfRow(row),
       status: row.status,
       planId: row.planId,
       budgetId: row.budgetId,
@@ -281,7 +283,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     .select({
       id: treatmentPlanItem.id,
       title: treatmentPlanItem.title,
-      toothNumber: treatmentPlanItem.toothNumber,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
       diagnosisSystem: treatmentPlanItem.diagnosisSystem,
       priceCents: treatmentPlanItem.priceCents,
@@ -340,19 +343,20 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   if (lastEncounter) {
     const [teethRows, procedures, encounterNotes] = await Promise.all([
       tx
-        .select({ toothNumber: encounterTooth.toothNumber })
-        .from(encounterTooth)
+        .select({ siteSystem: encounterSite.siteSystem, siteCode: encounterSite.siteCode })
+        .from(encounterSite)
         .where(
           and(
-            eq(encounterTooth.organizationId, orgId),
-            eq(encounterTooth.encounterId, lastEncounter.id),
+            eq(encounterSite.organizationId, orgId),
+            eq(encounterSite.encounterId, lastEncounter.id),
           ),
         )
-        .orderBy(asc(encounterTooth.toothNumber)),
+        .orderBy(asc(encounterSite.siteCode)),
       tx
         .select({
           description: encounterProcedure.description,
-          toothNumber: encounterProcedure.toothNumber,
+          siteSystem: encounterProcedure.siteSystem,
+          siteCode: encounterProcedure.siteCode,
           diagnosisCode: encounterProcedure.diagnosisCode,
           diagnosisSystem: encounterProcedure.diagnosisSystem,
         })
@@ -394,8 +398,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       evolution: lastEncounter.evolution,
       indications: lastEncounter.indications,
       finalizedAt: lastEncounter.finalizedAt,
-      teeth: teethRows.map((t) => t.toothNumber),
-      procedures,
+      teeth: teethRows.map(toothOfRow).filter((tooth): tooth is number => tooth != null),
+      procedures: procedures.map(({ siteSystem, siteCode, ...procedure }) => ({ ...procedure, toothNumber: toothOfRow({ siteSystem, siteCode }) })),
       diagnoses,
       plannedItems: planned.get(lastEncounter.id) ?? [],
       documents: docs.get(lastEncounter.id) ?? [],
@@ -405,7 +409,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   const acceptedPending: AcceptedPendingItem[] = acceptedRows.slice(0, 10).map((row) => ({
     id: row.id,
     title: row.title,
-    toothNumber: row.toothNumber,
+    toothNumber: toothOfRow(row),
     diagnosisCode: row.diagnosisCode,
     diagnosisLabel: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
     priceCents: row.priceCents,
@@ -730,7 +734,7 @@ export async function getTimeline(
   // en curso no es todavía un hecho: lo continúa la cabecera.
   if (types.includes("encounter"))
     branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else created_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
-    ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_tooth et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.tooth_number = ${tooth})`}`)
+    ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${ISO_3950} and et.site_code = ${toothSiteCode(tooth)})`}`)
   // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
   // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
   if (types.includes("consent") && tooth == null)
@@ -765,7 +769,7 @@ export async function getTimeline(
     const toothFilter =
       tooth == null
         ? sql``
-        : sql`and exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and ${tooth} = any(c.tooth_numbers))`
+        : sql`and exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.site_system = ${ISO_3950} and ${toothSiteCode(tooth)} = any(c.site_codes))`
     // En la historia completa viven dentro de su atención; al filtrar documentos
     // deben seguir visibles aunque no se estén solicitando las atenciones.
     const linkedFilter =
@@ -805,11 +809,11 @@ export async function getTimeline(
         .where(and(eq(encounter.organizationId, orgId), inArray(encounter.id, encounters))),
       tx
         .select()
-        .from(encounterTooth)
+        .from(encounterSite)
         .where(
           and(
-            eq(encounterTooth.organizationId, orgId),
-            inArray(encounterTooth.encounterId, encounters),
+            eq(encounterSite.organizationId, orgId),
+            inArray(encounterSite.encounterId, encounters),
           ),
         ),
       tx
@@ -864,7 +868,8 @@ export async function getTimeline(
         detail: row.evolution,
         toothNumbers: teeth
           .filter((t) => t.encounterId === row.id)
-          .map((t) => t.toothNumber)
+          .map(toothOfRow)
+          .filter((tooth): tooth is number => tooth != null)
           .sort((a, b) => a - b),
         authorId: row.professionalUserId,
         status: row.status,
@@ -1021,14 +1026,15 @@ export async function getTimeline(
       .where(
         and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, planIds)),
       )) {
+      const dental = dentalSiteOfRow(row)
       const site =
-        row.toothNumber != null
-          ? `Pieza ${row.toothNumber}${row.surfaces.length > 0 ? ` (${row.surfaces.join(", ")})` : ""}`
-          : row.scope === "quadrant" && row.quadrant != null
-            ? `Cuadrante ${row.quadrant}`
-            : row.scope === "arch" && row.arch === "upper"
+        dental.toothNumber != null
+          ? `Pieza ${dental.toothNumber}${dental.surfaces.length > 0 ? ` (${dental.surfaces.join(", ")})` : ""}`
+          : row.scope === "quadrant" && dental.quadrant != null
+            ? `Cuadrante ${dental.quadrant}`
+            : row.scope === "arch" && dental.arch === "upper"
               ? "Arcada superior"
-              : row.scope === "arch" && row.arch === "lower"
+              : row.scope === "arch" && dental.arch === "lower"
                 ? "Arcada inferior"
                 : "General"
       hydrated.set(row.id, {
@@ -1038,7 +1044,7 @@ export async function getTimeline(
         detail: `${site} · ${row.status}`,
         status: row.status,
         decision: row.decisionStatus,
-        toothNumbers: row.toothNumber != null ? [row.toothNumber] : [],
+        toothNumbers: dental.toothNumber != null ? [dental.toothNumber] : [],
         authorId: row.createdBy,
         planId: row.planId,
         planItemId: row.id,

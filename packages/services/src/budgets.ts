@@ -1,3 +1,5 @@
+import type { DentalSite } from "@odentia/dental"
+import { withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -68,7 +70,7 @@ export const BUDGET_STATUSES = [
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number]
 
 export type BudgetRow = typeof treatmentBudget.$inferSelect
-export type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect
+export type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & DentalSite
 export type BudgetOptionRow = typeof treatmentBudgetOption.$inferSelect
 
 /** Línea con estado clínico y totales unidos solo para lectura. */
@@ -438,7 +440,7 @@ async function listBudgetLines(
         ? tariffLineTotalCents - lineTotalCents
         : null
     return {
-      ...line,
+      ...withDentalSite(line),
       itemStatus: statuses.get(line.planItemId) ?? "pendiente",
       lineTotalCents,
       tariffLineTotalCents,
@@ -690,10 +692,9 @@ async function insertDraftLines(
       serviceId: item.serviceId,
       title: item.title,
       scope: item.scope,
-      toothNumber: item.toothNumber,
-      surfaces: item.surfaces,
-      quadrant: item.quadrant,
-      arch: item.arch,
+      siteSystem: item.siteSystem,
+      siteCode: item.siteCode,
+      siteQualifiers: item.siteQualifiers,
       codings: item.codings,
       priceCents: item.priceCents,
       tariffPriceCents: item.priceCents,
@@ -1213,10 +1214,9 @@ export async function duplicateBudgetOption(
       serviceId: line.serviceId,
       title: line.title,
       scope: line.scope,
-      toothNumber: line.toothNumber,
-      surfaces: line.surfaces,
-      quadrant: line.quadrant,
-      arch: line.arch,
+      siteSystem: line.siteSystem,
+      siteCode: line.siteCode,
+      siteQualifiers: line.siteQualifiers,
       codings: line.codings,
       priceCents: line.priceCents,
       tariffPriceCents: line.tariffPriceCents,
@@ -1957,8 +1957,8 @@ export async function reviseBudget(
     await tx.insert(treatmentBudgetItem).values({
       organizationId: orgId, patientId, planId: current.planId, budgetId: revision.id, optionId: option.id,
       planItemId: item.id, serviceId: snapshot.serviceId, title: snapshot.title,
-      scope: snapshot.scope, toothNumber: snapshot.toothNumber, surfaces: snapshot.surfaces,
-      quadrant: snapshot.quadrant, arch: snapshot.arch, codings: snapshot.codings,
+      scope: snapshot.scope, siteSystem: snapshot.siteSystem, siteCode: snapshot.siteCode,
+      siteQualifiers: snapshot.siteQualifiers, codings: snapshot.codings,
       priceCents,
       tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
       priceReason,

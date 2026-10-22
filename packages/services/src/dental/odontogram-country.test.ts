@@ -1,3 +1,4 @@
+import { withDentalSite } from "./site.js"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { validateLeavesFinding } from "@odentia/dental"
@@ -283,7 +284,7 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   })
   // Otra vez no lo duplica.
   const [row] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
-  expect(await f.run((tx) => drawTreatedFinding(tx, ...f.args, draft, row!))).toBeNull()
+  expect(await f.run((tx) => drawTreatedFinding(tx, ...f.args, draft, withDentalSite(row!)))).toBeNull()
   expect(await left()).toHaveLength(1)
   // Si se anula su procedimiento deja de estar realizado y lo dibujado se anula.
   await f.run((tx) => voidEncounterProcedure(tx, ...f.args, draft, procedure.id, { reason: "Pieza equivocada" }))
@@ -361,7 +362,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     .select()
     .from(encounterDiagnosis)
     .where(eq(encounterDiagnosis.encounterId, draft))
-  expect(diagnosis).toMatchObject({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, surfaces: ["occlusal"] })
+  expect(diagnosis).toMatchObject({ diagnosisCode: "K02.1", diagnosisType: "provisional", siteSystem: "ISO-3950", siteCode: "16", siteQualifiers: ["occlusal"] })
   expect(result.planItems[0]).toMatchObject({
     toothNumber: 16,
     surfaces: ["occlusal"],

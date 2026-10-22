@@ -339,6 +339,27 @@ export function jawRows(volume: CbctVolume, occlusalZ: number, jaw: "upper" | "l
 const TOOTH_WIDTH = { upper: [8.5, 6.5, 7.5, 7, 6.5, 10, 9], lower: [5.5, 6, 7, 7, 7.5, 11, 10.5] }
 
 /**
+ * Lo mismo en la dentición temporal (1 = incisivo central … 5 = segundo molar):
+ * media del ancho mesiodistal de 712 dientes de leche de 52 niños (Martínez de
+ * Pinillos, «Tooth size measurements from the deciduous dentitions of 52
+ * Spanish children», Zenodo, doi:10.5281/zenodo.17619010, CC BY 4.0). Frente a
+ * la tabla de Black mueve cada pieza menos de 1,5 mm sobre el arco.
+ */
+const PRIMARY_TOOTH_WIDTH = { upper: [5.03, 4.87, 6.18, 7.12, 8.93], lower: [3.82, 4.29, 5.65, 8.24, 10.06] }
+
+export type Dentition = "permanent" | "primary"
+
+/** La dentición de una pieza FDI: los cuadrantes 5 a 8 son los temporales. */
+export function dentitionOf(fdi: number): Dentition {
+  return Math.floor(fdi / 10) >= 5 ? "primary" : "permanent"
+}
+
+/** La arcada de una pieza FDI: los cuadrantes 1, 2, 5 y 6 son superiores. */
+export function jawOf(fdi: number): "upper" | "lower" {
+  return [1, 2, 5, 6].includes(Math.floor(fdi / 10)) ? "upper" : "lower"
+}
+
+/**
  * Dónde cae una pieza (FDI) sobre el arco, aproximado con los anchos típicos y
  * el largo de cada lado del arco. Sirve para «Ir a la pieza»: después se ajusta
  * con el control de los cortes.
@@ -346,14 +367,16 @@ const TOOTH_WIDTH = { upper: [8.5, 6.5, 7.5, 7, 6.5, 10, 9], lower: [5.5, 6, 7, 
 export function toothIndex(curve: readonly CurveSample[], fdi: number): number | null {
   const quadrant = Math.floor(fdi / 10)
   const position = fdi % 10
-  if (quadrant < 1 || quadrant > 4 || position < 1 || position > 7 || curve.length < 2) return null
-  const widths = quadrant <= 2 ? TOOTH_WIDTH.upper : TOOTH_WIDTH.lower
+  const primary = quadrant >= 5
+  if (quadrant < 1 || quadrant > 8 || position < 1 || position > (primary ? 5 : 7) || curve.length < 2) return null
+  const table = primary ? PRIMARY_TOOTH_WIDTH : TOOTH_WIDTH
+  const widths = jawOf(fdi) === "upper" ? table.upper : table.lower
   const total = curve[curve.length - 1]!.s
   // La línea media: el punto más adelantado del arco (el de menor y).
   let mid = 0
   for (let i = 1; i < curve.length; i++) if (curve[i]!.y < curve[mid]!.y) mid = i
   const sMid = curve[mid]!.s
-  const right = quadrant === 1 || quadrant === 4
+  const right = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8
   const sideLength = right ? sMid : total - sMid
   const sum = widths.reduce((n, w) => n + w, 0)
   const before = widths.slice(0, position - 1).reduce((n, w) => n + w, 0)
@@ -364,12 +387,21 @@ export function toothIndex(curve: readonly CurveSample[], fdi: number): number |
   return best
 }
 
-/** La pieza más cercana a una muestra del arco (para «Corte N · pieza 36»). */
-export function toothAt(curve: readonly CurveSample[], index: number, jaw: "upper" | "lower"): number | null {
-  const candidates = jaw === "upper" ? [1, 2] : [4, 3]
+/**
+ * La pieza más cercana a una muestra del arco (para «Corte N · pieza 36»), en
+ * la dentición que se está mirando: un niño con dientes de leche da «55».
+ */
+export function toothAt(
+  curve: readonly CurveSample[],
+  index: number,
+  jaw: "upper" | "lower",
+  dentition: Dentition = "permanent",
+): number | null {
+  const primary = dentition === "primary"
+  const candidates = jaw === "upper" ? (primary ? [5, 6] : [1, 2]) : primary ? [8, 7] : [4, 3]
   let best: { fdi: number; d: number } | null = null
   for (const q of candidates)
-    for (let p = 1; p <= 7; p++) {
+    for (let p = 1; p <= (primary ? 5 : 7); p++) {
       const fdi = q * 10 + p
       const at = toothIndex(curve, fdi)
       if (at === null) continue

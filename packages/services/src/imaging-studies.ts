@@ -1,3 +1,5 @@
+import { isValidTooth } from "@odentia/dental"
+import { siteColumns, toothNumberSql, toothOfRow } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
 import { user } from "@odentia/db/schema/auth"
@@ -537,7 +539,7 @@ export async function listImagingMeasurements(
       view: imagingMeasurement.view,
       points: imagingMeasurement.points,
       value: imagingMeasurement.value,
-      toothNumber: imagingMeasurement.toothNumber,
+      toothNumber: toothNumberSql(imagingMeasurement),
       createdAt: imagingMeasurement.createdAt,
       createdBy: imagingMeasurement.createdBy,
       createdByName: user.name,
@@ -580,7 +582,8 @@ export async function addImagingMeasurement(
   const max = input.kind === "angulo" ? 180 : 500
   if (!Number.isFinite(input.value) || input.value < 0 || input.value > max) throw validation("El valor de la medida no es válido")
   const tooth = input.toothNumber ?? null
-  if (tooth !== null && !(Number.isInteger(tooth) && tooth >= 11 && tooth <= 48))
+  // Cualquier pieza FDI, también los dientes de leche (51–85).
+  if (tooth !== null && !(Number.isInteger(tooth) && tooth > 0 && isValidTooth(tooth)))
     throw validation("La pieza no es válida")
   const [row] = await tx
     .insert(imagingMeasurement)
@@ -592,7 +595,7 @@ export async function addImagingMeasurement(
       view: input.view,
       points: input.points.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
       value: input.value,
-      toothNumber: tooth,
+      ...siteColumns({ toothNumber: tooth }),
       createdBy: actorUserId,
     })
     .returning()
@@ -609,7 +612,7 @@ export async function addImagingMeasurement(
     view: row.view,
     points: row.points,
     value: row.value,
-    toothNumber: row.toothNumber,
+    toothNumber: toothOfRow(row),
     createdAt: row.createdAt,
     createdBy: row.createdBy,
     createdByName: named?.name ?? null,

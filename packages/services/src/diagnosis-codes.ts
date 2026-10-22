@@ -14,6 +14,7 @@
  * Una sola regla para la atención, el panel de la pieza, el dictado y el
  * resto de lugares donde se escribe un código.
  */
+import { toothNumberSql } from "./dental/site.js"
 import {
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
@@ -299,7 +300,7 @@ export async function getDiagnosisSuggestions(
     const diagnosed = await tx
       .select({
         code: encounterDiagnosis.diagnosisCode,
-        toothNumber: encounterDiagnosis.toothNumber,
+        toothNumber: toothNumberSql(encounterDiagnosis),
       })
       .from(encounterDiagnosis)
       .where(

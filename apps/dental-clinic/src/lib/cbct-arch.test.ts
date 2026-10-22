@@ -61,6 +61,12 @@ describe("arco, panorámica y cortes transversales", () => {
     const at = toothIndex(curve, 36)!
     expect(at).not.toBeNull()
     expect(toothAt(curve, at, "lower")).toBe(36)
+    // En un niño, el mismo lado del arco es el de las piezas temporales.
+    const primary = toothIndex(curve, 75)!
+    expect(primary).not.toBeNull()
+    expect(toothAt(curve, primary, "lower", "primary")).toBe(75)
+    expect(toothAt(curve, toothIndex(curve, 55)!, "upper", "primary")).toBe(55)
+    expect(toothIndex(curve, 56)).toBeNull()
     // Centro real de la 36 (ausente): entre la 35 y la 37 del fantoma.
     const s36 = real.s - (real.width + 10) / 2
     const sMid = curve.reduce((best, c) => (c.y < best.y ? c : best)).s
@@ -76,6 +82,36 @@ describe("arco, panorámica y cortes transversales", () => {
     expect(crest).toBeDefined()
     expect(Math.abs(crest!.z - -11.5)).toBeLessThan(2)
     expect(lowerHalf.some(({ v, z }) => z > -11 && v > 2000)).toBe(false)
+  })
+})
+
+describe("tomografía de un niño", () => {
+  const child = generateCbctPhantom({ size: 128, slices: 100, voxelMm: 0.6, dentition: "primary" })
+  const childVolume = volumeFromSlices(
+    child.data.map((slice) => Int16Array.from(slice, (v) => v - 1000)),
+    { nx: 128, ny: 128, sx: 0.6, sy: 0.6, sz: 0.6 },
+  )
+  const arch = detectArch(childVolume)
+  const childCurve = arch ? sampleCurve(childVolume, arch.control) : []
+  const sMid = childCurve.reduce((best, c) => (c.y < best.y ? c : best), childCurve[0]!)?.s ?? 0
+
+  it("el fantoma tiene las 20 piezas de leche", () => {
+    const fdis = cbctDemoTeeth("primary").map((t) => t.fdi).sort()
+    expect(fdis).toHaveLength(20)
+    expect(fdis[0]).toBe(51)
+    expect(fdis.at(-1)).toBe(85)
+  })
+
+  it("propone el arco y «Ir a la pieza» cae sobre la pieza de leche", () => {
+    expect(arch).not.toBeNull()
+    for (const fdi of [51, 55, 63, 75, 84]) {
+      const real = cbctDemoTeeth("primary").find((t) => t.fdi === fdi)!
+      const at = toothIndex(childCurve, fdi)!
+      // Dentro del ancho de la propia pieza.
+      expect(Math.abs(childCurve[at]!.s - sMid - real.s)).toBeLessThan(real.width / 2 + 1.5)
+
+      expect(toothAt(childCurve, at, real.jaw, "primary")).toBe(fdi)
+    }
   })
 })
 

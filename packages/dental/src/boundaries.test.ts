@@ -12,7 +12,11 @@ import { describe, expect, it } from "vitest"
 const ROOT = join(import.meta.dirname, "..", "..", "..")
 const IMPORTS_DENTAL = /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)/
 
-/** Lo común que aún importa lo dental; cada entrega quita lo que separa. */
+/**
+ * Lo común que aún importa lo dental; cada entrega quita lo que separa. La
+ * entrega 3 sumó budgets, global-search e imaging-studies: guardan el sitio
+ * común pero la API sigue diciendo pieza y caras (salen en la entrega 5).
+ */
 const STILL_COUPLED = [
   "apps/api/src/routes/patients.ts",
   "apps/api/src/routes/timeline.test.ts",
@@ -20,6 +24,7 @@ const STILL_COUPLED = [
   "packages/db/src/procedure-seeds.test.ts",
   "packages/services/src/agent-clinic-info.ts",
   "packages/services/src/agent-search-index.ts",
+  "packages/services/src/budgets.ts",
   "packages/services/src/clinica-otro-pais.test.ts",
   "packages/services/src/clinical-forms.ts",
   "packages/services/src/clinical.ts",
@@ -27,6 +32,8 @@ const STILL_COUPLED = [
   "packages/services/src/encounter-diagnoses.ts",
   "packages/services/src/encounter-dictation.ts",
   "packages/services/src/encounters.ts",
+  "packages/services/src/global-search.ts",
+  "packages/services/src/imaging-studies.ts",
   "packages/services/src/index.ts",
   "packages/services/src/patient-history.ts",
   "packages/services/src/plan.ts",

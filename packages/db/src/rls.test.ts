@@ -264,15 +264,15 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
     on conflict do nothing`)
   // Un solo borrador por persona: este se entrega para que los siguientes tests armen el suyo.
   await ownerDb.execute(sql`update treatment_budget set status = 'presentado' where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'`)
-  await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number)
-    values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`)
+  await ownerDb.execute(sql`insert into encounter_site (organization_id,encounter_id,site_system,site_code)
+    values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','ISO-3950','36')`)
   await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,scope,price_cents,currency)
     values ('org_a','custom','RESTAURACION','Restauración','tooth',10000,'PEN')`)
   await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración realizada')`)
   for (const table of [
     "encounter",
-    "encounter_tooth",
+    "encounter_site",
     "encounter_procedure",
     "treatment_plan",
     "treatment_plan_item",
@@ -302,7 +302,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   )
   const deleted = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(
-      sql`delete from encounter_tooth where encounter_id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' returning id`,
+      sql`delete from encounter_site where encounter_id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' returning id`,
     ),
   )
   expect(deleted).toHaveLength(0)
@@ -384,8 +384,8 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   await ownerDb.execute(sql`insert into patient_document (id,organization_id,patient_id,category,label,storage_key,content_type,size_bytes)
     values ('dddddddd-dddd-dddd-dddd-dddddddddddd','org_a','99999999-9999-9999-9999-999999999999','radiografia','rx','k','image/png',4)
     on conflict (id) do nothing`)
-  await ownerDb.execute(sql`insert into patient_document_context (organization_id,patient_id,document_id,version,tooth_numbers,tags)
-    values ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1,'{36}','{control}')
+  await ownerDb.execute(sql`insert into patient_document_context (organization_id,patient_id,document_id,version,site_system,site_codes,tags)
+    values ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1,'ISO-3950','{36}','{control}')
     on conflict do nothing`)
 
   // Lecturas: A ve su fila, B ve cero, sin contexto cero.

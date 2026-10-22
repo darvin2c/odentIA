@@ -579,7 +579,10 @@ export const clinicalNote = pgTable(
     note: text("note").notNull(),
     // El diagnóstico es de la atención (`encounter_diagnosis`), no de una nota: una sola vía.
     /** Pieza FDI a la que se refiere la nota, si aplica. */
-    toothNumber: smallint("tooth_number"),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     kind: text("kind").notNull().default("evolucion"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -974,8 +977,10 @@ export const encounterDiagnosis = pgTable(
      * en la misma lista, en otra atención. Lo marca el sistema al registrarlo.
      */
     previouslyDiagnosed: boolean("previously_diagnosed").notNull().default(false),
-    toothNumber: smallint("tooth_number"),
-    surfaces: text("surfaces").array().notNull().default([]),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     note: text("note"),
     status: text("status").notNull().default("activo"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
@@ -1020,20 +1025,21 @@ export const encounterDiagnosis = pgTable(
   ],
 )
 
-/** Piezas dentales involucradas en una atención. */
-export const encounterTooth = pgTable(
-  "encounter_tooth",
+/** Sitios vistos en una atención (ADR 0079): piezas en odontología. */
+export const encounterSite = pgTable(
+  "encounter_site",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     encounterId: uuid("encounter_id")
       .notNull()
       .references(() => encounter.id, { onDelete: "cascade" }),
-    toothNumber: smallint("tooth_number").notNull(),
+    siteSystem: text("site_system").notNull(),
+    siteCode: text("site_code").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("encounter_tooth_encounter_tooth_uidx").on(table.encounterId, table.toothNumber),
+    uniqueIndex("encounter_site_encounter_site_uidx").on(table.encounterId, table.siteSystem, table.siteCode),
   ],
 )
 
@@ -1448,11 +1454,11 @@ export const encounterProcedure = pgTable(
       .notNull()
       .references(() => encounter.id, { onDelete: "cascade" }),
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
-    toothNumber: smallint("tooth_number"),
     scope: text("scope"),
-    surfaces: text("surfaces").array().notNull().default([]),
-    quadrant: smallint("quadrant"),
-    arch: text("arch"),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     description: text("description").notNull(),
     /** Unidades del acto (p. ej. 3 sellantes); el cargo es precio × cantidad. */
     quantity: smallint("quantity").notNull().default(1),
@@ -1646,11 +1652,11 @@ export const treatmentPlanItem = pgTable(
     statusReason: text("status_reason"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    toothNumber: smallint("tooth_number"),
     scope: text("scope"),
-    surfaces: text("surfaces").array().notNull().default([]),
-    quadrant: smallint("quadrant"),
-    arch: text("arch"),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     title: text("title").notNull(),
     detail: text("detail"),
     diagnosisSystem: text("diagnosis_system"),
@@ -1732,10 +1738,10 @@ export const treatmentBudgetItem = pgTable(
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
     title: text("title").notNull(),
     scope: text("scope"),
-    toothNumber: smallint("tooth_number"),
-    surfaces: text("surfaces").array().notNull().default([]),
-    quadrant: smallint("quadrant"),
-    arch: text("arch"),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
     /** Tarifa original al cotizar (por unidad); null = sin tarifa conocida. */
@@ -1842,7 +1848,7 @@ export const appointmentPlanItem = pgTable(
 
 /** Contexto versionado del documento (append-only): cada corrección agrega una
  * versión; las lecturas usan la vigente. Blob/original inmutables en
- * patient_document (sin encounterId/toothNumber: viven aquí). */
+ * patient_document (sin encounterId ni sitios: viven aquí). */
 export const patientDocumentContext = pgTable(
   "patient_document_context",
   {
@@ -1862,7 +1868,9 @@ export const patientDocumentContext = pgTable(
     prescriptionId: uuid("prescription_id").references(() => prescription.id),
     followUpId: uuid("follow_up_id").references(() => clinicalFollowUp.id),
     paymentId: uuid("payment_id").references(() => patientPayment.id),
-    toothNumbers: smallint("tooth_numbers").array().notNull().default(sql`'{}'`),
+    // Sitios del papel (ADR 0079): un sistema y sus códigos.
+    siteSystem: text("site_system"),
+    siteCodes: text("site_codes").array().notNull().default(sql`'{}'`),
     tags: text("tags").array().notNull().default(sql`'{}'`),
     authorUserId: text("author_user_id").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1982,7 +1990,10 @@ export const imagingMeasurement = pgTable(
     /** mm en una distancia, grados en un ángulo. */
     value: real("value").notNull(),
     /** Pieza (FDI) a la altura de la medida, si se sabe. */
-    toothNumber: smallint("tooth_number"),
+    // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.
+    siteSystem: text("site_system"),
+    siteCode: text("site_code"),
+    siteQualifiers: text("site_qualifiers").array().notNull().default([]),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     retiredAt: timestamp("retired_at", { withTimezone: true }),

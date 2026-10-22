@@ -35,7 +35,7 @@ import {
   encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
-  encounterTooth,
+  encounterSite,
   odontogramAssessment,
   odontogramEntry,
   orgCounter,
@@ -532,7 +532,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
-  await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
+  await db.delete(encounterSite).where(inArray(encounterSite.organizationId, SEED_ORGS))
   // Los diagnósticos migrados desde notas antiguas las referencian (`legacy_note_id`): van antes.
   await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, SEED_ORGS))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
