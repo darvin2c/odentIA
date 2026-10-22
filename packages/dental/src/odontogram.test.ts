@@ -8,6 +8,7 @@ import {
   findingColor,
   findingDefinition,
   isValidTooth,
+  periodontalDentition,
   surfacesForTooth,
   toothTypeOf,
   validateFinding,
@@ -419,6 +420,21 @@ describe("color y vigencia", () => {
     ]
     expect(activeFindingsAsOf(history, "2026-01-20").map((item) => item.id)).toEqual(["caries"])
     expect(activeFindingsAsOf(history, "2026-02-02")).toEqual([])
+  })
+})
+
+describe("estado actual del odontograma", () => {
+  it("sin fecha incluye lo recién guardado aunque el reloj de la base vaya adelantado", () => {
+    // La base fija `created_at` con microsegundos y su reloj puede ir un poco
+    // por delante: un implante recién guardado no debe quedar fuera.
+    const ahead = new Date(Date.now() + 5_000).toISOString()
+    const history: FindingRecord[] = [
+      { id: "implante", toothNumber: 46, condition: "implant", status: "recorded", createdAt: ahead },
+      { id: "anulado", toothNumber: 16, condition: "caries", status: "voided", voidedAt: ahead, createdAt: ahead },
+      { id: "tratado", toothNumber: 36, condition: "caries", status: "recorded", resolvedAt: ahead, createdAt: ahead },
+    ]
+    expect(activeFindingsAsOf(history).map((item) => item.id)).toEqual(["implante"])
+    expect(periodontalDentition(activeFindingsAsOf(history)).implants).toEqual([46])
   })
 })
 
