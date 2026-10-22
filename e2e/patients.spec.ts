@@ -857,7 +857,7 @@ test("una lista y un buscador: Pacientes, Contactos nuevos y Todos con sus vínc
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
   // Familiares y tutores no son contactos nuevos: aparecen en Todos, con su vínculo.
   await expect(page.getByRole("link", { name: "Madre de Lucía" })).toHaveCount(0)
-  await page.getByRole("button", { name: "Todos", exact: true }).click()
+  await page.getByRole("tab", { name: "Todos", exact: true }).click()
   await expect(page.getByRole("link", { name: "Madre de Lucía" })).toBeVisible()
   await expect(page.getByText(/de Lucía Quispe/).first()).toBeVisible()
   // Busca por teléfono en toda la clínica.

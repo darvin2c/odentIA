@@ -332,19 +332,25 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("region", { name: /^Semana del/ })).toBeVisible()
   await shot("semana-escritorio")
 
-  // Teléfono: un profesional a la vez; lo libre se ve en la rejilla, no en la ficha.
+  // Teléfono: un profesional a la vez, elegido en la hoja de abajo; lo libre se ve
+  // en la rejilla, no en la ficha.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole("tab", { name: "Día", exact: true }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
-  await expect(page.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
+  await expect(page.getByRole("button", { name: /^Profesionales: / })).toContainText("Ana")
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-telefono")
+  await page.getByRole("button", { name: /^Profesionales: / }).click()
+  const sheet = page.getByRole("dialog", { name: "Días y profesionales" })
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
   // En teléfono también se puede ver por unidad dental.
-  await page.getByRole("button", { name: /^Profesionales/ }).click()
-  await expect(page.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
-  await shot("dia-telefono-sillones")
-  await page.getByRole("button", { name: /^Unidades dentales/ }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
+  await sheet.getByRole("button", { name: "Ver por unidad dental" }).click()
+  await expect(sheet.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
+  await shot("dia-telefono-unidades")
+  await sheet.getByRole("button", { name: "Ver por profesional" }).click()
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(sheet).toBeHidden()
   await page.getByRole("tab", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
   await shot("lista-telefono")
