@@ -22,7 +22,7 @@ export type HarnessRuntime = {
   proxyPort: number
   appPorts: { api: number; panel: number; platform: number; admin: number }
   postgres?: { host: string; port: number }
-  minio?: { host: string; port: number }
+  storage?: { host: string; port: number }
   mailpit?: { host: string; httpPort: number; smtpPort: number }
 }
 
@@ -33,9 +33,12 @@ export const E2E_RUN_LABEL = "odentia.e2e.run"
 
 /** PostgreSQL con pgmq/pg_cron (imagen propia del repo). */
 export const PG_IMAGE = "dentalagent-postgres:18.6"
-/** MinIO publicado y verificado en el runtime local. */
-export const MINIO_IMAGE =
-  "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+/** RustFS 1.0.1 (S3) publicado y verificado en el runtime local; MinIO ya no publica imagen. */
+export const STORAGE_IMAGE =
+  "docker.io/rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
+/** Claves del S3 de la ejecución; el contenedor no se publica fuera de loopback. */
+export const STORAGE_ACCESS_KEY = "rustfsadmin"
+export const STORAGE_SECRET_KEY = "rustfsadmin"
 /** Mailpit publicado y verificado en el runtime local. */
 export const MAILPIT_IMAGE =
   "docker.io/axllent/mailpit@sha256:3856f9327f3f228afe8c4ce2dcca3cb2aa00f6ec60b569f36483f7ebb1ff44f7"
@@ -68,21 +71,21 @@ const requireInfra = (
   runtime: HarnessRuntime,
 ): {
   postgres: { host: string; port: number }
-  minio: { host: string; port: number }
+  storage: { host: string; port: number }
   mailpit: { host: string; httpPort: number; smtpPort: number }
 } => {
-  const { postgres, minio, mailpit } = runtime
+  const { postgres, storage, mailpit } = runtime
   const faltantes: string[] = []
   if (!postgres) faltantes.push("postgres")
-  if (!minio) faltantes.push("minio")
+  if (!storage) faltantes.push("storage")
   if (!mailpit) faltantes.push("mailpit")
-  if (!postgres || !minio || !mailpit) {
+  if (!postgres || !storage || !mailpit) {
     throw new Error(
       `El entorno E2E está incompleto: falta la infraestructura (${faltantes.join(", ")}). ` +
         `Arranca primero los contenedores con startStack; E2E no utiliza el entorno dev.`,
     )
   }
-  return { postgres, minio, mailpit }
+  return { postgres, storage, mailpit }
 }
 
 /** Origen público base (`https://odentia.<TLD>:<proxyPort>`). */
@@ -107,12 +110,12 @@ export function appDatabaseUrl(runtime: HarnessRuntime): string {
  * Exige los tres endpoints de infraestructura; lanza error si falta alguno.
  */
 export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
-  const { postgres, minio, mailpit } = requireInfra(runtime)
+  const { postgres, storage, mailpit } = requireInfra(runtime)
   const tld = runtime.baseDomain.replace(/^[^.]+\./, "")
   const base = `https://${runtime.baseDomain}:${runtime.proxyPort}`
   const api = `https://api.${runtime.baseDomain}:${runtime.proxyPort}`
   const panel = `https://app.${runtime.baseDomain}:${runtime.proxyPort}`
-  const s3Endpoint = `http://${minio.host}:${minio.port}`
+  const s3Endpoint = `http://${storage.host}:${storage.port}`
   const portlessStateDir = join(runtime.stateDir, "portless")
   return {
     PORTLESS_STATE_DIR: portlessStateDir,
@@ -138,8 +141,8 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     SUPPORT_INBOX_EMAIL: `soporte@${runtime.baseDomain}`,
     S3_ENDPOINT: s3Endpoint,
     S3_REGION: "auto",
-    S3_ACCESS_KEY: "minioadmin",
-    S3_SECRET_KEY: "minioadmin",
+    S3_ACCESS_KEY: STORAGE_ACCESS_KEY,
+    S3_SECRET_KEY: STORAGE_SECRET_KEY,
     S3_BUCKET: AVATARS_BUCKET,
     S3_ATTACHMENTS_BUCKET: ATTACHMENTS_BUCKET,
     S3_PUBLIC_URL: `${s3Endpoint}/${AVATARS_BUCKET}`,
