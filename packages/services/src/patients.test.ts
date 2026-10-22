@@ -3,17 +3,19 @@ import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   addClinicalNote,
-  addOdontogramEntries,
-  createOdontogramAssessment,
-  getOdontogram,
   getPatientHealth,
   listAnamnesisVersions,
   listClinicalNotes,
+  savePatientHealth,
+} from "./clinical.js"
+import {
+  addOdontogramEntries,
+  createOdontogramAssessment,
+  getOdontogram,
   listOdontogramAssessments,
   reviewLegacyEntry,
-  savePatientHealth,
   voidOdontogramEntry,
-} from "./clinical.js"
+} from "./dental/odontogram.js"
 import { createContact, getContact, updateContact } from "./contacts.js"
 import {
   createPatient,

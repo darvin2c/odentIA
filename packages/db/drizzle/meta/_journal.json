@@ -561,6 +561,13 @@
       "when": 1792698036812,
       "tag": "0079_esquema_dental_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1792701884503,
+      "tag": "0080_producto_de_la_clinica",
+      "breakpoints": true
     }
   ]
 }

@@ -45,6 +45,9 @@ export const orgProfile = pgTable("org_profile", {
   // CIE-11. Nula en perfiles creados sin ella: vale la que recomienda su país
   // (`clinicalProfileFor(...).diagnosis.recommended`); el alta la guarda.
   diagnosisSystem: text("diagnosis_system"),
+  // Producto de la clínica (ADR 0079): qué app la atiende y qué hace lo común
+  // en cada momento (`services/src/products.ts`). Las de hoy son dentales.
+  product: text("product").notNull().default("dental"),
   // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
   receiptWidth: text("receipt_width").notNull().default("80"),
   // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
@@ -58,6 +61,7 @@ export const orgProfile = pgTable("org_profile", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
+  check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
   check(
     "org_profile_diagnosis_system_check",

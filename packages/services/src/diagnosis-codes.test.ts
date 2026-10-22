@@ -7,7 +7,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
 import { afterEach, expect, it } from "vitest"
-import { addOdontogramEntries } from "./clinical.js"
+import { addOdontogramEntries } from "./dental/odontogram.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   getDiagnosisSuggestions,

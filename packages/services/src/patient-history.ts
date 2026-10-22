@@ -1,6 +1,6 @@
 import { budgetStateText, diagnosisCodeLabel } from "@odentia/clinical"
 import { dentalSiteOfRow, toothOfRow } from "./dental/site.js"
-import { ISO_3950, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS, toothSiteCode } from "@odentia/dental"
+import { ISO_3950, isValidTooth, toothSiteCode } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -19,19 +19,19 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { odontogramAssessment, odontogramEntry } from "@odentia/db/schema/dental"
 import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { valueOptionOf } from "./budgets.js"
-import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
+import { getCurrentDocumentContexts, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
-import { latestPeriodontalBrief, type PeriodontalBrief, periodontalBriefsByEncounter } from "./dental/periodontal.js"
+import type { ProductParts } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
@@ -335,8 +335,6 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     totals.set(item.currency, total)
   }
   const amounts = [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency))
-  const odontogram = await getOdontogram(tx, orgId, patientId)
-  const findings = new Map(odontogram.history.map((entry) => [entry.id, entry]))
 
   let lastVisit: LastVisit | null = null
   if (lastEncounter) {
@@ -584,7 +582,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     }
   })
 
-  return {
+  const summary = {
     treatmentJourneys: await listTreatmentJourneys(tx, orgId, patientId, 10),
     lastEncounter: lastEncounter ?? null,
     openEncounterId: draft?.id ?? null,
@@ -598,25 +596,15 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       currency: amounts.length === 1 ? amounts[0]!.currency : null,
       totals: amounts,
     },
-    activeDiagnoses: Object.entries(odontogram.teeth)
-      .flatMap(([toothNumber, tooth]) =>
-        [
-          ...new Set(
-            tooth.entries
-              .map((id) => findings.get(id)?.condition)
-              .filter((condition): condition is string => !!condition && condition !== "healthy"),
-          ),
-        ].map((condition) => ({ toothNumber: Number(toothNumber), condition, status: "recorded" })),
-      )
-      .slice(0, 20),
     lastVisit,
     acceptedPending,
     proposedBudgets,
     anamnesisBrief,
     recentDocuments,
-    // «Encías»: el último periodontograma firmado y el último diagnóstico confirmado.
-    periodontal: await latestPeriodontalBrief(tx, orgId, patientId),
   }
+  // Lo del producto (odentIA: diagnósticos por pieza y «Encías»).
+  const product = await (await productHooks(tx, orgId)).summaryParts(tx, { orgId, patientId })
+  return { ...summary, ...product } as typeof summary & ProductParts
 }
 
 export const TIMELINE_TYPES = [
@@ -639,7 +627,10 @@ export const TIMELINE_TYPES = [
   "odontogram_signed",
 ] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
-export interface TimelineItem {
+/** Un hecho de la historia; el producto agrega lo suyo (odentIA: el periodontograma de la atención). */
+export type TimelineItem = TimelineItemBase & ProductParts
+
+export interface TimelineItemBase {
   id: string
   type: TimelineType
   createdAt: Date
@@ -680,8 +671,6 @@ export interface TimelineItem {
   dueAt?: Date | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
-  /** El periodontograma de la atención: un hecho de ella (ADR 0054). */
-  periodontal?: PeriodontalBrief | null
 }
 
 /** Cómo se dice el tipo de una orden en la historia. */
@@ -756,14 +745,11 @@ export async function getTimeline(
     branches.push(
       sql`select id, 'anamnesis'::text as kind, created_at from patient_anamnesis where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
     )
-  if (types.includes("odontogram"))
-    branches.push(
-      sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``} and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`,
-    )
-  if (types.includes("odontogram_signed") && tooth == null)
-    branches.push(
-      sql`select id, 'odontogram_signed'::text as kind, created_at from odontogram_assessment where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``}`,
-    )
+  // Los hechos propios del producto (odentIA: hallazgos y odontogramas firmados).
+  const hooks = await productHooks(tx, orgId)
+  branches.push(
+    ...hooks.timelineSources({ orgId, patientId, types, outsideEncountersOnly: types.includes("encounter"), tooth: tooth ?? null }),
+  )
   if (types.includes("document")) {
     const toothFilter =
       tooth == null
@@ -840,10 +826,10 @@ export async function getTimeline(
           ),
         ),
     ])
-    const [planned, docs, periodontal] = await Promise.all([
+    const [planned, docs, productParts] = await Promise.all([
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
-      periodontalBriefsByEncounter(tx, orgId, encounters),
+      hooks.encounterParts(tx, orgId, encounters),
     ])
     for (const row of records) {
       const rowProcedures = procedures.filter((p) => p.encounterId === row.id)
@@ -879,7 +865,7 @@ export async function getTimeline(
         plannedItems: planned.get(row.id) ?? [],
         indications: row.indications,
         encounterId: row.id,
-        periodontal: periodontal.get(row.id) ?? null,
+        ...(productParts.get(row.id) ?? {}),
       })
     }
   }
@@ -947,52 +933,7 @@ export async function getTimeline(
       })
     }
   }
-  const entries = ids("odontogram")
-  if (entries.length)
-    for (const row of await tx
-      .select()
-      .from(odontogramEntry)
-      .where(
-        and(eq(odontogramEntry.organizationId, orgId), inArray(odontogramEntry.id, entries)),
-      )) {
-      const details = row.details as { relatedTeeth?: number[] }
-      const teeth = details.relatedTeeth ?? [row.toothNumber]
-      hydrated.set(row.id, {
-        id: row.id,
-        refId: row.id,
-        type: "odontogram",
-        createdAt: row.createdAt,
-        title: `${teeth.length > 1 ? "Piezas" : "Pieza"} ${teeth.join(", ")}`,
-        detail: row.note,
-        condition: row.condition,
-        surface: row.surface,
-        status: row.status,
-        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
-        toothNumbers: teeth,
-        authorId: row.createdBy,
-        // El hallazgo se registra dentro de una atención: la historia lo agrupa con ella.
-        encounterId: row.encounterId ?? null,
-      })
-    }
-  const signed = ids("odontogram_signed")
-  if (signed.length)
-    for (const row of await tx
-      .select()
-      .from(odontogramAssessment)
-      .where(and(eq(odontogramAssessment.organizationId, orgId), inArray(odontogramAssessment.id, signed)))) {
-      const purpose = SIGNED_ODONTOGRAM_PURPOSE_LABELS[row.purpose as keyof typeof SIGNED_ODONTOGRAM_PURPOSE_LABELS] ?? row.purpose
-      hydrated.set(row.id, {
-        id: row.id,
-        refId: row.id,
-        type: "odontogram_signed",
-        createdAt: row.createdAt,
-        title: `Odontograma firmado · ${purpose}`,
-        detail: `${row.examinerName} · ${row.registrationNumber}`,
-        toothNumbers: [],
-        authorId: row.authorUserId,
-        encounterId: row.encounterId ?? null,
-      })
-    }
+  for (const [id, item] of await hooks.timelineItems(tx, orgId, (type) => ids(type as TimelineType))) hydrated.set(id, item)
   for (const source of journeySources) {
     const sourceIds = ids(source.type)
     if (!sourceIds.length) continue

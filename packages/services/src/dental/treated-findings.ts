@@ -13,7 +13,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, isNull, ne } from "drizzle-orm"
-import { insertOdontogramFinding, orgStrictVariants } from "../clinical.js"
+import { insertOdontogramFinding, orgStrictVariants } from "./odontogram.js"
 import { serviceLeavesFinding } from "./service-finding.js"
 
 /** Lo del tratamiento que hace falta para dibujarlo. */

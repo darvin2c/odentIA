@@ -1,4 +1,10 @@
-import { type ClinicalCountryProfile, clinicalProfileFor, formatMoney } from "@odentia/clinical"
+import {
+  type ClinicalCountryProfile,
+  type ClinicalProduct,
+  clinicalProfileFor,
+  formatMoney,
+  isClinicalProduct,
+} from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import type { Db } from "@odentia/db"
 import { notFound, ServiceError } from "./errors.js"
@@ -129,6 +135,17 @@ export async function findOrgCountry(tx: Db, orgId: string): Promise<string | nu
   const [row] = await tx.execute<{ countryCode: string }>(sql`
     select country_code as "countryCode" from org_profile where organization_id = ${orgId}`)
   return row?.countryCode || null
+}
+
+/**
+ * Producto de la clínica (ADR 0079). Sin perfil, el de la columna por omisión:
+ * las clínicas de hoy son dentales.
+ */
+export async function orgProduct(tx: Db, orgId: string): Promise<ClinicalProduct> {
+  const [row] = await tx.execute<{ product: string }>(sql`
+    select product from org_profile where organization_id = ${orgId}`)
+  const product = row?.product
+  return isClinicalProduct(product) ? product : "dental"
 }
 
 /**

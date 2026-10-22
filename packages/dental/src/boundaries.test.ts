@@ -20,7 +20,9 @@ const IMPORTS_DENTAL =
  * común pero la API sigue diciendo pieza y caras (salen en la entrega 5). La
  * entrega 4 sumó el recorrido del tratamiento y las pruebas que escriben en
  * las tablas del esquema dental: salen cuando el cierre y la historia
- * pregunten al producto (entrega 5).
+ * pregunten al producto (entrega 5). La 5a sumó dos pruebas que usan el
+ * odontograma, ya en `services/src/dental/odontogram.ts`; lo demás sale con el
+ * sitio por el producto (5b).
  */
 const STILL_COUPLED = [
   "apps/api/src/routes/patients.ts",
@@ -34,6 +36,7 @@ const STILL_COUPLED = [
   "packages/services/src/clinical-forms.ts",
   "packages/services/src/clinical.ts",
   "packages/services/src/composite-keys.test.ts",
+  "packages/services/src/diagnosis-codes.test.ts",
   "packages/services/src/diagnosis-codes.ts",
   "packages/services/src/encounter-diagnoses.ts",
   "packages/services/src/encounter-dictation.ts",
@@ -44,6 +47,7 @@ const STILL_COUPLED = [
   "packages/services/src/index.ts",
   "packages/services/src/patient-history.test.ts",
   "packages/services/src/patient-history.ts",
+  "packages/services/src/patients.test.ts",
   "packages/services/src/plan.ts",
   "packages/services/src/procedure-codings.test.ts",
   "packages/services/src/seed-dev.ts",
@@ -69,8 +73,11 @@ const COMMON = [
   "apps/panel/src",
   "apps/admin/src",
 ]
-/** Dentro de lo común, lo que ya es del producto dental. */
-const DENTAL_INSIDE = ["packages/services/src/dental/", "apps/api/src/routes/dental/"]
+/**
+ * Dentro de lo común, lo que ya es del producto dental, y `products.ts`: el
+ * único lugar que conecta cada producto con los momentos de lo común.
+ */
+const DENTAL_INSIDE = ["packages/services/src/dental/", "apps/api/src/routes/dental/", "packages/services/src/products.ts"]
 
 function filesUnder(dir: string): string[] {
   const out: string[] = []
