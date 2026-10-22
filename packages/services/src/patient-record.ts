@@ -55,9 +55,8 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { conditionLabel } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
-import { getOdontogram } from "./clinical.js"
+import { odontogramLines } from "./clinical.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -99,7 +98,7 @@ export interface PatientRecord {
     diagnoses: Array<typeof encounterDiagnosis.$inferSelect & { title: string | null }>
     procedures: Array<typeof encounterProcedure.$inferSelect>
   }>
-  odontogram: Array<{ tooth: number; condition: string; surfaces: string[] }>
+  odontogram: Array<{ tooth: number; label: string; surfaces: string[] }>
   planItems: Array<{ title: string; status: string; toothNumber: number | null }>
   prescriptions: Array<{ row: typeof prescription.$inferSelect; items: Array<typeof prescriptionItem.$inferSelect> }>
   consents: Array<typeof consentDocument.$inferSelect>
@@ -174,7 +173,7 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
     .where(and(byPatient(patientDocument), isNull(patientDocument.retiredAt)))
     .orderBy(asc(patientDocument.createdAt))
   const appointments = await tx.select().from(appointment).where(byPatient(appointment)).orderBy(asc(appointment.startsAt))
-  const odontogram = await getOdontogram(tx, orgId, patientId)
+  const odontogram = await odontogramLines(tx, orgId, patientId)
   const planItems = await listPlanItems(tx, orgId, patientId)
   return {
     generatedAt: new Date(),
@@ -212,9 +211,7 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
         .map((d) => ({ ...d, title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
       procedures: procedures.filter((p) => p.encounterId === row.id),
     })),
-    odontogram: Object.entries(odontogram.teeth)
-      .map(([tooth, state]) => ({ tooth: Number(tooth), condition: state.condition, surfaces: state.surfaces }))
-      .sort((a, b) => a.tooth - b.tooth),
+    odontogram,
     planItems: planItems.map((item) => ({ title: item.title, status: item.status, toothNumber: item.toothNumber })),
     prescriptions: prescriptions.map((row) => ({ row, items: items.filter((i) => i.prescriptionId === row.id) })),
     consents,
@@ -346,7 +343,7 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
   else
     w.list(
       record.odontogram.map(
-        (t) => `Pieza ${t.tooth}: ${conditionLabel(t.condition)}${t.surfaces.length ? ` (${t.surfaces.join(", ")})` : ""}`,
+        (t) => `Pieza ${t.tooth}: ${t.label}${t.surfaces.length ? ` (${t.surfaces.join(", ")})` : ""}`,
       ),
     )
 

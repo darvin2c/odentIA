@@ -28,6 +28,7 @@ import {
   activeFindingsAsOf,
   type ClosingOdontogramPurpose,
   closingOdontogramPurpose,
+  conditionLabel,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
@@ -1941,6 +1942,17 @@ export async function getSignedOdontogramPrint(
     patient: await printPatientOf(tx, orgId, patientId),
     establishment: await establishmentOf(tx, orgId),
   }
+}
+
+/**
+ * El odontograma vigente en palabras, por pieza, para la copia de la historia
+ * (ADR 0080). Vive aquí para que la copia no importe lo dental (ADR 0079).
+ */
+export async function odontogramLines(tx: Db, orgId: string, patientId: string) {
+  const { teeth } = await getOdontogram(tx, orgId, patientId)
+  return Object.entries(teeth)
+    .map(([tooth, state]) => ({ tooth: Number(tooth), label: conditionLabel(state.condition), surfaces: state.surfaces }))
+    .sort((a, b) => a.tooth - b.tooth)
 }
 
 /**
