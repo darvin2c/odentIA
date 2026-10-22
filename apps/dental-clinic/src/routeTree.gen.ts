@@ -49,6 +49,7 @@ import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.ind
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
 import { Route as OrgPeopleIndexRouteImport } from './routes/_org/people.index'
 import { Route as OrgPeoplePersonIdRouteImport } from './routes/_org/people.$personId'
+import { Route as OrgPeopleLockedRouteImport } from './routes/_org/people.locked'
 import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
 import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
 import { Route as OrgServicesPromotionsRouteImport } from './routes/_org/services.promotions'
@@ -58,6 +59,7 @@ import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.aud
 import { Route as OrgSettingsAvailabilityRouteImport } from './routes/_org/settings.availability'
 import { Route as OrgSettingsBranchesRouteImport } from './routes/_org/settings.branches'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
+import { Route as OrgSettingsDataProtectionRouteImport } from './routes/_org/settings.data-protection'
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
 import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
 import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
@@ -282,6 +284,11 @@ const OrgPeoplePersonIdRoute = OrgPeoplePersonIdRouteImport.update({
   path: '/people/$personId',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgPeopleLockedRoute = OrgPeopleLockedRouteImport.update({
+  id: '/people/locked',
+  path: '/people/locked',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgServicesIndexRoute = OrgServicesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -327,6 +334,12 @@ const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
   path: '/channels',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsDataProtectionRoute =
+  OrgSettingsDataProtectionRouteImport.update({
+    id: '/data-protection',
+    path: '/data-protection',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
 const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
   id: '/fields',
   path: '/fields',
@@ -486,6 +499,7 @@ export interface FileRoutesByFullPath {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/people/locked': typeof OrgPeopleLockedRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -493,6 +507,7 @@ export interface FileRoutesByFullPath {
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
@@ -556,6 +571,7 @@ export interface FileRoutesByTo {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/people/locked': typeof OrgPeopleLockedRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -563,6 +579,7 @@ export interface FileRoutesByTo {
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
@@ -630,6 +647,7 @@ export interface FileRoutesById {
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/_org/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/_org/people/locked': typeof OrgPeopleLockedRoute
   '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/_org/services/promotions': typeof OrgServicesPromotionsRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
@@ -637,6 +655,7 @@ export interface FileRoutesById {
   '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/_org/settings/branches': typeof OrgSettingsBranchesRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
+  '/_org/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
   '/_org/settings/forms': typeof OrgSettingsFormsRoute
   '/_org/settings/mail': typeof OrgSettingsMailRoute
@@ -704,6 +723,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/people/$personId'
+    | '/people/locked'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -711,6 +731,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/data-protection'
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
@@ -774,6 +795,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/people/$personId'
+    | '/people/locked'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -781,6 +803,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/data-protection'
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
@@ -847,6 +870,7 @@ export interface FileRouteTypes {
     | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
     | '/_org/people/$personId'
+    | '/_org/people/locked'
     | '/_org/services/biblioteca'
     | '/_org/services/promotions'
     | '/_org/settings/agent'
@@ -854,6 +878,7 @@ export interface FileRouteTypes {
     | '/_org/settings/availability'
     | '/_org/settings/branches'
     | '/_org/settings/channels'
+    | '/_org/settings/data-protection'
     | '/_org/settings/fields'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
@@ -1180,6 +1205,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgPeoplePersonIdRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/people/locked': {
+      id: '/_org/people/locked'
+      path: '/people/locked'
+      fullPath: '/people/locked'
+      preLoaderRoute: typeof OrgPeopleLockedRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/services/': {
       id: '/_org/services/'
       path: '/'
@@ -1241,6 +1273,13 @@ declare module '@tanstack/react-router' {
       path: '/channels'
       fullPath: '/settings/channels'
       preLoaderRoute: typeof OrgSettingsChannelsRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/data-protection': {
+      id: '/_org/settings/data-protection'
+      path: '/data-protection'
+      fullPath: '/settings/data-protection'
+      preLoaderRoute: typeof OrgSettingsDataProtectionRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
     '/_org/settings/fields': {
@@ -1422,6 +1461,7 @@ interface OrgSettingsRouteChildren {
   OrgSettingsAvailabilityRoute: typeof OrgSettingsAvailabilityRoute
   OrgSettingsBranchesRoute: typeof OrgSettingsBranchesRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
+  OrgSettingsDataProtectionRoute: typeof OrgSettingsDataProtectionRoute
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
   OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
   OrgSettingsMailRoute: typeof OrgSettingsMailRoute
@@ -1446,6 +1486,7 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsAvailabilityRoute: OrgSettingsAvailabilityRoute,
   OrgSettingsBranchesRoute: OrgSettingsBranchesRoute,
   OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
+  OrgSettingsDataProtectionRoute: OrgSettingsDataProtectionRoute,
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
   OrgSettingsFormsRoute: OrgSettingsFormsRoute,
   OrgSettingsMailRoute: OrgSettingsMailRoute,
@@ -1522,6 +1563,7 @@ interface OrgRouteChildren {
   OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
   OrgPeoplePersonIdRoute: typeof OrgPeoplePersonIdRoute
+  OrgPeopleLockedRoute: typeof OrgPeopleLockedRoute
   OrgAgentIndexRoute: typeof OrgAgentIndexRoute
   OrgContactsIndexRoute: typeof OrgContactsIndexRoute
   OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
@@ -1555,6 +1597,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
   OrgPeoplePersonIdRoute: OrgPeoplePersonIdRoute,
+  OrgPeopleLockedRoute: OrgPeopleLockedRoute,
   OrgAgentIndexRoute: OrgAgentIndexRoute,
   OrgContactsIndexRoute: OrgContactsIndexRoute,
   OrgPatientsIndexRoute: OrgPatientsIndexRoute,

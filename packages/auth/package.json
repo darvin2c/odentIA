@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./permissions": "./src/permissions.ts",
     "./admin-permissions": "./src/admin-permissions.ts",
-    "./legal": "./src/legal.ts"
+    "./legal": "./src/legal.ts",
+    "./data-processors": "./src/data-processors.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

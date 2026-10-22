@@ -163,7 +163,7 @@ export interface WaitingDataRequest {
   patientId: string
   patientName: string
   /** Qué pidió. */
-  request: "copia" | "corregir" | "mensajes"
+  request: "copia" | "corregir" | "mensajes" | "borrar"
   dueOn: string
   /** Ya se comprobó que es ella o su representante. */
   verified: boolean

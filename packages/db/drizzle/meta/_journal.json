@@ -568,6 +568,20 @@
       "when": 1792701884503,
       "tag": "0080_producto_de_la_clinica",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1792703678834,
+      "tag": "0081_historia_bloqueada",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1792703682273,
+      "tag": "0082_historia_bloqueada_reglas",
+      "breakpoints": true
     }
   ]
 }

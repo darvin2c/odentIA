@@ -141,7 +141,7 @@ export type WaitingRow =
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un pedido sobre sus datos que vence en 3 días o ya venció (ADR 0080). */
-  | { kind: "dataRequest"; id: string; patientId: string; patientName: string; request: "copia" | "corregir" | "mensajes"; dueOn: string; verified: boolean }
+  | { kind: "dataRequest"; id: string; patientId: string; patientName: string; request: "copia" | "corregir" | "mensajes" | "borrar"; dueOn: string; verified: boolean }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
   /**

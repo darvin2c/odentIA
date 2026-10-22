@@ -22,6 +22,7 @@ const grupos: SectionNavGroup[] = [
       { label: "Sedes", to: "/settings/branches" },
       { label: "Equipo", to: "/settings/team" },
       { label: "Horarios y ausencias", to: "/settings/availability" },
+      { label: "Protección de datos", to: "/settings/data-protection" },
     ],
   },
   {

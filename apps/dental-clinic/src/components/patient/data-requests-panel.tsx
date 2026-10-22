@@ -7,17 +7,20 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
+  Input,
   RadioGroup,
   RadioGroupItem,
   Textarea,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, LoadingState, PastDateInput } from "@odentia/ui-patterns"
+import { formatMoney } from "@odentia/clinical"
+import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, PastDateInput } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FileText, MessageSquareOff, PencilLine } from "lucide-react"
+import { FileText, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { ChoiceButtons } from "../choice-buttons"
 import { ApiError } from "../../lib/api"
+import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import {
   createDataRequestApi,
@@ -38,7 +41,10 @@ import {
   dayWords,
   denyDataRequestApi,
   dueWords,
+  eraseDataApi,
+  type ErasurePreview,
   fetchDataRequests,
+  fetchErasurePreview,
   fetchRecordSendOptions,
   patientRecordDownloadUrl,
   respondDataRequestApi,
@@ -54,17 +60,18 @@ function problemOf(error: unknown): string | null {
     : "No pudimos completar la acción. Revisa tu conexión."
 }
 
-const KIND_ICON = { copia: FileText, corregir: PencilLine, mensajes: MessageSquareOff } as const
+const KIND_ICON = { copia: FileText, corregir: PencilLine, mensajes: MessageSquareOff, borrar: Trash2 } as const
 
 /**
  * Datos › Pedidos sobre sus datos (ADR 0080): lo que la persona o su
  * representante pidieron, con su plazo de 10 días. Lo atienden Recepción y
  * Administración; «Descargar historia» es solo de quien lee la ficha clínica,
- * porque lleva todo lo clínico.
+ * porque lleva todo lo clínico, y borrar sus datos es solo de Administración.
  */
 export function DataRequestsPanel({ patientId }: { patientId: string }) {
   const canManage = usePermission("patients.write")
   const canReadClinical = usePermission("clinical.read")
+  const canErase = usePermission("patients.erase")
   const locale = useOrgLocale() ?? "es"
   const query = useQuery({ queryKey: dataRequestsKey(patientId), queryFn: () => fetchDataRequests(patientId), enabled: canManage })
   const [registering, setRegistering] = useState(false)
@@ -87,7 +94,8 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
       />
     )
   const view = query.data
-  const firstName = view.requesters.find((r) => r.relation === "paciente")?.displayName.split(" ")[0] ?? "La persona"
+  const patientName = view.requesters.find((r) => r.relation === "paciente")?.displayName ?? null
+  const firstName = patientName?.split(" ")[0] ?? "La persona"
   const open = view.requests.find((r) => r.id === attending) ?? null
 
   return (
@@ -96,7 +104,8 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
         <div className="min-w-0">
           <h2 className="text-base font-semibold">Pedidos sobre sus datos</h2>
           <p className="text-sm text-muted-foreground">
-            Lo que ella o su representante pidieron: una copia, corregir o no recibir mensajes. Cada uno se responde en{" "}
+            Lo que ella o su representante pidieron: una copia, corregir, no recibir mensajes o borrar sus datos. Cada uno se
+            responde en{" "}
             {DATA_REQUEST_DAYS} días.
           </p>
         </div>
@@ -151,6 +160,8 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
           today={view.today}
           locale={locale}
           canReadClinical={canReadClinical}
+          canErase={canErase}
+          patientName={patientName}
           onClose={() => setAttending(null)}
         />
       ) : null}
@@ -216,7 +227,7 @@ function RequestRow({
   )
 }
 
-const KIND_ORDER: DataRequestKind[] = ["copia", "corregir", "mensajes"]
+const KIND_ORDER: DataRequestKind[] = ["copia", "corregir", "mensajes", "borrar"]
 const CHANNEL_ORDER: DataRequestChannel[] = ["clinica", "whatsapp", "correo", "portal"]
 
 function RegisterDrawer({
@@ -351,6 +362,8 @@ function AttendDrawer({
   today,
   locale,
   canReadClinical,
+  canErase,
+  patientName,
   onClose,
 }: {
   patientId: string
@@ -358,6 +371,8 @@ function AttendDrawer({
   today: string
   locale: string
   canReadClinical: boolean
+  canErase: boolean
+  patientName: string | null
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
@@ -400,7 +415,10 @@ function AttendDrawer({
       onClose()
     },
   })
+  const [erasing, setErasing] = useState(false)
   const error = problemOf(verify.error ?? respond.error ?? deny.error ?? send.error)
+  // Borrar se responde al borrar: no hay «Marcar respondida» (ADR 0080).
+  const erase = request.kind === "borrar"
 
   return (
     <FormDrawer
@@ -419,7 +437,7 @@ function AttendDrawer({
       }}
       isSubmitting={respond.isPending || deny.isPending}
       submitDisabled={denying ? !reason.trim() : !(verified && resolution.trim())}
-      hideSubmit={!pending}
+      hideSubmit={!pending || (erase && !denying)}
       submitLabel={denying ? "Denegar" : "Marcar respondida"}
       cancelLabel={pending ? "Cerrar" : "Listo"}
       error={error}
@@ -478,8 +496,35 @@ function AttendDrawer({
                 </>
               )}
             </Step>
-            <Step number={2} done={false} disabled={!verified} title={request.kind === "copia" ? "Envía la copia" : "Haz lo que pidió"}>
-              {request.kind === "copia" ? (
+            <Step
+              number={2}
+              done={false}
+              disabled={!verified}
+              title={request.kind === "copia" ? "Envía la copia" : erase ? "Borra sus datos y bloquea su historia" : "Haz lo que pidió"}
+            >
+              {erase ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-muted-foreground">
+                    Se borra lo que no es clínico: sus conversaciones, oportunidades, tareas, notas, correo y lo que el agente
+                    recuerda. Su historia clínica, sus cobros y sus comprobantes se guardan bloqueados, porque la ley lo pide. El
+                    pedido queda respondido solo.
+                  </p>
+                  {canErase ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="self-start"
+                      disabled={!verified}
+                      onClick={() => setErasing(true)}
+                    >
+                      Revisar y borrar…
+                    </Button>
+                  ) : (
+                    <p className="font-medium">Lo hace Administración: avísale que ya comprobaste que es ella.</p>
+                  )}
+                </div>
+              ) : request.kind === "copia" ? (
                 verified ? (
                   <div className="flex flex-col gap-2">
                     {sendOptions.isPending ? <p className="text-muted-foreground">Buscando por dónde enviarla…</p> : null}
@@ -522,6 +567,7 @@ function AttendDrawer({
                 </p>
               )}
             </Step>
+            {erase ? null : (
             <Step number={3} done={false} disabled={!verified} title="Responde">
               <Field>
                 <FieldLabel htmlFor="data-request-resolution">Qué se entregó o qué se hizo</FieldLabel>
@@ -535,13 +581,153 @@ function AttendDrawer({
                 />
               </Field>
             </Step>
+            )}
             <Button type="button" variant="ghost" size="sm" className="self-start text-destructive" onClick={() => setDenying(true)}>
               Denegar…
             </Button>
           </>
         )}
       </div>
+      {erasing ? (
+        <EraseDialog
+          patientId={patientId}
+          request={request}
+          patientName={patientName}
+          locale={locale}
+          onClose={() => setErasing(false)}
+          onDone={onClose}
+        />
+      ) : null}
     </FormDrawer>
+  )
+}
+
+/** Cómo se comprobó, después de por dónde llegó: sin repetir «en la clínica». */
+const ERASE_VERIFIED_TEXT: Record<DataRequestVerification, string> = {
+  documento: "comprobado con su documento",
+  portal: "desde su portal",
+  representante: "su representante legal, con su documento",
+}
+
+/** «46 mensajes», «1 oportunidad». */
+function countWords(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/**
+ * «¿Borrar los datos de…?» (tablero 6): lo que se borra, lo que se guarda
+ * bloqueado y lo que hay que saber antes (su cita por venir, lo que debe).
+ * Se confirma escribiendo BORRAR: no se puede deshacer.
+ */
+function EraseDialog({
+  patientId,
+  request,
+  patientName,
+  locale,
+  onClose,
+  onDone,
+}: {
+  patientId: string
+  request: DataRequest
+  patientName: string | null
+  locale: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [typed, setTyped] = useState("")
+  const preview = useQuery({
+    queryKey: ["data-request-erase-preview", request.id],
+    queryFn: () => fetchErasurePreview(patientId, request.id),
+  })
+  const erase = useMutation({
+    mutationFn: () => eraseDataApi(patientId, request.id),
+    onSuccess: async () => {
+      toast.success("Se borraron sus datos y su historia quedó bloqueada")
+      onDone()
+      // La ficha ya no existe para el equipo: la página pasa a la historia bloqueada.
+      await queryClient.invalidateQueries()
+    },
+  })
+  const verifiedText = request.verifiedHow ? ` · ${ERASE_VERIFIED_TEXT[request.verifiedHow]}` : ""
+  return (
+    <ConfirmDialog
+      open
+      title={`¿Borrar los datos de ${patientName ?? "esta persona"}?`}
+      description={`Lo pidió ${request.requesterName} ${DATA_REQUEST_CHANNEL_PHRASE[request.channel]} el ${dayWords(request.requestedOn, locale)}${verifiedText}.`}
+      confirmLabel="Borrar y bloquear"
+      pending={erase.isPending}
+      confirmDisabled={typed.trim() !== "BORRAR" || !preview.data}
+      onConfirm={() => erase.mutate()}
+      onClose={onClose}
+    >
+      {preview.isPending ? <LoadingState message="Revisando lo que se borra…" /> : null}
+      {preview.isError ? <p className="text-sm text-destructive">{problemOf(preview.error)}</p> : null}
+      {preview.data ? <ErasureSummary preview={preview.data} locale={locale} /> : null}
+      <Field>
+        <FieldLabel htmlFor="erase-confirm">Escribe BORRAR para confirmar</FieldLabel>
+        <Input
+          id="erase-confirm"
+          autoComplete="off"
+          value={typed}
+          placeholder="BORRAR"
+          onChange={(event) => setTyped(event.target.value)}
+        />
+        <FieldDescription>
+          Lo que se borra no se puede recuperar. Queda en la Actividad del equipo y el pedido pasa a «Respondida» con el detalle.
+        </FieldDescription>
+      </Field>
+      {erase.error ? <p className="text-sm text-destructive">{problemOf(erase.error)}</p> : null}
+    </ConfirmDialog>
+  )
+}
+
+function ErasureSummary({ preview, locale }: { preview: ErasurePreview; locale: string }) {
+  const erased = [
+    preview.conversations
+      ? `Sus conversaciones: ${countWords(preview.conversations, "conversación", "conversaciones")}, ${countWords(preview.messages, "mensaje", "mensajes")}`
+      : null,
+    preview.opportunities + preview.tasks > 0 ? `Sus oportunidades y tareas: ${preview.opportunities + preview.tasks}` : null,
+    preview.notes ? `Sus notas: ${preview.notes}` : null,
+    "Correo, etiquetas y campos propios",
+    "Lo que el agente recuerda de ella",
+    "Sus permisos de mensajes: no se le escribe más",
+  ].filter((item): item is string => item !== null)
+  const appointments = preview.futureAppointments.map((a) => formatDateTime(a.startsAt))
+  const debts = preview.balances.map((b) => formatMoney(b.cents, b.currency, locale))
+  const one = appointments.length === 1
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+        <p className="font-semibold text-destructive">Se borra ahora</p>
+        <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+          {erased.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="rounded-lg border bg-muted/40 p-3">
+        <p className="font-semibold">Se guarda bloqueado</p>
+        <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+          <li>Su historia clínica: la ley pide guardarla años</li>
+          <li>Sus cobros y comprobantes: los pide la ley tributaria</li>
+          <li>Nombre, documento y teléfono, solo dentro de la historia</li>
+        </ul>
+        <p className="mt-2 text-muted-foreground">
+          No sale en búsquedas, agenda, listas ni reportes, y el agente no la ve. Solo Administración la abre, con motivo.
+        </p>
+      </div>
+      {appointments.length || debts.length ? (
+        <p className="rounded-lg bg-warning-soft p-3 text-warning">
+          <strong>Antes de borrar: </strong>
+          {appointments.length
+            ? `tiene ${one ? "una cita" : `${appointments.length} citas`} (${appointments.join(", ")}), que se cancela${one ? "" : "n"} sin avisarle. `
+            : ""}
+          {debts.length ? `Debe ${debts.join(" y ")}, que se mantiene en Caja. ` : ""}
+          {appointments.length ? `Si prefiere conservar ${one ? "la cita" : "las citas"}, deniega el pedido o espera a después.` : ""}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

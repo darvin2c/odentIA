@@ -27,7 +27,7 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 
-export const DATA_REQUEST_KINDS = ["copia", "corregir", "mensajes"] as const
+export const DATA_REQUEST_KINDS = ["copia", "corregir", "mensajes", "borrar"] as const
 export type DataRequestKind = (typeof DATA_REQUEST_KINDS)[number]
 
 export const DATA_REQUEST_CHANNELS = ["clinica", "whatsapp", "correo", "portal"] as const
@@ -190,7 +190,8 @@ export async function createDataRequest(
   return (await listDataRequests(tx, orgId, patientId, { id: row.id }))[0]!
 }
 
-async function lockPending(tx: Db, orgId: string, patientId: string, requestId: string) {
+/** El pedido pendiente, bloqueado para cambiarlo; «Este pedido ya se respondió» si no lo está. */
+export async function lockPendingDataRequest(tx: Db, orgId: string, patientId: string, requestId: string) {
   const [row] = await tx
     .select()
     .from(patientDataRequest)
@@ -220,7 +221,7 @@ export async function verifyDataRequest(
 ): Promise<DataRequestItem> {
   if (!(DATA_REQUEST_VERIFICATIONS as readonly string[]).includes(input.how))
     throw validation("Elige cómo comprobaste que es ella")
-  const row = await lockPending(tx, orgId, patientId, requestId)
+  const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   await tx
     .update(patientDataRequest)
     .set({ verifiedHow: input.how, verifiedAt: new Date(), verifiedBy: actorUserId, updatedAt: new Date() })
@@ -243,9 +244,11 @@ export async function respondDataRequest(
 ): Promise<DataRequestItem> {
   const resolution = cleanText(input.resolution, "La respuesta", 1000)
   if (!resolution) throw validation("Escribe qué se entregó o qué se hizo")
-  const row = await lockPending(tx, orgId, patientId, requestId)
+  const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   if (!row.verifiedAt)
     throw new ServiceError("DATA_REQUEST_NOT_VERIFIED", 409, "Primero comprueba que es ella o su representante")
+  if (row.kind === "borrar")
+    throw new ServiceError("DATA_REQUEST_ERASE", 409, "Este pedido se responde al borrar sus datos")
   const now = new Date()
   await tx
     .update(patientDataRequest)
@@ -266,7 +269,7 @@ export async function denyDataRequest(
 ): Promise<DataRequestItem> {
   const reason = cleanText(input.reason, "El motivo", 1000)
   if (!reason) throw validation("Escribe por qué se deniega")
-  const row = await lockPending(tx, orgId, patientId, requestId)
+  const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   const now = new Date()
   await tx
     .update(patientDataRequest)
