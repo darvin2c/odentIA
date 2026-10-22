@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { type AdminInterpretation, interpretAdminRequest } from "@odentia/services"
+import { type AdminInterpretation, agentTextsFor, interpretAdminRequest } from "@odentia/services"
 import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState, asAdminDecider } from "../admin.js"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
@@ -92,7 +92,7 @@ let failed = 0
 for (const example of bank.pedidos) {
   let got: AdminInterpretation
   try {
-    got = await interpretAdminRequest(example.text, decider)
+    got = await interpretAdminRequest(example.text, decider, agentTextsFor("dental"))
   } catch (error) {
     failed += 1
     misses.push(`«${example.text}» → el modelo no respondió (${error instanceof Error ? error.message : "error"})`)

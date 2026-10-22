@@ -1,4 +1,5 @@
 import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
+import { clinicWord, type ProductAgentTexts } from "@odentia/services"
 
 /**
  * Primera ola de puntos de decisión, en modo sombra: se registran sin
@@ -8,11 +9,12 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  */
 export const TRIAGE_VERSION = "triage.v4"
 
-export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
+/** Las preguntas de cada mensaje, con las palabras del producto (odentIA: «dental clinic», la boca). */
+export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] => [
   {
     id: "requires_reply",
     kind: "yesno",
-    instructions: "Does the latest message from the contact need a reply from the dental clinic?",
+    instructions: `Does the latest message from the contact need a reply from the ${clinicWord(texts, "en")}?`,
     criteria: { yes: "The contact asks something, requests something or expects an answer.", no: "A closing, thanks or acknowledgement that needs no reply." },
   },
   {
@@ -47,7 +49,7 @@ export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
       {
         value: "off_topic",
         description:
-          "Unrelated to dental care, the mouth or the clinic: cooking, homework, programming, sports, politics, general knowledge, translations, writing texts or jokes. Never use it for anything about teeth, the mouth, eating or care after a dental procedure, the clinic's services, prices, payment, insurance, paperwork, access or appointments.",
+          `Unrelated to ${texts.care.scope ? `${texts.care.scope} or ` : ""}the clinic: cooking, homework, programming, sports, politics, general knowledge, translations, writing texts or jokes. Never use it for anything about ${texts.care.topics ? `${texts.care.topics}, ` : ""}the clinic's services, prices, payment, insurance, paperwork, access or appointments.`,
       },
       { value: "other", description: "None of the above or unclear." },
     ],
@@ -68,7 +70,7 @@ export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
       {
         value: "not_spam",
         description:
-          "A person writing for themselves: about teeth, the mouth, the clinic, appointments, prices, payments, a complaint, a greeting, a wrong number or anything personal. When in doubt, choose this.",
+          `A person writing for themselves: about ${texts.care.body ? `${texts.care.body}, ` : ""}the clinic, appointments, prices, payments, a complaint, a greeting, a wrong number or anything personal. When in doubt, choose this.`,
       },
       { value: "advertising", description: "Mass advertising or offers from others: earn money, loans, investments, products or promotions." },
       { value: "scam", description: "Fraud or phishing: asks to pay or click a link for a package, prize, bank, account or delivery." },

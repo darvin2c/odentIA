@@ -4,8 +4,8 @@ import { clinicalFollowUp, encounter, encounterDiagnosis, encounterDictationSugg
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { upsertAgentConfig } from "./agentConfig.js"
-import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
+import { upsertAgentConfig } from "../agentConfig.js"
+import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import {
   confirmDictationSuggestion,
   discardDictationSuggestion,
@@ -20,7 +20,7 @@ import {
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "./encounter-dictation.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { withOrgContext } from "@odentia/db"
 
 /** Asistente clínico: lo dictado queda como sugerencia y solo entra a la historia cuando el odontólogo confirma. */

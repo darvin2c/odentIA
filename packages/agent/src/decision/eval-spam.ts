@@ -17,7 +17,8 @@ import { resolve } from "node:path"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { triageState } from "./points.js"
-import { readRoute, ROUTE_QUESTIONS, ROUTE_SPAM } from "./route.js"
+import { agentTextsFor } from "@odentia/services"
+import { readRoute, ROUTE_SPAM, routeQuestions } from "./route.js"
 
 function arg(name: string, fallback: string): string {
   const found = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -52,7 +53,7 @@ if (!decision) throw new Error("Elige un proveedor de decisión")
 const rows: Array<{ texto: string; spam: boolean; p: number; reason: string | null }> = []
 for (const item of cases) {
   for (let i = 0; i < repeats; i++) {
-    const route = readRoute(await decision.decide(triageState(item.previous, item.texto, item.burst), ROUTE_QUESTIONS))
+    const route = readRoute(await decision.decide(triageState(item.previous, item.texto, item.burst), routeQuestions(agentTextsFor("dental"))))
     rows.push({ texto: item.texto, spam: item.spam, p: route.spam?.probability ?? 0, reason: route.spam?.reason ?? null })
   }
 }

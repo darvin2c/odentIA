@@ -16,9 +16,9 @@ import {
   ServiceError,
 } from "@odentia/services"
 import { z } from "zod"
-import { reportReplyUse } from "./ai-usage.js"
-import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "./llm.js"
-import type { AgentRuntime } from "./run.js"
+import { reportReplyUse } from "../ai-usage.js"
+import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "../llm.js"
+import type { AgentRuntime } from "../run.js"
 
 /**
  * Clío, el asistente clínico: convierte lo que el odontólogo dicta en sugerencias para

@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
-import { TRIAGE_QUESTIONS, triageOutcome, triageState } from "./points.js"
+import { agentTextsFor } from "@odentia/services"
+import { triageOutcome, triageQuestions, triageState } from "./points.js"
 
 interface Example {
   previous?: Array<{ direction: "in" | "out"; body: string }>
@@ -69,7 +70,7 @@ for (const example of examples) {
   const state = triageState(example.previous ?? [], example.latest, example.burst ?? [])
   let first: string | null = null
   for (let i = 0; i < repeats; i += 1) {
-    const result = await decision.decide(state, TRIAGE_QUESTIONS)
+    const result = await decision.decide(state, triageQuestions(agentTextsFor("dental")))
     latencies.push(result.latencyMs)
     // Mismos umbrales que la sombra (triageOutcome): se mide lo que se haría.
     const outcome = triageOutcome(result)

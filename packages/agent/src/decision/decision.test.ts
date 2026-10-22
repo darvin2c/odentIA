@@ -7,7 +7,10 @@ import { expect, it } from "vitest"
 import { createBaselineDecisionModel } from "./baseline.js"
 import { createFakeDecisionModel } from "./fake.js"
 import { createJevDecisionModel } from "./jev.js"
-import { TRIAGE_QUESTIONS, triageOutcome, triageState } from "./points.js"
+import { agentTextsFor } from "@odentia/services"
+import { triageOutcome, triageQuestions, triageState } from "./points.js"
+
+const TRIAGE_QUESTIONS = triageQuestions(agentTextsFor("dental"))
 import { answerOf, DecisionError } from "./port.js"
 
 async function mockProvider(handler: (body: unknown) => { status: number; body: unknown }) {

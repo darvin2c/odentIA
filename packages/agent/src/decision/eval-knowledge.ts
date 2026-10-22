@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import type { KnowledgeEntryItem } from "@odentia/services"
+import { agentTextsFor, type KnowledgeEntryItem } from "@odentia/services"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { knowledgeCandidates, knowledgeQuestion, readKnowledgeSelection } from "./knowledge.js"
@@ -81,7 +81,7 @@ const mistakes: string[] = []
 
 for (const question of bank.questions) {
   const candidates = knowledgeCandidates(entries, question.text)
-  const result = await decision.decide(`Contact (latest): ${question.text}`, [knowledgeQuestion(candidates)])
+  const result = await decision.decide(`Contact (latest): ${question.text}`, [knowledgeQuestion(candidates, agentTextsFor("dental"))])
   latencies.push(result.latencyMs)
   const selection = readKnowledgeSelection(result, candidates)
   const picked = selection.picked.map((entry) => entry.title)

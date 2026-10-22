@@ -1,4 +1,5 @@
 import { ADMIN_LINES, type AdminLine, type AdminLineKey, adminLineOf, CUSTOM_LINES, say } from "./admin-lines.js"
+import { clinicWord, type ProductAgentTexts } from "./product-agent.js"
 
 /**
  * Pedirle algo a Argos con palabras. El modelo solo **entiende**: de
@@ -106,13 +107,16 @@ function describeOption(line: AdminLine): string {
 }
 
 /** Las preguntas que se le hacen al modelo, todas con opciones cerradas. */
-export function adminQuestions(lines: readonly AdminLine[] = [...ADMIN_LINES, ...CUSTOM_LINES]): AdminQuestion[] {
+export function adminQuestions(
+  texts: ProductAgentTexts,
+  lines: readonly AdminLine[] = [...ADMIN_LINES, ...CUSTOM_LINES],
+): AdminQuestion[] {
   return [
     {
       id: "linea",
       kind: "choice",
       instructions:
-        "La persona que administra una clínica dental le pide algo a su asistente. ¿De cuál de estas tareas automáticas está hablando? Elige «ninguna» si no habla de ninguna de ellas.",
+        `La persona que administra una ${clinicWord(texts)} le pide algo a su asistente. ¿De cuál de estas tareas automáticas está hablando? Elige «ninguna» si no habla de ninguna de ellas.`,
       options: [...lines.map((line) => ({ value: line.key, description: describeOption(line) })), { value: "ninguna", description: "No habla de ninguna de estas tareas." }],
     },
     {
@@ -175,9 +179,14 @@ function yes(answers: AdminAnswer[], id: string): boolean {
  * Si el modelo falla, lanza: quien llama dice que ahora no puede y deja todo
  * como estaba.
  */
-export async function interpretAdminRequest(text: string, decider: AdminDecider): Promise<AdminInterpretation> {
+export async function interpretAdminRequest(
+  text: string,
+  decider: AdminDecider,
+  /** Las palabras del producto de la clínica (`productAgentTexts`). */
+  texts: ProductAgentTexts,
+): Promise<AdminInterpretation> {
   const request = text.trim().slice(0, 600)
-  const result = await decider.decide(request, adminQuestions())
+  const result = await decider.decide(request, adminQuestions(texts))
   const line = choice(result.answers, "linea")
   const intent = choice(result.answers, "intencion")
   const base = { model: result.model, usage: result.usage }

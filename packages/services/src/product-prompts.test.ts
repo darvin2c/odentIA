@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { adminQuestions } from "./admin-request.js"
+import { agentTextsFor } from "./products.js"
 import { reportQuestions } from "./report-questions.js"
 
 const golden = (name: string) => `./__golden__/${name}`
@@ -12,9 +13,9 @@ const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
 
 describe("preguntas de odentIA, iguales a las de antes", () => {
   it("Administrador", async () => {
-    await expect(json(adminQuestions())).toMatchFileSnapshot(golden("administrador.json"))
+    await expect(json(adminQuestions(agentTextsFor("dental")))).toMatchFileSnapshot(golden("administrador.json"))
   })
   it("Reportes", async () => {
-    await expect(json(reportQuestions())).toMatchFileSnapshot(golden("reportes.json"))
+    await expect(json(reportQuestions(agentTextsFor("dental")))).toMatchFileSnapshot(golden("reportes.json"))
   })
 })

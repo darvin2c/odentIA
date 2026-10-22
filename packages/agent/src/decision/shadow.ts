@@ -1,10 +1,10 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
-import { recordAgentDecision } from "@odentia/services"
+import { productAgentTexts, recordAgentDecision } from "@odentia/services"
 import { and, desc, eq, lt } from "drizzle-orm"
-import { BURST_HORIZON_MS, BURST_MESSAGES, TRIAGE_QUESTIONS, TRIAGE_VERSION, triageOutcome, triageState } from "./points.js"
+import { BURST_HORIZON_MS, BURST_MESSAGES, TRIAGE_VERSION, triageQuestions, triageOutcome, triageState } from "./points.js"
 import { DecisionError, type DecisionModel, type DecisionResult } from "./port.js"
-import { type AgentRoute, guardBurst, readRoute, ROUTE_QUESTIONS, ROUTE_VERSION, routeOutcome } from "./route.js"
+import { type AgentRoute, guardBurst, readRoute, ROUTE_VERSION, routeQuestions, routeOutcome } from "./route.js"
 
 /**
  * Estado mínimo que ve el modelo de decisión: el mensaje disparador, los que
@@ -101,7 +101,8 @@ export async function decideRoute(
     }
     let result: DecisionResult
     try {
-      result = await decision.decide(state, ROUTE_QUESTIONS)
+      const texts = await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId))
+      result = await decision.decide(state, routeQuestions(texts))
     } catch (error) {
       const detail = error instanceof DecisionError ? `${error.code}: ${error.message}` : "fallo inesperado del modelo de decisión"
       await record({ ...base, answers: [], error: detail })
@@ -141,7 +142,8 @@ export async function runShadowTriage(
   const base = { conversationId: input.conversationId, triggerMessageId: input.triggerMessageId, point: TRIAGE_VERSION, provider: decision.provider, state }
   let result: DecisionResult
   try {
-    result = await decision.decide(state, TRIAGE_QUESTIONS)
+    const texts = await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId))
+    result = await decision.decide(state, triageQuestions(texts))
   } catch (error) {
     const detail = error instanceof DecisionError ? `${error.code}: ${error.message}` : "fallo inesperado del modelo de decisión"
     await withOrgContext(db, orgId, (tx) => recordAgentDecision(tx, orgId, { ...base, answers: [], error: detail }))

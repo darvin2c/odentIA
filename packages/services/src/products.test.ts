@@ -2,6 +2,7 @@ import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
+import { requireDictatingProduct } from "./dental/encounter-dictation.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { finalizeEncounter, getEncounterClosing, getEncounterDetail } from "./encounters.js"
 import { getPatientSummary } from "./patient-history.js"
@@ -106,4 +107,18 @@ it("el «dónde» lo dice el producto: odentIA guarda la pieza y una clínica m�
   } finally {
     await setProduct("dental")
   }
+})
+
+it("Clío dicta solo en clínicas de un producto con su dictado: hoy, odentIA", async () => {
+  const f = await clinicalFixture()
+  await setProduct("medical")
+  try {
+    await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).rejects.toMatchObject({
+      code: "CLINICAL_ASSISTANT_UNAVAILABLE",
+      message: "Clío aún no dicta en esta clínica",
+    })
+  } finally {
+    await setProduct("dental")
+  }
+  await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toBeUndefined()
 })

@@ -58,7 +58,7 @@ export {
   type ArgosRoute,
   type ArgosShown,
   type ArgosTable,
-  ARGOS_ROUTE_QUESTION,
+  argosRouteQuestion,
   argosMessages,
   askArgos,
   demoArgosPlan,
@@ -69,4 +69,4 @@ export {
   showArgosAnswer,
   ARGOS_MAX_TURNS,
 } from "./argos.js"
-export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"
+export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dental/dictation.js"

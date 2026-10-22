@@ -61,6 +61,10 @@ import {
   runArgosQuery,
   ServiceError,
   unknownArgosHoles,
+  clinicWord,
+  NO_AGENT_TEXTS,
+  type ProductAgentTexts,
+  productAgentTexts,
 } from "@odentia/services"
 import { z } from "zod"
 import { createAdminDecisionModel } from "./admin.js"
@@ -83,87 +87,101 @@ import type { AgentRuntime } from "./run.js"
 
 const TOOL_NAME = "responder"
 
-/** Una cifra oficial con sus cortes y filtros (D18 y D19): odentIA arma su consulta. */
-export const figureAskSchema = z.object({
-  clave: z.string().describe("La clave de una cifra oficial de la lista."),
-  por: z.array(z.string()).describe("Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."),
-  filtros: z
-    .array(z.object({ corte: z.string(), valores: z.array(z.string()) }))
-    .describe("Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«Ortodoncia y Ortopedia Maxilar»]}]."),
-  parte_del_total: z.boolean().describe("Con cortes: la parte de cada fila en el total (parte_pct)."),
-  limite: z.number().int().nullable().describe("Solo si la pregunta pide un número de filas («los 5 que más…»)."),
-  orden: z
-    .enum(["tiempo", "mayor", "menor"])
-    .describe("tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."),
-})
+/**
+ * Las herramientas de Argos con los ejemplos de su producto (odentIA:
+ * «Ortodoncia y Ortopedia Maxilar»). Leer lo que devuelve el modelo no depende
+ * de los ejemplos: para eso van los de abajo, sin ellos.
+ */
+export function argosSchemas(texts: ProductAgentTexts) {
+  /** Una cifra oficial con sus cortes y filtros (D18 y D19): odentIA arma su consulta. */
+  const figureAskSchema = z.object({
+    clave: z.string().describe("La clave de una cifra oficial de la lista."),
+    por: z.array(z.string()).describe("Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."),
+    filtros: z
+      .array(z.object({ corte: z.string(), valores: z.array(z.string()) }))
+      .describe(`Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«${texts.argos.specialtyExample || "…"}»]}].`),
+    parte_del_total: z.boolean().describe("Con cortes: la parte de cada fila en el total (parte_pct)."),
+    limite: z.number().int().nullable().describe("Solo si la pregunta pide un número de filas («los 5 que más…»)."),
+    orden: z
+      .enum(["tiempo", "mayor", "menor"])
+      .describe("tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."),
+  })
 
-const periodFields = {
-  periodo: z
-    .string()
-    .describe(
-      "El periodo (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD, a_hoy o, para lo que viene, hoy_entero, manana, semana_entera, proxima_semana, mes_entero, resto_del_mes o proximo_mes.",
-    ),
-  compara: z.enum(ARGOS_COMPARES).describe("no, anterior, año_anterior u otro (la pregunta nombra dos periodos)."),
-  otro_periodo: z.string().describe("Con compara otro: el segundo periodo. Vacío si no."),
-  sede: z.string().describe("La sede que nombra la pregunta, tal cual. Vacío si no nombra ninguna."),
+  const periodFields = {
+    periodo: z
+      .string()
+      .describe(
+        "El periodo (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD, a_hoy o, para lo que viene, hoy_entero, manana, semana_entera, proxima_semana, mes_entero, resto_del_mes o proximo_mes.",
+      ),
+    compara: z.enum(ARGOS_COMPARES).describe("no, anterior, año_anterior u otro (la pregunta nombra dos periodos)."),
+    otro_periodo: z.string().describe("Con compara otro: el segundo periodo. Vacío si no."),
+    sede: z.string().describe("La sede que nombra la pregunta, tal cual. Vacío si no nombra ninguna."),
+  }
+
+  /** Un cálculo: una cifra oficial o una consulta propia, con su periodo. El modelo ve el resultado sin personas (D20). */
+  const calcularSchema = z.object({
+    id: z.string().describe("Un nombre corto para el cálculo («c1»): con él lo eliges al responder."),
+    cifra: figureAskSchema.nullable().describe("La cifra oficial que lo responde; null si ninguna sirve."),
+    sql: z.string().describe("Solo si ninguna cifra oficial sirve: tu consulta, con las reglas de «La consulta». Vacía con cifra."),
+    ...periodFields,
+  })
+
+  const buscarSchema = z.object({
+    textos: z
+      .array(z.string())
+      .describe(
+        `Lo que la pregunta nombra y no está tal cual en los nombres de la clínica: ${[texts.argos.searchExample, "Surco", "Rosa Quispe"].filter(Boolean).map((text) => `«${text}»`).join(", ")}.`,
+      ),
+  })
+
+  /** Lo que devuelve el modelo: la consulta y las frases, sin ningún número del resultado. */
+  const planSchema = z.object({
+    tipo: z
+      .enum(["consulta", "parcial", "no_existe"])
+      .describe("consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."),
+    calculo: z
+      .string()
+      .default("")
+      .describe("El id del cálculo que responde la pregunta; para juntar varios del mismo periodo, sus ids separados por coma («c1, c2»): el primero puede tener varias filas, los demás una. Vacío en no_existe."),
+    sql: z.string().default("").describe("Vacía: la consulta es la del cálculo."),
+    frase: z
+      .string()
+      .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."),
+    frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."),
+    como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
+    falta: z.string().describe("En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."),
+    calculo_cercano: z.string().default("").describe("En no_existe: el id de un cálculo con lo más cercano que sí existe. Vacío si no hay."),
+    sql_cercana: z.string().default("").describe("Vacía: lo cercano va en calculo_cercano."),
+    frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
+    titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."),
+    // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
+    pantalla: z.string().describe(`La pantalla de odentIA donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
+    seguir: z
+      .array(
+        z.object({
+          etiqueta: z.string().describe("El botón, de 1 a 4 palabras: «Por monto», «Por sede», «Solo productos». Nunca otra fecha."),
+          cifra: figureAskSchema.nullable().optional().describe("Si la respuesta es una cifra oficial: la misma con otro corte, filtro u orden."),
+          sql: z.string().default("").describe("Si no: la consulta completa de esa variante. Vacía con cifra."),
+          frase: z.string().describe("Su frase con huecos."),
+          frase_vacia: z.string().describe("Su frase si no trae filas."),
+          como: z.string().describe("Su «Así lo calculé»."),
+        }),
+      )
+      .describe("Hasta 3 variantes que la persona querría ver después; vacío en no_existe. Más de 3 no se usan."),
+    // Con un cálculo, el periodo y la sede son los suyos; sin él (lo que no existe), los de la pregunta.
+    periodo: z.string().default("a_hoy").describe("Sin cálculo: el periodo de la pregunta. Con cálculo no se usa: va el del cálculo."),
+    compara: z.enum(ARGOS_COMPARES).default("no"),
+    otro_periodo: z.string().default(""),
+    sede: z.string().default(""),
+  })
+  return { figureAskSchema, calcularSchema, buscarSchema, planSchema }
 }
 
-/** Un cálculo: una cifra oficial o una consulta propia, con su periodo. El modelo ve el resultado sin personas (D20). */
-export const calcularSchema = z.object({
-  id: z.string().describe("Un nombre corto para el cálculo («c1»): con él lo eliges al responder."),
-  cifra: figureAskSchema.nullable().describe("La cifra oficial que lo responde; null si ninguna sirve."),
-  sql: z.string().describe("Solo si ninguna cifra oficial sirve: tu consulta, con las reglas de «La consulta». Vacía con cifra."),
-  ...periodFields,
-})
-
-export const buscarSchema = z.object({
-  textos: z.array(z.string()).describe("Lo que la pregunta nombra y no está tal cual en los nombres de la clínica: «ortodoncia», «Surco», «Rosa Quispe»."),
-})
-
-/** Lo que devuelve el modelo: la consulta y las frases, sin ningún número del resultado. */
-export const planSchema = z.object({
-  tipo: z
-    .enum(["consulta", "parcial", "no_existe"])
-    .describe("consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."),
-  calculo: z
-    .string()
-    .default("")
-    .describe("El id del cálculo que responde la pregunta; para juntar varios del mismo periodo, sus ids separados por coma («c1, c2»): el primero puede tener varias filas, los demás una. Vacío en no_existe."),
-  sql: z.string().default("").describe("Vacía: la consulta es la del cálculo."),
-  frase: z
-    .string()
-    .describe("La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."),
-  frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."),
-  como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
-  falta: z.string().describe("En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."),
-  calculo_cercano: z.string().default("").describe("En no_existe: el id de un cálculo con lo más cercano que sí existe. Vacío si no hay."),
-  sql_cercana: z.string().default("").describe("Vacía: lo cercano va en calculo_cercano."),
-  frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
-  titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."),
-  // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
-  pantalla: z.string().describe(`La pantalla de odentIA donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
-  seguir: z
-    .array(
-      z.object({
-        etiqueta: z.string().describe("El botón, de 1 a 4 palabras: «Por monto», «Por sede», «Solo productos». Nunca otra fecha."),
-        cifra: figureAskSchema.nullable().optional().describe("Si la respuesta es una cifra oficial: la misma con otro corte, filtro u orden."),
-        sql: z.string().default("").describe("Si no: la consulta completa de esa variante. Vacía con cifra."),
-        frase: z.string().describe("Su frase con huecos."),
-        frase_vacia: z.string().describe("Su frase si no trae filas."),
-        como: z.string().describe("Su «Así lo calculé»."),
-      }),
-    )
-    .describe("Hasta 3 variantes que la persona querría ver después; vacío en no_existe. Más de 3 no se usan."),
-  // Con un cálculo, el periodo y la sede son los suyos; sin él (lo que no existe), los de la pregunta.
-  periodo: z.string().default("a_hoy").describe("Sin cálculo: el periodo de la pregunta. Con cálculo no se usa: va el del cálculo."),
-  compara: z.enum(ARGOS_COMPARES).default("no"),
-  otro_periodo: z.string().default(""),
-  sede: z.string().default(""),
-})
+export const { figureAskSchema, calcularSchema, buscarSchema, planSchema } = argosSchemas(NO_AGENT_TEXTS)
 
 export type ArgosPlan = z.infer<typeof planSchema>
 
-export const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
+export const argosRules = (texts: ProductAgentTexts): string => `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una ${clinicWord(texts)} con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
 1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto, una promoción) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
 3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.
@@ -215,6 +233,8 @@ const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> 
 }
 
 export interface ArgosAsk {
+  /** Las palabras del producto de la clínica (`productAgentTexts`). */
+  texts: ProductAgentTexts
   question: string
   key: ArgosKey
   now: Date
@@ -237,7 +257,7 @@ export interface ArgosAsk {
  * pantalla, lo anterior y la pregunta.
  */
 export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): BaseMessage[] {
-  const fixed = `${RULES}\n\n${argosCatalogText(input.key)}\n\nCifras oficiales (pídelas con calcular):\n${argosFiguresText(input.key)}`
+  const fixed = `${argosRules(input.texts)}\n\n${argosCatalogText(input.key)}\n\nCifras oficiales (pídelas con calcular):\n${argosFiguresText(input.key)}`
   const mark = CACHE_MARK[provider]
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
@@ -336,14 +356,16 @@ export const ARGOS_MAX_TURNS = 4
 /** El modelo que escribe con sus herramientas: buscar nombres, calcular y responder. Con el de demostración, null. */
 async function argosModel(
   deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
+  texts: ProductAgentTexts,
 ): Promise<{ provider: LlmSpec["provider"]; invoke: (messages: BaseMessage[], choice: string) => Promise<AIMessage> } | null> {
   const spec = resolveLlmSpec(deps.platform)
   if (spec.provider === "fake" && !deps.createModel) return null
   // Las herramientas no se ejecutan aquí: `askArgos` responde cada llamada con lo que hizo odentIA.
+  const schemas = argosSchemas(texts)
   const tools = [
-    tool(async () => "", { name: "buscar_nombres", description: "Busca cómo se llama en la clínica lo que nombra la pregunta, o si es un paciente.", schema: buscarSchema }),
-    tool(async () => "", { name: "calcular", description: "Calcula una cifra oficial o tu consulta y te muestra el resultado, sin personas.", schema: calcularSchema }),
-    tool(async () => "", { name: TOOL_NAME, description: "Entrega la respuesta: el cálculo que responde y sus frases.", schema: planSchema }),
+    tool(async () => "", { name: "buscar_nombres", description: "Busca cómo se llama en la clínica lo que nombra la pregunta, o si es un paciente.", schema: schemas.buscarSchema }),
+    tool(async () => "", { name: "calcular", description: "Calcula una cifra oficial o tu consulta y te muestra el resultado, sin personas.", schema: schemas.calcularSchema }),
+    tool(async () => "", { name: TOOL_NAME, description: "Entrega la respuesta: el cálculo que responde y sus frases.", schema: schemas.planSchema }),
   ]
   const reasoning = deps.reasoning ?? ARGOS_REASONING
   const model = deps.createModel
@@ -362,10 +384,10 @@ async function argosModel(
 }
 
 /** La fila del buscador (decisión D1): Jev la decide con solo el texto. */
-export const ARGOS_ROUTE_QUESTION: DecisionQuestion = {
+export const argosRouteQuestion = (texts: ProductAgentTexts): DecisionQuestion => ({
   id: "argos.fila",
   kind: "choice",
-  instructions: "Alguien del equipo de una clínica dental escribió esto. ¿Qué es?",
+  instructions: `Alguien del equipo de una ${clinicWord(texts)} escribió esto. ¿Qué es?`,
   options: [
     {
       value: "negocio",
@@ -376,7 +398,7 @@ export const ARGOS_ROUTE_QUESTION: DecisionQuestion = {
     { value: "buscar", description: "Un nombre o una palabra suelta para encontrar algo (una persona, un servicio, un producto), no una pregunta." },
     { value: "otro", description: "Un saludo, algo ajeno a la clínica o un pedido de que odentIA haga algo ahora (enviar, cambiar, agendar)." },
   ],
-}
+})
 
 export type ArgosRoute = "negocio" | "ayuda" | "buscar" | "otro"
 
@@ -403,11 +425,14 @@ export async function routeArgosQuestion(
   fallback: (text: string) => ArgosRoute = routeByWords,
   /** Con qué seguridad dice que es «otra cosa»: por debajo (si el modelo la dice), decide `fallback`. */
   awayAt?: number,
+  /** Las palabras del producto de la clínica; sin ellas, las comunes. */
+  texts: ProductAgentTexts = NO_AGENT_TEXTS,
 ): Promise<ArgosRoute> {
   if (!model) return fallback(text)
   try {
-    const result = await model.decide(text, [ARGOS_ROUTE_QUESTION])
-    const answer = answerOf(result, ARGOS_ROUTE_QUESTION.id, "choice")
+    const question = argosRouteQuestion(texts)
+    const result = await model.decide(text, [question])
+    const answer = answerOf(result, question.id, "choice")
     const route = ROUTES.find((item) => item === answer?.choice)
     if (!route) return fallback(text)
     const sure = answer?.confidence ?? answer?.probabilities?.[route] ?? null
@@ -428,7 +453,8 @@ export async function routeArgos(
   awayAt?: number,
 ): Promise<ArgosRoute> {
   const decision = deps.decisionModel !== undefined ? deps.decisionModel : await createAdminDecisionModel(db, deps, orgId).catch(() => null)
-  return routeArgosQuestion(decision, text, fallback, awayAt)
+  const texts = await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId))
+  return routeArgosQuestion(decision, text, fallback, awayAt, texts)
 }
 
 /**
@@ -550,6 +576,7 @@ export async function askArgos(
     branches: await listArgosBranches(tx, input.orgId),
     names: await listArgosNames(tx, input.orgId, key),
     asker: await argosAsker(tx, input.userId, input.memberRole),
+    texts: await productAgentTexts(tx, input.orgId),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
@@ -561,7 +588,7 @@ export async function askArgos(
     return { kind: route, message: ARGOS_WORDS[route] }
   }
 
-  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key), asker: ready.asker }
+  const ask: ArgosAsk = { texts: ready.texts, question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key), asker: ready.asker }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
   const step = (text: string) => deps.onStep?.(text)
   /** Los pacientes que encontró buscar_nombres (D23): con varios, se calcula con el primero y la persona elige. */
@@ -814,7 +841,7 @@ export async function askArgos(
   let timedOut = false
   let unreadableTwice = false
   try {
-    const model = await argosModel(deps)
+    const model = await argosModel(deps, ask.texts)
     if (!model) {
       // El modelo de demostración: una sola consulta, como antes de los pasos.
       const demo = demoArgosPlan(input.text)

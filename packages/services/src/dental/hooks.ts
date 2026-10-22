@@ -161,6 +161,7 @@ export interface DentalEncounterDetailParts {
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
+  dictates: true,
 
   async closingParts(tx, { orgId, patientId, encounterId }) {
     const parts: DentalClosingParts = {

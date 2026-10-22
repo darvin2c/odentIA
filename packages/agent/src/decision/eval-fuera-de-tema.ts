@@ -16,10 +16,11 @@ import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { triageState } from "./points.js"
 import { answerOf, type DecisionQuestion } from "./port.js"
-import { ROUTE_HANDOFF, ROUTE_QUESTIONS } from "./route.js"
+import { agentTextsFor } from "@odentia/services"
+import { ROUTE_HANDOFF, routeQuestions } from "./route.js"
 
 /** La pregunta de intención en producción ya trae la opción `off_topic` (triage.v4). */
-const CANDIDATE_QUESTIONS: DecisionQuestion[] = ROUTE_QUESTIONS
+const CANDIDATE_QUESTIONS: DecisionQuestion[] = routeQuestions(agentTextsFor("dental"))
 
 function arg(name: string, fallback: string): string {
   const found = process.argv.find((a) => a.startsWith(`--${name}=`))

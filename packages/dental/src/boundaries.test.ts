@@ -23,9 +23,14 @@ const IMPORTS_DENTAL =
  * pregunten al producto (entrega 5). La 5a sumó dos pruebas que usan el
  * odontograma, ya en `services/src/dental/odontogram.ts`. La 5b sacó lo que
  * dependía del sitio, del hallazgo de origen y de las fases: lo dice el
- * producto (`ProductSite`, `products.ts`).
+ * producto (`ProductSite`, `products.ts`). La 6 llevó a Clío entero a lo dental
+ * (`services/src/dental/encounter-dictation.ts`, `agent/src/dental/dictation.ts`):
+ * el índice del agente lo exporta y algunas pruebas lo usan.
  */
 const STILL_COUPLED = [
+  "packages/agent/src/agent.test.ts",
+  "packages/agent/src/index.ts",
+  "packages/agent/src/product-prompts.test.ts",
   "apps/api/src/routes/patients.ts",
   "apps/api/src/routes/timeline.test.ts",
   "packages/db/src/procedure-codes.ts",
@@ -35,12 +40,13 @@ const STILL_COUPLED = [
   "packages/services/src/clinica-otro-pais.test.ts",
   "packages/services/src/composite-keys.test.ts",
   "packages/services/src/diagnosis-codes.test.ts",
-  "packages/services/src/encounter-dictation.ts",
   "packages/services/src/encounter-lifecycle.test.ts",
   "packages/services/src/index.ts",
   "packages/services/src/patient-history.test.ts",
   "packages/services/src/patients.test.ts",
   "packages/services/src/procedure-codings.test.ts",
+  "packages/services/src/products.test.ts",
+  "packages/services/src/saas-actions.test.ts",
   "packages/services/src/seed-dev.ts",
   "packages/services/src/service-catalog.ts",
   "packages/services/src/specialties.ts",
@@ -67,7 +73,12 @@ const COMMON = [
  * Dentro de lo común, lo que ya es del producto dental, y `products.ts`: el
  * único lugar que conecta cada producto con los momentos de lo común.
  */
-const DENTAL_INSIDE = ["packages/services/src/dental/", "apps/api/src/routes/dental/", "packages/services/src/products.ts"]
+const DENTAL_INSIDE = [
+  "packages/services/src/dental/",
+  "packages/agent/src/dental/",
+  "apps/api/src/routes/dental/",
+  "packages/services/src/products.ts",
+]
 
 function filesUnder(dir: string): string[] {
   const out: string[] = []

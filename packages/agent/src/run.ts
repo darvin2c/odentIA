@@ -43,12 +43,14 @@ import {
   answerToTeamMember,
   TEAM_LIVE_MINUTES,
   toolsDisabledBy,
+  type ProductAgentTexts,
+  productAgentTexts,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { offTopicReply, readRoute, ROUTE_QUESTIONS, ROUTE_SPAM, routeHandoff } from "./decision/route.js"
+import { offTopicReply, readRoute, ROUTE_SPAM, routeHandoff, routeQuestions } from "./decision/route.js"
 import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
@@ -73,6 +75,7 @@ import {
   performHandoff,
   SANDBOX_NIL_ID,
   TOOL_ACTION_LABEL,
+  agentTexts,
 } from "./tools.js"
 export interface AgentRuntime {
   /** Cuenta de odentIA en el proveedor del modelo; la organización no elige ni trae la suya. */
@@ -219,9 +222,11 @@ function baseToolCtx(
   options: {
     triggerId?: string | null
     excludedTools?: readonly string[]
+    texts?: ProductAgentTexts
   } = {},
 ): AgentToolCtx {
   return {
+    texts: options.texts,
     db,
     orgId,
     conversationId,
@@ -505,6 +510,7 @@ async function attendAgentRun(
         toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
           excludedTools: await orgToolExclusions(tx, orgId, cfg),
+          texts: await productAgentTexts(tx, orgId),
         }),
         spec,
         cfg,
@@ -1060,7 +1066,10 @@ export async function simulateAgentTurn(
     }
   })
   const modelName = spec.modelName
-  const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey, { excludedTools })
+  const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey, {
+    excludedTools,
+    texts: await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId)),
+  })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = verifyReplies
   toolCtx.emojis = emojis
@@ -1142,7 +1151,10 @@ export async function simulateAgentSandbox(
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
     }
   })
-  const toolCtx = baseToolCtx(db, orgId, SANDBOX_NIL_ID, SANDBOX_NIL_ID, deps.secretsKey, { excludedTools })
+  const toolCtx = baseToolCtx(db, orgId, SANDBOX_NIL_ID, SANDBOX_NIL_ID, deps.secretsKey, {
+    excludedTools,
+    texts: await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId)),
+  })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = cfg.replyCheckEnabled
   toolCtx.emojis = cfg.emojis
@@ -1169,7 +1181,7 @@ export async function simulateAgentSandbox(
       toolCtx.route = readRoute(
         await toolCtx.decision.decide(
           triageState(said.map((turn) => ({ direction: "in" as const, body: turn.text })), text),
-          ROUTE_QUESTIONS,
+          routeQuestions(agentTexts(toolCtx)),
         ),
       )
     } catch {
