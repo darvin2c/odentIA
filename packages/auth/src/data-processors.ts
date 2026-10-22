@@ -37,7 +37,7 @@ export interface DataProcessor {
  * de datos que eligió odentIA, no el de la empresa: se confirma en su panel.
  */
 const SERVER_PROVIDER = "OVHcloud"
-const SERVER_COUNTRY = "[Por confirmar: país del centro de datos]"
+const SERVER_COUNTRY = "Canadá"
 const MAIL_PROVIDER = "Zoho CPaaS (antes ZeptoMail)"
 const MAIL_COUNTRY = "[Por confirmar: región de la cuenta de Zoho]"
 
