@@ -1,7 +1,13 @@
 import { createRequire } from "node:module"
 import { connect } from "node:net"
 import { dirname, join } from "node:path"
-import { CreateBucketCommand, PutBucketPolicyCommand, S3Client } from "@aws-sdk/client-s3"
+import {
+  CreateBucketCommand,
+  PutBucketCorsCommand,
+  PutBucketPolicyCommand,
+  PutBucketVersioningCommand,
+  S3Client,
+} from "@aws-sdk/client-s3"
 import {
   GenericContainer,
   Wait,
@@ -16,15 +22,17 @@ import {
   E2E_LABEL,
   E2E_RUN_LABEL,
   MAILPIT_IMAGE,
-  MINIO_IMAGE,
   PG_IMAGE,
   ROOT,
+  STORAGE_ACCESS_KEY,
+  STORAGE_IMAGE,
+  STORAGE_SECRET_KEY,
   ownerDatabaseUrl,
   type HarnessRuntime,
 } from "./harness-env"
 
 /**
- * Infraestructura efímera de una ejecución E2E: PostgreSQL, MinIO y Mailpit
+ * Infraestructura efímera de una ejecución E2E: PostgreSQL, RustFS (S3) y Mailpit
  * en Testcontainers más los buckets. Este módulo solo posee contenedores;
  * los procesos (proxy, builds, apps, migraciones) los posee el supervisor
  * (`run.ts`), que también registra sus handles para el cierre por señales.
@@ -259,13 +267,18 @@ async function inspectVolumes(client: ContainerRuntimeClient, id: string): Promi
   return volumes
 }
 
-/** Buckets del run: avatares públicos solo bajo `/avatars/*`, adjuntos privados. */
-async function prepareBuckets(endpoint: string): Promise<void> {
+/**
+ * Buckets del run como en producción (`infra/dev/storage-init.sh`): avatares
+ * públicos solo bajo `/avatars/*` y con versiones, adjuntos privados con la
+ * regla CORS de R2 para el dominio del run. RustFS no da CORS por defecto y
+ * sin ella el navegador no sube ni lee adjuntos firmados.
+ */
+async function prepareBuckets(endpoint: string, origin: string): Promise<void> {
   const client = new S3Client({
     endpoint,
     region: "auto",
     forcePathStyle: true,
-    credentials: { accessKeyId: "minioadmin", secretAccessKey: "minioadmin" },
+    credentials: { accessKeyId: STORAGE_ACCESS_KEY, secretAccessKey: STORAGE_SECRET_KEY },
   })
   try {
     for (const bucket of [AVATARS_BUCKET, ATTACHMENTS_BUCKET]) {
@@ -277,11 +290,23 @@ async function prepareBuckets(endpoint: string): Promise<void> {
             ? cause.name
             : undefined
         if (code !== "BucketAlreadyOwnedByYou" && code !== "BucketAlreadyExists") {
-          throw new Error(`MinIO: no se pudo crear el bucket ${bucket}: ${describe(cause)}`, {
+          throw new Error(`S3: no se pudo crear el bucket ${bucket}: ${describe(cause)}`, {
             cause,
           })
         }
       }
+    }
+    try {
+      await client.send(
+        new PutBucketVersioningCommand({
+          Bucket: AVATARS_BUCKET,
+          VersioningConfiguration: { Status: "Enabled" },
+        }),
+      )
+    } catch (cause) {
+      throw new Error(`S3: no se pudo activar versiones en ${AVATARS_BUCKET}: ${describe(cause)}`, {
+        cause,
+      })
     }
     try {
       await client.send(
@@ -301,7 +326,29 @@ async function prepareBuckets(endpoint: string): Promise<void> {
         }),
       )
     } catch (cause) {
-      throw new Error(`MinIO: no se pudo publicar /avatars/*: ${describe(cause)}`, { cause })
+      throw new Error(`S3: no se pudo publicar /avatars/*: ${describe(cause)}`, { cause })
+    }
+    try {
+      await client.send(
+        new PutBucketCorsCommand({
+          Bucket: ATTACHMENTS_BUCKET,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedOrigins: [origin],
+                AllowedMethods: ["GET", "PUT", "HEAD"],
+                AllowedHeaders: ["content-type", "range"],
+                ExposeHeaders: ["content-length", "content-range", "etag"],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        }),
+      )
+    } catch (cause) {
+      throw new Error(`S3: no se pudo poner CORS en ${ATTACHMENTS_BUCKET}: ${describe(cause)}`, {
+        cause,
+      })
     }
   } finally {
     client.destroy()
@@ -330,13 +377,12 @@ function startPostgres(labels: Record<string, string>): Promise<StartedTestConta
     .start()
 }
 
-function startMinio(labels: Record<string, string>): Promise<StartedTestContainer> {
-  return new GenericContainer(MINIO_IMAGE)
+function startStorage(labels: Record<string, string>): Promise<StartedTestContainer> {
+  return new GenericContainer(STORAGE_IMAGE)
     .withExposedPorts(9000)
     .withLabels(labels)
-    .withEnvironment({ MINIO_ROOT_USER: "minioadmin", MINIO_ROOT_PASSWORD: "minioadmin" })
-    .withWaitStrategy(Wait.forHttp("/minio/health/ready", 9000))
-    .withCommand(["server", "/data"])
+    .withEnvironment({ RUSTFS_ACCESS_KEY: STORAGE_ACCESS_KEY, RUSTFS_SECRET_KEY: STORAGE_SECRET_KEY })
+    .withWaitStrategy(Wait.forHttp("/health", 9000))
     .withStartupTimeout(CONTAINER_TIMEOUT_MS)
     .start()
 }
@@ -459,7 +505,7 @@ export async function startStack(runtime: HarnessRuntime): Promise<HarnessStack>
   }
 
   try {
-    const pending = [startPostgres(labels), startMinio(labels), startMailpit(labels)].map(
+    const pending = [startPostgres(labels), startStorage(labels), startMailpit(labels)].map(
       async promise => {
         const container = await promise
         started.push(container)
@@ -478,14 +524,14 @@ export async function startStack(runtime: HarnessRuntime): Promise<HarnessStack>
         cause: rejected[0]?.reason,
       })
     }
-    const [postgres, minio, mailpit] = results.flatMap((result) =>
+    const [postgres, storage, mailpit] = results.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
     )
     const pgHost = postgres.getHost()
-    const minioHost = minio.getHost()
+    const storageHost = storage.getHost()
     const mailHost = mailpit.getHost()
     runtime.postgres = { host: pgHost, port: postgres.getMappedPort(5432) }
-    runtime.minio = { host: minioHost, port: minio.getMappedPort(9000) }
+    runtime.storage = { host: storageHost, port: storage.getMappedPort(9000) }
     runtime.mailpit = {
       host: mailHost,
       httpPort: mailpit.getMappedPort(8025),
@@ -495,7 +541,10 @@ export async function startStack(runtime: HarnessRuntime): Promise<HarnessStack>
     await updateRuntimeMeta(runtimeMetaPath(runtime.runId), {
       containers: started.map((container) => ({ id: container.getId(), volumes: [] })),
     })
-    await prepareBuckets(`http://${runtime.minio.host}:${runtime.minio.port}`)
+    await prepareBuckets(
+      `http://${runtime.storage.host}:${runtime.storage.port}`,
+      `https://*.${runtime.baseDomain}:${runtime.proxyPort}`,
+    )
   } catch (error) {
     await fail(error)
   }
