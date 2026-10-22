@@ -700,10 +700,10 @@ export const clinicalAccessLog = pgTable(
 
 /**
  * Pedido de la persona sobre sus datos (issue 50, ADR 0080): una copia, una
- * corrección o no recibir mensajes. Lo pide la propia persona o su
+ * corrección, no recibir mensajes o borrar sus datos. Lo pide la propia persona o su
  * representante legal (una persona vinculada al paciente); se responde en
  * `DATA_REQUEST_DAYS` días corridos desde el día siguiente, en cualquier país.
- * Pendiente → respondida o denegada; nada se borra.
+ * Pendiente → respondida o denegada; el pedido nunca se borra.
  */
 export const patientDataRequest = pgTable(
   "patient_data_request",
@@ -743,7 +743,7 @@ export const patientDataRequest = pgTable(
     index("patient_data_request_org_pending_idx")
       .on(table.organizationId, table.dueOn)
       .where(sql`${table.status} = 'pendiente'`),
-    check("patient_data_request_kind_check", sql`${table.kind} IN ('copia','corregir','mensajes')`),
+    check("patient_data_request_kind_check", sql`${table.kind} IN ('copia','corregir','mensajes','borrar')`),
     check(
       "patient_data_request_channel_check",
       sql`${table.channel} IN ('clinica','whatsapp','correo','portal')`,
@@ -761,6 +761,37 @@ export const patientDataRequest = pgTable(
       sql`(${table.status} = 'pendiente') = (${table.resolvedAt} IS NULL)`,
     ),
     check("patient_data_request_due_check", sql`${table.dueOn} >= ${table.requestedOn}`),
+  ],
+)
+
+/**
+ * Una historia bloqueada que Administración abrió con motivo (ADR 0080):
+ * para leer durante una hora, sin cambiar nada. «Vuelve a atenderse» no
+ * queda aquí: desbloquea la ficha entera y queda en la auditoría.
+ */
+export const patientRecordOpening = pgTable(
+  "patient_record_opening",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    reason: text("reason").notNull(),
+    note: text("note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "patient_record_opening_patient_fk",
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    index("patient_record_opening_org_patient_idx").on(table.organizationId, table.patientId, table.userId),
+    check("patient_record_opening_reason_check", sql`${table.reason} IN ('autoridad','reclamo','otro')`),
+    check("patient_record_opening_note_check", sql`${table.reason} <> 'otro' OR ${table.note} IS NOT NULL`),
   ],
 )
 

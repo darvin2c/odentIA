@@ -22,7 +22,7 @@ import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES } from "@odentia/clinical"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
-import { createOwnerDb } from "@odentia/db"
+import { createOwnerDb, withOrgContext } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
@@ -123,6 +123,7 @@ import {
 } from "./imaging-studies.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
+import { eraseForDataRequest } from "./data-erasure.js"
 import { addCalendarDays, createDataRequest, respondDataRequest, verifyDataRequest } from "./data-requests.js"
 import { clinicToday } from "./inventory-stock.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -421,6 +422,8 @@ async function wipeSeed(): Promise<void> {
     "clinical_access_log",
     // Los pedidos sobre sus datos referencian a la persona vinculada (ADR 0080).
     "patient_data_request",
+    // Las aperturas de una historia bloqueada referencian al paciente (ADR 0080).
+    "patient_record_opening",
     "portal_session",
     "portal_link",
     "channel_template",
@@ -3216,6 +3219,33 @@ await db.transaction(async (tx) => {
   await respondDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, fix.id, {
     resolution: "Se cambió su dirección a Jr. Las Begonias 120, dpto. 302",
   })
+})
+// Historia bloqueada (ADR 0080, fase 2): Elena Huamán pidió en la clínica
+// borrar sus datos. Lo no clínico se borró y su historia quedó bloqueada:
+// solo Administración la ve, en Pacientes › Historias bloqueadas.
+const elena = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Elena Huamán Ccori",
+  givenNames: "Elena",
+  familyName: "Huamán Ccori",
+  docType: "DNI",
+  docNumber: "41234567",
+  birthDate: "1986-07-19",
+  phone: "+51987650214",
+  email: "elena.huaman@example.com",
+})
+await createContactNote(db, ORG_A, elena.personId, { body: "Prefiere que la llamen en la tarde." }, { userId: ANA_ID })
+// Borrar usa `erase_person_data`, que solo actúa dentro de la clínica activa.
+await withOrgContext(db, ORG_A, async (tx) => {
+  const today = await clinicToday(tx, ORG_A)
+  const request = await createDataRequest(tx, ORG_A, ANA_ID, elena.id, {
+    kind: "borrar",
+    requesterContactId: elena.personId,
+    channel: "clinica",
+    requestedOn: addCalendarDays(today, -3),
+    said: "No quiero que guarden mis datos",
+  })
+  await verifyDataRequest(tx, ORG_A, ANA_ID, elena.id, request.id, { how: "documento" })
+  await eraseForDataRequest(tx, ORG_A, ANA_ID, elena.id, request.id)
 })
 // --- Fase 2.1 (ADR 0030): Pedro Ríos llamó y recepción le dio cita desde la
 // Agenda con lo mínimo (nombres, apellidos y teléfono), aunque el registro pide

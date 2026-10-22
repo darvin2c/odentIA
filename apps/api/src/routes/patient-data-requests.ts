@@ -5,6 +5,8 @@ import {
   DATA_REQUEST_KINDS,
   DATA_REQUEST_VERIFICATIONS,
   denyDataRequest,
+  eraseForDataRequest,
+  erasurePreview,
   getDataRequestsView,
   loadPatientRecord,
   patientRecordFhirBundle,
@@ -19,7 +21,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { zipStream } from "../lib/zip-stream.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -29,7 +31,8 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
  * 0080). Los permisos los decide el guarda de `patients.ts`:
  * `/data-requests` es de pacientes (`patients.read`/`.write`: Recepción
  * registra, comprueba, envía y responde) y `/record` es clínico
- * (`clinical.read`), con traza en «Consultas a la historia».
+ * (`clinical.read`), con traza en «Consultas a la historia». Borrar sus
+ * datos y ver qué se borraría es solo de Administración (`patients.erase`).
  */
 const createInput = z
   .object({
@@ -62,6 +65,30 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createDataRequest(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
+  })
+
+  app.get("/:id/data-requests/:requestId/erase-preview", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.erase"))
+      return c.json(errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => erasurePreview(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  // Los adjuntos de sus mensajes se borran del almacenamiento después de
+  // confirmar: si falla, el archivo queda huérfano, nunca a la vista.
+  app.post("/:id/data-requests/:requestId/erase", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.erase"))
+      return c.json(errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"), 403)
+    return runService(c, 200, async () => {
+      const { request, attachmentKeys } = await withOrgContext(deps.db, orgId, (tx) =>
+        eraseForDataRequest(tx, orgId, userId, c.req.param("id"), c.req.param("requestId")),
+      )
+      await Promise.all(attachmentKeys.map((key) => deps.storage.deleteAttachment(key).catch(() => {})))
+      return request
+    })
   })
 
   app.post("/:id/data-requests/:requestId/verify", async (c) => {

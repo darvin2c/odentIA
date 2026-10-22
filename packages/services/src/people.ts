@@ -106,6 +106,8 @@ export interface PersonPage {
   email: string | null
   /** Archivada entera: la persona o su ficha (lo que quedó de antes de unir los dos indicadores). */
   archived: boolean
+  /** Su historia está bloqueada (ADR 0080): solo la ve Administración, que la abrió para leer. */
+  recordLocked: boolean
   /** Spam o bloqueada (ADR 0054); solo para quien lee conversaciones o maneja contactos. */
   screen: ContactScreenView | null
   createdAt: string
@@ -292,6 +294,7 @@ export async function getPersonPage(
     phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id),
     email: row.email,
     archived,
+    recordLocked: row.recordLockedAt !== null,
     screen: readsConversations || can("crm.read") ? await getContactScreenView(tx, orgId, row.id) : null,
     createdAt: row.createdAt.toISOString(),
     kind: own
@@ -451,10 +454,11 @@ function viewCondition(view: PeopleView) {
     case "por_registrar":
       // Spam y bloqueados no son contactos nuevos (ADR 0054): se encuentran en «Todos».
       return sql`p.id is null and (not ${RESPONSIBLE_SQL} or ${OWN_REQUEST_SQL}) and not ${ARCHIVED_SQL} and c.screen is null`
+    // Una historia bloqueada no sale aquí: tiene su propia lista (ADR 0080).
     case "archivados":
-      return ARCHIVED_SQL
+      return sql`${ARCHIVED_SQL} and c.record_locked_at is null`
     case "todos":
-      return sql`true`
+      return sql`c.record_locked_at is null`
     case "activos":
       return sql`not ${ARCHIVED_SQL}`
   }

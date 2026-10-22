@@ -99,12 +99,14 @@ import {
   voidEncounterDiagnosis,
   voidEncounterProcedure,
   voidOdontogramEntry,
+  recordLockState,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { recordLockResponse } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
@@ -627,6 +629,9 @@ const coordinationScheduleInput = z.union([
     .strict(),
 ])
 
+/** Borrar sus datos y ver qué se borraría: son las que dejan la historia bloqueada. */
+const ERASE_SUFFIXES = ["/erase", "/erase-preview"]
+
 export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   const app = new Hono()
   app.use("*", async (c, next) => {
@@ -687,6 +692,14 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         ),
         403,
       )
+    }
+    // Una historia bloqueada (ADR 0080): sus propias rutas de borrar quedan fuera.
+    const lockedId = c.req.path.match(/\/patients\/([0-9a-f-]{36})(?:\/|$)/i)?.[1]
+    if (lockedId && !ERASE_SUFFIXES.some((suffix) => remainder.endsWith(suffix))) {
+      const { orgId, userId } = orgContextOf(c)
+      const state = await withOrgContext(deps.db, orgId, (tx) => recordLockState(tx, orgId, userId, lockedId))
+      const blocked = recordLockResponse(c, state, write)
+      if (blocked) return blocked
     }
     await next()
     // Toda lectura clínica atendida deja traza de quién consultó qué parte de

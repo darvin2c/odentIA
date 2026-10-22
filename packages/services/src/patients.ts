@@ -672,6 +672,8 @@ export async function listPatients(
       }),
     )
   if (input.isActive !== undefined) conditions.push(eq(contact.isActive, input.isActive))
+  // Una historia bloqueada no sale en ninguna lista (ADR 0080).
+  conditions.push(isNull(contact.recordLockedAt))
   if (input.sex) conditions.push(eq(contact.sex, input.sex))
   if (input.docType) conditions.push(eq(contact.docType, input.docType))
   if (input.cursor) {
@@ -841,7 +843,8 @@ export async function listPatientsByContact(tx: Db, orgId: string, contactId: st
     isEmergency: patientContact.isEmergency,
   }).from(patientContact).innerJoin(patient, and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)))
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, contactId)))
+    // Ni el agente ni la página de quien la acompaña ven una historia bloqueada (ADR 0080).
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, contactId), isNull(patientPerson.recordLockedAt)))
     .orderBy(asc(patientPerson.displayName), asc(patient.id))
 }
 

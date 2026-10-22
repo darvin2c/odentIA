@@ -3,15 +3,21 @@ import {
   assertPersonVisible,
   createContactNote,
   createPerson,
+  getLockedRecord,
   getPersonPage,
   identityPatchOf,
+  listLockedRecords,
   listPeople,
   listPersonConversations,
   listPersonNotes,
   markInvitedToReturn,
+  openLockedRecord,
   PEOPLE_SHORTCUTS,
   PEOPLE_VIEWS,
   personOfPatient,
+  personRecordLock,
+  RECORD_OPENING_REASONS,
+  ServiceError,
   selfPatientOf,
   setPersonArchived,
   takeOutOfSpam,
@@ -23,6 +29,7 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { recordLockResponse } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
@@ -60,6 +67,10 @@ const identityInput = z
   })
   .strict()
 
+const openInput = z
+  .object({ reason: z.enum(RECORD_OPENING_REASONS), note: z.string().trim().max(500).nullish() })
+  .strict()
+
 const noteInput = z.object({ body: z.string().trim().min(1).max(4000) }).strict()
 
 function forbidden(c: Context, message: string) {
@@ -80,6 +91,59 @@ export function createPeopleRoute(deps: CrmDeps) {
   const canOf = (c: Context) => {
     const { memberRole } = orgContextOf(c)
     return (permission: string) => canAccess(memberRole, permission)
+  }
+
+  // Historias bloqueadas (ADR 0080): solo Administración las ve y las abre.
+  app.get("/locked", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.erase")) return forbidden(c, "Solo Administración ve las historias bloqueadas")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listLockedRecords(tx, orgId)))
+  })
+
+  app.get("/:id/lock", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.erase")) return forbidden(c, "Solo Administración abre una historia bloqueada")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const lock = await personRecordLock(tx, orgId, userId, c.req.param("id"))
+        if (!lock) throw new ServiceError("RECORD_NOT_LOCKED", 409, "Esta historia no está bloqueada")
+        return getLockedRecord(tx, orgId, userId, lock.patientId)
+      }),
+    )
+  })
+
+  app.post("/:id/lock/open", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.erase")) return forbidden(c, "Solo Administración abre una historia bloqueada")
+    const parsed = openInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const lock = await personRecordLock(tx, orgId, userId, c.req.param("id"))
+        if (!lock) throw new ServiceError("RECORD_NOT_LOCKED", 409, "Esta historia no está bloqueada")
+        return openLockedRecord(tx, orgId, userId, lock.patientId, parsed.data)
+      }),
+    )
+  })
+
+  // El resto de la página de una persona con la historia bloqueada: 404 o 423.
+  app.use("/:id/*", async (c, next) => {
+    const blocked = await lockGuard(c)
+    if (blocked) return blocked
+    await next()
+  })
+  app.use("/:id", async (c, next) => {
+    const blocked = await lockGuard(c)
+    if (blocked) return blocked
+    await next()
+  })
+  async function lockGuard(c: Context) {
+    const id = c.req.param("id")
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id) || c.req.path.endsWith("/lock") || c.req.path.endsWith("/lock/open"))
+      return null
+    const { orgId, userId } = orgContextOf(c)
+    const state = await withOrgContext(deps.db, orgId, (tx) => personRecordLock(tx, orgId, userId, id))
+    return recordLockResponse(c, state, !["GET", "HEAD", "OPTIONS"].includes(c.req.method))
   }
 
   app.get("/", async (c) => {

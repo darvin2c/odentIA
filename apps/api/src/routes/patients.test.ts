@@ -7,6 +7,7 @@ import {
   createContact,
   createPatient,
   getPatientRegistrationConfig,
+  openLockedRecord,
   savePatientRegistrationConfig,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -965,4 +966,39 @@ it("pedidos sobre sus datos: Recepción los registra y envía; la historia compl
   expect(zip.headers.get("content-type")).toBe("application/zip")
   const bytes = new Uint8Array(await zip.arrayBuffer())
   expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
+})
+
+it("borrar sus datos es de Administración y la historia bloqueada no existe para los demás (ADR 0080)", async () => {
+  const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Elena Bloqueo" }))
+  const json = { "content-type": "application/json" }
+  const call = (role: string, path: string, method = "GET", body?: unknown) =>
+    buildApp(role).request(`/patients/${fresh.id}${path}`, {
+      method,
+      headers: json,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const detail = (await (await call("reception", "")).json()) as {
+    data: { contacts: Array<{ contactId: string; relationship: string }> }
+  }
+  const self = detail.data.contacts.find((c) => c.relationship === "self")!.contactId
+  // Recepción registra y comprueba el pedido; borrar, solo Administración.
+  const created = await call("reception", "/data-requests", "POST", { kind: "borrar", requesterContactId: self, channel: "clinica" })
+  expect(created.status).toBe(201)
+  const requestId = ((await created.json()) as { data: { id: string } }).data.id
+  expect((await call("reception", `/data-requests/${requestId}/verify`, "POST", { how: "documento" })).status).toBe(200)
+  expect((await call("reception", `/data-requests/${requestId}/erase-preview`)).status).toBe(403)
+  expect((await call("reception", `/data-requests/${requestId}/erase`, "POST")).status).toBe(403)
+  expect((await call("admin", `/data-requests/${requestId}/erase-preview`)).status).toBe(200)
+  const erased = await call("admin", `/data-requests/${requestId}/erase`, "POST")
+  expect(erased.status).toBe(200)
+  expect(((await erased.json()) as { data: { status: string } }).data.status).toBe("respondida")
+  // Bloqueada: para Recepción y quien atiende no existe; Administración ve que está bloqueada.
+  expect((await call("reception", "")).status).toBe(404)
+  expect((await call("clinician", "/health")).status).toBe(404)
+  expect((await call("admin", "")).status).toBe(423)
+  // Abierta con motivo: Administración la lee durante una hora, sin cambiar nada.
+  await withOrgContext(appDb, "org_a", (tx) => openLockedRecord(tx, "org_a", "u-1", fresh.id, { reason: "autoridad" }))
+  expect((await call("admin", "")).status).toBe(200)
+  expect((await call("admin", "/health/allergies", "POST", { substance: "Látex" })).status).toBe(423)
+  expect((await call("reception", "")).status).toBe(404)
 })

@@ -3,10 +3,10 @@ import { API_URL } from "./auth-client"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
 /**
- * Pedidos de la persona sobre sus datos (ADR 0080): una copia, corregir o no
- * recibir mensajes, cada uno con 10 días para responder, en cualquier país.
+ * Pedidos de la persona sobre sus datos (ADR 0080): una copia, corregir, no
+ * recibir mensajes o borrar sus datos, cada uno con 10 días para responder, en cualquier país.
  */
-export type DataRequestKind = "copia" | "corregir" | "mensajes"
+export type DataRequestKind = "copia" | "corregir" | "mensajes" | "borrar"
 export type DataRequestChannel = "clinica" | "whatsapp" | "correo" | "portal"
 export type DataRequestVerification = "documento" | "portal" | "representante"
 export type DataRequestStatus = "pendiente" | "respondida" | "denegada"
@@ -42,6 +42,10 @@ export const DATA_REQUEST_KIND_TEXT: Record<DataRequestKind, { title: string; de
     title: "No recibir mensajes",
     detail: "Se apagan al registrarlo; los avisos de sus citas y papeles siguen.",
   },
+  borrar: {
+    title: "Borrar sus datos",
+    detail: "Se borra lo que no es clínico; su historia y sus cobros se guardan bloqueados. Lo hace Administración.",
+  },
 }
 
 /** El título corto de un pedido en una lista: «Copia de su historia». */
@@ -49,6 +53,7 @@ export const DATA_REQUEST_ROW_TITLE: Record<DataRequestKind, string> = {
   copia: "Copia de su historia",
   corregir: "Corregir un dato",
   mensajes: "No recibir mensajes",
+  borrar: "Borrar sus datos",
 }
 
 export const DATA_REQUEST_CHANNEL_TEXT: Record<DataRequestChannel, string> = {
@@ -176,4 +181,23 @@ export async function sendRecordCopyApi(patientId: string, id: string, connectio
 export function patientRecordDownloadUrl(patientId: string): string {
   const slug = orgSlugFromHostname(requestHostname()) ?? ""
   return `${API_URL}/api/patients/${patientId}/record?org=${encodeURIComponent(slug)}`
+}
+
+/** Lo que se borra y lo que hay que saber antes de confirmar (tablero 6). */
+export interface ErasurePreview {
+  conversations: number
+  messages: number
+  opportunities: number
+  tasks: number
+  notes: number
+  futureAppointments: Array<{ id: string; startsAt: string }>
+  balances: Array<{ currency: string; cents: number }>
+}
+
+export async function fetchErasurePreview(patientId: string, id: string): Promise<ErasurePreview> {
+  return (await apiFetch<{ data: ErasurePreview }>(`${base(patientId)}/${id}/erase-preview`)).data
+}
+
+export async function eraseDataApi(patientId: string, id: string): Promise<DataRequest> {
+  return (await apiFetch<{ data: DataRequest }>(`${base(patientId)}/${id}/erase`, { method: "POST" })).data
 }
