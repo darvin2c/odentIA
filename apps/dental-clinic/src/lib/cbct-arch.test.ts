@@ -61,6 +61,12 @@ describe("arco, panorámica y cortes transversales", () => {
     const at = toothIndex(curve, 36)!
     expect(at).not.toBeNull()
     expect(toothAt(curve, at, "lower")).toBe(36)
+    // En un niño, el mismo lado del arco es el de las piezas temporales.
+    const primary = toothIndex(curve, 75)!
+    expect(primary).not.toBeNull()
+    expect(toothAt(curve, primary, "lower", "primary")).toBe(75)
+    expect(toothAt(curve, toothIndex(curve, 55)!, "upper", "primary")).toBe(55)
+    expect(toothIndex(curve, 56)).toBeNull()
     // Centro real de la 36 (ausente): entre la 35 y la 37 del fantoma.
     const s36 = real.s - (real.width + 10) / 2
     const sMid = curve.reduce((best, c) => (c.y < best.y ? c : best)).s

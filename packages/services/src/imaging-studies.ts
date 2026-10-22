@@ -1,3 +1,4 @@
+import { isValidTooth } from "@odentia/dental"
 import { siteColumns, toothNumberSql, toothOfRow } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
@@ -581,7 +582,8 @@ export async function addImagingMeasurement(
   const max = input.kind === "angulo" ? 180 : 500
   if (!Number.isFinite(input.value) || input.value < 0 || input.value > max) throw validation("El valor de la medida no es válido")
   const tooth = input.toothNumber ?? null
-  if (tooth !== null && !(Number.isInteger(tooth) && tooth >= 11 && tooth <= 48))
+  // Cualquier pieza FDI, también los dientes de leche (51–85).
+  if (tooth !== null && !(Number.isInteger(tooth) && tooth > 0 && isValidTooth(tooth)))
     throw validation("La pieza no es válida")
   const [row] = await tx
     .insert(imagingMeasurement)

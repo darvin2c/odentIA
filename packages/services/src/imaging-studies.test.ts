@@ -250,4 +250,15 @@ it("guarda medidas con quién y cuándo, y quitarlas las retira sin borrarlas", 
       tx.execute(sql`update imaging_measurement set retired_at = null, retired_by = null where id = ${saved.id}`),
     ),
   ).rejects.toThrow()
+  // Un diente de leche también se mide; lo que no es una pieza FDI, no.
+  const primary = await withOrgContext(appDb, "org_a", (tx) =>
+    addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, toothNumber: 55 }),
+  )
+  expect(primary).toMatchObject({ toothNumber: 55 })
+  for (const toothNumber of [19, 49, 86])
+    await expect(
+      withOrgContext(appDb, "org_a", (tx) =>
+        addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, toothNumber }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION" })
 })

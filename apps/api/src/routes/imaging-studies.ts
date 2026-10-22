@@ -66,7 +66,8 @@ const measurementInput = z
     view: z.enum(MEASUREMENT_VIEWS),
     points: z.array(z.tuple([z.number(), z.number(), z.number()])).min(2).max(3),
     value: z.number().min(0),
-    toothNumber: z.number().int().min(11).max(48).nullish(),
+    // La pieza FDI la valida el servicio (también los dientes de leche).
+    toothNumber: z.number().int().min(11).max(85).nullish(),
   })
   .strict()
 const indexesInput = z.object({ indexes: z.array(z.number().int().min(0)).min(1).max(BATCH) }).strict()
