@@ -265,7 +265,7 @@ function listed(items: string[]): string {
  */
 const PRICE_LIST_RULE = `Nunca envías la lista de precios ni el tarifario, aunque te lo pidan: responde el precio de los servicios por los que pregunta la persona, como mucho ${PRICES_PER_CONVERSATION} servicios distintos en la conversación, y después ofrécele una evaluación, donde le dan un presupuesto a su medida. Si ya tiene un presupuesto de la clínica, ese sí se lo reenvías.`
 
-function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts): string {
+export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts): string {
   const ficha = AGENT_ROLES.recepcion
   const off = new Set(cfg.disabledFunctions)
   const on = (id: string) => !off.has(id)

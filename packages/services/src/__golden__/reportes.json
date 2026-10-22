@@ -1,0 +1,276 @@
+[
+  {
+    "id": "tema",
+    "kind": "choice",
+    "instructions": "Quien dirige una clínica dental le pregunta algo a su asistente de reportes. ¿De qué trata la pregunta?",
+    "options": [
+      {
+        "value": "cifra",
+        "description": "Pide una cifra o un dato de cómo va la clínica: dinero, pacientes, citas, el agente. «¿Cuánto…?», «¿cuántos…?», «¿quién…?», «compara…»."
+      },
+      {
+        "value": "clinico",
+        "description": "Pregunta por la salud o la historia clínica de los pacientes: enfermedades, diagnósticos, alergias, piezas dentales, tratamientos de una persona."
+      },
+      {
+        "value": "accion",
+        "description": "Pide hacer algo, no saber algo: escribirles, enviar, llamar, recordar, prender o cambiar algo, agendar."
+      },
+      {
+        "value": "otro",
+        "description": "Saluda o pregunta algo que no es de la clínica."
+      }
+    ]
+  },
+  {
+    "id": "area",
+    "kind": "choice",
+    "instructions": "Si pide una cifra, ¿de qué parte de la clínica es?",
+    "options": [
+      {
+        "value": "dinero",
+        "description": "Dinero: lo cobrado, los gastos, lo que queda, las deudas, las comisiones, lo que se debe pagar."
+      },
+      {
+        "value": "pacientes",
+        "description": "Pacientes: los nuevos, los que nos buscaron, los presupuestos aceptados, cómo nos conocieron, los que vuelven o dejaron de venir, los controles."
+      },
+      {
+        "value": "agenda",
+        "description": "Agenda: las citas atendidas, las inasistencias, las canceladas, qué tan llena está la agenda, las horas libres, la espera en sala."
+      },
+      {
+        "value": "agente",
+        "description": "Los agentes de odentIA: lo que hizo y trajo el agente, las conversaciones que atendió, las citas que agendó o recuperó, lo que cuesta, cuánto se tarda en responder, y las consultas dictadas con Clío."
+      }
+    ]
+  },
+  {
+    "id": "cifra_dinero",
+    "kind": "choice",
+    "instructions": "Si la pregunta es de dinero, ¿cuál de estas cifras pide? Elige «ninguna» si no pide ninguna de ellas.",
+    "options": [
+      {
+        "value": "cobrado",
+        "description": "Lo cobrado: Cuánto se cobró, «cuánto gané» o «cuánto vendimos»: lo que pagaron los pacientes, las ventas, los ingresos; también cómo pagaron (efectivo, tarjeta, transferencia) o qué tratamiento dejó más."
+      },
+      {
+        "value": "lo_que_deja",
+        "description": "Lo que deja: Cuánto queda después de pagar gastos y comisiones, «cuánto me queda»: la utilidad o ganancia neta del periodo."
+      },
+      {
+        "value": "gastos",
+        "description": "Lo gastado: Cuánto se gastó: los gastos o egresos registrados (alquiler, laboratorio, materiales, sueldos…)."
+      },
+      {
+        "value": "comisiones",
+        "description": "Las comisiones: Cuánto se generó en comisiones de los profesionales, o cuánto le toca a cada uno."
+      },
+      {
+        "value": "lo_que_debes",
+        "description": "Lo que debes: Cuánto debe pagar la clínica: comisiones por pagar a los profesionales y compras a proveedores sin pagar."
+      },
+      {
+        "value": "deuda_vencida",
+        "description": "Te deben hace más de 30 días: Cuánto deben los pacientes desde hace más de un mes: la deuda vencida, la cobranza atrasada, los morosos."
+      },
+      {
+        "value": "te_deben",
+        "description": "Te deben: Cuánto deben en total los pacientes, de cualquier antigüedad: las cuentas por cobrar, los saldos pendientes."
+      },
+      {
+        "value": "lo_que_viene",
+        "description": "Lo que viene: Cuánto dinero está por venir: tratamientos aceptados en presupuestos que aún no se hicieron."
+      },
+      {
+        "value": "valor_paciente",
+        "description": "Lo que deja un paciente nuevo en 6 meses: Cuánto vale o deja en promedio un paciente nuevo: el ticket promedio de un paciente en sus primeros meses."
+      },
+      {
+        "value": "ninguna",
+        "description": "Pide otra cifra que no está aquí."
+      }
+    ]
+  },
+  {
+    "id": "cifra_pacientes",
+    "kind": "choice",
+    "instructions": "Si la pregunta es de pacientes, ¿cuál de estas cifras pide? Elige «ninguna» si no pide ninguna de ellas.",
+    "options": [
+      {
+        "value": "pacientes_nuevos",
+        "description": "Pacientes nuevos: Cuántos pacientes nuevos llegaron o vinieron por primera vez a atenderse."
+      },
+      {
+        "value": "nos_buscaron",
+        "description": "Nos buscaron por primera vez: Cuántas personas nuevas escribieron o nos contactaron por primera vez, por dónde nos escribe la gente y por qué canal llegaron (WhatsApp, Instagram, chat web…)."
+      },
+      {
+        "value": "aceptaron",
+        "description": "Aceptaron su presupuesto: Qué porcentaje de los presupuestos presentados se aceptó: la conversión, la tasa de cierre de ventas."
+      },
+      {
+        "value": "como_nos_conocieron",
+        "description": "Cómo nos conocieron: Cómo se enteraron de la clínica los pacientes nuevos: recomendación, redes sociales, Google, convenio."
+      },
+      {
+        "value": "activos",
+        "description": "Pacientes activos: Cuántos pacientes tiene la clínica, los pacientes activos o la cartera de pacientes."
+      },
+      {
+        "value": "volvieron",
+        "description": "Volvieron en el año: Cuántos pacientes regresan o vuelven a atenderse: la fidelidad, la retención de pacientes."
+      },
+      {
+        "value": "sin_venir",
+        "description": "Sin venir hace más de 6 meses: Cuántos pacientes dejaron de venir hace tiempo, los pacientes perdidos o inactivos que habría que invitar a volver."
+      },
+      {
+        "value": "controles",
+        "description": "Vinieron a su control: Cuántos pacientes vinieron a su control o cita de seguimiento que les tocaba."
+      },
+      {
+        "value": "dejaron_de_escribir",
+        "description": "Dejaron de escribir: Cuántas personas preguntaron algo y dejaron de responder sin agendar."
+      },
+      {
+        "value": "ninguna",
+        "description": "Pide otra cifra que no está aquí."
+      }
+    ]
+  },
+  {
+    "id": "cifra_agenda",
+    "kind": "choice",
+    "instructions": "Si la pregunta es de agenda, ¿cuál de estas cifras pide? Elige «ninguna» si no pide ninguna de ellas.",
+    "options": [
+      {
+        "value": "atendidas",
+        "description": "Citas atendidas: Cuántas citas o consultas se atendieron, cuántos pacientes se vieron."
+      },
+      {
+        "value": "no_vinieron",
+        "description": "No vinieron: Cuántos pacientes faltaron a su cita: las inasistencias, el ausentismo, los que no se presentaron."
+      },
+      {
+        "value": "canceladas",
+        "description": "Canceladas: Cuántas citas se cancelaron."
+      },
+      {
+        "value": "agenda_ocupada",
+        "description": "Agenda ocupada: Qué tan llena está la agenda: la ocupación de los profesionales, el porcentaje de horas con citas."
+      },
+      {
+        "value": "horas_libres",
+        "description": "Horas libres: Cuántas horas de agenda quedaron sin citas, el tiempo libre o desaprovechado de los profesionales."
+      },
+      {
+        "value": "espera_en_sala",
+        "description": "Espera en sala: Cuánto esperan los pacientes en la sala antes de ser atendidos."
+      },
+      {
+        "value": "ninguna",
+        "description": "Pide otra cifra que no está aquí."
+      }
+    ]
+  },
+  {
+    "id": "cifra_agente",
+    "kind": "choice",
+    "instructions": "Si la pregunta es de el agente, ¿cuál de estas cifras pide? Elige «ninguna» si no pide ninguna de ellas.",
+    "options": [
+      {
+        "value": "agente_trajo",
+        "description": "Lo que te trajo el agente: Cuánto trajo o aportó el agente en general: citas que agendó, citas recuperadas y lo cobrado en ellas."
+      },
+      {
+        "value": "agente_conversaciones",
+        "description": "Conversaciones que atendió el agente: Cuántas conversaciones o mensajes de pacientes respondió el agente, y cuántas resolvió solo sin el equipo."
+      },
+      {
+        "value": "agente_citas",
+        "description": "Citas que agendó el agente: Cuántas citas agendó o reservó el agente por su cuenta, en el chat o desde su enlace."
+      },
+      {
+        "value": "agente_recuperadas",
+        "description": "Citas recuperadas: Cuántas citas recuperó el agente: pacientes que volvieron a agendar después de un mensaje de Argos."
+      },
+      {
+        "value": "agente_dictadas",
+        "description": "Consultas dictadas: Cuántas consultas se dictaron con Clío, el asistente clínico que escucha al odontólogo y ordena la atención."
+      },
+      {
+        "value": "agente_pagado",
+        "description": "Lo que pagaste por el agente: Cuánto cuesta o cuánto se le paga a odentIA por el agente: la factura del agente."
+      },
+      {
+        "value": "primera_respuesta",
+        "description": "Primera respuesta: Cuánto se tarda en responder al paciente que escribe: la velocidad de respuesta del agente y del equipo."
+      },
+      {
+        "value": "pasaron_al_equipo",
+        "description": "Pasaron al equipo: Cuántas conversaciones el agente pasó o derivó a una persona del equipo."
+      },
+      {
+        "value": "ninguna",
+        "description": "Pide otra cifra que no está aquí."
+      }
+    ]
+  },
+  {
+    "id": "agrupar",
+    "kind": "choice",
+    "instructions": "¿Cómo quiere ver esa cifra?",
+    "options": [
+      {
+        "value": "total",
+        "description": "Una sola cifra, sin separarla: «¿cuánto…?», «¿cuántos…?»."
+      },
+      {
+        "value": "profesional",
+        "description": "Por profesional, doctor u odontólogo: «¿quién…?», «¿qué doctor…?», «de cada dentista»."
+      },
+      {
+        "value": "sede",
+        "description": "Por sede o local: comparar las sedes, «en cada sede»."
+      },
+      {
+        "value": "mes",
+        "description": "Por mes, cómo cambió con el tiempo, la tendencia, mes a mes."
+      },
+      {
+        "value": "canal",
+        "description": "Por canal: WhatsApp, Instagram, Messenger, chat web, correo."
+      },
+      {
+        "value": "tratamiento",
+        "description": "Por tratamiento o servicio: ortodoncia, limpieza, blanqueamiento."
+      },
+      {
+        "value": "medio",
+        "description": "Por medio de pago: efectivo, tarjeta, transferencia, Yape."
+      },
+      {
+        "value": "categoria",
+        "description": "Por tipo de gasto: alquiler, laboratorio, materiales, personal."
+      },
+      {
+        "value": "como_nos_conocio",
+        "description": "Por cómo nos conocieron: recomendación, redes sociales, Google."
+      },
+      {
+        "value": "antiguedad",
+        "description": "Por antigüedad de la deuda: hace cuántos días deben."
+      }
+    ]
+  },
+  {
+    "id": "fuera",
+    "kind": "yesno",
+    "instructions": "¿Pide separar o filtrar la cifra por algo distinto del periodo, la sede, el profesional, el canal, el tratamiento, el medio de pago, el tipo de gasto o cómo nos conocieron? Por ejemplo: por edad, sexo, distrito o barrio, aseguradora, o un costo o un margen de cada tratamiento.",
+    "criteria": {
+      "yes": "Pide un filtro o una cuenta así: «mayores de 40», «de Miraflores», «el margen después del laboratorio», «la edad promedio».",
+      "no": "Solo pide la cifra, quizá por periodo, sede, profesional, canal, tratamiento, medio de pago, tipo de gasto o cómo nos conocieron."
+    }
+  }
+]

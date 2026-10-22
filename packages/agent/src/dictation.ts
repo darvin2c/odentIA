@@ -42,7 +42,7 @@ const said = z.string().max(DICTATION_SOURCE_CHARS).optional().describe("El frag
  */
 const VOICE_EDITS_HINT = 10
 
-const extraction = z.object({
+export const extraction = z.object({
   nota: operationAgentSchema("atencion.nota")
     .extend({ dicho: said })
     .optional()
@@ -83,7 +83,7 @@ const extraction = z.object({
 
 const TOOL_NAME = "registrar_dictado"
 
-function systemPrompt(input: { services: string[]; diagnosisList: string }): string {
+export function systemPrompt(input: { services: string[]; diagnosisList: string }): string {
   return [
     "Eres el asistente clínico de una clínica dental. El odontólogo dicta mientras atiende y tú ordenas lo dictado en registros para que él los revise.",
     `Principios que no cambian: ${AGENT_BASE_PRINCIPLES.join(" ")}`,

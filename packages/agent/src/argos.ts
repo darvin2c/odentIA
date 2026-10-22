@@ -84,7 +84,7 @@ import type { AgentRuntime } from "./run.js"
 const TOOL_NAME = "responder"
 
 /** Una cifra oficial con sus cortes y filtros (D18 y D19): odentIA arma su consulta. */
-const figureAskSchema = z.object({
+export const figureAskSchema = z.object({
   clave: z.string().describe("La clave de una cifra oficial de la lista."),
   por: z.array(z.string()).describe("Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."),
   filtros: z
@@ -109,19 +109,19 @@ const periodFields = {
 }
 
 /** Un cálculo: una cifra oficial o una consulta propia, con su periodo. El modelo ve el resultado sin personas (D20). */
-const calcularSchema = z.object({
+export const calcularSchema = z.object({
   id: z.string().describe("Un nombre corto para el cálculo («c1»): con él lo eliges al responder."),
   cifra: figureAskSchema.nullable().describe("La cifra oficial que lo responde; null si ninguna sirve."),
   sql: z.string().describe("Solo si ninguna cifra oficial sirve: tu consulta, con las reglas de «La consulta». Vacía con cifra."),
   ...periodFields,
 })
 
-const buscarSchema = z.object({
+export const buscarSchema = z.object({
   textos: z.array(z.string()).describe("Lo que la pregunta nombra y no está tal cual en los nombres de la clínica: «ortodoncia», «Surco», «Rosa Quispe»."),
 })
 
 /** Lo que devuelve el modelo: la consulta y las frases, sin ningún número del resultado. */
-const planSchema = z.object({
+export const planSchema = z.object({
   tipo: z
     .enum(["consulta", "parcial", "no_existe"])
     .describe("consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."),
@@ -163,7 +163,7 @@ const planSchema = z.object({
 
 export type ArgosPlan = z.infer<typeof planSchema>
 
-const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
+export const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
 1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto, una promoción) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
 3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.

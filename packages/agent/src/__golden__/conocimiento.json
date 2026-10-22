@@ -1,0 +1,19 @@
+{
+  "id": "topic",
+  "kind": "choice",
+  "instructions": "Which official answer of the dental clinic, if any, answers the latest message from the contact? Choose `none` when no listed answer applies or the message is not a question about the clinic.",
+  "options": [
+    {
+      "value": "k1",
+      "description": "¿Atienden urgencias? / ¿Atienden de emergencia?"
+    },
+    {
+      "value": "k2",
+      "description": "Formas de pago"
+    },
+    {
+      "value": "none",
+      "description": "No listed answer applies."
+    }
+  ]
+}

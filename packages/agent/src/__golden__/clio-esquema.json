@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "nota": {
+      "description": "Los textos de la consulta que se dictaron. Omite los que no se dijeron.",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Por qué vino el paciente, en sus palabras.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "presentIllness": {
+          "description": "El relato de lo que le pasa: cómo empezó y cómo ha seguido.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "illnessDuration": {
+          "description": "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "evolution": {
+          "description": "Lo que se hizo en esta atención y cómo respondió el paciente.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 10000
+        },
+        "indications": {
+          "description": "Lo que se le indica al paciente para después de la atención.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "prognosis": {
+          "description": "El pronóstico que dijo el odontólogo.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnosticos": {
+      "default": [],
+      "description": "Un elemento por cada diagnóstico que nombró el odontólogo.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "diagnosisCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno."
+          },
+          "diagnosisType": {
+            "type": "string",
+            "enum": [
+              "provisional",
+              "confirmed"
+            ],
+            "description": "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques."
+          },
+          "toothNumber": {
+            "description": "La pieza en numeración FDI (dieciséis = 16).",
+            "type": "integer",
+            "minimum": 11,
+            "maximum": 85
+          },
+          "surfaces": {
+            "description": "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20
+            }
+          },
+          "note": {
+            "description": "Una precisión que dijo el odontólogo sobre el diagnóstico.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "diagnosisCode",
+          "diagnosisType"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "indicaciones": {
+      "default": [],
+      "description": "Un elemento por cada tratamiento que indicó para el plan.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "La prestación tal como la nombró el odontólogo (por ejemplo, «resina compuesta»). El sistema la busca en los servicios de la clínica."
+          },
+          "toothNumber": {
+            "description": "La pieza en numeración FDI, si la indicación es para una pieza.",
+            "type": "integer",
+            "minimum": 11,
+            "maximum": 85
+          },
+          "surfaces": {
+            "description": "Caras de la pieza que se tratan.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20
+            }
+          },
+          "detail": {
+            "description": "Una precisión sobre la indicación.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "controles": {
+      "default": [],
+      "description": "Un elemento por cada control que pidió.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "De qué es el control (por ejemplo, «Control en 6 meses»)."
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "La fecha aproximada del control, en ISO 8601 con zona, contada desde la fecha de hoy que se te da."
+          },
+          "instructions": {
+            "description": "Qué revisar o hacer en ese control.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "title",
+          "dueAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "correcciones": {
+      "default": [],
+      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sugerencia": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "El número de la sugerencia pendiente que corrige."
+          },
+          "cambios": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Solo los campos que cambian, con los mismos nombres que al registrarla (por ejemplo, toothNumber)."
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "sugerencia",
+          "cambios"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "quitar": {
+      "default": [],
+      "description": "Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna.",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sugerencia": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "El número de la sugerencia pendiente que pidió quitar."
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "sugerencia"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "diagnosticos",
+    "indicaciones",
+    "controles",
+    "correcciones",
+    "quitar"
+  ],
+  "additionalProperties": false
+}

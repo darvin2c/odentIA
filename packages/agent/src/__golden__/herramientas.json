@@ -1,0 +1,938 @@
+[
+  {
+    "name": "send_reply",
+    "description": "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "despedirse_y_cerrar",
+    "description": "Se despide y cierra la conversación cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo). En text va una sola línea cordial, en el tono de la clínica, que diga que estamos atentos si quiere volver a escribir. Úsala sola en su paso, en lugar de send_reply. Si queda algo pendiente no cierra y te dice qué.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_opportunity",
+    "description": "Registra un interés concreto de la persona que no sea la pregunta por un servicio (eso lo anota el sistema solo): por ejemplo, una evaluación sin servicio definido. Nunca por un saludo. Nace en «Interesado» y, sin responsable, queda en Recepción. Si ya tiene abierta una del mismo interés, sigue con esa en vez de crear otra.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "El interés concreto, en una línea: el tratamiento, el precio o la evaluación que pidió."
+        },
+        "patientId": {
+          "description": "El paciente, si el interés es para alguien ya registrado.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "serviceId": {
+          "description": "El servicio que le interesa, si está en el catálogo: su valor sale de la lista de precios.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "interestText": {
+          "description": "Lo que pidió, en sus palabras.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "reason": {
+          "description": "Por qué lo hace, en una frase: queda en el historial para el equipo.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "update_followup",
+    "description": "Deja o cambia la tarea de una oportunidad del contacto: su próxima acción, una sola. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "opportunityId": {
+          "description": "De qué oportunidad es; si la persona tiene una sola abierta puede omitirse.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "nextActionNote": {
+          "description": "Qué hay que hacer, en una línea (llamar para confirmar la evaluación).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "nextActionAt": {
+          "description": "Cuándo, en ISO 8601 con zona. Solo si se acordó un momento.",
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "reason": {
+          "description": "Por qué lo hace, en una frase: queda en el historial para el equipo.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "close_opportunity",
+    "description": "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con un motivo de la lista. Como perdida, solo si la persona lo dijo claro en esta conversación (el precio, eligió otra clínica, ya no lo necesita); nunca porque dejó de responder. Aceptar o rechazar un presupuesto ya la cierra sola. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "opportunityId": {
+          "description": "Cuál cerrar; si la persona tiene una sola abierta puede omitirse.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "won",
+            "lost"
+          ],
+          "description": "Ganada (won) o perdida (lost)."
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "precio",
+            "otra_clinica",
+            "no_lo_necesita",
+            "otro",
+            "acepto"
+          ],
+          "description": "Perdida: precio, otra_clinica (eligió otra clínica), no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto."
+        },
+        "note": {
+          "description": "Lo que añade al motivo, en una frase. Solo si hace falta (por ejemplo, con «otro»).",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "listar_oportunidades",
+    "description": "Lista todas las oportunidades del contacto por páginas (el prompt solo trae las primeras). Pasa el cursor devuelto para ver más; nunca asumas que no hay más.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "won",
+            "lost"
+          ]
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "listar_tareas",
+    "description": "Lista todas las tareas del contacto (el prompt solo trae un resumen). Úsala antes de afirmar que no hay seguimientos.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done",
+            "cancelled"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "leer_contexto_comercial",
+    "description": "Lee etiquetas, campos y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "notesCursor": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ver_otros_canales",
+    "description": "Historial acotado de otros hilos del mismo contacto verificado en otros canales, con procedencia (canal y fecha). Solo lectura, también en simulación; sin historia clínica. Pasa el cursor devuelto para páginas anteriores; nunca asumas que no hay más.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "add_tags",
+    "description": "Agrega etiquetas al contacto (p.ej. interesado-ortodoncia).",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "tags": {
+          "minItems": 1,
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "required": [
+        "tags"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "update_contact",
+    "description": "Actualiza los campos personalizados del contacto o el nombre de quien aún no es paciente (el nombre de un paciente lo cambia el equipo en su ficha).",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "customFields": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_task",
+    "description": "Deja una tarea a recepción (llamar, confirmar, enviar algo que pidió la persona).",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Qué hay que hacer, en una línea (llamar, confirmar, enviar)."
+        },
+        "dueAt": {
+          "description": "Fecha y hora límite en ISO 8601. Solo si se acordó un plazo.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ver_sedes_y_servicios",
+    "description": "Sedes (con id) y su horario de atención, servicios con cómo decir su precio, promociones vigentes con sus condiciones, profesionales y medios de pago. Úsalo antes de hablar de precios, sedes, horarios, profesionales, medios, promociones o disponibilidad. Si la clínica tiene muchos servicios, búscalos con buscar_en_la_clinica.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "buscar_en_la_clinica",
+    "description": "Busca en lo que ofrece la clínica: servicios (con cómo decir su precio), promociones vigentes (precio, condiciones y fecha de fin) y profesionales por nombre o especialidad. Escribe lo que pide la persona con sus palabras («dientes amarillos», «frenillos», «ortodoncista»). Devuelve solo lo que coincide, leído en este momento.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "texto": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "texto"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "consultar_conocimiento",
+    "description": "Busca respuestas oficiales vigentes por el título, por cómo lo pregunta la gente o por las palabras de la pregunta; para el texto completo de una respuesta del índice o recortada pasa su título exacto. Cítalas tal cual.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pregunta": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "pregunta"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ver_contexto_paciente",
+    "description": "Sin id lista los pacientes vinculados al interlocutor; con id verifica vínculo y autorización. Nunca devuelve historia clínica.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ver_resumen_paciente",
+    "description": "Próximas citas (con id y versión para reprogramar_cita/cancelar_cita) y estado de presupuestos del paciente verificado; saldo solo si el interlocutor tiene facultad económica. Si tiene más citas de las que caben, lo dice: pídelas con desde. Nunca historia clínica.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "desde": {
+          "description": "Solo las citas desde ese día (AAAA-MM-DD), cuando busca una cita más adelante o el resumen dijo que hay más.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      },
+      "required": [
+        "patientId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "buscar_huecos",
+    "description": "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, unidad dental, profesional, inicio, fin, zona y duración para proponer_cita.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "branchId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "durationMin": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 480
+        },
+        "profesional": {
+          "description": "El identificador de la lista de profesionales («pro-…»), cuando la persona pide a alguien en particular.",
+          "type": "string"
+        },
+        "roomId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "serviceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "branchId",
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "pedir_volver_al_portal",
+    "description": "Úsala cuando la persona pida volver a entrar al portal del paciente (cambió de teléfono, perdió su acceso, el enlace venció). No envía nada: deja el pedido a recepción, que le manda un enlace nuevo y le da el código por otra vía. Nunca envíes tú un enlace o un código del portal.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "proponer_cita",
+    "description": "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, unidad dental, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El paciente que se atiende; debe estar vinculado al interlocutor."
+        },
+        "professionalUserId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "El profesional del hueco elegido en buscar_huecos."
+        },
+        "roomId": {
+          "description": "La unidad dental del hueco elegido en buscar_huecos; sin ella, la agenda pone la primera libre de la sede.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "Inicio exacto del hueco elegido, en ISO 8601 con zona."
+        },
+        "branchId": {
+          "description": "La sede del hueco elegido.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "serviceId": {
+          "description": "El servicio que se va a atender, si se sabe.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "durationMin": {
+          "description": "La del hueco elegido; si falta se toma la del servicio y, sin servicio, la de una cita regular en la sede.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 480
+        },
+        "reason": {
+          "description": "Motivo de la consulta en palabras del paciente.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "patientId",
+        "professionalUserId",
+        "startsAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reprogramar_cita",
+    "description": "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Queda esperando la confirmación del interlocutor (confirmar_propuesta).",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El id exacto de la cita, tomado de ver_resumen_paciente."
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "La versión de la cita que se leyó: evita pisar un cambio de otra persona."
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "Inicio exacto del hueco nuevo, en ISO 8601 con zona."
+        },
+        "professionalUserId": {
+          "description": "Solo si cambia de profesional.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "roomId": {
+          "description": "Solo si cambia de unidad dental.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "reason": {
+          "description": "Por qué lo hace, en una frase: queda en el historial para el equipo.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "appointmentId",
+        "expectedVersion",
+        "startsAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cancelar_cita",
+    "description": "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Queda esperando la confirmación del interlocutor (confirmar_propuesta); la respuesta indica el estado real: pendiente, ejecutada o fallida.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "appointmentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "confirmar_cita",
+    "description": "Confirma una cita que la persona ya tiene cuando ella lo dice por escrito («sí, ahí estaré», «confirmo»), por ejemplo al responder un recordatorio. No es una propuesta ni pide otro sí. Sin id confirma, como el botón, las citas del último recordatorio que recibió (si escribe por sus hijos, las de ellos); si no hay recordatorio, la única cita que espera confirmación, y si tiene varias te las devuelve para que preguntes cuál. Te devuelve qué confirmó y la frase para decírselo.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "description": "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirman, como con el botón, las citas del último recordatorio que recibió; si no hubo recordatorio, la única suya que espera confirmación.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "responder_permiso_mensajes",
+    "description": "Anota la respuesta de la persona a la pregunta que le hizo la clínica tras reservar: «¿Te podemos escribir para enviarte novedades y promociones de la clínica?». Úsala solo si su último mensaje responde a esa pregunta (sí o no); nunca para confirmar una cita.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "granted": {
+          "type": "boolean",
+          "description": "true si la persona dijo que sí a recibir novedades y promociones de la clínica; false si dijo que no."
+        }
+      },
+      "required": [
+        "granted"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "elegir_mensajes",
+    "description": "Cuando la persona pide no recibir más un tipo de mensaje («ya no me manden recordatorios», «no quiero promociones», «no me escriban nada») o volver a recibirlo («sí, mándenme el recordatorio»), o pide elegir qué mensajes recibe. Si no queda claro qué tipo quiere dejar, pregúntale antes: los recordatorios de sus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje. «Cancelar» es cancelar una cita, nunca una baja. Sin tipo, te da su página para que elija. Te devuelve la frase para decírselo.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "tipo": {
+          "description": "Los recordatorios de sus citas (recordatorio), los de controles y seguimiento (seguimiento), las novedades y promociones (novedades) o ningún mensaje de la clínica, también los avisos de sus citas y papeles (ninguno). Sin tipo, solo se le da su página para que elija.",
+          "type": "string",
+          "enum": [
+            "recordatorio",
+            "seguimiento",
+            "novedades",
+            "ninguno"
+          ]
+        },
+        "recibir": {
+          "description": "false si pide dejar de recibirlos; true si pide volver a recibirlos.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ver_presupuesto",
+    "description": "Los presupuestos que la clínica ya entregó a la persona (o a quien ella lleva), como los recibe ella: cada tratamiento con su pieza y su precio, las opciones y lo que ya respondió, con los ids para reenviar_presupuesto y anotar_respuesta_presupuesto. Nunca trae diagnósticos ni la historia clínica. Úsala antes de hablar de un presupuesto o de anotar lo que responde.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El paciente, de ver_contexto_paciente."
+        }
+      },
+      "required": [
+        "patientId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reenviar_presupuesto",
+    "description": "Reenvía a la persona el presupuesto que la clínica ya preparó y entregó, cuando ella lo pide por el chat. Sale por WhatsApp (o por correo) a la persona o, si el paciente es menor, a su representante legal. Nunca cambia precios ni arma uno. Si todavía no está listo o no hay por dónde enviarlo, deja una tarea a recepción y te devuelve la frase para decírselo.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El paciente del presupuesto: la persona que escribe o alguien que ella lleva (de ver_contexto_paciente)."
+        },
+        "budgetId": {
+          "description": "El presupuesto que pide, de ver_presupuesto. Sin él, el último que la clínica preparó para ese paciente.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "patientId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enviar_comprobante",
+    "description": "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó por correo y está en su enlace, en «Tus papeles».",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "patientId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "anotar_respuesta_presupuesto",
+    "description": "Cuando la persona responde a su presupuesto por escrito («la 16 y la 26 ahora, la 36 después», «prefiero la opción de la corona»), prepara la lista para confirmarla con ella: no anota nada todavía. Con los ids de ver_presupuesto, una respuesta por cada tratamiento de la opción que eligió: aceptado, pospuesto si lo deja para después, o rechazado. Con varias opciones, indica optionId. Te devuelve la pregunta para pedirle el sí; con su sí, usa confirmar_propuesta.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El paciente del presupuesto, de ver_presupuesto."
+        },
+        "budgetId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El presupuesto que responde, de ver_presupuesto."
+        },
+        "optionId": {
+          "description": "La opción que eligió, de ver_presupuesto; obligatoria si el presupuesto tiene varias.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "decisions": {
+          "minItems": 1,
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "planItemId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "aceptado",
+                  "pospuesto",
+                  "rechazado"
+                ]
+              }
+            },
+            "required": [
+              "planItemId",
+              "decision"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Lo que responde por cada tratamiento de la opción elegida, con su id de ver_presupuesto: aceptado, pospuesto (lo deja para después) o rechazado. Lo que ya había decidido antes no cambia."
+        }
+      },
+      "required": [
+        "patientId",
+        "budgetId",
+        "decisions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "confirmar_propuesta",
+    "description": "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "proposalId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "anotar_caso",
+    "description": "Guarda una nota breve del caso para los próximos mensajes: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nota": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "nota"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "recordar_dato",
+    "description": "Guarda un dato práctico de la persona que servirá en otra conversación y en cualquier canal (horario que le viene bien, cómo quiere que la llamen, por quién escribe). Nunca datos de salud: esos no se guardan aquí. Si corrige un dato ya guardado, indica su id en replacesId.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "description": "Un dato práctico y no clínico que servirá en otra conversación: a qué hora le viene bien, cómo quiere que la llamen, por quién escribe. Nunca síntomas, diagnósticos ni nada de salud."
+        },
+        "replacesId": {
+          "description": "El id del dato ya guardado que este corrige, cuando la persona cambió de preferencia.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "request_human_handoff",
+    "description": "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Por qué hace falta una persona."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Lo conversado y lo que falta, solo con hechos."
+        },
+        "priority": {
+          "description": "Alta si hay dolor, urgencia o una queja.",
+          "type": "string",
+          "enum": [
+            "alta",
+            "media",
+            "baja"
+          ]
+        },
+        "message": {
+          "description": "Aviso breve de quién verá su consulta y cuándo le responde (por ejemplo, «la Dra. lo verá mañana desde las 9:00»). El agente sigue atendiendo lo demás.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "clinical": {
+          "description": "Sí si es una duda sobre su salud, un síntoma, un medicamento o un tratamiento: el tema va al profesional que atiende al paciente.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "cita si quiere reservar, cambiar o cancelar una cita; precio si pregunta un precio de la lista (un descuento es otro); clinico si es una duda de salud; pago si habla de un pago, una transferencia o un comprobante; otro en lo demás (un reclamo, un descuento, hablar con una persona).",
+          "type": "string",
+          "enum": [
+            "cita",
+            "precio",
+            "clinico",
+            "pago",
+            "otro"
+          ]
+        },
+        "asks": {
+          "description": "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "pending": {
+          "description": "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        }
+      },
+      "required": [
+        "reason",
+        "summary"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "recordar_tema",
+    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene y cuándo le responde, sin responder el tema.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "tema_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "El id del tema, de «Temas con el equipo»."
+        }
+      },
+      "required": [
+        "tema_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

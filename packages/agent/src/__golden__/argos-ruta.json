@@ -1,0 +1,23 @@
+{
+  "id": "argos.fila",
+  "kind": "choice",
+  "instructions": "Alguien del equipo de una clínica dental escribió esto. ¿Qué es?",
+  "options": [
+    {
+      "value": "negocio",
+      "description": "Una pregunta sobre los datos o el negocio de la clínica: dinero, cobros, ventas, pacientes, citas, agenda, tratamientos, presupuestos, promociones, inventario o el equipo. También pedir un consejo, prioridades o causas del negocio («¿qué debería hacer…?», «¿por qué bajaron…?»)."
+    },
+    {
+      "value": "ayuda",
+      "description": "Cómo se usa odentIA: dónde está algo o cómo se hace algo en el sistema."
+    },
+    {
+      "value": "buscar",
+      "description": "Un nombre o una palabra suelta para encontrar algo (una persona, un servicio, un producto), no una pregunta."
+    },
+    {
+      "value": "otro",
+      "description": "Un saludo, algo ajeno a la clínica o un pedido de que odentIA haga algo ahora (enviar, cambiar, agendar)."
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+[
+  {
+    "id": "requires_reply",
+    "kind": "yesno",
+    "instructions": "Does the latest message from the contact need a reply from the dental clinic?",
+    "criteria": {
+      "yes": "The contact asks something, requests something or expects an answer.",
+      "no": "A closing, thanks or acknowledgement that needs no reply."
+    }
+  },
+  {
+    "id": "handoff",
+    "kind": "yesno",
+    "instructions": "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains, is upset, or describes pain, bleeding, swelling or any clinical situation."
+  },
+  {
+    "id": "urgency",
+    "kind": "score",
+    "instructions": "How urgent is the latest message from the contact?",
+    "levels": [
+      {
+        "label": "low",
+        "description": "No time pressure: general information or a routine request."
+      },
+      {
+        "label": "medium",
+        "description": "Needs attention today: wants an appointment soon, follow-up or a change."
+      },
+      {
+        "label": "high",
+        "description": "Needs attention now: pain, bleeding, swelling, accident or distress."
+      }
+    ]
+  },
+  {
+    "id": "intent",
+    "kind": "choice",
+    "instructions": "What is the main intent of the latest message from the contact?",
+    "options": [
+      {
+        "value": "appointment_request",
+        "description": "Wants to book an appointment or asks what dates or times are available."
+      },
+      {
+        "value": "reschedule_or_cancel",
+        "description": "Wants to move or cancel an existing appointment."
+      },
+      {
+        "value": "price_or_service_info",
+        "description": "Asks for general information about the clinic or how it works: prices, treatments offered, locations, hours, payment methods, instalments, insurance, parking, whether walk-ins are accepted or what to bring. A question to answer, not a request to book or to do something for them."
+      },
+      {
+        "value": "clinical_question",
+        "description": "Describes symptoms or asks for clinical advice."
+      },
+      {
+        "value": "complaint",
+        "description": "Complains about the service or the clinic."
+      },
+      {
+        "value": "unsubscribe",
+        "description": "Asks to stop receiving messages."
+      },
+      {
+        "value": "greeting_or_thanks",
+        "description": "Greeting, thanks or closing with no request."
+      },
+      {
+        "value": "off_topic",
+        "description": "Unrelated to dental care, the mouth or the clinic: cooking, homework, programming, sports, politics, general knowledge, translations, writing texts or jokes. Never use it for anything about teeth, the mouth, eating or care after a dental procedure, the clinic's services, prices, payment, insurance, paperwork, access or appointments."
+      },
+      {
+        "value": "other",
+        "description": "None of the above or unclear."
+      }
+    ]
+  },
+  {
+    "id": "unsubscribe",
+    "kind": "yesno",
+    "instructions": "Does the contact ask the clinic to stop sending messages?"
+  },
+  {
+    "id": "spam",
+    "kind": "choice",
+    "instructions": "Is the latest message from the contact spam: unsolicited advertising, a scam, a chain message, an automatic reply from another business, or a company selling something to the clinic? A person writing for themselves is never spam.",
+    "options": [
+      {
+        "value": "not_spam",
+        "description": "A person writing for themselves: about teeth, the mouth, the clinic, appointments, prices, payments, a complaint, a greeting, a wrong number or anything personal. When in doubt, choose this."
+      },
+      {
+        "value": "advertising",
+        "description": "Mass advertising or offers from others: earn money, loans, investments, products or promotions."
+      },
+      {
+        "value": "scam",
+        "description": "Fraud or phishing: asks to pay or click a link for a package, prize, bank, account or delivery."
+      },
+      {
+        "value": "chain",
+        "description": "A chain message that asks to forward it to other people."
+      },
+      {
+        "value": "automated_reply",
+        "description": "An automatic reply or bot of another business: thanks for writing, we will reply soon; away messages; menus."
+      },
+      {
+        "value": "selling_to_clinic",
+        "description": "A company or agency offering its products or services to the clinic: websites, marketing, software, supplies or laboratories."
+      }
+    ]
+  }
+]
