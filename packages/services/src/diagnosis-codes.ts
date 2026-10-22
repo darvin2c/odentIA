@@ -14,7 +14,6 @@
  * Una sola regla para la atención, el panel de la pieza, el dictado y el
  * resto de lugares donde se escribe un código.
  */
-import { toothNumberSql } from "./dental/site.js"
 import {
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
@@ -26,16 +25,13 @@ import {
   normalizeSearchText,
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
-import {
-  dentalDiagnosisPattern,
-  findingDefinition,
-} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
-import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import type { SiteFields } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 
 /** Un código del catálogo, como se ofrece y se guarda. */
 export interface DiagnosisCodeOption {
@@ -155,6 +151,8 @@ export async function searchDiagnosisCodes(
   limit = 20,
 ): Promise<DiagnosisCodeOption[]> {
   const system = await orgDiagnosisSystem(tx, orgId)
+  // Lo que el producto pone primero (odentIA: lo odontológico).
+  const preferred = (await productHooks(tx, orgId)).preferredDiagnoses(system)
   const terms = normalizeSearchText(q).split(" ").filter(Boolean).slice(0, 8)
   if (terms.length === 0) return []
   const code = normalizeDiagnosisCode(system, q.trim())
@@ -178,7 +176,7 @@ export async function searchDiagnosisCodes(
       desc(sql`${diagnosisCatalog.code} = ${code}`),
       desc(sql`starts_with(${diagnosisCatalog.code}, ${code})`),
       // Lo odontológico primero (ADR 0079: lo dice el producto, no la lista).
-      desc(sql`${diagnosisCatalog.code} ~ ${dentalDiagnosisPattern(system)}`),
+      desc(preferred ? sql`${diagnosisCatalog.code} ~ ${preferred}` : sql`false`),
       asc(diagnosisCatalog.code),
     )
     .limit(Math.min(Math.max(limit, 1), 50))
@@ -191,12 +189,11 @@ export async function searchDiagnosisCodes(
 }
 
 /** Lo que el odontograma propone: un código por hallazgo, en la lista de la clínica. */
-export interface ProposedDiagnosis extends DiagnosisCodeOption {
+/** Un diagnóstico propuesto, con lo que lo propone y su sitio como lo dice el producto. */
+export type ProposedDiagnosis = DiagnosisCodeOption & {
   /** «Lesión de caries dental»: el hallazgo que lo propone. */
   finding: string
-  toothNumber: number | null
-  surfaces: string[]
-}
+} & SiteFields
 
 export interface DiagnosisSuggestions {
   system: DiagnosisSystemKey
@@ -245,61 +242,20 @@ export async function getDiagnosisSuggestions(
   } = {},
 ): Promise<DiagnosisSuggestions> {
   const system = await orgDiagnosisSystem(tx, orgId)
-  const candidates: Array<{
-    code: string
-    condition: string
-    toothNumber: number | null
-    surfaces: string[]
-  }> = []
-  if (input.finding) {
-    const code = findingDiagnosisCode(system, input.finding.condition, input.finding.variant)
-    if (code)
-      candidates.push({
-        code,
-        condition: input.finding.condition,
-        toothNumber: input.finding.toothNumber ?? null,
-        surfaces: input.finding.surfaces ?? [],
-      })
-  }
+  // Lo que propone lo registrado lo dice el producto (odentIA: los hallazgos del
+  // odontograma de esta atención y el que se está marcando en la pieza).
+  const hooks = await productHooks(tx, orgId)
+  const candidates = await hooks.diagnosisCandidates(tx, {
+    orgId,
+    system,
+    patientId: input.patientId,
+    encounterId: input.encounterId,
+    finding: input.finding ?? null,
+  })
   const already = new Set<string>()
   if (input.patientId && input.encounterId) {
-    const entries = await tx
-      .select({
-        condition: odontogramEntry.condition,
-        details: odontogramEntry.details,
-        toothNumber: odontogramEntry.toothNumber,
-        surface: odontogramEntry.surface,
-      })
-      .from(odontogramEntry)
-      .where(
-        and(
-          eq(odontogramEntry.organizationId, orgId),
-          eq(odontogramEntry.patientId, input.patientId),
-          eq(odontogramEntry.encounterId, input.encounterId),
-          isNull(odontogramEntry.voidedAt),
-        ),
-      )
-      .orderBy(asc(odontogramEntry.createdAt))
-    for (const entry of entries) {
-      const variant = (entry.details as { variant?: unknown } | null)?.variant
-      const code = findingDiagnosisCode(
-        system,
-        entry.condition,
-        typeof variant === "string" ? variant : null,
-      )
-      if (code)
-        candidates.push({
-          code,
-          condition: entry.condition,
-          toothNumber: entry.toothNumber,
-          surfaces: entry.surface ? [entry.surface] : [],
-        })
-    }
     const diagnosed = await tx
-      .select({
-        code: encounterDiagnosis.diagnosisCode,
-        toothNumber: toothNumberSql(encounterDiagnosis),
-      })
+      .select({ code: encounterDiagnosis.diagnosisCode, siteSystem: encounterDiagnosis.siteSystem, siteCode: encounterDiagnosis.siteCode })
       .from(encounterDiagnosis)
       .where(
         and(
@@ -309,7 +265,7 @@ export async function getDiagnosisSuggestions(
           isNull(encounterDiagnosis.voidedAt),
         ),
       )
-    for (const row of diagnosed) already.add(`${row.code}|${row.toothNumber ?? ""}`)
+    for (const row of diagnosed) already.add(`${row.code}|${row.siteSystem ?? ""}|${row.siteCode ?? ""}`)
   }
   const known = await codesIn(
     tx,
@@ -320,7 +276,7 @@ export async function getDiagnosisSuggestions(
   const seen = new Set<string>()
   for (const candidate of candidates) {
     const row = known.get(candidate.code)
-    const key = `${candidate.code}|${candidate.toothNumber ?? ""}`
+    const key = `${candidate.code}|${candidate.site.siteSystem ?? ""}|${candidate.site.siteCode ?? ""}`
     if (!row || row.isCategory || already.has(key) || seen.has(key)) continue
     seen.add(key)
     proposed.push({
@@ -328,9 +284,8 @@ export async function getDiagnosisSuggestions(
       code: candidate.code,
       description: row.title,
       isCategory: false,
-      finding: findingDefinition(candidate.condition)?.label ?? candidate.condition,
-      toothNumber: candidate.toothNumber,
-      surfaces: candidate.surfaces,
+      finding: candidate.finding,
+      ...hooks.site.fields(candidate.site),
     })
   }
   const usage = count()

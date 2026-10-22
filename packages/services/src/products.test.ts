@@ -1,7 +1,8 @@
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
+import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { finalizeEncounter, getEncounterClosing, getEncounterDetail } from "./encounters.js"
 import { getPatientSummary } from "./patient-history.js"
 import { loadPatientRecord } from "./patient-record.js"
@@ -50,6 +51,58 @@ it("cada momento de lo común pregunta al producto: una clínica médica no ve n
     const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
     expect(closed.encounter.status).toBe("finalizada")
     expect(closed).not.toHaveProperty("odontogram")
+  } finally {
+    await setProduct("dental")
+  }
+})
+
+it("el «dónde» lo dice el producto: odentIA guarda la pieza y una clínica médica no", async () => {
+  const f = await clinicalFixture()
+  await seedDiagnosisCodes([{ code: "K02.1", title: "Caries de la dentina" }])
+  const dental = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+      diagnosisCode: "K02.1",
+      diagnosisType: "confirmed",
+      toothNumber: 16,
+      surfaces: ["occlusal"],
+    }),
+  )
+  // Se guarda como sitio común y la API lo sigue diciendo como pieza y caras.
+  expect(dental).toMatchObject({
+    siteSystem: "ISO-3950",
+    siteCode: "16",
+    toothNumber: 16,
+    surfaces: ["occlusal"],
+  })
+  await expect(
+    f.run((tx) =>
+      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+        diagnosisCode: "K02.1",
+        diagnosisType: "confirmed",
+        toothNumber: 19,
+      }),
+    ),
+  ).rejects.toMatchObject({ message: "Pieza FDI inválida: 19" })
+
+  await setProduct("medical")
+  try {
+    await expect(
+      f.run((tx) =>
+        addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+          diagnosisCode: "K02.1",
+          diagnosisType: "confirmed",
+          toothNumber: 16,
+        }),
+      ),
+    ).rejects.toMatchObject({ message: "Esta clínica no registra dónde" })
+    const general = await f.run((tx) =>
+      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+        diagnosisCode: "K02.1",
+        diagnosisType: "provisional",
+      }),
+    )
+    expect(general).toMatchObject({ siteSystem: null, siteCode: null })
+    expect(general).not.toHaveProperty("toothNumber")
   } finally {
     await setProduct("dental")
   }

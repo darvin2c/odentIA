@@ -32,7 +32,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCountry } from "./locale.js"
+import { findOrgCountry, orgProduct } from "./locale.js"
 import { createContactNote } from "./crm-workspace.js"
 import {
   createPatient,
@@ -720,6 +720,8 @@ export async function registerPatient(
     mode: isPublic ? "public" : "internal",
     today,
     countryCode,
+    // Lo de un producto («Tu boca» es dental) solo lo pregunta una clínica de él.
+    product: await orgProduct(tx, orgId),
     ...(essentials ? { scope: "essentials" as const } : {}),
   })
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)

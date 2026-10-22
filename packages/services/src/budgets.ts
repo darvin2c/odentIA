@@ -1,5 +1,3 @@
-import type { DentalSite } from "@odentia/dental"
-import { withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -36,6 +34,8 @@ import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import type { ProductSite, SiteFields } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -70,7 +70,8 @@ export const BUDGET_STATUSES = [
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number]
 
 export type BudgetRow = typeof treatmentBudget.$inferSelect
-export type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & DentalSite
+/** La línea con su sitio como lo dice el producto (odentIA: pieza y caras). */
+export type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & SiteFields
 export type BudgetOptionRow = typeof treatmentBudgetOption.$inferSelect
 
 /** Línea con estado clínico y totales unidos solo para lectura. */
@@ -388,6 +389,7 @@ async function listBudgetLines(
   patientId: string,
   budgetId: string,
 ): Promise<BudgetLineWithStatus[]> {
+  const site = (await productHooks(tx, orgId)).site
   const lines = await tx
     .select({ line: treatmentBudgetItem, position: treatmentBudgetOption.position })
     .from(treatmentBudgetItem)
@@ -440,7 +442,8 @@ async function listBudgetLines(
         ? tariffLineTotalCents - lineTotalCents
         : null
     return {
-      ...withDentalSite(line),
+      ...line,
+      ...site.fields(line),
       itemStatus: statuses.get(line.planItemId) ?? "pendiente",
       lineTotalCents,
       tariffLineTotalCents,
@@ -2038,7 +2041,7 @@ export interface BudgetPrintPayload {
   totalCents: number | null
 }
 
-function printLine(line: BudgetLineWithStatus): BudgetPrintLine {
+function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLine {
   const units = budgetLineUnits(line)
   const unitCents = line.priceCents
   // La referencia nunca queda por debajo de lo acordado: un precio mayor
@@ -2051,7 +2054,7 @@ function printLine(line: BudgetLineWithStatus): BudgetPrintLine {
   const listTotalCents = listUnitCents == null ? null : listUnitCents * units
   return {
     title: line.title,
-    detail: line.toothNumber != null ? `pieza ${line.toothNumber}` : null,
+    detail: site.words(line, "short"),
     listUnitCents,
     unitCents,
     units,
@@ -2102,6 +2105,7 @@ export async function getBudgetPrintPayload(
     .from(treatmentPlan)
     .where(and(eq(treatmentPlan.id, budget.planId), eq(treatmentPlan.organizationId, orgId)))
     .limit(1)
+  const site = (await productHooks(tx, orgId)).site
   // Firma quien preparó el presupuesto; si no consta, quien abrió el plan.
   const author = budget.createdBy ?? planRow?.createdBy ?? null
   let professional: BudgetPrintPayload["professional"] = null
@@ -2134,12 +2138,12 @@ export async function getBudgetPrintPayload(
     .limit(2)
   const onlyBranch = branches.length === 1 ? branches[0]! : null
   const value = valueOptionOf(budget.options)
-  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map(printLine)
+  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map((line) => printLine(site, line))
   const subtotalCents = sumCents(lines.map((line) => line.listTotalCents))
   const options: BudgetPrintOption[] =
     budget.options.length > 1
       ? budget.options.map((option) => {
-          const optionLines = budget.items.filter((line) => line.optionId === option.id).map(printLine)
+          const optionLines = budget.items.filter((line) => line.optionId === option.id).map((line) => printLine(site, line))
           const optionSubtotal = sumCents(optionLines.map((line) => line.listTotalCents))
           return {
             label: option.label,

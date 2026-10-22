@@ -1,5 +1,6 @@
 import { ALLERGY_SEVERITIES, REFERRAL_KINDS } from "./catalogs.js"
 import { z } from "zod"
+import type { ClinicalProduct } from "./products.js"
 import {
   type ClinicalCountryProfile,
   clinicalProfileFor,
@@ -67,6 +68,9 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  *   entrevista (`personal.*` y `dental.*`) llegan a «Entrevista de salud»
  *   de la ficha con las mismas claves y solo pueden ser opcionales.
  *
+ * Un dato con `product` es de ese producto (ADR 0079): «Tu boca» (`dental.*`)
+ * solo lo preguntan las clínicas dentales.
+ *
  * Solo entran aquí datos que el paciente sabe responder solo y que la ficha ya
  * guarda. Lo que se pregunta junto (la referencia con la dirección, el
  * parentesco con el contacto de emergencia, la aseguradora con el seguro) sigue
@@ -102,13 +106,13 @@ export const REGISTRATION_FIELDS = [
   { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
   { key: "personal.hospitalizaciones", label: "Hospitalizaciones", step: "personales", group: "health" },
   { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
-  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health" },
-  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health" },
-  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health" },
-  { key: "dental.cepilladosAlDia", label: "Cepillado diario", step: "odontologicos", group: "health" },
-  { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health" },
-  { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health" },
-  { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health" },
+  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.cepilladosAlDia", label: "Cepillado diario", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health", product: "dental" },
+  { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health", product: "dental" },
 ] as const
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
 /** Datos que se piden siempre: el registro los guarda como obligatorios y no se cambian. */
@@ -431,9 +435,20 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
   return missingPersonData(config, answers.demographics, { representativeContact })
 }
 
-/** Si el registro de esta clínica pregunta ese dato: «Procedencia» solo en clínicas de Perú. */
-export function registrationFieldAsked(config: Pick<RegistrationConfig, "fields">, key: RegistrationFieldKey, countryCode?: string | null): boolean {
+/**
+ * Si el registro de esta clínica pregunta ese dato: «Procedencia» solo en
+ * clínicas de Perú y lo de un producto (`dental.*`, «Tu boca») solo en las de
+ * ese producto.
+ */
+export function registrationFieldAsked(
+  config: Pick<RegistrationConfig, "fields">,
+  key: RegistrationFieldKey,
+  countryCode?: string | null,
+  product: ClinicalProduct = "dental",
+): boolean {
   if (key === "origin" && !clinicalProfileFor(countryCode).origin) return false
+  const field = REGISTRATION_FIELDS.find((item) => item.key === key)
+  if (field && "product" in field && field.product !== product) return false
   return config.fields[key] !== "hidden"
 }
 
@@ -466,7 +481,7 @@ function representativeDocumentErrors(
     errors["representative.docCountry"] ??= "Elige el país que emitió el documento"
 }
 
-export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope; countryCode?: string | null }): Record<string, string> {
+export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope; countryCode?: string | null; product?: ClinicalProduct }): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = registrationAnswersSchema.safeParse(answers)
   if (!parsed.success) {
@@ -510,7 +525,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       const key = field.key
       const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
       const value = registrationFieldValue(data, field)
-      if (!registrationFieldAsked(config, key, context.countryCode)) {
+      if (!registrationFieldAsked(config, key, context.countryCode, context.product)) {
         if (value !== undefined) errors[path] = "Este dato no se pide en el registro"
         continue
       }

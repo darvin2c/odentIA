@@ -1,6 +1,4 @@
 import { budgetStateText, diagnosisCodeLabel } from "@odentia/clinical"
-import { dentalSiteOfRow, toothOfRow } from "./dental/site.js"
-import { ISO_3950, isValidTooth, toothSiteCode } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -30,8 +28,12 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
-import type { ProductParts } from "./product-hooks.js"
+import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+
+/** El sitio suelto de una fila como lo dice el producto (odentIA: su pieza). */
+const looseValue = (site: ProductSite, row: Pick<SiteColumns, "siteSystem" | "siteCode">): number | null =>
+  row.siteSystem === site.system ? site.value(row.siteCode) : null
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
@@ -148,6 +150,7 @@ async function loadPlannedForEncounters(
 ): Promise<Map<string, PlannedLink[]>> {
   const grouped = new Map<string, PlannedLink[]>()
   if (encounterIds.length === 0) return grouped
+  const site = (await productHooks(tx, orgId)).site
   const rows = await tx
     .select({
       encounterId: encounterPlanItem.encounterId,
@@ -179,7 +182,7 @@ async function loadPlannedForEncounters(
     list.push({
       id: row.id,
       title: row.title,
-      toothNumber: toothOfRow(row),
+      toothNumber: looseValue(site, row),
       status: row.status,
       planId: row.planId,
       budgetId: row.budgetId,
@@ -203,6 +206,7 @@ export interface OpenEncounterBrief {
 
 export async function getPatientSummary(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
+  const site = (await productHooks(tx, orgId)).site
   const [lastEncounter] = await tx
     .select()
     .from(encounter)
@@ -395,8 +399,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       evolution: lastEncounter.evolution,
       indications: lastEncounter.indications,
       finalizedAt: lastEncounter.finalizedAt,
-      teeth: teethRows.map(toothOfRow).filter((tooth): tooth is number => tooth != null),
-      procedures: procedures.map(({ siteSystem, siteCode, ...procedure }) => ({ ...procedure, toothNumber: toothOfRow({ siteSystem, siteCode }) })),
+      teeth: teethRows.map((row) => looseValue(site, row)).filter((tooth): tooth is number => tooth != null),
+      procedures: procedures.map(({ siteSystem, siteCode, ...procedure }) => ({ ...procedure, toothNumber: looseValue(site, { siteSystem, siteCode }) })),
       diagnoses,
       plannedItems: planned.get(lastEncounter.id) ?? [],
       documents: docs.get(lastEncounter.id) ?? [],
@@ -406,7 +410,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   const acceptedPending: AcceptedPendingItem[] = acceptedRows.slice(0, 10).map((row) => ({
     id: row.id,
     title: row.title,
-    toothNumber: toothOfRow(row),
+    toothNumber: looseValue(site, row),
     diagnosisCode: row.diagnosisCode,
     diagnosisLabel: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
     priceCents: row.priceCents,
@@ -705,8 +709,9 @@ export async function getTimeline(
   const types = input.types ?? TIMELINE_TYPES
   const order = input.order ?? "desc"
   if (order !== "desc" && order !== "asc") throw validation("Orden inválido")
-  if (input.toothNumber != null && !isValidTooth(input.toothNumber))
-    throw validation("Pieza FDI inválida")
+  const site = (await productHooks(tx, orgId)).site
+  const toothCode = input.toothNumber == null ? null : site.code(input.toothNumber)
+  if (input.toothNumber != null && toothCode === null) throw validation(site.invalid(input.toothNumber))
   const cursor = input.cursor ? decodeCursor(input.cursor) : null
   if (
     input.cursor &&
@@ -722,7 +727,7 @@ export async function getTimeline(
   // en curso no es todavía un hecho: lo continúa la cabecera.
   if (types.includes("encounter"))
     branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else created_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
-    ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${ISO_3950} and et.site_code = ${toothSiteCode(tooth)})`}`)
+    ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${site.system} and et.site_code = ${toothCode})`}`)
   // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
   // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
   if (types.includes("consent") && tooth == null)
@@ -754,7 +759,7 @@ export async function getTimeline(
     const toothFilter =
       tooth == null
         ? sql``
-        : sql`and exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.site_system = ${ISO_3950} and ${toothSiteCode(tooth)} = any(c.site_codes))`
+        : sql`and exists (select 1 from patient_document_context c where c.document_id = patient_document.id and c.organization_id = ${orgId} and c.version = (select max(version) from patient_document_context where document_id = patient_document.id and organization_id = ${orgId}) and c.site_system = ${site.system} and ${toothCode} = any(c.site_codes))`
     // En la historia completa viven dentro de su atención; al filtrar documentos
     // deben seguir visibles aunque no se estén solicitando las atenciones.
     const linkedFilter =
@@ -853,7 +858,7 @@ export async function getTimeline(
         detail: row.evolution,
         toothNumbers: teeth
           .filter((t) => t.encounterId === row.id)
-          .map(toothOfRow)
+          .map((t) => looseValue(site, t))
           .filter((tooth): tooth is number => tooth != null)
           .sort((a, b) => a - b),
         authorId: row.professionalUserId,
@@ -966,25 +971,15 @@ export async function getTimeline(
       .where(
         and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, planIds)),
       )) {
-      const dental = dentalSiteOfRow(row)
-      const site =
-        dental.toothNumber != null
-          ? `Pieza ${dental.toothNumber}${dental.surfaces.length > 0 ? ` (${dental.surfaces.join(", ")})` : ""}`
-          : row.scope === "quadrant" && dental.quadrant != null
-            ? `Cuadrante ${dental.quadrant}`
-            : row.scope === "arch" && dental.arch === "upper"
-              ? "Arcada superior"
-              : row.scope === "arch" && dental.arch === "lower"
-                ? "Arcada inferior"
-                : "General"
+      const where = site.words(row, "full") ?? "General"
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,
         title: row.title,
-        detail: `${site} · ${row.status}`,
+        detail: `${where} · ${row.status}`,
         status: row.status,
         decision: row.decisionStatus,
-        toothNumbers: dental.toothNumber != null ? [dental.toothNumber] : [],
+        toothNumbers: [looseValue(site, row)].filter((tooth): tooth is number => tooth !== null),
         authorId: row.createdBy,
         planId: row.planId,
         planItemId: row.id,
