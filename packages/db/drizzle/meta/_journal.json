@@ -449,6 +449,55 @@
       "when": 1792603043577,
       "tag": "0063_direcciones_sugeridas_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792603043578,
+      "tag": "0064_argos_vistas_del_negocio",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792603043579,
+      "tag": "0065_argos_guarda_la_consulta",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1792603043580,
+      "tag": "0066_argos_sigue_fija_y_descarga",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1792603043581,
+      "tag": "0067_argos_especialidad",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1792603043582,
+      "tag": "0068_argos_insumos_y_ultima_atencion",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1792603043583,
+      "tag": "0069_argos_equipo_ausencias_y_primera_sede",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1792603043584,
+      "tag": "0070_argos_detalle_de_compras_y_espera_respuesta",
+      "breakpoints": true
     }
   ]
 }

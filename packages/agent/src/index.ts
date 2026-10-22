@@ -49,4 +49,24 @@ export {
   type SimulationResult,
 } from "./run.js"
 export type { AgentSandboxState } from "./tools.js"
+export {
+  type ArgosAskResult,
+  type ArgosClosest,
+  type ArgosDeps,
+  type ArgosPlan,
+  type ArgosRerun,
+  type ArgosRoute,
+  type ArgosShown,
+  type ArgosTable,
+  ARGOS_ROUTE_QUESTION,
+  argosMessages,
+  askArgos,
+  demoArgosPlan,
+  rerunArgos,
+  routeArgos,
+  routeArgosQuestion,
+  routeByWords,
+  showArgosAnswer,
+  ARGOS_MAX_TURNS,
+} from "./argos.js"
 export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"

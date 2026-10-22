@@ -1,10 +1,11 @@
 /**
- * Lo que la pantalla de Reportes le pide a Argos (ADR 0070) y lo de la fase 6
- * (ADR 0071): las respuestas fijadas, las metas, el resumen del lunes y
- * «Descargar». Las frases, las cifras y lo que se puede tocar los entrega el
- * servidor; la pantalla solo los dibuja.
+ * Lo de la fase 6 de Reportes (ADR 0071): las respuestas fijadas, las metas, el
+ * resumen del lunes y «Descargar». Las de las 32 cifras (ADR 0070) ya no se
+ * preguntan: el Argos de las vistas va en `argos.ts`; las ya fijadas se siguen
+ * mostrando. Las frases y las cifras las entrega el servidor.
  */
 import { apiDownload, apiFetch } from "./api"
+import type { ArgosPeriod, ArgosScreen, ArgosShown } from "./argos"
 import type { ReportAdvice, ReportQuery } from "./reports"
 
 export type FigureGroup = "total" | "mes" | "sede" | "profesional" | "canal" | "medio" | "tratamiento" | "categoria" | "como_nos_conocio" | "antiguedad"
@@ -46,17 +47,6 @@ export interface ReportAnswer {
   downloadable: boolean
 }
 
-export type ReportAskResult =
-  | { kind: "respuesta"; answer: ReportAnswer }
-  | { kind: "pregunta"; message: string; options: Array<{ label: string; query: ReportAskQuery }> }
-  | { kind: "no_sabe"; message: string; closest: Array<{ label: string; query: ReportAskQuery }> }
-  | { kind: "accion"; message: string; line: { key: string; name: string } | null }
-  | { kind: "clinico" | "otro" | "tope" | "sin_modelo" | "apagado"; message: string }
-
-export function askReport(body: (ReportQuery & { text: string }) | { query: ReportAskQuery }): Promise<{ data: ReportAskResult }> {
-  return apiFetch("/api/reports/ask", { method: "POST", body: JSON.stringify(body) })
-}
-
 export interface PinnedAnswer {
   id: string
   pinnedBy: string
@@ -70,12 +60,27 @@ export function reportParams(query: ReportQuery & Record<string, string | null |
   return search.toString()
 }
 
-export function fetchPins(query: ReportQuery): Promise<{ data: { limit: number; pins: PinnedAnswer[] } }> {
-  return apiFetch(`/api/reports/pins?${reportParams({ period: query.period, branchId: query.branchId })}`)
+/** Una respuesta del Argos de las vistas (ADR 0075) fijada: se vuelve a correr cada vez con la llave de quien mira. */
+export interface PinnedArgosAnswer {
+  id: string
+  pinnedBy: string
+  pinnedOn: string
+  title: string
+  screen: ArgosScreen
+  how: string
+  /** De dónde sale (D21): la misma cuenta de Reportes o un cálculo de Argos. */
+  source: "oficial" | "argos"
+  /** Respondió solo una parte: fijada lo sigue diciendo, con lo que falta. */
+  partial: boolean
+  missing: string | null
+  /** Con el periodo y la sede de arriba (D11); lo que es a hoy, a hoy. null en una respuesta de antes. */
+  period: ArgosPeriod | null
+  /** null: ya no corre o el rol de quien mira no la ve. */
+  answer: ArgosShown | null
 }
 
-export function pinAnswer(query: Pick<ReportAskQuery, "figure" | "group" | "focus">): Promise<{ data: { id: string } }> {
-  return apiFetch("/api/reports/pins", { method: "POST", body: JSON.stringify({ figure: query.figure, group: query.group, focus: query.focus ?? null }) })
+export function fetchPins(query: ReportQuery): Promise<{ data: { limit: number; pins: PinnedAnswer[]; argos: PinnedArgosAnswer[] } }> {
+  return apiFetch(`/api/reports/pins?${reportParams({ period: query.period, branchId: query.branchId })}`)
 }
 
 export function unpinAnswer(id: string): Promise<unknown> {
@@ -83,13 +88,6 @@ export function unpinAnswer(id: string): Promise<unknown> {
 }
 
 export const PINS_KEY = ["report", "pins"] as const
-
-/** Qué está fijado, sin recalcularlo. Vive bajo `PINS_KEY`: fijar o quitar la pone al día. */
-export const PIN_KEYS_KEY = [...PINS_KEY, "keys"] as const
-
-export function fetchPinKeys(): Promise<{ data: Array<{ id: string; figure: string; group: FigureGroup; focus: string | null }> }> {
-  return apiFetch("/api/reports/pins/keys")
-}
 
 // --- Metas ---------------------------------------------------------------------------
 
@@ -138,11 +136,4 @@ export function downloadReportList(list: string, query: ReportQuery): Promise<vo
 
 export function downloadReportTable(table: "professionals" | "commissions", query: ReportQuery): Promise<void> {
   return apiDownload(`/api/reports/download/${table}?${reportParams({ period: query.period, branchId: query.branchId })}`, `${table}.csv`)
-}
-
-export function downloadReportAnswer(query: ReportAskQuery): Promise<void> {
-  return apiDownload(
-    `/api/reports/download/answer?${reportParams({ period: query.period, branchId: query.branchId, figure: query.figure, group: query.group, focus: query.focus })}`,
-    `${query.figure}.csv`,
-  )
 }

@@ -154,22 +154,36 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
  * spec. `fake` es el modelo determinista de dev/e2e. Con `explicitCache`,
  * OpenAI guarda en su caché solo hasta lo marcado con
  * `prompt_cache_breakpoint` (el dictado); sin él, además escribe lo último de
- * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer.
+ * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer. Con
+ * `temperature` 0 la misma pregunta tiende a dar la misma respuesta (Argos).
+ *
+ * Con `reasoning` el modelo piensa antes de responder: gpt-6-luna no acepta
+ * herramientas con razonamiento en chat/completions, así que va por
+ * /v1/responses, sin temperatura y con la caché automática del proveedor.
  */
-export async function createConfiguredChatModel(spec: LlmSpec, options: { explicitCache?: boolean } = {}) {
+export async function createConfiguredChatModel(
+  spec: LlmSpec,
+  options: { explicitCache?: boolean; temperature?: number; reasoning?: "low" | "medium" | "high" } = {},
+) {
   if (spec.provider === "fake") return new FakeChatModel({})
-  const modelKwargs = {
-    // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
-    // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
-    ...(spec.reasoningEffort ? { reasoning_effort: spec.reasoningEffort } : {}),
-    // LangChain 1.5.3 no conoce esta opción: también va directo en la petición.
-    ...(options.explicitCache ? { prompt_cache_options: { mode: "explicit" } } : {}),
-  }
+  const reasoning = options.reasoning
+  const modelKwargs = reasoning
+    ? // También directo: LangChain no se lo envía a un modelo que no reconoce por su nombre.
+      { reasoning: { effort: reasoning } }
+    : {
+        // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
+        // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
+        ...(spec.reasoningEffort ? { reasoning_effort: spec.reasoningEffort } : {}),
+        // LangChain 1.5.3 no conoce esta opción: también va directo en la petición.
+        ...(options.explicitCache ? { prompt_cache_options: { mode: "explicit" } } : {}),
+      }
   return new ChatOpenAI({
     model: spec.modelName,
     apiKey: spec.apiKey,
     timeout: spec.timeoutMs,
     maxRetries: spec.maxRetries,
+    ...(reasoning ? { useResponsesApi: true } : {}),
+    ...(options.temperature !== undefined && !reasoning ? { temperature: options.temperature } : {}),
     ...(Object.keys(modelKwargs).length ? { modelKwargs } : {}),
     configuration: {
       ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),

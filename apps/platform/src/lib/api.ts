@@ -61,6 +61,40 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return (await response.json()) as T
 }
 
+/**
+ * Una respuesta que llega por líneas (NDJSON): cada línea se entrega a
+ * `onLine` a medida que llega. Un error antes de empezar va como en `apiFetch`.
+ */
+export async function apiLines(path: string, init: RequestInit, onLine: (line: unknown) => void): Promise<void> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { "content-type": "application/json", accept: "application/x-ndjson", ...contextHeaders(), ...init.headers },
+  })
+  if (!response.ok || !response.body) {
+    let shape: ApiErrorShape = {}
+    try {
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ""
+  for (;;) {
+    const { done, value } = await reader.read()
+    pending += decoder.decode(value, { stream: !done })
+    const lines = pending.split("\n")
+    pending = lines.pop() ?? ""
+    for (const line of lines) if (line.trim()) onLine(JSON.parse(line))
+    if (done) break
+  }
+  if (pending.trim()) onLine(JSON.parse(pending))
+}
+
 /** Descarga binaria autenticada (p. ej. un DICOM para el visor). */
 export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
   const response = await fetch(`${API_URL}${path}`, {

@@ -4,15 +4,22 @@
  *
  * Todo pide `reports.read`: ni caja ni el profesional lo ven. El periodo es una
  * opción cerrada (meses completos) o un rango de días; la sede es opcional.
- * Además: preguntarle a Argos (ADR 0070), las respuestas fijadas, las metas,
- * el resumen del lunes de cada persona y «Descargar» en CSV (ADR 0071).
+ * Además: preguntarle a Argos sobre las vistas del negocio (ADR 0075), las
+ * respuestas fijadas, las metas, el resumen del lunes de cada persona y
+ * «Descargar» en CSV (ADR 0071).
  */
-import { asAdminDecider, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
+import { askArgos, meterAiUse, type PlatformDecisions, type PlatformLlm, rerunArgos, routeArgos, routeByWords, showArgosAnswer } from "@odentia/agent"
 import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
-  answerReportQuery,
-  FIGURE_GROUPS,
+  ARGOS_DOWNLOAD_LIMIT,
+  ArgosQueryError,
+  argosAnswerCsv,
+  argosChoiceOf,
+  boundArgosQuery,
+  getAdminSettings,
+  getArgosAnswer,
+  getOrgLocale,
   getAgendaReport,
   getPatientReportList,
   getReportAdvice,
@@ -27,33 +34,28 @@ import {
   getReportPatients,
   getReportProfessionals,
   getReportSummary,
-  interpretReportQuestion,
+  isArgosPeriod,
   isPatientReportList,
-  keywordReportDecider,
-  listReportPinKeys,
+  listArgosPins,
   listReportPins,
   PATIENT_REPORT_LISTS,
-  pinReportAnswer,
-  prepareReportQuestion,
-  recordReportQuestionFailure,
-  REPORT_ASK_WORDS,
+  pinArgosAnswer,
   REPORT_GOAL_METRICS,
   REPORT_LISTS,
   REPORT_PERIOD_PATTERN,
-  reportAnswerCsv,
   reportCommissionsCsv,
   reportListCsv,
   reportProfessionalsCsv,
   type CsvFile,
-  type ReportInterpretationResult,
   type ReportQuery,
-  resolveReportQuestion,
+  runArgosQuery,
   ServiceError,
   setReportDigest,
   setReportGoal,
   unpinReportAnswer,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
+import { stream } from "hono/streaming"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -64,19 +66,45 @@ const reportQuery = z.object({
   branchId: z.uuid().optional(),
 })
 
-/** Una pregunta ya entendida: la que manda una opción de la respuesta o una respuesta fijada. */
-const askQuery = reportQuery.extend({
-  figure: z.string().min(1).max(60),
-  group: z.enum(FIGURE_GROUPS),
-  focus: z.string().max(60).nullable().optional(),
+/**
+ * Una pregunta al Argos de las vistas (ADR 0075). Desde Reportes llevan su
+ * periodo y su sede (D7); la anterior de la conversación va con su consulta
+ * (D3) y solo se le muestra al modelo: no se corre ni se guarda.
+ */
+const argosInput = z
+  .object({
+    text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga"),
+    screen: reportQuery.optional(),
+    previous: z.object({ text: z.string().trim().max(500), query: z.string().trim().max(4000) }).strict().nullable().optional(),
+    /** La fila ya la decidió el buscador (D1): no se paga otra vez a Jev. */
+    routed: z.boolean().optional(),
+  })
+  .strict()
+
+const argosRouteInput = z.object({ text: z.string().trim().min(2).max(500) }).strict()
+
+/** Una respuesta de Argos ya dada: la principal o una de las de seguir. */
+const argosAnswerRef = z
+  .object({ questionId: z.uuid(), option: z.number().int().min(0).max(2).nullable().optional(), patientId: z.uuid().optional() })
+  .strict()
+
+const argosPeriod = z.string().refine(isArgosPeriod, "Periodo no reconocido")
+
+/**
+ * Ver una respuesta con otro periodo, el segundo periodo (D15) o la sede
+ * (D13): sin valor, lo de la pregunta; `branchId: null`, todas las sedes.
+ */
+const argosChoiceInput = z
+  .object({ period: argosPeriod.optional(), other: argosPeriod.nullable().optional(), branchId: z.uuid().nullable().optional(), patientId: z.uuid().optional() })
+  .strict()
+
+/** Lo mismo en la dirección de la descarga: `branch=todas` es todas las sedes. */
+const argosChoiceQuery = z.object({
+  period: argosPeriod.optional(),
+  other: argosPeriod.optional(),
+  branch: z.union([z.uuid(), z.literal("todas")]).optional(),
+  patient: z.uuid().optional(),
 })
-
-const askInput = z.union([
-  reportQuery.extend({ text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga") }).strict(),
-  z.object({ query: askQuery }).strict(),
-])
-
-const pinInput = z.object({ figure: z.string().min(1).max(60), group: z.enum(FIGURE_GROUPS), focus: z.string().max(60).nullable().optional() }).strict()
 
 const goalInput = z
   .object({ amount: z.number().int("La meta va en números enteros").positive("La meta tiene que ser mayor que cero").nullable() })
@@ -164,43 +192,117 @@ export function createReportsRoute(deps: ReportsDeps) {
     )
   })
 
-  // --- Pregúntale a Argos (ADR 0070) ---------------------------------------------------
+  // --- Argos sobre las vistas del negocio (ADR 0075) -----------------------------------
 
   /**
-   * Una pregunta con palabras pasa por el modelo de decisión (solo el texto,
-   * nada de la clínica) y cuenta para el tope diario; una pregunta ya
-   * entendida (una opción que se tocó) no. Si el modelo no responde se dice y
-   * las cifras siguen a la vista.
+   * Jev decide la fila y ChatGPT 6 escribe la consulta; corre con la llave del
+   * rol de quien pregunta. Todo lo que se paga al proveedor queda medido con el
+   * origen `reportes`.
    */
-  app.post("/ask", async (c) => {
+  app.post("/argos", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
-    const parsed = askInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = argosInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const options = { billing: seesBilling(memberRole), can: (permission: string) => canAccess(memberRole, permission) }
-    return runService(c, 200, async () => {
-      const body = parsed.data
-      const screenOf = "text" in body ? { period: body.period, branchId: body.branchId } : undefined
-      const ready = await withOrgContext(deps.db, orgId, (tx) => prepareReportQuestion(tx, orgId, new Date(), screenOf))
-      if (!ready.enabled) return { kind: "apagado" as const, message: REPORT_ASK_WORDS.apagado }
-      if ("query" in body) return withOrgContext(deps.db, orgId, (tx) => answerReportQuery(tx, orgId, userId, body.query, options))
-      if (ready.roomLeft <= 0) return { kind: "tope" as const, message: REPORT_ASK_WORDS.tope }
-      let understood: ReportInterpretationResult
+    const body = parsed.data
+    const ask = (onStep?: (text: string) => void) =>
+      meterAiUse(deps.db, orgId, "reportes", () =>
+        askArgos(
+          deps.db,
+          { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey, ...(onStep ? { onStep } : {}) },
+          {
+            orgId,
+            userId,
+            memberRole,
+            text: body.text,
+            ...(body.screen ? { screen: body.screen } : {}),
+            previous: body.previous ?? null,
+            routed: body.routed === true,
+          },
+        ),
+      )
+    // Quien pide líneas (la pantalla) recibe cada paso a medida que pasa (D22) y al final la respuesta; si no, la respuesta entera.
+    if (!(c.req.header("accept") ?? "").includes("application/x-ndjson")) return runService(c, 200, () => ask())
+    c.header("content-type", "application/x-ndjson; charset=utf-8")
+    c.header("cache-control", "no-store")
+    return stream(c, async (out) => {
+      const send = (value: unknown) => out.write(`${JSON.stringify(value)}\n`)
       try {
-        understood = await meterAiUse(deps.db, orgId, "reportes", async () => {
-          const model = await createAdminDecisionModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions }, orgId)
-          // Con el modelo de demostración responde el doble determinista de los servicios.
-          return interpretReportQuestion(body.text, model ? asAdminDecider(model) : keywordReportDecider(), {
-            timezone: ready.timezone,
-            now: new Date(),
-            branches: ready.branches,
-            billing: options.billing,
-          })
-        })
-      } catch {
-        return withOrgContext(deps.db, orgId, (tx) => recordReportQuestionFailure(tx, orgId, userId))
+        const data = await ask((text) => void send({ step: text }))
+        await send({ data })
+      } catch (error) {
+        if (error instanceof ServiceError) await send({ ...errorBody(c, error.code, error.message), status: error.status })
+        else {
+          console.error(error)
+          await send({ ...errorBody(c, "INTERNAL", "No se pudo responder. Prueba de nuevo."), status: 500 })
+        }
       }
-      const screen = { period: body.period, branchId: body.branchId }
-      return withOrgContext(deps.db, orgId, (tx) => resolveReportQuestion(tx, orgId, userId, body.text, understood, screen, options))
+    })
+  })
+
+  /** La fila del buscador (D1): Jev decide con solo el texto si es una pregunta de los datos, de la Ayuda o algo para buscar. */
+  app.post("/argos/route", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = argosRouteInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const text = parsed.data.text
+    const argosDeps = { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey }
+    return runService(c, 200, async () => {
+      // Un teléfono, un documento o un número de historia se buscan: no viajan a ningún modelo. Con Argos apagado
+      // tampoco: las palabras dicen si va primero la Ayuda; lo demás, los resultados.
+      if (/^[\d\s+().-]+$/.test(text)) return { route: "buscar" as const }
+      const { enabled } = await withOrgContext(deps.db, orgId, (tx) => getAdminSettings(tx, orgId))
+      if (!enabled) return { route: routeByWords(text) === "ayuda" ? ("ayuda" as const) : ("buscar" as const) }
+      return { route: await meterAiUse(deps.db, orgId, "reportes", () => routeArgos(deps.db, argosDeps, orgId, text)) }
+    })
+  })
+
+  /** Fijar en el Resumen (D5): se guarda la consulta y sus frases; el Resumen la vuelve a correr cada vez. */
+  app.post("/argos/pins", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = argosAnswerRef.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, async (tx) =>
+        pinArgosAnswer(tx, orgId, userId, await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null, parsed.data.patientId)),
+      ),
+    )
+  })
+
+  /**
+   * Otro periodo o sede (D9): la misma consulta con otras fechas, la principal
+   * y las de seguir, sin el modelo y sin contar para el tope. Solo quien preguntó.
+   */
+  app.post("/argos/:questionId/rerun", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    const questionId = z.uuid().safeParse(c.req.param("questionId"))
+    if (!questionId.success) return validationError(c, questionId.error.issues)
+    const parsed = argosChoiceInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => rerunArgos(deps.db, { orgId, userId, memberRole, questionId: questionId.data, choice: parsed.data }))
+  })
+
+  /** Descargar (D5): la misma consulta, corrida otra vez con la llave de quien descarga y con el periodo y la sede que se ven. */
+  app.get("/argos/:questionId/csv", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    const raw = c.req.query("option")
+    const parsed = argosAnswerRef.safeParse({ questionId: c.req.param("questionId"), option: raw === undefined || raw === "" ? null : Number(raw) })
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const seen = argosChoiceQuery.safeParse({ period: c.req.query("period"), other: c.req.query("other"), branch: c.req.query("branch") })
+    if (!seen.success) return validationError(c, seen.error.issues)
+    const { branch, patient, ...periods } = seen.data
+    const choice = { ...periods, ...(branch === undefined ? {} : { branchId: branch === "todas" ? null : branch }) }
+    return sendCsv(c, async () => {
+      const { answer, zone, query } = await withOrgContext(deps.db, orgId, async (tx) => {
+        const answer = await getArgosAnswer(tx, orgId, userId, parsed.data.questionId, parsed.data.option ?? null, patient)
+        const zone = await getOrgLocale(tx, orgId)
+        return { answer, zone, query: boundArgosQuery(answer.sql, await argosChoiceOf(tx, orgId, answer, choice, zone, new Date())) }
+      })
+      // El mismo tope que los demás CSV de Reportes, no el de la respuesta en pantalla.
+      const result = await runArgosQuery(deps.db, { orgId, memberRole, query, rowLimit: ARGOS_DOWNLOAD_LIMIT }).catch((error: unknown) => {
+        throw error instanceof ArgosQueryError ? new ServiceError("ARGOS_QUERY", 409, error.message) : error
+      })
+      const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+      return argosAnswerCsv(answer.titulo, day, result, zone.timezone)
     })
   })
 
@@ -209,20 +311,37 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = reportQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const options = { billing: seesBilling(memberRole), can: (permission: string) => canAccess(memberRole, permission) }
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listReportPins(tx, orgId, parsed.data, options)))
-  })
-
-  // Solo qué está fijado, sin recalcular: lo lee cada respuesta del panel.
-  app.get("/pins/keys", async (c) => {
-    const { orgId } = orgContextOf(c)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listReportPinKeys(tx, orgId)))
-  })
-
-  app.post("/pins", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    const parsed = pinInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => pinReportAnswer(tx, orgId, userId, parsed.data, seesBilling(memberRole))))
+    return runService(c, 200, async () => {
+      const { figures, saved, zone } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        figures: await listReportPins(tx, orgId, parsed.data, options),
+        saved: await listArgosPins(tx, orgId),
+        zone: await getOrgLocale(tx, orgId),
+      }))
+      // Las del Argos de las vistas se vuelven a correr con la llave de quien mira, a la vez, con el periodo
+      // y la sede de arriba (D11); lo que es a hoy sigue a hoy.
+      const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" })
+      const choice = { period: parsed.data.period, branchId: parsed.data.branchId ?? null }
+      const argos = await Promise.all(
+        saved.map(async (pin) => {
+          const shown = await showArgosAnswer(deps.db, { orgId, memberRole, answer: pin.answer, zone, choice })
+          return {
+            id: pin.id,
+            pinnedBy: pin.pinnedBy,
+            pinnedOn: day.format(new Date(pin.pinnedAt)),
+            title: pin.answer.titulo,
+            screen: pin.answer.pantalla,
+            how: shown?.how ?? pin.answer.como,
+            // De dónde sale (D21); las de antes de la fase 6 eran consultas de Argos.
+            source: pin.answer.fuente ?? "argos",
+            partial: pin.answer.parcial === true,
+            missing: pin.answer.falta?.trim() || null,
+            period: shown?.period ?? null,
+            answer: shown,
+          }
+        }),
+      )
+      return { ...figures, argos }
+    })
   })
 
   app.delete("/pins/:id", async (c) => {
@@ -280,14 +399,6 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = reportQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return sendCsv(c, () => withOrgContext(deps.db, orgId, (tx) => reportCommissionsCsv(tx, orgId, parsed.data)))
-  })
-
-  app.get("/download/answer", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    const parsed = askQuery.safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const options = { billing: seesBilling(memberRole), can: (permission: string) => canAccess(memberRole, permission) }
-    return sendCsv(c, () => withOrgContext(deps.db, orgId, (tx) => reportAnswerCsv(tx, orgId, parsed.data, options)))
   })
 
   return app

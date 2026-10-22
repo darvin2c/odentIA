@@ -2,8 +2,8 @@
  * Semilla de materiales por servicio y venta desde «Cobrar» (ADR 0067): corre
  * después de la de Inventario. Deja dos servicios con sus materiales (así
  * «Empieza por estos 5» muestra el resto), la atención firmada de Rosa con sus
- * «Materiales usados» descontados, un cepillo vendido en Caja y otros dos
- * cobrados de los que devolvió uno (ADR 0068). Determinista e idempotente: la
+ * «Materiales usados» descontados, un cepillo vendido en Caja, otros dos
+ * cobrados de los que devolvió uno (ADR 0068) y un enjuague cobrado. Determinista e idempotente: la
  * purga de `seed-dev.ts` borra lo anterior.
  */
 import type { Db } from "@odentia/db"
@@ -26,13 +26,19 @@ export async function seedMaterialsAndSales(tx: Db, input: SeedMaterialsInput): 
   const products = await tx
     .select({ id: product.id, sku: product.sku })
     .from(product)
-    .where(and(eq(product.organizationId, orgId), inArray(product.sku, ["INS-GUANTE-NITRILO", "INS-ALGODON-ROLLO", "PRO-RESINA-A2", "VEN-CEPILLO-SUAVE"])))
+    .where(
+      and(
+        eq(product.organizationId, orgId),
+        inArray(product.sku, ["INS-GUANTE-NITRILO", "INS-ALGODON-ROLLO", "PRO-RESINA-A2", "VEN-CEPILLO-SUAVE", "VEN-ENJUAGUE-250"]),
+      ),
+    )
   const bySku = new Map(products.map((row) => [row.sku, row.id]))
   const gloves = bySku.get("INS-GUANTE-NITRILO")
   const cotton = bySku.get("INS-ALGODON-ROLLO")
   const resin = bySku.get("PRO-RESINA-A2")
   const brush = bySku.get("VEN-CEPILLO-SUAVE")
-  if (!gloves || !cotton || !resin || !brush) throw new Error("Faltan productos de la semilla de Inventario")
+  const rinse = bySku.get("VEN-ENJUAGUE-250")
+  if (!gloves || !cotton || !resin || !brush || !rinse) throw new Error("Faltan productos de la semilla de Inventario")
 
   const services = await tx
     .select({ id: serviceCatalog.id, code: serviceCatalog.code, name: serviceCatalog.name })
@@ -110,5 +116,19 @@ export async function seedMaterialsAndSales(tx: Db, input: SeedMaterialsInput): 
     paymentMethodId: cash.id,
     reason: "Lo trajo cerrado: prefería otro modelo",
     requestId: "50206010-0000-4000-8000-000000000202",
+  })
+
+  // Un enjuague vendido y pagado: «¿cuál es mi producto más vendido?» compara dos productos (issue 192).
+  const rinseSale = await createCharge(tx, orgId, ownerUserId, patientId, {
+    productId: rinse,
+    quantity: 1,
+    branchId,
+    requestKey: "semilla:venta-enjuague",
+  })
+  await collectCharge(tx, orgId, ownerUserId, patientId, {
+    branchId,
+    chargeIds: [rinseSale.id],
+    payments: [{ paymentMethodId: cash.id, amountCents: rinseSale.amountCents }],
+    requestId: "50206010-0000-4000-8000-000000000203",
   })
 }

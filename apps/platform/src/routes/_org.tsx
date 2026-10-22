@@ -60,6 +60,7 @@ import {
   useAgentPanelSummary,
 } from "../components/agent-panel"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
+import { ArgosPanel } from "../components/argos/argos-panel"
 import { HelpButton } from "../components/help-panel"
 import { HeaderHelpMenuItem } from "../components/header-more-menu"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
@@ -380,6 +381,9 @@ function OrgLayout() {
           >
             <Outlet />
           </HeaderUtilitiesProvider>
+          {/* Argos no tiene botón: lo abren el buscador y Reportes. Una sola vez aquí, no en la cabecera de cada
+              página: la conversación sigue al navegar (D4). */}
+          <ArgosPanel />
           </GlobalSearchProvider>
         </AgentPanelProvider>
       </SideDockProvider>

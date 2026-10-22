@@ -3,17 +3,19 @@ import { readFile } from "node:fs/promises"
 import type { Db } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patient, patientPayment } from "@odentia/db/schema/clinical"
+import { member } from "@odentia/db/schema/auth"
 import { contact } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
+import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
-import { call, expect, test, type OwnerFixture } from "./fixtures"
+import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * Fases 5 y 6 de Reportes (ADR 0070 y 0071): preguntarle a Argos, fijar la
- * respuesta en el Resumen, descargar, poner una meta y el resumen del lunes.
- * El modelo es el de demostración: entiende por palabras clave y no acredita a
- * ningún proveedor.
+ * Argos sobre los datos de la clínica (ADR 0075) desde el buscador y desde
+ * Reportes, con el periodo de cada respuesta (tableros 7 a 12), y la fase 6 de
+ * Reportes (ADR 0071): metas, descargas y el resumen del lunes. El modelo es el de demostración (`demoArgosPlan` y la fila por
+ * palabras): sirve para ver el recorrido, no acredita a ningún proveedor.
  */
 
 async function observe(page: Page, info: TestInfo, name: string) {
@@ -58,79 +60,154 @@ async function csvOf(page: Page, click: () => Promise<void>): Promise<{ name: st
   return { name: download.suggestedFilename(), body: await readFile(path, "utf8") }
 }
 
+const dialogOf = (page: Page) => page.getByRole("dialog", { name: "Buscar en todo" })
+/** El panel de Argos: la columna si cabe, el cajón si no (en el teléfono, la hoja de abajo). */
+const panelOf = (page: Page) =>
+  page.getByRole("region", { name: "Argos" }).or(page.getByRole("dialog", { name: "Argos" })).filter({ hasText: "Responde con los datos de la clínica" }).first()
+/** Las preguntas y respuestas del panel: la frase también la dice el aviso para el lector de pantalla. */
+const answersOf = (page: Page) => panelOf(page).getByRole("list", { name: "Preguntas y respuestas" })
+
+async function setRole(db: Db, owner: OwnerFixture, role: string) {
+  await db.update(member).set({ role }).where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
+}
+
+async function openSearch(page: Page, width: number, text: string) {
+  // La raíz marca la página como hidratada antes de que el layout escuche el teclado: se insiste mientras no abre.
+  const button = page.getByRole("button", { name: "Buscar en todo" })
+  await expect(async () => {
+    if (!(await dialogOf(page).isVisible())) {
+      if (width < 768) await button.click()
+      else await page.keyboard.press("Control+K")
+    }
+    await expect(dialogOf(page)).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 10_000 })
+  await page.getByRole("combobox", { name: "Buscar en todo" }).fill(text)
+}
+
 for (const width of [1440, 390]) {
-  test.describe(`Argos en Reportes a ${width}px`, () => {
-    test("pregunta, responde al lado con la cifra de la pestaña, se fija en el Resumen y se descarga", async ({ owner, fixtureDb }, info) => {
+  test.describe(`Argos a ${width}px`, () => {
+    test("desde el buscador: la fila de Argos, la respuesta al lado, seguir y cambiar el periodo sin preguntar otra vez, descargar y fijar", async ({ owner, fixtureDb }, info) => {
       await lastMonth(fixtureDb, owner)
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
-      await gotoHydrated(page, tenant(owner.org.slug, "/reports?period=mes_pasado"))
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
 
-      const field = page.getByLabel("Pregúntale a Argos")
-      await field.fill("¿Qué profesional tiene más inasistencias?")
-      await field.press("Enter")
-      const panel = page.getByRole(width === 390 ? "dialog" : "region", { name: "Argos" }).filter({ hasText: "Responde con las cifras de Reportes" }).first()
-      await expect(panel.getByText("¿Qué profesional tiene más inasistencias?")).toBeVisible()
-      await expect(panel.getByText(/: 25 % \(1 de 4 citas\)\. En toda la clínica fue 25 %/)).toBeVisible()
-      await expect(panel.getByText("Así lo calculé:")).toBeVisible()
+      // Una pregunta de los datos: la fila de Argos sale primero y queda elegida (D1).
+      await openSearch(page, width, "¿cuánto cobramos este mes?")
+      const row = dialogOf(page).getByRole("option", { name: /Preguntarle a Argos: «¿cuánto cobramos este mes\?»/ })
+      await expect(row).toHaveAttribute("aria-selected", "true")
+      await observe(page, info, "buscador")
+      await row.click()
+
+      const panel = panelOf(page)
+      const answers = answersOf(page)
+      // El periodo lo dice odentIA: en la frase y en el botón de arriba, con las palabras de Reportes.
+      await expect(answers.getByText(/^(Del|El) .+ se cobró S\/\s?400\.00\.$/)).toBeVisible()
+      await expect(answers.getByText("Así lo calculé:")).toBeVisible()
+      // De dónde sale (D21): el modelo de demostración consulta por su cuenta.
+      await expect(answers.getByText("Cálculo de Argos")).toBeVisible()
+      const period = panel.getByRole("button", { name: /^Periodo: .+, hasta hoy\. Cambiar$/ })
+      await expect(period).toBeVisible()
       await observe(page, info, "respuesta")
 
-      // Descargar trae las mismas filas que dibuja el gráfico, en CSV.
-      const file = await csvOf(page, () => panel.getByRole("button", { name: "Descargar" }).click())
-      expect(file.name).toMatch(/^no-vinieron-por-profesional-\d{4}-\d{2}\.csv$/)
-      expect(file.body.startsWith("﻿")).toBe(true)
-      expect(file.body).toContain("Profesional,No vinieron (%),Detalle")
+      // El botón para seguir ya viene corrido: cambia lo que se ve sin volver a preguntar.
+      const follow = panel.getByRole("button", { name: "Por medio de pago" })
+      await follow.click()
+      await expect(follow).toHaveAttribute("aria-pressed", "true")
+      await expect(answers.getByText(/^(Del|El) .+, por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
+      await expect(panel.getByRole("status")).toHaveText(/, por medio de pago: Efectivo/)
 
-      // Fijarla: queda en el Resumen, recalculada con la pantalla.
+      // Otro periodo: la misma consulta con otras fechas, sin preguntar otra vez. El mes pasado no tuvo cobros.
+      await period.click()
+      await page.getByRole("button", { name: /^Mes pasado/ }).click()
+      await expect(answers.getByText(/^En .+ no se cobró nada\.$/)).toBeVisible()
+      await expect(follow).toHaveAttribute("aria-pressed", "true")
+      const lastMonthButton = panel.getByRole("button", { name: /^Periodo: .+\. Cambiar$/ })
+      await expect(lastMonthButton).not.toHaveAccessibleName(/hasta hoy/)
+      await observe(page, info, "otro periodo")
+      await lastMonthButton.click()
+      await page.getByRole("button", { name: /^Este mes/ }).click()
+      await expect(answers.getByText(/^(Del|El) .+, por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
+
+      // Descargar trae esa misma respuesta, en CSV.
+      const file = await csvOf(page, () => panel.getByRole("button", { name: "Descargar" }).click())
+      expect(file.name).toMatch(/^lo-cobrado-por-medio-de-pago-\d{4}-\d{2}-\d{2}\.csv$/)
+      expect(file.body.startsWith("﻿")).toBe(true)
+      expect(file.body).toContain("Medio,Cobrado")
+      expect(file.body).toContain("Efectivo,400")
+
+      // Fijarla: el Resumen la vuelve a calcular cada vez.
       await panel.getByRole("button", { name: "Fijar en Resumen" }).click()
       await expect(panel.getByRole("button", { name: "Fijada en Resumen" })).toBeDisabled()
-      const pinned = page.getByRole("region", { name: "Fijadas" })
-      if (width === 1440) {
-        // Con la respuesta al lado, quitarla del Resumen vuelve a ofrecer «Fijar» en el panel.
-        await pinned.getByRole("button", { name: "Quitar" }).click()
-        await expect(panel.getByRole("button", { name: "Fijar en Resumen" })).toBeEnabled()
-        await panel.getByRole("button", { name: "Fijar en Resumen" }).click()
-        await expect(panel.getByRole("button", { name: "Fijada en Resumen" })).toBeDisabled()
-      }
       await page.keyboard.press("Escape")
-      await expect(pinned.getByRole("region", { name: "No vinieron, por profesional" })).toBeVisible()
-      await expect(pinned.getByText(/Caben 3 más/)).toBeVisible()
+      await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
+      const pinned = page.getByRole("region", { name: "Fijadas" })
+      await expect(pinned.getByText("Lo cobrado · Por medio de pago")).toBeVisible()
+      await expect(pinned.getByText(/Efectivo \(S\/\s?400\.00\)/)).toBeVisible()
+      // Sigue el periodo de arriba (D11) y lo dice.
+      await expect(pinned.getByText(/, hasta hoy$/)).toBeVisible()
+      await expect(pinned.getByText("Así lo calculé:")).toBeVisible()
       await observe(page, info, "fijada")
-
-      // Una opción de la respuesta pregunta sin escribir; «Quitar» la saca del Resumen.
       await pinned.getByRole("button", { name: "Quitar" }).click()
-      await expect(pinned.getByRole("region", { name: "No vinieron, por profesional" })).toHaveCount(0)
+      await expect(pinned.getByText("Lo cobrado · Por medio de pago")).toHaveCount(0)
     })
   })
 }
 
-test("lo que no sabe lo dice y ofrece enviarlo a odentIA; lo clínico no le toca", async ({ owner, fixtureDb }) => {
+test("la fila la decide la pregunta: lo de cómo se usa va primero a la Ayuda y un nombre deja primero los resultados", async ({ owner, fixtureDb }) => {
   await lastMonth(fixtureDb, owner)
   const page = owner.page
-  await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
-  await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
-  const field = page.getByLabel("Pregúntale a Argos")
-  await field.fill("¿Cuál es la edad promedio de mis pacientes?")
-  await field.press("Enter")
-  const panel = page.getByRole("region", { name: "Argos" }).filter({ hasText: "Responde con las cifras de Reportes" }).first()
-  await expect(panel.getByText("Todavía no sé responder eso")).toBeVisible()
-  await expect(panel.getByRole("heading", { name: "Lo que se envía" })).toBeVisible()
-  await panel.getByRole("button", { name: "Enviar a odentIA" }).click()
-  await expect(panel.getByText("Enviado a odentIA. La respuesta te llega en Ayuda.")).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+  await openSearch(page, 1440, "dónde configuro los horarios")
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toHaveAttribute("aria-selected", "true")
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Argos/ })).toBeVisible()
 
-  await panel.getByLabel("Escribe otra pregunta").fill("¿Cuántos pacientes tienen diabetes?")
-  await panel.getByLabel("Escribe otra pregunta").press("Enter")
-  await expect(panel.getByText(/Eso está en la historia clínica y no lo veo/)).toBeVisible()
+  await page.getByRole("combobox", { name: "Buscar en todo" }).fill("Ana Paz")
+  await expect(dialogOf(page).getByRole("option", { name: /Ana Paz/ }).first()).toHaveAttribute("aria-selected", "true")
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Argos: «Ana Paz»/ })).toBeVisible()
 })
 
-test("con Argos apagado el campo lo dice; las cifras siguen", async ({ owner, fixtureDb }) => {
+test("desde Reportes: apagado lo dice; encendido pregunta con su periodo y responde al lado", async ({ owner, fixtureDb }, info) => {
   await lastMonth(fixtureDb, owner)
   const page = owner.page
+  await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
   await expect(page.getByLabel("Pregúntale a Argos")).toBeDisabled()
   await expect(page.getByText(/Argos está apagado: enciéndelo para preguntarle/)).toBeVisible()
   await expect(page.getByRole("region", { name: "Las seis cifras" })).toBeVisible()
+
+  await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
+  await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
+  await page.getByLabel("Pregúntale a Argos").fill("¿cuántas citas hay mañana?")
+  await page.getByLabel("Pregúntale a Argos").press("Enter")
+  const panel = panelOf(page)
+  const answers = answersOf(page)
+  await expect(answers.getByText(/^Mañana hay \d+ citas\.$/)).toBeVisible()
+  // Las citas por venir son de hoy: no llevan periodo que cambiar (D12).
+  await expect(answers.getByText(/^A hoy, /)).toBeVisible()
+  // El periodo de Reportes sigue puesto para lo que se escriba en el panel, a la vista y con «Quitar».
+  await expect(panel.getByText(/^Con lo de Reportes/)).toBeVisible()
+  // Lo que no sabe lo dice, sin inventar una cifra.
+  await panel.getByLabel("Escribe otra pregunta").fill("¿cuántos pacientes tienen diabetes?")
+  await panel.getByLabel("Escribe otra pregunta").press("Enter")
+  await expect(answers.getByText("Con el modelo de demostración solo respondo lo cobrado, las citas y los pacientes nuevos.")).toBeVisible()
+  await observe(page, info, "reportes")
+  await panel.getByRole("button", { name: "Quitar" }).click()
+  await expect(panel.getByText(/^Con lo de Reportes/)).toHaveCount(0)
+})
+
+test("recepción no ve a Argos en el buscador y el servidor se lo niega", async ({ owner, fixtureDb }) => {
+  const page = owner.page
+  await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
+  await setRole(fixtureDb, owner, "reception")
+  await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+  await openSearch(page, 1440, "¿cuánto cobramos este mes?")
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
+  await expect(dialogOf(page).getByRole("option", { name: /Argos/ })).toHaveCount(0)
+  expect((await api(page, "POST", "/api/reports/argos", owner.org.slug, { text: "¿cuánto cobramos?" })).status).toBe(403)
+  expect((await api(page, "POST", "/api/reports/argos/route", owner.org.slug, { text: "¿cuánto cobramos?" })).status).toBe(403)
 })
 
 test("una meta del mes en curso: se pone, se ve el avance y vale desde este mes", async ({ owner, fixtureDb }, info) => {
@@ -181,13 +258,4 @@ test("el resumen del lunes lo prende cada persona y se apaga desde el enlace del
   await expect(visitor.getByText("Ya no te llega el resumen del lunes")).toBeVisible()
   await stranger.close()
   expect(await call<{ enabled: boolean }>(page, "GET", "/api/reports/digest", owner.org.slug)).toEqual({ enabled: false })
-})
-
-test("recepción no pregunta ni descarga: el servidor lo niega", async ({ createOwner }) => {
-  const owner = await createOwner("argos-permisos")
-  const page = owner.page
-  await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
-  // El dueño sí puede; con el rol de recepción, Reportes entero responde 403.
-  const asked = await call<{ kind: string }>(page, "POST", "/api/reports/ask", owner.org.slug, { text: "¿cuánto cobramos?", period: "este_mes" })
-  expect(asked.kind).toBe("respuesta")
 })

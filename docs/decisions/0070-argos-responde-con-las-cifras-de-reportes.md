@@ -1,6 +1,6 @@
 # 0070 · Argos responde con las cifras de Reportes
 
-Fecha: 2026-10-20 · Estado: aceptada · Amplía [0015](0015-administrador-lineas-prendidas-o-apagadas.md) sin contradecirla. Lienzo «Reportes odentIA · cómo va el negocio», página «Pregúntale al Administrador», aprobado entero el 2026-10-18 (decisiones 6, 7 y 8; fase 5).
+Fecha: 2026-10-20 · Estado: sustituida en parte por [0075](0075-argos-consulta-vistas-del-negocio.md) (el modelo ya no elige de un catálogo cerrado) · Amplía [0015](0015-administrador-lineas-prendidas-o-apagadas.md) sin contradecirla. Lienzo «Reportes odentIA · cómo va el negocio», página «Pregúntale al Administrador», aprobado entero el 2026-10-18 (decisiones 6, 7 y 8; fase 5).
 
 ## Problema
 

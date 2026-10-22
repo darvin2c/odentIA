@@ -139,6 +139,37 @@ it("ChatGPT 6 ejecuta herramientas con el SDK real de OpenAI y envía reasoning_
   }
 })
 
+it("con razonamiento, ChatGPT 6 va por /v1/responses con el nivel pedido y sin temperatura, y sus herramientas siguen", async () => {
+  const provider = await fakeProvider((n, response) => {
+    json(response, 200, {
+      id: `resp_${n}`,
+      object: "response",
+      created_at: 1,
+      status: "completed",
+      model: "gpt-6-luna",
+      output: [
+        { type: "function_call", id: "fc_1", call_id: "call_horario", name: "consultar_horario", arguments: '{"sede":"central"}', status: "completed" },
+      ],
+      usage: { input_tokens: 12, output_tokens: 30, total_tokens: 42, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 24 } },
+    })
+  })
+  try {
+    const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
+    const model = await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, reasoning: "high" })
+    if (!model.bindTools) throw new Error("El modelo no permite herramientas")
+    const reply = await model.bindTools([horario], { tool_choice: "consultar_horario" }).invoke([new HumanMessage("¿A qué hora abre la sede central?")])
+    expect(reply.tool_calls).toMatchObject([{ name: "consultar_horario", args: { sede: "central" } }])
+    expect(reply.usage_metadata).toMatchObject({ input_tokens: 12, output_tokens: 30, output_token_details: { reasoning: 24 } })
+    // gpt-6-luna no acepta herramientas con razonamiento en chat/completions: va por responses.
+    expect(provider.requests[0]?.url).toBe("/v1/responses")
+    expect(provider.requests[0]?.body).toMatchObject({ model: "gpt-6-luna", reasoning: { effort: "high" } })
+    expect(provider.requests[0]?.body).not.toHaveProperty("temperature")
+    expect(provider.requests[0]?.body).not.toHaveProperty("reasoning_effort")
+  } finally {
+    await provider.close()
+  }
+})
+
 it("ChatGPT 6 con caché explícita recibe el corte en la parte fija y devuelve lo que escribió en ella", async () => {
   const provider = await fakeProvider((n, response) => {
     json(response, 200, {

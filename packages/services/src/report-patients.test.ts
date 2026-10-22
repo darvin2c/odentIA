@@ -24,6 +24,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, setAppointmentStatus } from "./appointments.js"
+import { runArgosQuery } from "./argos-query.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { makeSigner } from "./clinical-test-fixture.js"
 import { createOpportunity } from "./opportunities.js"
@@ -47,6 +48,16 @@ setupTestDb()
 
 /** Lunes 12 de octubre de 2026, 10:00 en Lima. */
 const NOW = new Date("2026-10-12T15:00:00Z")
+/** El embudo con la vista de Argos (ADR 0075): debe dar lo mismo que Reportes. */
+const argosFunnel = async (orgId: string, where: string) =>
+  (
+    await runArgosQuery(appDb, {
+      orgId,
+      memberRole: "owner",
+      query: `select count(*) as sought, count(*) filter (where agendo) as booked, count(*) filter (where vino) as came, count(*) filter (where recibio_presupuesto) as budget, count(*) filter (where acepto) as accepted, count(*) filter (where pago) as paid from embudo where ${where}`,
+    })
+  ).rows[0]
+
 const DAY = 86_400_000
 
 async function clinic() {
@@ -167,6 +178,7 @@ it("el embudo y Oportunidades dan las mismas cifras: agendar, presentar y acepta
     paid: 1,
   })
   expect(funnel).toEqual({ sought: 5, booked: 4, came: 3, budget: 3, accepted: 1, paid: 1 })
+  expect(await argosFunnel(c.orgId, `primer_contacto_en >= timestamptz '${today.start.toISOString()}' and primer_contacto_en < timestamptz '${today.end.toISOString()}'`)).toEqual(funnel)
   // Las listas tienen tantas personas como su paso, y las que se cayeron, las que faltan.
   const list = (name: "funnel_budget" | "funnel_lost_booked" | "funnel_lost_accepted") =>
     c.run((tx) => getPatientReportList(tx, c.orgId, { period: "este_mes", list: name }))
@@ -206,6 +218,9 @@ it("el embudo sigue a las mismas personas: quien escribió en agosto y aceptó e
 
   const august = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-08" }, NOW))
   expect(august.funnel.current).toEqual({ sought: 2, booked: 1, came: 1, budget: 1, accepted: 1, paid: 0 })
+  // Argos cuenta a las mismas personas: el primer mensaje de Lucía, no su registro; Teresa no cuenta en septiembre.
+  expect(await argosFunnel(c.orgId, "dia >= date '2026-08-01' and dia < date '2026-09-01'")).toEqual(august.funnel.current)
+  expect(await argosFunnel(c.orgId, "dia >= date '2026-09-01' and dia < date '2026-10-01'")).toMatchObject({ sought: 1, booked: 0 })
   expect(august.channels).toEqual([
     { channel: "instagram", sought: 1, came: 0 },
     { channel: "whatsapp", sought: 1, came: 1 },

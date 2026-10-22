@@ -13,7 +13,7 @@ import { Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
-import { ArgosPanel, AskArgosField, useArgosConversation } from "../../components/reports/ask-argos"
+import { ArgosReportField } from "../../components/argos/argos-panel"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { AgentTab } from "../../components/reports/agent-tab"
 import { FinanceTab } from "../../components/reports/finance-tab"
@@ -126,8 +126,6 @@ function ReportsPage() {
     return found ? <AdviceNote advice={found} onOpen={setRecommendation} /> : undefined
   }
 
-  // La conversación con Argos sigue al cambiar de pestaña: vive en la pantalla, no se guarda.
-  const argos = useArgosConversation(query)
   const argosEnabled = advice.data?.data.enabled
 
   const setSearch = (patch: Partial<ReportsSearch>): void => void navigate({ search: (prev) => ({ ...prev, ...patch }) })
@@ -186,7 +184,18 @@ function ReportsPage() {
               </ChoiceSelect>
             ) : null}
             {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
-            <AskArgosField conversation={argos} enabled={argosEnabled} />
+            {/* Pregunta con el periodo y la sede de arriba (D7); la respuesta se abre en el panel de Argos. */}
+            <ArgosReportField
+              query={query}
+              label={
+                data
+                  ? [periodLabel(data.period, locale), branchList.length > 1 ? (branchList.find((branch) => branch.id === search.branch)?.name ?? "Todas las sedes") : null]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : undefined
+              }
+              enabled={argosEnabled}
+            />
           </div>
 
           {head.isError ? (
@@ -259,7 +268,6 @@ function ReportsPage() {
           )}
         </>
       )}
-      <ArgosPanel conversation={argos} onOpenList={openList} onOpenRecommendation={setRecommendation} />
       <ReportListDrawer list={search.lista ?? null} query={query} onClose={() => setSearch({ lista: undefined })} />
       <AdminRecommendationDrawer recommendationKey={recommendation} onClose={() => setRecommendation(null)} />
     </PageShell>
