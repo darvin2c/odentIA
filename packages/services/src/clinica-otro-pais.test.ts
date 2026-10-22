@@ -17,7 +17,7 @@ import {
   getOdontogram,
   getOdontogramPrint,
   listOdontogramAssessments,
-} from "./clinical.js"
+} from "./dental/odontogram.js"
 import { makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,

@@ -4,9 +4,6 @@ import {
 } from "@odentia/clinical"
 import {
   assertTreatmentSite,
-  emptyPeriodontalTooth,
-  pendingProbingWords,
-  type PeriodontalToothRecord,
   VALID_FDI_TEETH,
 } from "@odentia/dental"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
@@ -29,20 +26,12 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { odontogramEntry, periodontalChart, periodontalTooth, planItemFinding } from "@odentia/db/schema/dental"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAccess } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
-import {
-  type ClosingOdontogram,
-  closingOdontogramOf,
-  listEncounterDocuments,
-  type OdontogramAssessmentRow,
-  type PatientDocumentWithContext,
-  signClosingOdontogram,
-} from "./clinical.js"
+import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
@@ -73,13 +62,13 @@ import {
   discountEncounterMaterials,
 } from "./service-materials.js"
 import { countConsultationAction } from "./saas-actions.js"
-import { drawTreatedFinding, voidLeftFindings } from "./dental/treated-findings.js"
+import type { ProductParts } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & DentalSite
 export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect & DentalSite
 export type EncounterNoteRow = typeof clinicalNote.$inferSelect & DentalSite
-export type EncounterOdontogramRow = typeof odontogramEntry.$inferSelect
 /** Documento con vínculos, piezas y etiquetas de su revisión vigente. */
 export type EncounterDocumentRow = PatientDocumentWithContext
 export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite
@@ -159,7 +148,10 @@ export interface ListEncountersInput {
   status?: string
 }
 
-export interface EncounterDetail {
+/** La atención con todo lo suyo; el producto agrega lo propio (odentIA: `odontogramEntries`). */
+export type EncounterDetail = EncounterDetailBase & ProductParts
+
+export interface EncounterDetailBase {
   encounter: EncounterRow
   teeth: number[]
   /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
@@ -168,7 +160,6 @@ export interface EncounterDetail {
   diagnoses: EncounterDiagnosisRow[]
   /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
-  odontogramEntries: EncounterOdontogramRow[]
   documents: EncounterDocumentRow[]
   /** clinical_note con kind='adenda', orden ascendente determinista. */
   addenda: EncounterNoteRow[]
@@ -781,7 +772,6 @@ export async function getEncounterDetail(
     procedures,
     notes,
     addenda,
-    entries,
     documents,
     plannedItems,
     indicatedItems,
@@ -814,16 +804,6 @@ export async function getEncounterDetail(
       .from(clinicalNote)
       .where(and(childOf, eq(clinicalNote.kind, "adenda")))
       .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
-    tx
-      .select()
-      .from(odontogramEntry)
-      .where(
-        and(
-          eq(odontogramEntry.encounterId, encounterId),
-          eq(odontogramEntry.organizationId, orgId),
-        ),
-      )
-      .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id)),
     listEncounterDocuments(tx, orgId, patientId, encounterId),
     tx
       .select({ item: treatmentPlanItem })
@@ -864,7 +844,8 @@ export async function getEncounterDetail(
     procedures: procedures.map(withDentalSite),
     diagnoses: diagnoses.map(withDentalSite),
     notes: notes.map(withDentalSite),
-    odontogramEntries: entries,
+    // Lo del producto (odentIA: los hallazgos del odontograma de la atención).
+    ...(await (await productHooks(tx, orgId)).encounterDetailParts(tx, { orgId, patientId, encounterId })),
     documents,
     addenda: addenda.map(withDentalSite),
     plannedItems: plannedItems.map((link) => withDentalSite(link.item)),
@@ -1387,14 +1368,9 @@ export async function addEncounterProcedure(
         procedureId: row.id,
       },
     )
-    // Lo tratado queda dibujado: el servicio directo nace realizado.
-    await drawTreatedFinding(tx, orgId, actorUserId, patientId, encounterId, {
-      id: directPlanItemId,
-      serviceId,
-      toothNumber,
-      surfaces,
-      odontogramEntryId: input.odontogramEntryId ?? null,
-    })
+    // El servicio directo nace realizado: lo que su producto hace con un
+    // tratamiento realizado (odentIA: lo tratado queda dibujado).
+    await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1420,7 +1396,10 @@ export interface FinalizeBillingLine {
   reason: SkippedCharge["reason"] | null
 }
 
-export interface FinalizeEncounterResult {
+/** Lo que informa el cierre; el producto agrega lo suyo (odentIA: el odontograma que firmó). */
+export type FinalizeEncounterResult = FinalizeEncounterBase & ProductParts
+
+export interface FinalizeEncounterBase {
   encounter: EncounterRow
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
@@ -1432,11 +1411,6 @@ export interface FinalizeEncounterResult {
    * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
    */
   budget: AssembledBudget | null
-  /**
-   * El odontograma que firmó este cierre (solo en clínicas de Perú, si la
-   * atención cambió el gráfico), con su momento deducido.
-   */
-  odontogram: Pick<OdontogramAssessmentRow, "id" | "purpose"> | null
   /**
    * Los materiales que descontó el cierre (ADR 0067), con lo que quedó como
    * faltante. Null si la atención no tiene sede o no usó nada configurado.
@@ -1505,7 +1479,13 @@ async function acceptedBudgetLine(
 /** Lo que falta para cerrar una atención, en el orden de la historia clínica. */
 export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
 
-export interface ClosingCheck {
+/**
+ * «¿Se puede cerrar?». El producto agrega lo suyo, que informa y no bloquea
+ * (odentIA: el odontograma que se firmará y el periodontograma).
+ */
+export type ClosingCheck = ClosingCheckBase & ProductParts
+
+export interface ClosingCheckBase {
   ready: boolean
   missing: ClosingRequirement[]
   /**
@@ -1515,58 +1495,11 @@ export interface ClosingCheck {
    */
   consents: ConsentNeed[]
   /**
-   * En clínicas de Perú, el odontograma que este cierre firmará (su momento y
-   * lo que cambió), o null si la atención no cambió el gráfico o la clínica no
-   * firma odontogramas.
-   */
-  odontogram: ClosingOdontogram | null
-  /**
-   * El periodontograma de la atención, que queda fijo al firmarla (decisión 6),
-   * o null si no tiene. A medias no bloquea: se firma como parcial.
-   */
-  periodontal: ClosingPeriodontal | null
-  /**
    * Lo que se descontará al firmar (materiales de sus servicios × cantidad),
    * por producto y con la sede. Informa, no pide confirmar; null si la
    * atención no tiene sede o no hay nada que descontar.
    */
   materials: ClosingMaterials | null
-}
-
-export interface ClosingPeriodontal {
-  /** Piezas naturales e implantes que se sondean. */
-  teeth: number
-  implants: number
-  /** Lo que falta sondear en palabras («abajo por fuera, de la 43 a la 47»); null si está completo. */
-  pending: string | null
-}
-
-/** El periodontograma de la atención para el cierre: cuántas piezas y qué falta. */
-async function closingPeriodontalOf(tx: Db, orgId: string, encounterId: string): Promise<ClosingPeriodontal | null> {
-  const [chart] = await tx
-    .select({ id: periodontalChart.id, expectedTeeth: periodontalChart.expectedTeeth, implantTeeth: periodontalChart.implantTeeth })
-    .from(periodontalChart)
-    .where(and(eq(periodontalChart.organizationId, orgId), eq(periodontalChart.encounterId, encounterId)))
-    .limit(1)
-  if (!chart) return null
-  const rows = await tx
-    .select({
-      toothNumber: periodontalTooth.toothNumber,
-      skipped: periodontalTooth.skipped,
-      probingDepth: periodontalTooth.probingDepth,
-    })
-    .from(periodontalTooth)
-    .where(and(eq(periodontalTooth.organizationId, orgId), eq(periodontalTooth.chartId, chart.id)))
-  const stored = new Map(rows.map((row) => [row.toothNumber, row]))
-  const teeth: PeriodontalToothRecord[] = chart.expectedTeeth.map((tooth) => ({
-    ...emptyPeriodontalTooth(tooth),
-    ...(stored.get(tooth) ?? {}),
-  }))
-  return {
-    teeth: chart.expectedTeeth.length - chart.implantTeeth.length,
-    implants: chart.implantTeeth.length,
-    pending: pendingProbingWords(teeth, chart.expectedTeeth),
-  }
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1616,10 +1549,9 @@ export async function checkEncounterClosing(
   const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
     (need) => need.status !== "firmado",
   )
-  const odontogram = await closingOdontogramOf(tx, orgId, row.patientId, row.id)
-  const periodontal = await closingPeriodontalOf(tx, orgId, row.id)
   const materials = await closingMaterialsOf(tx, orgId, row)
-  return { ready: missing.length === 0, missing, consents, odontogram, periodontal, materials }
+  const product = await (await productHooks(tx, orgId)).closingParts(tx, { orgId, patientId: row.patientId, encounterId: row.id })
+  return { ready: missing.length === 0, missing, consents, materials, ...product }
 }
 
 export async function getEncounterClosing(
@@ -1723,10 +1655,16 @@ export async function finalizeEncounter(
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
-  await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
-  // En Perú, la atención que cambió el gráfico firma el odontograma con el
-  // mismo perfil y en el mismo paso (NTS 188, 5.3 y 5.10).
-  const odontogram = await signClosingOdontogram(tx, orgId, actorUserId, patientId, encounterId, signature)
+  // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
+  // firma el odontograma con el mismo perfil; NTS 188, 5.3 y 5.10).
+  const product = await (await productHooks(tx, orgId)).encounterFinalized(tx, {
+    orgId,
+    actorUserId,
+    patientId,
+    encounterId,
+    at: now,
+    signer: signature,
+  })
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
   // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
@@ -1933,13 +1871,13 @@ export async function finalizeEncounter(
     charges,
     skippedCharges,
     budget,
-    odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null,
     materials,
     billing: {
       chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
       lines: billingLines,
     },
+    ...product,
   }
 }
 
@@ -1982,65 +1920,6 @@ function cleanReason(reason: string | null | undefined): string {
   if (text.length < 1 || text.length > 2000)
     throw validation("El motivo debe tener 1–2000 caracteres")
   return text
-}
-
-/**
- * Hallazgos tratados al cerrar: cada indicación realizada en la atención que
- * nació de un hallazgo deja ese hallazgo como tratado (sigue en la historia,
- * pero ya no es un problema por tratar).
- */
-async function resolveTreatedFindings(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  encounterId: string,
-  at: Date,
-): Promise<void> {
-  const items = await tx
-    .select({ id: treatmentPlanItem.id, entryId: planItemFinding.odontogramEntryId })
-    .from(encounterPlanItem)
-    .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
-    .innerJoin(planItemFinding, eq(planItemFinding.planItemId, treatmentPlanItem.id))
-    .where(
-      and(
-        eq(encounterPlanItem.organizationId, orgId),
-        eq(encounterPlanItem.encounterId, encounterId),
-        eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.status, "realizado"),
-      ),
-    )
-  for (const item of items) {
-    if (!item.entryId) continue
-    const [resolved] = await tx
-      .update(odontogramEntry)
-      .set({ resolvedAt: at, resolvedBy: actorUserId, resolvedByPlanItemId: item.id })
-      .where(
-        and(
-          eq(odontogramEntry.id, item.entryId),
-          eq(odontogramEntry.organizationId, orgId),
-          eq(odontogramEntry.patientId, patientId),
-          isNull(odontogramEntry.resolvedAt),
-          isNull(odontogramEntry.voidedAt),
-        ),
-      )
-      .returning({ id: odontogramEntry.id })
-    if (resolved) {
-      await audit(
-        tx,
-        orgId,
-        actorUserId,
-        "odontogram.entry_resolved",
-        "odontogram_entry",
-        resolved.id,
-        {
-          patientId,
-          encounterId,
-          planItemId: item.id,
-        },
-      )
-    }
-  }
 }
 
 /**
@@ -2161,7 +2040,7 @@ async function voidProcedureRow(
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
       if (direct || item.status === "realizado")
-        await voidLeftFindings(tx, orgId, actorUserId, patientId, encounterId, item.id, reason, at)
+        await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
     }
   }
   await audit(
@@ -2286,24 +2165,8 @@ export async function voidEncounter(
         isNull(encounterDiagnosis.voidedAt),
       ),
     )
-  await tx
-    .update(odontogramEntry)
-    .set({
-      status: "voided",
-      voidedAt: at,
-      voidedBy: actorUserId,
-      voidReason: cascade,
-      updatedAt: at,
-    })
-    .where(
-      and(
-        eq(odontogramEntry.organizationId, orgId),
-        eq(odontogramEntry.patientId, patientId),
-        eq(odontogramEntry.encounterId, encounterId),
-        isNull(odontogramEntry.voidedAt),
-        ne(odontogramEntry.status, "voided"),
-      ),
-    )
+  // Lo que el producto registró en la atención (odentIA: sus hallazgos) también se anula.
+  await (await productHooks(tx, orgId)).encounterVoided(tx, { orgId, actorUserId, patientId, encounterId, at, reason: cascade })
   await tx
     .update(prescription)
     .set({

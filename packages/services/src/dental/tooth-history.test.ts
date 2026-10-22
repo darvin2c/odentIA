@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
-import { addOdontogramEntries } from "../clinical.js"
+import { addOdontogramEntries } from "./odontogram.js"
 import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { setupTestDb } from "../test-setup.js"

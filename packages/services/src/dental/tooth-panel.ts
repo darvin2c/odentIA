@@ -9,7 +9,7 @@
  */
 import { findingDefinition, type FindingDetails, isValidTooth } from "@odentia/dental"
 import type { Db } from "@odentia/db"
-import { addOdontogramEntries } from "../clinical.js"
+import { addOdontogramEntries } from "./odontogram.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { validation } from "../errors.js"
 import { addPlanItem } from "../plan.js"

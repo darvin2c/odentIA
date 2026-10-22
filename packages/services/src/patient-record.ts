@@ -56,7 +56,9 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
-import { odontogramLines, toothAndSurfaces } from "./clinical.js"
+import { toothAndSurfaces } from "./clinical.js"
+import type { RecordSection } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -101,7 +103,8 @@ export interface PatientRecord {
     diagnoses: Array<typeof encounterDiagnosis.$inferSelect & RecordSite & { title: string | null }>
     procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
   }>
-  odontogram: Array<{ tooth: number; label: string; surfaces: string[] }>
+  /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente). */
+  productSections: RecordSection[]
   planItems: Array<{ title: string; status: string; toothNumber: number | null }>
   prescriptions: Array<{ row: typeof prescription.$inferSelect; items: Array<typeof prescriptionItem.$inferSelect> }>
   consents: Array<typeof consentDocument.$inferSelect>
@@ -176,7 +179,7 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
     .where(and(byPatient(patientDocument), isNull(patientDocument.retiredAt)))
     .orderBy(asc(patientDocument.createdAt))
   const appointments = await tx.select().from(appointment).where(byPatient(appointment)).orderBy(asc(appointment.startsAt))
-  const odontogram = await odontogramLines(tx, orgId, patientId)
+  const productSections = await (await productHooks(tx, orgId)).recordSections(tx, { orgId, patientId })
   const planItems = await listPlanItems(tx, orgId, patientId)
   return {
     generatedAt: new Date(),
@@ -214,7 +217,7 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
         .map((d) => ({ ...d, ...toothAndSurfaces(d), title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
       procedures: procedures.filter((p) => p.encounterId === row.id).map((p) => ({ ...p, ...toothAndSurfaces(p) })),
     })),
-    odontogram,
+    productSections,
     planItems: planItems.map((item) => ({ title: item.title, status: item.status, toothNumber: item.toothNumber })),
     prescriptions: prescriptions.map((row) => ({ row, items: items.filter((i) => i.prescriptionId === row.id) })),
     consents,
@@ -341,14 +344,11 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
     if (row.status === "anulada" && row.voidReason) w.text(`Anulada: ${row.voidReason}`, { size: 8, color: MUTED })
   }
 
-  w.heading("Odontograma vigente")
-  if (!record.odontogram.length) w.text("Sin hallazgos registrados.")
-  else
-    w.list(
-      record.odontogram.map(
-        (t) => `Pieza ${t.tooth}: ${t.label}${t.surfaces.length ? ` (${t.surfaces.join(", ")})` : ""}`,
-      ),
-    )
+  for (const section of record.productSections) {
+    w.heading(section.title)
+    if (!section.lines.length) w.text(section.empty)
+    else w.list(section.lines)
+  }
 
   w.heading("Plan de tratamiento")
   if (!record.planItems.length) w.text("Sin tratamientos en el plan.")

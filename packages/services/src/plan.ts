@@ -29,12 +29,12 @@ import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
 import { serviceKindOf } from "./specialties.js"
+import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { siteColumns, withDentalSite } from "./dental/site.js"
 import { linkPlanItemFinding, type PlanItemFinding, withPlanDental, withPlanItemDental } from "./dental/plan-finding.js"
 import { templateDentalColumns } from "./dental/service-finding.js"
-import { drawTreatedFinding } from "./dental/treated-findings.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -1137,12 +1137,17 @@ export async function setPlanItemStatus(
     reason,
     encounterId: input.encounterId,
   })
-  // Lo tratado queda dibujado: lo que su servicio deja en la pieza (la resina,
-  // una restauración) se registra en esta atención, una sola vez.
-  const done = await withPlanItemDental(tx, orgId, updated)
+  // Lo que su producto hace con un tratamiento realizado (odentIA: lo que su
+  // servicio deja en la pieza se registra en esta atención, una sola vez).
   if (input.status === "realizado" && input.encounterId)
-    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, done)
-  return { ...done, decision: updated.decisionStatus as PlanItemDecision }
+    await (await productHooks(tx, orgId)).treatmentDone(tx, {
+      orgId,
+      actorUserId,
+      patientId,
+      encounterId: input.encounterId,
+      planItemId: updated.id,
+    })
+  return { ...(await withPlanItemDental(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
 }
 
 export async function revisePlanItem(

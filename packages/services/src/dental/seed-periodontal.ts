@@ -9,7 +9,7 @@ import type { Db } from "@odentia/db"
 import { encounter } from "@odentia/db/schema/clinical"
 import type { FurcationRecord } from "@odentia/dental"
 import { eq } from "drizzle-orm"
-import { addOdontogramEntries } from "../clinical.js"
+import { addOdontogramEntries } from "./odontogram.js"
 import { createEncounter, finalizeEncounter, updateEncounterDraft } from "../encounters.js"
 import { classifyPeriodontalChart, savePeriodontalTooth, startPeriodontalChart } from "./periodontal.js"
 

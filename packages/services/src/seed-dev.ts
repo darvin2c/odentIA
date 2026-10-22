@@ -105,14 +105,12 @@ import {
 import {
   addClinicalNote,
   addDeclaredAllergies,
-  addOdontogramEntries,
   correctDocumentContext,
-  createOdontogramAssessment,
   registerPatientDocument,
   retirePatientDocument,
   savePatientHealth,
-  voidOdontogramEntry,
 } from "./clinical.js"
+import { addOdontogramEntries, createOdontogramAssessment, voidOdontogramEntry } from "./dental/odontogram.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { blockContact, markSpam } from "./contact-screen.js"
@@ -196,6 +194,7 @@ import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-co
 import { seedClinicNoticesDemo, seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, quickAddServices, updateService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
+import type { DentalFinalizeParts } from "./dental/hooks.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask, settleTask, updateTask } from "./tasks.js"
 
@@ -2660,7 +2659,7 @@ await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
 // El cierre de su evaluación firmó solo el odontograma «Inicio del plan de
 // tratamiento» (clínica de Perú, NTS 188); el botón «Firmar odontograma» queda
 // para lo judicial, lo personal y el reingreso: Rosa pidió una copia firmada.
-if (cierreRosa.odontogram?.purpose !== "initial")
+if ((cierreRosa.odontogram as DentalFinalizeParts["odontogram"])?.purpose !== "initial")
   throw new Error("El cierre de Rosa debía firmar el odontograma de inicio del plan")
 await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
   purpose: "personal",
@@ -2920,7 +2919,7 @@ await createClinicalOrder(db, ORG_A, ANA_ID, {
 const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
 // Al firmar, el odontograma quedó firmado como «Inicio del plan de tratamiento».
-if (cierreLucia.odontogram?.purpose !== "initial")
+if ((cierreLucia.odontogram as DentalFinalizeParts["odontogram"])?.purpose !== "initial")
   throw new Error("La evaluación de Lucía debía firmar el odontograma de inicio del plan")
 await deliverBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id)
 await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
