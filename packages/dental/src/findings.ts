@@ -542,7 +542,11 @@ function timeOf(value: string | Date | null | undefined): number | undefined {
 }
 
 /**
- * Hallazgos vigentes a la fecha de corte (ISO; por defecto ahora).
+ * Hallazgos vigentes a la fecha de corte (ISO). Sin fecha, el estado actual:
+ * todo lo registrado, sin cortar por la hora. Cortar por «ahora» con el reloj
+ * del servidor dejaba fuera lo recién guardado cuando el reloj de la base va
+ * adelantado (microsegundos bastan): un implante recién registrado no llegaba
+ * al periodontograma.
  * El registro es append-only: coexisten todas las entradas válidas registradas
  * hasta la fecha; se excluyen las pendientes de revisión, las anuladas a esa
  * fecha (voidedAt o estado voided) y las tratadas a esa fecha (resolvedAt). Sin latest-wins por cara. Orden
@@ -552,8 +556,8 @@ export function activeFindingsAsOf<T extends FindingRecord>(
   history: readonly T[],
   iso?: string,
 ): T[] {
-  const cutoff = iso === undefined ? Date.now() : Date.parse(iso)
-  if (!Number.isFinite(cutoff)) return []
+  const cutoff = iso === undefined ? Number.POSITIVE_INFINITY : Date.parse(iso)
+  if (iso !== undefined && !Number.isFinite(cutoff)) return []
   return history
     .filter((record) => {
       const created = timeOf(record.createdAt)
