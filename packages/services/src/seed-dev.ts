@@ -3212,7 +3212,7 @@ await db.transaction(async (tx) => {
     kind: "corregir",
     requesterContactId: rosaContactId,
     channel: "clinica",
-    requestedOn: addCalendarDays(today, -20),
+    requestedOn: addCalendarDays(today, -6),
     said: "Me mudé",
   })
   await verifyDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, fix.id, { how: "documento" })

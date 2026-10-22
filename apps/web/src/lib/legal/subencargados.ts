@@ -1,98 +1,14 @@
 // Subencargados del tratamiento: proveedores que tratan datos de las clínicas por cuenta de odentIA.
+// La lista vive en `@odentia/auth/data-processors`, la misma que ve cada clínica en Protección de datos.
 // Al añadir o cambiar uno, actualiza LEGAL_UPDATED y avisa a las clínicas con la antelación del encargo.
+import { ALWAYS_PROCESSORS, type DataProcessor, OPTIONAL_PROCESSORS } from "@odentia/auth/data-processors"
 import { contactEmail } from "../site"
 import type { LegalDoc } from "./types"
 
-/** Proveedor, para qué, datos que trata, país o región. */
-const PLATAFORMA: string[][] = [
-  [
-    "Servidor VPS: [Por completar: proveedor]",
-    "Alojar la aplicación y la base de datos.",
-    "Todos los datos de la cuenta y de los pacientes.",
-    "[Por completar: país]",
-  ],
-  [
-    "Cloudflare, Inc. (Cloudflare R2)",
-    "Almacenar archivos: adjuntos, imágenes, documentos y audios de dictado.",
-    "Archivos que la clínica y sus pacientes suben o envían.",
-    "Estados Unidos [Por confirmar: región de almacenamiento]",
-  ],
-  [
-    "Correo transaccional por SMTP: [Por completar: proveedor]",
-    "Enviar correos del sistema: invitaciones, avisos, facturas.",
-    "Nombre y correo del destinatario y contenido del mensaje.",
-    "[Por completar: país]",
-  ],
-  [
-    "Jev",
-    "Modelo de decisión de la plataforma: entender qué pide cada mensaje para dirigirlo.",
-    "Texto de los mensajes recibidos.",
-    "[Por completar: país]",
-  ],
-  [
-    "OpenAI, L.L.C. (modelo de decisión)",
-    "Modelo de decisión de la plataforma: entender qué pide cada mensaje para dirigirlo.",
-    "Texto de los mensajes recibidos.",
-    "Estados Unidos",
-  ],
-  [
-    "OpenAI, L.L.C. (transcripción)",
-    "Pasar a texto las notas de voz que llegan por los canales y los dictados de la consulta.",
-    "Audios de las notas de voz y de los dictados, que pueden incluir datos de salud.",
-    "Estados Unidos",
-  ],
-  [
-    "Geoapify GmbH",
-    "Sugerir la dirección mientras se escribe en los datos de un paciente o en su registro.",
-    "Solo el texto de la dirección que se escribe, sin el nombre de la persona.",
-    "Alemania",
-  ],
-  [
-    "Google LLC (Google Maps Platform, Places)",
-    "Sugerir y ubicar la dirección de las sedes de la clínica.",
-    "Solo el texto de la dirección de la sede que se escribe.",
-    "Estados Unidos",
-  ],
-  [
-    "Embeddings: [Por completar: proveedor]",
-    "Convertir el conocimiento de la clínica en vectores para buscar en él.",
-    "Textos que la clínica carga como conocimiento y consultas de búsqueda.",
-    "[Por completar: país]",
-  ],
-]
-
-const SEGUN_CLINICA: string[][] = [
-  [
-    "OpenAI, L.L.C. («ChatGPT 6»)",
-    "Modelo de inteligencia artificial de los agentes, si la clínica los usa.",
-    "Conversaciones, dictados y datos de pacientes necesarios para la tarea, incluidos datos de salud.",
-    "Estados Unidos",
-  ],
-  [
-    "Meta Platforms, Inc. (WhatsApp Business, Instagram, Messenger)",
-    "Enviar y recibir mensajes por esos canales, si la clínica los conecta.",
-    "Nombre de perfil, número o identificador y contenido de los mensajes.",
-    "Estados Unidos [Por confirmar: entidad de Meta que corresponde según el país de la clínica]",
-  ],
-  [
-    "Telegram",
-    "Enviar y recibir mensajes por Telegram, si la clínica lo conecta.",
-    "Nombre de usuario, identificador y contenido de los mensajes.",
-    "Emiratos Árabes Unidos [Por confirmar: entidad y país de Telegram]",
-  ],
-  [
-    "Google LLC (Gmail)",
-    "Enviar y recibir correos desde la cuenta de la clínica, si la conecta.",
-    "Direcciones y contenido de los correos.",
-    "Estados Unidos",
-  ],
-  [
-    "Microsoft Corporation (Microsoft 365)",
-    "Enviar y recibir correos desde la cuenta de la clínica, si la conecta.",
-    "Direcciones y contenido de los correos.",
-    "Estados Unidos",
-  ],
-]
+/** Proveedor, para qué, datos que trata, país o región: de la lista compartida con la clínica. */
+const row = (p: DataProcessor): string[] => [p.name, p.purpose, p.data, p.country]
+const PLATAFORMA = ALWAYS_PROCESSORS.map(row)
+const SEGUN_CLINICA = OPTIONAL_PROCESSORS.map(row)
 
 const HEAD = ["Proveedor", "Para qué", "Datos que trata", "País o región"]
 
@@ -117,7 +33,7 @@ export const SUBENCARGADOS: LegalDoc = {
       id: "segun-clinica",
       title: "Proveedores que dependen de la clínica",
       blocks: [
-        "Solo intervienen si la clínica conecta el canal o usa los agentes. Un canal que la clínica no conecta, o un modelo que sus agentes no usan, no recibe ningún dato.",
+        "Solo intervienen si la clínica conecta el canal, usa los agentes o dicta en la atención. Un canal que la clínica no conecta, o un modelo que no usa, no recibe ningún dato.",
         {
           table: {
             caption: "Proveedores que intervienen según la configuración de la clínica",

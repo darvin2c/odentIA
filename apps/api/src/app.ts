@@ -51,6 +51,7 @@ import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
 import { createPeopleRoute } from "./routes/people.js"
+import { createDataProtectionRoute } from "./routes/data-protection.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
 import { createPromotionsRoute } from "./routes/promotions.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
@@ -727,6 +728,7 @@ export function createApp(deps: AppDeps) {
   const llm: PlatformLlm = deps.llm ?? { fake: true }
   guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
   guarded.route("/people", createPeopleRoute(crmDeps))
+  guarded.route("/data-protection", createDataProtectionRoute(crmDeps))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
