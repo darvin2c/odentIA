@@ -9,7 +9,8 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { conditionLabel, formatMoney, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
+import { formatMoney } from "@odentia/clinical"
+import { conditionLabel, surfaceLabel, surfacesForTooth } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -43,7 +44,7 @@ import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
 import { usePlanNextStep } from "./plan/plan-next"
 import { ServicePicker } from "./service-picker"
-import { ToothSelector } from "./tooth-selector"
+import { ToothSelector } from "../dental/tooth-selector"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",

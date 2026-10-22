@@ -1,11 +1,11 @@
-import { kindOfSpecialty, specialtyForKind, type TreatmentKind } from "@odentia/clinical"
+import { kindOfSpecialty, specialtyForKind, type TreatmentKind } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgSpecialty, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { validation } from "./errors.js"
-import { orgClinicalProfile } from "./locale.js"
+import { orgDentalProfile } from "./dental/profile.js"
 
 /**
  * Una sola lista de especialidades, la de la clínica (ADR 0039). Nace con las
@@ -21,7 +21,7 @@ import { orgClinicalProfile } from "./locale.js"
  * las claves que faltan. Se llama al crear la clínica.
  */
 export async function ensureClinicSpecialties(tx: Db, orgId: string): Promise<void> {
-  const { specialties } = await orgClinicalProfile(tx, orgId)
+  const { specialties } = await orgDentalProfile(tx, orgId)
   await tx
     .insert(orgSpecialty)
     .values(specialties.list.map((item) => ({ organizationId: orgId, key: item.key, name: item.name })))
@@ -37,7 +37,7 @@ export async function ensureClinicSpecialties(tx: Db, orgId: string): Promise<vo
 export async function librarySpecialtyIds(tx: Db, orgId: string, kinds: readonly string[]): Promise<Map<string, string>> {
   const wanted = [...new Set(kinds)]
   if (wanted.length === 0) return new Map()
-  const profile = await orgClinicalProfile(tx, orgId)
+  const profile = await orgDentalProfile(tx, orgId)
   const keyOfKind = new Map<string, string>()
   for (const kind of wanted) {
     const owner = specialtyForKind(profile, kind)
@@ -103,7 +103,7 @@ export async function serviceKindOf(
     .from(orgSpecialty)
     .where(and(eq(orgSpecialty.organizationId, orgId), eq(orgSpecialty.id, service.specialtyId)))
     .limit(1)
-  return kindOfSpecialty(await orgClinicalProfile(tx, orgId), row?.key)
+  return kindOfSpecialty(await orgDentalProfile(tx, orgId), row?.key)
 }
 
 /** A quién ofrece la agenda un servicio en una sede, si la regla aplica. */

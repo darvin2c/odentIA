@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { encodeDemoCtSlice, generateCbctPhantom } from "@odentia/clinical"
+import { encodeDemoCtSlice } from "@odentia/clinical"
+import { generateCbctPhantom } from "@odentia/dental"
 import { tenant } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"

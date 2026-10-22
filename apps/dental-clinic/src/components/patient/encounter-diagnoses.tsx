@@ -1,4 +1,5 @@
-import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel, surfaceLabel } from "@odentia/clinical"
+import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel } from "@odentia/clinical"
+import { surfaceLabel } from "@odentia/dental"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
@@ -8,7 +9,7 @@ import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { DiagnosisPicker } from "./diagnosis-picker"
-import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
+import { type ToothSite, ToothSiteSelector } from "../dental/tooth-site-selector"
 
 /** Presuntivo o definitivo (FHIR verificationStatus); «ya diagnosticado antes» lo marca el sistema. */
 const TYPES = DIAGNOSIS_VERIFICATION

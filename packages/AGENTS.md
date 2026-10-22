@@ -9,7 +9,8 @@ Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni dupli
 | `auth` | Identidad, membresías y permisos canónicos; ocultar UI no sustituye autorización. |
 | `channels` | Normalizar proveedores/capacidades; no decidir identidad clínica o reglas comerciales. |
 | `agent` | Contexto autorizado, razonamiento y herramientas; efectos mediante servicios y políticas. |
-| `clinical` | Utilidades clínicas compartidas; no una historia paralela ni otra capa de persistencia. |
+| `clinical` | Utilidades clínicas comunes a todos los productos; no una historia paralela ni otra capa de persistencia. Nunca importa `dental`. |
+| `dental` | Dominio dental puro (ADR 0079): odontograma, periodontograma, tipos de tratamiento y lo dental de cada país (`dentalProfileFor`). Lo común no lo importa; en `services` lo dental vive en `src/dental/`. |
 | `mail` | Correo transaccional de la plataforma; distinto del buzón omnicanal de una organización. |
 | `ui` | Primitivas visuales y accesibles sin negocio. |
 | `ui-patterns` | Composiciones reutilizables, con stories; las apps deciden sus datos y permisos. |

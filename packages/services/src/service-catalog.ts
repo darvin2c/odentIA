@@ -1,14 +1,16 @@
 import {
-  isTreatmentKind,
-  type LeavesFinding,
   type ProcedureCodingSnapshot,
   type ServiceListProfile,
+} from "@odentia/clinical"
+import {
+  isTreatmentKind,
+  type LeavesFinding,
   TREATMENT_KINDS,
   TREATMENT_SCOPES,
   type TreatmentKind,
   type TreatmentScope,
   validateLeavesFinding,
-} from "@odentia/clinical"
+} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   orgSpecialty,
@@ -25,6 +27,7 @@ import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
+import { orgDentalProfile } from "./dental/profile.js"
 import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
 import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn } from "./procedure-codings.js"
 
@@ -207,7 +210,7 @@ async function assertLeavesFinding(
   scope: string | null | undefined,
 ): Promise<LeavesFinding | null> {
   if (leaves === null || leaves === undefined) return null
-  const strictVariants = (await orgClinicalProfile(tx, orgId)).odontogram?.strictVariants ?? false
+  const strictVariants = (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
   const errors = validateLeavesFinding(leaves, { scope, strictVariants })
   if (errors.length) throw validation(errors.join(" "))
   const { condition, variant } = leaves as LeavesFinding

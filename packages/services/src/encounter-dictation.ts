@@ -3,10 +3,12 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
   isDiagnosisVerification,
+} from "@odentia/clinical"
+import {
   isValidTooth,
   surfaceLabel,
   surfacesForTooth,
-} from "@odentia/clinical"
+} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   DICTATION_KINDS,

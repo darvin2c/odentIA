@@ -1,11 +1,13 @@
 import {
+  parseVitals,
+} from "@odentia/clinical"
+import {
   assertTreatmentSite,
   emptyPeriodontalTooth,
-  parseVitals,
   pendingProbingWords,
   type PeriodontalToothRecord,
   VALID_FDI_TEETH,
-} from "@odentia/clinical"
+} from "@odentia/dental"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
@@ -71,7 +73,7 @@ import {
   discountEncounterMaterials,
 } from "./service-materials.js"
 import { countConsultationAction } from "./saas-actions.js"
-import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
+import { drawTreatedFinding, voidLeftFindings } from "./dental/treated-findings.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect

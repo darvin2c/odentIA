@@ -1,4 +1,4 @@
-import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import {
   Badge,
   Button,

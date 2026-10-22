@@ -1,5 +1,5 @@
 import { ContactScreenBanner } from "../../components/inbox-contact-screen"
-import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
+import { FDI_ADULT, FDI_CHILD } from "@odentia/dental"
 import {
   Button,
   ScrollArea,
@@ -32,9 +32,9 @@ import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { DocumentosSection } from "../../components/patient/documentos-panel"
 import { HistoriaTab } from "../../components/patient/historia-tab"
-import { OdontogramaTab } from "../../components/patient/odontograma-tab"
+import { OdontogramaTab } from "../../components/dental/odontograma-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
-import { PeriodontogramaTab } from "../../components/periodontal/periodontograma-tab"
+import { PeriodontogramaTab } from "../../components/dental/periodontal/periodontograma-tab"
 import { PlanTab } from "../../components/patient/plan-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { PersonChannels } from "../../components/person/person-channels"

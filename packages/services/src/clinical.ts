@@ -1,11 +1,8 @@
 import {
   ALLERGY_SEVERITIES,
   PATIENT_DOCUMENT_CATEGORIES,
-  activeFindingsAsOf,
   BLOOD_GROUPS,
   type BloodGroup,
-  type ClosingOdontogramPurpose,
-  closingOdontogramPurpose,
   codeAllergySubstance,
   DOSE_UNITS,
   type DoseUnit,
@@ -14,26 +11,31 @@ import {
   MEDICATION_FREQUENCIES,
   MEDICATION_FREQUENCY_LABELS,
   type MedicationFrequency,
-  type FindingDetails,
-  type FindingInput,
-  type FindingRecord,
   IMAGE_TYPE_LABELS,
   type ImageType,
   imageTypeCategory,
   isImageType,
-  isValidTooth,
-  MANUAL_SIGNED_ODONTOGRAM_PURPOSES,
   normalizeDrugText,
   normalizeTags,
   type RegistrationAnswers,
   REPORT_STATUSES,
   type ReportStatus,
   registrationAnswersSchema,
-  type SignedOdontogramPurpose,
-  validateFinding,
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
 } from "@odentia/clinical"
+import {
+  activeFindingsAsOf,
+  type ClosingOdontogramPurpose,
+  closingOdontogramPurpose,
+  type FindingDetails,
+  type FindingInput,
+  type FindingRecord,
+  isValidTooth,
+  MANUAL_SIGNED_ODONTOGRAM_PURPOSES,
+  type SignedOdontogramPurpose,
+  validateFinding,
+} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -66,7 +68,7 @@ import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
-import { orgClinicalProfile } from "./locale.js"
+import { orgDentalProfile } from "./dental/profile.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 
@@ -1266,7 +1268,7 @@ export async function listClinicalNotes(
 //
 // Numeración FDI y nomenclatura de la NTS 188 en todos los países; las siglas,
 // la variante obligatoria y el odontograma firmado solo en clínicas de Perú
-// (`orgClinicalProfile`, ADR 0036). La validación vive en `@odentia/clinical`
+// (`orgDentalProfile`, ADR 0036 y 0079). La validación vive en `@odentia/clinical`
 // (fail closed: condición desconocida, anatomía incompatible o datos
 // faltantes = error); el servicio añade tenant, paciente, atención y CIE-10.
 // Los hallazgos solo se registran dentro de una atención en borrador: así los
@@ -1327,7 +1329,7 @@ function coveredTeeth(record: FindingRecord): number[] {
 
 /** Con odontograma oficial (Perú) la variante es obligatoria; si no, opcional. */
 export async function orgStrictVariants(tx: Db, orgId: string): Promise<boolean> {
-  return (await orgClinicalProfile(tx, orgId)).odontogram?.strictVariants ?? false
+  return (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
 }
 
 /**
@@ -1659,7 +1661,7 @@ export async function createOdontogramAssessment(
   input: CreateAssessmentInput,
 ): Promise<OdontogramAssessmentRow> {
   await requirePatient(tx, orgId, patientId)
-  const official = (await orgClinicalProfile(tx, orgId)).odontogram
+  const official = (await orgDentalProfile(tx, orgId)).odontogram
   if (!official?.signedOdontogram) {
     throw new ServiceError(
       "SIGNED_ODONTOGRAM_UNAVAILABLE",
@@ -1748,7 +1750,7 @@ export async function closingOdontogramOf(
   patientId: string,
   encounterId: string,
 ): Promise<ClosingOdontogram | null> {
-  const official = (await orgClinicalProfile(tx, orgId)).odontogram
+  const official = (await orgDentalProfile(tx, orgId)).odontogram
   if (!official?.signedOdontogram) return null
   const added = await tx
     .select({

@@ -46,7 +46,7 @@ import {
   tomographySubmitLabel,
   useTomographyFlow,
 } from "./tomography-upload"
-import { ToothSelector } from "./tooth-selector"
+import { ToothSelector } from "../dental/tooth-selector"
 
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 

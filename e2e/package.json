@@ -13,6 +13,7 @@
     "@odentia/auth": "workspace:*",
     "@odentia/clinical": "workspace:*",
     "@odentia/db": "workspace:*",
+    "@odentia/dental": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "22.20.2",
     "better-auth": "1.7.4",

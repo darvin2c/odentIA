@@ -7,7 +7,7 @@
  * problemas.
  */
 
-import { isValidTooth, surfacesForTooth } from "@odentia/clinical"
+import { isValidTooth, surfacesForTooth } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"

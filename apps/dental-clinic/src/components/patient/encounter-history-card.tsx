@@ -6,7 +6,7 @@ import { apiFetch } from "../../lib/api"
 import { timeAgo } from "../../lib/crm"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
-import { SignedOdontogramFact } from "../odontogram-assessments"
+import { SignedOdontogramFact } from "../dental/odontogram-assessments"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
 

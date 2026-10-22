@@ -1,4 +1,5 @@
-import { budgetStateText, diagnosisCodeLabel, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { budgetStateText, diagnosisCodeLabel } from "@odentia/clinical"
+import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -30,7 +31,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
-import { latestPeriodontalBrief, type PeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
+import { latestPeriodontalBrief, type PeriodontalBrief, periodontalBriefsByEncounter } from "./dental/periodontal.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */

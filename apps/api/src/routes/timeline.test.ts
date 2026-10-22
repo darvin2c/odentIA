@@ -1,4 +1,4 @@
-import type { FindingDetails } from "@odentia/clinical"
+import type { FindingDetails } from "@odentia/dental"
 
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 

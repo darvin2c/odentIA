@@ -45,8 +45,9 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
-import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
+import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { conditionLabel, variantLabel } from "@odentia/dental"
+import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
 import { capitalize, missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import {
   ServiceMaterialsCost,

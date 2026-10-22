@@ -1,4 +1,5 @@
-import { formatMoney, isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
+import { formatMoney } from "@odentia/clinical"
+import { isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/dental"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { Check, CircleAlert, X } from "lucide-react"

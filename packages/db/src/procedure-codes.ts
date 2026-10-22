@@ -24,7 +24,7 @@
  * `seed:procedures`. Rol owner (bypasea RLS; el rol app solo lee). Los tests
  * lo invocan directo para no divergir del catálogo real.
  */
-import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/clinical"
+import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"

@@ -8,7 +8,7 @@ import {
   type ProfessionalProfileInput,
   saveProfessionalProfileApi,
 } from "../lib/encounters"
-import { useClinicalProfile } from "../lib/org"
+import { useDentalProfile } from "../lib/org"
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
@@ -35,7 +35,7 @@ export function ProfessionalProfileDrawer({
 }): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
-  const suggested = useClinicalProfile().professional
+  const suggested = useDentalProfile().professional
   const [values, setValues] = useState<Required<ProfessionalProfileInput>>(() => ({
     signatureName: profile?.signatureName ?? "",
     professionalTitle: profile?.professionalTitle || suggested?.title || "",

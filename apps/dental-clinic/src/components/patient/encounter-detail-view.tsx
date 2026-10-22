@@ -1,9 +1,10 @@
 import { label } from "../../lib/glossary"
-import { conditionLabel, diagnosisCodeLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, formatVitals } from "@odentia/clinical"
+import { conditionLabel, surfaceLabel } from "@odentia/dental"
 import { Badge, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { periodontalBlockSummary, useEncounterPeriodontal } from "../periodontal/encounter-periodontal"
+import { periodontalBlockSummary, useEncounterPeriodontal } from "../dental/periodontal/encounter-periodontal"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {

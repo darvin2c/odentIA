@@ -5,6 +5,7 @@ import {
   type DiagnosisSystemInfo,
   isDiagnosisSystem,
 } from "@odentia/clinical"
+import { type DentalCountryProfile, dentalProfileFor } from "@odentia/dental"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 
@@ -100,12 +101,21 @@ export function useOrgProfile() {
 
 /**
  * Lo que vale en las clínicas del país de esta (ADR 0036): documentos, seguro,
- * dirección y odontograma. Mientras carga, o sin país, el núcleo internacional:
+ * dirección y diagnósticos. Mientras carga, o sin país, el núcleo internacional:
  * nunca se muestra lo de un país que la clínica no eligió.
  */
 export function useClinicalProfile(): ClinicalCountryProfile {
   const profile = useOrgProfile()
   return clinicalProfileFor(profile.data?.countryCode)
+}
+
+/**
+ * Lo dental del país de esta clínica (ADR 0079): odontograma oficial,
+ * especialidades y título profesional. Mientras carga, o sin país, el núcleo.
+ */
+export function useDentalProfile(): DentalCountryProfile {
+  const profile = useOrgProfile()
+  return dentalProfileFor(profile.data?.countryCode)
 }
 
 /**

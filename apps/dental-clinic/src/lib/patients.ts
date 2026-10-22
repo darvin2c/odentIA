@@ -1,11 +1,13 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
-  activeFindingsAsOf,
   DIAGNOSIS_VERIFICATION_LABELS,
-  type FindingDetails,
   type MissingPersonDatum,
-  type SignedOdontogramPurpose,
 } from "@odentia/clinical"
+import {
+  activeFindingsAsOf,
+  type FindingDetails,
+  type SignedOdontogramPurpose,
+} from "@odentia/dental"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 

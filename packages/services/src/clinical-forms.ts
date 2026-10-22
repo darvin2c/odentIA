@@ -3,11 +3,13 @@ import {
   CONSENT_DECLARATION,
   type ConsentSections,
   consentSectionsToText,
-  isValidTooth,
   normalizeDrugText,
   parseConsentSections,
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
+import {
+  isValidTooth,
+} from "@odentia/dental"
 import {
   diagnosisCatalog,
   encounter,
