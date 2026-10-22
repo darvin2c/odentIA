@@ -49,6 +49,7 @@ import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.ind
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
 import { Route as OrgPeopleIndexRouteImport } from './routes/_org/people.index'
 import { Route as OrgPeoplePersonIdRouteImport } from './routes/_org/people.$personId'
+import { Route as OrgPeopleLockedRouteImport } from './routes/_org/people.locked'
 import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
 import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
 import { Route as OrgServicesPromotionsRouteImport } from './routes/_org/services.promotions'
@@ -282,6 +283,11 @@ const OrgPeoplePersonIdRoute = OrgPeoplePersonIdRouteImport.update({
   path: '/people/$personId',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgPeopleLockedRoute = OrgPeopleLockedRouteImport.update({
+  id: '/people/locked',
+  path: '/people/locked',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgServicesIndexRoute = OrgServicesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -486,6 +492,7 @@ export interface FileRoutesByFullPath {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/people/locked': typeof OrgPeopleLockedRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -556,6 +563,7 @@ export interface FileRoutesByTo {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/people/locked': typeof OrgPeopleLockedRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -630,6 +638,7 @@ export interface FileRoutesById {
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/_org/people/$personId': typeof OrgPeoplePersonIdRoute
+  '/_org/people/locked': typeof OrgPeopleLockedRoute
   '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/_org/services/promotions': typeof OrgServicesPromotionsRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
@@ -704,6 +713,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/people/$personId'
+    | '/people/locked'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -774,6 +784,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/people/$personId'
+    | '/people/locked'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -847,6 +858,7 @@ export interface FileRouteTypes {
     | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
     | '/_org/people/$personId'
+    | '/_org/people/locked'
     | '/_org/services/biblioteca'
     | '/_org/services/promotions'
     | '/_org/settings/agent'
@@ -1178,6 +1190,13 @@ declare module '@tanstack/react-router' {
       path: '/people/$personId'
       fullPath: '/people/$personId'
       preLoaderRoute: typeof OrgPeoplePersonIdRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/people/locked': {
+      id: '/_org/people/locked'
+      path: '/people/locked'
+      fullPath: '/people/locked'
+      preLoaderRoute: typeof OrgPeopleLockedRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/services/': {
@@ -1522,6 +1541,7 @@ interface OrgRouteChildren {
   OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
   OrgPeoplePersonIdRoute: typeof OrgPeoplePersonIdRoute
+  OrgPeopleLockedRoute: typeof OrgPeopleLockedRoute
   OrgAgentIndexRoute: typeof OrgAgentIndexRoute
   OrgContactsIndexRoute: typeof OrgContactsIndexRoute
   OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
@@ -1555,6 +1575,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
   OrgPeoplePersonIdRoute: OrgPeoplePersonIdRoute,
+  OrgPeopleLockedRoute: OrgPeopleLockedRoute,
   OrgAgentIndexRoute: OrgAgentIndexRoute,
   OrgContactsIndexRoute: OrgContactsIndexRoute,
   OrgPatientsIndexRoute: OrgPatientsIndexRoute,

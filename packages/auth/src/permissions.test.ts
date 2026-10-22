@@ -228,3 +228,10 @@ describe("tareas de toda la clínica", () => {
     }
   })
 })
+
+describe("historia bloqueada (ADR 0080)", () => {
+  it("solo propietario y administrador borran los datos de una persona y abren una historia bloqueada", () => {
+    for (const role of ["owner", "admin"]) expect(canAccess(role, "patients.erase")).toBe(true)
+    for (const role of ["reception", "clinician", "cashier", "member"]) expect(canAccess(role, "patients.erase")).toBe(false)
+  })
+})

@@ -553,6 +553,8 @@ export async function listAppointments(
   ]
   if (input.branchId) conditions.push(eq(appointment.branchId, input.branchId))
   if (input.patientId) conditions.push(eq(appointment.patientId, input.patientId))
+  // Una historia bloqueada no sale en la agenda (ADR 0080); solo en su ficha.
+  else conditions.push(sql`${patientPerson.recordLockedAt} is null`)
   if (input.patientIds?.length) conditions.push(inArray(appointment.patientId, input.patientIds))
   if (input.professionals?.length) {
     conditions.push(inArray(appointment.professionalUserId, input.professionals))

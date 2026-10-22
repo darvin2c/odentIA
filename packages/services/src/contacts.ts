@@ -155,6 +155,8 @@ export async function listContacts(
       personSearchCondition(q, { displayName: contact.displayName, email: contact.email, phone: contact.phone }),
     )
   if (active !== "all") conditions.push(eq(contact.isActive, active))
+  // Una historia bloqueada no sale en ninguna lista (ADR 0080).
+  conditions.push(sql`${contact.recordLockedAt} is null`)
   if (input.cursor) {
     const decoded = decodeListingCursor(input.cursor)
     if (!decoded) throw validation("Cursor inválido")

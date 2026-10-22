@@ -31,6 +31,8 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "ordenes",
   /** Descargó la historia completa (ADR 0080). */
   "descarga",
+  /** Abrió con motivo una historia bloqueada (ADR 0080). */
+  "apertura",
 ] as const
 export type ClinicalAccessResource = (typeof CLINICAL_ACCESS_RESOURCES)[number]
 

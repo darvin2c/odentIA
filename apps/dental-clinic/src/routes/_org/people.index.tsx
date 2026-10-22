@@ -30,6 +30,7 @@ import { NewPatientDrawer, type NewPatientTarget } from "../../components/patien
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
+import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { channelLabel } from "../../lib/channels"
 import { activeOrgLocale } from "../../lib/locale"
 import { hcLabel } from "../../lib/patients"
@@ -454,6 +455,7 @@ function PeoplePage() {
           </div>
         </>
       )}
+      <LockedRecordsLink />
       <NewPatientDrawer
         open={registering}
         onClose={() => {
@@ -464,5 +466,18 @@ function PeoplePage() {
       />
       <NewPersonDrawer open={creating} onClose={() => setCreating(false)} />
     </PageShell>
+  )
+}
+
+/** «Historias bloqueadas (3)», al final y solo para Administración (ADR 0080); sin ninguna, no aparece. */
+function LockedRecordsLink() {
+  const canSee = usePermission("patients.erase")
+  const query = useQuery({ queryKey: LOCKED_RECORDS_KEY, queryFn: fetchLockedRecords, enabled: canSee, retry: false })
+  const count = query.data?.length ?? 0
+  if (!canSee || count === 0) return null
+  return (
+    <Link to="/people/locked" className="self-start text-sm text-muted-foreground underline-offset-4 hover:underline">
+      Historias bloqueadas ({count})
+    </Link>
   )
 }

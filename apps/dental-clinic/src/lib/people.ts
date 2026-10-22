@@ -63,6 +63,8 @@ export interface PersonPage {
   phoneWhatsApp: PhoneWhatsApp
   email: string | null
   archived: boolean
+  /** Su historia está bloqueada (ADR 0080): solo llega aquí si Administración la abrió para leer. */
+  recordLocked?: boolean
   /** Spam o bloqueada (ADR 0054); nulo si no la ve quien mira. Ausente en respuestas antiguas en caché. */
   screen?: ContactScreenView | null
   createdAt: string

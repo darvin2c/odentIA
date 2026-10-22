@@ -71,6 +71,7 @@ import {
 import type { PatientFull, PatientSummary } from "../../lib/patients"
 import { personOfPatientKey, rememberPatientSection, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
+import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
 
 const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
 
@@ -233,6 +234,9 @@ function PersonPageRoute() {
         <LoadingState message="Cargando…" />
       </PageShell>
     )
+  // Historia bloqueada (ADR 0080): Administración ve por qué y la abre con motivo; los demás, 404.
+  // También al bloquearla con la página abierta, o al vencer la hora para leerla.
+  if (isRecordLocked(personQuery.error)) return <LockedRecordPage personId={personId} />
   if (!person || section === null)
     return (
       <PageShell>
@@ -458,6 +462,7 @@ function PersonPageRoute() {
           </p>
         </div>
       ) : null}
+      {person.recordLocked ? <LockedRecordNotice personId={person.id} /> : null}
       <PersonHeader
         person={person}
         detail={patientDetail}

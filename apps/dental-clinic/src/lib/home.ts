@@ -21,6 +21,7 @@ const DATA_REQUEST_PHRASE = {
   copia: "una copia de su historia",
   corregir: "corregir un dato",
   mensajes: "no recibir mensajes",
+  borrar: "borrar sus datos",
 } as const
 
 export interface HomeTextContext {

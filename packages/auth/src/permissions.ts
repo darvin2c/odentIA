@@ -70,6 +70,7 @@ export type Permission =
   | "budgets.send"
   | "finance.close"
   | "finance.admin"
+  | "patients.erase"
   | "tasks.all"
   | "catalog.read"
   | "inventory.stock"
@@ -109,6 +110,9 @@ const ALL_PERMISSIONS: Permission[] = [
   "budgets.send",
   "finance.close",
   "finance.admin",
+  // Borrar los datos de una persona a su pedido y abrir una historia
+  // bloqueada (ADR 0080): solo propietario y administrador.
+  "patients.erase",
   "tasks.all",
   "catalog.read",
   "inventory.stock",
@@ -197,6 +201,7 @@ function isPermission(permission: string): permission is Permission {
     permission === "budgets.send" ||
     permission === "finance.close" ||
     permission === "finance.admin" ||
+    permission === "patients.erase" ||
     permission === "tasks.all" ||
     permission === "catalog.read" ||
     permission === "inventory.stock" ||
@@ -263,6 +268,8 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/agenda", permissions: ["appointments.read"] },
   // La página de cada persona y la lista única (ADR 0029): cada bloque pide
   // su propio permiso al servidor; entrar es de quien ve a las personas.
+  // Historias bloqueadas (ADR 0080): solo Administración.
+  { prefix: "/people/locked", permissions: ["patients.erase"] },
   { prefix: "/people", permissions: ["patients.read"] },
   // La ficha del paciente redirige a su persona; la atención y las
   // impresiones siguen colgando de aquí.

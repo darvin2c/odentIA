@@ -353,6 +353,14 @@ export const contact = pgTable("contact", {
   /** Alguien del equipo dijo «No es spam»: nunca vuelve sola a Spam. */
   notSpamAt: timestamp("not_spam_at", { withTimezone: true }),
   notSpamByUserId: text("not_spam_by_user_id").references(() => user.id),
+  /**
+   * Historia bloqueada (ADR 0080, fase 2): a su pedido se borró lo no clínico
+   * y la historia se guarda porque la ley lo pide. Siempre archivada; no sale
+   * en búsquedas, agenda, listas ni reportes, y el agente no la ve. Solo
+   * Administración la abre, con motivo (`patient_record_opening`).
+   */
+  recordLockedAt: timestamp("record_locked_at", { withTimezone: true }),
+  recordLockedBy: text("record_locked_by").references(() => user.id),
   // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
   // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
   tags: text("tags").array().notNull().default(sql`'{}'`),
@@ -388,7 +396,13 @@ export const contact = pgTable("contact", {
     "contact_not_spam_check",
     sql`(${table.notSpamAt} IS NULL) = (${table.notSpamByUserId} IS NULL)`,
   ),
+  // Bloqueada es siempre archivada, y con quién lo hizo (ADR 0080).
+  check(
+    "contact_record_locked_check",
+    sql`${table.recordLockedAt} IS NULL OR (NOT ${table.isActive} AND ${table.recordLockedBy} IS NOT NULL)`,
+  ),
   index("contact_org_screen_idx").on(table.organizationId, table.screen).where(sql`"screen" IS NOT NULL`),
+  index("contact_org_locked_idx").on(table.organizationId).where(sql`"record_locked_at" IS NOT NULL`),
 ])
 
 export const contactIdentity = pgTable(
