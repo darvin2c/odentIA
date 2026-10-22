@@ -1,3 +1,4 @@
+import { siteColumns, toothNumberSql, toothOfRow } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
 import { user } from "@odentia/db/schema/auth"
@@ -537,7 +538,7 @@ export async function listImagingMeasurements(
       view: imagingMeasurement.view,
       points: imagingMeasurement.points,
       value: imagingMeasurement.value,
-      toothNumber: imagingMeasurement.toothNumber,
+      toothNumber: toothNumberSql(imagingMeasurement),
       createdAt: imagingMeasurement.createdAt,
       createdBy: imagingMeasurement.createdBy,
       createdByName: user.name,
@@ -592,7 +593,7 @@ export async function addImagingMeasurement(
       view: input.view,
       points: input.points.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
       value: input.value,
-      toothNumber: tooth,
+      ...siteColumns({ toothNumber: tooth }),
       createdBy: actorUserId,
     })
     .returning()
@@ -609,7 +610,7 @@ export async function addImagingMeasurement(
     view: row.view,
     points: row.points,
     value: row.value,
-    toothNumber: row.toothNumber,
+    toothNumber: toothOfRow(row),
     createdAt: row.createdAt,
     createdBy: row.createdBy,
     createdByName: named?.name ?? null,

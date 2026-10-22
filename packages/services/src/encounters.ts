@@ -1,3 +1,4 @@
+import { type DentalSite, ISO_3950, toothSiteCode } from "@odentia/dental"
 import {
   parseVitals,
 } from "@odentia/clinical"
@@ -9,6 +10,7 @@ import {
   VALID_FDI_TEETH,
 } from "@odentia/dental"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
+import { siteColumns, toothOfRow, withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -18,7 +20,7 @@ import {
   encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
-  encounterTooth,
+  encounterSite,
   odontogramEntry,
   patient,
   patientCharge,
@@ -76,13 +78,13 @@ import { countConsultationAction } from "./saas-actions.js"
 import { drawTreatedFinding, voidLeftFindings } from "./dental/treated-findings.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
-export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
-export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect
-export type EncounterNoteRow = typeof clinicalNote.$inferSelect
+export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & DentalSite
+export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect & DentalSite
+export type EncounterNoteRow = typeof clinicalNote.$inferSelect & DentalSite
 export type EncounterOdontogramRow = typeof odontogramEntry.$inferSelect
 /** Documento con vínculos, piezas y etiquetas de su revisión vigente. */
 export type EncounterDocumentRow = PatientDocumentWithContext
-export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect
+export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite
 
 export interface CreateEncounterInput {
   /**
@@ -590,9 +592,9 @@ export async function createEncounter(
     if (!row) throw new Error("No se pudo crear la atención")
     if (teeth.length > 0) {
       await tx
-        .insert(encounterTooth)
+        .insert(encounterSite)
         .values(
-          teeth.map((toothNumber) => ({ organizationId: orgId, encounterId: row.id, toothNumber })),
+          teeth.map((toothNumber) => ({ organizationId: orgId, encounterId: row.id, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })),
         )
     }
     if (acceptedPlans.length > 0) {
@@ -760,7 +762,7 @@ async function assertLinkablePlans(
         "El presupuesto del tratamiento no tiene una aceptación vigente",
       )
     }
-    accepted.push({ id: plan.id, toothNumber: plan.toothNumber })
+    accepted.push({ id: plan.id, toothNumber: toothOfRow(plan) })
   }
   return accepted
 }
@@ -788,12 +790,12 @@ export async function getEncounterDetail(
     diagnoses,
   ] = await Promise.all([
     tx
-      .select({ toothNumber: encounterTooth.toothNumber })
-      .from(encounterTooth)
+      .select({ siteSystem: encounterSite.siteSystem, siteCode: encounterSite.siteCode })
+      .from(encounterSite)
       .where(
-        and(eq(encounterTooth.encounterId, encounterId), eq(encounterTooth.organizationId, orgId)),
+        and(eq(encounterSite.encounterId, encounterId), eq(encounterSite.organizationId, orgId)),
       )
-      .orderBy(asc(encounterTooth.toothNumber)),
+      .orderBy(asc(encounterSite.siteCode)),
     tx
       .select()
       .from(encounterProcedure)
@@ -860,15 +862,15 @@ export async function getEncounterDetail(
   ])
   return {
     encounter: row,
-    teeth: teethRows.map((t) => t.toothNumber),
-    procedures,
-    diagnoses,
-    notes,
+    teeth: teethRows.map(toothOfRow).filter((tooth): tooth is number => tooth != null),
+    procedures: procedures.map(withDentalSite),
+    diagnoses: diagnoses.map(withDentalSite),
+    notes: notes.map(withDentalSite),
     odontogramEntries: entries,
     documents,
-    addenda,
-    plannedItems: plannedItems.map((link) => link.item),
-    indicatedItems,
+    addenda: addenda.map(withDentalSite),
+    plannedItems: plannedItems.map((link) => withDentalSite(link.item)),
+    indicatedItems: indicatedItems.map(withDentalSite),
   }
 }
 
@@ -1048,11 +1050,11 @@ export async function updateEncounterDraft(
     .returning()
   if (!updated) throw notFound("Atención")
   if (teeth !== undefined) {
-    await tx.delete(encounterTooth).where(eq(encounterTooth.encounterId, encounterId))
+    await tx.delete(encounterSite).where(eq(encounterSite.encounterId, encounterId))
     if (teeth.length > 0) {
       await tx
-        .insert(encounterTooth)
-        .values(teeth.map((toothNumber) => ({ organizationId: orgId, encounterId, toothNumber })))
+        .insert(encounterSite)
+        .values(teeth.map((toothNumber) => ({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })))
     }
   }
   await audit(tx, orgId, actorUserId, "encounter.updated", "encounter", encounterId, {
@@ -1300,11 +1302,8 @@ export async function addEncounterProcedure(
       organizationId: orgId,
       encounterId,
       serviceId,
-      toothNumber,
       scope,
-      surfaces,
-      quadrant,
-      arch,
+      ...siteColumns({ toothNumber, surfaces, quadrant, arch }),
       description,
       quantity,
       ...diagnosis,
@@ -1319,9 +1318,9 @@ export async function addEncounterProcedure(
     // La pieza tratada entra al set de la atención para que el filtro por
     // pieza del timeline la incluya aunque no estuviera al crear el borrador.
     await tx
-      .insert(encounterTooth)
-      .values({ organizationId: orgId, encounterId, toothNumber })
-      .onConflictDoNothing({ target: [encounterTooth.encounterId, encounterTooth.toothNumber] })
+      .insert(encounterSite)
+      .values({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })
+      .onConflictDoNothing({ target: [encounterSite.encounterId, encounterSite.siteSystem, encounterSite.siteCode] })
   }
   if (input.planItemId) {
     // Conserva el vínculo encounter_plan_item (pudo crearse al abrir la
@@ -1404,7 +1403,7 @@ export async function addEncounterProcedure(
     encounterId,
     planItemId: input.planItemId ?? null,
   })
-  return row
+  return withDentalSite(row)
 }
 
 /** Cargo omitido al cerrar: queda registrado para mostrarlo en el resumen. */
@@ -1977,7 +1976,7 @@ export async function addEncounterAddendum(
     patientId,
     encounterId,
   })
-  return row
+  return withDentalSite(row)
 }
 
 function cleanReason(reason: string | null | undefined): string {
@@ -2097,7 +2096,7 @@ async function voidProcedureRow(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  proc: EncounterProcedureRow,
+  proc: typeof encounterProcedure.$inferSelect,
   reason: string,
   at: Date,
 ): Promise<EncounterProcedureRow> {
@@ -2181,7 +2180,7 @@ async function voidProcedureRow(
       reason,
     },
   )
-  return voided
+  return withDentalSite(voided)
 }
 
 export async function voidEncounterProcedure(

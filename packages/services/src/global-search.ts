@@ -18,6 +18,7 @@
  *   respuestas: quien llama decide si la frase puede ir al proveedor.
  * - Buscar nunca identifica: un teléfono compartido trae a las dos personas.
  */
+import { ISO_3950 } from "@odentia/dental"
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, sql } from "drizzle-orm"
@@ -333,7 +334,9 @@ export async function searchEverything(
       order by n.created_at desc limit ${PER_TYPE}`)
     for (const row of notes) clinical(row, "nota", excerpt(String(row.note ?? ""), q), "notas")
     const diagnoses = await rows(sql`
-      select d.id, d.diagnosis_code, dc.title, d.tooth_number, null as at, p.id as patient_id, p.person_id
+      select d.id, d.diagnosis_code, dc.title,
+        case when d.site_system = ${ISO_3950} and d.site_code ~ '^[1-8][1-8]$' then d.site_code::int end as tooth_number,
+        null as at, p.id as patient_id, p.person_id
       from encounter_diagnosis d
       join patient p on p.organization_id = d.organization_id and p.id = d.patient_id
       left join diagnosis_code dc on dc.system_key = d.diagnosis_system and dc.code = d.diagnosis_code

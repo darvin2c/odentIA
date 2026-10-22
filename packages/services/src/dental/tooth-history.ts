@@ -1,3 +1,4 @@
+import { isTooth } from "./site.js"
 import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, isDiagnosisVerification } from "@odentia/clinical"
 import { isValidTooth } from "@odentia/dental"
 import type { Db } from "@odentia/db"
@@ -88,7 +89,7 @@ export async function getToothHistory(
         and(
           eq(encounterDiagnosis.organizationId, orgId),
           eq(encounterDiagnosis.patientId, patientId),
-          eq(encounterDiagnosis.toothNumber, toothNumber),
+          isTooth(encounterDiagnosis, toothNumber),
         ),
       ),
     tx
@@ -106,7 +107,7 @@ export async function getToothHistory(
         and(
           eq(encounterProcedure.organizationId, orgId),
           eq(encounter.patientId, patientId),
-          eq(encounterProcedure.toothNumber, toothNumber),
+          isTooth(encounterProcedure, toothNumber),
         ),
       ),
     tx
@@ -116,7 +117,7 @@ export async function getToothHistory(
         and(
           eq(treatmentPlanItem.organizationId, orgId),
           eq(treatmentPlanItem.patientId, patientId),
-          eq(treatmentPlanItem.toothNumber, toothNumber),
+          isTooth(treatmentPlanItem, toothNumber),
         ),
       ),
     listPatientDocuments(tx, orgId, patientId),
@@ -168,7 +169,7 @@ export async function getToothHistory(
       at: row.createdAt,
       title: description ?? row.diagnosisCode,
       code: diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode),
-      surfaces: row.surfaces,
+      surfaces: row.siteQualifiers,
       status: row.voidedAt ? "anulado" : row.status,
       detail:
         [
@@ -191,7 +192,7 @@ export async function getToothHistory(
       at: row.createdAt,
       title: row.description,
       code: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
-      surfaces: row.surfaces,
+      surfaces: row.siteQualifiers,
       status: row.voidedAt ? "anulado" : encounterStatus === "borrador" ? "en_curso" : "realizado",
       detail: null,
       encounterId: row.encounterId,

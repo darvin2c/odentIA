@@ -1,3 +1,4 @@
+import { toothNumberSql } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import {
   CONSENT_DECLARATION,
@@ -2684,7 +2685,7 @@ export async function getEncounterConsentNeeds(
       serviceId: encounterProcedure.serviceId,
       serviceName: serviceCatalog.name,
       description: encounterProcedure.description,
-      toothNumber: encounterProcedure.toothNumber,
+      toothNumber: toothNumberSql(encounterProcedure),
       planItemId: encounterProcedure.planItemId,
       diagnosisCode: encounterProcedure.diagnosisCode,
       diagnosisSystem: encounterProcedure.diagnosisSystem,
@@ -2705,7 +2706,7 @@ export async function getEncounterConsentNeeds(
       serviceId: treatmentPlanItem.serviceId,
       serviceName: serviceCatalog.name,
       title: treatmentPlanItem.title,
-      toothNumber: treatmentPlanItem.toothNumber,
+      toothNumber: toothNumberSql(treatmentPlanItem),
       diagnosisCode: treatmentPlanItem.diagnosisCode,
       diagnosisSystem: treatmentPlanItem.diagnosisSystem,
     })
@@ -2803,7 +2804,7 @@ export async function getEncounterConsentNeeds(
     .select({
       code: encounterDiagnosis.diagnosisCode,
       system: encounterDiagnosis.diagnosisSystem,
-      toothNumber: encounterDiagnosis.toothNumber,
+      toothNumber: toothNumberSql(encounterDiagnosis),
     })
     .from(encounterDiagnosis)
     .where(

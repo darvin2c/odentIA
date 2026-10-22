@@ -13,6 +13,7 @@ export * from "./treatment-templates.js"
 export * from "./periodontal.js"
 export * from "./cbct-demo.js"
 export * from "./country.js"
+export * from "./site.js"
 export type {
   FindingColorKind,
   FindingDefinition,

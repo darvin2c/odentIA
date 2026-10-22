@@ -8,6 +8,7 @@
  */
 
 import { isValidTooth, surfacesForTooth } from "@odentia/dental"
+import { siteColumns, withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
@@ -107,8 +108,7 @@ export async function addEncounterDiagnosis(
       diagnosisCode: found.code,
       diagnosisType: input.diagnosisType,
       previouslyDiagnosed,
-      toothNumber,
-      surfaces,
+      ...siteColumns({ toothNumber, surfaces }),
       note,
       createdBy: actorUserId,
     })
@@ -120,7 +120,7 @@ export async function addEncounterDiagnosis(
     diagnosisSystem: found.system,
     diagnosisCode: found.code,
   })
-  return row
+  return withDentalSite(row)
 }
 
 export async function voidEncounterDiagnosis(
@@ -164,7 +164,7 @@ export async function voidEncounterDiagnosis(
     encounterId,
     reason,
   })
-  return row
+  return withDentalSite(row)
 }
 
 /** Marca un diagnóstico como resuelto o lo reactiva; vale también en atenciones cerradas. */
@@ -193,7 +193,7 @@ export async function setDiagnosisStatus(
     .limit(1)
   if (!current) throw notFound("Diagnóstico")
   if (current.voidedAt) throw new ServiceError("ALREADY_VOIDED", 409, "El diagnóstico está anulado")
-  if (current.status === status) return current
+  if (current.status === status) return withDentalSite(current)
   const now = new Date()
   const [row] = await tx
     .update(encounterDiagnosis)
@@ -206,7 +206,7 @@ export async function setDiagnosisStatus(
     from: current.status,
     to: status,
   })
-  return row
+  return withDentalSite(row)
 }
 
 /**
@@ -258,7 +258,7 @@ export async function listPatientDiagnoses(
   return rows
     .filter((row) => row.encounterStatus !== "anulada")
     .map((row) => ({
-      ...row.diagnosis,
+      ...withDentalSite(row.diagnosis),
       description: row.description,
       encounterStartedAt: row.encounterStartedAt,
       authorName: row.authorName,

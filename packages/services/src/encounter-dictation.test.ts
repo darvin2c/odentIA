@@ -120,12 +120,12 @@ describe("dictado en la atención", () => {
 
     await confirm(diagnosis!.id)
     expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([
-      expect.objectContaining({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 }),
+      expect.objectContaining({ diagnosisCode: "K02.1", diagnosisType: "provisional", siteSystem: "ISO-3950", siteCode: "16" }),
     ])
 
     await confirm(plan!.id)
     const items = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.planId, fx.plan.id))
-    expect(items).toEqual([expect.objectContaining({ serviceId: fx.service.id, toothNumber: 16, sourceEncounterId: fx.encounter.id })])
+    expect(items).toEqual([expect.objectContaining({ serviceId: fx.service.id, siteSystem: "ISO-3950", siteCode: "16", sourceEncounterId: fx.encounter.id })])
 
     // Falta elegir la prestación: no se confirma hasta que el odontólogo la elija.
     await expect(confirm(pending!.id)).rejects.toMatchObject({ code: "SUGGESTION_NEEDS_REVIEW" })
@@ -246,7 +246,7 @@ describe("dictado en la atención", () => {
     expect(await fx.run((tx) => countConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toBe(0)
     await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, plan!.id))
     expect(await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.planId, fx.plan.id))).toEqual([
-      expect.objectContaining({ serviceId: fx.service.id, toothNumber: 26, detail: "Con aislamiento" }),
+      expect.objectContaining({ serviceId: fx.service.id, siteSystem: "ISO-3950", siteCode: "26", detail: "Con aislamiento" }),
     ])
     expect(await fx.run((tx) => countConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toBe(1)
     // La auditoría cuenta correcciones y descartes, sin texto.
