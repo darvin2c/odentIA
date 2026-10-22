@@ -163,7 +163,7 @@ const planSchema = z.object({
 export type ArgosPlan = z.infer<typeof planSchema>
 
 const RULES = `Eres Argos, de odentIA: respondes preguntas sobre el negocio de una clínica dental con los datos de las vistas de abajo. Trabajas por pasos, con tus herramientas, como alguien que analiza datos:
-1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
+1. buscar_nombres: si la pregunta nombra algo de la clínica (una especialidad, un servicio, una sede, alguien del equipo, un producto, una promoción) que no está tal cual en «Los nombres de esta clínica», o a un paciente, búscalo. Un paciente se filtra con paciente_id = :paciente.
 2. calcular: si una cifra oficial (la lista de abajo) responde la pregunta, pídela con su clave, sus cortes y sus filtros: es la misma cuenta de Reportes y nunca se arma a mano. Solo si ninguna sirve, escribe tu consulta (una sola sentencia PostgreSQL de solo lectura sobre las vistas, nunca otras tablas). Puedes pedir varios cálculos a la vez.
 3. Mira lo que salió: llega sin personas («Paciente 1»). Si no cuadra con la pregunta (un cero o un vacío donde debería haber datos, un nombre que no está, otro periodo), corrige. Lo que no sale en el resultado (una sede, alguien del equipo o un servicio sin filas) no tiene datos en el periodo: dilo así en la frase («la Sede Surco no tiene cobros») y responde lo demás; eso no es no_existe.
 4. responder: el id del cálculo que responde y una frase con huecos que odentIA llena. Nunca escribas una cifra del resultado, aunque la veas: las cifras salen solo de los huecos. Para juntar cifras de varios cálculos del mismo periodo, pon sus ids («c1, c2») y nombra las columnas de los demás con su id delante: {c2_te_deben_dinero}. Dos listas se juntan por lo que comparten (por profesional con por profesional).
@@ -186,7 +186,7 @@ Qué contar:
 - Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
 - Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
 - Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
-- no_existe es solo para lo de «Lo que odentIA no registra», lo clínico (diagnósticos, enfermedades, alergias, la historia clínica) o lo que ninguna vista tiene: antes, mira si se arma con las vistas y las cifras de abajo. Va sin cálculo: dilo con palabras simples y, si hay algo cercano que sí existe, calcúlalo y ponlo en calculo_cercano con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: una parecida se dice como lo cercano.
+- no_existe es solo para lo de «Lo que odentIA no registra», lo que no puedes consultar o lo que ninguna vista tiene: antes, mira si se arma con las vistas y las cifras de abajo. Va sin cálculo: dilo con palabras simples y, si hay algo cercano que sí existe, calcúlalo y ponlo en calculo_cercano con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: una parecida se dice como lo cercano.
 - «odentIA no registra» solo para lo de «Lo que odentIA no registra»: lo que no está en tus vistas puede estar en odentIA (el texto de una tarea, el motivo de una ausencia…), así que dilo como «eso no lo puedo consultar», nunca como que no se registra.
 - Un consejo, una prioridad, una causa o un juicio (qué hacer, qué priorizar, por qué pasó algo): odentIA no aconseja ni sabe causas. Tipo parcial: la frase lo dice primero, en pocas palabras («Qué hacer lo decides tú; lo registrado que sirve para decidirlo:», «No sé por qué bajaron; lo que cambió:»), y sigue con cifras de las vistas sobre ese tema, nunca con una recomendación ni con una cifra que las vistas no tienen (oportunidades «perdidas», montos estimados). Para una causa, las cifras de los dos periodos y lo que más cambió entre ellos, sin decir que eso es la causa. «falta» dice que odentIA no da consejos ni sabe causas.
 
@@ -565,6 +565,7 @@ export async function askArgos(
       ["especialidad", ready.names.especialidades],
       ["servicio", ready.names.servicios.map((service) => service.name)],
       ["producto", ready.names.productos],
+      ["promoción", ready.names.promociones],
     ]
     for (const text of texts.map((item) => item.trim()).filter(Boolean).slice(0, 6)) {
       const found = kinds.flatMap(([kind, list]) => {
@@ -750,7 +751,7 @@ export async function askArgos(
       result = calc.result
       binding = calc.binding
       const holes = unknownArgosHoles(result.rows.length ? full.frase : full.frase_vacia, result, binding.period?.words ?? {})
-      if (holes.length) return { problem: `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas de ${calc.id}`, code: "HUECOS" }
+      if (holes.length) return { problem: holesProblem(holes, result, calc.id), code: "HUECOS" }
     } else {
       const outcome = await attempt(plan)
       if (!("result" in outcome)) return outcome
@@ -1067,6 +1068,12 @@ export async function showArgosAnswer(
   }
 }
 
+/** Los huecos que no existen y los que sí: con eso el modelo corrige la frase en el turno siguiente, sin adivinar. */
+function holesProblem(holes: string[], result: Pick<ArgosQueryResult, "columns">, where: string): string {
+  const usable = result.columns.map((column) => column.name).filter((name) => !/(^|_)id$/.test(name))
+  return `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas de ${where}; sus columnas son ${usable.map((name) => `{${name}}`).join(", ") || "ninguna"}, y además {lista}, {filas}, {periodo} y, si compara, {periodo_antes}`
+}
+
 /** Pone el periodo y la sede en una consulta del plan y la corre: su resultado o el problema que se le devuelve al modelo (sin datos). */
 async function runPlan(
   run: (query: string) => Promise<ArgosQueryResult>,
@@ -1078,7 +1085,7 @@ async function runPlan(
   try {
     const result = await run(bound.sql)
     const holes = unknownArgosHoles(result.rows.length ? plan.frase : plan.frase_vacia, result, binding.period?.words ?? {})
-    return holes.length ? { problem: `la frase usa ${holes.map((hole) => `{${hole}}`).join(", ")}, que no son columnas del resultado`, code: "HUECOS" } : { result }
+    return holes.length ? { problem: holesProblem(holes, result, "el resultado"), code: "HUECOS" } : { result }
   } catch (error) {
     if (!(error instanceof ArgosQueryError) || error.code === "PERMISO") throw error
     return { problem: error.message, code: error.code }

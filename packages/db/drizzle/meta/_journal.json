@@ -407,6 +407,13 @@
       "when": 1792543670782,
       "tag": "0057_argos_equipo_ausencias_y_primera_sede",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792543670783,
+      "tag": "0058_argos_detalle_de_compras_y_espera_respuesta",
+      "breakpoints": true
     }
   ]
 }

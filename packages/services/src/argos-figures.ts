@@ -17,6 +17,7 @@ import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { orgSpecialty } from "@odentia/db/schema/clinical"
 import { product } from "@odentia/db/schema/inventory"
+import { promotion } from "@odentia/db/schema/promotions"
 import { and, asc, eq } from "drizzle-orm"
 import { listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
@@ -78,6 +79,19 @@ const TIME_CUTS: Partial<Record<ArgosCut, string>> = {
   mes: "date_trunc('month', dia)::date",
   semana: "date_trunc('week', dia)::date",
   dia_semana: "(array['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'])[extract(isodow from dia)::int]",
+}
+
+/**
+ * Lo de antes, corrido a las fechas de ahora: al comparar por mes, semana o día,
+ * enero de 2025 se junta con enero de 2026 (o setiembre con octubre). La
+ * distancia es la que hay entre el primer día de cada tramo: un año, un mes, 7
+ * días. El día de la semana y la hora ya coinciden solos.
+ */
+const SHIFT = "age(:dia_desde, :dia_desde_antes)"
+const SHIFTED_TIME_CUTS: Partial<Record<ArgosCut, string>> = {
+  mes: `date_trunc('month', (dia + ${SHIFT})::date)::date`,
+  semana: `date_trunc('week', (dia + ${SHIFT})::date)::date`,
+  dia: `(dia + ${SHIFT})::date`,
 }
 
 /** Una fila sin nombre en un corte de texto se dice así; también junta lo de ahora con lo de antes. */
@@ -1378,11 +1392,13 @@ export interface ArgosNames {
   especialidades: string[]
   servicios: Array<{ name: string; specialty: string | null }>
   productos: string[]
+  /** Las promociones, vigentes o no, como en la vista `promociones`. */
+  promociones: string[]
 }
 
 export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Promise<ArgosNames> {
   const seesStock = argosViewsOf(key).some((view) => view.name === "inventario")
-  const [branches, team, specialties, services, products] = await Promise.all([
+  const [branches, team, specialties, services, products, promotions] = await Promise.all([
     listArgosBranches(tx, orgId),
     tx
       .selectDistinct({ name: user.name })
@@ -1403,6 +1419,7 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
           .where(and(eq(product.organizationId, orgId), eq(product.isActive, true)))
           .orderBy(asc(product.name))
       : Promise.resolve([]),
+    tx.selectDistinct({ name: promotion.name }).from(promotion).where(eq(promotion.organizationId, orgId)).orderBy(asc(promotion.name)),
   ])
   return {
     sedes: branches.map((item) => item.name),
@@ -1410,14 +1427,16 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
     especialidades: specialties.map((item) => item.name),
     servicios: services.map((item) => ({ name: item.name, specialty: item.specialty })),
     productos: products.map((item) => item.name),
+    promociones: promotions.map((item) => item.name),
   }
 }
 
-/** Para comparar nombres: sin tildes, sin mayúsculas y con un espacio entre palabras. */
+/** Para comparar nombres: sin tildes, sin mayúsculas, «×» como «x» y con un espacio entre palabras. */
 export function plainArgosName(text: string): string {
   return text
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
+    .replace(/×/g, "x")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim()
@@ -1583,13 +1602,15 @@ export function compileArgosFigure(
       ? ["(:sede is null or sede = :sede)"]
       : []),
   ]
-  const select = cuts.map((cut) => {
-    const empty = NULL_WORDS[cut as ArgosCut]
-    return `${TIME_CUTS[cut as ArgosCut] ?? (empty ? `coalesce(${cut}, ${quote(empty)})` : cut)} as ${cut}`
-  })
+  const select = (shifted: boolean) =>
+    cuts.map((cut) => {
+      const empty = NULL_WORDS[cut as ArgosCut]
+      const expression = (shifted ? SHIFTED_TIME_CUTS[cut as ArgosCut] : undefined) ?? TIME_CUTS[cut as ArgosCut]
+      return `${expression ?? (empty ? `coalesce(${cut}, ${quote(empty)})` : cut)} as ${cut}`
+    })
   const block = (name: string, range: Range) => {
     const where = [time(range), ...conditions].filter(Boolean)
-    return `${name} as (select ${[...select, `${figure.value} as v`].join(", ")} from (${rowsOf(range)}) as filas${where.length ? ` where ${where.join(" and ")}` : ""}${cuts.length ? ` group by ${cuts.map((_, index) => index + 1).join(", ")}` : ""})`
+    return `${name} as (select ${[...select(range === BEFORE), `${figure.value} as v`].join(", ")} from (${rowsOf(range)}) as filas${where.length ? ` where ${where.join(" and ")}` : ""}${cuts.length ? ` group by ${cuts.map((_, index) => index + 1).join(", ")}` : ""})`
   }
   const before = options.compare && figure.time !== "a_hoy"
   const columns = [...cuts, `ahora.v as ${figure.column}`]

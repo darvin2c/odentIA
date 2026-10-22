@@ -8,6 +8,7 @@ const NAMES: ArgosNames = {
   especialidades: [],
   servicios: [{ name: "Exodoncia simple", specialty: null }],
   productos: [],
+  promociones: [],
 }
 
 describe("lo que Argos ve de un resultado (D20)", () => {

@@ -180,10 +180,16 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     keys: ["gestion"],
   },
   {
+    name: "compras_detalle",
+    about: "Cada producto de una orden de compra: cuánto se pidió, cuánto llegó y a qué precio. Lo comprado son las órdenes sin 'borrador' ni 'cancelada', como en compras.",
+    columns: "numero, proveedor, sede, estado (el de la orden), creada_en, dia, producto, unidad (en la que se cuenta el producto), cantidad (pedida, en esa unidad), recibida, precio (por unidad), total",
+    keys: ["gestion"],
+  },
+  {
     name: "conversaciones",
     about: "Conversaciones con personas por los canales (sin mensajes). No hay campañas ni encuestas.",
     columns:
-      "inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta'|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, persona_id (una persona puede tener varias conversaciones), paciente_id (null si aún no es paciente), es_paciente (bool), agente ('on'|'off'), asignada_a",
+      "inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta': la persona dejó de responder|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, persona_id (una persona puede tener varias conversaciones), paciente_id (null si aún no es paciente), es_paciente (bool), agente ('on'|'off'), asignada_a, espera_respuesta (bool: su último mensaje es de la persona y nadie le respondió todavía, a hoy)",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
@@ -228,7 +234,11 @@ export const ARGOS_NOT_RECORDED: readonly string[] = [
   "Encuestas, satisfacción, recomendación (NPS) y quejas.",
   "El costo de los lotes: el inventario no se puede valorizar.",
   "El consumo de materiales por procedimiento: se registra por atención (por profesional sí).",
-  "La historia clínica: diagnósticos, enfermedades, alergias.",
+]
+
+/** Lo que odentIA sí guarda pero Argos no lee: la respuesta dice que no lo puede consultar, nunca que no se registra. */
+export const ARGOS_NOT_READABLE: readonly string[] = [
+  "La historia clínica (diagnósticos, enfermedades, alergias, odontogramas, periodontogramas, notas): está en la ficha de cada paciente, y Argos no la lee.",
 ]
 
 /** Las vistas que lee una llave. */
@@ -244,5 +254,7 @@ export function argosCatalogText(key: ArgosKey): string {
     ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
     "\nLo que odentIA no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
     ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
+    "\nLo que odentIA guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):",
+    ...ARGOS_NOT_READABLE.map((item) => `- ${item}`),
   ].join("\n")
 }

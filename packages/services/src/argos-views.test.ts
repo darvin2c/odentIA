@@ -150,6 +150,11 @@ describe("las llaves de Argos", () => {
     // La hora del día se dice como hora, y el total de todas las filas va en la frase, no en cada una.
     const hours = { columns: [{ name: "hora", kind: "number" as const }, { name: "libres", kind: "number" as const }], rows: [{ hora: 9, libres: 4 }], truncated: false }
     expect(fillArgosSentence("{lista}", hours, zone).text).toBe("09:00 (libres: 4)")
+    // Las horas, los días y los minutos son unidades: se dicen con su palabra, en singular si es uno.
+    const team = { columns: [{ name: "profesional", kind: "text" as const }, { name: "horas", kind: "number" as const }], rows: [{ profesional: "Dra. Ana Torres", horas: 47 }], truncated: false }
+    expect(fillArgosSentence("{lista}", team, zone).text).toBe("Dra. Ana Torres (47 horas)")
+    const away = { columns: [{ name: "profesional", kind: "text" as const }, { name: "dias", kind: "number" as const }], rows: [{ profesional: "Dra. Ana Torres", dias: 1 }], truncated: false }
+    expect(fillArgosSentence("{lista}", away, zone).text).toBe("Dra. Ana Torres (1 día)")
     const owed = {
       columns: [
         { name: "paciente", kind: "text" as const },

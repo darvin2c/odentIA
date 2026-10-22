@@ -79,6 +79,7 @@ export function argosNamesText(names: ArgosNames, key: ArgosKey): string {
     `- Equipo: ${names.equipo.join(", ") || "nadie"}.`,
     services.length ? `- Servicios por especialidad:\n${services.join("\n")}` : "- Servicios: ninguno.",
     seesStock ? `- Productos: ${names.productos.join(", ") || "ninguno"}.` : "",
+    names.promociones.length ? `- Promociones: ${names.promociones.join(", ")}.` : "",
   ]
   return lines.filter(Boolean).join("\n")
 }
@@ -255,6 +256,17 @@ export function formatArgosValue(value: string | number | boolean | null, column
 }
 
 /**
+ * Las horas, los días y los minutos son unidades, como el dinero y el
+ * porcentaje: una columna `horas`, `horas_libres` o `espera_minutos` se lee en
+ * la lista como «47 horas» o «1 día», no como «horas: 47».
+ */
+const TIME_UNITS: Record<string, [string, string]> = { horas: ["hora", "horas"], dias: ["día", "días"], minutos: ["minuto", "minutos"] }
+function timeUnitOf(name: string): [string, string] | null {
+  const unit = Object.keys(TIME_UNITS).find((key) => name === key || name.startsWith(`${key}_`) || name.endsWith(`_${key}`))
+  return unit ? (TIME_UNITS[unit] ?? null) : null
+}
+
+/**
  * Llena la frase con el resultado: `{columna}` es el valor de la primera fila,
  * `{lista}` las primeras filas como «a (b, c); …» en el orden de la consulta,
  * con «y N más» si hay más, y `{filas}` cuántas son. Una columna del resultado
@@ -283,14 +295,19 @@ export function fillArgosSentence(
   const constant = (name: string) => result.rows.length > 1 && result.rows.every((row) => row[name] === first[name])
   const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name) && !constant(column.name))
   // El dinero y el porcentaje solos se entienden; dos de lo mismo en una fila llevan su nombre («cobrado: S/ 284,045.00, dejo: S/ 15,946.50»).
-  const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? null
+  const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? timeUnitOf(name)?.[1] ?? null
   const twice = (unit: string | null) => unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1
   const selfExplained = (column: ArgosQueryResult["columns"][number]) => column.kind !== "number" || (unitOf(column.name) !== null && !twice(unitOf(column.name)))
   const labeled = !(rest.length === 1 && rest[0] && selfExplained(rest[0]))
   const items = result.rows.slice(0, ARGOS_LIST_ROWS).map((row) => {
     const head = lead ? cell(row, lead.name) : ""
     if (!rest.length) return head
-    const details = rest.map((column) => (labeled && !selfExplained(column) ? `${argosColumnLabel(column.name).toLowerCase()}: ${cell(row, column.name)}` : cell(row, column.name)))
+    const value = (column: ArgosQueryResult["columns"][number]) => {
+      const unit = column.kind === "number" ? timeUnitOf(column.name) : null
+      const said = cell(row, column.name)
+      return unit && typeof row[column.name] === "number" ? `${said} ${row[column.name] === 1 ? unit[0] : unit[1]}` : said
+    }
+    const details = rest.map((column) => (labeled && !selfExplained(column) ? `${argosColumnLabel(column.name).toLowerCase()}: ${value(column)}` : value(column)))
     return `${head} (${details.join(", ")})`
   })
   const more = result.truncated ? " y más" : result.rows.length > ARGOS_LIST_ROWS ? ` y ${result.rows.length - ARGOS_LIST_ROWS} más` : ""

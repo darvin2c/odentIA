@@ -19,6 +19,7 @@ const NAMES: ArgosNames = {
     { name: "Exodoncia de pieza impactada en hueso", specialty: "Cirugía oral" },
   ],
   productos: ["Enjuague bucal"],
+  promociones: ["Blanqueamiento 2×1"],
 }
 
 const compile = (ask: Parameters<typeof compileArgosFigure>[0], compare = false) =>
@@ -61,6 +62,7 @@ describe("las cifras oficiales de Argos", () => {
       "servicio = any(array['Exodoncia simple', 'Exodoncia de pieza impactada en hueso'])",
     )
     expect(matchArgosName("surco", NAMES.sedes)).toEqual({ name: "Sede Surco" })
+    expect(matchArgosName("Blanqueamiento 2x1", NAMES.promociones)).toEqual({ name: "Blanqueamiento 2×1" })
     expect(matchArgosName("SAN ISIDRO", NAMES.sedes)).toEqual({ name: "Sede San Isidro" })
     // Una sede elegida en la pregunta reemplaza a la de arriba.
     const two = compile({
@@ -97,6 +99,19 @@ describe("las cifras oficiales de Argos", () => {
     expect(rate.sql).toContain("no_vinieron_antes_pct")
     expect(rate.sql).not.toContain("variacion_pct")
     expect(rate.sql).not.toContain("parte_pct")
+  })
+
+  it("por mes, semana o día, lo de antes se corre a las fechas de ahora: enero con el enero del año anterior", () => {
+    const out = compile({ cifra: "cobrado", por: ["mes"] }, true)
+    if ("problem" in out) throw new Error(out.problem)
+    expect(out.sql).toContain("antes as (select date_trunc('month', (dia + age(:dia_desde, :dia_desde_antes))::date)::date as mes")
+    expect(out.sql).toContain("ahora as (select date_trunc('month', dia)::date as mes")
+    expect(out.sql).toContain("ahora left join antes using (mes)")
+    expect(reviewArgosQuery(out.sql).ok).toBe(true)
+    // El día de la semana ya coincide: no se corre.
+    const weekdays = compile({ cifra: "atendidas", por: ["dia_semana"] }, true)
+    if ("problem" in weekdays) throw new Error(weekdays.problem)
+    expect(weekdays.sql).not.toContain("age(")
   })
 
   it("lo que la cifra no admite se le dice al modelo, sin calcular", () => {
