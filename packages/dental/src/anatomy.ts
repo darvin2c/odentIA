@@ -1,7 +1,7 @@
 /**
  * Anatomía FDI (ISO 3950) y superficies. Copia canónica: los consumidores
  * importan de aquí. La norma del odontograma no vive aquí: depende del país
- * de la clínica (`clinicalProfileFor(...).odontogram`, ADR 0036).
+ * de la clínica (`dentalProfileFor(...).odontogram`, ADR 0036 y 0079).
  */
 import type { Surface, ToothType } from "./types.js"
 

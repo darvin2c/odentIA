@@ -203,7 +203,7 @@ function pushDrawingErrors(errors: string[], drawing: unknown, minPoints: number
  *
  * `strictVariants` (por defecto, el criterio más estricto) exige la variante
  * como la norma peruana; quien valida para una clínica lo toma de su país
- * (`clinicalProfileFor(country).odontogram?.strictVariants ?? false`).
+ * (`dentalProfileFor(country).odontogram?.strictVariants ?? false`).
  */
 export function validateFinding(
   input: FindingInput,

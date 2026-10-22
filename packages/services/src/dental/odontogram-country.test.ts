@@ -394,7 +394,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
 })
 
 it("lo que deja cada tratamiento de la biblioteca encaja con su ámbito y es un hallazgo completo", () => {
-  const rows = readFileSync(new URL("../../db/seeds/biblioteca.csv", import.meta.url), "utf8")
+  const rows = readFileSync(new URL("../../../db/seeds/biblioteca.csv", import.meta.url), "utf8")
     .trim()
     .split(/\r?\n/)
     .slice(1)

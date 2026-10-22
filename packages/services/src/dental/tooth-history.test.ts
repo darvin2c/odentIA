@@ -3,7 +3,7 @@ import { expect, it } from "vitest"
 import { addOdontogramEntries } from "../clinical.js"
 import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
-import { ownerDb, setupTestDb } from "../test-setup.js"
+import { setupTestDb } from "../test-setup.js"
 import { getToothHistory } from "./tooth-history.js"
 
 setupTestDb()

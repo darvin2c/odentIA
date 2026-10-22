@@ -74,7 +74,7 @@ export interface FindingDetails {
 
 /**
  * Lo que cambia con el país de la clínica al validar un hallazgo
- * (`clinicalProfileFor(...).odontogram`): con odontograma oficial (Perú) la
+ * (`dentalProfileFor(...).odontogram`): con odontograma oficial (Perú) la
  * variante es obligatoria como en la norma; sin él, opcional.
  */
 export interface ValidateFindingOptions {

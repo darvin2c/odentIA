@@ -16,7 +16,7 @@ import { useDentalProfile } from "../lib/org"
  * Perú, el odontograma (nadie escribe su nombre a mano al firmar); cada
  * documento guarda su copia, así que cambiarlo no reescribe lo ya firmado.
  * Título y colegio no tienen valor por defecto: si están vacíos se proponen
- * los del país de la clínica cuando los hay (`clinicalProfileFor().professional`,
+ * los del país de la clínica cuando los hay (`dentalProfileFor().professional`,
  * «Cirujano dentista» y «COP» solo en Perú), a la vista y editables.
  */
 export function ProfessionalProfileDrawer({
