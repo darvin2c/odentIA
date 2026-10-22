@@ -39,7 +39,7 @@ export interface DataProcessor {
 const SERVER_PROVIDER = "OVHcloud"
 const SERVER_COUNTRY = "Canadá"
 const MAIL_PROVIDER = "Zoho CPaaS (antes ZeptoMail)"
-const MAIL_COUNTRY = "[Por confirmar: región de la cuenta de Zoho]"
+const MAIL_COUNTRY = "Estados Unidos"
 
 export const DATA_PROCESSORS: readonly DataProcessor[] = [
   {
