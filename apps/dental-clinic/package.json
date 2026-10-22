@@ -28,6 +28,7 @@
     "@fontsource-variable/manrope": "5.3.0",
     "@odentia/auth": "workspace:*",
     "@odentia/clinical": "workspace:*",
+    "@odentia/dental": "workspace:*",
     "@odentia/ui": "workspace:*",
     "@odentia/ui-patterns": "workspace:*",
     "@simplewebauthn/browser": "14.0.0",

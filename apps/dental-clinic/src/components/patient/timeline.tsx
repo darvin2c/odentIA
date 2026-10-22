@@ -1,4 +1,5 @@
-import { budgetAnswerText, conditionLabel, FDI_ADULT, FDI_CHILD, surfaceLabel } from "@odentia/clinical"
+import { budgetAnswerText } from "@odentia/clinical"
+import { conditionLabel, FDI_ADULT, FDI_CHILD, surfaceLabel } from "@odentia/dental"
 import {
   Attachment,
   AttachmentActions,
@@ -36,7 +37,7 @@ import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-ove
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
-import { SignedOdontogramFact } from "../odontogram-assessments"
+import { SignedOdontogramFact } from "../dental/odontogram-assessments"
 import { EncounterHistoryCard } from "./encounter-history-card"
 import { NewEncounterButton } from "./new-encounter-button"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"

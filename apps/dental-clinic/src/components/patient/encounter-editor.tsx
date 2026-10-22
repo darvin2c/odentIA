@@ -61,7 +61,7 @@ import {
 } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
-import { OdontogramStudio } from "../odontogram-studio"
+import { OdontogramStudio } from "../dental/odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
 import { useAgentPanelDockBlocker } from "../agent-panel"
@@ -79,7 +79,7 @@ import {
   PeriodontalCaptureHost,
   periodontalBlockSummary,
   useEncounterPeriodontal,
-} from "../periodontal/encounter-periodontal"
+} from "../dental/periodontal/encounter-periodontal"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"

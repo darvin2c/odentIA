@@ -1,4 +1,5 @@
 import { clinicalProfileFor, DIAGNOSIS_SYSTEM_INFO } from "@odentia/clinical"
+import { dentalProfileFor } from "@odentia/dental"
 import {
   Button,
   Field,
@@ -580,12 +581,13 @@ function ProfileForm({
 /**
  * «Normas de tu país» (tablero 6 del lienzo del issue 40): de solo lectura y
  * sin interruptores, lo que exige el país elegido. Cada línea sale de su
- * perfil (`clinicalProfileFor`); un país sin perfil propio dice lo del núcleo.
+ * perfil (`clinicalProfileFor` y, lo dental, `dentalProfileFor`); un país sin perfil propio dice lo del núcleo.
  */
 function CountryRules({ country, language }: { country: string; language: string }) {
   const saved = useOrgProfile().data
   if (country.length !== 2) return null
   const profile = clinicalProfileFor(country)
+  const dental = dentalProfileFor(country)
   // La lista de diagnósticos guardada vale para el país guardado; otro país propone la suya.
   const diagnosis =
     saved?.countryCode === country
@@ -600,10 +602,10 @@ function CountryRules({ country, language }: { country: string; language: string
     ],
     [
       "Especialidades",
-      profile.specialties.source ? `Las de su norma (${profile.specialties.source})` : "Lista general de odentIA",
+      dental.specialties.source ? `Las de su norma (${dental.specialties.source})` : "Lista general de odentIA",
     ],
     ["Diagnósticos", `${diagnosis} (se cambia en «Lista de diagnósticos»)`],
-    ["Odontograma", profile.odontogram ? profile.odontogram.standard : "Numeración FDI"],
+    ["Odontograma", dental.odontogram ? dental.odontogram.standard : "Numeración FDI"],
   ]
   return (
     <div role="group" className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2.5" aria-labelledby="org-country-rules">

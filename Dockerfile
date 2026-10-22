@@ -21,6 +21,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/channels/package.json packages/channels/
 COPY packages/clinical/package.json packages/clinical/
 COPY packages/db/package.json packages/db/
+COPY packages/dental/package.json packages/dental/
 COPY packages/mail/package.json packages/mail/
 COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/

@@ -1,9 +1,11 @@
 import {
   diagnosisCodeLabel,
+} from "@odentia/clinical"
+import {
   TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
   type TreatmentPhase,
-} from "@odentia/clinical"
+} from "@odentia/dental"
 import {
   Badge,
   Button,

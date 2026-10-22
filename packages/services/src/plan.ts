@@ -5,7 +5,7 @@ import {
   TREATMENT_SCOPES,
   type TreatmentPhase,
   type TreatmentScope,
-} from "@odentia/clinical"
+} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   encounter,
@@ -30,7 +30,7 @@ import { requireServiceForIndication, type ServiceRow } from "./service-catalog.
 import { serviceKindOf } from "./specialties.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
-import { drawTreatedFinding } from "./treated-findings.js"
+import { drawTreatedFinding } from "./dental/treated-findings.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede

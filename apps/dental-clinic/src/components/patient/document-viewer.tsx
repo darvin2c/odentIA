@@ -52,7 +52,7 @@ import {
 import { TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
-import { ToothSelector } from "./tooth-selector"
+import { ToothSelector } from "../dental/tooth-selector"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000

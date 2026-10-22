@@ -8,7 +8,8 @@ import { type Db, seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { odontogramEntry } from "@odentia/db/schema/clinical"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
-import { clinicalProfileFor, DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { dentalProfileFor } from "@odentia/dental"
 import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -31,7 +32,7 @@ import { updatePatient } from "./patients.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { createService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
-import { registerToothFinding } from "./tooth-panel.js"
+import { registerToothFinding } from "./dental/tooth-panel.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -156,7 +157,7 @@ it("«Faltan datos para atenderla» lo calcula el servidor: lo necesario siempre
 
 it("otra clínica, otro país: la atención y el odontograma son los del núcleo, sin siglas ni odontograma firmado", async () => {
   const c = await bogotaClinic()
-  expect(clinicalProfileFor("CO").odontogram).toBeNull()
+  expect(dentalProfileFor("CO").odontogram).toBeNull()
   await makeSigner(c.orgId, c.professional)
   // Título y colegio de su país: el perfil no trae ninguno por defecto.
   await c.run((tx) =>

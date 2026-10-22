@@ -1,4 +1,4 @@
-import { FDI_ADULT, FDI_CHILD, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { FDI_ADULT, FDI_CHILD, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -68,8 +68,8 @@ import {
   visibleDocumentFilters,
 } from "../../lib/document-list"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { fetchSignedOdontograms } from "../../lib/odontogram"
-import { useClinicalProfile } from "../../lib/org"
+import { fetchSignedOdontograms } from "../../lib/dental/odontogram"
+import { useDentalProfile } from "../../lib/org"
 import { DOCUMENT_FILTERS, type DocumentFilter } from "../../lib/patient-areas"
 import {
   ageFrom,
@@ -227,7 +227,7 @@ export function DocumentosSection({
   const router = useRouter()
   const canWrite = usePermission("clinical.write")
   // El odontograma firmado es de las clínicas de Perú (NTS 188; ADR 0036).
-  const signsOdontogram = useClinicalProfile().odontogram?.signedOdontogram === true
+  const signsOdontogram = useDentalProfile().odontogram?.signedOdontogram === true
   // Fuera de Perú no hay filtro «Odontogramas»: un enlace con él abre todo.
   const filter =
     requestedFilter === "odontogramas" && !signsOdontogram ? undefined : requestedFilter

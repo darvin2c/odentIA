@@ -21,7 +21,7 @@ import {
 } from "../../lib/imaging-upload"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
-import { ToothSelector } from "./tooth-selector"
+import { ToothSelector } from "../dental/tooth-selector"
 
 /** Tope por tomografía (decisión 4 del lienzo; lo valida también la API). */
 export const TOMOGRAPHY_MAX_BYTES = 1024 ** 3

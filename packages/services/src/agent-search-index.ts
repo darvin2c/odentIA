@@ -2,7 +2,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { agentSearchItem, type SearchItemKind } from "@odentia/db/schema/agent"
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
-import type { TreatmentKind } from "@odentia/clinical"
+import type { TreatmentKind } from "@odentia/dental"
 import { listAgentPromotions, listAgentProfessionals, listAgentServices } from "./agent-clinic-info.js"
 import { listActiveKnowledge } from "./knowledge.js"
 

@@ -8,7 +8,7 @@ import {
   type ProfessionalProfileInput,
   saveProfessionalProfileApi,
 } from "../lib/encounters"
-import { useClinicalProfile } from "../lib/org"
+import { useDentalProfile } from "../lib/org"
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
@@ -16,7 +16,7 @@ import { useClinicalProfile } from "../lib/org"
  * Perú, el odontograma (nadie escribe su nombre a mano al firmar); cada
  * documento guarda su copia, así que cambiarlo no reescribe lo ya firmado.
  * Título y colegio no tienen valor por defecto: si están vacíos se proponen
- * los del país de la clínica cuando los hay (`clinicalProfileFor().professional`,
+ * los del país de la clínica cuando los hay (`dentalProfileFor().professional`,
  * «Cirujano dentista» y «COP» solo en Perú), a la vista y editables.
  */
 export function ProfessionalProfileDrawer({
@@ -35,7 +35,7 @@ export function ProfessionalProfileDrawer({
 }): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
-  const suggested = useClinicalProfile().professional
+  const suggested = useDentalProfile().professional
   const [values, setValues] = useState<Required<ProfessionalProfileInput>>(() => ({
     signatureName: profile?.signatureName ?? "",
     professionalTitle: profile?.professionalTitle || suggested?.title || "",

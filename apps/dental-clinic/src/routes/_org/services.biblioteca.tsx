@@ -1,4 +1,5 @@
-import { formatMoneyInput, parseMoney, TREATMENT_KINDS } from "@odentia/clinical"
+import { formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { TREATMENT_KINDS } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -36,7 +37,7 @@ import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
-import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
+import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
 import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"

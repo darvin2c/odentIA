@@ -8,10 +8,12 @@ import {
   REPORT_STATUSES,
   registrationAnswersSchema,
   registrationContactInputSchema,
-  SURFACES,
   sniffDocumentMime,
-  TREATMENT_PHASES,
 } from "@odentia/clinical"
+import {
+  SURFACES,
+  TREATMENT_PHASES,
+} from "@odentia/dental"
 import { withOrgContext } from "@odentia/db"
 import {
   addClinicalNote,
@@ -106,7 +108,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
-import { createPatientPeriodontalRoute } from "./patient-periodontal.js"
+import { createPatientPeriodontalRoute } from "./dental/patient-periodontal.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
 import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"

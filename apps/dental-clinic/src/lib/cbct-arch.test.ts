@@ -1,4 +1,4 @@
-import { cbctDemoTeeth, generateCbctPhantom } from "@odentia/clinical"
+import { cbctDemoTeeth, generateCbctPhantom } from "@odentia/dental"
 import { describe, expect, it } from "vitest"
 import { crossSection, detectArch, occlusalSample, panorama, panoramaRows, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
 import { volumeFromSlices } from "./cbct-volume"

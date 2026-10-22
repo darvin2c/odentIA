@@ -1,4 +1,5 @@
-import { encodeDemoCtSlice, generateCbctPhantom } from "@odentia/clinical"
+import { encodeDemoCtSlice } from "@odentia/clinical"
+import { generateCbctPhantom } from "@odentia/dental"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   computePresets,

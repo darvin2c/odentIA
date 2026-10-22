@@ -1,4 +1,5 @@
-import { diagnosisCodeLabel, surfaceLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel } from "@odentia/clinical"
+import { surfaceLabel } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -30,7 +31,7 @@ import { useOrgProfile } from "../../lib/org"
 import { type ServiceCatalogItem } from "../../lib/services"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ServicePicker } from "./service-picker"
-import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
+import { type ToothSite, ToothSiteSelector } from "../dental/tooth-site-selector"
 import { activeOrgLocale } from "../../lib/locale"
 
 const NO_PLAN = "__sin-plan__"

@@ -8,7 +8,8 @@
  */
 
 import { label } from "../../lib/glossary"
-import { diagnosisCodeLabel, surfacesForTooth } from "@odentia/clinical"
+import { diagnosisCodeLabel } from "@odentia/clinical"
+import { surfacesForTooth } from "@odentia/dental"
 import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"

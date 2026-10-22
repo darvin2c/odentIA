@@ -19,6 +19,7 @@
     "@odentia/channels": "workspace:*",
     "@odentia/clinical": "workspace:*",
     "@odentia/db": "workspace:*",
+    "@odentia/dental": "workspace:*",
     "@odentia/mail": "workspace:*",
     "@odentia/services": "workspace:*",
     "drizzle-orm": "0.45.2",

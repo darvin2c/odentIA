@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
-import { kindOfSpecialty, type TreatmentKind } from "@odentia/clinical"
+import { kindOfSpecialty, type TreatmentKind } from "@odentia/dental"
 import { orgSpecialty, type PriceDisclosure, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
@@ -9,7 +9,8 @@ import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
 import { normalizeForSearch } from "./knowledge.js"
-import { formatOrgMoney, orgClinicalProfile, type OrgLocale } from "./locale.js"
+import { orgDentalProfile } from "./dental/profile.js"
+import { formatOrgMoney, type OrgLocale } from "./locale.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
 
 /**
@@ -299,7 +300,7 @@ export async function listAgentServices(
     .where(and(...conditions))
     .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
   const rows = options.limit ? await query.limit(options.limit) : await query
-  const profile = await orgClinicalProfile(tx, orgId)
+  const profile = await orgDentalProfile(tx, orgId)
   return rows.map((row) => ({
     id: row.id,
     name: row.name,

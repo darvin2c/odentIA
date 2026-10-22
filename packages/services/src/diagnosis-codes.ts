@@ -18,7 +18,6 @@ import {
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
   type DiagnosisSystemKey,
-  findingDefinition,
   findingDiagnosisCode,
   isDiagnosisSystem,
   isSelectableDiagnosisSystem,
@@ -26,6 +25,9 @@ import {
   normalizeSearchText,
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
+import {
+  findingDefinition,
+} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   diagnosisCatalog,
