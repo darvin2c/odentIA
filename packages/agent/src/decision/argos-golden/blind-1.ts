@@ -298,7 +298,21 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
       const crown = crowns[0]
       const white = whitening[0]
       const others = [...crowns.slice(1), ...whitening.slice(1)].filter((row) => row.times > 0)
-      const month = await h.fig("cobrado", "tratamiento")
+      // Lo pagado este mes de cada servicio, sobre los pagos: la lista de Reportes por tratamiento junta los menores en «Otros».
+      const paidThisMonth = async (serviceId: string | undefined) => {
+        if (!serviceId) return 0
+        const [row] = await tx.execute<{ cents: string }>(sql`
+          select coalesce(sum(a.amount_cents), 0)::text as cents
+          from patient_charge c
+          join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+          join patient_payment_application a on a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null
+          join patient_payment pay on pay.organization_id = a.organization_id and pay.id = a.payment_id and pay.voided_at is null
+          where c.organization_id = ${org} and c.voided_at is null and ep.service_id = ${serviceId}
+            and pay.paid_at >= ${h.monthStart}::timestamptz and pay.paid_at < ${nowIso}::timestamptz`)
+        return Number(row?.cents ?? 0)
+      }
+      const crownMonth = await paidThisMonth(crown?.id)
+      const whiteMonth = await paidThisMonth(white?.id)
       const year = await h.fig("cobrado", "tratamiento", w.lastYear)
       const of = (result: FigureResult, name: string | undefined) => (name ? centsOf(result.rows.find((row) => row.label === name)) : 0)
       const [lab] = await tx.execute<{ cents: string }>(sql`
@@ -310,7 +324,7 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
       return {
         respuesta: `No puedo decirte cuál te deja más ganancia: odentIA no tiene lo que cuesta cada tratamiento (laboratorio, materiales, el tiempo del profesional), solo lo que se cobra, así que no hay utilidad por tratamiento. Lo más cercano es lo que se cobra: ${words(crown, crown?.times === 1 ? "hecha" : "hechas")}; ${words(white, white?.times === 1 ? "hecho" : "hechos")}. Es lo cobrado, sin restar costos.`,
         criterio: "Trampa: sin el costo de cada tratamiento no hay ganancia. Se ofrecen, de la corona y del blanqueamiento más hechos, «Lo cobrado» de Reportes por tratamiento de los últimos 365 días, las veces hechas (atenciones firmadas), su precio de lista y lo cargado en promedio cada vez.",
-        nota: `Este mes (${w.monthSoFar}), por lo cobrado: ${crown?.name ?? "corona"} ${money(of(month, crown?.name))} y ${white?.name ?? "blanqueamiento"} ${money(of(month, white?.name))}. El laboratorio se registra como un gasto del mes sin ligarlo a cada corona: ${money(Number(lab?.cents ?? 0))} en gastos de Laboratorio en los últimos 365 días, que juntan coronas y prótesis. ${others.length ? `Otros servicios con esos nombres que se hicieron: ${listOf(others.map((row) => ({ name: row.name, value: `${money(row.price)}, ${row.times} hechos` })))}.` : `Los demás servicios de corona y blanqueamiento de tu lista no se hicieron en los últimos 365 días.`}`,
+        nota: `Este mes (${w.monthSoFar}), por lo cobrado: ${crown?.name ?? "corona"} ${money(crownMonth)} y ${white?.name ?? "blanqueamiento"} ${money(whiteMonth)}. El laboratorio se registra como un gasto del mes sin ligarlo a cada corona: ${money(Number(lab?.cents ?? 0))} en gastos de Laboratorio en los últimos 365 días, que juntan coronas y prótesis. ${others.length ? `Otros servicios con esos nombres que se hicieron: ${listOf(others.map((row) => ({ name: row.name, value: `${money(row.price)}, ${row.times} hechos` })))}.` : `Los demás servicios de corona y blanqueamiento de tu lista no se hicieron en los últimos 365 días.`}`,
         datos: { corona: crown ?? null, blanqueamiento: white ?? null, coronas: crowns, blanqueamientos: whitening, laboratorio365: Number(lab?.cents ?? 0) },
       }
     },
