@@ -543,7 +543,7 @@ function resolveViteCli(appDir: string): string {
 
 async function runBuild(
   state: RunState,
-  app: "panel" | "platform" | "admin",
+  app: "panel" | "dental-clinic" | "admin",
   viteCli: string,
   outDir: string,
   env: Record<string, string>,
@@ -1126,7 +1126,7 @@ export async function main(args: string[]): Promise<number> {
     const viteAdmin = resolveViteCli(join(ROOT, "apps", "admin"))
     const builds = await Promise.allSettled([
       runBuild(state, "panel", vitePanel, outDirs.panel, childEnv),
-      runBuild(state, "platform", vitePlatform, outDirs.platform, childEnv),
+      runBuild(state, "dental-clinic", vitePlatform, outDirs.platform, childEnv),
       runBuild(state, "admin", viteAdmin, outDirs.admin, childEnv),
     ])
     for (const build of builds) {
