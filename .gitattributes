@@ -6,3 +6,6 @@ packages/db/seeds/*.csv text eol=lf
 
 # Archivos oficiales tal como los publica su editor: su SHA-256 se verifica byte a byte.
 packages/db/seeds/oficiales/** binary
+
+# Prompts de referencia (ADR 0079): se comparan carácter por carácter.
+**/__golden__/** text eol=lf
