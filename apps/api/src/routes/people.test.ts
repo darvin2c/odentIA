@@ -173,7 +173,7 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       expect((await get(role, `/people/${guardianId}`)).status, role).toBe(404)
       // Ni las vistas de quien aún no es paciente; en las demás, solo pacientes.
       expect((await get(role, "/people?ver=por_registrar")).status, role).toBe(403)
-      expect((await get(role, "/people?ver=responsables")).status, role).toBe(403)
+      expect((await get(role, "/people?ver=responsables")).status, role).toBe(400)
       const all = (await (await get(role, "/people?ver=todos")).json()) as {
         data: { id: string }[]
         counts: { porRegistrar: number }
@@ -285,7 +285,7 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
     expect(after.resumen ?? 0).toBe((before.resumen ?? 0) + 1)
   })
 
-  it("la ficha lleva a su persona y la lista separa pacientes, por registrar y responsables", async () => {
+  it("la ficha lleva a su persona y la lista separa pacientes y contactos nuevos", async () => {
     const res = await get("dentist", `/people/by-patient/${patientId}`)
     expect(((await res.json()) as { data: { personId: string } }).data.personId).toBe(personId)
     const view = async (ver: string) =>
@@ -295,7 +295,8 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       }
     expect((await view("pacientes")).data.map((row) => row.id)).toEqual([personId])
     expect((await view("por_registrar")).data.map((row) => row.id)).toEqual([leadId])
-    expect((await view("responsables")).data.map((row) => row.id)).toEqual([guardianId])
+    expect((await view("todos")).data.map((row) => row.id)).toContain(guardianId)
+    expect((await view("por_registrar")).data.map((row) => row.id)).not.toContain(guardianId)
     expect((await view("pacientes")).counts.porRegistrar).toBe(1)
     expect((await get("reception", "/people?ver=otra")).status).toBe(400)
   })

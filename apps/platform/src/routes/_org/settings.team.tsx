@@ -7,7 +7,6 @@ import {
 } from "@odentia/auth/permissions"
 import {
   Badge,
-  Button,
   Field,
   FieldDescription,
   FieldError,
@@ -430,13 +429,8 @@ function TeamPage() {
       <PageHeader
         title="Equipo"
         subtitle={TEAM_SUBTITLE}
-        actions={
-          canManage ? (
-            <Button type="button" className="min-h-11" onClick={openInvite}>
-              <Plus aria-hidden />
-              Invitar al equipo
-            </Button>
-          ) : undefined
+        primary={
+          canManage ? { label: "Invitar al equipo", icon: <Plus aria-hidden />, onClick: openInvite } : undefined
         }
       />
       <FilterBar

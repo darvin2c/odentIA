@@ -23,6 +23,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { Plus } from "lucide-react"
 import { useState } from "react"
 import { ApiError, api } from "../../lib/api"
 
@@ -211,7 +212,9 @@ function TeamPage() {
       <PageHeader
         title="Equipo"
         subtitle="Personal interno: invitaciones nominales, roles y reactivación"
-        actions={isManager ? <Button onClick={() => setInviteOpen(true)}>Invitar</Button> : null}
+        primary={
+          isManager ? { label: "Invitar", icon: <Plus aria-hidden />, onClick: () => setInviteOpen(true) } : undefined
+        }
       />
       {team.isPending || session.isPending ? (
         <LoadingState message="Cargando equipo…" />

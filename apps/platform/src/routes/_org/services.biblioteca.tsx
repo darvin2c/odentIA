@@ -632,13 +632,6 @@ function AddServicesPage() {
     )
   }
 
-  const ownAction = canIncorporate && regional ? (
-    <Button type="button" variant="outline" className="min-h-11" onClick={openOwn}>
-      <Plus aria-hidden />
-      Crear un servicio propio
-    </Button>
-  ) : undefined
-
   const emptyView =
     view === "mas-usados" ? (
       <EmptyState
@@ -727,7 +720,11 @@ function AddServicesPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <PageHeader title={title} subtitle={subtitle} actions={ownAction} />
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        primary={canIncorporate && regional ? { label: "Crear un servicio propio", icon: <Plus aria-hidden />, onClick: openOwn } : undefined}
+      />
       {profileQuery.isPending ? (
         <LoadingState />
       ) : profileQuery.isError ? (

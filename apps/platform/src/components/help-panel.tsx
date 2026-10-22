@@ -155,7 +155,10 @@ export function WhatIsSent({
  * no se puede. No cambia nada: explica. Si no sabe, lo dice y ofrece enviarlo
  * a odentIA.
  */
-export function HelpButton() {
+/** Abre la ayuda desde fuera del botón (el menú «⋯» del teléfono). */
+export const OPEN_HELP_EVENT = "odentia:abrir-ayuda"
+
+export function HelpButton({ className }: { className?: string } = {}) {
   const receptionName = useReceptionName()
   const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
@@ -238,6 +241,11 @@ export function HelpButton() {
   useEffect(() => {
     setDirect(null)
   }, [pathname])
+  useEffect(() => {
+    const onOpen = () => setOpen(true)
+    window.addEventListener(OPEN_HELP_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_HELP_EVENT, onOpen)
+  }, [])
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -266,13 +274,13 @@ export function HelpButton() {
       <Button
         type="button"
         variant={open ? "default" : "outline"}
-        className="elevated relative h-11 gap-2 rounded-full px-3"
+        className={cn("elevated relative h-9 gap-2 rounded-full px-3", className)}
         onClick={() => setOpen(!open)}
         aria-label={`Ayuda${unseen.length > 0 ? `, ${unseen.length} ${unseen.length === 1 ? "respuesta nueva" : "respuestas nuevas"}` : ""}`}
         aria-expanded={open}
       >
-        <CircleHelp className="size-5" aria-hidden />
-        <span className="hidden sm:inline">Ayuda</span>
+        <CircleHelp className="size-4" aria-hidden />
+        <span className="hidden lg:inline">Ayuda</span>
         {unseen.length > 0 ? (
           <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-xs font-bold text-primary-foreground">
             {unseen.length}

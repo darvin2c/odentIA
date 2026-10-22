@@ -102,13 +102,13 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
 
   await page.setViewportSize({ width: 1440, height: 900 })
   // Una vista sin pestaña en la URL no filtra a escondidas: queda «Por atender».
-  const chip = (name: string) => page.getByRole("button", { name, exact: true })
+  const chip = (name: string) => page.getByRole("tab", { name, exact: true })
   for (const hidden of ["human", "team"]) {
     await gotoHydrated(page, tenant(org.slug, `/inbox?view=${hidden}`))
-    await expect(chip("Por atender 1")).toHaveAttribute("aria-pressed", "true")
+    await expect(chip("Por atender 1")).toHaveAttribute("aria-selected", "true")
   }
   await expect(page.getByText("2 abiertas · 1 por atender")).toBeVisible()
-  await expect(chip("Las atiende Sofi 0")).toHaveAttribute("aria-pressed", "false")
+  await expect(chip("Las atiende Sofi 0")).toHaveAttribute("aria-selected", "false")
   await expect(chip("Esperan al paciente 1")).toBeVisible()
   await expect(chip("Cerradas 0")).toBeVisible()
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
@@ -259,7 +259,7 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
 
   // En la Bandeja ocupa el lugar de «Contexto»; la banda del hilo la lleva a
   // «Esperan al paciente», donde lo del hilo abierto va primero.
-  await page.getByRole("button", { name: "Esperan al paciente 1", exact: true }).click()
+  await page.getByRole("tab", { name: "Esperan al paciente 1", exact: true }).click()
   await page.getByRole("button").filter({ hasText: WAITING_TEXT }).click()
   const context = page.getByRole("button", { name: "Contexto", exact: true })
   await expect(context).toHaveAttribute("aria-pressed", "false")

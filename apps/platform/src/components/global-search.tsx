@@ -166,15 +166,15 @@ export function GlobalSearchButton() {
     <Button
       type="button"
       variant="outline"
-      className="elevated relative h-11 gap-2 rounded-full px-3 sm:pr-2"
+      className="elevated relative h-9 gap-2 rounded-full px-3 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0"
       onClick={() => setOpen(!open)}
       aria-expanded={open}
       aria-haspopup="dialog"
       aria-label="Buscar en todo"
       aria-keyshortcuts="Control+K Meta+K"
     >
-      <Search className="size-5" aria-hidden="true" />
-      <span className="hidden lg:inline">Buscar en todo</span>
+      <Search className="size-4" aria-hidden="true" />
+      <span className="hidden md:inline">Buscar</span>
       <KbdGroup className="hidden lg:inline-flex">
         <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
         <Kbd>K</Kbd>

@@ -8,6 +8,8 @@ import {
   listPeople,
   listPersonConversations,
   listPersonNotes,
+  markInvitedToReturn,
+  PEOPLE_SHORTCUTS,
   PEOPLE_VIEWS,
   personOfPatient,
   selfPatientOf,
@@ -26,6 +28,7 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
 const listQuery = z.object({
   ver: z.enum(PEOPLE_VIEWS).optional(),
   q: z.string().max(200).optional(),
+  atajo: z.enum(PEOPLE_SHORTCUTS).optional(),
   cursor: z.string().max(500).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })
@@ -86,20 +89,21 @@ export function createPeopleRoute(deps: CrmDeps) {
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
-      const { items, nextCursor, counts } = await withOrgContext(deps.db, orgId, (tx) =>
+      const { items, nextCursor, counts, shortcuts } = await withOrgContext(deps.db, orgId, (tx) =>
         listPeople(
           tx,
           orgId,
           {
             view: parsed.data.ver,
             q: parsed.data.q,
+            atajo: parsed.data.atajo,
             cursor: parsed.data.cursor,
             limit: parsed.data.limit,
           },
           canOf(c),
         ),
       )
-      return c.json({ data: items, nextCursor, counts })
+      return c.json({ data: items, nextCursor, counts, shortcuts })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
@@ -225,6 +229,19 @@ export function createPeopleRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, async (tx) => {
         await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
         return takeOutOfSpam(tx, orgId, { contactId: c.req.param("id"), userId })
+      }),
+    )
+  })
+
+  // «Ya la invité»: la invitación que se hizo por teléfono o en persona (issue 139, decisión 15).
+  app.post("/:id/invited-to-return", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.write"))
+      return forbidden(c, "No tienes permiso para anotar una invitación")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
+        return markInvitedToReturn(tx, orgId, userId, c.req.param("id"))
       }),
     )
   })

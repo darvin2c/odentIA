@@ -1,5 +1,5 @@
 import { Badge, Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, FormDrawer, LoadingState, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
@@ -85,22 +85,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
           </Button>
         ) : null}
       </div>
-      <fieldset className="m-0 flex min-w-0 flex-wrap gap-1.5 border-0 p-0" aria-label="Filtrar por origen">
-        {options.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={filter === option.value ? "default" : "outline"}
-            className="min-h-11 rounded-full sm:min-h-8"
-            aria-pressed={filter === option.value}
-            onClick={() => setFilter(option.value)}
-          >
-            {option.label}
-            {option.count !== undefined ? <span className="tabular-nums"> · {option.count}</span> : null}
-          </Button>
-        ))}
-      </fieldset>
+      <ViewTabs label="Filtrar por origen" value={filter} options={options} onValueChange={setFilter} />
       {query.isPending ? (
         <LoadingState message="Cargando lo que sabe…" />
       ) : query.isError || !data ? (

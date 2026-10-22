@@ -127,12 +127,7 @@ export const Lista: Story = {
           <PageHeader
             title="Contactos"
             subtitle="Pacientes y conversaciones asociadas"
-            actions={
-              <Button type="button">
-                <Plus className="size-4" />
-                Nuevo contacto
-              </Button>
-            }
+            primary={{ label: "Nuevo contacto", icon: <Plus className="size-4" />, onClick: () => {} }}
           />
           <FilterBar filters={FILTERS} sortOptions={SORT_OPTIONS} searchPlaceholder="Buscar por nombre, teléfono…" />
           <DemoTable />
@@ -151,7 +146,7 @@ export const Detalle: Story = {
           <PageHeader
             title="Rosa Quispe"
             subtitle="HC-000001 · contacto desde hace 3 días"
-            actions={<Button type="button" variant="outline">Reanudar atención</Button>}
+            primary={{ label: "Reanudar atención", icon: <Plus className="size-4" />, onClick: () => {} }}
           />
           <div className="flex flex-col gap-6 rounded-md bg-card p-6">
             <DemoDetailBody />

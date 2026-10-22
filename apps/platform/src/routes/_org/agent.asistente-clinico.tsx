@@ -89,22 +89,24 @@ function ClinicalAssistantPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title={`${CLINICAL_NAME}, tu agente clínico`}
-        subtitle={AGENT_NAME_REASONS.asistente_clinico}
-        actions={
-          config && canWrite ? (
-            <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
-              {on ? "Encendido" : "Apagado"}
-              <Switch
-                id="asistente-clinico-encendido"
-                checked={on}
-                disabled={toggle.isPending}
-                aria-label={on ? `Apagar a ${CLINICAL_NAME}` : `Encender a ${CLINICAL_NAME}`}
-                onCheckedChange={(next) => toggle.mutate(next)}
-              />
-            </label>
-          ) : config ? (
-            <Badge variant={on ? "success" : "secondary"}>{on ? "Encendido" : "Apagado"}</Badge>
-          ) : null
+        subtitle={
+          <>
+            <p className="min-w-0">{AGENT_NAME_REASONS.asistente_clinico}</p>
+            {config && canWrite ? (
+              <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
+                {on ? "Encendido" : "Apagado"}
+                <Switch
+                  id="asistente-clinico-encendido"
+                  checked={on}
+                  disabled={toggle.isPending}
+                  aria-label={on ? `Apagar a ${CLINICAL_NAME}` : `Encender a ${CLINICAL_NAME}`}
+                  onCheckedChange={(next) => toggle.mutate(next)}
+                />
+              </label>
+            ) : config ? (
+              <Badge variant={on ? "success" : "secondary"}>{on ? "Encendido" : "Apagado"}</Badge>
+            ) : null}
+          </>
         }
       />
       <Link to="/agent" className={`-mt-3 w-fit ${LINK}`}>

@@ -840,7 +840,7 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los quince, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los dieciséis, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
@@ -848,6 +848,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida"],
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
+      ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver"],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo"],
       ["odentia_recordatorio_cita_datos_v1", "en_revision", "recordatorio_cita_datos"],
       ["odentia_recordatorio_cita_v2", "en_revision", "recordatorio_cita"],
@@ -987,6 +988,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida", 3],
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
+      ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver", 2],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo", 2],
       ["odentia_recordatorio_cita_datos_v1", "en_revision", "recordatorio_cita_datos", 3],
       ["odentia_recordatorio_cita_v2", "rechazada", "recordatorio_cita", 3],
@@ -1004,7 +1006,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(16)
+    expect(rows).toHaveLength(17)
   })
 })
 

@@ -1,10 +1,5 @@
 import {
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
   ScrollArea,
   Tabs,
   TabsContent,
@@ -14,7 +9,7 @@ import {
 import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { MoreHorizontal, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import * as React from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { CountView } from "../../components/inventory/count-view"
@@ -214,60 +209,26 @@ function InventoryWorkspace() {
     )
   }
 
-  const menu: Array<{ key: string; label: string; onClick: () => void } | "separador"> = []
-  if (canWrite) menu.push({ key: "ajustar", label: "Ajustar", onClick: () => open.action("ajustar") })
-  if (canWrite && sede.branches.length > 1) menu.push({ key: "trasladar", label: "Trasladar", onClick: () => open.action("trasladar") })
-  if (canReceive) menu.push({ key: "uso", label: "Registrar uso", onClick: () => open.action("uso") })
-  if (canWrite) menu.push({ key: "agregar", label: "Agregar sin compra", onClick: () => open.action("agregar") })
-  if (canWrite) menu.push("separador", { key: "pegar", label: "Pegar mi lista", onClick: open.paste })
+  // Lo que la pestaña de Productos ofrece aparte de su acción principal va al menú ⋯.
+  const menu: Array<{ label: string; onSelect: () => void }> = []
+  if (canWrite) menu.push({ label: "Contar", onSelect: open.count })
+  if (canWrite) menu.push({ label: "Ajustar", onSelect: () => open.action("ajustar") })
+  if (canWrite && sede.branches.length > 1) menu.push({ label: "Trasladar", onSelect: () => open.action("trasladar") })
+  if (canReceive) menu.push({ label: "Registrar uso", onSelect: () => open.action("uso") })
+  if (canWrite) menu.push({ label: "Agregar sin compra", onSelect: () => open.action("agregar") })
+  if (canWrite) menu.push({ label: "Pegar mi lista", onSelect: open.paste })
 
-  const headerActions =
-    tab === "productos" ? (
-      canWrite || menu.length > 0 ? (
-        <>
-          {canWrite ? (
-            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={open.count}>
-              Contar
-            </Button>
-          ) : null}
-          {menu.length > 0 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button type="button" variant="outline" className="min-h-11 min-w-11 sm:min-h-9" aria-label="Más acciones de inventario" />}>
-                <MoreHorizontal aria-hidden />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {menu.map((item, index) =>
-                  item === "separador" ? (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: el separador es fijo en su lugar.
-                    <DropdownMenuSeparator key={`separador-${index}`} />
-                  ) : (
-                    <DropdownMenuItem key={item.key} onClick={item.onClick}>
-                      {item.label}
-                    </DropdownMenuItem>
-                  ),
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-          {canWrite ? (
-            <Button type="button" className="min-h-11 sm:min-h-9" onClick={() => open.productForm()}>
-              <Plus aria-hidden />
-              Producto
-            </Button>
-          ) : null}
-        </>
-      ) : undefined
-    ) : tab === "compras" && canWrite ? (
-      <Button type="button" className="min-h-11 sm:min-h-9" onClick={() => open.purchase()}>
-        <Plus aria-hidden />
-        Compra
-      </Button>
-    ) : tab === "proveedores" && canWrite ? (
-      <Button type="button" className="min-h-11 sm:min-h-9" onClick={() => open.supplier()}>
-        <Plus aria-hidden />
-        Proveedor
-      </Button>
-    ) : undefined
+  // La acción principal es crear lo que cada pestaña lista (producto, compra o proveedor).
+  const headerPrimary =
+    tab === "productos"
+      ? canWrite
+        ? { label: "Producto", icon: <Plus aria-hidden />, onClick: () => open.productForm() }
+        : undefined
+      : tab === "compras" && canWrite
+        ? { label: "Compra", icon: <Plus aria-hidden />, onClick: () => open.purchase() }
+        : tab === "proveedores" && canWrite
+          ? { label: "Proveedor", icon: <Plus aria-hidden />, onClick: () => open.supplier() }
+          : undefined
 
   return (
     <InventoryProvider value={scope}>
@@ -276,7 +237,12 @@ function InventoryWorkspace() {
           <CountView key={branchId} subtitle={subtitle} onExit={() => setParams({ contar: undefined, q: undefined }, { replace: true })} />
         ) : (
           <>
-            <PageHeader title="Inventario" subtitle={subtitle} actions={headerActions} />
+            <PageHeader
+              title="Inventario"
+              subtitle={subtitle}
+              primary={headerPrimary}
+              menu={tab === "productos" && menu.length > 0 ? menu : undefined}
+            />
             {profile.isError && !profile.data ? (
               // Sin el perfil no se sabe la moneda: no se confunde con «configura la moneda».
               <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">

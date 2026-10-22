@@ -106,7 +106,14 @@ export {
   useDetailMode,
 } from "./master-detail.js"
 export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
-export { PageHeader, type PageHeaderProps } from "./page-header.js"
+export {
+  PageHeader,
+  PageHeaderMenu,
+  type PageHeaderMenuItem,
+  type PageHeaderPrimary,
+  type PageHeaderProps,
+} from "./page-header.js"
+export { type ViewTabOption, type ViewTabsProps, ViewTabs } from "./view-tabs.js"
 export { PersonAvatar, type PersonAvatarProps, personInitials } from "./person-avatar.js"
 export {
   ADJUSTED_IMAGE_SIZE,

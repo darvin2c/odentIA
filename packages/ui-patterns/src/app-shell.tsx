@@ -328,6 +328,24 @@ function SidebarShortcut() {
 }
 
 /**
+ * En tableta, el menú abierto flota sobre la página: al cambiar de página se
+ * cierra solo, para no dejarlo tapando lo que se acaba de elegir.
+ */
+function CloseFloatingSidebarOnNavigate({ pathname }: { pathname: string }) {
+  const sidebar = useSidebar()
+  const overlayRef = React.useRef(sidebar.overlay)
+  overlayRef.current = sidebar.overlay
+  const lastPathname = React.useRef(pathname)
+  const { setOpen } = sidebar
+  React.useEffect(() => {
+    if (lastPathname.current === pathname) return
+    lastPathname.current = pathname
+    if (overlayRef.current) setOpen(false)
+  }, [pathname, setOpen])
+  return null
+}
+
+/**
  * Cabecera del sidebar, patrón ChatGPT sin search: expandido muestra la marca
  * a la izquierda y el icono de panel lateral a la derecha; en el riel colapsado
  * la marca se vuelve el botón superior y al pasar el hover troca al mismo icono.
@@ -482,6 +500,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     <TooltipProvider>
       {notice}
       <SidebarProvider className="min-h-[calc(100svh-var(--notice-strip-h,0px))]">
+        <CloseFloatingSidebarOnNavigate pathname={pathname} />
         <Sidebar
           collapsible="icon"
           className="top-(--notice-strip-h) h-[calc(100svh-var(--notice-strip-h,0px))]"
@@ -509,7 +528,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label={`Menú de ${user.name || "usuario"}`}
-                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
               >
                 <PersonAvatar
                   name={user.name}

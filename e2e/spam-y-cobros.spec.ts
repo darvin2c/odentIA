@@ -69,8 +69,8 @@ test("bandeja: el mismo texto cinco veces va a Spam y «No es spam» la devuelve
   const spamButton = page.getByRole("button", { name: /^Spam/ })
   await expect(spamButton).toContainText("1")
   // «Bloqueados» queda a la vista junto a Spam, sin que los filtros lo tapen.
-  await expect(page.getByRole("button", { name: "Bloqueados" })).toBeInViewport()
-  const blockedBox = await page.getByRole("button", { name: "Bloqueados" }).boundingBox()
+  await expect(page.getByRole("tab", { name: "Bloqueados" })).toBeInViewport()
+  const blockedBox = await page.getByRole("tab", { name: "Bloqueados" }).boundingBox()
   const searchBox = await page.getByRole("searchbox").first().boundingBox().catch(() => null)
   if (blockedBox && searchBox && Math.abs(blockedBox.y - searchBox.y) < blockedBox.height) {
     expect(blockedBox.x + blockedBox.width).toBeLessThanOrEqual(searchBox.x)

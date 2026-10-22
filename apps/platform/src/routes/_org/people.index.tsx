@@ -2,12 +2,11 @@ import { documentText } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  ButtonGroup,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  buttonVariants,
   Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from "@odentia/ui"
 import {
   DataTable,
@@ -15,28 +14,38 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  type FilterDef,
   internationalText,
   PageHeader,
   PageShell,
+  PersonAvatar,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ChevronDown, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { NewPatientDrawer, type NewPatientTarget } from "../../components/patient/new-patient-drawer"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
+import { channelLabel } from "../../lib/channels"
 import { activeOrgLocale } from "../../lib/locale"
 import { hcLabel } from "../../lib/patients"
 import {
+  isPeopleShortcut,
   isPeopleView,
+  PEOPLE_SHORTCUTS,
   PEOPLE_VIEWS,
   PERSON_KIND_LABELS,
+  type PeopleShortcutCounts,
   type PeopleView,
   type PersonListItem,
+  attentionWords,
+  daysSince,
+  situationAction,
+  situationText,
 } from "../../lib/people"
 
 const PAGE_LIMIT = 30
@@ -44,8 +53,7 @@ const NEW_PATIENT: NewPatientTarget = { kind: "new" }
 
 /**
  * Una lista y un buscador (ADR 0029): todas las personas de la clínica, con
- * «Pacientes» por defecto y las vistas Por registrar, Responsables,
- * Archivados y Todos. Busca por nombre, teléfono o documento en el servidor,
+ * «Pacientes» por defecto y las vistas Contactos nuevos, Archivados y Todos. Busca por nombre, teléfono o documento en el servidor,
  * con páginas del servidor. Cada fila abre la página de la persona.
  */
 export const Route = createFileRoute("/_org/people/")({
@@ -61,22 +69,38 @@ export const Route = createFileRoute("/_org/people/")({
 
 /** La segunda línea de cada fila: lo que sirve para reconocer a la persona. */
 function rowDetail(row: PersonListItem): string {
-  if (row.kind === "responsable" && !row.patient) {
-    const names = row.responsibleFor.join(", ")
-    const more = row.responsibleCount - row.responsibleFor.length
-    return `Responsable de ${names}${more > 0 ? ` y ${more} más` : ""}`
-  }
   const parts: string[] = []
   if (row.patient) parts.push(hcLabel(row.patient.patientNumber))
+  if (row.age !== null) parts.push(`${row.age} años`)
+  if (row.vinculos.length > 0) parts.push(vinculosText(row))
   if (row.docNumber) parts.push(documentText(row.docType, row.docNumber))
-  if (!row.patient && row.phone) parts.push(internationalText(row.phone))
-  if (row.nextAppointmentAt)
-    parts.push(
-      `próxima cita ${new Date(row.nextAppointmentAt).toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric" })}`,
-    )
-  else if (!row.patient && row.lastInteractionAt)
-    parts.push(`escribió ${timeAgo(row.lastInteractionAt)}`)
+  if (row.phone) parts.push(internationalText(row.phone))
   return parts.join(" · ") || "Sin datos todavía"
+}
+
+/** «Madre de Mateo Vargas», y cuántos más; el contacto de emergencia se dice como tal (decisión 16). */
+function vinculosText(row: PersonListItem): string {
+  const more = row.vinculoCount - row.vinculos.length
+  return `${row.vinculos.join(", ")}${more > 0 ? ` y ${more} más` : ""}`
+}
+
+/** «Ya la invité»: anota la invitación que se hizo por teléfono o en persona (issue 139, decisión 15). */
+function InvitedToReturnButton({ personId }: { personId: string }) {
+  const queryClient = useQueryClient()
+  const invited = useMutation({
+    mutationFn: () => apiFetch(`/api/people/${personId}/invited-to-return`, { method: "POST" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["people"] }),
+  })
+  return (
+    <Button type="button" size="sm" variant="outline" disabled={invited.isPending} onClick={() => invited.mutate()}>
+      Ya la invité
+    </Button>
+  )
+}
+
+/** Fecha corta en la zona y el idioma de la clínica. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric", month: "short" })
 }
 
 function PeoplePage() {
@@ -100,29 +124,32 @@ function PeoplePage() {
   }, [nuevo, canRegister, navigate])
   // Quien aún no es paciente solo lo ven recepción y quien dirige; caja y odontología, solo pacientes.
   const seesAll = can("crm.read")
-  const views = PEOPLE_VIEWS.filter(
-    (item) => seesAll || (item.id !== "por_registrar" && item.id !== "responsables"),
-  )
+  const views = PEOPLE_VIEWS.filter((item) => seesAll || item.id !== "por_registrar")
   const view: PeopleView = ((v) =>
     isPeopleView(v) && views.some((item) => item.id === v) ? v : "pacientes")(listSearch.get("ver"))
   const search = listSearch.get("q") ?? ""
+  const atajoParam = listSearch.get("atajo")
+  const atajo = view === "pacientes" && isPeopleShortcut(atajoParam) ? atajoParam : undefined
+  const atajoLabel = PEOPLE_SHORTCUTS.find((item) => item.id === atajo)?.label ?? ""
   const [cursors, setCursors] = useState<string[]>([])
   const cursor = cursors.at(-1) ?? null
   const [creating, setCreating] = useState(false)
   // Otra vista u otra búsqueda vuelven a la primera página.
   // biome-ignore lint/correctness/useExhaustiveDependencies: se reinicia al cambiar los filtros
-  useEffect(() => setCursors([]), [view, search])
+  useEffect(() => setCursors([]), [view, search, atajo])
 
   const query = useQuery({
-    queryKey: ["people", view, search.trim(), cursor],
+    queryKey: ["people", view, search.trim(), atajo, cursor],
     queryFn: () => {
       const params = new URLSearchParams({ ver: view, limit: String(PAGE_LIMIT) })
       if (search.trim()) params.set("q", search.trim())
+      if (atajo) params.set("atajo", atajo)
       if (cursor) params.set("cursor", cursor)
       return apiFetch<{
         data: PersonListItem[]
         nextCursor: string | null
         counts: { porRegistrar: number }
+        shortcuts: PeopleShortcutCounts | null
       }>(`/api/people?${params}`)
     },
     enabled: canView,
@@ -131,14 +158,47 @@ function PeoplePage() {
   const rows = query.data?.data ?? []
   const nextCursor = query.data?.nextCursor ?? null
   const porRegistrar = query.data?.counts.porRegistrar
+  const shortcuts = query.data?.shortcuts ?? null
+  // Los atajos viven en un solo filtro «Qué necesita algo», con su cuenta en cada opción.
+  const shortcutFilters: FilterDef[] =
+    view === "pacientes" && shortcuts
+      ? [
+          {
+            type: "select",
+            key: "atajo",
+            label: "Qué necesita algo",
+            options: PEOPLE_SHORTCUTS.flatMap((item) =>
+              shortcuts[item.id] === null ? [] : [{ value: item.id, label: item.label, count: shortcuts[item.id] ?? undefined }],
+            ),
+          },
+        ]
+      : []
 
-  const columns = useMemo<ColumnDef<PersonListItem>[]>(
-    () => [
-      {
-        id: "name",
-        header: "Persona",
-        meta: { view: { role: "title" } },
-        cell: ({ row }) => (
+  const columns = useMemo<ColumnDef<PersonListItem>[]>(() => {
+    // En el atajo «Por invitar a volver», anotar la invitación que se hizo por teléfono o en persona.
+    const invitedColumn: ColumnDef<PersonListItem>[] =
+      atajo === "por_invitar_a_volver"
+        ? [
+            {
+              id: "invited",
+              header: "Invitación",
+              cell: ({ row }) => <InvitedToReturnButton personId={row.original.id} />,
+            },
+          ]
+        : []
+    const persona: ColumnDef<PersonListItem> = {
+      id: "name",
+      header: "Persona",
+      meta: { view: { role: "title" } },
+      cell: ({ row }) => (
+        <span className="flex min-w-0 items-center gap-3">
+          <PersonAvatar
+            name={row.original.displayName}
+            familyName={row.original.familyName}
+            className="size-9 shrink-0"
+            fallbackClassName="text-xs"
+            decorative
+          />
           <span className="flex min-w-0 flex-col">
             <Link
               to="/people/$personId"
@@ -149,8 +209,99 @@ function PeoplePage() {
             </Link>
             <span className="text-sm text-muted-foreground">{rowDetail(row.original)}</span>
           </span>
-        ),
-      },
+        </span>
+      ),
+    }
+    if (view === "pacientes")
+      return [
+        persona,
+        {
+          id: "next",
+          header: "Próxima cita",
+          cell: ({ row }) => (
+            <span className="text-sm">
+              {row.original.nextAppointmentAt ? shortDate(row.original.nextAppointmentAt) : "—"}
+            </span>
+          ),
+        },
+        {
+          id: "last",
+          header: "Última visita",
+          cell: ({ row }) => (
+            <span className="text-sm">{row.original.lastVisitAt ? shortDate(row.original.lastVisitAt) : "—"}</span>
+          ),
+        },
+        {
+          id: "step",
+          header: "Qué sigue",
+          meta: { view: { primary: true } },
+          cell: ({ row }) => {
+            const step = row.original.nextStep
+            if (!step) return <span className="text-sm text-muted-foreground">—</span>
+            const who = attentionWords(row.original.attention)
+            return (
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="text-sm">{step.text}</span>
+                  {row.original.missingData ? <Badge variant="warning">Faltan datos</Badge> : null}
+                  {step.actionLabel ? (
+                    <Link
+                      to="/people/$personId"
+                      params={{ personId: row.original.id }}
+                      className={buttonVariants({ size: "sm", variant: "outline" })}
+                    >
+                      {step.actionLabel}
+                    </Link>
+                  ) : null}
+                </span>
+                {who ? <span className="text-xs text-muted-foreground">{who}</span> : null}
+              </span>
+            )
+          },
+        },
+      ...invitedColumn,
+      ]
+    if (view === "por_registrar")
+      return [
+        persona,
+        {
+          id: "how",
+          header: "Cómo llegó",
+          cell: ({ row }) => {
+            const first = row.original.firstContact
+            if (!first) return <span className="text-sm">Lo registró el equipo</span>
+            const channel = first.channel ? channelLabel(first.channel) : "Lo registró el equipo"
+            const isNew = (daysSince(first.at) ?? Number.POSITIVE_INFINITY) < 7
+            return (
+              <span className="flex flex-wrap items-center gap-2 text-sm">
+                {`${channel} · ${timeAgo(first.at)}`}
+                {isNew ? <Badge variant="secondary">Nueva</Badge> : null}
+              </span>
+            )
+          },
+        },
+        {
+          id: "situation",
+          header: "En qué está",
+          meta: { view: { primary: true } },
+          cell: ({ row }) => <span className="text-sm font-medium">{situationText(row.original)}</span>,
+        },
+        {
+          id: "step",
+          header: "Siguiente paso",
+          cell: ({ row }) => (
+            <Link
+              to="/people/$personId"
+              params={{ personId: row.original.id }}
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+            >
+              {situationAction(row.original.situation)}
+            </Link>
+          ),
+        },
+      ]
+    return [
+      persona,
       {
         id: "kind",
         header: "Qué es",
@@ -167,9 +318,8 @@ function PeoplePage() {
           </span>
         ),
       },
-    ],
-    [],
-  )
+    ]
+  }, [view, atajo])
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
   const filtered = Boolean(search.trim())
 
@@ -179,71 +329,45 @@ function PeoplePage() {
         title="Pacientes"
         subtitle={
           seesAll
-            ? "Todas las personas de la clínica: pacientes, quienes aún no se registran y sus responsables"
+            ? "Todas las personas de la clínica: pacientes, contactos nuevos y sus familiares"
             : "Los pacientes de la clínica"
         }
-        actions={
-          canRegister ? (
-            <ButtonGroup>
-              <Button type="button" onClick={() => setRegistering(true)}>
-                <Plus aria-hidden />
-                Nuevo paciente
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={<Button type="button" size="icon" aria-label="Más formas de agregar a alguien" />}
-                >
-                  <ChevronDown aria-hidden />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
-                  <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
-                    <span className="font-medium">Nuevo paciente</span>
-                    <span className="text-xs text-muted-foreground">Para atenderlo: crea su historia.</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setCreating(true)} className="flex-col items-start gap-0.5">
-                    <span className="font-medium">Nuevo contacto</span>
-                    <span className="text-xs text-muted-foreground">Aún no es paciente: alguien que pregunta o un familiar.</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </ButtonGroup>
-          ) : canCreate ? (
-            <Button type="button" onClick={() => setCreating(true)}>
-              <Plus aria-hidden />
-              Nuevo contacto
-            </Button>
-          ) : undefined
+        primary={
+          canRegister
+            ? { label: "Nuevo paciente", icon: <Plus aria-hidden />, onClick: () => setRegistering(true) }
+            : canCreate
+              ? { label: "Nuevo contacto", icon: <Plus aria-hidden />, onClick: () => setCreating(true) }
+              : undefined
         }
+        menu={canRegister ? [{ label: "Nuevo contacto", onSelect: () => setCreating(true) }] : undefined}
       />
       <div className="flex flex-col gap-2 py-4">
-        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-          <legend className="sr-only">Qué personas ver</legend>
-          {views.map((item) => {
-            const pressed = view === item.id
-            return (
-              <Button
-                key={item.id}
-                type="button"
-                size="sm"
-                variant={pressed ? "default" : "outline"}
-                aria-pressed={pressed}
-                className="min-h-11 rounded-full sm:min-h-9"
-                onClick={() =>
-                  listSearch.setParam("ver", item.id === "pacientes" ? undefined : item.id, {
-                    replace: true,
-                  })
-                }
-              >
+        {/* Elegir qué personas ver cambia la lista entera: es pestaña, igual que Finanzas. */}
+        <Tabs
+          value={view}
+          onValueChange={(next) =>
+            listSearch.setParam("ver", String(next) === "pacientes" ? undefined : String(next), {
+              replace: true,
+            })
+          }
+        >
+          <TabsList
+            aria-label="Qué personas ver"
+            className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {views.map((item) => (
+              <TabsTrigger key={item.id} value={item.id} className="shrink-0 min-h-11 sm:min-h-9">
                 {item.label}
                 {item.id === "por_registrar" && porRegistrar !== undefined
                   ? ` · ${porRegistrar}`
                   : ""}
-              </Button>
-            )
-          })}
-        </fieldset>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <FilterBar
-          filters={[]}
+          filters={shortcutFilters}
+          resetKeys={["atajo"]}
           sortOptions={[]}
           searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
           searchPending={query.isFetching && filtered}
@@ -262,17 +386,29 @@ function PeoplePage() {
           title={
             filtered
               ? "Nadie coincide con la búsqueda"
+              : atajo
+                ? `Nadie en «${atajoLabel}». ¡Al día!`
               : view === "pacientes"
                 ? "Sin pacientes todavía"
-                : "Nadie en esta vista"
+                : view === "por_registrar"
+                  ? "Nadie nuevo por ahora"
+                  : "Nadie en esta vista"
           }
           description={
             filtered
               ? "Prueba con otra parte del nombre, el teléfono o el documento, o mira en «Todos»."
               : "Cuando alguien escriba o lo registres, aparece aquí."
           }
-          actionLabel={canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
-          onAction={canRegister ? () => setRegistering(true) : canCreate ? () => setCreating(true) : undefined}
+          actionLabel={atajo ? "Ver todos" : canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
+          onAction={
+            atajo
+              ? () => listSearch.setParam("atajo", undefined, { replace: true })
+              : canRegister
+                ? () => setRegistering(true)
+                : canCreate
+                  ? () => setCreating(true)
+                  : undefined
+          }
         />
       ) : (
         <>

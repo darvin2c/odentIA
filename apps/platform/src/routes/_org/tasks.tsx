@@ -1,4 +1,4 @@
-import { Badge, Button, Spinner } from "@odentia/ui"
+import { Badge, Button, Spinner, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import {
   common,
   DataTable,
@@ -268,14 +268,7 @@ function TasksPage() {
       <PageHeader
         title="Tareas"
         subtitle={wholeClinic ? "Las de toda la clínica" : `Las tuyas y las de tu parte del equipo, las deje una persona, ${receptionName} o ${ADMIN_NAME}`}
-        actions={
-          canWrite ? (
-            <Button type="button" className="min-h-11" onClick={() => { setEditTaskId(null); setDrawerOpen(true) }}>
-              <Plus aria-hidden />
-              Nueva tarea
-            </Button>
-          ) : undefined
-        }
+        primary={canWrite ? { label: "Nueva tarea", icon: <Plus aria-hidden />, onClick: () => { setEditTaskId(null); setDrawerOpen(true) } } : undefined}
       />
       {actionError || completion.error ? (
         <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
@@ -284,39 +277,30 @@ function TasksPage() {
       ) : null}
       {completion.dialog}
       <div className="flex flex-col gap-2">
-        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-          <legend className="sr-only">Qué tareas ver</legend>
-          {VIEWS.map((item) => {
-            const pressed = view.value === item.value
-            return (
-              <Button
-                key={item.label}
-                type="button"
-                size="sm"
-                variant={pressed ? "default" : "outline"}
-                aria-pressed={pressed}
-                className="min-h-11 rounded-full sm:min-h-9"
-                onClick={() => listSearch.setParams({ vista: item.value, sort: undefined }, { replace: true })}
-              >
+        {/* Las vistas se excluyen entre sí: son pestañas, como en Pacientes. «Toda la clínica» acota cualquiera: es un filtro. */}
+        <Tabs
+          value={view.value ?? "abiertas"}
+          onValueChange={(next) =>
+            listSearch.setParams({ vista: String(next) === "abiertas" ? undefined : String(next), sort: undefined }, { replace: true })
+          }
+        >
+          <TabsList
+            aria-label="Qué tareas ver"
+            className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {VIEWS.map((item) => (
+              <TabsTrigger key={item.label} value={item.value ?? "abiertas"} className="shrink-0 min-h-11 sm:min-h-9">
                 {item.label}
-              </Button>
-            )
-          })}
-          {canAll ? (
-            <Button
-              type="button"
-              size="sm"
-              variant={wholeClinic ? "default" : "outline"}
-              aria-pressed={wholeClinic}
-              className="min-h-11 rounded-full sm:min-h-9"
-              onClick={() => listSearch.setParam("alcance", wholeClinic ? undefined : "clinica", { replace: true })}
-            >
-              Toda la clínica
-            </Button>
-          ) : null}
-        </fieldset>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <FilterBar
-          filters={[]}
+          filters={
+            canAll
+              ? [{ key: "alcance", label: "Alcance", type: "select", options: [{ value: "clinica", label: "Toda la clínica" }] }]
+              : []
+          }
           sortOptions={view.api === "hechas" ? [] : [
             { value: "vence", label: "Vence primero" },
             { value: "recientes", label: "Más recientes" },

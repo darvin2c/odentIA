@@ -26,7 +26,7 @@ import {
   FormPanel,
   MasterDetail,
   useDetailMode,
-  useHeaderUtilities,
+  PageHeader,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -65,6 +65,7 @@ import { OdontogramStudio } from "../odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
 import { useAgentPanelDockBlocker } from "../agent-panel"
+import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
 import { prepareConsents, type ConsentNeed } from "../../lib/encounter-documents"
 import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
@@ -389,7 +390,6 @@ export function EncounterEditor({
   const myUserId = useMyUserId()
   // El borrador ocupa la página: el agente se abre como cajón, sin desmontarlo.
   useAgentPanelDockBlocker(true)
-  const utilities = useHeaderUtilities()
   const signAs = useSignAs()
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
@@ -1638,39 +1638,40 @@ export function EncounterEditor({
       )}
     >
       <PatientClinicalStrip detail={patient} onAntecedentes={() => setContextOpen(true)} />
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{patient.patient.displayName}</h1>
-          <p className="text-sm text-muted-foreground">
-            {[
-              age !== "" ? `${age} años` : null,
-              hcLabel(patient.patient.patientNumber),
-              // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
-              encounter.appointmentId ? "desde su cita" : null,
-              encounter.startedAt ? `inicio ${formatClock(encounter.startedAt)}` : null,
-              memberName(encounter.dentistUserId),
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            role="status"
-            aria-live="polite"
-            className={cn("rounded-full border px-3 py-1 text-xs font-medium", saveChip.tone)}
-          >
-            {saveChip.text}
-          </span>
-          <Button type="button" size="sm" variant="outline" onClick={() => {
-            if (mode === "panel" && openSection) closeSection()
-            setContextOpen(true)
-          }}>
-            Antecedentes y última atención
-          </Button>
-          {utilities}
-        </div>
-      </div>
+      {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}
+      <PageHeader
+        title={patient.patient.displayName}
+        subtitle={
+          <>
+            <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
+            <span>
+              {[
+                age !== "" ? `${age} años` : null,
+                hcLabel(patient.patient.patientNumber),
+                // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
+                encounter.appointmentId ? "desde su cita" : null,
+                encounter.startedAt ? `inicio ${formatClock(encounter.startedAt)}` : null,
+                memberName(encounter.dentistUserId),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            <span
+              role="status"
+              aria-live="polite"
+              className={cn("rounded-full border px-3 py-1 text-xs font-medium", saveChip.tone)}
+            >
+              {saveChip.text}
+            </span>
+            <Button type="button" size="sm" variant="outline" onClick={() => {
+              if (mode === "panel" && openSection) closeSection()
+              setContextOpen(true)
+            }}>
+              Antecedentes y última atención
+            </Button>
+          </>
+        }
+      />
       {saveState === "offline" ? (
         <p role="status" className="text-sm text-muted-foreground">
           Sin conexión: lo escrito se queda en la pantalla y se guarda al volver. Mientras tanto no se puede firmar.

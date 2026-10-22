@@ -144,6 +144,7 @@ export const AUTOMATION_MESSAGE_KEYS = [
   "seguimiento_comercial",
   "seguimiento_no_asistencia",
   "cita_cancelada",
+  "invitar_a_volver",
 ] as const
 export type AutomationMessageKey = (typeof AUTOMATION_MESSAGE_KEYS)[number]
 
@@ -222,6 +223,17 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     variables: ["persona", "cita_pasada", "clinica"],
     buttons: [{ action: "responder", title: "Sí, otro horario", asks: "reservar" }, OPT_OUT],
     subject: "¿Reprogramamos tu cita?",
+  },
+  // «Invitar a volver» (issue 139): quien no viene hace seis meses. Controles y seguimiento: se apaga aparte.
+  invitar_a_volver: {
+    key: "invitar_a_volver",
+    purpose: "seguimiento",
+    category: "utility",
+    template: "odentia_invitar_a_volver_v1",
+    body: "Hola, {{1}}. Hace más de seis meses que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
+    variables: ["persona", "clinica"],
+    buttons: [{ action: "responder", title: "Sí, otro horario", asks: "reservar" }, OPT_OUT],
+    subject: "¿Te buscamos un horario para tu control?",
   },
   // Lo recibe quien coordina la cita, que puede no ser quien la canceló: por eso
   // no dice «cancelaste».

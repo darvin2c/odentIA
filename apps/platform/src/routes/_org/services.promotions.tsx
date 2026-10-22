@@ -274,14 +274,7 @@ function PromotionsPage() {
     <PageHeader
       title="Promociones"
       subtitle={`Un nombre, unas fechas y el precio de cada servicio. Caja y ${receptionName} las leen de aquí.`}
-      actions={
-        canConfigure && regional ? (
-          <Button type="button" className="min-h-11" onClick={() => open(null)}>
-            <Plus aria-hidden />
-            Nueva promoción
-          </Button>
-        ) : undefined
-      }
+      primary={canConfigure && regional ? { label: "Nueva promoción", icon: <Plus aria-hidden />, onClick: () => open(null) } : undefined}
     />
   )
 

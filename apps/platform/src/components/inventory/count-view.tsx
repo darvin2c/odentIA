@@ -6,10 +6,10 @@
  */
 import { unitFor } from "@odentia/clinical"
 import { Button, Checkbox, Field, FieldLabel, toast } from "@odentia/ui"
-import { ConfirmDialog, DataTable, DataTableSkeleton, EmptyState, PageHeader, SearchInput, SubmitButton, normalizeSearchText, useListSearch } from "@odentia/ui-patterns"
+import { ConfirmDialog, DataTable, DataTableSkeleton, EmptyState, PageHeader, SearchInput, SubmitButton, ViewTabs, normalizeSearchText, useListSearch } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ClipboardList } from "lucide-react"
+import { ClipboardList, LogOut } from "lucide-react"
 import * as React from "react"
 import {
   countStock,
@@ -217,22 +217,17 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
       <PageHeader
         title="Contar lo que hay"
         subtitle={subtitle}
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 sm:min-h-9"
-            onClick={() => {
-              if (written.length === 0) onExit()
-              else {
-                setDiscard(false)
-                setLeaving(true)
-              }
-            }}
-          >
-            Salir sin guardar
-          </Button>
-        }
+        primary={{
+          label: "Salir sin guardar",
+          icon: <LogOut aria-hidden />,
+          onClick: () => {
+            if (written.length === 0) onExit()
+            else {
+              setDiscard(false)
+              setLeaving(true)
+            }
+          },
+        }}
       />
       <form
         ref={container}
@@ -261,23 +256,7 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
       >
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
           <SearchInput label="Buscar en productos" placeholder="Buscar por nombre o código" expandable />
-          <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-            <legend className="sr-only">Qué productos ver</legend>
-            {filters.map((item) => (
-              <Button
-                key={item.value}
-                type="button"
-                size="sm"
-                variant={filter === item.value ? "default" : "outline"}
-                aria-pressed={filter === item.value}
-                className="min-h-11 rounded-full sm:min-h-9"
-                onClick={() => pick(item.value)}
-              >
-                {item.label}
-                <span className="tabular-nums opacity-80">{formatWhole(item.count)}</span>
-              </Button>
-            ))}
-          </fieldset>
+          <ViewTabs label="Qué productos ver" value={filter} options={filters} onValueChange={pick} />
         </div>
 
         {products.isPending ? (

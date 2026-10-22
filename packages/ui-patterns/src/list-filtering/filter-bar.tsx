@@ -187,26 +187,25 @@ export function FilterBar({
         {showSearch && (
           <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
         )}
-        <Button
-          type="button"
-          variant="outline"
-          className="shrink-0"
-          aria-label={common.filters.label}
-          onClick={() => setDrawerMode("all")}
-        >
-          <SlidersHorizontal />
-          <span>{common.filters.label}</span>
-          {activeFilterCount > 0 ? (
-            <span className="flex min-w-5 items-center justify-center rounded-full bg-accent-soft px-1.5 text-xs text-accent-foreground">
-              {activeFilterCount}
-            </span>
-          ) : null}
-        </Button>
-        {hasActiveCriteria && (
-          <Button type="button" size="sm" variant="ghost" onClick={clear}>
-            {common.filters.clear}
+        {/* Sin filtros que elegir, el botón no tiene nada que abrir: no se muestra. */}
+        {filters.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0"
+            aria-label={common.filters.label}
+            onClick={() => setDrawerMode("all")}
+          >
+            <SlidersHorizontal />
+            <span>{common.filters.label}</span>
+            {activeFilterCount > 0 ? (
+              <span className="flex min-w-5 items-center justify-center rounded-full bg-accent-soft px-1.5 text-xs text-accent-foreground">
+                {activeFilterCount}
+              </span>
+            ) : null}
           </Button>
         )}
+        {/* En el teléfono, Limpiar vive en el cajón de filtros; aquí solo queda lo que se ve. */}
         {sortOptions.length > 0 && (
           <div className="ml-auto shrink-0">
             <SortMenu options={sortOptions} compact />

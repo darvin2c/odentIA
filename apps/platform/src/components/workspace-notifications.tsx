@@ -43,13 +43,13 @@ export function WorkspaceNotifications() {
     <Button
       type="button"
       variant="ghost"
-      size="icon-lg"
-      className={`elevated relative border border-border hover:bg-accent/50 ${open ? "bg-accent" : "bg-card"}`}
+      className={`elevated relative h-9 gap-2 rounded-full border border-border px-3 hover:bg-accent/50 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0 ${open ? "bg-accent" : "bg-card"}`}
       onClick={() => setOpen(!open)}
       aria-label={`Avisos${unread ? `: ${unread} sin leer` : ""}`}
       aria-expanded={open}
     >
       <Bell className="size-4" />
+      <span className="hidden md:inline">Avisos</span>
       {unread > 0 && (
         <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold text-background ring-2 ring-canvas">
           {unread > 99 ? "99+" : unread}

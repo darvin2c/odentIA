@@ -1,25 +1,17 @@
-import {
-  Badge,
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@odentia/ui"
+import { Badge } from "@odentia/ui"
 import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
 import { SignedOdontogramFact } from "../../components/odontogram-assessments"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
+import { EncounterBreadcrumb } from "../../components/patient/encounter-breadcrumb"
 import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { lastPatientSection } from "../../lib/people"
 import {
   type EncounterDetail,
   encounterStatusLabel,
@@ -30,42 +22,6 @@ import {
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   component: EncounterPage,
 })
-
-/**
- * Miga `Pacientes > {paciente} > Atención`. El enlace a su página vuelve a la
- * pestaña donde estaba quien abrió la atención; si no se sabe (llegó desde la
- * Agenda o Inicio), a la que su página abre por su rol.
- */
-function EncounterBreadcrumb({
-  patientId,
-  patientName,
-}: {
-  patientId: string
-  patientName?: string
-}) {
-  const back = lastPatientSection(patientId)
-  return (
-    <Breadcrumb>
-      <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink render={<Link to="/people" />}>Pacientes</BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbLink
-            render={<Link to="/patients/$patientId" params={{ patientId }} search={back ? { tab: back } : {}} />}
-          >
-            {patientName ?? "…"}
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbPage>Atención</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
-  )
-}
 
 function EncounterPage() {
   const { patientId, encounterId } = Route.useParams()
@@ -141,7 +97,6 @@ function EncounterPage() {
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
       <PageShell className="flex flex-col gap-4">
-        <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
         <EncounterEditor
           key={encounterId}
           patientId={patientId}
@@ -155,11 +110,15 @@ function EncounterPage() {
   }
   return (
     <PageShell className="flex flex-col gap-6">
-      <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
       <PageHeader
         title={`Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
-        subtitle={`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}
-        actions={<Badge variant="outline">Solo lectura</Badge>}
+        subtitle={
+          <>
+            <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
+            <p className="min-w-0">{`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}</p>
+            <Badge variant="outline">Solo lectura</Badge>
+          </>
+        }
       />
       {detail.encounter.status === "finalizada" ? (
         <EncounterHandoff patientId={patientId} detail={detail} />

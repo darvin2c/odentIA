@@ -28,6 +28,7 @@ import {
   PageShell,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Plus } from "lucide-react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
@@ -238,17 +239,11 @@ function BillingPage() {
       <PageHeader
         title="Facturación"
         subtitle="Suscripciones, comprobantes por confirmar, cargos, planes y medios"
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setMethodDrawer(true)}>
-              Nuevo medio
-            </Button>
-            <Button variant="outline" onClick={() => setManualOpen(true)}>
-              Registrar pago
-            </Button>
-            <Button onClick={() => setPlanDrawer({})}>Nuevo plan</Button>
-          </>
-        }
+        primary={{ label: "Nuevo plan", icon: <Plus aria-hidden />, onClick: () => setPlanDrawer({}) }}
+        menu={[
+          { label: "Nuevo medio", onSelect: () => setMethodDrawer(true) },
+          { label: "Registrar pago", onSelect: () => setManualOpen(true) },
+        ]}
       />
 
       <section aria-labelledby="pendientes" className="flex flex-col gap-2">

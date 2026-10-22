@@ -798,7 +798,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   await gotoHydrated(page, tenant(slug, `/people/${rosa.id}`))
   const areas = page.getByRole("tablist", { name: "Pestañas de la página" }).getByRole("tab")
   await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Datos"])
-  await expect(page.getByText("Por registrar", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("Contacto nuevo", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Falta registrarla como paciente")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("por-registrar.png"), fullPage: true })
 
@@ -828,7 +828,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   await expect(page.getByText("Falta registrarla como paciente")).toHaveCount(0)
 })
 
-test("una lista y un buscador: Pacientes, Por registrar y Responsables; Contactos redirige", async ({ owner }) => {
+test("una lista y un buscador: Pacientes, Contactos nuevos y Todos con sus vínculos; Contactos redirige", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
   const { page } = owner
   const slug = owner.org.slug
@@ -852,13 +852,15 @@ test("una lista y un buscador: Pacientes, Por registrar y Responsables; Contacto
   await expect(page.getByText(/PASAPORTE/)).toHaveCount(0)
   // Plegado, el buscador dice su nombre («Buscar en pacientes», ADR 0066); la ayuda completa aparece al abrirlo.
   await expect(page.getByRole("searchbox")).toHaveAttribute("placeholder", "Buscar en pacientes")
-  await page.getByRole("button", { name: /^Por registrar/ }).click()
+  // Contactos nuevos: quien aún no es paciente ni familiar de uno.
+  await page.getByRole("tab", { name: /^Contactos nuevos/ }).click()
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
-  await page.getByRole("button", { name: "Responsables", exact: true }).click()
-  await expect(page.getByRole("link", { name: "Madre de Lucía" })).toBeVisible()
-  await expect(page.getByText("Responsable de Lucía Quispe")).toBeVisible()
-  // Busca por teléfono en toda la clínica.
+  // Familiares y tutores no son contactos nuevos: aparecen en Todos, con su vínculo.
+  await expect(page.getByRole("link", { name: "Madre de Lucía" })).toHaveCount(0)
   await page.getByRole("button", { name: "Todos", exact: true }).click()
+  await expect(page.getByRole("link", { name: "Madre de Lucía" })).toBeVisible()
+  await expect(page.getByText(/de Lucía Quispe/).first()).toBeVisible()
+  // Busca por teléfono en toda la clínica.
   await page.getByRole("searchbox").fill("987 654")
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Lucía Quispe" })).toHaveCount(0)

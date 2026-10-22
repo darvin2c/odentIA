@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { IntegrationsCrumb } from "../../components/integrations/integrations-crumb"
+import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { WhatsAppConnect } from "../../components/integrations/whatsapp/connect"
 import { WhatsAppConnection } from "../../components/integrations/whatsapp/connection"
 import { SettingsNoAccess } from "../../components/settings/no-access"
@@ -115,8 +115,7 @@ function WhatsAppPage() {
   if (!canRead) {
     return (
       <div className="flex flex-col gap-4">
-        <IntegrationsCrumb current={TITLE} />
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <PageHeader title={TITLE} subtitle={<IntegrationsCrumbWithText current={TITLE} text={SUBTITLE} />} />
         <SettingsNoAccess />
       </div>
     )
@@ -134,8 +133,7 @@ function WhatsAppPage() {
   return (
     // En teléfono «Nuevo mensaje» queda fijo al pie: el contenido deja ese sitio libre.
     <div className={activeCount === 1 && canWrite ? "flex flex-col gap-4 pb-20 sm:pb-0" : "flex flex-col gap-4"}>
-      <IntegrationsCrumb current={TITLE} />
-      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <PageHeader title={TITLE} subtitle={<IntegrationsCrumbWithText current={TITLE} text={SUBTITLE} />} />
 
       {listQuery.isPending ? (
         <WhatsAppSkeleton />

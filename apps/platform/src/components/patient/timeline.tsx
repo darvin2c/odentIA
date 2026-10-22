@@ -8,7 +8,6 @@ import {
   AttachmentTitle,
   Badge,
   Button,
-  ButtonGroup,
   buttonVariants,
   Empty,
   EmptyContent,
@@ -18,7 +17,6 @@ import {
   EmptyTitle,
   Field,
   FieldLabel,
-  ScrollArea,
   Select,
   SelectContent,
   SelectGroup,
@@ -27,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
+import { ViewTabs } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
@@ -556,57 +555,18 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <ScrollArea horizontal className="max-w-full">
-          <ButtonGroup aria-label="Filtrar historia clínica">
-            {FILTERS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                size="sm"
-                variant={filter === option.value ? "default" : "outline"}
-                aria-pressed={filter === option.value}
-                onClick={() => setFilter(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </ButtonGroup>
-        </ScrollArea>
+        <ViewTabs label="Filtrar historia clínica" value={filter} options={FILTERS} onValueChange={setFilter} />
         <div className="flex flex-wrap items-center gap-2">
-          <ButtonGroup aria-label="Agrupar historia clínica">
-            {GROUP_MODES.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                size="sm"
-                variant={mode === option.value ? "default" : "outline"}
-                aria-pressed={mode === option.value}
-                onClick={() => setMode(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </ButtonGroup>
-          <ButtonGroup aria-label="Orden de historia clínica">
-            <Button
-              type="button"
-              size="sm"
-              variant={order === "desc" ? "default" : "outline"}
-              aria-pressed={order === "desc"}
-              onClick={() => setOrder("desc")}
-            >
-              Recientes
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={order === "asc" ? "default" : "outline"}
-              aria-pressed={order === "asc"}
-              onClick={() => setOrder("asc")}
-            >
-              Antiguos
-            </Button>
-          </ButtonGroup>
+          <ViewTabs label="Agrupar historia clínica" value={mode} options={GROUP_MODES} onValueChange={setMode} />
+          <ViewTabs
+            label="Orden de historia clínica"
+            value={order}
+            options={[
+              { value: "desc", label: "Recientes" },
+              { value: "asc", label: "Antiguos" },
+            ]}
+            onValueChange={setOrder}
+          />
         </div>
       </div>
 

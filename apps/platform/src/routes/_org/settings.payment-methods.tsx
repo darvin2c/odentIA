@@ -13,7 +13,7 @@ import { Switch } from "@odentia/ui/components/switch"
 import { common, EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowDown, ArrowUp, Wallet } from "lucide-react"
+import { ArrowDown, ArrowUp, Plus, Wallet } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ChoiceSelect } from "../../components/ui/choice-select"
@@ -161,12 +161,10 @@ function PaymentMethodsPage() {
       <PageHeader
         title="Medios de pago y ticket"
         subtitle={SUBTITLE}
-        actions={
-          canWrite && methods && methods.length > 0 ? (
-            <Button type="button" className="min-h-11" onClick={() => setMethodForm("new")}>
-              Agregar medio de pago
-            </Button>
-          ) : undefined
+        primary={
+          canWrite && methods && methods.length > 0
+            ? { label: "Agregar medio de pago", icon: <Plus aria-hidden />, onClick: () => setMethodForm("new") }
+            : undefined
         }
       />
 

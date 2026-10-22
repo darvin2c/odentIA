@@ -12,6 +12,7 @@ import { seesBilling } from "@odentia/auth/permissions"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { ArrowLeft } from "lucide-react"
 import { useMemo, useState } from "react"
 import { type ActionReview, ActionReviewDrawer, type ReviewTarget, reviewStateWords } from "../../components/billing/action-review"
 import { AGENT_OF, PriceWithDiscount, type SaasActionKind } from "../../components/billing/consumption"
@@ -283,11 +284,7 @@ function ActionsPage() {
       <PageHeader
         title="Cada acción de tus agentes"
         subtitle={`${clinicLine} · La factura suma exactamente estas filas`}
-        actions={
-          <Button variant="outline" size="sm" render={<Link to={PLAN_PATH} />}>
-            Volver a Plan y pagos
-          </Button>
-        }
+        primary={{ label: "Volver a Plan y pagos", icon: <ArrowLeft aria-hidden />, render: <Link to={PLAN_PATH} /> }}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Tabs

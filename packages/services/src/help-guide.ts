@@ -108,7 +108,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Pacientes",
     parent: "Personas",
     purpose: "Todas las personas de la clínica en una lista: pacientes, quienes aún no se registran y sus responsables. Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
-    terms: ["historia clínica", "ficha", "expediente", "registrar paciente", "nueva persona", "odontograma", "buscar paciente", "contactos", "por registrar", "responsables", "archivar", "notas", "plan de tratamiento", "presupuesto", "enviar presupuesto", "opciones", "controles", "qué sigue", "resumen clínico", "atenciones", "documentos", "recetas", "órdenes", "alergias"],
+    terms: ["historia clínica", "ficha", "expediente", "registrar paciente", "nueva persona", "odontograma", "buscar paciente", "contactos", "contactos nuevos", "archivar", "notas", "plan de tratamiento", "presupuesto", "enviar presupuesto", "opciones", "controles", "qué sigue", "resumen clínico", "atenciones", "documentos", "recetas", "órdenes", "alergias"],
     writePermission: "patients.write",
     faqs: [
       { q: "¿Cómo registro un paciente nuevo?", a: "Abre su página (desde la Bandeja, o con «Nueva persona» en Pacientes) y pulsa «Registrar»: el formulario ya trae lo que se sabe de ella y solo pide lo que falta. También puedes «Enviarle su enlace»: ahí elige su cita y deja sus datos." },

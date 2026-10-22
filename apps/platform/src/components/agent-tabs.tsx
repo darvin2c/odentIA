@@ -1,4 +1,4 @@
-import { cn, ScrollArea } from "@odentia/ui"
+import { cn, ScrollArea, tabsListVariants, tabsTriggerClassName } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import type { AgentOverview, AgentPanelSummary } from "../lib/agent"
@@ -17,11 +17,15 @@ const TABS = [
  * misma vista: se anuncian como navegación con `aria-current`, y cada pestaña
  * aparece solo con el permiso que su ruta ya exige en el servidor.
  *
+ * Se dibujan con el mismo control que Pacientes (`tabsTriggerClassName`): la
+ * activa es la píldora blanca y lo que espera a una persona va después del
+ * nombre, con «·».
+ *
  * Aprender y Conocimiento dicen cuánto espera a una persona. Los números salen
  * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
  * compartida con esa pantalla): no hay otra cuenta. «Esperan su sí» cuenta
  * solo las citas propuestas que esperan respuesta (`awaitingAnswer` del panel
- * del agente): los casos se cuentan en «Te espera» y en el menú. En teléfono se dibujan como píldoras y
+ * del agente): los casos se cuentan en «Te espera» y en el menú. En teléfono
  * «Esperan su sí» pasa al final de la fila (`phoneLast`): ahí el recorrido es
  * Resumen, Aprender, Conocimiento. El orden del documento, y con él el del
  * teclado, es el mismo en todos los anchos.
@@ -69,7 +73,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   if (visible.length < 2) return null
   return (
     <ScrollArea horizontal className="-mt-2 min-w-0">
-      <nav aria-label="Secciones del agente" className="relative flex gap-1.5 max-sm:pb-2 sm:gap-1 sm:border-b">
+      <nav aria-label="Secciones del agente" className={cn(tabsListVariants(), "h-11 max-w-full justify-start")}>
         {visible.map((tab) => {
           const active = pathname === tab.to
           const count = pending[tab.to] ?? 0
@@ -79,24 +83,17 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
               to={tab.to}
               activeOptions={{ exact: true }}
               aria-current={active ? "page" : undefined}
+              data-active={active ? "" : undefined}
               className={cn(
-                "inline-flex min-h-11 shrink-0 items-center gap-1.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                "max-sm:rounded-full max-sm:border max-sm:px-3.5 sm:-mb-px sm:border-b-2 sm:px-3 sm:focus-visible:ring-inset",
+                tabsTriggerClassName,
+                "shrink-0 min-h-11 sm:min-h-9",
                 "phoneLast" in tab && "max-sm:order-1",
-                active
-                  ? "border-primary font-semibold text-primary-soft-foreground max-sm:border-2 max-sm:bg-primary-soft"
-                  : "font-medium text-muted-foreground hover:text-foreground max-sm:border-border max-sm:bg-card sm:border-transparent",
               )}
             >
               {tab.label}
               {count > 0 ? (
-                <span
-                  className={cn(
-                    "font-bold tabular-nums sm:inline-flex sm:h-5 sm:min-w-5 sm:items-center sm:justify-center sm:rounded-full sm:px-1.5 sm:text-xs",
-                    active ? "sm:bg-primary-soft" : "text-foreground sm:bg-muted",
-                  )}
-                >
-                  {count}
+                <span className="tabular-nums">
+                  {` · ${count}`}
                   <span className="sr-only"> {count === 1 ? "pendiente" : "pendientes"}</span>
                 </span>
               ) : null}

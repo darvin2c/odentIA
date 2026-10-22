@@ -94,17 +94,21 @@ function SalesStagesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title={TITLE}
-        subtitle={SUBTITLE}
-        actions={
+        subtitle={
           funnels.length > 1 ? (
-            <ChoiceSelect aria-label="Embudo de ventas" value={funnel?.id ?? ""} onChange={(event) => setFunnelId(event.target.value)}>
-              {funnels.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </ChoiceSelect>
-          ) : undefined
+            <>
+              <p className="min-w-0">{SUBTITLE}</p>
+              <ChoiceSelect aria-label="Embudo de ventas" value={funnel?.id ?? ""} onChange={(event) => setFunnelId(event.target.value)}>
+                {funnels.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </ChoiceSelect>
+            </>
+          ) : (
+            SUBTITLE
+          )
         }
       />
       {listQuery.isPending ? (

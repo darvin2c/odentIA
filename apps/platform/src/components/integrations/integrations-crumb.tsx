@@ -28,3 +28,13 @@ export function IntegrationsCrumb({ current }: { current: string }) {
     </Breadcrumb>
   )
 }
+
+/** El camino de vuelta y el texto de contexto, en la fila de contexto del encabezado. */
+export function IntegrationsCrumbWithText({ current, text }: { current: string; text: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <IntegrationsCrumb current={current} />
+      <p className="min-w-0">{text}</p>
+    </div>
+  )
+}
