@@ -133,8 +133,8 @@ export const Route = createFileRoute("/_org/people/$personId")({
   component: PersonPageRoute,
 })
 
-/** Pestañas: pocas y cortas; pueden envolver. La altura fija de la primitiva se libera para no solapar. */
-const TAB_LIST_CLASS = "group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start"
+/** Pestañas de la página: píldoras en una sola fila; en tableta se desliza y no se parte (lienzo «Pestañas de la ficha»). */
+const TAB_LIST_CLASS = "w-max flex-nowrap justify-start"
 /** Secciones: una sola fila con scroll horizontal propio; en móvil no empujan ni tapan el contenido. */
 const SECTION_SCROLL_CLASS = "max-w-full pb-1"
 const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
@@ -462,8 +462,8 @@ function PersonPageRoute() {
         }}
       >
         {mobileNav}
-        <ScrollArea horizontal className="hidden max-w-full border-b pb-1 sm:block">
-          <TabsList className={TAB_LIST_CLASS} variant="line" aria-label="Pestañas de la página">
+        <ScrollArea horizontal className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
+          <TabsList className={TAB_LIST_CLASS} aria-label="Pestañas de la página">
             {areas.map((area) => (
               <TabsTrigger key={area.id} value={area.id}>
                 {area.label}

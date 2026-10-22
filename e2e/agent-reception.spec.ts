@@ -198,7 +198,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(editForm).toBeHidden()
   await expect(knowsMust).toContainText("No ofrezcas descuentos ni promociones.")
   await expect(knowsMust).toContainText("Despídete recordando la dirección.")
-  await expect(knowsMust.getByRole("button", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
+  await expect(knowsMust.getByRole("tab", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
 
   // La base: lo fijo no se edita; la voz sí, con su muestra.
   await behaves.getByRole("button", { name: "Editar la base" }).click()

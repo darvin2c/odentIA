@@ -113,13 +113,8 @@ function SpecialtiesPage() {
       <PageHeader
         title={TITLE}
         subtitle={SUBTITLE}
-        actions={
-          canAdmin ? (
-            <Button type="button" className="min-h-11" onClick={() => openForm(null)}>
-              <Plus aria-hidden />
-              Agregar especialidad
-            </Button>
-          ) : undefined
+        primary={
+          canAdmin ? { label: "Agregar especialidad", icon: <Plus aria-hidden />, onClick: () => openForm(null) } : undefined
         }
       />
 

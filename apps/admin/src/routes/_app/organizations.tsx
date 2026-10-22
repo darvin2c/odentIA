@@ -408,11 +408,7 @@ function OrganizationsPage() {
       <PageHeader
         title="Clínicas"
         subtitle="Lista y ficha con suscripción, uso, miembros y actividad."
-        actions={
-          <Button type="button" onClick={() => setAssistedOpen(true)}>
-            <Plus aria-hidden /> Alta asistida
-          </Button>
-        }
+        primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, onClick: () => setAssistedOpen(true) }}
       />
       <form
         className="flex gap-2"

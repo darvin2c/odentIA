@@ -17,11 +17,12 @@ import {
   RowActions,
   type RowActionItem,
   useListSearch,
+  ViewTabs,
 } from "@odentia/ui-patterns"
 import { type InfiniteData, useInfiniteQuery, useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Undo2, UserRound } from "lucide-react"
+import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Plus, Undo2, UserRound } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type CloseTarget, CloseOpportunityDialog } from "../../components/crm/close-opportunity-dialog"
 import { dueWords, isOverdue, moneyText } from "../../components/crm/crm-helpers"
@@ -276,13 +277,7 @@ function PipelinePage() {
       <PageHeader
         title="Oportunidades"
         subtitle={pipelines.length > 1 && summary ? `${pipeline.name} · ${subtitle}` : subtitle}
-        actions={
-          canWrite ? (
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              Nueva oportunidad
-            </Button>
-          ) : undefined
-        }
+        primary={canWrite ? { label: "Nueva oportunidad", icon: <Plus aria-hidden />, onClick: () => setCreateOpen(true) } : undefined}
       />
       <div className="flex items-center gap-2 rounded-xl bg-card p-2">
         <FilterBar
@@ -317,14 +312,16 @@ function PipelinePage() {
           searchPending={boardFetching + listFetching > 0}
           resetKeys={["q", "asignado", "tarea"]}
         />
-        <div role="group" aria-label="Vista de oportunidades" className="flex shrink-0 gap-0.5 rounded-lg bg-muted/70 p-1">
-          <Button variant="ghost" size="icon" aria-label="Vista tablero" aria-pressed={vista === "tablero"} className={vista === "tablero" ? "bg-background shadow-sm" : "text-muted-foreground"} onClick={() => listSearch.setParam("vista", undefined)}>
-            <Columns3 className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon" aria-label="Vista lista" aria-pressed={vista === "lista"} className={vista === "lista" ? "bg-background shadow-sm" : "text-muted-foreground"} onClick={() => listSearch.setParam("vista", "lista")}>
-            <List className="size-4" />
-          </Button>
-        </div>
+        <ViewTabs
+          label="Vista de oportunidades"
+          className="shrink-0"
+          value={vista === "lista" ? "lista" : "tablero"}
+          options={[
+            { value: "tablero", label: "Tablero", icon: <Columns3 aria-hidden /> },
+            { value: "lista", label: "Lista", icon: <List aria-hidden /> },
+          ]}
+          onValueChange={(next) => listSearch.setParam("vista", next === "lista" ? "lista" : undefined)}
+        />
       </div>
       {summaryQuery.isError ? (
         <ErrorState error={summaryQuery.error instanceof Error ? summaryQuery.error : String(summaryQuery.error)} onRetry={() => void summaryQuery.refetch()} />

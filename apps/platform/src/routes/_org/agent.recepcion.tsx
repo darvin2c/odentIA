@@ -395,47 +395,45 @@ function ReceptionPage() {
 
   return (
     <PageShell className={`flex flex-col gap-6 ${canWrite && !testing ? "max-sm:pb-24" : ""}`}>
-      <Breadcrumb className={`-mb-3 ${besideTest}`}>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink render={<Link to="/agent" />} className="inline-flex min-h-11 items-center sm:min-h-0">
-              Agente
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{receptionName}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
         className={besideTest}
         title={title}
         subtitle={
           <>
+            <Breadcrumb className={besideTest}>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link to="/agent" />} className="inline-flex min-h-11 items-center sm:min-h-0">
+                    Agente
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{receptionName}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
             {/* El porqué de «Sofi»; con otro nombre, lo que hace. */}
             <span className="max-sm:hidden">{receptionName === RECEPTION_DEFAULT_NAME ? AGENT_NAME_REASONS.recepcion : role.role}</span>
             <span className="truncate sm:hidden">
               {status} · {count(today.attended, "conversación hoy", "conversaciones hoy")}
             </span>
+            {canWrite ? (
+              <label htmlFor="recepcion-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
+                <span className="max-sm:hidden">{status}</span>
+                <Switch
+                  id="recepcion-encendido"
+                  checked={overview.enabled}
+                  aria-label={overview.enabled ? `Apagar a ${receptionName}` : `Encender a ${receptionName}`}
+                  onCheckedChange={(next) => (next ? setTurnOnOpen(true) : setTurnOffOpen(true))}
+                />
+              </label>
+            ) : (
+              <Badge variant={overview.enabled ? "success" : "secondary"} className="max-sm:hidden">
+                {status}
+              </Badge>
+            )}
           </>
-        }
-        actions={
-          canWrite ? (
-            <label htmlFor="recepcion-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
-              <span className="max-sm:hidden">{status}</span>
-              <Switch
-                id="recepcion-encendido"
-                checked={overview.enabled}
-                aria-label={overview.enabled ? `Apagar a ${receptionName}` : `Encender a ${receptionName}`}
-                onCheckedChange={(next) => (next ? setTurnOnOpen(true) : setTurnOffOpen(true))}
-              />
-            </label>
-          ) : (
-            <Badge variant={overview.enabled ? "success" : "secondary"} className="max-sm:hidden">
-              {status}
-            </Badge>
-          )
         }
       />
 

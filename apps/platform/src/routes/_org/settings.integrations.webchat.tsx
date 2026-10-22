@@ -5,7 +5,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { CheckCircle2, ChevronRight, Copy, Globe, ShieldAlert } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ChoiceButtons } from "../../components/choice-buttons"
-import { IntegrationsCrumb } from "../../components/integrations/integrations-crumb"
+import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -115,16 +115,14 @@ function WebchatSettingsPage() {
   if (!canRead) {
     return (
       <div className="flex flex-col gap-6">
-        <IntegrationsCrumb current={TITLE} />
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <PageHeader title={TITLE} subtitle={<IntegrationsCrumbWithText current={TITLE} text={SUBTITLE} />} />
         <SettingsNoAccess />
       </div>
     )
   }
   return (
     <div className="flex flex-col gap-6">
-      <IntegrationsCrumb current={TITLE} />
-      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <PageHeader title={TITLE} subtitle={<IntegrationsCrumbWithText current={TITLE} text={SUBTITLE} />} />
       {query.isError ? (
         <ErrorState title="No pudimos cargar el chat web" message="Revisa tu conexión." retryLabel="Reintentar" onRetry={() => void query.refetch()} />
       ) : !chat ? (

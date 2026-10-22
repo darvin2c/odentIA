@@ -662,13 +662,10 @@ function BranchesPage() {
         <PageHeader
           title="Sedes"
           subtitle={SUBTITLE}
-          actions={
-            canWrite ? (
-              <Button type="button" className="min-h-11" onClick={() => openBranchForm(null)}>
-                <Plus aria-hidden />
-                Nueva sede
-              </Button>
-            ) : undefined
+          primary={
+            canWrite
+              ? { label: "Nueva sede", icon: <Plus aria-hidden />, onClick: () => openBranchForm(null) }
+              : undefined
           }
         />
         <FilterBar

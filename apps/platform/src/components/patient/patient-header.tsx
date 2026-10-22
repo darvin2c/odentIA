@@ -14,8 +14,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  SidebarTrigger,
+  useSidebarOptional,
 } from "@odentia/ui"
-import { ConfirmDialog, PersonAvatar, useHeaderUtilities } from "@odentia/ui-patterns"
+import { ConfirmDialog, PageHeaderMenu, PersonAvatar, useHeaderUtilities } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle, MoreHorizontal } from "lucide-react"
@@ -148,6 +150,8 @@ export function PersonHeader({
 }) {
   // La página no usa PageHeader; las utilidades globales (avisos, agente) van aquí.
   const utilities = useHeaderUtilities()
+  // El disparador del menú lateral en el teléfono, como en el encabezado de página.
+  const sidebar = useSidebarOptional()
   const queryClient = useQueryClient()
   const canRead = usePermission("patients.read")
   const canEditPatient = usePermission("patients.write")
@@ -236,6 +240,7 @@ export function PersonHeader({
   return (
     <header className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
+        {sidebar ? <SidebarTrigger className="-ml-2 size-11 shrink-0 md:hidden" /> : null}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -247,9 +252,10 @@ export function PersonHeader({
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        {utilities ? (
-          <div className="ml-auto flex shrink-0 items-center gap-1">{utilities}</div>
-        ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {utilities?.utilities}
+          <PageHeaderMenu />
+        </div>
       </div>
       <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">

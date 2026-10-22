@@ -1,5 +1,6 @@
 import { Button } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
+import { Plus } from "lucide-react"
 import { useState } from "react"
 import { MasterDetail } from "../master-detail.js"
 import { PageHeader } from "../page-header.js"
@@ -51,16 +52,12 @@ export const EntradaYSalida: Story = {
           <PageHeader
             title="Sucursales"
             subtitle="Clínica Odontológica Sur"
-            actions={
-              <Button
-                type="button"
-                className="min-h-11"
-                disabled={open}
-                onClick={() => setOpen(true)}
-              >
-                Nueva sucursal
-              </Button>
-            }
+            primary={{
+              label: "Nueva sucursal",
+              icon: <Plus className="size-4" />,
+              disabled: open,
+              onClick: () => setOpen(true),
+            }}
           />
           <div className="flex p-3 bg-card rounded-md">
             <div className="flex min-w-0 flex-1 items-center gap-2 p-1">

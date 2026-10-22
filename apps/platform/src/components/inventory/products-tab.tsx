@@ -5,7 +5,7 @@
  * falta» cuando algo hace falta. Recepción ve la misma lista sin «Pedir».
  */
 import { Button, cn, toast } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, RowActions, type RowActionItem, SearchInput, useListSearch } from "@odentia/ui-patterns"
+import { DataTable, DataTableSkeleton, EmptyState, RowActions, type RowActionItem, SearchInput, useListSearch, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Package } from "lucide-react"
@@ -264,26 +264,12 @@ export function ProductsTab() {
             expandable
             isFetching={query.isFetching && !query.isPending && q !== ""}
           />
-          <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-            <legend className="sr-only">Qué productos ver</legend>
-            {filters.map((filter) => {
-              const pressed = need === (filter.value ?? null)
-              return (
-                <Button
-                  key={filter.label}
-                  type="button"
-                  size="sm"
-                  variant={pressed ? "default" : "outline"}
-                  aria-pressed={pressed}
-                  className="min-h-11 rounded-full sm:min-h-9"
-                  onClick={() => setParam("ver", filter.value, { replace: true })}
-                >
-                  {filter.label}
-                  {filter.count !== undefined ? <span className="tabular-nums opacity-80">{formatWhole(filter.count)}</span> : null}
-                </Button>
-              )
-            })}
-          </fieldset>
+          <ViewTabs
+            label="Qué productos ver"
+            value={need ?? "todos"}
+            options={filters.map((filter) => ({ value: filter.value ?? "todos", label: filter.label, count: filter.count }))}
+            onValueChange={(next) => setParam("ver", next === "todos" ? undefined : next, { replace: true })}
+          />
         </div>
       )}
 

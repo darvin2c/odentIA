@@ -85,7 +85,7 @@ export {
   TableHeader,
   TableRow,
 } from "./components/table.js";
-export { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants } from "./components/tabs.js";
+export { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants, tabsTriggerClassName } from "./components/tabs.js";
 export { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from "./components/avatar.js";
 export { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "./components/item.js";
 export { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogOverlay, DialogPortal, DialogTitle, DialogTrigger } from "./components/dialog.js";

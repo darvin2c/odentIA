@@ -1,4 +1,5 @@
 import { Button, Field, FieldLabel, Slider } from "@odentia/ui"
+import { ViewTabs } from "@odentia/ui-patterns"
 import { useId, useState } from "react"
 
 /** Ajustes de visualización: solo afectan a la pantalla, nunca al archivo. */
@@ -154,26 +155,15 @@ export function ImageCompare({ before, after }: { before: CompareItem; after: Co
   const [adjustments, setAdjustments] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS)
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Modo de comparación">
-        <Button
-          type="button"
-          size="sm"
-          variant={mode === "lado" ? "secondary" : "outline"}
-          aria-pressed={mode === "lado"}
-          onClick={() => setMode("lado")}
-        >
-          Lado a lado
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={mode === "superpuesta" ? "secondary" : "outline"}
-          aria-pressed={mode === "superpuesta"}
-          onClick={() => setMode("superpuesta")}
-        >
-          Superpuestas
-        </Button>
-      </div>
+      <ViewTabs
+        label="Modo de comparación"
+        value={mode}
+        options={[
+          { value: "lado", label: "Lado a lado" },
+          { value: "superpuesta", label: "Superpuestas" },
+        ]}
+        onValueChange={setMode}
+      />
       {mode === "lado" ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {[before, after].map((item) => (

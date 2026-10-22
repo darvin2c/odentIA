@@ -186,13 +186,8 @@ function ContactFieldsPage() {
       <PageHeader
         title={TITLE}
         subtitle={SUBTITLE}
-        actions={
-          canWrite ? (
-            <Button type="button" className="min-h-11" onClick={() => openForm(null)}>
-              <Plus aria-hidden />
-              Nuevo campo
-            </Button>
-          ) : undefined
+        primary={
+          canWrite ? { label: "Nuevo campo", icon: <Plus aria-hidden />, onClick: () => openForm(null) } : undefined
         }
       />
 

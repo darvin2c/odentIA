@@ -39,10 +39,11 @@ import {
   LoadingState,
   PageHeader,
   PageShell,
+  ViewTabs,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Banknote, Lock, Plus } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { WriteToPersonDialog } from "../../components/write-to-person"
@@ -360,32 +361,51 @@ function FinanceWorkspace() {
     if (view === "gastos" && canWrite) return expenseButton(mobile, true)
     return null
   }
-  const headerActions = isMobile ? null : (monthPicker ?? actions(false))
   const mobileActions = isMobile ? actions(true) : null
+  // En el escritorio, la cabecera trae la acción principal de la sección y lo demás en ⋯; en el teléfono, las acciones van en la barra de abajo.
+  const headerOn = !isMobile && ws !== null
+  const headerPrimary = !headerOn
+    ? undefined
+    : view === "caja" && canWrite
+      ? { label: "Cobrar", icon: <Banknote aria-hidden />, onClick: () => collect() }
+      : view === "caja" && canClose
+        ? { label: "Cerrar caja", icon: <Lock aria-hidden />, onClick: () => setPanel({ kind: "cerrar" }) }
+        : view === "gastos" && canWrite
+          ? { label: "Registrar gasto", icon: <Plus aria-hidden />, onClick: () => setPanel({ kind: "gasto" }) }
+          : undefined
+  const headerMenu =
+    headerOn && view === "caja" && canWrite
+      ? [
+          { label: "Registrar gasto", icon: <Plus aria-hidden />, onSelect: () => setPanel({ kind: "gasto" }) },
+          ...(canClose ? [{ label: "Cerrar caja", icon: <Lock aria-hidden />, onSelect: () => setPanel({ kind: "cerrar" }) }] : []),
+        ]
+      : []
 
   return (
     <PageShell className="flex flex-col gap-4">
       <PageHeader
         title="Finanzas"
         subtitle={
-          view === "comisiones" ? (
-            canCommissionsWrite ? (
-              "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró"
+          <>
+            {view === "comisiones" ? (
+              <p className="min-w-0">
+                {canCommissionsWrite ? "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró" : "Mis comisiones"}
+              </p>
+            ) : sede.branches.length > 0 && branchId ? (
+              <BranchSwitcher
+                branches={sede.branches}
+                value={branchId}
+                fallbackName={sede.branches[0]?.name ?? ""}
+                onChange={(id) => sede.choose(id)}
+              />
             ) : (
-              "Mis comisiones"
-            )
-          ) : sede.branches.length > 0 && branchId ? (
-            <BranchSwitcher
-              branches={sede.branches}
-              value={branchId}
-              fallbackName={sede.branches[0]?.name ?? ""}
-              onChange={(id) => sede.choose(id)}
-            />
-          ) : (
-            "Caja por sede, deudas y gastos"
-          )
+              <p className="min-w-0">Caja por sede, deudas y gastos</p>
+            )}
+            {headerOn && monthPicker ? monthPicker : null}
+          </>
         }
-        actions={headerActions ?? undefined}
+        primary={headerPrimary}
+        menu={headerMenu}
       />
 
       {profile.isPending || !sede.ready || branchZone.isPending ? (
@@ -1568,23 +1588,15 @@ function DebtsTab({
         )}
       </section>
 
-      <div role="group" aria-label="Antigüedad de la deuda" className="flex flex-wrap gap-2">
-        {filters.map((option) => (
-          <Button
-            key={option.value}
-            size="sm"
-            variant={filter === option.value ? "default" : "outline"}
-            aria-pressed={filter === option.value}
-            onClick={() => {
-              setFilter(option.value)
-              setExpanded(false)
-            }}
-          >
-            {option.label}
-            {debts.isSuccess ? ` · ${option.count}` : ""}
-          </Button>
-        ))}
-      </div>
+      <ViewTabs
+        label="Antigüedad de la deuda"
+        value={filter}
+        options={filters.map((option) => ({ ...option, count: debts.isSuccess ? option.count : undefined }))}
+        onValueChange={(next) => {
+          setFilter(next)
+          setExpanded(false)
+        }}
+      />
 
       {debts.isPending ? (
         <DataTableSkeleton view="list" rowCount={5} label="Consultando las deudas" />

@@ -5,7 +5,7 @@
  * (`?orden=`). Recepción ve lo que llega, sin precios ni pagos.
  */
 import { Button, Spinner } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, useListSearch } from "@odentia/ui-patterns"
+import { DataTable, DataTableSkeleton, EmptyState, useListSearch, ViewTabs } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ShoppingCart, X } from "lucide-react"
@@ -130,26 +130,12 @@ export function PurchasesTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
-        <fieldset className="flex min-w-0 flex-wrap gap-1.5">
-          <legend className="sr-only">Qué compras ver</legend>
-          {views.map((item) => {
-            const pressed = view === item.value
-            return (
-              <Button
-                key={item.value}
-                type="button"
-                size="sm"
-                variant={pressed ? "default" : "outline"}
-                aria-pressed={pressed}
-                className="min-h-11 rounded-full sm:min-h-9"
-                onClick={() => setParams({ ver: item.value === "por_llegar" ? undefined : item.value, pago: undefined }, { replace: true })}
-              >
-                {item.label}
-                {item.count !== undefined ? <span className="tabular-nums opacity-80">{formatWhole(item.count)}</span> : null}
-              </Button>
-            )
-          })}
-        </fieldset>
+        <ViewTabs
+          label="Qué compras ver"
+          value={view}
+          options={views}
+          onValueChange={(next) => setParams({ ver: next === "por_llegar" ? undefined : next, pago: undefined }, { replace: true })}
+        />
         {supplierName ? (
           <Button type="button" size="sm" variant="secondary" className="min-h-11 rounded-full sm:min-h-9" onClick={() => setParams({ proveedor: undefined }, { replace: true })}>
             Solo {supplierName}

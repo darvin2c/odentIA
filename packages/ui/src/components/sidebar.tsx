@@ -29,6 +29,28 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+/** Tableta: entre el umbral del cajón móvil (768) y el de la página con menú fijo (1024). */
+const TABLET_QUERY = "(min-width: 768px) and (max-width: 1023px)"
+
+function isTabletWidth(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(TABLET_QUERY).matches
+}
+
+/**
+ * Cambia al cruzar el umbral de tableta. Empieza en falso, igual que el HTML del
+ * servidor, y toma el valor real al montar: si no, la hidratación no coincide.
+ */
+function useIsTablet(): boolean {
+  const [tablet, setTablet] = React.useState(false)
+  React.useEffect(() => {
+    const query = window.matchMedia(TABLET_QUERY)
+    const onChange = () => setTablet(query.matches)
+    onChange()
+    query.addEventListener("change", onChange)
+    return () => query.removeEventListener("change", onChange)
+  }, [])
+  return tablet
+}
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -37,6 +59,11 @@ type SidebarContextProps = {
   openMobile: boolean
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
+  /**
+   * Tableta con el menú abierto: flota sobre la página y no la empuja. Se cierra
+   * con Escape, al tocar fuera o al cambiar de página.
+   */
+  overlay: boolean
   toggleSidebar: () => void
   mobileTriggerRef: React.RefObject<HTMLElement | null>
 }
@@ -86,8 +113,15 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
+  // En tableta el menú empieza colapsado en su riel; al abrirlo flota (`overlay`).
+  const isTablet = useIsTablet()
   const [_open, _setOpen] = React.useState(defaultOpen)
+  // Se decide al montar y no al pintar: así el primer render coincide con el HTML del servidor.
+  React.useEffect(() => {
+    if (isTabletWidth()) _setOpen(false)
+  }, [])
   const open = openProp ?? _open
+  const overlay = isTablet && open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value
@@ -111,6 +145,10 @@ function SidebarProvider({
   // Adds a keyboard shortcut to toggle the sidebar.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && overlay) {
+        setOpen(false)
+        return
+      }
       if (
         event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
         (event.metaKey || event.ctrlKey)
@@ -122,7 +160,7 @@ function SidebarProvider({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar])
+  }, [toggleSidebar, overlay, setOpen])
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
@@ -134,12 +172,13 @@ function SidebarProvider({
       open,
       setOpen,
       isMobile,
+      overlay,
       openMobile,
       setOpenMobile,
       toggleSidebar,
       mobileTriggerRef,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, overlay, openMobile, setOpenMobile, toggleSidebar]
   )
 
   return (
@@ -178,7 +217,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, mobileTriggerRef } = useSidebar()
+  const { isMobile, state, overlay, setOpen, openMobile, setOpenMobile, mobileTriggerRef } = useSidebar()
 
   if (collapsible === "none") {
     return (
@@ -228,13 +267,15 @@ function Sidebar({
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
+      data-overlay={overlay ? "true" : undefined}
       data-variant={variant}
       data-side={side}
       data-slot="sidebar"
     >
-      {/* This is what handles the sidebar gap on desktop */}
+      {/* This is what handles the sidebar gap on desktop. Flotando, el hueco se queda en el riel: la página no se mueve. */}
       <div
         data-slot="sidebar-gap"
+        style={overlay ? { width: "var(--sidebar-width-icon)" } : undefined}
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
           "group-data-[collapsible=offcanvas]:w-0",
@@ -253,10 +294,20 @@ function Sidebar({
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          overlay && "z-30 shadow-xl",
           className
         )}
         {...props}
       >
+        {overlay ? (
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label="Cerrar el menú lateral"
+            className="fixed inset-0 z-20 h-auto w-auto rounded-none bg-transparent hover:bg-transparent dark:hover:bg-transparent"
+            onClick={() => setOpen(false)}
+          />
+        ) : null}
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"

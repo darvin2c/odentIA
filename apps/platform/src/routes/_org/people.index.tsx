@@ -3,11 +3,6 @@ import {
   Badge,
   Button,
   buttonVariants,
-  ButtonGroup,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   Spinner,
   Tabs,
   TabsList,
@@ -29,7 +24,7 @@ import {
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ChevronDown, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { NewPatientDrawer, type NewPatientTarget } from "../../components/patient/new-patient-drawer"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
@@ -337,60 +332,14 @@ function PeoplePage() {
             ? "Todas las personas de la clínica: pacientes, contactos nuevos y sus familiares"
             : "Los pacientes de la clínica"
         }
-        actions={
-          canRegister ? (
-            <>
-              <div className="max-sm:hidden">
-                <ButtonGroup>
-                  <Button type="button" onClick={() => setRegistering(true)}>
-                    <Plus aria-hidden />
-                    Nuevo paciente
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<Button type="button" size="icon" aria-label="Más formas de agregar a alguien" />}
-                    >
-                      <ChevronDown aria-hidden />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-72">
-                      <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
-                        <span className="font-medium">Nuevo paciente</span>
-                        <span className="text-xs text-muted-foreground">Para atenderlo: crea su historia.</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setCreating(true)} className="flex-col items-start gap-0.5">
-                        <span className="font-medium">Nuevo contacto</span>
-                        <span className="text-xs text-muted-foreground">Aún no es paciente: alguien que pregunta o un familiar.</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </ButtonGroup>
-              </div>
-              {/* En el teléfono, un solo «+» redondo: el mismo menú de dos opciones. */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={<Button type="button" size="icon" className="size-9 rounded-full sm:hidden" aria-label="Agregar a alguien" />}
-                >
-                  <Plus aria-hidden />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
-                  <DropdownMenuItem onClick={() => setRegistering(true)} className="flex-col items-start gap-0.5">
-                    <span className="font-medium">Nuevo paciente</span>
-                    <span className="text-xs text-muted-foreground">Para atenderlo: crea su historia.</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setCreating(true)} className="flex-col items-start gap-0.5">
-                    <span className="font-medium">Nuevo contacto</span>
-                    <span className="text-xs text-muted-foreground">Aún no es paciente: alguien que pregunta o un familiar.</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          ) : canCreate ? (
-            <Button type="button" onClick={() => setCreating(true)}>
-              <Plus aria-hidden />
-              Nuevo contacto
-            </Button>
-          ) : undefined
+        primary={
+          canRegister
+            ? { label: "Nuevo paciente", icon: <Plus aria-hidden />, onClick: () => setRegistering(true) }
+            : canCreate
+              ? { label: "Nuevo contacto", icon: <Plus aria-hidden />, onClick: () => setCreating(true) }
+              : undefined
         }
+        menu={canRegister ? [{ label: "Nuevo contacto", onSelect: () => setCreating(true) }] : undefined}
       />
       <div className="flex flex-col gap-2 py-4">
         {/* Elegir qué personas ver cambia la lista entera: es pestaña, igual que Finanzas. */}

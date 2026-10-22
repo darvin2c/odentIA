@@ -205,11 +205,7 @@ export function FilterBar({
             ) : null}
           </Button>
         )}
-        {hasActiveCriteria && (
-          <Button type="button" size="sm" variant="ghost" onClick={clear}>
-            {common.filters.clear}
-          </Button>
-        )}
+        {/* En el teléfono, Limpiar vive en el cajón de filtros; aquí solo queda lo que se ve. */}
         {sortOptions.length > 0 && (
           <div className="ml-auto shrink-0">
             <SortMenu options={sortOptions} compact />

@@ -141,14 +141,16 @@ function OwnCommissionsPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title={title}
-        subtitle={subtitle}
-        actions={
-          <MonthPicker
-            value={period}
-            onChange={setPeriod}
-            max={currentMonth}
-            locale={region.locale}
-          />
+        subtitle={
+          <>
+            {subtitle ? <p className="min-w-0">{subtitle}</p> : null}
+            <MonthPicker
+              value={period}
+              onChange={setPeriod}
+              max={currentMonth}
+              locale={region.locale}
+            />
+          </>
         }
       />
       {canWrite ? (

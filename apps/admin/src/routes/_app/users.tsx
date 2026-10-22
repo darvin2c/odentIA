@@ -261,11 +261,7 @@ function UsersPage() {
       <PageHeader
         title="Usuarios"
         subtitle="Búsqueda, ayuda de acceso, sesiones, bloqueo global y recuperación con doble control."
-        actions={
-          <Button type="button" variant="outline" onClick={() => setRecoveryOpen(true)}>
-            <ShieldAlert aria-hidden /> Abrir recuperación
-          </Button>
-        }
+        primary={{ label: "Abrir recuperación", icon: <ShieldAlert aria-hidden />, onClick: () => setRecoveryOpen(true) }}
       />
       <form
         className="flex flex-wrap gap-2"

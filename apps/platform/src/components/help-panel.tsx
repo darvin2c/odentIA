@@ -274,13 +274,13 @@ export function HelpButton({ className }: { className?: string } = {}) {
       <Button
         type="button"
         variant={open ? "default" : "outline"}
-        className={cn("elevated relative h-11 gap-2 rounded-full px-3", className)}
+        className={cn("elevated relative h-9 gap-2 rounded-full px-3", className)}
         onClick={() => setOpen(!open)}
         aria-label={`Ayuda${unseen.length > 0 ? `, ${unseen.length} ${unseen.length === 1 ? "respuesta nueva" : "respuestas nuevas"}` : ""}`}
         aria-expanded={open}
       >
-        <CircleHelp className="size-5" aria-hidden />
-        <span className="hidden sm:inline">Ayuda</span>
+        <CircleHelp className="size-4" aria-hidden />
+        <span className="hidden lg:inline">Ayuda</span>
         {unseen.length > 0 ? (
           <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-xs font-bold text-primary-foreground">
             {unseen.length}

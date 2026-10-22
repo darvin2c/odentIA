@@ -878,13 +878,6 @@ function AgendaPage() {
   const phoneValue = view === "lista" ? filter : view === "semana" ? focus : dayFocus
   const resourceChosen = phoneResources.find((item) => item.id === phoneValue)?.label ?? "todos"
 
-  const newButton = canWrite ? (
-    <Button onClick={() => openBooking()} className={small ? "h-12 w-full text-base" : undefined}>
-      <Plus aria-hidden />
-      Nueva cita
-    </Button>
-  ) : null
-
   const loading =
     !resources || appointmentsQuery.data == null || availabilityQuery.data == null
   const noSchedules =
@@ -1060,19 +1053,17 @@ function AgendaPage() {
       <PageHeader
         title="Agenda"
         subtitle={
-          resources ? (
-            <BranchSwitcher
-              branches={sede.branches}
-              value={resources.branchId}
-              fallbackName={resources.branchName}
-              onChange={(id) => sede.choose(id, { who: undefined, group: undefined })}
-            />
-          ) : (
-            <Skeleton className="h-4 w-28" />
-          )
-        }
-        actions={
           <>
+            {resources ? (
+              <BranchSwitcher
+                branches={sede.branches}
+                value={resources.branchId}
+                fallbackName={resources.branchName}
+                onChange={(id) => sede.choose(id, { who: undefined, group: undefined })}
+              />
+            ) : (
+              <Skeleton className="h-4 w-28" />
+            )}
             {resources ? (
               <AppointmentSearch
                 compact={small}
@@ -1083,9 +1074,9 @@ function AgendaPage() {
                 onBook={(patient) => openBooking({ patient })}
               />
             ) : null}
-            {small ? null : newButton}
           </>
         }
+        primary={canWrite ? { label: "Nueva cita", icon: <Plus aria-hidden />, onClick: () => openBooking() } : undefined}
       />
 
       {((requested.patientId &&
@@ -1316,8 +1307,6 @@ function AgendaPage() {
             .join(", ")}
         </p>
       ) : null}
-
-      {small ? <div className="shrink-0">{newButton}</div> : null}
 
       <span role="status" className="sr-only">
         {message}

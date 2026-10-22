@@ -15,6 +15,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { Plus } from "lucide-react"
 import { useState } from "react"
 import { ApiError, api } from "../../lib/api"
 
@@ -118,7 +119,7 @@ function CommissionsPage() {
       <PageHeader
         title="Comisiones"
         subtitle="Vendedores, cobros confirmados por liquidar y liquidaciones"
-        actions={<Button onClick={() => setSellerDrawer({})}>Nuevo vendedor</Button>}
+        primary={{ label: "Nuevo vendedor", icon: <Plus aria-hidden />, onClick: () => setSellerDrawer({}) }}
       />
 
       <section aria-labelledby="vendedores" className="flex flex-col gap-2">

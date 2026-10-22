@@ -272,22 +272,24 @@ function AdministratorPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title={`${ADMIN_NAME}, tu agente administrador`}
-        subtitle={AGENT_NAME_REASONS.administrador}
-        actions={
-          page && canWrite ? (
-            <label htmlFor="administrador-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
-              {page.enabled ? "Encendido" : "Apagado"}
-              <Switch
-                id="administrador-encendido"
-                checked={page.enabled}
-                disabled={power.isPending}
-                aria-label={page.enabled ? `Apagar a ${ADMIN_NAME}` : `Encender a ${ADMIN_NAME}`}
-                onCheckedChange={(next: boolean) => power.mutate(next)}
-              />
-            </label>
-          ) : page ? (
-            <Badge variant={page.enabled ? "success" : "secondary"}>{page.enabled ? "Encendido" : "Apagado"}</Badge>
-          ) : null
+        subtitle={
+          <>
+            <p className="min-w-0">{AGENT_NAME_REASONS.administrador}</p>
+            {page && canWrite ? (
+              <label htmlFor="administrador-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
+                {page.enabled ? "Encendido" : "Apagado"}
+                <Switch
+                  id="administrador-encendido"
+                  checked={page.enabled}
+                  disabled={power.isPending}
+                  aria-label={page.enabled ? `Apagar a ${ADMIN_NAME}` : `Encender a ${ADMIN_NAME}`}
+                  onCheckedChange={(next: boolean) => power.mutate(next)}
+                />
+              </label>
+            ) : page ? (
+              <Badge variant={page.enabled ? "success" : "secondary"}>{page.enabled ? "Encendido" : "Apagado"}</Badge>
+            ) : null}
+          </>
         }
       />
       <Link to="/agent" className={`-mt-3 w-fit ${LINK}`}>

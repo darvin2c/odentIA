@@ -557,28 +557,12 @@ function TarifarioPage() {
         <PageHeader
           title="Servicios y precios"
           subtitle={`${org.name} · lo que ofrece la clínica y cuánto cuesta`}
-          actions={
-            canManage ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="min-h-11"
-                  onClick={() => openOffer(null)}
-                >
-                  Crear un servicio propio
-                </Button>
-                <Button
-                  type="button"
-                  className="min-h-11"
-                  onClick={() => void navigate({ to: "/services/biblioteca" })}
-                >
-                  <Plus aria-hidden />
-                  Agregar servicios
-                </Button>
-              </>
-            ) : undefined
+          primary={
+            canManage
+              ? { label: "Agregar servicios", icon: <Plus aria-hidden />, onClick: () => void navigate({ to: "/services/biblioteca" }) }
+              : undefined
           }
+          menu={canManage ? [{ label: "Crear un servicio propio", onSelect: () => openOffer(null) }] : undefined}
         />
         {canWriteMaterials && profileLocale !== undefined ? (
           <ServicesWithoutMaterialsCard locale={profileLocale} onOpen={(id) => void openOfferById(id)} />

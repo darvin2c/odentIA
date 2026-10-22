@@ -1,5 +1,5 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, useIsMobile } from "@odentia/ui"
-import { AgentSurface, EmptyState, ErrorState, LoadingState, PageHeader, PageShell, RowActions } from "@odentia/ui-patterns"
+import { AgentSurface, EmptyState, ErrorState, LoadingState, PageHeader, PageShell, RowActions, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
@@ -36,7 +36,6 @@ export const Route = createFileRoute("/_org/agent/learn")({
 
 const PREVIEW = 3
 const LINK = "h-auto min-h-11 p-0 sm:min-h-8"
-const CHIP_ON = "border-primary bg-primary-soft font-bold text-primary-soft-foreground ring-1 ring-primary hover:bg-primary-soft"
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("es", { weekday: "long", hour: "2-digit", minute: "2-digit" })
@@ -266,35 +265,20 @@ function AgentLearnPage() {
         <>
           <div className="-mt-1 flex flex-col gap-1.5">
             {agents.length > 0 ? (
-              // biome-ignore lint/a11y/useSemanticElements: grupo de botones de filtro con `aria-pressed`, no un conjunto de campos.
-              <div role="group" aria-label="De qué agente" className="flex flex-wrap gap-1.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-pressed={agent === null}
-                  className={cn("min-h-11 rounded-full px-3.5 sm:min-h-9", agent === null ? CHIP_ON : "")}
-                  onClick={() => setAgent(null)}
-                >
-                  Todos los agentes
-                </Button>
-                {agents.map((item) => (
-                  <Button
-                    key={item.id}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-pressed={agent === item.id}
-                    disabled={item.disabled}
-                    className={cn("min-h-11 rounded-full px-3.5 sm:min-h-9", agent === item.id ? CHIP_ON : "")}
-                    onClick={() => setAgent(item.id)}
-                  >
-                    {item.name}
-                    {item.pending > 0 ? ` · ${item.pending}` : ""}
-                    {item.off ? " · apagado" : ""}
-                  </Button>
-                ))}
-              </div>
+              <ViewTabs
+                label="De qué agente"
+                value={agent ?? "todos"}
+                options={[
+                  { value: "todos", label: "Todos los agentes" },
+                  ...agents.map((item) => ({
+                    value: item.id,
+                    label: item.off ? `${item.name} · apagado` : item.name,
+                    count: item.pending > 0 ? item.pending : undefined,
+                    disabled: item.disabled,
+                  })),
+                ]}
+                onValueChange={(next) => setAgent(next === "todos" ? null : next)}
+              />
             ) : null}
             <p className="text-sm text-muted-foreground">
               Cada agente aprende lo suyo y no se mezcla con los otros. Solo el conocimiento de la clínica es de todos.

@@ -534,13 +534,10 @@ function InboxPage() {
         <PageHeader
           title="Bandeja"
           subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)}
-          actions={
-            canWrite && canReadCrm ? (
-              <Button className="min-h-11 sm:min-h-9" onClick={() => setNewConversation(true)}>
-                <SquarePen className="size-4" aria-hidden />
-                Nueva conversación
-              </Button>
-            ) : undefined
+          primary={
+            canWrite && canReadCrm
+              ? { label: "Nueva conversación", icon: <SquarePen className="size-4" aria-hidden />, onClick: () => setNewConversation(true) }
+              : undefined
           }
         />
       ) : (
