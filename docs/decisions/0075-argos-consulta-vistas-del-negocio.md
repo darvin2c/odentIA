@@ -1,6 +1,6 @@
 # 0075 · Argos consulta las vistas del negocio con la llave de quien pregunta
 
-Fecha: 2026-10-20 · Estado: aceptada; sustituida en parte por [0076](0076-argos-por-pasos-con-cifras-oficiales.md) (el modelo trabaja por pasos, con cifras oficiales, y ve el resultado sin personas) · Sustituye en parte a [0070](0070-argos-responde-con-las-cifras-de-reportes.md): el modelo ya no elige de un catálogo cerrado. Issue darvin2c/odentIA#192; lienzo «Argos conoce la base», aprobado entero el 2026-10-20 (decisiones D1 a D7); el periodo de cada respuesta (tableros 7 a 12, decisiones D8 a D16), aprobado el 2026-10-21.
+Fecha: 2026-10-20 · Estado: aceptada; sustituida en parte por [0078](0078-argos-por-pasos-con-cifras-oficiales.md) (el modelo trabaja por pasos, con cifras oficiales, y ve el resultado sin personas) · Sustituye en parte a [0070](0070-argos-responde-con-las-cifras-de-reportes.md): el modelo ya no elige de un catálogo cerrado. Issue darvin2c/odentIA#192; lienzo «Argos conoce la base», aprobado entero el 2026-10-20 (decisiones D1 a D7); el periodo de cada respuesta (tableros 7 a 12, decisiones D8 a D16), aprobado el 2026-10-21.
 
 ## Problema
 

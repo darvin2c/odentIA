@@ -184,7 +184,7 @@ export const ARGOS_TIMEOUT_MS = 3_000
 
 /**
  * El tope de tiempo de una consulta: el de siempre o, si junta varios cálculos
- * de Argos (`with c1 as (…), c2 as (…)`, ADR 0076), el de siempre por cada uno,
+ * de Argos (`with c1 as (…), c2 as (…)`, ADR 0078), el de siempre por cada uno,
  * hasta 10 s. Vale igual al volver a correrla, fijada o al descargarla.
  */
 export function argosQueryTimeout(query: string): number {

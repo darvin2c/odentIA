@@ -1,4 +1,4 @@
--- Argos (ADR 0075 y 0076): dos datos que ya están en odentIA y las vistas no mostraban.
+-- Argos (ADR 0075 y 0078): dos datos que ya están en odentIA y las vistas no mostraban.
 -- El detalle de cada orden de compra (qué producto, cuánto, a qué precio y a qué proveedor): solo quien dirige la clínica,
 -- como las compras; recepción ve el inventario sin precios.
 -- Si una conversación espera respuesta de la clínica: su último mensaje es de la persona. Solo la dirección del mensaje,

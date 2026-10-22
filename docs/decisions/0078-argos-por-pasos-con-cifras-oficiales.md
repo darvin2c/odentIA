@@ -1,4 +1,4 @@
-# 0076 · Argos por pasos, con cifras oficiales y viendo el resultado sin personas
+# 0078 · Argos por pasos, con cifras oficiales y viendo el resultado sin personas
 
 Fecha: 2026-10-21 · Estado: aceptada · Sustituye en parte a [0075](0075-argos-consulta-vistas-del-negocio.md): las vistas, las llaves por rol, el revisor y el periodo siguen igual; cambia cómo trabaja el modelo. Issue darvin2c/odentIA#192; lienzo «Argos por pasos» (tableros 13 a 19, decisiones D17 a D26), aprobado el 2026-10-21.
 

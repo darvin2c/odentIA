@@ -1,5 +1,5 @@
 /**
- * El cuadre de las cifras oficiales de Argos (ADR 0076, D18) con Reportes,
+ * El cuadre de las cifras oficiales de Argos (ADR 0078, D18) con Reportes,
  * sobre una base con datos (la del examen): cada cifra que también está en
  * Reportes, en varios periodos y por sede, tiene que dar lo mismo. Además
  * corre cada cifra con cada uno de sus cortes, para ver que su consulta pasa

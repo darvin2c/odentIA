@@ -1,5 +1,5 @@
 /**
- * Lo que Argos ve del resultado de un cálculo (ADR 0076, decisión D20): para
+ * Lo que Argos ve del resultado de un cálculo (ADR 0078, decisión D20): para
  * revisar su cuenta antes de responder ve las cifras, las fechas y los
  * nombres de la clínica, pero nunca a las personas. Un texto se muestra solo
  * si es un nombre de la clínica (sede, equipo, especialidad, servicio,

@@ -1,5 +1,5 @@
 /**
- * Las cifras oficiales de Argos (ADR 0076, decisiones D18 y D19): cada cuenta
+ * Las cifras oficiales de Argos (ADR 0078, decisiones D18 y D19): cada cuenta
  * del negocio escrita una sola vez sobre las vistas `argos`, con los cortes y
  * filtros que admite. El modelo no escribe su consulta: pide la cifra, por qué
  * separarla y qué filtrar, y `compileArgosFigure` arma la consulta con los

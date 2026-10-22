@@ -8,7 +8,7 @@
  * «Descargar» y «Abrir…» los entrega el servidor; aquí solo se dibujan. La conversación vive en el panel mientras dura
  * la sesión (D4): el texto de las preguntas no se guarda (D2).
  */
-import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, toast } from "@odentia/ui"
+import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, ScrollArea, toast } from "@odentia/ui"
 import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -180,7 +180,7 @@ function AnswerRows({ table }: { table: ArgosTable }) {
   const [lead, ...rest] = table.columns
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="max-w-full overflow-x-auto rounded-lg border">
+      <ScrollArea horizontal className="max-w-full rounded-lg border">
         <table className="w-full text-[13px]">
           <thead className="bg-muted/50 text-left text-muted-foreground">
             <tr>
@@ -221,7 +221,7 @@ function AnswerRows({ table }: { table: ArgosTable }) {
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollArea>
       {table.rows.length > ROWS_SHOWN ? (
         <Button type="button" variant="link" className="min-h-11 self-start px-0 text-[13px] sm:min-h-8" onClick={() => setAll(!all)}>
           {all ? "Ver menos" : `Ver las ${table.truncated ? `más de ${table.rows.length}` : table.rows.length}`}
