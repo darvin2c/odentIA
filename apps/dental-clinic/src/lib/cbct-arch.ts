@@ -339,10 +339,13 @@ export function jawRows(volume: CbctVolume, occlusalZ: number, jaw: "upper" | "l
 const TOOTH_WIDTH = { upper: [8.5, 6.5, 7.5, 7, 6.5, 10, 9], lower: [5.5, 6, 7, 7, 7.5, 11, 10.5] }
 
 /**
- * Lo mismo en la dentición temporal (1 = incisivo central … 5 = segundo molar),
- * con los anchos de corona de la tabla de Black (Wheeler, Dental Anatomy).
+ * Lo mismo en la dentición temporal (1 = incisivo central … 5 = segundo molar):
+ * media del ancho mesiodistal de 712 dientes de leche de 52 niños (Martínez de
+ * Pinillos, «Tooth size measurements from the deciduous dentitions of 52
+ * Spanish children», Zenodo, doi:10.5281/zenodo.17619010, CC BY 4.0). Frente a
+ * la tabla de Black mueve cada pieza menos de 1,5 mm sobre el arco.
  */
-const PRIMARY_TOOTH_WIDTH = { upper: [6.5, 5.1, 7, 7.3, 8.2], lower: [4.2, 4.1, 5, 7.7, 9.9] }
+const PRIMARY_TOOTH_WIDTH = { upper: [5.03, 4.87, 6.18, 7.12, 8.93], lower: [3.82, 4.29, 5.65, 8.24, 10.06] }
 
 export type Dentition = "permanent" | "primary"
 

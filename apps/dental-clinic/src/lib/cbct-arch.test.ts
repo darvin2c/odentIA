@@ -85,6 +85,36 @@ describe("arco, panorámica y cortes transversales", () => {
   })
 })
 
+describe("tomografía de un niño", () => {
+  const child = generateCbctPhantom({ size: 128, slices: 100, voxelMm: 0.6, dentition: "primary" })
+  const childVolume = volumeFromSlices(
+    child.data.map((slice) => Int16Array.from(slice, (v) => v - 1000)),
+    { nx: 128, ny: 128, sx: 0.6, sy: 0.6, sz: 0.6 },
+  )
+  const arch = detectArch(childVolume)
+  const childCurve = arch ? sampleCurve(childVolume, arch.control) : []
+  const sMid = childCurve.reduce((best, c) => (c.y < best.y ? c : best), childCurve[0]!)?.s ?? 0
+
+  it("el fantoma tiene las 20 piezas de leche", () => {
+    const fdis = cbctDemoTeeth("primary").map((t) => t.fdi).sort()
+    expect(fdis).toHaveLength(20)
+    expect(fdis[0]).toBe(51)
+    expect(fdis.at(-1)).toBe(85)
+  })
+
+  it("propone el arco y «Ir a la pieza» cae sobre la pieza de leche", () => {
+    expect(arch).not.toBeNull()
+    for (const fdi of [51, 55, 63, 75, 84]) {
+      const real = cbctDemoTeeth("primary").find((t) => t.fdi === fdi)!
+      const at = toothIndex(childCurve, fdi)!
+      // Dentro del ancho de la propia pieza.
+      expect(Math.abs(childCurve[at]!.s - sMid - real.s)).toBeLessThan(real.width / 2 + 1.5)
+
+      expect(toothAt(childCurve, at, real.jaw, "primary")).toBe(fdi)
+    }
+  })
+})
+
 /**
  * Un arco como el de una tomografía real (la de 3D Slicer): coronas de 9 mm de
  * grosor con el esmalte por fuera, el arco de arriba 3 mm por delante del de
