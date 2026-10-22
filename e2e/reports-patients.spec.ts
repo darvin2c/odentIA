@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patient, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import type { Locator, Page, TestInfo } from "@playwright/test"
@@ -30,8 +30,8 @@ function lastMonth(day: number, hour = 15): Date {
  */
 async function fourPeople(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
-  const chairId = randomUUID()
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  const roomId = randomUUID()
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   const channel = async (name: string) => {
     const id = randomUUID()
     await db.insert(channelConnection).values({ id, organizationId, channel: name, provider: "prueba", displayName: name, configEncrypted: "no-se-usa", webhookSecret: "no-se-usa" })
@@ -55,7 +55,7 @@ async function fourPeople(db: Db, owner: OwnerFixture) {
   const luciaPatient = randomUUID()
   await db.insert(patient).values({ id: luciaPatient, organizationId, personId: lucia, patientNumber: 1, referralKind: "redes_sociales", createdAt: lastMonth(5) })
   await db.insert(appointment).values({
-    organizationId, branchId: owner.branchId, patientId: luciaPatient, chairId, dentistUserId: owner.user.id, serviceName: "Evaluación",
+    organizationId, branchId: owner.branchId, patientId: luciaPatient, roomId, professionalUserId: owner.user.id, serviceName: "Evaluación",
     startsAt: lastMonth(8), endsAt: new Date(lastMonth(8).getTime() + 30 * 60_000), durationMin: 30, status: "atendida", createdAt: lastMonth(5),
   })
   const [plan] = await db.insert(treatmentPlan).values({ organizationId, patientId: luciaPatient, title: "Plan" }).returning({ id: treatmentPlan.id })
@@ -69,7 +69,7 @@ async function fourPeople(db: Db, owner: OwnerFixture) {
   await db.insert(patient).values({ id: rosaPatient, organizationId, personId: rosa, patientNumber: 2, createdAt: lastMonth(6) })
   const soon = new Date(Date.now() + 5 * 86_400_000)
   await db.insert(appointment).values({
-    organizationId, branchId: owner.branchId, patientId: rosaPatient, chairId, dentistUserId: owner.user.id, serviceName: "Evaluación",
+    organizationId, branchId: owner.branchId, patientId: rosaPatient, roomId, professionalUserId: owner.user.id, serviceName: "Evaluación",
     startsAt: soon, endsAt: new Date(soon.getTime() + 30 * 60_000), durationMin: 30, status: "programada", createdAt: lastMonth(6),
   })
   await wrote(await person("Mario Torres", lastMonth(4)), instagram, lastMonth(4))

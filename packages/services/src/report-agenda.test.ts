@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
@@ -35,32 +35,32 @@ async function clinic() {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `agenda-${orgId}`)
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
   const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Rosa", patientNumber: 1 })
-  const dentist = async (name: string) => {
+  const professional = async (name: string) => {
     const id = randomUUID()
     await ownerDb.insert(user).values({ id, name, email: `${id}@agenda.test` })
-    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: id, role: "dentist", createdAt: new Date() })
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: id, role: "clinician", createdAt: new Date() })
     return id
   }
-  const schedule = (dentistUserId: string, rules: typeof FULL_DAY, validFrom: string, validUntil: string | null = null) =>
+  const schedule = (professionalUserId: string, rules: typeof FULL_DAY, validFrom: string, validUntil: string | null = null) =>
     ownerDb.insert(professionalSchedule).values(
       rules.map((rule) => ({
         organizationId: orgId,
         branchId: site!.id,
-        dentistUserId,
+        professionalUserId,
         ...rule,
         isActive: validUntil === null,
         validFrom,
         validUntil,
       })),
     )
-  const visit = (dentistUserId: string, day: string, from: string, to: string, status = "atendida") =>
+  const visit = (professionalUserId: string, day: string, from: string, to: string, status = "atendida") =>
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       branchId: site!.id,
-      chairId: chair!.id,
-      dentistUserId,
+      roomId: room!.id,
+      professionalUserId,
       patientId: person!.id,
       serviceName: "Control",
       startsAt: lima(day, from),
@@ -70,19 +70,19 @@ async function clinic() {
       source: "recepcion",
     })
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
-  return { orgId, branchId: site!.id, chairId: chair!.id, dentist, schedule, visit, run }
+  return { orgId, branchId: site!.id, roomId: room!.id, professional, schedule, visit, run }
 }
 
 it("las horas libres de una semana cuadran con su agenda", async () => {
   const c = await clinic()
-  const ana = await c.dentist("Dra. Ana Torres")
+  const ana = await c.professional("Dra. Ana Torres")
   await c.schedule(ana, FULL_DAY, "2026-01-01")
   // Miércoles feriado: la sede cerrada. Jueves de 9 a 11, Ana ausente. El martes
   // por la tarde se bloquea solo la unidad dental: Ana sigue atendiendo en otra.
   await ownerDb.insert(scheduleBlock).values([
     { organizationId: c.orgId, branchId: c.branchId, kind: "bloqueo", reason: "Feriado", startsAt: lima("2026-09-16", "00:00"), endsAt: lima("2026-09-17", "00:00") },
-    { organizationId: c.orgId, branchId: c.branchId, dentistUserId: ana, kind: "ausencia", reason: "Curso", startsAt: lima("2026-09-17", "09:00"), endsAt: lima("2026-09-17", "11:00") },
-    { organizationId: c.orgId, branchId: c.branchId, chairId: c.chairId, kind: "bloqueo", reason: "Mantenimiento", startsAt: lima("2026-09-15", "14:00"), endsAt: lima("2026-09-15", "18:00") },
+    { organizationId: c.orgId, branchId: c.branchId, professionalUserId: ana, kind: "ausencia", reason: "Curso", startsAt: lima("2026-09-17", "09:00"), endsAt: lima("2026-09-17", "11:00") },
+    { organizationId: c.orgId, branchId: c.branchId, roomId: c.roomId, kind: "bloqueo", reason: "Mantenimiento", startsAt: lima("2026-09-15", "14:00"), endsAt: lima("2026-09-15", "18:00") },
   ])
   await c.visit(ana, "2026-09-14", "09:00", "10:00")
   // Una que no vino ocupó su hora igual.
@@ -129,7 +129,7 @@ it("las horas libres de una semana cuadran con su agenda", async () => {
 
 it("cada día usa el horario que valía ese día; antes del primero guardado, el de hoy, y lo dice", async () => {
   const c = await clinic()
-  const luis = await c.dentist("Luis Prado")
+  const luis = await c.professional("Luis Prado")
   // Hasta el martes atendía en la mañana; desde el miércoles, en la tarde.
   await c.schedule(luis, FULL_DAY.filter((rule) => rule.startMin === 9 * 60), "2026-09-01", "2026-09-16")
   await c.schedule(luis, FULL_DAY.filter((rule) => rule.startMin === 14 * 60), "2026-09-16")
@@ -148,14 +148,14 @@ it("cada día usa el horario que valía ese día; antes del primero guardado, el
 
 it("cambiar un horario no borra el anterior: lo cierra desde hoy; el mismo día se reemplaza y el mismo horario no deja otro", async () => {
   const c = await clinic()
-  const rojas = await c.dentist("Dra. Elena Rojas")
+  const rojas = await c.professional("Dra. Elena Rojas")
   const owner = rojas
-  const save = (rules: typeof FULL_DAY) => c.run((tx) => setProfessionalSchedule(tx, c.orgId, owner, { branchId: c.branchId, dentistUserId: rojas, rules }))
+  const save = (rules: typeof FULL_DAY) => c.run((tx) => setProfessionalSchedule(tx, c.orgId, owner, { branchId: c.branchId, professionalUserId: rojas, rules }))
   const rows = () =>
     ownerDb
       .select({ weekday: professionalSchedule.weekday, startMin: professionalSchedule.startMin, isActive: professionalSchedule.isActive, validFrom: professionalSchedule.validFrom, validUntil: professionalSchedule.validUntil })
       .from(professionalSchedule)
-      .where(and(eq(professionalSchedule.organizationId, c.orgId), eq(professionalSchedule.dentistUserId, rojas)))
+      .where(and(eq(professionalSchedule.organizationId, c.orgId), eq(professionalSchedule.professionalUserId, rojas)))
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
 
   const first = await save(FULL_DAY.filter((rule) => rule.weekday === 2))
@@ -164,7 +164,7 @@ it("cambiar un horario no borra el anterior: lo cierra desde hoy; el mismo día 
   await save(FULL_DAY.filter((rule) => rule.weekday === 4))
   expect((await rows()).map((row) => row.weekday).sort()).toEqual([4, 4])
   // Si ese horario venía de antes, cambiarlo lo cierra hoy y el nuevo vale desde hoy.
-  await ownerDb.update(professionalSchedule).set({ validFrom: "2026-01-05" }).where(eq(professionalSchedule.dentistUserId, rojas))
+  await ownerDb.update(professionalSchedule).set({ validFrom: "2026-01-05" }).where(eq(professionalSchedule.professionalUserId, rojas))
   const second = await save(FULL_DAY.filter((rule) => rule.weekday === 1))
   expect(second.rules.map((rule) => rule.weekday)).toEqual([1, 1])
   const history = await rows()

@@ -137,27 +137,27 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
  * Agenda mínima para reservar: una unidad dental y horario diario del propio usuario.
  * Sin horario explícito no se puede programar un control.
  */
-export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: string }> {
+export async function enableAgenda(owner: OwnerFixture): Promise<{ roomId: string }> {
   const { page } = owner
   const slug = owner.org.slug
-  const chair = await call<{ id: string }>(
+  const room = await call<{ id: string }>(
     page,
     "POST",
-    "/api/agenda/chairs",
+    "/api/agenda/rooms",
     slug,
     { branchId: owner.branchId, name: "Unidad dental control" },
     201,
   )
   await call(page, "PUT", "/api/agenda/schedules", slug, {
     branchId: owner.branchId,
-    dentistUserId: owner.user.id,
+    professionalUserId: owner.user.id,
     rules: Array.from({ length: 7 }, (_, weekday) => ({
       weekday,
       startMin: 8 * 60,
       endMin: 20 * 60,
     })),
   })
-  return { chairId: chair.id }
+  return { roomId: room.id }
 }
 
 /** Presupuesto en borrador; la entrega y la decisión las hace cada caso. */
@@ -280,7 +280,7 @@ export async function setupAggregation(
   })
   // Mañana a las 10:00 de Lima: dentro del horario del profesional.
   const tomorrow = `${limaDate(new Date(now.getTime() + 86_400_000))}T15:00:00.000Z`
-  const { chairId } = await enableAgenda(owner)
+  const { roomId } = await enableAgenda(owner)
   const followUp = await call<{ id: string }>(page, "POST", `${apiPath}/follow-ups`, slug, {
     kind: "tratamiento",
     title: "Control post-endodoncia",
@@ -294,8 +294,8 @@ export async function setupAggregation(
   await call(page, "POST", `${apiPath}/follow-ups/${followUp.id}/schedule`, slug, {
     appointment: {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
-      chairId,
+      professionalUserId: owner.user.id,
+      roomId,
       startsAt: tomorrow,
       durationMin: 30,
     },

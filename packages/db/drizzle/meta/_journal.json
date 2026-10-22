@@ -498,6 +498,20 @@
       "when": 1792603043584,
       "tag": "0070_argos_detalle_de_compras_y_espera_respuesta",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792687513314,
+      "tag": "0071_nombres_neutros",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792687657860,
+      "tag": "0072_nombres_neutros_reglas",
+      "breakpoints": true
     }
   ]
 }

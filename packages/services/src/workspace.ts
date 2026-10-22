@@ -262,16 +262,16 @@ export interface WorkspaceAppointment {
   startsAt: string
   status: string
   serviceName: string | null
-  dentistUserId: string
-  dentistName: string
-  chairName: string
+  professionalUserId: string
+  professionalName: string
+  roomName: string
   branchName: string
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   /** El momento de la cita (`appointmentVisit`, ADR 0032): de ahí salen la sala, «Ahora» y «Más tarde». */
   visit: AppointmentVisit
   /** La atención abierta unida a la cita, sin nada de la historia: con quién y desde cuándo. */
-  encounter: { id: string; startedAt: string; dentistUserId: string; dentistName: string } | null
+  encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente cita en pie que aún no llega; a lo sumo una. */
   next: boolean
 }
@@ -335,7 +335,7 @@ function dayBounds(zone: string) {
 async function hasOwnAppointmentsToday(tx: Db, orgId: string, userId: string, timezone: string): Promise<boolean> {
   const { start, end } = dayBounds(timezone)
   const [row] = await tx.execute<{ found: boolean }>(sql`
-    select exists(select 1 from appointment a where a.organization_id=${orgId} and a.dentist_user_id=${userId}
+    select exists(select 1 from appointment a where a.organization_id=${orgId} and a.professional_user_id=${userId}
       and a.starts_at >= ${start} and a.starts_at < ${end}
       and a.status in ('programada','confirmada','atendida','no_asistio')) as found`)
   return row?.found ?? false
@@ -359,32 +359,32 @@ async function workspaceToday(
     encounterId: string | null
     encounterStatus: string | null
     encounterStartedAt: string | null
-    encounterDentistUserId: string | null
-    encounterDentistName: string | null
+    encounterProfessionalUserId: string | null
+    encounterProfessionalName: string | null
   }
   const rows = await tx.execute<Row>(sql`
     select a.id, a.patient_id as "patientId", pp.display_name as "patientName",
       ${iso(sql`a.starts_at`)} as "startsAt", a.status, a.service_name as "serviceName",
-      a.dentist_user_id as "dentistUserId", u.name as "dentistName", ch.name as "chairName", b.name as "branchName",
+      a.professional_user_id as "professionalUserId", u.name as "professionalName", ch.name as "roomName", b.name as "branchName",
       case when a.arrived_at is null then null else ${iso(sql`a.arrived_at`)} end as "arrivedAt",
       a.ends_at > now() as open,
       e.id as "encounterId", e.status as "encounterStatus",
       case when e.id is null then null else ${iso(sql`e.started_at`)} end as "encounterStartedAt",
-      e.dentist_user_id as "encounterDentistUserId", eu.name as "encounterDentistName"
+      e.professional_user_id as "encounterProfessionalUserId", eu.name as "encounterProfessionalName"
     from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     join branch b on b.id=a.branch_id and b.organization_id=${orgId}
-    join schedule_chair ch on ch.id=a.chair_id and ch.organization_id=${orgId}
-    join "user" u on u.id=a.dentist_user_id
+    join schedule_room ch on ch.id=a.room_id and ch.organization_id=${orgId}
+    join "user" u on u.id=a.professional_user_id
     left join encounter e on e.organization_id=a.organization_id and e.appointment_id=a.id and e.status<>'anulada'
-    left join "user" eu on eu.id=e.dentist_user_id
+    left join "user" eu on eu.id=e.professional_user_id
     where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end}
       and a.status in ('programada','confirmada','atendida','no_asistio')
-      and ${own ? sql`a.dentist_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
+      and ${own ? sql`a.professional_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
     order by a.starts_at, a.id limit 300`)
-  const items = rows.map(({ encounterId, encounterStatus, encounterStartedAt, encounterDentistUserId, encounterDentistName, ...row }) => {
+  const items = rows.map(({ encounterId, encounterStatus, encounterStartedAt, encounterProfessionalUserId, encounterProfessionalName, ...row }) => {
     const visit = appointmentVisit({ status: row.status, arrivedAt: row.arrivedAt, encounterStatus })
-    const encounter = encounterId && encounterStatus === "borrador" && encounterStartedAt && encounterDentistUserId
-      ? { id: encounterId, startedAt: encounterStartedAt, dentistUserId: encounterDentistUserId, dentistName: encounterDentistName ?? "" }
+    const encounter = encounterId && encounterStatus === "borrador" && encounterStartedAt && encounterProfessionalUserId
+      ? { id: encounterId, startedAt: encounterStartedAt, professionalUserId: encounterProfessionalUserId, professionalName: encounterProfessionalName ?? "" }
       : null
     return { ...row, visit, encounter }
   })
@@ -439,7 +439,7 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(
       eq(encounter.organizationId, orgId),
-      eq(encounter.dentistUserId, userId),
+      eq(encounter.professionalUserId, userId),
       eq(encounter.status, "borrador"),
       sql`${encounter.startedAt} < ${start}`,
     ))
@@ -580,12 +580,12 @@ async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: W
 async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingRegistrationDone[]> {
   const rows = await tx.execute<{ [K in keyof WaitingRegistrationDone]: WaitingRegistrationDone[K] }>(sql`
     select a.id as "appointmentId", a.patient_id as "patientId", pp.display_name as "patientName",
-      ${iso(sql`sent.at`)} as "sentAt", ${iso(sql`a.starts_at`)} as "startsAt", u.name as "dentistName"
+      ${iso(sql`sent.at`)} as "sentAt", ${iso(sql`a.starts_at`)} as "startsAt", u.name as "professionalName"
     from appointment a
     join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
     join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
     join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    left join "user" u on u.id = a.dentist_user_id
+    left join "user" u on u.id = a.professional_user_id
     cross join lateral (select max(e.created_at) as at from audit_event e
       where e.organization_id = a.organization_id and e.action = 'personal_link.data_sent' and e.entity_id = a.patient_id::text
         and (e.created_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date) sent
@@ -870,9 +870,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
 
   // La puesta en marcha consulta capacidades existentes, no deduce configuración
   // a partir de contadores operativos en cero. Solo administración recibe estos datos.
-  const [setup] = access.configure ? await tx.execute<{ availability: boolean; chairs: boolean; patients: boolean }>(sql`
+  const [setup] = access.configure ? await tx.execute<{ availability: boolean; rooms: boolean; patients: boolean }>(sql`
     select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
-      exists(select 1 from schedule_chair where organization_id=${orgId} and is_active) as chairs,
+      exists(select 1 from schedule_room where organization_id=${orgId} and is_active) as rooms,
       exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
   // Sin Recepción ni el Administrador no sale «Recordar la cita» ni ningún aviso:
   // es un paso más de la puesta en marcha para quien puede encenderlos.

@@ -159,7 +159,7 @@ it("otro periodo vuelve a correr la respuesta sin el modelo; solo quien pregunt�
 })
 
 it("solo quien ve Reportes pregunta, y el cuerpo se valida", async () => {
-  for (const role of ["cashier", "reception", "dentist", "member"]) expect((await ask(role, { text: "¿Cuánto cobramos?" })).status, role).toBe(403)
+  for (const role of ["cashier", "reception", "clinician", "member"]) expect((await ask(role, { text: "¿Cuánto cobramos?" })).status, role).toBe(403)
   expect((await ask("owner", { text: "?" })).status).toBe(400)
   expect((await ask("owner", { text: "¿Cuánto cobramos?", sql: "select 1" })).status).toBe(400)
 })

@@ -1174,7 +1174,7 @@ export async function createFormResponse(
   if (input.encounterId) {
     const visible = await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
     encounterId = input.encounterId
-    attendingUserId = visible.dentistUserId
+    attendingUserId = visible.professionalUserId
   }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
@@ -2916,7 +2916,7 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
     requested_at: Date | string
   }>(sql`
     with needed as (
-      select cts."template_key", e."dentist_user_id", e."created_at"
+      select cts."template_key", e."professional_user_id", e."created_at"
       from "consent_template_service" cts
       join "encounter_procedure" ep
         on ep."organization_id" = cts."organization_id" and ep."service_id" = cts."service_id" and ep."voided_at" is null
@@ -2924,7 +2924,7 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
       where cts."organization_id" = ${orgId} and e."status" <> 'anulada'
         and e."created_at" > now() - interval '30 days'
       union all
-      select cts."template_key", e."dentist_user_id", e."created_at"
+      select cts."template_key", e."professional_user_id", e."created_at"
       from "consent_template_service" cts
       join "treatment_plan_item" tpi
         on tpi."organization_id" = cts."organization_id" and tpi."service_id" = cts."service_id"
@@ -2934,7 +2934,7 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
         and e."created_at" > now() - interval '30 days'
     ),
     latest as (
-      select distinct on (n."template_key") n."template_key", n."dentist_user_id", n."created_at"
+      select distinct on (n."template_key") n."template_key", n."professional_user_id", n."created_at"
       from needed n
       where not exists (
         select 1 from "consent_template" ct
@@ -2942,10 +2942,10 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
       )
       order by n."template_key", n."created_at" desc
     )
-    select l."template_key", l."dentist_user_id" as requested_by, u."name" as requested_by_name,
+    select l."template_key", l."professional_user_id" as requested_by, u."name" as requested_by_name,
       l."created_at" as requested_at
     from latest l
-    left join "user" u on u."id" = l."dentist_user_id"
+    left join "user" u on u."id" = l."professional_user_id"
     order by l."created_at" desc
     limit 20
   `)

@@ -393,7 +393,7 @@ export function EncounterEditor({
   const signAs = useSignAs()
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
-  const attending = encounter.dentistUserId === myUserId
+  const attending = encounter.professionalUserId === myUserId
   const closingQuery = useQuery({
     queryKey: ["encounter-closing", patientId, encounterId],
     queryFn: () => fetchEncounterClosing(patientId, encounterId),
@@ -1651,7 +1651,7 @@ export function EncounterEditor({
                 // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
                 encounter.appointmentId ? "desde su cita" : null,
                 encounter.startedAt ? `inicio ${formatClock(encounter.startedAt)}` : null,
-                memberName(encounter.dentistUserId),
+                memberName(encounter.professionalUserId),
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -1681,7 +1681,7 @@ export function EncounterEditor({
       {/* Quien cubre a otro lo lee en la atención: «Atiendes la cita de la Dra. Ana Torres». */}
       <AttendingForNotice
         appointmentId={encounter.appointmentId ?? null}
-        encounterDentistUserId={encounter.dentistUserId}
+        encounterProfessionalUserId={encounter.professionalUserId}
       />
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
@@ -1694,7 +1694,7 @@ export function EncounterEditor({
           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4"
         >
           <p className="text-sm">
-            Esta atención la lleva {memberName(encounter.dentistUserId)}. Puedes leerla; para
+            Esta atención la lleva {memberName(encounter.professionalUserId)}. Puedes leerla; para
             continuarla y firmarla, toma el relevo (queda registrado).
           </p>
           <Button type="button" disabled={takingOver} onClick={() => void handleTakeOver()}>

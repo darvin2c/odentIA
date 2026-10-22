@@ -26,7 +26,7 @@ export interface ReportsFinanceSeedInput {
   orgId: string
   ownerUserId: string
   /** Profesionales de la historia, en este orden: la primera es la dueña. */
-  dentistIds: string[]
+  professionalIds: string[]
 }
 
 /** Porcentaje de comisión de cada profesional, por su orden en la semilla. */
@@ -39,19 +39,19 @@ const SERVICE_CODES = ["EVALUACION", "LIMPIEZA", "BLANQUEAMIENTO", "CORONA", "OB
 
 /** Lo que la semilla necesita de la historia ya sembrada: sedes, nombres, días de cada profesional y servicios. */
 async function readHistory(tx: Db, input: ReportsFinanceSeedInput, timezone: string) {
-  const ids = sql.join(input.dentistIds.map((id) => sql`${id}`), sql`, `)
+  const ids = sql.join(input.professionalIds.map((id) => sql`${id}`), sql`, `)
   const branches = await tx.execute<{ id: string; name: string }>(sql`
     select b.id, b.name from appointment a join branch b on b.organization_id = a.organization_id and b.id = a.branch_id
     where a.organization_id = ${input.orgId} and a.status = 'atendida' group by b.id, b.name order by count(*) desc, b.name`)
   const habits = await tx.execute<{ userId: string; name: string; branchId: string; weekdays: number[]; earliest: number }>(sql`
-    select a.dentist_user_id as "userId", u.name,
+    select a.professional_user_id as "userId", u.name,
       mode() within group (order by a.branch_id) as "branchId",
       array_agg(distinct extract(dow from a.starts_at at time zone ${timezone})::int) as weekdays,
       min(extract(hour from a.starts_at at time zone ${timezone}))::int as earliest
-    from appointment a join "user" u on u.id = a.dentist_user_id
-    where a.organization_id = ${input.orgId} and a.status = 'atendida' and a.dentist_user_id in (${ids})
+    from appointment a join "user" u on u.id = a.professional_user_id
+    where a.organization_id = ${input.orgId} and a.status = 'atendida' and a.professional_user_id in (${ids})
       and a.starts_at > now() - interval '120 days'
-    group by a.dentist_user_id, u.name`)
+    group by a.professional_user_id, u.name`)
   const services = await tx.execute<{ code: string; id: string; name: string; priceCents: number }>(sql`
     select code, id, name, price_cents as "priceCents" from service_catalog
     where organization_id = ${input.orgId} and price_cents is not null
@@ -63,7 +63,7 @@ async function readHistory(tx: Db, input: ReportsFinanceSeedInput, timezone: str
   }
   return {
     branches: [...branches],
-    dentists: input.dentistIds.flatMap((userId, index) => {
+    professionals: input.professionalIds.flatMap((userId, index) => {
       const habit = habits.find((row) => row.userId === userId)
       if (!habit) return []
       return [
@@ -111,7 +111,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   const { orgId, ownerUserId } = seed
   const { timezone, currency, locale } = await getOrgLocale(tx, orgId)
   const input = await readHistory(tx, seed, timezone)
-  if (input.branches.length === 0 || input.dentists.length === 0) return { settlements: 0, orders: 0, budgets: 0 }
+  if (input.branches.length === 0 || input.professionals.length === 0) return { settlements: 0, orders: 0, budgets: 0 }
   const random = generator(20_261_103)
   const now = Date.now()
   const current = currentMonthIn(timezone)
@@ -121,12 +121,12 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   // El horario de hoy lo dejó la semilla de disponibilidad; el de antes es el que
   // siguió la historia de citas y vale hasta ayer. Cada profesional lo guarda desde
   // `scheduleSinceMonths`; antes no hay registro y Reportes lo dice.
-  for (const dentist of input.dentists) {
-    const since = addMonths(current, -dentist.scheduleSinceMonths)
+  for (const professional of input.professionals) {
+    const since = addMonths(current, -professional.scheduleSinceMonths)
     const sinceDay = localDay(new Date(monthStart(timezone, since.year, since.month).getTime() + 12 * 3_600_000), timezone)
     const turns = (evening: boolean) =>
-      dentist.weekdays.flatMap((weekday) => {
-        if (dentist.afternoonOnly) return [{ weekday, startMin: 14 * 60, endMin: 18 * 60 }]
+      professional.weekdays.flatMap((weekday) => {
+        if (professional.afternoonOnly) return [{ weekday, startMin: 14 * 60, endMin: 18 * 60 }]
         if (weekday === 6) return [{ weekday, startMin: 9 * 60, endMin: 13 * 60 }]
         return [
           { weekday, startMin: 9 * 60, endMin: 13 * 60 },
@@ -134,8 +134,8 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
         ]
       })
     const versions: Array<{ from: string; until: string; evening: boolean }> = []
-    if (dentist.eveningSinceMonths !== undefined && dentist.eveningSinceMonths < dentist.scheduleSinceMonths) {
-      const change = addMonths(current, -dentist.eveningSinceMonths)
+    if (professional.eveningSinceMonths !== undefined && professional.eveningSinceMonths < professional.scheduleSinceMonths) {
+      const change = addMonths(current, -professional.eveningSinceMonths)
       const changeDay = `${change.year}-${String(change.month).padStart(2, "0")}-01`
       versions.push({ from: sinceDay, until: changeDay, evening: false }, { from: changeDay, until: today, evening: true })
     } else versions.push({ from: sinceDay, until: today, evening: false })
@@ -144,8 +144,8 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       await tx.insert(professionalSchedule).values(
         turns(version.evening).map((turn) => ({
           organizationId: orgId,
-          branchId: dentist.branchId,
-          dentistUserId: dentist.userId,
+          branchId: professional.branchId,
+          professionalUserId: professional.userId,
           ...turn,
           isActive: false,
           validFrom: version.from,
@@ -157,7 +157,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
   }
 
   // --- Comisiones: porcentajes y pagos -----------------------------------------------------
-  for (const dentist of input.dentists) await setCommissionRate(tx, orgId, ownerUserId, { professionalUserId: dentist.userId, rateBps: dentist.rateBps })
+  for (const professional of input.professionals) await setCommissionRate(tx, orgId, ownerUserId, { professionalUserId: professional.userId, rateBps: professional.rateBps })
   // Cada mes se paga el día 10 del siguiente, como lo haría «Pagar comisiones»: congela
   // cada cobro con su porcentaje y deja el gasto de Personal. El mes pasado solo se les
   // pagó a dos; lo demás y el mes en curso quedan por pagar.
@@ -171,7 +171,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
     const paidAt = new Date(end.getTime() + 9 * DAY_MS + 16 * 3_600_000)
     if (paidAt.getTime() > now) continue
     const label = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(month.year, month.month - 1, 15)))
-    for (const [position, dentist] of input.dentists.entries()) {
+    for (const [position, professional] of input.professionals.entries()) {
       if (month.year === lastPaid.year && month.month === lastPaid.month && position % 2 === 1) continue
       const settlementId = randomUUID()
       const expenseId = randomUUID()
@@ -183,35 +183,35 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
           join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
           join encounter_procedure ep on ep.organization_id = a.organization_id and ep.id = c.encounter_procedure_id
           join encounter e on e.organization_id = a.organization_id and e.id = ep.encounter_id
-          where a.organization_id = ${orgId} and e.dentist_user_id = ${dentist.userId}
+          where a.organization_id = ${orgId} and e.professional_user_id = ${professional.userId}
             and a.created_at >= ${start.toISOString()}::timestamptz and a.created_at < ${end.toISOString()}::timestamptz
             and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
             and e.status = 'finalizada' and e.voided_at is null and c.currency = ${currency}
         )
-        select coalesce(sum(cents), 0)::text as base, coalesce(sum((cents * ${dentist.rateBps}) / 10000), 0)::text as commission, count(*)::int as lines from apps`)
+        select coalesce(sum(cents), 0)::text as base, coalesce(sum((cents * ${professional.rateBps}) / 10000), 0)::text as commission, count(*)::int as lines from apps`)
       const commission = Number(totals?.commission ?? 0)
       if (!totals || totals.lines === 0 || commission <= 0) continue
       await tx.execute(sql`
         insert into expense (id, organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, created_by, created_at, updated_at)
-        values (${expenseId}::uuid, ${orgId}, ${dentist.branchId}::uuid, ${`Comisión de ${label} — ${dentist.name}`.slice(0, 500)}, 'Personal', ${commission},
+        values (${expenseId}::uuid, ${orgId}, ${professional.branchId}::uuid, ${`Comisión de ${label} — ${professional.name}`.slice(0, 500)}, 'Personal', ${commission},
           ${currency}, ${paidAt.toISOString()}::timestamptz, 'ninguno', ${ownerUserId}, ${paidAt.toISOString()}::timestamptz, ${paidAt.toISOString()}::timestamptz)`)
       await tx.execute(sql`
         insert into commission_settlement (id, organization_id, professional_user_id, period_year, period_month, base, currency, rate_bps, base_cents,
           commission_cents, status, settled_by, settled_at, expense_id, created_at, updated_at)
-        values (${settlementId}::uuid, ${orgId}, ${dentist.userId}, ${month.year}, ${month.month}, 'cobrado', ${currency}, ${dentist.rateBps},
+        values (${settlementId}::uuid, ${orgId}, ${professional.userId}, ${month.year}, ${month.month}, 'cobrado', ${currency}, ${professional.rateBps},
           ${Number(totals.base)}, ${commission}, 'liquidada', ${ownerUserId}, ${paidAt.toISOString()}::timestamptz, ${expenseId}::uuid,
           ${paidAt.toISOString()}::timestamptz, ${paidAt.toISOString()}::timestamptz)`)
       await tx.execute(sql`
         insert into commission_settlement_line (organization_id, settlement_id, kind, source_key, application_id, charge_id, payment_id, patient_id,
           description, base_cents, commission_cents, rate_bps, occurred_at)
         select ${orgId}, ${settlementId}::uuid, 'cobro', 'app:' || a.id, a.id, a.charge_id, a.payment_id, a.patient_id, c.description,
-          a.amount_cents, (a.amount_cents::bigint * ${dentist.rateBps}) / 10000, ${dentist.rateBps}, a.created_at
+          a.amount_cents, (a.amount_cents::bigint * ${professional.rateBps}) / 10000, ${professional.rateBps}, a.created_at
         from patient_payment_application a
         join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
         join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
         join encounter_procedure ep on ep.organization_id = a.organization_id and ep.id = c.encounter_procedure_id
         join encounter e on e.organization_id = a.organization_id and e.id = ep.encounter_id
-        where a.organization_id = ${orgId} and e.dentist_user_id = ${dentist.userId}
+        where a.organization_id = ${orgId} and e.professional_user_id = ${professional.userId}
           and a.created_at >= ${start.toISOString()}::timestamptz and a.created_at < ${end.toISOString()}::timestamptz
           and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
           and e.status = 'finalizada' and e.voided_at is null and c.currency = ${currency}`)

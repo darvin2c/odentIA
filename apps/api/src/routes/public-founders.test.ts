@@ -83,7 +83,7 @@ const request = (email: string) => ({
   clinicName: "Clínica Sonrisa",
   countryCode: "PE",
   city: "Arequipa",
-  dentists: "2-3",
+  professionals: "2-3",
   currentTool: "nada",
 })
 
@@ -161,7 +161,7 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   // Pedirlo otra vez no duplica la solicitud ni la copia.
   expect((await send(request("ana@sonrisa.test"))).status).toBe(201)
   expect(mailer.sent).toHaveLength(1)
-  const bad = await send({ ...request("x@y.test"), dentists: "muchos" })
+  const bad = await send({ ...request("x@y.test"), professionals: "muchos" })
   expect(bad.status).toBe(400)
   expect(((await bad.json()) as { error: { message: string } }).error.message).toBe("Elige cuántos odontólogos atienden")
 })
@@ -185,7 +185,7 @@ it("con «solo con invitación», abrir una clínica pide la invitación de quie
 
   const [row] = await ownerDb
     .insert(saasWaitlistRequest)
-    .values({ ...request("rosa@norte.test"), dentists: "1", currentTool: "nada", phone: "+51911111111" })
+    .values({ ...request("rosa@norte.test"), professionals: "1", currentTool: "nada", phone: "+51911111111" })
     .returning({ id: saasWaitlistRequest.id })
   const { token } = await inviteFromWaitlist(ownerDb, ADMIN, row!.id)
 

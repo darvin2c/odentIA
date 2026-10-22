@@ -43,7 +43,7 @@ const storageStub: Storage = {
 
 const ORG = "org_commissions_api"
 const OWNER = "api-comm-owner"
-const DENTIST = "api-comm-dentist"
+const PROFESSIONAL = "api-comm-professional"
 const CASHIER = "api-comm-cashier"
 const MEMBER = "api-comm-member"
 const OTHER = "api-comm-other"
@@ -106,17 +106,17 @@ beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "user" ("id", "name", "email") values
       (${OWNER}, 'Dueña API', 'comm-owner@example.test'),
-      (${DENTIST}, 'Dra. API', 'comm-dentist@example.test'),
+      (${PROFESSIONAL}, 'Dra. API', 'comm-professional@example.test'),
       (${CASHIER}, 'Caja API', 'comm-cashier@example.test'),
       (${MEMBER}, 'Miembro API', 'comm-member@example.test'),
       (${OTHER}, 'Otra API', 'comm-other@example.test')`)
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-comm-owner', ${ORG}, ${OWNER}, 'owner', now()),
-      ('m-comm-dentist', ${ORG}, ${DENTIST}, 'dentist', now()),
+      ('m-comm-professional', ${ORG}, ${PROFESSIONAL}, 'clinician', now()),
       ('m-comm-cashier', ${ORG}, ${CASHIER}, 'cashier', now()),
       ('m-comm-member', ${ORG}, ${MEMBER}, 'member', now()),
-      ('m-comm-other', ${ORG}, ${OTHER}, 'dentist', now())`)
+      ('m-comm-other', ${ORG}, ${OTHER}, 'clinician', now())`)
 }, 180_000)
 
 afterAll(async () => {
@@ -132,7 +132,7 @@ it("sin commissions.read no hay acceso", async () => {
 })
 
 it("el odontólogo ve solo las suyas y no administra", async () => {
-  const app = buildApp("dentist", DENTIST)
+  const app = buildApp("clinician", PROFESSIONAL)
   const mine = await app.request("/commissions/my?year=2026&month=9&currency=PEN")
   expect(mine.status).toBe(200)
   const other = await app.request(
@@ -144,14 +144,14 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
   const rate = await app.request("/commissions/rates", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ professionalUserId: DENTIST, rateBps: 4000 }),
+    body: JSON.stringify({ professionalUserId: PROFESSIONAL, rateBps: 4000 }),
   })
   expect(rate.status).toBe(403)
   const pay = await app.request("/commissions/pay", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      professionalUserId: DENTIST,
+      professionalUserId: PROFESSIONAL,
       year: 2026,
       month: 9,
       branchId: "00000000-0000-4000-8000-000000000001",
@@ -167,14 +167,14 @@ it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el 
   const rate = await admin.request("/commissions/rates", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ professionalUserId: DENTIST, rateBps: 4000 }),
+    body: JSON.stringify({ professionalUserId: PROFESSIONAL, rateBps: 4000 }),
   })
   expect(rate.status).toBe(200)
   const month = await admin.request("/commissions/month?year=2026&month=9")
   expect(month.status).toBe(200)
   const rows = ((await month.json()) as { data: Array<{ professionalUserId: string; rateBps: number }> }).data
   // Con porcentaje fijado aparece en el mes aunque aún no tenga cobros.
-  expect(rows.find((row) => row.professionalUserId === DENTIST)?.rateBps).toBe(4000)
+  expect(rows.find((row) => row.professionalUserId === PROFESSIONAL)?.rateBps).toBe(4000)
   expect((await admin.request("/reports/finance?period=2026-09")).status).toBe(200)
   const cashier = buildApp("cashier", CASHIER)
   const result = await cashier.request("/reports/finance?period=2026-09")

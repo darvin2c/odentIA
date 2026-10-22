@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { encounter, encounterProcedure, orgSpecialty, patientCharge, serviceCatalog } from "@odentia/db/schema/clinical"
@@ -240,7 +240,7 @@ describe("cuadre con Reportes", () => {
   it("dinero del mes: lo cobrado, comisiones, gastos, lo que deja y lo que deben", async () => {
     const f = await clinicalFixture()
     // Una segunda fila de miembro de la misma persona: su comisión no se cuenta dos veces.
-    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "dentist", createdAt: new Date() })
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
     const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
     const branchId = site!.id
     const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))
@@ -367,12 +367,12 @@ describe("cuadre con Reportes", () => {
     const orgId = randomUUID()
     await insertOrg(ownerDb, orgId, `argos-${orgId}`)
     const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
-    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
-    const dentist = randomUUID()
-    await ownerDb.insert(user).values({ id: dentist, name: "Dra. Prueba", email: `${dentist}@argos.test` })
-    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: dentist, role: "dentist", createdAt: new Date() })
+    const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
+    const professional = randomUUID()
+    await ownerDb.insert(user).values({ id: professional, name: "Dra. Prueba", email: `${professional}@argos.test` })
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: professional, role: "clinician", createdAt: new Date() })
     await ownerDb.insert(professionalSchedule).values(
-      [1, 2, 3, 4, 5].map((weekday) => ({ organizationId: orgId, branchId: site!.id, dentistUserId: dentist, weekday, startMin: 9 * 60, endMin: 13 * 60, isActive: true, validFrom: "2020-01-01" })),
+      [1, 2, 3, 4, 5].map((weekday) => ({ organizationId: orgId, branchId: site!.id, professionalUserId: professional, weekday, startMin: 9 * 60, endMin: 13 * 60, isActive: true, validFrom: "2020-01-01" })),
     )
     const people = await insertTestPatients(ownerDb, [
       { organizationId: orgId, displayName: "Uno", patientNumber: 1 },
@@ -392,8 +392,8 @@ describe("cuadre con Reportes", () => {
         organizationId: orgId,
         branchId: site!.id,
         patientId: people[patient]!.id,
-        dentistUserId: dentist,
-        chairId: chair!.id,
+        professionalUserId: professional,
+        roomId: room!.id,
         serviceName: "Consulta",
         startsAt: at(day, hour),
         endsAt: at(day, hour + 1),
@@ -448,18 +448,18 @@ describe("cuadre con Reportes", () => {
     const orgId = randomUUID()
     await insertOrg(ownerDb, orgId, `argos-${orgId}`)
     const [norte, sur] = await ownerDb.insert(branch).values([{ organizationId: orgId, name: "Sede Norte" }, { organizationId: orgId, name: "Sede Sur" }]).returning()
-    const [northChair, southChair] = await ownerDb
-      .insert(scheduleChair)
+    const [northRoom, southRoom] = await ownerDb
+      .insert(scheduleRoom)
       .values([
         { organizationId: orgId, branchId: norte!.id, name: "Unidad dental 1" },
         { organizationId: orgId, branchId: sur!.id, name: "Unidad dental 2" },
       ])
       .returning()
-    const dentist = randomUUID()
-    await ownerDb.insert(user).values({ id: dentist, name: "Dra. Sur", email: `${dentist}@argos.test` })
-    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: dentist, role: "dentist", createdAt: new Date() })
+    const professional = randomUUID()
+    await ownerDb.insert(user).values({ id: professional, name: "Dra. Sur", email: `${professional}@argos.test` })
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: professional, role: "clinician", createdAt: new Date() })
     const [specialty] = await ownerDb.insert(orgSpecialty).values({ organizationId: orgId, key: "orto", name: "Ortodoncia y Ortopedia Maxilar" }).returning()
-    await ownerDb.insert(professionalSpecialty).values({ organizationId: orgId, specialtyId: specialty!.id, userId: dentist })
+    await ownerDb.insert(professionalSpecialty).values({ organizationId: orgId, specialtyId: specialty!.id, userId: professional })
     await ownerDb.insert(serviceCatalog).values({ organizationId: orgId, name: "Control de ortodoncia", specialtyId: specialty!.id, priceCents: 12_000, currency: "PEN" })
     const people = await insertTestPatients(ownerDb, [
       { organizationId: orgId, displayName: "Primero en el norte", patientNumber: 1 },
@@ -475,8 +475,8 @@ describe("cuadre con Reportes", () => {
         organizationId: orgId,
         branchId: site,
         patientId: people[patient]!.id,
-        dentistUserId: dentist,
-        chairId: site === sur!.id ? southChair!.id : northChair!.id,
+        professionalUserId: professional,
+        roomId: site === sur!.id ? southRoom!.id : northRoom!.id,
         serviceName: "Consulta",
         startsAt: at(day, hour),
         endsAt: at(day, hour + 1),
@@ -487,7 +487,7 @@ describe("cuadre con Reportes", () => {
     await visit(0, norte!.id, 5, 9)
     await visit(0, sur!.id, 12, 9)
     await visit(1, sur!.id, 13, 10)
-    await ownerDb.insert(scheduleBlock).values({ organizationId: orgId, branchId: sur!.id, dentistUserId: dentist, kind: "ausencia", reason: "Vacaciones", startsAt: at(20, 0), endsAt: at(23, 0) })
+    await ownerDb.insert(scheduleBlock).values({ organizationId: orgId, branchId: sur!.id, professionalUserId: professional, kind: "ausencia", reason: "Vacaciones", startsAt: at(20, 0), endsAt: at(23, 0) })
 
     const pantalla = await screen(orgId, "mes_pasado", "pacientes_nuevos", sur!.id)
     const vistas = await one(

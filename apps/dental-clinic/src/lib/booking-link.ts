@@ -24,7 +24,7 @@ export interface BookingAppointment {
   branchAddress: string | null
   /** «Cómo llegar» a la sede (Google Maps); null sin dirección. */
   branchDirectionsUrl: string | null
-  dentistName: string
+  professionalName: string
   serviceName: string | null
 }
 
@@ -90,9 +90,9 @@ export interface PersonalLinkPaper {
 export interface BookingSlot {
   startsAt: string
   endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
+  professionalUserId: string
+  professionalName: string
+  roomId: string | null
 }
 
 /** Página pública: sin sesión ni cabecera de organización; lo único que identifica es el enlace. */
@@ -209,7 +209,7 @@ export function submitBookingRegistration(
 
 export function reserveBooking(
   slug: string,
-  input: { token: string; branchId: string; startsAt: string; dentistUserId: string; chairId?: string; planItemIds?: string[] },
+  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[] },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/reserve`, input)
 }
@@ -217,7 +217,7 @@ export function reserveBooking(
 /** Cambia de horario la cita del enlace. */
 export function changeBooking(
   slug: string,
-  input: { token: string; startsAt: string; dentistUserId: string; chairId?: string },
+  input: { token: string; startsAt: string; professionalUserId: string; roomId?: string },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/change`, input)
 }

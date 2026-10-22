@@ -5,7 +5,7 @@
  * la cita y su atención lo trae, y «Qué sigue» decide frase y botón.
  */
 import { randomUUID } from "node:crypto"
-import { scheduleChair } from "@odentia/db/schema/agenda"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent } from "@odentia/db/schema/automation"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
@@ -215,30 +215,30 @@ it("el odontólogo actúa sobre lo que él indicó, aunque el plan lo haya abier
     { id: third, name: "Tercer clínico", email: `${third}@example.test` },
   ])
   await ownerDb.insert(member).values([
-    { id: randomUUID(), organizationId: "org_a", userId: other, role: "dentist", createdAt: new Date() },
-    { id: randomUUID(), organizationId: "org_a", userId: third, role: "dentist", createdAt: new Date() },
+    { id: randomUUID(), organizationId: "org_a", userId: other, role: "clinician", createdAt: new Date() },
+    { id: randomUUID(), organizationId: "org_a", userId: third, role: "clinician", createdAt: new Date() },
   ])
   // El plan lo abrió f.actor; este tratamiento lo indicó `other`.
   const own = await withOrgContext(appDb, "org_a", (tx) =>
     addPlanItem(tx, "org_a", other, f.patient.id, { serviceId: f.service.id, sourceEncounterId: f.encounter.id }),
   )
-  const asDentist = { memberRole: "dentist" }
+  const asProfessional = { memberRole: "clinician" }
   const budget = await withOrgContext(appDb, "org_a", (tx) =>
-    createBudget(tx, "org_a", other, f.patient.id, { itemIds: [own.id] }, asDentist),
+    createBudget(tx, "org_a", other, f.patient.id, { itemIds: [own.id] }, asProfessional),
   )
   // Un tratamiento que no indicó no lo puede sumar.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      addBudgetItems(tx, "org_a", other, f.patient.id, budget.id, { itemIds: [items[0]!.id] }, asDentist),
+      addBudgetItems(tx, "org_a", other, f.patient.id, budget.id, { itemIds: [items[0]!.id] }, asProfessional),
     ),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      getBudgetDetail(tx, "org_a", f.patient.id, budget.id, { actorUserId: third, memberRole: "dentist" }),
+      getBudgetDetail(tx, "org_a", f.patient.id, budget.id, { actorUserId: third, memberRole: "clinician" }),
     ),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
   const seen = await withOrgContext(appDb, "org_a", (tx) =>
-    listBudgets(tx, "org_a", f.patient.id, undefined, { actorUserId: other, memberRole: "dentist" }),
+    listBudgets(tx, "org_a", f.patient.id, undefined, { actorUserId: other, memberRole: "clinician" }),
   )
   expect(seen.map((row) => row.id)).toEqual([budget.id])
 })
@@ -271,13 +271,13 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
   expect(reader.action).toBeNull()
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
-  await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" })
+  await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" })
   const startsAt = new Date(Date.now() + 3 * 24 * 3_600_000)
   startsAt.setUTCMinutes(0, 0, 0)
   const cita = await f.run((tx) =>
     createAppointment(tx, "org_a", f.actor, {
       patientId: f.patient.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       branchId: site!.id,
       startsAt: startsAt.toISOString(),
       durationMin: 30,
@@ -293,7 +293,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
     f.run((tx) =>
       createAppointment(tx, "org_a", f.actor, {
         patientId: f.patient.id,
-        dentistUserId: f.actor,
+        professionalUserId: f.actor,
         branchId: site!.id,
         startsAt: new Date(startsAt.getTime() + 3_600_000).toISOString(),
         durationMin: 30,

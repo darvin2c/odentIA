@@ -15,7 +15,7 @@ const ARGOS_KEYS: Record<string, ArgosKey> = {
   owner: "gestion",
   admin: "gestion",
   reception: "recepcion",
-  dentist: "clinico",
+  clinician: "clinico",
   cashier: "caja",
 }
 

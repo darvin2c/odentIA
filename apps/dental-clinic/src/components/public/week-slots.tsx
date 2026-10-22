@@ -15,9 +15,9 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 export interface WeekSlot {
   startsAt: string
   endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
+  professionalUserId: string
+  professionalName: string
+  roomId: string | null
 }
 
 const DAY_MS = 86_400_000
@@ -85,7 +85,7 @@ export function useWeekSlots(options: UseWeekSlotsOptions) {
   const queryClient = useQueryClient()
   const [week, setWeek] = useState(0)
   const [day, setDay] = useState<string | null>(null)
-  const [dentist, setDentist] = useState<string>(ANYONE)
+  const [professional, setProfessional] = useState<string>(ANYONE)
   // La semana que se mira: de lunes a domingo, sin lo que ya pasó.
   const range = useMemo(() => {
     const start = weekStart(week)
@@ -106,19 +106,19 @@ export function useWeekSlots(options: UseWeekSlotsOptions) {
   const timeZone = query.data?.timeZone ?? options.fallbackTimeZone ?? activeOrgTimeZone()
   const allSlots = query.data?.slots ?? []
   // Con quién: los profesionales que tienen algún horario libre esta semana.
-  const dentists = useMemo(() => {
+  const professionals = useMemo(() => {
     const byId = new Map<string, string>()
-    for (const slot of allSlots) byId.set(slot.dentistUserId, slot.dentistName)
+    for (const slot of allSlots) byId.set(slot.professionalUserId, slot.professionalName)
     return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "es"))
   }, [allSlots])
-  const dentistFilter = dentists.some((item) => item.id === dentist) ? dentist : ANYONE
+  const professionalFilter = professionals.some((item) => item.id === professional) ? professional : ANYONE
   // Un horario por hora de inicio: sin preferencia, si varios profesionales lo tienen libre se ofrece una sola vez.
   // Se muestran los días de la semana que aún no pasaron; sábado y domingo, solo si la clínica atiende.
   const days = useMemo(() => {
     const byDay = new Map<string, WeekSlot[]>()
     const seen = new Set<string>()
     for (const slot of allSlots) {
-      if (dentistFilter !== ANYONE && slot.dentistUserId !== dentistFilter) continue
+      if (professionalFilter !== ANYONE && slot.professionalUserId !== professionalFilter) continue
       if (seen.has(slot.startsAt)) continue
       seen.add(slot.startsAt)
       const key = dayKey(slot.startsAt, timeZone)
@@ -131,22 +131,22 @@ export function useWeekSlots(options: UseWeekSlotsOptions) {
       const key = dayKey(instant, timeZone)
       return { key, instant, weekend: index >= 5, slots: byDay.get(key) ?? [] }
     }).filter((item) => item.key >= today && (!item.weekend || item.slots.length > 0))
-  }, [allSlots, dentistFilter, range.start, timeZone])
+  }, [allSlots, professionalFilter, range.start, timeZone])
   const activeDay = days.find((item) => item.key === day && item.slots.length > 0) ?? days.find((item) => item.slots.length > 0)
-  const withWhom = dentistFilter === ANYONE ? null : (dentists.find((item) => item.id === dentistFilter)?.name ?? null)
+  const withWhom = professionalFilter === ANYONE ? null : (professionals.find((item) => item.id === professionalFilter)?.name ?? null)
   return {
     query,
     week,
     timeZone,
-    dentists,
-    dentistFilter,
+    professionals,
+    professionalFilter,
     days,
     activeDay,
     withWhom,
     range,
     setDay,
-    setDentist: (value: string) => {
-      setDentist(value)
+    setProfessional: (value: string) => {
+      setProfessional(value)
       setDay(null)
     },
     changeWeek: (next: number) => {
@@ -156,7 +156,7 @@ export function useWeekSlots(options: UseWeekSlotsOptions) {
     reset: () => {
       setWeek(0)
       setDay(null)
-      setDentist(ANYONE)
+      setProfessional(ANYONE)
     },
     /** Ese horario pudo ocuparse mientras elegía: se vuelve a pedir lo libre. */
     refresh: () => void queryClient.invalidateQueries({ queryKey: [...options.queryKey] }),
@@ -166,26 +166,26 @@ export function useWeekSlots(options: UseWeekSlotsOptions) {
 export type WeekSlotsState = ReturnType<typeof useWeekSlots>
 
 /** «Profesional»: cualquiera o uno de los que tienen horarios esta semana. */
-export function DentistSelect({ state, id, onChange }: { state: WeekSlotsState; id: string; onChange?: () => void }) {
-  if (state.dentists.length === 0) return null
+export function ProfessionalSelect({ state, id, onChange }: { state: WeekSlotsState; id: string; onChange?: () => void }) {
+  if (state.professionals.length === 0) return null
   return (
     <Field>
       <FieldLabel htmlFor={id}>Profesional</FieldLabel>
       <Select
-        value={state.dentistFilter}
+        value={state.professionalFilter}
         onValueChange={(value) => {
-          state.setDentist(value ?? ANYONE)
+          state.setProfessional(value ?? ANYONE)
           onChange?.()
         }}
       >
         <SelectTrigger id={id} className="min-h-11 w-full">
           <SelectValue>
-            {state.dentistFilter === ANYONE ? "Cualquier profesional" : (state.dentists.find((item) => item.id === state.dentistFilter)?.name ?? "")}
+            {state.professionalFilter === ANYONE ? "Cualquier profesional" : (state.professionals.find((item) => item.id === state.professionalFilter)?.name ?? "")}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ANYONE}>Cualquier profesional</SelectItem>
-          {state.dentists.map((item) => (
+          {state.professionals.map((item) => (
             <SelectItem key={item.id} value={item.id}>
               {item.name}
             </SelectItem>
@@ -230,10 +230,10 @@ export function WeekSlotsGrid({
     onChoose(slot)
   }
   const slotButton = (slot: WeekSlot, compact: boolean) => {
-    const active = chosen?.startsAt === slot.startsAt && chosen.dentistUserId === slot.dentistUserId
+    const active = chosen?.startsAt === slot.startsAt && chosen.professionalUserId === slot.professionalUserId
     return (
       <Button
-        key={`${slot.startsAt}-${slot.dentistUserId}`}
+        key={`${slot.startsAt}-${slot.professionalUserId}`}
         type="button"
         variant={active ? "default" : "outline"}
         className={compact ? "min-h-10 w-full px-1 text-sm" : "min-h-11"}
@@ -345,7 +345,7 @@ export function WeekSlotsGrid({
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{group.slots.map((slot) => slotButton(slot, false))}</div>
                 </fieldset>
               ))}
-            {chosen ? <p className="text-sm text-muted-foreground">Con {chosen.dentistName}.</p> : null}
+            {chosen ? <p className="text-sm text-muted-foreground">Con {chosen.professionalName}.</p> : null}
           </div>
           <p className="text-sm text-muted-foreground">Solo se muestran los horarios libres. Si alguien toma uno mientras eliges, te avisamos antes de reservar.</p>
         </>

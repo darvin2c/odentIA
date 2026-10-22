@@ -25,10 +25,10 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   const ids = await buildClinicalBase(owner)
   const { page } = owner
   const slug = owner.org.slug
-  const chair = await call<{ id: string }>(
+  const room = await call<{ id: string }>(
     page,
     "POST",
-    "/api/agenda/chairs",
+    "/api/agenda/rooms",
     slug,
     {
       branchId: owner.branchId,
@@ -38,7 +38,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   )
   await call(page, "PUT", "/api/agenda/schedules", slug, {
     branchId: owner.branchId,
-    dentistUserId: owner.user.id,
+    professionalUserId: owner.user.id,
     rules: Array.from({ length: 7 }, (_, weekday) => ({
       weekday,
       startMin: 8 * 60,
@@ -127,8 +127,8 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
     slug,
     {
       appointment: {
-        dentistUserId: owner.user.id,
-        chairId: chair.id,
+        professionalUserId: owner.user.id,
+        roomId: room.id,
         startsAt,
         durationMin: 30,
       },

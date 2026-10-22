@@ -721,7 +721,7 @@ export function generatedSolvers8(h: GoldenHelpers): GoldenSolvers {
       const sundays = await h.tx.execute<{ branch: string; person: string; since: string }>(sql`
         select b.name as branch, u.name as person, min(s.valid_from)::text as since from professional_schedule s
         join branch b on b.organization_id = s.organization_id and b.id = s.branch_id
-        join "user" u on u.id = s.dentist_user_id
+        join "user" u on u.id = s.professional_user_id
         where s.organization_id = ${h.org} and s.is_active and s.valid_until is null and s.weekday = 0
         group by 1, 2 order by 1, 2`)
       const byDay = await h.tx.execute<{ dow: number; total: number }>(sql`

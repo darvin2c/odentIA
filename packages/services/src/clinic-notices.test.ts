@@ -34,22 +34,22 @@ async function clinic(over: Partial<typeof saasSubscription.$inferInsert> = {}) 
     .insert(saasSubscription)
     .values({ organizationId: orgId, ...values })
     .onConflictDoUpdate({ target: saasSubscription.organizationId, set: values })
-  const people = { owner: randomUUID(), reception: randomUUID(), dentist: randomUUID(), cashier: randomUUID() }
+  const people = { owner: randomUUID(), reception: randomUUID(), clinician: randomUUID(), cashier: randomUUID() }
   await ownerDb.insert(user).values([
     { id: people.owner, name: "Rosa Díaz", email: `${people.owner}@clinica.test` },
     { id: people.reception, name: "Carla Ruiz", email: `${people.reception}@clinica.test` },
-    { id: people.dentist, name: "Luis Mamani", email: `${people.dentist}@clinica.test` },
+    { id: people.clinician, name: "Luis Mamani", email: `${people.clinician}@clinica.test` },
     { id: people.cashier, name: "Pedro Salas", email: `${people.cashier}@clinica.test` },
   ])
   await ownerDb.insert(member).values([
     { id: randomUUID(), userId: people.owner, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: randomUUID(), userId: people.reception, organizationId: orgId, role: "reception", createdAt: new Date() },
-    { id: randomUUID(), userId: people.dentist, organizationId: orgId, role: "dentist", createdAt: new Date() },
+    { id: randomUUID(), userId: people.clinician, organizationId: orgId, role: "clinician", createdAt: new Date() },
     { id: randomUUID(), userId: people.cashier, organizationId: orgId, role: "cashier", createdAt: new Date() },
   ])
   const read = (who: keyof typeof people) =>
     withOrgContext(appDb, orgId, (tx) =>
-      getClinicNotices(tx, orgId, { userId: people[who], role: { owner: "owner", reception: "reception", dentist: "dentist", cashier: "cashier" }[who] }),
+      getClinicNotices(tx, orgId, { userId: people[who], role: { owner: "owner", reception: "reception", clinician: "clinician", cashier: "cashier" }[who] }),
     )
   return { orgId, people, read }
 }
@@ -135,11 +135,11 @@ describe("franja de avisos: el pago del mes", () => {
     const owner = await read("owner")
     expect(owner[0]).toMatchObject({ tone: "alarma", action: { kind: "pagar" } })
     expect(owner[0]?.message).toContain("Mañana")
-    const dentist = await read("dentist")
-    expect(dentist).toHaveLength(1)
-    expect(dentist[0]).toMatchObject({ tone: "alarma", action: null })
-    expect(dentist[0]?.message).toContain("Avísale a Rosa")
-    expect(dentist[0]?.message).not.toContain("32.76")
+    const clinician = await read("clinician")
+    expect(clinician).toHaveLength(1)
+    expect(clinician[0]).toMatchObject({ tone: "alarma", action: null })
+    expect(clinician[0]?.message).toContain("Avísale a Rosa")
+    expect(clinician[0]?.message).not.toContain("32.76")
   })
 
   it("en solo lectura todos lo ven en rojo; solo quien administra, el monto y la acción", async () => {
@@ -210,7 +210,7 @@ describe("franja de avisos: soporte con acceso", () => {
     expect(owner[0]?.message).toMatch(/^Diste acceso/)
     expect(owner[0]?.message).toContain("No se envían los recordatorios")
     expect(await read("reception")).toEqual([])
-    expect(await read("dentist")).toEqual([])
+    expect(await read("clinician")).toEqual([])
   })
 })
 

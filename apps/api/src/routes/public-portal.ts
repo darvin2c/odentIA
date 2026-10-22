@@ -42,8 +42,8 @@ const rescheduleInput = z.strictObject({
   expectedVersion: z.number().int().min(1),
   startsAt: z.string().min(1).max(64),
   // El horario elegido en la semana: con quién y en qué unidad dental está libre.
-  dentistUserId: z.string().min(1).max(200),
-  chairId: z.uuid().optional(),
+  professionalUserId: z.string().min(1).max(200),
+  roomId: z.uuid().optional(),
 })
 const decisionLineInput = z.strictObject({
   planItemId: z.uuid(),

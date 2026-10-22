@@ -89,7 +89,7 @@ it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo co
   // Una cita es el acto que espera el sí del interlocutor en el hilo (ADR 0021).
   const booking = await run((tx) => createProposal(tx, ORG, {
     conversationId, action: "reservar_cita", idempotencyKey: "case:cita-1",
-    payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
+    payload: { patientId: randomUUID(), professionalUserId: OWNER, roomId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
   const pending = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(pending.pending.map((item) => item.action)).toEqual(["reservar_cita"])

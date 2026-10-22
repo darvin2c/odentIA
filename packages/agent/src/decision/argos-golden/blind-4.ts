@@ -492,7 +492,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
         }
       const last = { start: dayStart(tz, year - 1, 1, 1), end: dayStart(tz, year, 1, 1) }
       const endo = sql`coalesce(s.name, ep.description) ilike '%endodon%'`
-      const mineWhere = sql`${endo} and e.dentist_user_id = ${salas.id}`
+      const mineWhere = sql`${endo} and e.professional_user_id = ${salas.id}`
       const rows = await done(last.start, last.end, mineWhere)
       const mine = await doneTotal(last.start, last.end, mineWhere)
       const team = [
@@ -501,7 +501,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
           from encounter_procedure ep
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
           left join service_catalog s on s.organization_id = ep.organization_id and s.id = ep.service_id
-          left join "user" u on u.id = e.dentist_user_id
+          left join "user" u on u.id = e.professional_user_id
           where ep.organization_id = ${org} and ep.voided_at is null and ${between(sql`e.started_at`, last.start, last.end)} and ${endo}
           group by 1 order by 2 desc, 1`)),
       ]
@@ -647,7 +647,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
             (select r.rate_bps from commission_rule r where r.organization_id = ${org} and r.professional_user_id = u.id) as rate
           from encounter_procedure ep
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-          join "user" u on u.id = e.dentist_user_id
+          join "user" u on u.id = e.professional_user_id
           left join lateral (select sum(c.amount_cents) as cents from patient_charge c
             where c.organization_id = ep.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null) ch on true
           where ep.organization_id = ${org} and ep.voided_at is null and ep.service_id = ${service.id} and ${between(sql`e.started_at`, yearAgo, h.now)}
@@ -785,14 +785,14 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
           day: string
           time: string
           patient: string
-          dentist: string
+          professional: string
           branch: string
           status: string
         }>(sql`
           select to_char(a.starts_at at time zone ${tz}, 'YYYY-MM-DD') as day, to_char(a.starts_at at time zone ${tz}, 'HH24:MI') as time,
-            pp.display_name as patient, u.name as dentist, b.name as branch, a.status
+            pp.display_name as patient, u.name as professional, b.name as branch, a.status
           from appointment a
-          join "user" u on u.id = a.dentist_user_id
+          join "user" u on u.id = a.professional_user_id
           join branch b on b.organization_id = a.organization_id and b.id = a.branch_id
           ${h.joinPerson(sql`a.patient_id`)}
           where a.organization_id = ${org} and a.status in ('programada','confirmada') and ${between(sql`a.starts_at`, start, end)} and ${orthoAppointment}
@@ -843,7 +843,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
         : ""
       return {
         respuesta: ortho.length
-          ? `La próxima semana (${week2}) les toca control de ortodoncia a ${plural(ortho.length, "paciente", "pacientes")}: ${listOf(ortho.map((row) => ({ name: `${row.patient}, el ${w.dayWords(row.day)} a las ${row.time}`, value: `${row.dentist}, ${row.branch}${row.status === "confirmada" ? ", confirmada" : ", sin confirmar"}` })))}.`
+          ? `La próxima semana (${week2}) les toca control de ortodoncia a ${plural(ortho.length, "paciente", "pacientes")}: ${listOf(ortho.map((row) => ({ name: `${row.patient}, el ${w.dayWords(row.day)} a las ${row.time}`, value: `${row.professional}, ${row.branch}${row.status === "confirmada" ? ", confirmada" : ", sin confirmar"}` })))}.`
           : `A nadie todavía: para la próxima semana (${week2}) no hay ningún control de ortodoncia agendado${(week?.all ?? 0) === 0 ? "; esa semana aún no hay ninguna cita agendada" : ` (hay ${plural(week?.all ?? 0, "cita", "citas")} de otros tratamientos)`}${orthoControls.length ? "" : ", y en las fichas no toca ningún control de ortodoncia esa semana"}.${plannedWords}`,
         criterio:
           "Citas programadas o confirmadas de la próxima semana (lunes a domingo, día de la clínica) de un servicio de ortodoncia (por su nombre o su especialidad), y los controles pendientes de las fichas que tocan esa semana (como x31). Sin ninguna, lo más cercano: los pacientes con controles de ortodoncia aceptados en su plan por hacer y sin cita por venir.",
@@ -1463,7 +1463,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
         charges: number
         encounters: number
         schedules: number
-        chairs: number
+        rooms: number
         expenses: number
       }>(sql`
         select (select count(*) from appointment a where a.organization_id = ${org} and a.branch_id = ${surco.id})::int as appointments,
@@ -1471,7 +1471,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
           (select count(*) from patient_charge c where c.organization_id = ${org} and c.branch_id = ${surco.id})::int as charges,
           (select count(*) from encounter e where e.organization_id = ${org} and e.branch_id = ${surco.id})::int as encounters,
           (select count(*) from professional_schedule s where s.organization_id = ${org} and s.branch_id = ${surco.id} and s.is_active)::int as schedules,
-          (select count(*) from schedule_chair c where c.organization_id = ${org} and c.branch_id = ${surco.id} and c.is_active)::int as chairs,
+          (select count(*) from schedule_room c where c.organization_id = ${org} and c.branch_id = ${surco.id} and c.is_active)::int as rooms,
           (select count(*) from expense e where e.organization_id = ${org} and e.branch_id = ${surco.id} and e.voided_at is null)::int as expenses`)
       const empty =
         !facts ||
@@ -1485,7 +1485,7 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
           : `${ThisMonth} en la ${surco.name} se cobró ${show(own as FigureResult)} (${changeWords(own?.total.value ?? 0, own?.previous?.value ?? 0)} que en ${days.sameAs}) y se atendieron ${plural(ownAttended?.total.value ?? 0, "cita", "citas")}.`,
         criterio:
           "Sin periodo, el mes en curso. Lo registrado en la sede desde siempre (citas, atenciones, cobros, cargos, gastos, horarios y unidades dentales); sin nada, «Lo cobrado» y «Citas atendidas» de Reportes con cada otra sede elegida, contra los mismos días del mes anterior.",
-        nota: `En la ${surco.name}, desde siempre: ${facts?.appointments ?? 0} citas, ${facts?.encounters ?? 0} atenciones, ${facts?.payments ?? 0} cobros, ${facts?.charges ?? 0} cargos, ${facts?.expenses ?? 0} gastos, ${facts?.schedules ?? 0} horarios y ${plural(facts?.chairs ?? 0, "unidad dental", "unidades dentales")} registrados.`,
+        nota: `En la ${surco.name}, desde siempre: ${facts?.appointments ?? 0} citas, ${facts?.encounters ?? 0} atenciones, ${facts?.payments ?? 0} cobros, ${facts?.charges ?? 0} cargos, ${facts?.expenses ?? 0} gastos, ${facts?.schedules ?? 0} horarios y ${plural(facts?.rooms ?? 0, "unidad dental", "unidades dentales")} registrados.`,
         datos: { sede: surco, hechos: facts ?? null, otrasSedes: rows, clinica: clinic.total },
       }
     },

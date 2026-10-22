@@ -2410,7 +2410,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       .select({
         id: encounterProcedure.id,
         serviceId: encounterProcedure.serviceId,
-        dentistName: user.name,
+        professionalName: user.name,
         finalizedAt: encounter.finalizedAt,
         startedAt: encounter.startedAt,
       })
@@ -2419,11 +2419,11 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         encounter,
         and(eq(encounter.id, encounterProcedure.encounterId), eq(encounter.organizationId, orgId)),
       )
-      .leftJoin(user, eq(user.id, encounter.dentistUserId))
+      .leftJoin(user, eq(user.id, encounter.professionalUserId))
       .where(and(eq(encounterProcedure.organizationId, orgId), inArray(encounterProcedure.id, procedureIds)))
     for (const row of rows) {
       serviceByProcedure[row.id] = row.serviceId
-      attendedByProcedure[row.id] = { name: row.dentistName ?? null, at: row.finalizedAt ?? row.startedAt ?? null }
+      attendedByProcedure[row.id] = { name: row.professionalName ?? null, at: row.finalizedAt ?? row.startedAt ?? null }
     }
   }
   // Cobro por sesión: visitas previstas del tratamiento y qué visita es cada concepto.

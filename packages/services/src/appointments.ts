@@ -11,7 +11,7 @@ import {
   APPOINTMENT_STATUSES,
   type AppointmentStatus,
   appointment,
-  scheduleChair,
+  scheduleRoom,
 } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import {
@@ -41,7 +41,7 @@ import {
 } from "./automation.js"
 import {
   branchNotFound,
-  chairNotFound,
+  roomNotFound,
   isExclusionViolation,
   notFound,
   ServiceError,
@@ -132,8 +132,8 @@ export interface AppointmentEncounterRef {
   status: "borrador" | "finalizada"
   startedAt: string
   endedAt: string | null
-  dentistUserId: string
-  dentistName: string
+  professionalUserId: string
+  professionalName: string
 }
 
 export interface AppointmentItem {
@@ -141,10 +141,10 @@ export interface AppointmentItem {
   branchId: string
   patientId: string
   patientName: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string
-  chairName: string
+  professionalUserId: string
+  professionalName: string
+  roomId: string
+  roomName: string
   serviceId: string | null
   serviceName: string | null
   startsAt: string
@@ -175,7 +175,7 @@ export interface ScheduleResources {
   /** Minutos de una cita regular en la sede (sin servicio). */
   defaultDurationMin: number
   professionals: Array<{ id: string; label: string }>
-  chairs: Array<{ id: string; label: string }>
+  rooms: Array<{ id: string; label: string }>
 }
 
 /** Sede explícita o la primera activa; la zona es branch ?? organización. */
@@ -202,28 +202,28 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
   return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? NEUTRAL_TIMEZONE }
 }
 
-async function requireDentist(tx: Db, orgId: string, dentistUserId: string) {
+async function requireProfessional(tx: Db, orgId: string, professionalUserId: string) {
   const [membership] = await tx
     .select({ id: member.id })
     .from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, dentistUserId)))
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, professionalUserId)))
     .limit(1)
   if (!membership) throw notFound("Profesional")
 }
 
-async function requireChair(tx: Db, orgId: string, chairId: string, branchId?: string) {
+async function requireRoom(tx: Db, orgId: string, roomId: string, branchId?: string) {
   const conditions = [
-    eq(scheduleChair.organizationId, orgId),
-    eq(scheduleChair.id, chairId),
-    eq(scheduleChair.isActive, true),
+    eq(scheduleRoom.organizationId, orgId),
+    eq(scheduleRoom.id, roomId),
+    eq(scheduleRoom.isActive, true),
   ]
-  if (branchId) conditions.push(eq(scheduleChair.branchId, branchId))
+  if (branchId) conditions.push(eq(scheduleRoom.branchId, branchId))
   const [row] = await tx
-    .select({ id: scheduleChair.id, branchId: scheduleChair.branchId })
-    .from(scheduleChair)
+    .select({ id: scheduleRoom.id, branchId: scheduleRoom.branchId })
+    .from(scheduleRoom)
     .where(and(...conditions))
     .limit(1)
-  if (!row) throw chairNotFound()
+  if (!row) throw roomNotFound()
   return row
 }
 
@@ -332,7 +332,7 @@ async function audit(
 }
 
 /** Quien lleva la atención unida a la cita (otro alias de `user`). */
-const encounterDentist = alias(user, "encounter_dentist")
+const encounterProfessional = alias(user, "encounter_professional")
 
 /** La cita con sus nombres y su atención no anulada (a lo sumo una: índice único). */
 function appointmentRows(tx: Db, orgId: string) {
@@ -340,16 +340,16 @@ function appointmentRows(tx: Db, orgId: string) {
     .select({
       appointment,
       patientName: patientPerson.displayName,
-      dentistName: user.name,
-      chairName: scheduleChair.name,
+      professionalName: user.name,
+      roomName: scheduleRoom.name,
       encounter: {
         id: encounter.id,
         status: encounter.status,
         startedAt: encounter.startedAt,
         endedAt: encounter.endedAt,
-        dentistUserId: encounter.dentistUserId,
+        professionalUserId: encounter.professionalUserId,
       },
-      encounterDentistName: encounterDentist.name,
+      encounterProfessionalName: encounterProfessional.name,
     })
     .from(appointment)
     .innerJoin(
@@ -357,8 +357,8 @@ function appointmentRows(tx: Db, orgId: string) {
       and(eq(patient.organizationId, orgId), eq(patient.id, appointment.patientId)),
     )
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
-    .innerJoin(scheduleChair, eq(scheduleChair.id, appointment.chairId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
+    .innerJoin(scheduleRoom, eq(scheduleRoom.id, appointment.roomId))
     .leftJoin(
       encounter,
       and(
@@ -367,7 +367,7 @@ function appointmentRows(tx: Db, orgId: string) {
         ne(encounter.status, "anulada"),
       ),
     )
-    .leftJoin(encounterDentist, eq(encounterDentist.id, encounter.dentistUserId))
+    .leftJoin(encounterProfessional, eq(encounterProfessional.id, encounter.professionalUserId))
 }
 
 export async function getAppointment(tx: Db, orgId: string, id: string): Promise<AppointmentItem> {
@@ -478,10 +478,10 @@ export async function appointmentReminderReach(
 function toItem(row: {
   appointment: typeof appointment.$inferSelect
   patientName: string
-  dentistName: string
-  chairName: string
-  encounter: { id: string; status: string; startedAt: Date; endedAt: Date | null; dentistUserId: string } | null
-  encounterDentistName: string | null
+  professionalName: string
+  roomName: string
+  encounter: { id: string; status: string; startedAt: Date; endedAt: Date | null; professionalUserId: string } | null
+  encounterProfessionalName: string | null
 }): AppointmentItem {
   const rowAppointment = row.appointment
   const linked = row.encounter?.id ? row.encounter : null
@@ -490,10 +490,10 @@ function toItem(row: {
     branchId: rowAppointment.branchId,
     patientId: rowAppointment.patientId,
     patientName: row.patientName,
-    dentistUserId: rowAppointment.dentistUserId,
-    dentistName: row.dentistName,
-    chairId: rowAppointment.chairId,
-    chairName: row.chairName,
+    professionalUserId: rowAppointment.professionalUserId,
+    professionalName: row.professionalName,
+    roomId: rowAppointment.roomId,
+    roomName: row.roomName,
     serviceId: rowAppointment.serviceId,
     serviceName: rowAppointment.serviceName,
     startsAt: rowAppointment.startsAt.toISOString(),
@@ -516,8 +516,8 @@ function toItem(row: {
           status: linked.status === "finalizada" ? "finalizada" : "borrador",
           startedAt: linked.startedAt.toISOString(),
           endedAt: linked.endedAt?.toISOString() ?? null,
-          dentistUserId: linked.dentistUserId,
-          dentistName: row.encounterDentistName ?? "",
+          professionalUserId: linked.professionalUserId,
+          professionalName: row.encounterProfessionalName ?? "",
         }
       : null,
   }
@@ -529,7 +529,7 @@ export interface ListAppointmentsInput {
   from: string
   to: string
   professionals?: string[]
-  chairs?: string[]
+  rooms?: string[]
   statuses?: string[]
   q?: string
   /** Solo las citas de este paciente (ficha del paciente). */
@@ -555,9 +555,9 @@ export async function listAppointments(
   if (input.patientId) conditions.push(eq(appointment.patientId, input.patientId))
   if (input.patientIds?.length) conditions.push(inArray(appointment.patientId, input.patientIds))
   if (input.professionals?.length) {
-    conditions.push(inArray(appointment.dentistUserId, input.professionals))
+    conditions.push(inArray(appointment.professionalUserId, input.professionals))
   }
-  if (input.chairs?.length) conditions.push(inArray(appointment.chairId, input.chairs))
+  if (input.rooms?.length) conditions.push(inArray(appointment.roomId, input.rooms))
   if (input.statuses?.length) {
     for (const status of input.statuses) assertStatus(status)
     conditions.push(inArray(appointment.status, input.statuses))
@@ -619,7 +619,7 @@ export async function listScheduleResources(
   input: { branchId?: string },
 ): Promise<ScheduleResources> {
   const resolved = await resolveBranch(tx, orgId, input.branchId)
-  const [professionals, chairs] = await Promise.all([
+  const [professionals, rooms] = await Promise.all([
     tx
       .select({ id: user.id, label: user.name })
       .from(member)
@@ -627,16 +627,16 @@ export async function listScheduleResources(
       .where(eq(member.organizationId, orgId))
       .orderBy(asc(user.name)),
     tx
-      .select({ id: scheduleChair.id, label: scheduleChair.name })
-      .from(scheduleChair)
+      .select({ id: scheduleRoom.id, label: scheduleRoom.name })
+      .from(scheduleRoom)
       .where(
         and(
-          eq(scheduleChair.organizationId, orgId),
-          eq(scheduleChair.branchId, resolved.id),
-          eq(scheduleChair.isActive, true),
+          eq(scheduleRoom.organizationId, orgId),
+          eq(scheduleRoom.branchId, resolved.id),
+          eq(scheduleRoom.isActive, true),
         ),
       )
-      .orderBy(asc(scheduleChair.name)),
+      .orderBy(asc(scheduleRoom.name)),
   ])
   return {
     branchId: resolved.id,
@@ -644,7 +644,7 @@ export async function listScheduleResources(
     timeZone: resolved.timeZone,
     defaultDurationMin: resolved.defaultMinutes,
     professionals,
-    chairs,
+    rooms,
   }
 }
 
@@ -682,37 +682,37 @@ export async function setBranchDefaultDuration(
  * Primera unidad dental libre de la sede para ese tramo: quien reserva elige persona y
  * hora, y la unidad dental la pone la agenda.
  */
-async function pickFreeChair(
+async function pickFreeRoom(
   tx: Db,
   orgId: string,
   branchId: string,
-  dentistUserId: string,
+  professionalUserId: string,
   startsAt: Date,
   endsAt: Date,
   /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su unidad dental. */
-  moving?: { appointmentId: string; chairId: string },
+  moving?: { appointmentId: string; roomId: string },
 ): Promise<string> {
-  const chairs = await tx
-    .select({ id: scheduleChair.id })
-    .from(scheduleChair)
+  const rooms = await tx
+    .select({ id: scheduleRoom.id })
+    .from(scheduleRoom)
     .where(
       and(
-        eq(scheduleChair.organizationId, orgId),
-        eq(scheduleChair.branchId, branchId),
-        eq(scheduleChair.isActive, true),
+        eq(scheduleRoom.organizationId, orgId),
+        eq(scheduleRoom.branchId, branchId),
+        eq(scheduleRoom.isActive, true),
       ),
     )
-    .orderBy(asc(scheduleChair.name))
-  if (chairs.length === 0) throw validation("La sede no tiene unidades dentales: añade una para reservar")
-  const ids = chairs.map((chair) => chair.id)
+    .orderBy(asc(scheduleRoom.name))
+  if (rooms.length === 0) throw validation("La sede no tiene unidades dentales: añade una para reservar")
+  const ids = rooms.map((room) => room.id)
   const [taken, blocked] = await Promise.all([
     tx
-      .select({ chairId: appointment.chairId })
+      .select({ roomId: appointment.roomId })
       .from(appointment)
       .where(
         and(
           eq(appointment.organizationId, orgId),
-          inArray(appointment.chairId, ids),
+          inArray(appointment.roomId, ids),
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, endsAt),
           gt(appointment.endsAt, startsAt),
@@ -720,37 +720,37 @@ async function pickFreeChair(
         ),
       ),
     tx
-      .select({ chairId: scheduleBlock.chairId, dentistUserId: scheduleBlock.dentistUserId })
+      .select({ roomId: scheduleBlock.roomId, professionalUserId: scheduleBlock.professionalUserId })
       .from(scheduleBlock)
       .where(
         and(
           eq(scheduleBlock.organizationId, orgId),
           eq(scheduleBlock.branchId, branchId),
-          inArray(scheduleBlock.chairId, ids),
+          inArray(scheduleBlock.roomId, ids),
           lt(scheduleBlock.startsAt, endsAt),
           gt(scheduleBlock.endsAt, startsAt),
         ),
       ),
   ])
   const unavailable = new Set<string | null>([
-    ...taken.map((row) => row.chairId),
+    ...taken.map((row) => row.roomId),
     ...blocked
-      .filter((row) => row.dentistUserId === null || row.dentistUserId === dentistUserId)
-      .map((row) => row.chairId),
+      .filter((row) => row.professionalUserId === null || row.professionalUserId === professionalUserId)
+      .map((row) => row.roomId),
   ])
   const free =
-    chairs.find((chair) => chair.id === moving?.chairId && !unavailable.has(chair.id)) ??
-    chairs.find((chair) => !unavailable.has(chair.id))
-  if (!free) throw conflict("NO_CHAIR", "No hay una unidad dental libre a esa hora")
+    rooms.find((room) => room.id === moving?.roomId && !unavailable.has(room.id)) ??
+    rooms.find((room) => !unavailable.has(room.id))
+  if (!free) throw conflict("NO_ROOM", "No hay una unidad dental libre a esa hora")
   return free.id
 }
 
 export interface CreateAppointmentInput {
   branchId?: string
   patientId: string
-  dentistUserId: string
+  professionalUserId: string
   /** Sin unidad dental, la agenda pone la primera libre de la sede. */
-  chairId?: string
+  roomId?: string
   serviceId?: string
   startsAt: string
   endsAt?: string
@@ -814,9 +814,9 @@ export async function createAppointment(
 ): Promise<AppointmentItem> {
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
-  const chair = input.chairId ? await requireChair(tx, orgId, input.chairId) : null
-  const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair?.branchId)
-  if (chair && chair.branchId !== resolved.id) {
+  const room = input.roomId ? await requireRoom(tx, orgId, input.roomId) : null
+  const resolved = await resolveBranch(tx, orgId, input.branchId ?? room?.branchId)
+  if (room && room.branchId !== resolved.id) {
     throw validation("La unidad dental no pertenece a la sede de la cita")
   }
 
@@ -834,7 +834,7 @@ export async function createAppointment(
     : new Date(startsAt.getTime() + duration * 60000)
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
-  await requireDentist(tx, orgId, input.dentistUserId)
+  await requireProfessional(tx, orgId, input.professionalUserId)
   const planItemIds = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
   if (input.conversationId) {
     const [linked] = await tx.select({ id: conversation.id }).from(conversation)
@@ -854,18 +854,18 @@ export async function createAppointment(
   const lockScope = `appointment:${orgId}`
   if (standing) {
     await tx.execute(sql`select pg_advisory_xact_lock(
-      hashtext(${lockScope}), hashtext(${"dentist:" + input.dentistUserId}))`)
+      hashtext(${lockScope}), hashtext(${"professional:" + input.professionalUserId}))`)
   }
-  const chairId =
-    chair?.id ??
-    (await pickFreeChair(tx, orgId, resolved.id, input.dentistUserId, startsAt, endsAt))
+  const roomId =
+    room?.id ??
+    (await pickFreeRoom(tx, orgId, resolved.id, input.professionalUserId, startsAt, endsAt))
   if (standing) {
     await tx.execute(sql`select pg_advisory_xact_lock(
-      hashtext(${lockScope}), hashtext(${"chair:" + chairId}))`)
+      hashtext(${lockScope}), hashtext(${"room:" + roomId}))`)
     await validateAvailability(tx, orgId, {
       branchId: resolved.id,
-      dentistUserId: input.dentistUserId,
-      chairId,
+      professionalUserId: input.professionalUserId,
+      roomId,
       startsAt,
       endsAt,
       allowOutsideSchedule: input.outsideSchedule === true,
@@ -879,8 +879,8 @@ export async function createAppointment(
         organizationId: orgId,
         branchId: resolved.id,
         patientId: input.patientId,
-        dentistUserId: input.dentistUserId,
-        chairId,
+        professionalUserId: input.professionalUserId,
+        roomId,
         serviceId: service?.id ?? null,
         serviceName: service?.name ?? null,
         startsAt,
@@ -908,8 +908,8 @@ export async function createAppointment(
     }
     await audit(tx, orgId, actorUserId, "appointment.created", created.id, {
       patientId: input.patientId,
-      dentistUserId: input.dentistUserId,
-      chairId,
+      professionalUserId: input.professionalUserId,
+      roomId,
       startsAt: startsAt.toISOString(),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(planItemIds.length > 0 ? { planItemIds } : {}),
@@ -938,8 +938,8 @@ export interface MoveAppointmentInput {
   expectedVersion: number
   startsAt: string
   endsAt?: string
-  dentistUserId?: string
-  chairId?: string
+  professionalUserId?: string
+  roomId?: string
 }
 
 /**
@@ -975,29 +975,29 @@ export async function moveAppointment(
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + durationMs)
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
-  const dentistUserId = input.dentistUserId ?? current.dentistUserId
+  const professionalUserId = input.professionalUserId ?? current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
   // Sin unidad dental indicada la cita conserva la suya; si a la nueva hora está ocupada, pasa a una libre.
-  const chairId =
-    input.chairId ??
+  const roomId =
+    input.roomId ??
     (active
-      ? await pickFreeChair(tx, orgId, current.branchId, dentistUserId, startsAt, endsAt, {
+      ? await pickFreeRoom(tx, orgId, current.branchId, professionalUserId, startsAt, endsAt, {
           appointmentId: id,
-          chairId: current.chairId,
+          roomId: current.roomId,
         })
-      : current.chairId)
-  if (dentistUserId !== current.dentistUserId) await requireDentist(tx, orgId, dentistUserId)
-  if (chairId !== current.chairId) {
-    const chair = await requireChair(tx, orgId, chairId)
-    if (chair.branchId !== current.branchId) {
+      : current.roomId)
+  if (professionalUserId !== current.professionalUserId) await requireProfessional(tx, orgId, professionalUserId)
+  if (roomId !== current.roomId) {
+    const room = await requireRoom(tx, orgId, roomId)
+    if (room.branchId !== current.branchId) {
       throw validation("La unidad dental no pertenece a la sede de la cita")
     }
   }
   if (active) {
     await validateAvailability(tx, orgId, {
       branchId: current.branchId,
-      dentistUserId,
-      chairId,
+      professionalUserId,
+      roomId,
       startsAt,
       endsAt,
       ignoreAppointmentId: id,
@@ -1013,8 +1013,8 @@ export async function moveAppointment(
         startsAt,
         endsAt,
         durationMin: Math.round((endsAt.getTime() - startsAt.getTime()) / 60000),
-        dentistUserId,
-        chairId,
+        professionalUserId,
+        roomId,
         ...(arrivalCleared ? { arrivedAt: null, arrivedBy: null } : {}),
         version: current.version + 1,
         updatedAt: new Date(),
@@ -1035,8 +1035,8 @@ export async function moveAppointment(
     }
     await audit(tx, orgId, actorUserId, "appointment.moved", id, {
       startsAt: startsAt.toISOString(),
-      dentistUserId,
-      chairId,
+      professionalUserId,
+      roomId,
       ...(arrivalCleared ? { arrivalCleared: true } : {}),
     })
     await invalidateAppointmentTokens(tx, orgId, id)
@@ -1067,8 +1067,8 @@ export interface UpdateAppointmentInput {
   expectedVersion: number
   reason?: string | null
   serviceId?: string | null
-  dentistUserId?: string
-  chairId?: string
+  professionalUserId?: string
+  roomId?: string
 }
 
 export async function updateAppointment(
@@ -1096,21 +1096,21 @@ export async function updateAppointment(
       set.durationMin = service.durationMin
     }
   }
-  const dentistUserId = input.dentistUserId ?? current.dentistUserId
-  if (dentistUserId !== current.dentistUserId) set.dentistUserId = dentistUserId
-  const chairId = input.chairId ?? current.chairId
-  if (chairId !== current.chairId) {
-    const chair = await requireChair(tx, orgId, chairId)
-    if (chair.branchId !== current.branchId) {
+  const professionalUserId = input.professionalUserId ?? current.professionalUserId
+  if (professionalUserId !== current.professionalUserId) set.professionalUserId = professionalUserId
+  const roomId = input.roomId ?? current.roomId
+  if (roomId !== current.roomId) {
+    const room = await requireRoom(tx, orgId, roomId)
+    if (room.branchId !== current.branchId) {
       throw validation("La unidad dental no pertenece a la sede de la cita")
     }
-    set.chairId = chairId
+    set.roomId = roomId
   }
   // «Editar» revisa la agenda igual que «Mover» (`moveAppointment`): quien
   // atiende debe tener horario, y ni un bloqueo ni otra cita pueden pisarla.
   const active = current.status === "programada" || current.status === "confirmada"
   const changesPlace =
-    dentistUserId !== current.dentistUserId || chairId !== current.chairId || endsAt.getTime() !== current.endsAt.getTime()
+    professionalUserId !== current.professionalUserId || roomId !== current.roomId || endsAt.getTime() !== current.endsAt.getTime()
   if (changesPlace) {
     if (!active) {
       throw conflict("APPOINTMENT_STATUS", "Esta cita ya no se puede cambiar: solo se cambian las programadas o confirmadas")
@@ -1120,8 +1120,8 @@ export async function updateAppointment(
     }
     await validateAvailability(tx, orgId, {
       branchId: current.branchId,
-      dentistUserId,
-      chairId,
+      professionalUserId,
+      roomId,
       startsAt: current.startsAt,
       endsAt,
       ignoreAppointmentId: id,
@@ -1404,7 +1404,7 @@ export async function setAppointmentStatus(
 }
 
 /** Alta de unidad dental (recepción no la crea; la hace owner/admin en configuración o seed). */
-export async function createChair(
+export async function createRoom(
   tx: Db,
   orgId: string,
   input: { branchId: string; name: string },
@@ -1413,15 +1413,15 @@ export async function createChair(
   if (!name) throw validation("El nombre de la unidad dental es obligatorio")
   await resolveBranch(tx, orgId, input.branchId)
   const [created] = await tx
-    .insert(scheduleChair)
+    .insert(scheduleRoom)
     .values({ organizationId: orgId, branchId: input.branchId, name })
-    .returning({ id: scheduleChair.id })
+    .returning({ id: scheduleRoom.id })
   if (!created) throw new Error("No se pudo crear la unidad dental")
   return created
 }
 
 /** Una unidad dental tal como la administra Configuración: también las desactivadas. */
-export interface ChairItem {
+export interface RoomItem {
   id: string
   name: string
   isActive: boolean
@@ -1434,21 +1434,21 @@ export interface ChairItem {
  * citas en pie que cada uno tiene por delante. La agenda sigue leyendo solo
  * los activos (`listScheduleResources`).
  */
-export async function listChairs(
+export async function listRooms(
   tx: Db,
   orgId: string,
   input: { branchId: string; now?: Date },
-): Promise<ChairItem[]> {
+): Promise<RoomItem[]> {
   const resolved = await resolveBranch(tx, orgId, input.branchId)
   const now = input.now ?? new Date()
-  const [chairs, standing] = await Promise.all([
+  const [rooms, standing] = await Promise.all([
     tx
-      .select({ id: scheduleChair.id, name: scheduleChair.name, isActive: scheduleChair.isActive })
-      .from(scheduleChair)
-      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.branchId, resolved.id)))
-      .orderBy(asc(scheduleChair.name)),
+      .select({ id: scheduleRoom.id, name: scheduleRoom.name, isActive: scheduleRoom.isActive })
+      .from(scheduleRoom)
+      .where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.branchId, resolved.id)))
+      .orderBy(asc(scheduleRoom.name)),
     tx
-      .select({ chairId: appointment.chairId, total: sql<number>`count(*)::int` })
+      .select({ roomId: appointment.roomId, total: sql<number>`count(*)::int` })
       .from(appointment)
       .where(
         and(
@@ -1458,10 +1458,10 @@ export async function listChairs(
           gt(appointment.endsAt, now),
         ),
       )
-      .groupBy(appointment.chairId),
+      .groupBy(appointment.roomId),
   ])
-  const upcoming = new Map(standing.map((row) => [row.chairId, row.total]))
-  return chairs.map((chair) => ({ ...chair, upcomingAppointments: upcoming.get(chair.id) ?? 0 }))
+  const upcoming = new Map(standing.map((row) => [row.roomId, row.total]))
+  return rooms.map((room) => ({ ...room, upcomingAppointments: upcoming.get(room.id) ?? 0 }))
 }
 
 /**
@@ -1469,14 +1469,14 @@ export async function listChairs(
  * de las reservas nuevas; sus citas en pie se conservan en ella y no se mueven
  * solas (quien la desactiva ve cuántas son antes de confirmar).
  */
-export async function updateChair(
+export async function updateRoom(
   tx: Db,
   orgId: string,
   actorUserId: string,
   id: string,
   patch: { name?: string; isActive?: boolean },
 ): Promise<{ id: string; name: string; isActive: boolean }> {
-  const set: Partial<typeof scheduleChair.$inferInsert> = {}
+  const set: Partial<typeof scheduleRoom.$inferInsert> = {}
   const fields: string[] = []
   if (patch.name !== undefined) {
     const name = patch.name.trim()
@@ -1490,16 +1490,16 @@ export async function updateChair(
   }
   if (fields.length === 0) throw validation("Indica qué cambia de la unidad dental")
   const [updated] = await tx
-    .update(scheduleChair)
+    .update(scheduleRoom)
     .set({ ...set, updatedAt: new Date() })
-    .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, id)))
-    .returning({ id: scheduleChair.id, name: scheduleChair.name, isActive: scheduleChair.isActive })
-  if (!updated) throw chairNotFound()
+    .where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.id, id)))
+    .returning({ id: scheduleRoom.id, name: scheduleRoom.name, isActive: scheduleRoom.isActive })
+  if (!updated) throw roomNotFound()
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
-    action: "schedule_chair.updated",
-    entity: "schedule_chair",
+    action: "schedule_room.updated",
+    entity: "schedule_room",
     entityId: id,
     metadata: { fields, ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}) },
   })

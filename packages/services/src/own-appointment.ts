@@ -87,7 +87,7 @@ export async function moveOwnAppointment(
   orgId: string,
   actor: string,
   row: OwnRow & { version: number },
-  input: { startsAt: string; endsAt?: string; dentistUserId?: string; chairId?: string; expectedVersion?: number },
+  input: { startsAt: string; endsAt?: string; professionalUserId?: string; roomId?: string; expectedVersion?: number },
 ): Promise<AppointmentItem> {
   assertOwnAppointmentChangeable(row)
   const startsAt = assertOwnNewTime(input.startsAt)
@@ -100,8 +100,8 @@ export async function moveOwnAppointment(
       expectedVersion: input.expectedVersion ?? row.version,
       startsAt: startsAt.toISOString(),
       ...(input.endsAt ? { endsAt: input.endsAt } : {}),
-      ...(input.dentistUserId ? { dentistUserId: input.dentistUserId } : {}),
-      ...(input.chairId ? { chairId: input.chairId } : {}),
+      ...(input.professionalUserId ? { professionalUserId: input.professionalUserId } : {}),
+      ...(input.roomId ? { roomId: input.roomId } : {}),
     },
     { notice: false },
   )

@@ -21,7 +21,7 @@ interface PersonLastTime {
   timezone: string
   locale: string
   wrote: { at: string; channel: string } | null
-  appointment: { startsAt: string; status: string; upcoming: boolean; branchName: string; dentistName: string | null } | null
+  appointment: { startsAt: string; status: string; upcoming: boolean; branchName: string; professionalName: string | null } | null
   handoff: { at: string; reason: string | null } | null
 }
 
@@ -61,7 +61,7 @@ function lastTimeLines(last: PersonLastTime): string[] {
     const at = new Date(visit.startsAt)
     const date = at.toLocaleDateString(last.locale, { timeZone: last.timezone, weekday: "long", day: "numeric", month: "long" })
     const time = at.toLocaleTimeString(last.locale, { timeZone: last.timezone, hour: "2-digit", minute: "2-digit" })
-    const where = `en la sede ${visit.branchName}${visit.dentistName ? ` con ${visit.dentistName}` : ""}`
+    const where = `en la sede ${visit.branchName}${visit.professionalName ? ` con ${visit.professionalName}` : ""}`
     if (visit.upcoming) lines.push(`Su próxima cita es el ${date} a las ${time}, ${where}.`)
     else if (visit.status === "no_asistio") lines.push(`No vino a su cita del ${date} a las ${time}, ${where}.`)
     else if (visit.status === "atendida") lines.push(`Su última cita fue el ${date} a las ${time}, ${where}.`)

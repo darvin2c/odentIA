@@ -904,7 +904,7 @@ export interface PortalAppointmentView {
   branchAddress: string | null
   branchDirectionsUrl: string | null
   /** Quién la atiende: el bloque de la cita es el mismo de «Su enlace». */
-  dentistName: string
+  professionalName: string
   /** Zona de la sede (o de la clínica): la hora de la cita se dice en ella, no en la del teléfono. */
   timeZone: string
   version: number
@@ -1006,11 +1006,11 @@ export async function getPortalAppointments(
       branchAddress: branchAddressColumns,
       branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
-      dentistName: user.name,
+      professionalName: user.name,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
     .where(
       and(
         eq(appointment.organizationId, ctx.orgId),
@@ -1049,11 +1049,11 @@ async function portalAppointmentView(tx: Db, orgId: string, appointmentId: strin
       branchAddress: branchAddressColumns,
       branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
-      dentistName: user.name,
+      professionalName: user.name,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
     .limit(1)
   if (!row) throw notFound("Cita")
@@ -1112,8 +1112,8 @@ export interface ReschedulePortalAppointmentInput {
   expectedVersion: number
   startsAt: string
   /** El horario elegido en la semana: con quién y en qué unidad dental está libre. */
-  dentistUserId: string
-  chairId?: string
+  professionalUserId: string
+  roomId?: string
 }
 
 /**

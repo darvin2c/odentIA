@@ -30,7 +30,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Building2, Plus } from "lucide-react"
 import * as React from "react"
 import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
-import { ChairForm } from "../../components/agenda/chair-form"
+import { RoomForm } from "../../components/agenda/room-form"
 import { useWeeklySchedule, WeeklyScheduleFields } from "../../components/agenda/schedule-editor"
 import { errorMessage, shortName } from "../../components/agenda/shared"
 import { BranchSwitcher } from "../../components/branch-switcher"
@@ -39,7 +39,7 @@ import { useActiveBranch } from "../../lib/active-branch"
 import type {
   AgendaAppointment,
   AgendaResources,
-  ChairSetting,
+  RoomSetting,
   ScheduleBlock,
 } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -141,13 +141,13 @@ function AvailabilityPage() {
       })),
     [resources],
   )
-  const [dentistId, setDentistId] = React.useState("")
-  const professional = professionals.find((item) => item.id === dentistId) ?? professionals[0]
+  const [pickedProfessionalId, setPickedProfessionalId] = React.useState("")
+  const professional = professionals.find((item) => item.id === pickedProfessionalId) ?? professionals[0]
   const professionalId = professional?.id ?? ""
 
   const schedule = useWeeklySchedule({
     branchId: resources?.branchId,
-    dentistUserId: professionalId,
+    professionalUserId: professionalId,
   })
   const draftGuard = usePageDraftGuard(schedule.dirty)
 
@@ -167,16 +167,16 @@ function AvailabilityPage() {
       ),
   })
   const blocks = blocksQuery.data?.data ?? []
-  const absences = blocks.filter((block) => block.dentistUserId === professionalId)
-  const closures = blocks.filter((block) => block.dentistUserId === null)
+  const absences = blocks.filter((block) => block.professionalUserId === professionalId)
+  const closures = blocks.filter((block) => block.professionalUserId === null)
   // Las unidades dentales de la sede para administrarlas: también las desactivadas.
-  const chairsQuery = useQuery({
-    queryKey: ["agenda-chairs", resources?.branchId],
+  const roomsQuery = useQuery({
+    queryKey: ["agenda-rooms", resources?.branchId],
     enabled: Boolean(resources?.branchId),
     queryFn: () =>
-      apiFetch<{ data: ChairSetting[] }>(`/api/agenda/chairs?branchId=${resources?.branchId}`),
+      apiFetch<{ data: RoomSetting[] }>(`/api/agenda/rooms?branchId=${resources?.branchId}`),
   })
-  const chairs = chairsQuery.data?.data
+  const rooms = roomsQuery.data?.data
   // Citas en pie del profesional: las que caen en una ausencia hay que moverlas.
   const standingQuery = useQuery({
     queryKey: ["agenda", "ausencias", resources?.branchId, professionalId, range.from],
@@ -201,8 +201,8 @@ function AvailabilityPage() {
 
   const [absenceForm, setAbsenceForm] = React.useState<AbsenceScope | null>(null)
   /** `"new"` añade una unidad dental; una unidad dental, la renombra. El formulario es el mismo. */
-  const [chairForm, setChairForm] = React.useState<"new" | ChairSetting | null>(null)
-  const [deactivatingChair, setDeactivatingChair] = React.useState<ChairSetting | null>(null)
+  const [roomForm, setRoomForm] = React.useState<"new" | RoomSetting | null>(null)
+  const [deactivatingRoom, setDeactivatingRoom] = React.useState<RoomSetting | null>(null)
   const [removal, setRemoval] = React.useState<Removal | null>(null)
   const invalidateBlocks = async () => {
     await Promise.all([
@@ -210,9 +210,9 @@ function AvailabilityPage() {
       queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
     ])
   }
-  const invalidateChairs = async () => {
+  const invalidateRooms = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["agenda-chairs"] }),
+      queryClient.invalidateQueries({ queryKey: ["agenda-rooms"] }),
       queryClient.invalidateQueries({ queryKey: ["agenda-resources"] }),
       queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
     ])
@@ -248,18 +248,18 @@ function AvailabilityPage() {
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const chairActiveMutation = useMutation({
-    mutationFn: ({ chair, isActive }: { chair: ChairSetting; isActive: boolean }) =>
-      apiFetch(`/api/agenda/chairs/${chair.id}`, {
+  const roomActiveMutation = useMutation({
+    mutationFn: ({ room, isActive }: { room: RoomSetting; isActive: boolean }) =>
+      apiFetch(`/api/agenda/rooms/${room.id}`, {
         method: "PATCH",
         body: JSON.stringify({ isActive }),
       }),
-    onSuccess: async (_result, { chair, isActive }) => {
-      setDeactivatingChair(null)
+    onSuccess: async (_result, { room, isActive }) => {
+      setDeactivatingRoom(null)
       toast.success(
-        isActive ? `${chair.name} vuelve a estar activa` : `${chair.name} quedó desactivada`,
+        isActive ? `${room.name} vuelve a estar activa` : `${room.name} quedó desactivada`,
       )
-      await invalidateChairs()
+      await invalidateRooms()
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -278,13 +278,13 @@ function AvailabilityPage() {
     resources === undefined &&
     resourcesQuery.error instanceof ApiError &&
     resourcesQuery.error.status === 404
-  const activeChairs = (chairs ?? []).filter((chair) => chair.isActive)
+  const activeRooms = (rooms ?? []).filter((room) => room.isActive)
   /** A qué alcanza un cierre: toda la sede o una unidad dental, aunque hoy esté desactivada. */
   const closureScope = (block: ScheduleBlock) =>
-    block.chairId === null
+    block.roomId === null
       ? "toda la sede"
-      : (chairs?.find((chair) => chair.id === block.chairId)?.name ??
-        resources?.chairs.find((chair) => chair.id === block.chairId)?.label ??
+      : (rooms?.find((room) => room.id === block.roomId)?.name ??
+        resources?.rooms.find((room) => room.id === block.roomId)?.label ??
         "una unidad dental")
   const reasonOf = (block: ScheduleBlock) =>
     block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
@@ -304,7 +304,7 @@ function AvailabilityPage() {
                 onChange={(id) =>
                   draftGuard.requestLeave(() => {
                     sede.choose(id)
-                    setDentistId("")
+                    setPickedProfessionalId("")
                   })
                 }
               />
@@ -331,7 +331,7 @@ function AvailabilityPage() {
                 value={professionalId}
                 onChange={(next) => {
                   if (!next || next === professionalId) return
-                  draftGuard.requestLeave(() => setDentistId(next))
+                  draftGuard.requestLeave(() => setPickedProfessionalId(next))
                 }}
               />
 
@@ -373,7 +373,7 @@ function AvailabilityPage() {
                         onClick={() =>
                           setAbsenceForm({
                             kind: "person",
-                            dentistUserId: professional.id,
+                            professionalUserId: professional.id,
                             name: professional.label,
                           })
                         }
@@ -464,60 +464,60 @@ function AvailabilityPage() {
                 title="Unidades dentales"
                 action={
                   canConfigure ? (
-                    <Button variant="outline" size="sm" onClick={() => setChairForm("new")}>
+                    <Button variant="outline" size="sm" onClick={() => setRoomForm("new")}>
                       <Plus aria-hidden />
                       Añadir unidad dental
                     </Button>
                   ) : null
                 }
               />
-              {chairsQuery.isError && chairs === undefined ? (
-                <CardError what="las unidades dentales" onRetry={() => void chairsQuery.refetch()} />
-              ) : chairs === undefined ? (
+              {roomsQuery.isError && rooms === undefined ? (
+                <CardError what="las unidades dentales" onRetry={() => void roomsQuery.refetch()} />
+              ) : rooms === undefined ? (
                 <Skeleton className="h-9 w-full" />
-              ) : chairs.length === 0 ? (
+              ) : rooms.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Esta sede aún no tiene unidades dentales: sin al menos una no se puede reservar.
                 </p>
               ) : (
                 <>
                   <ul className="grid">
-                    {chairs.map((chair) => (
+                    {rooms.map((room) => (
                       <li
-                        key={chair.id}
+                        key={room.id}
                         className="flex min-h-11 items-center gap-2 border-b text-sm last:border-b-0"
                       >
                         <span
                           className={cn(
                             "min-w-0 flex-1 truncate font-medium",
-                            !chair.isActive && "text-muted-foreground",
+                            !room.isActive && "text-muted-foreground",
                           )}
                         >
-                          {chair.name}
+                          {room.name}
                         </span>
-                        {chair.isActive ? null : <Badge variant="secondary">Desactivada</Badge>}
+                        {room.isActive ? null : <Badge variant="secondary">Desactivada</Badge>}
                         {canConfigure ? (
                           <RowActions
-                            label={`Acciones de ${chair.name}`}
+                            label={`Acciones de ${room.name}`}
                             items={[
                               {
                                 key: "rename",
                                 label: "Renombrar",
-                                onSelect: () => setChairForm(chair),
+                                onSelect: () => setRoomForm(room),
                               },
-                              chair.isActive
+                              room.isActive
                                 ? {
                                     key: "deactivate",
                                     label: "Desactivar",
                                     tone: "danger" as const,
-                                    onSelect: () => setDeactivatingChair(chair),
+                                    onSelect: () => setDeactivatingRoom(room),
                                   }
                                 : {
                                     key: "reactivate",
                                     label: "Reactivar",
-                                    disabled: chairActiveMutation.isPending,
+                                    disabled: roomActiveMutation.isPending,
                                     onSelect: () =>
-                                      chairActiveMutation.mutate({ chair, isActive: true }),
+                                      roomActiveMutation.mutate({ room, isActive: true }),
                                   },
                             ]}
                           />
@@ -525,7 +525,7 @@ function AvailabilityPage() {
                       </li>
                     ))}
                   </ul>
-                  {activeChairs.length === 0 ? (
+                  {activeRooms.length === 0 ? (
                     <p className="text-sm font-medium text-warning">
                       Ninguna unidad dental está activa: sin al menos una no se puede reservar.
                     </p>
@@ -641,17 +641,17 @@ function AvailabilityPage() {
       ) : (
         <AvailabilitySkeleton />
       )}
-      {chairForm && resources ? (
-        <ChairForm
-          key={chairForm === "new" ? "new" : chairForm.id}
+      {roomForm && resources ? (
+        <RoomForm
+          key={roomForm === "new" ? "new" : roomForm.id}
           branchId={resources.branchId}
           branchName={resources.branchName}
-          suggestedName={`Unidad dental ${(chairs?.length ?? resources.chairs.length) + 1}`}
-          chair={chairForm === "new" ? undefined : { id: chairForm.id, name: chairForm.name }}
-          onClose={() => setChairForm(null)}
+          suggestedName={`Unidad dental ${(rooms?.length ?? resources.rooms.length) + 1}`}
+          room={roomForm === "new" ? undefined : { id: roomForm.id, name: roomForm.name }}
+          onClose={() => setRoomForm(null)}
           onSaved={async () => {
-            setChairForm(null)
-            await invalidateChairs()
+            setRoomForm(null)
+            await invalidateRooms()
           }}
         />
       ) : null}
@@ -661,7 +661,7 @@ function AvailabilityPage() {
           timeZone={resources.timeZone}
           today={zonedDateOf(new Date().toISOString(), resources.timeZone)}
           scope={absenceForm}
-          chairs={resources.chairs}
+          rooms={resources.rooms}
           onClose={() => setAbsenceForm(null)}
           onSaved={async () => {
             setAbsenceForm(null)
@@ -682,32 +682,32 @@ function AvailabilityPage() {
       />
 
       <ConfirmDialog
-        open={deactivatingChair !== null}
-        onClose={() => setDeactivatingChair(null)}
+        open={deactivatingRoom !== null}
+        onClose={() => setDeactivatingRoom(null)}
         onConfirm={() =>
-          deactivatingChair &&
-          chairActiveMutation.mutate({ chair: deactivatingChair, isActive: false })
+          deactivatingRoom &&
+          roomActiveMutation.mutate({ room: deactivatingRoom, isActive: false })
         }
-        title={`Desactivar ${deactivatingChair?.name ?? ""}`}
+        title={`Desactivar ${deactivatingRoom?.name ?? ""}`}
         description={
-          deactivatingChair ? chairConsequence(deactivatingChair, activeChairs.length) : ""
+          deactivatingRoom ? roomConsequence(deactivatingRoom, activeRooms.length) : ""
         }
         confirmLabel="Desactivar"
         variant="destructive"
-        pending={chairActiveMutation.isPending}
+        pending={roomActiveMutation.isPending}
       />
     </div>
   )
 }
 
 /** Lo que pasa al desactivar una unidad dental, con sus citas por delante y si es la última activa. */
-function chairConsequence(chair: ChairSetting, activeCount: number): string {
+function roomConsequence(room: RoomSetting, activeCount: number): string {
   const parts = ["No se podrán reservar citas nuevas en ella. Puedes reactivarla cuando quieras."]
-  if (chair.upcomingAppointments === 1) {
+  if (room.upcomingAppointments === 1) {
     parts.push("Tiene 1 cita por venir: sigue en esta unidad dental y no se mueve sola.")
-  } else if (chair.upcomingAppointments > 1) {
+  } else if (room.upcomingAppointments > 1) {
     parts.push(
-      `Tiene ${chair.upcomingAppointments} citas por venir: siguen en esta unidad dental y no se mueven solas.`,
+      `Tiene ${room.upcomingAppointments} citas por venir: siguen en esta unidad dental y no se mueven solas.`,
     )
   }
   if (activeCount <= 1)

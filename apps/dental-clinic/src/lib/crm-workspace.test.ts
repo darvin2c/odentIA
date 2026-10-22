@@ -23,7 +23,7 @@ describe("«Contexto» dice lo que la persona aceptó y su próxima cita", () =>
       status: "programada",
       branchName: "Centro",
       timeZone: "America/Lima",
-      dentistName: "Dra. Ruiz",
+      professionalName: "Dra. Ruiz",
       serviceName: "Evaluación",
     }
     const own = nextAppointmentSaid(next, "es-PE", "Rosa Quispe")

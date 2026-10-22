@@ -23,7 +23,7 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
       <div className="flex min-w-0 flex-col">
         <span className="font-medium">{appointmentWhen(appointment)}</span>
         <span className="break-words text-muted-foreground">
-          {[appointment.serviceName ?? appointment.reason, appointment.dentistName]
+          {[appointment.serviceName ?? appointment.reason, appointment.professionalName]
             .filter(Boolean)
             .join(" · ")}
         </span>

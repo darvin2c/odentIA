@@ -81,7 +81,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         title: `${row.patientName} terminó su registro`,
         detail: joined([
           `Por su enlace ${ago(row.sentAt)}`,
-          `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.dentistName ? ` con ${row.dentistName}` : ""}`,
+          `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.professionalName ? ` con ${row.professionalName}` : ""}`,
         ]),
         action: "Abrir su página",
       }

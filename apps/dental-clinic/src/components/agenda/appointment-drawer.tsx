@@ -146,7 +146,7 @@ export function AppointmentDrawer({
   const startAttention = () =>
     attend.mutate({
       patientId: appointment.patientId,
-      appointment: { id: appointment.id, dentistUserId: appointment.dentistUserId, dentistName: appointment.dentistName },
+      appointment: { id: appointment.id, professionalUserId: appointment.professionalUserId, professionalName: appointment.professionalName },
     })
 
   // ----- Cancelar -----
@@ -187,11 +187,11 @@ export function AppointmentDrawer({
   const moving = React.useMemo(
     () => ({
       id: appointment.id,
-      dentistUserId: appointment.dentistUserId,
+      professionalUserId: appointment.professionalUserId,
       startsAt: appointment.startsAt,
       endsAt: appointment.endsAt,
     }),
-    [appointment.id, appointment.dentistUserId, appointment.startsAt, appointment.endsAt],
+    [appointment.id, appointment.professionalUserId, appointment.startsAt, appointment.endsAt],
   )
   const when = useWhen({
     branchId: appointment.branchId,
@@ -203,7 +203,7 @@ export function AppointmentDrawer({
       (Date.parse(appointment.endsAt) - Date.parse(appointment.startsAt)) / 60000,
     ),
     date: zonedDateOf(appointment.startsAt, timeZone),
-    dentistUserId: appointment.dentistUserId,
+    professionalUserId: appointment.professionalUserId,
     moving,
     enabled: mode === "move",
   })
@@ -211,7 +211,7 @@ export function AppointmentDrawer({
   /** El bloque sigue donde ya está la cita: no hay nada que mover. */
   const unmoved =
     target != null &&
-    target.columnId === appointment.dentistUserId &&
+    target.columnId === appointment.professionalUserId &&
     Date.parse(target.start) === Date.parse(appointment.startsAt) &&
     Date.parse(target.end) === Date.parse(appointment.endsAt)
   const targetSaid = target ? whenSaid(target.start, timeZone, today) : ""
@@ -225,7 +225,7 @@ export function AppointmentDrawer({
           expectedVersion: appointment.version,
           startsAt: target.start,
           endsAt: target.end,
-          dentistUserId: target.columnId,
+          professionalUserId: target.columnId,
         }),
       })
     },
@@ -249,13 +249,13 @@ export function AppointmentDrawer({
   // ----- Editar detalles -----
   const [draft, setDraft] = React.useState({
     serviceId: appointment.serviceId ?? "",
-    chairId: appointment.chairId,
+    roomId: appointment.roomId,
     reason: appointment.reason ?? "",
   })
   const dirty =
     mode === "edit" &&
     (draft.serviceId !== (appointment.serviceId ?? "") ||
-      draft.chairId !== appointment.chairId ||
+      draft.roomId !== appointment.roomId ||
       draft.reason !== (appointment.reason ?? ""))
   const save = useMutation({
     mutationFn: () =>
@@ -264,7 +264,7 @@ export function AppointmentDrawer({
         body: JSON.stringify({
           expectedVersion: appointment.version,
           serviceId: draft.serviceId || null,
-          chairId: draft.chairId,
+          roomId: draft.roomId,
           reason: draft.reason.trim() || null,
         }),
       }),
@@ -358,10 +358,10 @@ export function AppointmentDrawer({
             <ResourceSelect
               id="cita-editar-sillon"
               label="Unidad dental"
-              options={resources.chairs.map((chair) => ({ id: chair.id, label: chair.label }))}
-              value={draft.chairId}
-              onChange={(chairId) =>
-                setDraft((current) => ({ ...current, chairId: chairId || current.chairId }))
+              options={resources.rooms.map((room) => ({ id: room.id, label: room.label }))}
+              value={draft.roomId}
+              onChange={(roomId) =>
+                setDraft((current) => ({ ...current, roomId: roomId || current.roomId }))
               }
             />
             <div className="grid gap-2">
@@ -392,7 +392,7 @@ export function AppointmentDrawer({
               >
                 <StatusIcon status={visitState(appointment.visit)} />
                 {appointment.visit === "en_atencion" && appointment.encounter
-                  ? `En atención con ${professionalSaid(appointment.encounter.dentistName)} desde ${hourLabel(dayMinutesIn(appointment.encounter.startedAt, timeZone))}`
+                  ? `En atención con ${professionalSaid(appointment.encounter.professionalName)} desde ${hourLabel(dayMinutesIn(appointment.encounter.startedAt, timeZone))}`
                   : appointment.visit === "llego" && appointment.arrivedAt
                     ? visitLabel(appointment, { now, timeZone }).replace(/^Llegó /, "Llegó a las ")
                     : visitLabel(appointment, { now, timeZone })}
@@ -524,8 +524,8 @@ export function AppointmentDrawer({
                 </DetailField>
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
-              <DetailField label="Profesional">{appointment.dentistName}</DetailField>
-              <DetailField label="Unidad dental">{appointment.chairName}</DetailField>
+              <DetailField label="Profesional">{appointment.professionalName}</DetailField>
+              <DetailField label="Unidad dental">{appointment.roomName}</DetailField>
               {appointment.reason ? (
                 <DetailField label="Motivo">{appointment.reason}</DetailField>
               ) : null}

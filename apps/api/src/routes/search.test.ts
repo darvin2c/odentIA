@@ -107,8 +107,8 @@ it("lo clínico que se mostró queda en el registro de accesos; recepción no lo
   expect(((await reception.json()) as { data: { owners: unknown[] } }).data.owners).toEqual([])
   expect(await accessRows()).toEqual([])
 
-  const dentist = await buildApp("dentist").request("/search?q=bruxismo")
-  const body = (await dentist.json()) as {
+  const professional = await buildApp("clinician").request("/search?q=bruxismo")
+  const body = (await professional.json()) as {
     data: { owners: Array<{ items: Array<{ kind: string }> }> }
   }
   expect(body.data.owners[0]?.items[0]?.kind).toBe("nota")
@@ -129,7 +129,7 @@ it("un nombre o algo de la historia nunca va al proveedor de vectores; un servic
     },
   }
   await buildApp("owner", counting).request("/search?q=maria luisa")
-  await buildApp("dentist", counting).request("/search?q=bruxismo")
+  await buildApp("clinician", counting).request("/search?q=bruxismo")
   expect(sent).toEqual([])
   await buildApp("owner", counting).request("/search?q=me duele una muela")
   expect(sent).toEqual([["me duele una muela"]])

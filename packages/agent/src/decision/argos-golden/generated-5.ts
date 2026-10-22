@@ -91,7 +91,7 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       join treatment_plan_item xp on xp.organization_id = x.organization_id and xp.id = x.plan_item_id
       join encounter e on e.organization_id = xp.organization_id and e.id = xp.source_encounter_id
       where x.organization_id = b.organization_id and x.budget_id = b.id order by e.started_at, e.id limit 1),
-    (select s.branch_id from professional_schedule s where s.organization_id = b.organization_id and s.dentist_user_id = b.created_by
+    (select s.branch_id from professional_schedule s where s.organization_id = b.organization_id and s.professional_user_id = b.created_by
       group by s.branch_id order by count(*) desc, s.branch_id limit 1))`
 
   /** Presupuestos presentados (no borradores) que cumplen `where`, con su valor, lo aceptado y lo aún no decidido. */
@@ -142,17 +142,17 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
 
   /** Lo que hay en una sede: unidades dentales, profesionales con horario y citas en el tramo. */
   const branchFacts = async (branchId: string, start: Date | string, end: Date | string) => {
-    const [row] = await tx.execute<{ chairs: number; people: number; appointments: number; encounters: number }>(sql`
-      select (select count(*) from schedule_chair c where c.organization_id = ${org} and c.branch_id = ${branchId} and c.is_active)::int as chairs,
-        (select count(distinct s.dentist_user_id) from professional_schedule s where s.organization_id = ${org} and s.branch_id = ${branchId} and s.is_active)::int as people,
+    const [row] = await tx.execute<{ rooms: number; people: number; appointments: number; encounters: number }>(sql`
+      select (select count(*) from schedule_room c where c.organization_id = ${org} and c.branch_id = ${branchId} and c.is_active)::int as rooms,
+        (select count(distinct s.professional_user_id) from professional_schedule s where s.organization_id = ${org} and s.branch_id = ${branchId} and s.is_active)::int as people,
         (select count(*) from appointment a where a.organization_id = ${org} and a.branch_id = ${branchId} and ${between(sql`a.starts_at`, start, end)})::int as appointments,
         (select count(*) from encounter e where e.organization_id = ${org} and e.branch_id = ${branchId})::int as encounters`)
-    return row ?? { chairs: 0, people: 0, appointments: 0, encounters: 0 }
+    return row ?? { rooms: 0, people: 0, appointments: 0, encounters: 0 }
   }
 
   /** «sin unidades dentales registradas, ni profesionales con horario, ni citas». */
-  const missingWords = (facts: { chairs: number; people: number; appointments: number }): string[] =>
-    [facts.chairs === 0 ? "unidades dentales registradas" : null, facts.people === 0 ? "profesionales con horario" : null, facts.appointments === 0 ? "citas" : null].filter(
+  const missingWords = (facts: { rooms: number; people: number; appointments: number }): string[] =>
+    [facts.rooms === 0 ? "unidades dentales registradas" : null, facts.people === 0 ? "profesionales con horario" : null, facts.appointments === 0 ? "citas" : null].filter(
       (item): item is string => item !== null,
     )
   const orList = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ni ${items.at(-1)}`)
@@ -183,7 +183,7 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       }
       const minutes = await agendaMinutes(tx, org, { start: startOf(day), end: startOf(addDays(day, 1)) }, { branchId: branch.id })
       const people = await tx.execute<{ id: string; name: string }>(sql`
-        select distinct u.id, u.name from professional_schedule s join "user" u on u.id = s.dentist_user_id
+        select distinct u.id, u.name from professional_schedule s join "user" u on u.id = s.professional_user_id
         where s.organization_id = ${org} and s.branch_id = ${branch.id}`)
       const [booked] = await tx.execute<{ count: number }>(sql`
         select count(*)::int as count from appointment a
@@ -195,12 +195,12 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       const lateFree = minutes.slots.filter((slot) => slot.hour >= 14 && slot.hour < AFTERNOON.to).reduce((total, slot) => total + Math.max(0, slot.availMin - slot.occMin), 0)
       for (const slot of minutes.slots) {
         if (slot.hour < AFTERNOON.from || slot.hour >= AFTERNOON.to) continue
-        const entry = byPerson.get(slot.dentistUserId) ?? { free: 0, avail: 0, hours: [] }
+        const entry = byPerson.get(slot.professionalUserId) ?? { free: 0, avail: 0, hours: [] }
         const free = Math.max(0, slot.availMin - slot.occMin)
         entry.free += free
         entry.avail += slot.availMin
         if (free >= 1) entry.hours.push(slot.hour)
-        byPerson.set(slot.dentistUserId, entry)
+        byPerson.set(slot.professionalUserId, entry)
       }
       // Horas seguidas con algo libre: «14:00 a 18:00».
       const ranges = (hours: number[]): string => {
@@ -259,7 +259,7 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       return {
         respuesta:
           (row?.value.value ?? null) !== null
-            ? `odentIA no mide las horas de cada unidad dental: las unidades no tienen horario, solo los profesionales. Lo más cercano: en ${lastName} la agenda de los profesionales de la ${branch.name} tuvo ${h.show(free, row?.value.value)} sin usar (ocupada ${h.show(occupied, occupiedRow?.value.value ?? null)}), con ${plural(facts.chairs, "unidad dental", "unidades dentales")}.`
+            ? `odentIA no mide las horas de cada unidad dental: las unidades no tienen horario, solo los profesionales. Lo más cercano: en ${lastName} la agenda de los profesionales de la ${branch.name} tuvo ${h.show(free, row?.value.value)} sin usar (ocupada ${h.show(occupied, occupiedRow?.value.value ?? null)}), con ${plural(facts.rooms, "unidad dental", "unidades dentales")}.`
             : `En ${lastName} la ${branch.name} no tuvo horas que medir: no tiene ${orList(missing)}${facts.appointments === 0 ? " ese mes" : ""}. Además, odentIA no mide las horas de cada unidad dental (las unidades no tienen horario), solo la agenda de los profesionales. En las otras sedes quedaron ${othersWords}.`,
         criterio:
           "«Horas libres» de Reportes por sede, del mes pasado completo: horario de los profesionales menos ausencias, bloqueos y citas no canceladas. La ocupación por unidad dental no existe: las unidades no tienen horario (report-agenda.ts).",
@@ -724,7 +724,7 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
     },
 
     g122: async () => {
-      const [row] = await tx.execute<{ overHalf: number; open: number; finished: number; half: number; overHalfMoney: number; plans: number; dentist: string | null }>(sql`
+      const [row] = await tx.execute<{ overHalf: number; open: number; finished: number; half: number; overHalfMoney: number; plans: number; professional: string | null }>(sql`
         with plans as (
           select tp.id, u.name from treatment_plan tp join "user" u on u.id = tp.created_by
           where tp.organization_id = ${org} and not tp.is_legacy and u.name ilike '%ana torres%'),
@@ -737,9 +737,9 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
         select count(*) filter (where done * 2 > total and done < total)::int as "overHalf", count(*) filter (where done < total)::int as open,
           count(*) filter (where total > 0 and done = total)::int as finished, count(*) filter (where done * 2 = total and done < total)::int as half,
           count(*) filter (where done_cents * 2 > cents and done < total)::int as "overHalfMoney",
-          (select count(*) from plans)::int as plans, (select min(name) from plans) as dentist
+          (select count(*) from plans)::int as plans, (select min(name) from plans) as professional
         from progress`)
-      const name = row?.dentist ?? "Dra. Ana Torres"
+      const name = row?.professional ?? "Dra. Ana Torres"
       const overHalf = row?.overHalf ?? 0
       return {
         respuesta: `${plural(overHalf, "plan de tratamiento", "planes de tratamiento")} ${ofName(name)} ${overHalf === 1 ? "va" : "van"} por más de la mitad: ${overHalf === 1 ? "tiene" : "tienen"} hecho más de la mitad de sus tratamientos aceptados y aún les falta algo. Son de los ${row?.open ?? 0} planes suyos que siguen abiertos.`,

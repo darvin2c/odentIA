@@ -11,7 +11,7 @@ export interface WorkspaceHome {
   /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
   multiBranch: boolean
   /** `agent`: Recepción y el Administrador encendidos; solo viaja a quien puede encenderlos. */
-  setup: { availability: boolean; chairs: boolean; patients: boolean; agent?: boolean } | null
+  setup: { availability: boolean; rooms: boolean; patients: boolean; agent?: boolean } | null
   activity: { recorded: boolean }
   /** Lo que necesita a una persona, en el orden en que se muestra. */
   waiting: WaitingRow[]
@@ -47,7 +47,7 @@ export type WaitingRow =
       patientName: string
       sentAt: string
       startsAt: string
-      dentistName: string | null
+      professionalName: string | null
     }
   /** Una atención de otro día que quedó en borrador y lleva quien mira: «Continuar» o «Anular con motivo». */
   | {
@@ -165,16 +165,16 @@ export interface WorkspaceAppointment {
   startsAt: string
   status: string
   serviceName: string | null
-  dentistUserId: string
-  dentistName: string
-  chairName: string
+  professionalUserId: string
+  professionalName: string
+  roomName: string
   branchName: string
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   /** El momento de la cita: de ahí salen la sala, «Ahora» y «Más tarde». */
   visit: AppointmentVisit
   /** La atención abierta unida a la cita: con quién y desde cuándo. */
-  encounter: { id: string; startedAt: string; dentistUserId: string; dentistName: string } | null
+  encounter: { id: string; startedAt: string; professionalUserId: string; professionalName: string } | null
   /** La siguiente que aún no llega. */
   next: boolean
 }

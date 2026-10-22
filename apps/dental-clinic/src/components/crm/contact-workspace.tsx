@@ -626,7 +626,7 @@ export function ContactWorkspace({
                           ctx.patientName ?? ctx.contactName,
                           ctx.opportunityTitle,
                           ctx.branchName,
-                          ctx.dentistName,
+                          ctx.professionalName,
                         ]
                           .filter(Boolean)
                           .join(" · ")

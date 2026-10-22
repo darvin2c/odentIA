@@ -57,7 +57,7 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccess("cashier", "conversations.topics")).toBe(true)
     expect(canAccess("cashier", "conversations.read")).toBe(false)
     expect(canAccess("reception", "conversations.topics")).toBe(true)
-    expect(canAccess("dentist", "conversations.topics")).toBe(true)
+    expect(canAccess("clinician", "conversations.topics")).toBe(true)
     expect(canAccess("member", "conversations.topics")).toBe(false)
     expect(ALL_PERMISSIONS).toContain("conversations.topics")
   })
@@ -67,7 +67,7 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccess("reception", "inventory.receive")).toBe(true)
     expect(canAccess("reception", "inventory.read")).toBe(false)
     expect(canAccess("reception", "inventory.write")).toBe(false)
-    for (const role of ["dentist", "cashier", "member"]) {
+    for (const role of ["clinician", "cashier", "member"]) {
       expect(canAccess(role, "inventory.stock")).toBe(false)
       expect(canAccess(role, "inventory.receive")).toBe(false)
     }
@@ -79,13 +79,13 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccess("reception", "clinical.receive")).toBe(true)
     expect(canAccess("reception", "clinical.read")).toBe(false)
     expect(canAccess("cashier", "clinical.receive")).toBe(false)
-    expect(canAccess("dentist", "clinical.receive")).toBe(false)
+    expect(canAccess("clinician", "clinical.receive")).toBe(false)
     expect(canAccess("admin", "clinical.receive")).toBe(true)
     expect(ALL_PERMISSIONS).toContain("clinical.receive")
   })
 
   it("otros roles operativos no deciden ni administran el agente", () => {
-    for (const role of ["dentist", "cashier", "member"]) {
+    for (const role of ["clinician", "cashier", "member"]) {
       expect(canAccess(role, "agent.decide")).toBe(false)
       expect(canAccess(role, "agent.write")).toBe(false)
       expect(canAccess(role, "agent.read")).toBe(false)
@@ -112,14 +112,14 @@ describe("permiso operativo agent.decide", () => {
   it("agent.decide es un permiso conocido y listado", () => {
     expect(ALL_PERMISSIONS).toContain("agent.decide")
     expect(canAccessAny("reception", ["agent.write", "agent.decide"])).toBe(true)
-    expect(canAccessAny("dentist", ["agent.write", "agent.decide"])).toBe(false)
+    expect(canAccessAny("clinician", ["agent.write", "agent.decide"])).toBe(false)
   })
 
   it("aprobaciones con decidir; supervisión y conocimiento sin lectura general", () => {
     const approvals = platformPathPermission("/agent/approvals")
     expect(approvals).toContain("agent.decide")
     expect(canAccessAny("reception", approvals ?? [])).toBe(true)
-    expect(canAccessAny("dentist", approvals ?? [])).toBe(false)
+    expect(canAccessAny("clinician", approvals ?? [])).toBe(false)
     // Sin agent.read, recepción no entra a supervisión ni a conocimiento.
     expect(canAccessAny("reception", platformPathPermission("/agent") ?? [])).toBe(false)
     expect(canAccessAny("reception", platformPathPermission("/agent/knowledge") ?? [])).toBe(false)
@@ -131,7 +131,7 @@ describe("permiso operativo agent.decide", () => {
     expect(pipeline).toEqual(platformPathPermission("/opportunities/abc"))
     expect(canAccessAny("reception", pipeline ?? [])).toBe(true)
     // Odontología y caja no leen el CRM: sin regla entraban y el servidor les negaba los datos.
-    expect(canAccessAny("dentist", pipeline ?? [])).toBe(false)
+    expect(canAccessAny("clinician", pipeline ?? [])).toBe(false)
     expect(canAccessAny("cashier", pipeline ?? [])).toBe(false)
   })
 
@@ -146,7 +146,7 @@ describe("permiso operativo agent.decide", () => {
       const rule = platformPathPermission(path) ?? []
       expect(canAccessAny("reception", rule)).toBe(true)
       expect(canAccessAny("admin", rule)).toBe(true)
-      expect(canAccessAny("dentist", rule)).toBe(false)
+      expect(canAccessAny("clinician", rule)).toBe(false)
       expect(canAccessAny("cashier", rule)).toBe(false)
     }
     // El resto de Configuración sigue cerrado para recepción.
@@ -177,10 +177,10 @@ describe("permiso operativo agent.decide", () => {
 describe("fronteras económicas por rol", () => {
   it("odontología presupuesta y consulta sus comisiones sin acceso a caja", () => {
     for (const permission of ["budgets.read", "budgets.write", "budgets.decide", "commissions.read"]) {
-      expect(canAccess("dentist", permission)).toBe(true)
+      expect(canAccess("clinician", permission)).toBe(true)
     }
     for (const permission of ["finance.read", "finance.write", "finance.close", "finance.admin", "commissions.write"]) {
-      expect(canAccess("dentist", permission)).toBe(false)
+      expect(canAccess("clinician", permission)).toBe(false)
     }
   })
 
@@ -206,14 +206,14 @@ describe("fronteras económicas por rol", () => {
 
   it("enviar el presupuesto es un permiso aparte de armarlo: caja anota, pero no envía", () => {
     expect(ALL_PERMISSIONS).toContain("budgets.send")
-    expect(canAccess("dentist", "budgets.send")).toBe(true)
+    expect(canAccess("clinician", "budgets.send")).toBe(true)
     expect(canAccess("cashier", "budgets.send")).toBe(false)
     expect(canAccess("member", "budgets.send")).toBe(false)
   })
 
   it("la entrada de comisiones no concede acceso a otros dominios", () => {
-    expect(canAccessAny("dentist", platformPathPermission("/commissions") ?? [])).toBe(true)
-    expect(canAccessAny("dentist", platformPathPermission("/finance") ?? [])).toBe(false)
+    expect(canAccessAny("clinician", platformPathPermission("/commissions") ?? [])).toBe(true)
+    expect(canAccessAny("clinician", platformPathPermission("/finance") ?? [])).toBe(false)
     expect(canAccessAny("cashier", platformPathPermission("/commissions") ?? [])).toBe(false)
     expect(canAccess("owner", "budgets.delete")).toBe(false)
   })
@@ -222,7 +222,7 @@ describe("fronteras económicas por rol", () => {
 describe("tareas de toda la clínica", () => {
   it("solo propietario y administrador ven las de toda la clínica; los demás, las suyas y las de su área", () => {
     for (const role of ["owner", "admin"]) expect(canAccess(role, "tasks.all")).toBe(true)
-    for (const role of ["reception", "dentist", "cashier", "member"]) {
+    for (const role of ["reception", "clinician", "cashier", "member"]) {
       expect(canAccess(role, "tasks.read")).toBe(true)
       expect(canAccess(role, "tasks.all")).toBe(false)
     }

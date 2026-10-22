@@ -40,7 +40,7 @@ async function seedInbox() {
     ownerDb.insert(agentProposal).values({
       organizationId: orgId, contactId: conv.contactId, conversationId: conv.id, action,
       payload: action === "reservar_cita"
-        ? { patientId: randomUUID(), dentistUserId: "dentista", chairId: randomUUID(), startsAt: new Date(Date.now() + 86_400_000).toISOString() }
+        ? { patientId: randomUUID(), professionalUserId: "dentista", roomId: randomUUID(), startsAt: new Date(Date.now() + 86_400_000).toISOString() }
         : { title: "Ortodoncia" },
       afterSummary: "Cambio previsto", idempotencyKey: randomUUID(), createdAt,
     })

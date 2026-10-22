@@ -170,28 +170,28 @@ export function useWeeklyTurns(input: {
  */
 export function useWeeklySchedule(input: {
   branchId: string | undefined
-  dentistUserId: string
+  professionalUserId: string
   onSaved?: () => void | Promise<void>
 }): WeeklySchedule {
-  const { branchId, dentistUserId, onSaved } = input
+  const { branchId, professionalUserId, onSaved } = input
   const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ["professional-schedule", branchId, dentistUserId],
-    enabled: Boolean(branchId && dentistUserId),
+    queryKey: ["professional-schedule", branchId, professionalUserId],
+    enabled: Boolean(branchId && professionalUserId),
     queryFn: () =>
       apiFetch<{ data: ProfessionalSchedule }>(
-        `/api/agenda/schedules?branchId=${branchId}&dentistUserId=${dentistUserId}`,
+        `/api/agenda/schedules?branchId=${branchId}&professionalUserId=${professionalUserId}`,
       ),
   })
   const turns = useWeeklyTurns({
-    key: `${branchId}:${dentistUserId}`,
+    key: `${branchId}:${professionalUserId}`,
     rules: query.data?.data.rules,
     failed: query.isError,
     retry: () => void query.refetch(),
     save: (rules) =>
       apiFetch("/api/agenda/schedules", {
         method: "PUT",
-        body: JSON.stringify({ branchId, dentistUserId, rules }),
+        body: JSON.stringify({ branchId, professionalUserId, rules }),
       }),
     savedMessage: "Horario guardado",
     onSaved: async () => {
@@ -331,11 +331,11 @@ export function ScheduleDrawer({
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const [dentistId, setDentistId] = React.useState(professionals[0]?.id ?? "")
+  const [professionalId, setProfessionalId] = React.useState(professionals[0]?.id ?? "")
   /** A quién se quiere pasar con cambios sin guardar. */
   const [pending, setPending] = React.useState<string | null>(null)
-  const schedule = useWeeklySchedule({ branchId, dentistUserId: dentistId, onSaved })
-  const current = professionals.find((item) => item.id === dentistId)
+  const schedule = useWeeklySchedule({ branchId, professionalUserId: professionalId, onSaved })
+  const current = professionals.find((item) => item.id === professionalId)
   return (
     <>
       <FormDrawer
@@ -362,11 +362,11 @@ export function ScheduleDrawer({
               label="Profesional"
               resources={professionals}
               formatLabel={(item) => shortName(item.label)}
-              value={dentistId}
+              value={professionalId}
               onChange={(next) => {
-                if (!next || next === dentistId) return
+                if (!next || next === professionalId) return
                 if (schedule.dirty) setPending(next)
-                else setDentistId(next)
+                else setProfessionalId(next)
               }}
             />
           </div>
@@ -389,7 +389,7 @@ export function ScheduleDrawer({
         variant="destructive"
         onClose={() => setPending(null)}
         onConfirm={() => {
-          if (pending) setDentistId(pending)
+          if (pending) setProfessionalId(pending)
           setPending(null)
         }}
       />

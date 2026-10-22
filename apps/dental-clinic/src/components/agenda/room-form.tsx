@@ -7,14 +7,14 @@ import { errorMessage } from "./shared"
 
 /**
  * El formulario de una unidad dental, el mismo en la agenda y en Configuración: da de
- * alta una en la sede (sin al menos una no se puede reservar) o, con `chair`,
+ * alta una en la sede (sin al menos una no se puede reservar) o, con `room`,
  * le cambia el nombre.
  */
-export function ChairForm({
+export function RoomForm({
   branchId,
   branchName,
   suggestedName,
-  chair,
+  room,
   onClose,
   onSaved,
 }: {
@@ -23,26 +23,26 @@ export function ChairForm({
   /** Nombre propuesto («Unidad dental 2»), para no empezar de cero. */
   suggestedName: string
   /** La unidad dental que se renombra; sin ella, el formulario crea una nueva. */
-  chair?: { id: string; name: string }
+  room?: { id: string; name: string }
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const initialName = chair?.name ?? suggestedName
+  const initialName = room?.name ?? suggestedName
   const [name, setName] = React.useState(initialName)
   const [error, setError] = React.useState("")
   const save = useMutation({
     mutationFn: () =>
-      chair
-        ? apiFetch(`/api/agenda/chairs/${chair.id}`, {
+      room
+        ? apiFetch(`/api/agenda/rooms/${room.id}`, {
             method: "PATCH",
             body: JSON.stringify({ name: name.trim() }),
           })
-        : apiFetch("/api/agenda/chairs", {
+        : apiFetch("/api/agenda/rooms", {
             method: "POST",
             body: JSON.stringify({ branchId, name: name.trim() }),
           }),
     onSuccess: async () => {
-      toast.success(chair ? "Unidad dental guardada" : "Unidad dental añadida")
+      toast.success(room ? "Unidad dental guardada" : "Unidad dental añadida")
       await onSaved()
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -50,9 +50,9 @@ export function ChairForm({
   return (
     <FormDrawer
       open
-      title={chair ? `Renombrar ${chair.name}` : "Nueva unidad dental"}
+      title={room ? `Renombrar ${room.name}` : "Nueva unidad dental"}
       description={
-        chair
+        room
           ? `Unidad dental de ${branchName}. Sus citas se verán con el nombre nuevo.`
           : `Se añade a ${branchName}. Cada cita ocupa una unidad dental.`
       }
@@ -65,8 +65,8 @@ export function ChairForm({
       isSubmitting={save.isPending}
       isDirty={name !== initialName}
       error={error || null}
-      submitDisabled={!name.trim() || (chair !== undefined && name.trim() === chair.name)}
-      submitLabel={chair ? "Guardar" : "Añadir unidad dental"}
+      submitDisabled={!name.trim() || (room !== undefined && name.trim() === room.name)}
+      submitLabel={room ? "Guardar" : "Añadir unidad dental"}
     >
       <div className="grid gap-2">
         <FieldLabel htmlFor="sillon-nombre">Nombre</FieldLabel>

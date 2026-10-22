@@ -55,18 +55,18 @@ export interface AppointmentEncounterRef {
   status: "borrador" | "finalizada"
   startedAt: string
   endedAt: string | null
-  dentistUserId: string
-  dentistName: string
+  professionalUserId: string
+  professionalName: string
 }
 
 export interface AgendaAppointment {
   id: string
   patientId: string
   patientName: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string
-  chairName: string
+  professionalUserId: string
+  professionalName: string
+  roomId: string
+  roomName: string
   branchId: string
   serviceId: string | null
   serviceName: string | null
@@ -140,7 +140,7 @@ export function visitLabel(
     return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitMinutes(appointment.arrivedAt, context.now)} min`
   }
   if (appointment.visit === "en_atencion" && appointment.encounter) {
-    return `En atención · con ${professionalSaid(appointment.encounter.dentistName)} desde ${clock(appointment.encounter.startedAt)}`
+    return `En atención · con ${professionalSaid(appointment.encounter.professionalName)} desde ${clock(appointment.encounter.startedAt)}`
   }
   if (appointment.visit === "atendida" && appointment.encounter?.endedAt) {
     return `Atendida · ${clock(appointment.encounter.endedAt)}`
@@ -169,13 +169,13 @@ export interface AgendaResources {
   branchName: string
   timeZone: string
   professionals: { id: string; label: string }[]
-  chairs: { id: string; label: string }[]
+  rooms: { id: string; label: string }[]
   /** Lo que dura una cita regular en la sede, en minutos. */
   defaultDurationMin: number
 }
 
-/** Una unidad dental en Configuración (`GET /api/agenda/chairs`): también las desactivadas. */
-export interface ChairSetting {
+/** Una unidad dental en Configuración (`GET /api/agenda/rooms`): también las desactivadas. */
+export interface RoomSetting {
   id: string
   name: string
   isActive: boolean
@@ -199,7 +199,7 @@ export interface ScheduleRule {
 
 export interface ProfessionalSchedule {
   branchId: string
-  dentistUserId: string
+  professionalUserId: string
   timeZone: string
   rules: ScheduleRule[]
   /** Desde qué día vale el horario de hoy (ADR 0060); nulo sin horario. */
@@ -209,9 +209,9 @@ export interface ProfessionalSchedule {
 export interface ScheduleBlock {
   id: string
   branchId: string
-  dentistUserId: string | null
-  dentistName: string | null
-  chairId: string | null
+  professionalUserId: string | null
+  professionalName: string | null
+  roomId: string | null
   kind: "bloqueo" | "ausencia"
   reason: string | null
   startsAt: string
@@ -225,15 +225,15 @@ export interface AgendaAvailability {
   professionals: {
     id: string
     label: string
-    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+    nextFree: { startsAt: string; endsAt: string; roomId: string | null } | null
   }[]
   defaultDurationMin: number
-  open: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  open: { professionalUserId: string; startsAt: string; endsAt: string }[]
   /** Tramos en que cada profesional puede recibir una cita: su horario menos lo ocupado. */
-  free: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  free: { professionalUserId: string; startsAt: string; endsAt: string }[]
   blocks: ScheduleBlock[]
   /** Con servicio: si alguien lo atiende en la sede, solo esas personas (ADR 0039). */
-  attending?: { specialtyName: string; dentistUserIds: string[] } | null
+  attending?: { specialtyName: string; professionalUserIds: string[] } | null
 }
 
 /** Persona encontrada al buscar una cita, con sus próximas citas en pie. */

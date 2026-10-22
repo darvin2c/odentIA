@@ -980,9 +980,9 @@ export async function getOpportunity(
   const patientId = row.opp.patientId ?? (await selfPatientOf(tx, orgId, row.opp.contactId))
   if (options.appointments && patientId && item.status === "open") {
     const [next] = await tx
-      .select({ startsAt: appointment.startsAt, dentistName: user.name, serviceName: appointment.serviceName })
+      .select({ startsAt: appointment.startsAt, professionalName: user.name, serviceName: appointment.serviceName })
       .from(appointment)
-      .leftJoin(user, eq(user.id, appointment.dentistUserId))
+      .leftJoin(user, eq(user.id, appointment.professionalUserId))
       .where(
         and(
           eq(appointment.organizationId, orgId),
@@ -996,7 +996,7 @@ export async function getOpportunity(
     if (next) {
       nextAppointment = {
         startsAt: next.startsAt.toISOString(),
-        text: [next.serviceName ?? "Cita", dayAndTime(next.startsAt, zone), next.dentistName].filter(Boolean).join(" · "),
+        text: [next.serviceName ?? "Cita", dayAndTime(next.startsAt, zone), next.professionalName].filter(Boolean).join(" · "),
       }
     }
   }

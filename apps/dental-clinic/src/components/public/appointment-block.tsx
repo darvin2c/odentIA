@@ -13,7 +13,7 @@ export interface AppointmentBlockData {
   branchAddress?: string | null
   /** «Cómo llegar» a la sede (Google Maps), si tiene dirección. */
   branchDirectionsUrl?: string | null
-  dentistName: string
+  professionalName: string
   serviceName: string | null
   confirmed: boolean
 }
@@ -47,7 +47,7 @@ function calendarFile(clinicName: string, appointment: AppointmentBlockData, uid
     // Sin el servicio: un título de calendario no lleva datos clínicos.
     `SUMMARY:${text(`Cita en ${clinicName}`)}`,
     `LOCATION:${text(where)}`,
-    `DESCRIPTION:${text(`Con ${appointment.dentistName}`)}`,
+    `DESCRIPTION:${text(`Con ${appointment.professionalName}`)}`,
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n")
@@ -104,7 +104,7 @@ export function AppointmentBlock({
       </div>
       <div className="flex flex-col gap-0.5 text-sm">
         <p className="text-base font-semibold">{when}</p>
-        <p>{[appointment.serviceName, `Sede ${appointment.branchName}`, appointment.dentistName].filter(Boolean).join(" · ")}</p>
+        <p>{[appointment.serviceName, `Sede ${appointment.branchName}`, appointment.professionalName].filter(Boolean).join(" · ")}</p>
         {appointment.branchAddress ? <p className="text-muted-foreground">{appointment.branchAddress}</p> : null}
       </div>
       {error ? (

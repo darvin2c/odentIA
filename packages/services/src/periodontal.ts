@@ -76,7 +76,7 @@ export interface PeriodontalChartView {
   /** Fecha de la atención en que se sondeó. */
   date: Date
   encounterStatus: string
-  dentistName: string | null
+  professionalName: string | null
   expectedTeeth: number[]
   implantTeeth: number[]
   /** Una pieza por cada una que se debía sondear, medida o no. */
@@ -102,7 +102,7 @@ export interface PeriodontalChartListItem {
   encounterId: string
   date: Date
   encounterStatus: string
-  dentistName: string | null
+  professionalName: string | null
   bleedingPercent: number | null
   plaquePercent: number | null
   sitesFrom4mm: number
@@ -246,9 +246,9 @@ async function previousPeriodontitis(
 
 async function chartView(tx: Db, orgId: string, chart: ChartRow, birthDate: string | null | undefined): Promise<PeriodontalChartView> {
   const [visit] = await tx
-    .select({ startedAt: encounter.startedAt, status: encounter.status, dentistName: user.name })
+    .select({ startedAt: encounter.startedAt, status: encounter.status, professionalName: user.name })
     .from(encounter)
-    .leftJoin(user, eq(user.id, encounter.dentistUserId))
+    .leftJoin(user, eq(user.id, encounter.professionalUserId))
     .where(and(eq(encounter.id, chart.encounterId), eq(encounter.organizationId, orgId)))
     .limit(1)
   if (!visit) throw notFound("Atención")
@@ -281,7 +281,7 @@ async function chartView(tx: Db, orgId: string, chart: ChartRow, birthDate: stri
     encounterId: chart.encounterId,
     date: visit.startedAt,
     encounterStatus: visit.status,
-    dentistName: visit.dentistName ?? null,
+    professionalName: visit.professionalName ?? null,
     expectedTeeth: chart.expectedTeeth,
     implantTeeth: chart.implantTeeth,
     teeth,
@@ -600,13 +600,13 @@ export async function listPeriodontalCharts(
 ): Promise<PeriodontalChartListItem[]> {
   await requirePatient(tx, orgId, patientId)
   const charts = await tx
-    .select({ chart: periodontalChart, date: encounter.startedAt, status: encounter.status, dentistName: user.name })
+    .select({ chart: periodontalChart, date: encounter.startedAt, status: encounter.status, professionalName: user.name })
     .from(periodontalChart)
     .innerJoin(
       encounter,
       and(eq(encounter.organizationId, periodontalChart.organizationId), eq(encounter.id, periodontalChart.encounterId)),
     )
-    .leftJoin(user, eq(user.id, encounter.dentistUserId))
+    .leftJoin(user, eq(user.id, encounter.professionalUserId))
     .where(
       and(
         eq(periodontalChart.organizationId, orgId),
@@ -628,7 +628,7 @@ export async function listPeriodontalCharts(
         ),
       ),
     )
-  return charts.map(({ chart, date, status, dentistName }) => {
+  return charts.map(({ chart, date, status, professionalName }) => {
     const teeth = fullTeeth(chart, rows.filter((row) => row.chartId === chart.id))
     const summary = summarizePeriodontal(teeth, chart.implantTeeth, chart.expectedTeeth)
     const classification = classificationOf(chart)
@@ -637,7 +637,7 @@ export async function listPeriodontalCharts(
       encounterId: chart.encounterId,
       date,
       encounterStatus: status,
-      dentistName: dentistName ?? null,
+      professionalName: professionalName ?? null,
       bleedingPercent: summary.bleedingPercent,
       plaquePercent: summary.plaque?.percent ?? null,
       sitesFrom4mm: summary.sitesFrom4mm,

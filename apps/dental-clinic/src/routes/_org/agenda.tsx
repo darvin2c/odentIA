@@ -83,7 +83,7 @@ import {
 import { AppointmentSearch } from "../../components/agenda/appointment-search"
 import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
-import { ChairForm } from "../../components/agenda/chair-form"
+import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival } from "../../components/agenda/arrival"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
@@ -143,7 +143,7 @@ function planItemIdsOf(value: string | undefined): string[] {
 }
 
 type AgendaView = "dia" | "semana" | "lista"
-type GroupMode = "professionals" | "chairs"
+type GroupMode = "professionals" | "rooms"
 
 const VIEWS = [
   { id: "dia", label: "Día" },
@@ -231,7 +231,7 @@ function AgendaPage() {
   const viewParam = get("view")
   const view: AgendaView = viewParam === "semana" || viewParam === "lista" ? viewParam : "dia"
   const group: GroupMode =
-    view === "dia" && get("group") === "chairs" ? "chairs" : "professionals"
+    view === "dia" && get("group") === "rooms" ? "rooms" : "professionals"
   const whoParam = get("who") ?? null
   const statusParam = get("status")
   const statusFilter = STATUSES.find((item) => item === statusParam) ?? null
@@ -241,7 +241,7 @@ function AgendaPage() {
   const [detail, setDetail] = React.useState<{ id: string; mode: AppointmentDrawerMode } | null>(
     null,
   )
-  const [chairForm, setChairForm] = React.useState(false)
+  const [roomForm, setRoomForm] = React.useState(false)
   const [scheduleForm, setScheduleForm] = React.useState(false)
   const [message, setMessage] = React.useState("")
 
@@ -417,16 +417,16 @@ function AgendaPage() {
     const known = new Map<string, string>()
     for (const item of availability?.professionals ?? []) known.set(item.id, item.label)
     for (const item of appointments) {
-      if (!known.has(item.dentistUserId)) known.set(item.dentistUserId, item.dentistName)
+      if (!known.has(item.professionalUserId)) known.set(item.professionalUserId, item.professionalName)
     }
     return [...known].map(([id, label]) => ({ id, label, tone: toneOf(id) }))
   }, [availability, appointments, toneOf])
   // Un odontólogo abre la Agenda en su columna (tablero 7); «todos» la abre entera.
   const ownColumn = canAttend && group === "professionals" && team.some((item) => item.id === myUserId) ? myUserId : null
   const who = whoParam === WHO_ALL ? null : (whoParam ?? ownColumn)
-  const chairs = React.useMemo(
+  const rooms = React.useMemo(
     (): ScheduleColumn[] =>
-      (resources?.chairs ?? []).map((item, index) => ({
+      (resources?.rooms ?? []).map((item, index) => ({
         id: item.id,
         label: item.label,
         tone: scheduleToneAt(index),
@@ -447,8 +447,8 @@ function AgendaPage() {
           start: item.startsAt,
           end: item.endsAt,
           status: item.status,
-          professionalId: item.dentistUserId,
-          chairId: item.chairId,
+          professionalId: item.professionalUserId,
+          roomId: item.roomId,
         })),
       ),
     [appointments],
@@ -460,7 +460,7 @@ function AgendaPage() {
   const open = React.useMemo(
     (): ScheduleAvailability[] =>
       (availability?.open ?? []).map((item) => ({
-        columnId: item.dentistUserId,
+        columnId: item.professionalUserId,
         start: item.startsAt,
         end: item.endsAt,
       })),
@@ -468,12 +468,12 @@ function AgendaPage() {
   )
   const blocksBy = React.useCallback(
     (kind: GroupMode): ScheduleBlocked[] => {
-      const targets = kind === "chairs" ? chairs : team
+      const targets = kind === "rooms" ? rooms : team
       return (availability?.blocks ?? []).flatMap((block) => {
         // Un bloqueo de unidad dental no cierra al profesional, ni al revés.
-        const scoped = kind === "chairs" ? block.dentistUserId : block.chairId
+        const scoped = kind === "rooms" ? block.professionalUserId : block.roomId
         if (scoped) return []
-        const own = kind === "chairs" ? block.chairId : block.dentistUserId
+        const own = kind === "rooms" ? block.roomId : block.professionalUserId
         const label = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "No disponible")
         return (own ? [own] : targets.map((item) => item.id)).map((columnId) => ({
           id: `${block.id}:${columnId}`,
@@ -484,12 +484,12 @@ function AgendaPage() {
         }))
       })
     },
-    [availability, chairs, team],
+    [availability, rooms, team],
   )
   /** Ausencias y cierres de cada profesional, sea cual sea la vista. */
   const absences = React.useMemo(() => blocksBy("professionals"), [blocksBy])
   const blocked = React.useMemo(
-    () => (group === "chairs" ? blocksBy("chairs") : absences),
+    () => (group === "rooms" ? blocksBy("rooms") : absences),
     [group, blocksBy, absences],
   )
   /** Si una ausencia cubre todo el horario de alguien ese día: el motivo y hasta cuándo. */
@@ -508,7 +508,7 @@ function AgendaPage() {
     if (!standing(item.status)) return undefined
     const hit = absences.find(
       (block) =>
-        block.columnId === item.dentistUserId &&
+        block.columnId === item.professionalUserId &&
         Date.parse(block.start) < Date.parse(item.endsAt) &&
         Date.parse(block.end) > Date.parse(item.startsAt),
     )
@@ -523,7 +523,7 @@ function AgendaPage() {
   const entries = appointments.map(
     (item): ScheduleEntry => ({
       id: item.id,
-      columnId: group === "chairs" ? item.chairId : item.dentistUserId,
+      columnId: group === "rooms" ? item.roomId : item.professionalUserId,
       title: item.patientName,
       subtitle: item.serviceName ?? item.reason ?? undefined,
       start: item.startsAt,
@@ -538,12 +538,12 @@ function AgendaPage() {
   const attends = (id: string, date: string) =>
     rangesOn(open, id, date, TZ).length > 0 ||
     appointments.some(
-      (item) => item.dentistUserId === id && zonedDateOf(item.startsAt, TZ) === date,
+      (item) => item.professionalUserId === id && zonedDateOf(item.startsAt, TZ) === date,
     )
   const hasAppointments = (id: string, date: string) =>
     appointments.some(
       (item) =>
-        item.dentistUserId === id &&
+        item.professionalUserId === id &&
         occupies(item.status) &&
         zonedDateOf(item.startsAt, TZ) === date,
     )
@@ -560,7 +560,7 @@ function AgendaPage() {
     absent.length > 0 && absent.every((item) => item.absence !== null)
       ? (absent[0]?.absence?.label ?? null)
       : null
-  const dayColumns = group === "chairs" ? chairs : dayTeam
+  const dayColumns = group === "rooms" ? rooms : dayTeam
   /** Semana, y Día en teléfono: de quién es la agenda. */
   const focus =
     (who && team.some((item) => item.id === who) ? who : null) ??
@@ -671,8 +671,8 @@ function AgendaPage() {
       expectedVersion: number
       startsAt: string
       endsAt: string
-      dentistUserId?: string
-      chairId?: string
+      professionalUserId?: string
+      roomId?: string
     }) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/move`, {
         method: "POST",
@@ -680,8 +680,8 @@ function AgendaPage() {
           expectedVersion: input.expectedVersion,
           startsAt: input.startsAt,
           endsAt: input.endsAt,
-          dentistUserId: input.dentistUserId,
-          chairId: input.chairId,
+          professionalUserId: input.professionalUserId,
+          roomId: input.roomId,
         }),
       }),
     onSuccess: async (result) => {
@@ -709,7 +709,7 @@ function AgendaPage() {
   const attendItem = (item: AgendaAppointment) =>
     attend.mutate({
       patientId: item.patientId,
-      appointment: { id: item.id, dentistUserId: item.dentistUserId, dentistName: item.dentistName },
+      appointment: { id: item.id, professionalUserId: item.professionalUserId, professionalName: item.professionalName },
     })
   const patientOf = (item: AgendaAppointment) => ({ id: item.patientId, name: item.patientName })
   const menuFor = (entry: ScheduleEntry): RowActionItem[] => {
@@ -781,12 +781,12 @@ function AgendaPage() {
   }
 
   const listItems: ScheduleAgendaItem[] = dayAppointments
-    .filter((item) => !filter || item.dentistUserId === filter)
+    .filter((item) => !filter || item.professionalUserId === filter)
     .filter((item) => !statusFilter || item.status === statusFilter)
     .map((item) => ({
       entry: {
         id: item.id,
-        columnId: item.dentistUserId,
+        columnId: item.professionalUserId,
         title: item.patientName,
         subtitle: item.serviceName ?? item.reason ?? undefined,
         start: item.startsAt,
@@ -794,14 +794,14 @@ function AgendaPage() {
         status: item.status,
         ...stateOf(item),
       },
-      resourceLabel: item.dentistName,
-      resourceShortLabel: shortName(item.dentistName),
-      resourceTone: toneOf(item.dentistUserId),
-      resourceDetail: item.chairName,
+      resourceLabel: item.professionalName,
+      resourceShortLabel: shortName(item.professionalName),
+      resourceTone: toneOf(item.professionalUserId),
+      resourceDetail: item.roomName,
     }))
   const counts: Partial<Record<ScheduleStatus, number>> = {}
   for (const item of dayAppointments) {
-    if (filter && item.dentistUserId !== filter) continue
+    if (filter && item.professionalUserId !== filter) continue
     counts[item.status] = (counts[item.status] ?? 0) + 1
   }
 
@@ -852,18 +852,18 @@ function AgendaPage() {
               {item.label}
             </DropdownMenuItem>
           ))}
-          {view === "dia" && chairs.length > 0 ? (
+          {view === "dia" && rooms.length > 0 ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() =>
                   setParams({
-                    group: group === "chairs" ? undefined : "chairs",
+                    group: group === "rooms" ? undefined : "rooms",
                     who: undefined,
                   })
                 }
               >
-                {group === "chairs" ? "Ver por profesional" : "Ver por unidad dental"}
+                {group === "rooms" ? "Ver por profesional" : "Ver por unidad dental"}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -873,7 +873,7 @@ function AgendaPage() {
   }
   const pickWho = (id: string | null) => setParam("who", id ?? (ownColumn ? WHO_ALL : undefined))
   // Las fichas del teléfono: quiénes son según la vista y cuál está elegida; la fila dice el nombre.
-  const resourceTitle = group === "chairs" ? "Unidades dentales" : "Profesionales"
+  const resourceTitle = group === "rooms" ? "Unidades dentales" : "Profesionales"
   const phoneResources = view === "semana" ? team : view === "dia" ? dayColumns : dayTeam
   const phoneValue = view === "lista" ? filter : view === "semana" ? focus : dayFocus
   const resourceChosen = phoneResources.find((item) => item.id === phoneValue)?.label ?? "todos"
@@ -882,7 +882,7 @@ function AgendaPage() {
     !resources || appointmentsQuery.data == null || availabilityQuery.data == null
   const noSchedules =
     resources != null && availability != null && availability.professionals.length === 0
-  const noChairs = resources != null && resources.chairs.length === 0
+  const noRooms = resources != null && resources.rooms.length === 0
   const hasData = resources != null && appointmentsQuery.data != null && availability != null
   const readFailed =
     resourcesQuery.isError || appointmentsQuery.isError || availabilityQuery.isError
@@ -897,7 +897,7 @@ function AgendaPage() {
     void availabilityQuery.refetch()
   }
   // Falta lo básico para reservar y no hay nada que mostrar: se dice qué falta y cómo resolverlo.
-  const setupMissing = (noChairs || noSchedules) && appointments.length === 0
+  const setupMissing = (noRooms || noSchedules) && appointments.length === 0
   /** Primer día con atención después del que se mira, para no dejar a nadie ante un día vacío. */
   const nextOpenDay =
     (availability?.professionals ?? [])
@@ -915,7 +915,7 @@ function AgendaPage() {
       <div className="flex min-h-full flex-col [&>*]:flex-1">{content}</div>
     </ScrollArea>
   )
-  const setupState = noChairs ? (
+  const setupState = noRooms ? (
     <EmptyState
       icon={Armchair}
       title="Esta sede aún no tiene unidades dentales"
@@ -925,7 +925,7 @@ function AgendaPage() {
           : "Cada cita ocupa una unidad dental. Pide a quien administra la clínica que añada una."
       }
       actionLabel={canConfigure ? "Añadir unidad dental" : undefined}
-      onAction={canConfigure ? () => setChairForm(true) : undefined}
+      onAction={canConfigure ? () => setRoomForm(true) : undefined}
     />
   ) : (
     <EmptyState
@@ -989,7 +989,7 @@ function AgendaPage() {
       lanes={view === "dia" ? dayLanes : weekLanes}
       timeZone={TZ}
       entries={active}
-      availability={group === "chairs" ? undefined : open}
+      availability={group === "rooms" ? undefined : open}
       blocked={blocked}
       window={view === "semana" ? weekWindow : undefined}
       hourHeight={small ? 88 : view === "semana" ? 96 : 72}
@@ -998,7 +998,7 @@ function AgendaPage() {
       createMinutes={resources?.defaultDurationMin}
       now={now}
       selectedEntryId={detail?.id}
-      preview={view === "dia" && group === "chairs" ? null : preview}
+      preview={view === "dia" && group === "rooms" ? null : preview}
       onEntryClick={(entry) => setDetail({ id: entry.id, mode: "view" })}
       onEntryMove={
         canWrite
@@ -1010,12 +1010,12 @@ function AgendaPage() {
                 expectedVersion: item.version,
                 startsAt: move.start,
                 endsAt: move.end,
-                dentistUserId:
-                  group === "professionals" && move.columnId !== item.dentistUserId
+                professionalUserId:
+                  group === "professionals" && move.columnId !== item.professionalUserId
                     ? move.columnId
                     : undefined,
-                chairId:
-                  group === "chairs" && move.columnId !== item.chairId ? move.columnId : undefined,
+                roomId:
+                  group === "rooms" && move.columnId !== item.roomId ? move.columnId : undefined,
               })
             }
           : undefined
@@ -1038,7 +1038,7 @@ function AgendaPage() {
         canWrite && group === "professionals"
           ? (target) =>
               openBooking({
-                dentistUserId: target.columnId,
+                professionalUserId: target.columnId,
                 startsAt: target.start,
                 date: target.date,
               })
@@ -1144,7 +1144,7 @@ function AgendaPage() {
                     filter,
                     dayColumns,
                     pickWho,
-                    group === "chairs" ? "Unidades dentales: todas" : "Profesionales: todos",
+                    group === "rooms" ? "Unidades dentales: todas" : "Profesionales: todos",
                   )}
             </>
           )
@@ -1187,22 +1187,22 @@ function AgendaPage() {
                       onNext={() => goTo(addDays(day, 7))}
                     />
                   ) : null}
-                  {view === "dia" && chairs.length > 0 ? (
+                  {view === "dia" && rooms.length > 0 ? (
                     <Button
                       variant="outline"
                       className="w-full"
                       onClick={() =>
-                        setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
+                        setParams({ group: group === "rooms" ? undefined : "rooms", who: undefined })
                       }
                     >
-                      {group === "chairs" ? "Ver por profesional" : "Ver por unidad dental"}
+                      {group === "rooms" ? "Ver por profesional" : "Ver por unidad dental"}
                     </Button>
                   ) : null}
                   <ScheduleResourceChips
                     label={resourceTitle}
                     wrap
                     resources={phoneResources}
-                    formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
+                    formatLabel={(item) => (group === "rooms" ? item.label : shortName(item.label))}
                     value={phoneValue}
                     allLabel={view === "lista" ? "Todos" : undefined}
                     onChange={(id) => {
@@ -1314,7 +1314,7 @@ function AgendaPage() {
 
       {booking && resources && branchId ? (
         <BookingDrawer
-          key={`${booking.patient?.id ?? ""}:${booking.startsAt ?? ""}:${booking.dentistUserId ?? ""}`}
+          key={`${booking.patient?.id ?? ""}:${booking.startsAt ?? ""}:${booking.professionalUserId ?? ""}`}
           seed={booking}
           branchId={branchId}
           timeZone={TZ}
@@ -1378,14 +1378,14 @@ function AgendaPage() {
         />
       ) : null}
 
-      {chairForm && resources && branchId ? (
-        <ChairForm
+      {roomForm && resources && branchId ? (
+        <RoomForm
           branchId={branchId}
           branchName={resources.branchName}
-          suggestedName={`Unidad dental ${resources.chairs.length + 1}`}
-          onClose={() => setChairForm(false)}
+          suggestedName={`Unidad dental ${resources.rooms.length + 1}`}
+          onClose={() => setRoomForm(false)}
           onSaved={async () => {
-            setChairForm(false)
+            setRoomForm(false)
             await invalidate()
           }}
         />

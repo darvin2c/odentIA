@@ -41,7 +41,7 @@ export interface CrmNextAppointment {
   status: string
   branchName: string
   timeZone: string
-  dentistName: string
+  professionalName: string
   serviceName: string | null
 }
 
@@ -82,7 +82,7 @@ export function nextAppointmentSaid(next: CrmNextAppointment, locale: string | u
     minute: "2-digit",
   }).format(new Date(next.startsAt))
   const who = next.patientName === personName ? "" : `${next.patientName}: `
-  return `${who}${when} · ${next.serviceName ?? "Cita"} · ${next.dentistName}`
+  return `${who}${when} · ${next.serviceName ?? "Cita"} · ${next.professionalName}`
 }
 
 /** Clave de caché del contexto del contacto (conversación opcional). */

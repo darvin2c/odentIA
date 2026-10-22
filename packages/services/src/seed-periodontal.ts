@@ -129,9 +129,9 @@ async function probe(
 
 export async function seedPeriodontalCase(
   db: Db,
-  input: { orgId: string; dentistUserId: string; patientId: string; branchId: string; daysAgo: (days: number) => Date },
+  input: { orgId: string; professionalUserId: string; patientId: string; branchId: string; daysAgo: (days: number) => Date },
 ): Promise<void> {
-  const { orgId, dentistUserId: actor, patientId, branchId, daysAgo } = input
+  const { orgId, professionalUserId: actor, patientId, branchId, daysAgo } = input
   // Visita inicial: le sangran las encías. El odontograma registra las piezas
   // que faltan y el implante; el periodontograma las toma de ahí (decisión 4).
   const first = await createEncounter(db, orgId, actor, patientId, {

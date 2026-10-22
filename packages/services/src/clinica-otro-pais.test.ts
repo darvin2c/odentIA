@@ -43,18 +43,18 @@ async function bogotaClinic() {
   const orgId = `co-${randomUUID()}`
   await insertOrg(ownerDb, orgId, orgId)
   const reception = randomUUID()
-  const dentist = randomUUID()
-  for (const [id, name] of [[reception, "Paula Recepción"], [dentist, "Luis Gómez"]] as const)
+  const professional = randomUUID()
+  for (const [id, name] of [[reception, "Paula Recepción"], [professional, "Luis Gómez"]] as const)
     await ownerDb.insert(user).values({ id, name, email: `${id}@example.test` })
   await ownerDb.insert(member).values([
     { id: randomUUID(), organizationId: orgId, userId: reception, role: "reception", createdAt: new Date() },
-    { id: randomUUID(), organizationId: orgId, userId: dentist, role: "dentist", createdAt: new Date() },
+    { id: randomUUID(), organizationId: orgId, userId: professional, role: "clinician", createdAt: new Date() },
   ])
   const run = <T>(fn: (tx: Db) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const profile = await run((tx) =>
     updateOrgRegion(tx, orgId, reception, { countryCode: "CO", applyCountryPreset: true }),
   )
-  return { orgId, reception, dentist, profile, run }
+  return { orgId, reception, professional, profile, run }
 }
 
 function answers(demographics: Record<string, unknown>) {
@@ -157,10 +157,10 @@ it("«Faltan datos para atenderla» lo calcula el servidor: lo necesario siempre
 it("otra clínica, otro país: la atención y el odontograma son los del núcleo, sin siglas ni odontograma firmado", async () => {
   const c = await bogotaClinic()
   expect(clinicalProfileFor("CO").odontogram).toBeNull()
-  await makeSigner(c.orgId, c.dentist)
+  await makeSigner(c.orgId, c.professional)
   // Título y colegio de su país: el perfil no trae ninguno por defecto.
   await c.run((tx) =>
-    setProfessionalProfile(tx, c.orgId, c.dentist, c.dentist, {
+    setProfessionalProfile(tx, c.orgId, c.professional, c.professional, {
       professionalTitle: "Odontólogo",
       registrationBody: "Colegio de odontólogos",
       registrationNumber: "4567",
@@ -176,12 +176,12 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
       answers({ docType: "NACIONAL", docNumber: "52998877", birthDate: "1988-03-04", phone: "+573001112233" }),
     ),
   )
-  const args = [c.orgId, c.dentist, andrea.id] as const
+  const args = [c.orgId, c.professional, andrea.id] as const
   // Una resina propia que deja una restauración, sin variante: fuera de Perú es opcional.
   // En Colombia cada servicio lleva su código CUPS (ADR 0069): el de la obturación con resina.
   await seedProcedureCodes(ownerDb)
   const resin = await c.run(async (tx) =>
-    createService(tx, c.orgId, c.dentist, {
+    createService(tx, c.orgId, c.professional, {
       name: "Resina compuesta",
       officialCode: "232102",
       specialtyId: (await librarySpecialtyIds(tx, c.orgId, ["restauradora"])).get("restauradora")!,
@@ -208,7 +208,7 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   expect(caries?.details).not.toHaveProperty("variant")
   // Lo tratado queda dibujado, también aquí.
   await c.run((tx) =>
-    addEncounterProcedure(tx, c.orgId, c.dentist, andrea.id, encounter.id, {
+    addEncounterProcedure(tx, c.orgId, c.professional, andrea.id, encounter.id, {
       serviceId: resin.id,
       toothNumber: 16,
       surfaces: ["occlusal"],

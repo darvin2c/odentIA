@@ -192,7 +192,7 @@ export interface OpenEncounterBrief {
   id: string
   reason: string | null
   startedAt: Date
-  dentistUserId: string
+  professionalUserId: string
   appointmentId: string | null
   diagnosisCount: number
   procedureCount: number
@@ -249,13 +249,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
             isNull(encounterProcedure.voidedAt),
           ),
         ),
-      checkEncounterClosing(tx, orgId, draft.dentistUserId, draft),
+      checkEncounterClosing(tx, orgId, draft.professionalUserId, draft),
     ])
     openEncounter = {
       id: draft.id,
       reason: draft.reason,
       startedAt: draft.startedAt,
-      dentistUserId: draft.dentistUserId,
+      professionalUserId: draft.professionalUserId,
       appointmentId: draft.appointmentId,
       diagnosisCount: dx?.n ?? 0,
       procedureCount: proc?.n ?? 0,
@@ -865,7 +865,7 @@ export async function getTimeline(
           .filter((t) => t.encounterId === row.id)
           .map((t) => t.toothNumber)
           .sort((a, b) => a - b),
-        authorId: row.dentistUserId,
+        authorId: row.professionalUserId,
         status: row.status,
         procedures: rowProcedures.map((p) => p.description),
         documentsCount: related.length,

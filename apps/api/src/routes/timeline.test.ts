@@ -102,7 +102,7 @@ beforeAll(async () => {
   )
   // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
   await ownerDb.execute(
-    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'clinician', now()) on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
@@ -570,8 +570,8 @@ it("timeline de paciente de otra organización responde 404 con rol clínico; me
   const other = await withOrgContext(appDb, "org_b", (tx) =>
     createPatient(tx, "org_b", "u-1", { displayName: "Paciente B timeline" }),
   )
-  const dentist = buildApp("dentist")
-  const res = await dentist.request(`/patients/${other.id}/timeline`, { method: "GET" })
+  const professional = buildApp("clinician")
+  const res = await professional.request(`/patients/${other.id}/timeline`, { method: "GET" })
   expect(res.status).toBe(404)
   const body = (await res.json()) as ErrorBody
   expect(typeof body.error.code).toBe("string")
@@ -635,9 +635,9 @@ it("documentos: la lectura devuelve el contexto vigente fusionado", async () => 
   expect(doc.encounterId).toBeNull()
 })
 
-it("timeline: dentist lee 200, member ni lee ni muta clínica ni corrige contexto (403 sin efectos)", async () => {
+it("timeline: professional lee 200, member ni lee ni muta clínica ni corrige contexto (403 sin efectos)", async () => {
   const admin = buildApp("admin")
-  const dentist = buildApp("dentist")
+  const professional = buildApp("clinician")
   const member = buildApp("member")
   const patientId = await createFixturePatient(admin, "Timeline permisos")
   const docId = await postDocument(admin, patientId, {
@@ -646,7 +646,7 @@ it("timeline: dentist lee 200, member ni lee ni muta clínica ni corrige context
     toothNumbers: [36],
   })
 
-  const read = await dentist.request(`/patients/${patientId}/timeline`, { method: "GET" })
+  const read = await professional.request(`/patients/${patientId}/timeline`, { method: "GET" })
   expect(read.status).toBe(200)
 
   const memberRead = await member.request(`/patients/${patientId}/timeline`, { method: "GET" })

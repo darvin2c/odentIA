@@ -21,7 +21,7 @@
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, sql } from "drizzle-orm"
-import { isDentist, ownBudgetOf } from "./budgets.js"
+import { isProfessional, ownBudgetOf } from "./budgets.js"
 import type { ClinicalAccessResource } from "./clinical-access.js"
 import { purchaseOrderLabel } from "./finance.js"
 import { accountBalances } from "./payments.js"
@@ -212,7 +212,7 @@ export async function searchEverything(
   const now = input.now ?? new Date()
   const seesPeople = can("patients.read")
   const seesNonPatients = can("crm.read")
-  const dentist = isDentist(input.viewer.role)
+  const professional = isProfessional(input.viewer.role)
 
   const owners = new Map<string, SearchOwner>()
   /** Lo clínico de cada cosa encontrada: se anota solo si se muestra. */
@@ -260,7 +260,7 @@ export async function searchEverything(
       from appointment a
       join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
       join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-      left join "user" u on u.id = a.dentist_user_id
+      left join "user" u on u.id = a.professional_user_id
       where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada')
         and a.starts_at >= ${new Date(now.getTime() - 86_400_000).toISOString()}
         and ${foldedWordsMatch([sql`a.service_name`, sql`a.reason`], q)}
@@ -431,7 +431,7 @@ export async function searchEverything(
       select b.id, b.budget_number, b.title, b.status, coalesce(b.presented_at, b.created_at) as at, p.person_id
       from treatment_budget b join patient p on p.organization_id = b.organization_id and p.id = b.patient_id
       where b.organization_id = ${orgId} and b.status not in ('sustituido', 'cancelado')
-        ${dentist ? sql`and ${ownBudgetOf({ id: sql`b.id`, organizationId: sql`b.organization_id`, createdBy: sql`b.created_by` }, input.viewer.userId)}` : sql``}
+        ${professional ? sql`and ${ownBudgetOf({ id: sql`b.id`, organizationId: sql`b.organization_id`, createdBy: sql`b.created_by` }, input.viewer.userId)}` : sql``}
         and ${docNumber != null ? sql`b.budget_number = ${docNumber}` : foldedWordsMatch([sql`b.title`, sql`b.notes`], q)}
       order by at desc limit ${PER_TYPE}`)
     for (const row of budgets) addToPerson(String(row.person_id), budgetItem(row, true))
@@ -679,7 +679,7 @@ export async function searchEverything(
     now,
     on,
     userId: input.viewer.userId,
-    dentist,
+    professional,
   })
   for (const [index, row] of [...matchedPeople, ...extraPeople].entries()) {
     const id = String(row.id)
@@ -815,7 +815,7 @@ async function pendingOfPeople(
     now: Date
     on: (type: SearchType) => boolean
     userId: string
-    dentist: boolean
+    professional: boolean
   },
 ): Promise<Map<string, SearchItem[]>> {
   const out = new Map<string, SearchItem[]>()
@@ -831,7 +831,7 @@ async function pendingOfPeople(
   if (patientIds.length && can("appointments.read") && on("cita")) {
     const next = await run(sql`
       select distinct on (a.patient_id) a.id, a.patient_id, a.service_name, a.reason, a.starts_at, u.name as professional
-      from appointment a left join "user" u on u.id = a.dentist_user_id
+      from appointment a left join "user" u on u.id = a.professional_user_id
       where a.organization_id = ${orgId} and a.patient_id in ${inList(patientIds)}
         and a.status in ('programada', 'confirmada') and a.starts_at >= ${now.toISOString()}
       order by a.patient_id, a.starts_at`)
@@ -917,7 +917,7 @@ async function pendingOfPeople(
       select distinct on (b.patient_id) b.id, b.patient_id, b.budget_number, b.title, b.status, coalesce(b.presented_at, b.created_at) as at
       from treatment_budget b
       where b.organization_id = ${orgId} and b.patient_id in ${inList(patientIds)} and b.status in ('borrador', 'presentado', 'pospuesto')
-        ${context.dentist ? sql`and ${ownBudgetOf({ id: sql`b.id`, organizationId: sql`b.organization_id`, createdBy: sql`b.created_by` }, context.userId)}` : sql``}
+        ${context.professional ? sql`and ${ownBudgetOf({ id: sql`b.id`, organizationId: sql`b.organization_id`, createdBy: sql`b.created_by` }, context.userId)}` : sql``}
       order by b.patient_id, at desc`)
     for (const row of open) {
       const personId = personOfPatient.get(String(row.patient_id)) as string

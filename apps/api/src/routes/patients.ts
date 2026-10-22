@@ -353,7 +353,7 @@ const encounterCreateInput = z.object({
   appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
   /** Profesional que atiende; por defecto quien abre la atención. */
-  dentistUserId: z.string().nullish(),
+  professionalUserId: z.string().nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
   planItemIds: z.array(z.uuid()).max(52).optional(),
 })
@@ -609,8 +609,8 @@ const coordinationScheduleInput = z.union([
       appointment: z
         .object({
           branchId: z.uuid().optional(),
-          dentistUserId: z.string().min(1),
-          chairId: z.uuid().optional(),
+          professionalUserId: z.string().min(1),
+          roomId: z.uuid().optional(),
           serviceId: z.uuid().optional(),
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),

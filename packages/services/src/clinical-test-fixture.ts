@@ -32,7 +32,7 @@ export async function makeSigner(orgId: string, userId: string): Promise<void> {
         id: randomUUID(),
         organizationId: orgId,
         userId,
-        role: "dentist",
+        role: "clinician",
         createdAt: new Date(),
       })
   }
@@ -124,7 +124,7 @@ export async function clinicalFixture() {
     .values({
       organizationId: "org_a",
       patientId: person.id,
-      dentistUserId: actor,
+      professionalUserId: actor,
       reason: "Consulta",
     })
     .returning()

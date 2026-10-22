@@ -220,7 +220,7 @@ export function EncounterDetailView({
           </div>
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>
-            <dd className="text-sm">{memberName(encounter.dentistUserId)}</dd>
+            <dd className="text-sm">{memberName(encounter.professionalUserId)}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Inicio y fin</dt>

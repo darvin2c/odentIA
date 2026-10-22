@@ -190,7 +190,7 @@ test("cada rol ve lo de su pantalla: recepción no ve la historia clínica, el o
   await expect(dialog(page).getByText("No encontramos «bruxismo».")).toBeVisible()
   await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
 
-  await setRole(fixtureDb, owner, "dentist")
+  await setRole(fixtureDb, owner, "clinician")
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
   await pressSearchShortcut(page)
   await search(page, "bruxismo")

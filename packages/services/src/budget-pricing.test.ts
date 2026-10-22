@@ -78,18 +78,18 @@ it("el odontólogo solo presupuesta su plan propio", async () => {
     }),
   )
   const own = await f.run((tx) =>
-    createBudget(tx, ...f.args, { planId: ownPlan.id, itemIds: [item.id] }, { memberRole: "dentist" }),
+    createBudget(tx, ...f.args, { planId: ownPlan.id, itemIds: [item.id] }, { memberRole: "clinician" }),
   )
   expect(own.planId).toBe(ownPlan.id)
   // Otro odontólogo no puede presupuestar ni entregar un plan ajeno.
   const other = "00000000-0000-0000-0000-000000000001"
   await expect(
     f.run((tx) =>
-      createBudget(tx, "org_a", other, f.patient.id, { planId: ownPlan.id, itemIds: [item.id] }, { memberRole: "dentist" }),
+      createBudget(tx, "org_a", other, f.patient.id, { planId: ownPlan.id, itemIds: [item.id] }, { memberRole: "clinician" }),
     ),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
   await expect(
-    f.run((tx) => deliverBudget(tx, "org_a", other, f.patient.id, own.id, { memberRole: "dentist" })),
+    f.run((tx) => deliverBudget(tx, "org_a", other, f.patient.id, own.id, { memberRole: "clinician" })),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
 })
 

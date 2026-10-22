@@ -31,7 +31,7 @@ import { appointmentTotalsMany, waitInRoom } from "./reports.js"
 /** Minutos de horario libres de bloqueos (`availMin`) y los ocupados por citas, en una hora de un día. */
 export interface AgendaSlot {
   branchId: string
-  dentistUserId: string
+  professionalUserId: string
   /** Día de la sede, `YYYY-MM-DD`. */
   day: string
   /** 0 domingo … 6 sábado. */
@@ -46,7 +46,7 @@ export interface AgendaSlot {
 /** Un día de horario de un profesional: lo que tenía de horario, para decir «cerrado» si un bloqueo lo tapó todo. */
 export interface AgendaDay {
   branchId: string
-  dentistUserId: string
+  professionalUserId: string
   day: string
   weekday: number
   start: Date
@@ -127,7 +127,7 @@ function length(spans: Array<[number, number]>): number {
 
 type ScheduleRow = {
   branchId: string
-  dentistUserId: string
+  professionalUserId: string
   weekday: number
   startMin: number
   endMin: number
@@ -144,48 +144,48 @@ type ScheduleRow = {
  * (horarios, bloqueos, citas) y las cuentas se hacen aquí, con las mismas
  * operaciones de tramos que la agenda (`availability.ts`).
  */
-export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: { branchId?: string; dentistUserId?: string } = {}): Promise<AgendaMinutes> {
+export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: { branchId?: string; professionalUserId?: string } = {}): Promise<AgendaMinutes> {
   const from = span.start.getTime()
   const to = span.end.getTime()
   if (to <= from) return { slots: [], days: [] }
   const branchFilter = (column: string) => (options.branchId ? sql`and ${sql.raw(column)} = ${options.branchId}` : sql``)
-  const dentistFilter = (column: string) => (options.dentistUserId ? sql`and ${sql.raw(column)} = ${options.dentistUserId}` : sql``)
+  const professionalFilter = (column: string) => (options.professionalUserId ? sql`and ${sql.raw(column)} = ${options.professionalUserId}` : sql``)
   const branches = await tx.execute<{ id: string; tz: string }>(sql`
     select b.id, coalesce(b.timezone, op.timezone, 'UTC') as tz
     from branch b left join org_profile op on op.organization_id = b.organization_id
     where b.organization_id = ${orgId} ${branchFilter("b.id")}`)
   const schedules = await tx.execute<ScheduleRow>(sql`
-    select s.branch_id as "branchId", s.dentist_user_id as "dentistUserId", s.weekday, s.start_min as "startMin", s.end_min as "endMin",
+    select s.branch_id as "branchId", s.professional_user_id as "professionalUserId", s.weekday, s.start_min as "startMin", s.end_min as "endMin",
       s.is_active as "isActive", s.valid_from::text as "validFrom", s.valid_until::text as "validUntil"
-    from professional_schedule s where s.organization_id = ${orgId} ${branchFilter("s.branch_id")} ${dentistFilter("s.dentist_user_id")}`)
-  const blocks = await tx.execute<{ branchId: string; dentistUserId: string | null; start: Date | string; end: Date | string }>(sql`
-    select k.branch_id as "branchId", k.dentist_user_id as "dentistUserId", k.starts_at as start, k.ends_at as end
+    from professional_schedule s where s.organization_id = ${orgId} ${branchFilter("s.branch_id")} ${professionalFilter("s.professional_user_id")}`)
+  const blocks = await tx.execute<{ branchId: string; professionalUserId: string | null; start: Date | string; end: Date | string }>(sql`
+    select k.branch_id as "branchId", k.professional_user_id as "professionalUserId", k.starts_at as start, k.ends_at as end
     from schedule_block k
     where k.organization_id = ${orgId} and k.starts_at < ${at(span.end)} and k.ends_at > ${at(span.start)}
-      and (k.dentist_user_id is not null or k.chair_id is null) ${branchFilter("k.branch_id")}`)
-  const booked = await tx.execute<{ branchId: string; dentistUserId: string; start: Date | string; end: Date | string }>(sql`
-    select a.branch_id as "branchId", a.dentist_user_id as "dentistUserId", a.starts_at as start, a.ends_at as end
+      and (k.professional_user_id is not null or k.room_id is null) ${branchFilter("k.branch_id")}`)
+  const booked = await tx.execute<{ branchId: string; professionalUserId: string; start: Date | string; end: Date | string }>(sql`
+    select a.branch_id as "branchId", a.professional_user_id as "professionalUserId", a.starts_at as start, a.ends_at as end
     from appointment a
     where a.organization_id = ${orgId} and a.starts_at < ${at(span.end)} and a.ends_at > ${at(span.start)} and a.status <> 'cancelada'
-      ${branchFilter("a.branch_id")} ${dentistFilter("a.dentist_user_id")}
+      ${branchFilter("a.branch_id")} ${professionalFilter("a.professional_user_id")}
     order by a.starts_at`)
 
-  const pairKey = (branchId: string, dentistUserId: string): string => `${branchId}|${dentistUserId}`
+  const pairKey = (branchId: string, professionalUserId: string): string => `${branchId}|${professionalUserId}`
   const byPair = new Map<string, ScheduleRow[]>()
   for (const row of schedules) {
-    const key = pairKey(row.branchId, row.dentistUserId)
+    const key = pairKey(row.branchId, row.professionalUserId)
     const list = byPair.get(key) ?? []
     list.push(row)
     byPair.set(key, list)
   }
   const visits = new Map<string, Array<[number, number]>>()
   for (const row of booked) {
-    const key = pairKey(row.branchId, row.dentistUserId)
+    const key = pairKey(row.branchId, row.professionalUserId)
     const list = visits.get(key) ?? []
     list.push([new Date(row.start).getTime(), new Date(row.end).getTime()])
     visits.set(key, list)
   }
-  const closures = blocks.map((row) => ({ branchId: row.branchId, dentistUserId: row.dentistUserId, span: [new Date(row.start).getTime(), new Date(row.end).getTime()] as [number, number] }))
+  const closures = blocks.map((row) => ({ branchId: row.branchId, professionalUserId: row.professionalUserId, span: [new Date(row.start).getTime(), new Date(row.end).getTime()] as [number, number] }))
 
   const slots: AgendaSlot[] = []
   const days: AgendaDay[] = []
@@ -201,7 +201,7 @@ export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: 
       const weekday = new Date(`${day}T12:00:00Z`).getUTCDay()
       const hours = Array.from({ length: 25 }, (_, hour) => clock(hour * 60))
       for (const [key, rows] of pairs) {
-        const dentistUserId = key.slice(branchId.length + 1)
+        const professionalUserId = key.slice(branchId.length + 1)
         const first = rows.reduce((min, row) => (row.validFrom < min ? row.validFrom : min), rows[0]?.validFrom ?? day)
         const assumed = day < first
         const rules = rows.filter(
@@ -214,7 +214,7 @@ export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: 
         )
         if (scheduled.length === 0) continue
         const cuts = closures
-          .filter((block) => block.branchId === branchId && (block.dentistUserId === null || block.dentistUserId === dentistUserId))
+          .filter((block) => block.branchId === branchId && (block.professionalUserId === null || block.professionalUserId === professionalUserId))
           .map((block) => block.span)
         const free = subtractSpans(scheduled, cuts)
         // Las citas van ordenadas: cada profesional avanza su cursor día a día.
@@ -227,7 +227,7 @@ export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: 
         const busy = intersectSpans(free, today)
         days.push({
           branchId,
-          dentistUserId,
+          professionalUserId,
           day,
           weekday,
           start: new Date(dayStart),
@@ -242,7 +242,7 @@ export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: 
           if (availMs <= 0) continue
           slots.push({
             branchId,
-            dentistUserId,
+            professionalUserId,
             day,
             weekday,
             hour,
@@ -270,10 +270,10 @@ export function occupancyBySpan(days: AgendaDay[], spans: Span[]): Occupancy[] {
     const inside = days.filter((day) => day.start.getTime() >= span.start.getTime() && day.start.getTime() < span.end.getTime())
     const byUser = new Map<string, { availMin: number; occMin: number }>()
     for (const day of inside) {
-      const entry = byUser.get(day.dentistUserId) ?? { availMin: 0, occMin: 0 }
+      const entry = byUser.get(day.professionalUserId) ?? { availMin: 0, occMin: 0 }
       entry.availMin += day.availMin
       entry.occMin += day.occMin
-      byUser.set(day.dentistUserId, entry)
+      byUser.set(day.professionalUserId, entry)
     }
     const all = [...byUser.values()]
     return {
@@ -297,25 +297,25 @@ export async function occupancyMany(tx: Db, orgId: string, spans: Span[], option
 /** Primer día con horario guardado, por profesional y sede: antes de él, el mapa usa el de hoy. */
 async function firstScheduleDays(tx: Db, orgId: string, branchId: string | undefined) {
   const rows = await tx.execute<{ userId: string; first: string }>(sql`
-    select dentist_user_id as "userId", min(valid_from)::text as first from professional_schedule
+    select professional_user_id as "userId", min(valid_from)::text as first from professional_schedule
     where organization_id = ${orgId} ${branchId ? sql`and branch_id = ${branchId}` : sql``}
-    group by dentist_user_id`)
+    group by professional_user_id`)
   return [...rows]
 }
 
 /** Citas del periodo de cada profesional, por cómo terminaron (la misma regla de `appointmentTotalsMany`). */
 export async function appointmentsByProfessional(tx: Db, orgId: string, span: Span, now: Date, branchId: string | undefined) {
   const rows = await tx.execute<{ userId: string; name: string; attended: number; noShow: number; cancelled: number; unmarked: number }>(sql`
-    select a.dentist_user_id as "userId", u.name,
+    select a.professional_user_id as "userId", u.name,
       count(*) filter (where a.status = 'atendida')::int as attended,
       count(*) filter (where a.status = 'no_asistio')::int as "noShow",
       count(*) filter (where a.status = 'cancelada')::int as cancelled,
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
-    from appointment a join "user" u on u.id = a.dentist_user_id
+    from appointment a join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
       and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))
       ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
-    group by a.dentist_user_id, u.name`)
+    group by a.professional_user_id, u.name`)
   return [...rows]
 }
 
@@ -339,7 +339,7 @@ export async function getAgendaReport(tx: Db, orgId: string, query: ReportQuery,
   const wait = await waitInRoom(tx, orgId, scope, window)
   const names = new Map<string, string>()
   for (const row of byProfessional) names.set(row.userId, row.name)
-  const people = [...new Set([...minutes.days.map((day) => day.dentistUserId), ...byProfessional.map((row) => row.userId)])]
+  const people = [...new Set([...minutes.days.map((day) => day.professionalUserId), ...byProfessional.map((row) => row.userId)])]
   const missing = people.filter((id) => !names.has(id))
   if (missing.length > 0) {
     const rows = await tx.execute<{ id: string; name: string }>(sql`select id, name from "user" where id in (${sql.join(missing.map((id) => sql`${id}`), sql`, `)})`)
@@ -397,7 +397,7 @@ export async function getAgendaReport(tx: Db, orgId: string, query: ReportQuery,
       days: minutes.days.filter(inTwelve).map((day) => ({
         day: day.day,
         weekday: day.weekday,
-        userId: day.dentistUserId,
+        userId: day.professionalUserId,
         scheduledMin: day.scheduledMin,
         availMin: day.availMin,
         occMin: day.occMin,
@@ -405,14 +405,14 @@ export async function getAgendaReport(tx: Db, orgId: string, query: ReportQuery,
       })),
       hours: aggregate(
         minutes.slots.filter((slot) => slot.at.getTime() >= twelve.start.getTime() && slot.at.getTime() < twelve.end.getTime()),
-        (slot) => `${slot.day.slice(0, 7)}|${slot.hour}|${slot.dentistUserId}`,
+        (slot) => `${slot.day.slice(0, 7)}|${slot.hour}|${slot.professionalUserId}`,
       ).map(([key, item]) => {
         const [month, hour, userId] = key.split("|") as [string, string, string]
         return { month, hour: Number(hour), userId, ...item }
       }),
       week: aggregate(
         minutes.slots.filter((slot) => inWindow(slot.at)),
-        (slot) => `${slot.weekday}|${slot.hour}|${slot.dentistUserId}`,
+        (slot) => `${slot.weekday}|${slot.hour}|${slot.professionalUserId}`,
       ).map(([key, item]) => {
         const [weekday, hour, userId] = key.split("|") as [string, string, string]
         return { weekday: Number(weekday), hour: Number(hour), userId, ...item }

@@ -1591,7 +1591,7 @@ interface CollectedApp {
   methodLabel: string
   cashMethod: boolean
   patientId: string
-  dentistUserId: string
+  professionalUserId: string
 }
 
 /** Una aplicación de un pago a un cargo: lo mínimo para repartir sus devoluciones (`allocateRefunds`). */
@@ -1642,14 +1642,14 @@ async function collectedApplications(
     eq(encounter.status, "finalizada"),
     isNull(encounter.voidedAt),
   ]
-  if (query.professionalUserId) filters.push(eq(encounter.dentistUserId, query.professionalUserId))
+  if (query.professionalUserId) filters.push(eq(encounter.professionalUserId, query.professionalUserId))
   if (query.branchId) filters.push(eq(patientPayment.branchId, query.branchId))
   const rows = await tx
     .select({
       app: patientPaymentApplication,
       charge: patientCharge,
       payment: patientPayment,
-      dentistUserId: encounter.dentistUserId,
+      professionalUserId: encounter.professionalUserId,
     })
     .from(patientPaymentApplication)
     .innerJoin(
@@ -1694,7 +1694,7 @@ async function collectedApplications(
     methodLabel: r.payment.methodName,
     cashMethod: methodCashOf(r.payment),
     patientId: r.app.patientId,
-    dentistUserId: r.dentistUserId,
+    professionalUserId: r.professionalUserId,
   }))
 }
 
@@ -2049,7 +2049,7 @@ export async function listMonthCommissions(
     .from(commissionRule)
     .where(eq(commissionRule.organizationId, orgId))
   const active = await collectedApplications(tx, orgId, start, end, unit, { liveNow: true })
-  const ids = [...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.dentistUserId)])]
+  const ids = [...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)])]
   // Solo quienes siguen en la clínica; el histórico de un ex miembro se ve en sus pagos.
   const members = ids.length
     ? await tx
@@ -2349,7 +2349,7 @@ export async function collectedByProfessional(
   const profSums = new Map<string, number>()
   for (const a of apps) {
     const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-    profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
+    profSums.set(a.professionalUserId, (profSums.get(a.professionalUserId) ?? 0) + net)
   }
   const names = await userNames(tx, [...profSums.keys()])
   return [...profSums].map(([professionalUserId, cobradoCents]) => ({
@@ -2458,7 +2458,7 @@ export interface DebtRow {
   /** Conceptos pendientes, del más antiguo al más nuevo (hasta tres). */
   concepts: string[]
   /** Última atención que dejó algo por cobrar: cuándo terminó y quién atendió. */
-  lastAttended: { at: Date; dentistName: string | null } | null
+  lastAttended: { at: Date; professionalName: string | null } | null
   /**
    * Cuándo salió hoy de su atención (o se le anotó algo hoy), en el día de la
    * sede; null si debe de antes. Con esto se arma «Atendidos hoy» de la caja y
@@ -2574,13 +2574,13 @@ export async function getDebts(
         .filter((id): id is string => !!id),
     ),
   ]
-  const attended = new Map<string, { at: Date; dentistUserId: string }>()
+  const attended = new Map<string, { at: Date; professionalUserId: string }>()
   if (procedureIds.length > 0) {
     const visits = await tx
       .select({
         procedureId: encounterProcedure.id,
         finalizedAt: encounter.finalizedAt,
-        dentistUserId: encounter.dentistUserId,
+        professionalUserId: encounter.professionalUserId,
       })
       .from(encounterProcedure)
       .innerJoin(
@@ -2589,9 +2589,9 @@ export async function getDebts(
       )
       .where(and(eq(encounterProcedure.organizationId, orgId), inArray(encounterProcedure.id, procedureIds)))
     for (const visit of visits)
-      if (visit.finalizedAt) attended.set(visit.procedureId, { at: visit.finalizedAt, dentistUserId: visit.dentistUserId })
+      if (visit.finalizedAt) attended.set(visit.procedureId, { at: visit.finalizedAt, professionalUserId: visit.professionalUserId })
   }
-  const dentists = await userNames(tx, [...attended.values()].map((visit) => visit.dentistUserId))
+  const professionals = await userNames(tx, [...attended.values()].map((visit) => visit.professionalUserId))
   // A quién escribirle: la propia persona y, si la tiene, su conversación abierta.
   const selves = await tx
     .select({ patientId: patientContact.patientId, contactId: patientContact.contactId })
@@ -2636,7 +2636,7 @@ export async function getDebts(
   const isToday = (at: Date | null): at is Date => at !== null && dayKeyIn(at, timezone) === today
   return Object.entries(groups)
     .map(([key, { latestCharge: _latest, ...row }]) => {
-      let last: { at: Date; dentistUserId: string } | null = null
+      let last: { at: Date; professionalUserId: string } | null = null
       for (const charge of chargesOf[key] ?? []) {
         const visit = charge.procedureId ? attended.get(charge.procedureId) : undefined
         if (visit && (!last || visit.at > last.at)) last = visit
@@ -2645,7 +2645,7 @@ export async function getDebts(
         ...row,
         displayName: names.get(row.patientId) ?? "",
         creditCents: credit.get(`${row.patientId}|${row.currency}`) ?? 0,
-        lastAttended: last ? { at: last.at, dentistName: dentists.get(last.dentistUserId) ?? null } : null,
+        lastAttended: last ? { at: last.at, professionalName: professionals.get(last.professionalUserId) ?? null } : null,
         attendedTodayAt: last && isToday(last.at) ? last.at : isToday(row.latestSince) ? row.latestSince : null,
         contactId: contactOf.get(row.patientId) ?? null,
         conversationId: openThread.get(contactOf.get(row.patientId) ?? "") ?? null,

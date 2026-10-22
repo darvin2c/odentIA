@@ -29,7 +29,7 @@ export function taskAreasOfRole(role: string): TaskArea[] {
   if (role === "owner" || role === "admin") return ["administracion"]
   if (role === "reception") return ["recepcion"]
   if (role === "cashier") return ["caja"]
-  if (role === "dentist") return ["clinico"]
+  if (role === "clinician") return ["clinico"]
   return []
 }
 

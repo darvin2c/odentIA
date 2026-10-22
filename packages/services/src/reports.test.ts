@@ -5,7 +5,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { clinicalFollowUp, encounter, encounterProcedure, patientPayment } from "@odentia/db/schema/clinical"
@@ -56,19 +56,19 @@ async function clinic(profile?: { country: string; currency: string; timezone: s
     const [row] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: number })
     return row!.id
   }
-  const dentist = async (name: string) => {
+  const professional = async (name: string) => {
     const id = randomUUID()
     await ownerDb.insert(user).values({ id, name, email: `${id}@reportes.test` })
     return id
   }
   const site = async (name: string) => {
     const [row] = await ownerDb.insert(branch).values({ organizationId: orgId, name }).returning()
-    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: row!.id, name: "Unidad dental 1" }).returning()
-    return { branchId: row!.id, chairId: chair!.id }
+    const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: row!.id, name: "Unidad dental 1" }).returning()
+    return { branchId: row!.id, roomId: room!.id }
   }
   const visit = (
-    place: { branchId: string; chairId: string },
-    dentistUserId: string,
+    place: { branchId: string; roomId: string },
+    professionalUserId: string,
     patientId: string,
     startsAt: string,
     status: string,
@@ -77,7 +77,7 @@ async function clinic(profile?: { country: string; currency: string; timezone: s
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       ...place,
-      dentistUserId,
+      professionalUserId,
       patientId,
       serviceName: "Evaluación",
       startsAt: new Date(startsAt),
@@ -86,13 +86,13 @@ async function clinic(profile?: { country: string; currency: string; timezone: s
       status,
       source,
     })
-  return { orgId, run, person, dentist, site, visit }
+  return { orgId, run, person, professional, site, visit }
 }
 
 it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clínica y por sede", async () => {
   const c = await clinic()
   const [a, b] = [await c.site("Sede A"), await c.site("Sede B")]
-  const [ana, luis] = [await c.dentist("Ana"), await c.dentist("Luis")]
+  const [ana, luis] = [await c.professional("Ana"), await c.professional("Luis")]
   const [p1, p2, p3, p4, p5] = [await c.person("Uno", 1), await c.person("Dos", 2), await c.person("Tres", 3), await c.person("Cuatro", 4), await c.person("Cinco", 5)]
   // Septiembre.
   await c.visit(a, ana, p1, "2026-09-03T15:00:00Z", "atendida")
@@ -359,7 +359,7 @@ it("lo cobrado: el periodo, el anterior y por mes, en la moneda y la zona de otr
   // Una clínica de otro país: euros y hora de Madrid.
   const c = await clinic({ country: "ES", currency: "EUR", timezone: "Europe/Madrid", locale: "es-ES" })
   const place = await c.site("Centro")
-  const [doctor, p1] = [await c.dentist("Marta"), await c.person("Uno", 1)]
+  const [doctor, p1] = [await c.professional("Marta"), await c.person("Uno", 1)]
   const pay = (paidAt: string, amountCents: number) =>
     ownerDb.insert(patientPayment).values({ organizationId: c.orgId, patientId: p1, branchId: place.branchId, amountCents, currency: "EUR", paidAt: new Date(paidAt), methodName: "tarjeta" })
   await pay("2026-08-10T10:00:00Z", 10000)
@@ -393,7 +393,7 @@ it("lo cobrado: el periodo, el anterior y por mes, en la moneda y la zona de otr
 it("el asesor acompaña a la cifra solo si está encendido y hay algo que hacer", async () => {
   const c = await clinic()
   const [a, b] = [await c.site("Sede A"), await c.site("Sede B")]
-  const [doctor, other, absent, present] = [await c.dentist("Ana"), await c.dentist("Luis"), await c.person("Falta", 1), await c.person("Viene", 2)]
+  const [doctor, other, absent, present] = [await c.professional("Ana"), await c.professional("Luis"), await c.person("Falta", 1), await c.person("Viene", 2)]
   // Una inasistencia y una atendida hace veinte minutos: la detección mira desde ahora.
   const recent = new Date(Date.now() - 20 * 60_000)
   await c.visit(a, doctor, absent, recent.toISOString(), "no_asistio")

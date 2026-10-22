@@ -30,7 +30,7 @@ import { createWorkspaceRoute } from "./workspace.js"
 // Matriz de acceso económico (P2) sobre API real con PostgreSQL efímero.
 // reception no lee caja/cuenta/importes ni configura métodos; cashier cobra,
 // cierra y decide presupuestos pero no configura métodos ni comisiones;
-// dentist presupuestos propios sin caja y comisiones propias sin ajenas.
+// professional presupuestos propios sin caja y comisiones propias sin ajenas.
 // Tenants aislados (org_fin_a vs org_fin_b) con appDb (RLS).
 // Montaje del test: /patients (incluye patient-budgets y patient-payments),
 // /finance, /org/payment-methods, /commissions.
@@ -230,8 +230,8 @@ beforeAll(async () => {
       ('m-fin-admin', ${ORG_A}, ${ADMIN}, 'admin', now()),
       ('m-fin-admin-b', ${ORG_B}, ${ADMIN_B}, 'admin', now()),
       ('m-fin-recep', ${ORG_A}, ${RECEP}, 'reception', now()),
-      ('m-fin-dent-1', ${ORG_A}, ${DENT1}, 'dentist', now()),
-      ('m-fin-dent-2', ${ORG_A}, ${DENT2}, 'dentist', now()),
+      ('m-fin-dent-1', ${ORG_A}, ${DENT1}, 'clinician', now()),
+      ('m-fin-dent-2', ${ORG_A}, ${DENT2}, 'clinician', now()),
       ('m-fin-cash', ${ORG_A}, ${CASH}, 'cashier', now()),
       ('m-fin-member', ${ORG_A}, ${MEMBER}, 'member', now())`)
   await ownerDb.execute(sql`
@@ -291,10 +291,10 @@ beforeAll(async () => {
   }
   ;[ITEM1, ITEM2, ITEM3] = itemIds as [string, string, string]
   const budget = await withOrgContext(appDb, ORG_A, (tx) =>
-    createBudget(tx, ORG_A, DENT1, PAT_A, { planId: PLAN_A, itemIds: [ITEM1] }, { memberRole: "dentist" }),
+    createBudget(tx, ORG_A, DENT1, PAT_A, { planId: PLAN_A, itemIds: [ITEM1] }, { memberRole: "clinician" }),
   )
   await withOrgContext(appDb, ORG_A, (tx) =>
-    deliverBudget(tx, ORG_A, DENT1, PAT_A, budget.id, { memberRole: "dentist" }),
+    deliverBudget(tx, ORG_A, DENT1, PAT_A, budget.id, { memberRole: "clinician" }),
   )
   BUDGET1 = budget.id
 }, 180_000)
@@ -317,7 +317,7 @@ it("métodos: activeOnly filtra y configurar exige settings.write", async () => 
   const validCreate = { name: "Plin", typeCode: "68" }
   expect((await postJson(buildApp("reception", RECEP), "/org/payment-methods", validCreate)).status).toBe(403)
   expect((await postJson(buildApp("cashier", CASH), "/org/payment-methods", validCreate)).status).toBe(403)
-  expect((await postJson(buildApp("dentist", DENT1), "/org/payment-methods", validCreate)).status).toBe(403)
+  expect((await postJson(buildApp("clinician", DENT1), "/org/payment-methods", validCreate)).status).toBe(403)
   expect((await patchJson(buildApp("reception", RECEP), `/org/payment-methods/${CARD_A}`, { isActive: false })).status).toBe(403)
   expect((await patchJson(buildApp("cashier", CASH), `/org/payment-methods/${CARD_A}`, { isActive: false })).status).toBe(403)
 
@@ -338,10 +338,10 @@ it("métodos: activeOnly filtra y configurar exige settings.write", async () => 
   expect(order.indexOf(createdId)).toBe(order.length - 2)
 })
 
-it("caja: reception/dentist sin finance.read; cashier lee y cierra", async () => {
+it("caja: reception/professional sin finance.read; cashier lee y cierra", async () => {
   const cashPath = `/finance/cash?branchId=${BRANCH_A}`
   expect((await buildApp("reception", RECEP).request(cashPath)).status).toBe(403)
-  expect((await buildApp("dentist", DENT1).request(cashPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(cashPath)).status).toBe(403)
   expect((await buildApp("member", MEMBER).request(cashPath)).status).toBe(403)
   expect((await buildApp("cashier", CASH).request(cashPath)).status).toBe(200)
   expect((await buildApp("admin", ADMIN).request(cashPath)).status).toBe(200)
@@ -354,7 +354,7 @@ it("caja: reception/dentist sin finance.read; cashier lee y cierra", async () =>
   // aún no tenía caja: se afirma con `shiftId: null`.
   const closeBody = { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 }
   expect((await postJson(buildApp("reception", RECEP), "/finance/closures", closeBody)).status).toBe(403)
-  expect((await postJson(buildApp("dentist", DENT1), "/finance/closures", closeBody)).status).toBe(403)
+  expect((await postJson(buildApp("clinician", DENT1), "/finance/closures", closeBody)).status).toBe(403)
   const closed = await postJson(buildApp("cashier", CASH), "/finance/closures", closeBody)
   expect(closed.status).toBe(201)
   const shiftId = ((await closed.json()) as { data: { id: string } }).data.id
@@ -388,7 +388,7 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     [`/finance/expenses/${id}/void`, { reason: "x" }],
     ["/finance/closures", { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 }],
   ]
-  for (const [role, userId] of [["reception", RECEP], ["dentist", DENT1], ["member", MEMBER]] as const) {
+  for (const [role, userId] of [["reception", RECEP], ["clinician", DENT1], ["member", MEMBER]] as const) {
     for (const path of reads)
       expect((await buildApp(role, userId).request(path)).status, `${role} GET ${path}`).toBe(403)
     for (const [path, body] of writes)
@@ -396,10 +396,10 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
   }
 })
 
-it("cuenta y cobro: reception/dentist 403, cashier cobra con ticket, tenancy", async () => {
+it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenancy", async () => {
   const accountPath = `/patients/${PAT_A}/account`
   expect((await buildApp("reception", RECEP).request(accountPath)).status).toBe(403)
-  expect((await buildApp("dentist", DENT1).request(accountPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(accountPath)).status).toBe(403)
   expect((await buildApp("cashier", CASH).request(accountPath)).status).toBe(200)
   // Tenant: la cuenta de org_fin_a no existe en org_fin_b.
   expect((await buildApp("admin", ADMIN_B, ORG_B).request(accountPath)).status).toBe(404)
@@ -412,13 +412,13 @@ it("cuenta y cobro: reception/dentist 403, cashier cobra con ticket, tenancy", a
     requestId: crypto.randomUUID(),
   })
   expect((await postJson(buildApp("reception", RECEP), `/patients/${PAT_A}/collect`, collectBody(CASH_A))).status).toBe(403)
-  expect((await postJson(buildApp("dentist", DENT1), `/patients/${PAT_A}/collect`, collectBody(CASH_A))).status).toBe(403)
+  expect((await postJson(buildApp("clinician", DENT1), `/patients/${PAT_A}/collect`, collectBody(CASH_A))).status).toBe(403)
   const collected = await postJson(buildApp("cashier", CASH), `/patients/${PAT_A}/collect`, collectBody(CASH_A))
   expect(collected.status).toBe(201)
   expect(TicketData.parse(await collected.json()).data.ticket.id).toBeTruthy()
 })
 
-it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier decide sin escribir; dentist solo lo propio", async () => {
+it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier decide sin escribir; professional solo lo propio", async () => {
   const listPath = `/patients/${PAT_A}/budgets`
   const detailPath = `/patients/${PAT_A}/budgets/${BUDGET1}`
   // Decisión 4: recepción lee el presupuesto como documento de la persona.
@@ -426,29 +426,29 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect((await buildApp("reception", RECEP).request(detailPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(listPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(detailPath)).status).toBe(200)
-  expect((await buildApp("dentist", DENT1).request(listPath)).status).toBe(200)
+  expect((await buildApp("clinician", DENT1).request(listPath)).status).toBe(200)
   // Plan de DENT1: DENT2 no ve ajenos en lista (200 filtrada a planes propios:
   // vacía, sin importes de otro) ni lee detalle aunque tenga budgets.*.
-  const dent2List = await buildApp("dentist", DENT2).request(listPath)
+  const dent2List = await buildApp("clinician", DENT2).request(listPath)
   expect(dent2List.status).toBe(200)
   const dent2Budgets = IdList.parse(await dent2List.json())
   expect(dent2Budgets.data).toEqual([])
   expect(dent2Budgets.data.map((b) => b.id)).not.toContain(BUDGET1)
-  expect((await buildApp("dentist", DENT2).request(detailPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT2).request(detailPath)).status).toBe(403)
 
   // La hoja en PDF y las opciones de envío respetan la misma frontera que la
   // pantalla: un odontólogo no obtiene el presupuesto de un plan ajeno.
   const pdfPath = `/patients/${PAT_A}/financial-document-pdf?documentType=budget&documentId=${BUDGET1}`
   const optionsPath = `/patients/${PAT_A}/financial-document-options?documentType=budget&documentId=${BUDGET1}`
-  expect((await buildApp("dentist", DENT2).request(pdfPath)).status).toBe(403)
-  expect((await buildApp("dentist", DENT2).request(optionsPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT2).request(pdfPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT2).request(optionsPath)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(pdfPath)).status).toBe(200)
   // Enviar es `budgets.send`: recepción sí, caja no (caja solo lee y anota).
   expect((await buildApp("reception", RECEP).request(optionsPath)).status).toBe(200)
   const previewPath = `/patients/${PAT_A}/budgets/${BUDGET1}/send-preview`
   expect((await buildApp("reception", RECEP).request(previewPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(previewPath)).status).toBe(403)
-  const ownPdf = await buildApp("dentist", DENT1).request(pdfPath)
+  const ownPdf = await buildApp("clinician", DENT1).request(pdfPath)
   expect(ownPdf.status).toBe(200)
   expect(ownPdf.headers.get("content-type")).toBe("application/pdf")
   expect(Buffer.from(await ownPdf.arrayBuffer()).subarray(0, 5).toString("latin1")).toBe("%PDF-")
@@ -475,10 +475,10 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   const createBody = { planId: PLAN_A, itemIds: [ITEM3] }
   expect((await postJson(buildApp("reception", RECEP), listPath, createBody)).status).toBe(403)
   expect((await postJson(buildApp("cashier", CASH), listPath, createBody)).status).toBe(403)
-  expect((await postJson(buildApp("dentist", DENT2), listPath, createBody)).status).toBe(403)
+  expect((await postJson(buildApp("clinician", DENT2), listPath, createBody)).status).toBe(403)
 
   // Servicio real al comprobar propio: DENT1 crea sobre su plan.
-  const own = await postJson(buildApp("dentist", DENT1), listPath, createBody)
+  const own = await postJson(buildApp("clinician", DENT1), listPath, createBody)
   expect(own.status).toBe(201)
   const ownId = IdData.parse(await own.json()).data.id
 
@@ -486,25 +486,25 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   // anota la respuesta (budgets.decide, decisión 4) con servicio real.
   const decisionPath = `/patients/${PAT_A}/budgets/${BUDGET1}/decision`
   const decisionBody = { decisions: [{ planItemId: ITEM1, decision: "aceptado" }] }
-  expect((await postJson(buildApp("dentist", DENT2), decisionPath, decisionBody)).status).toBe(403)
+  expect((await postJson(buildApp("clinician", DENT2), decisionPath, decisionBody)).status).toBe(403)
   expect((await postJson(buildApp("reception", RECEP), decisionPath, decisionBody)).status).toBe(200)
 
   // DENT1 entrega su propio presupuesto (budgets.send); caja no entrega y anota la respuesta.
   const deliverPath = `/patients/${PAT_A}/budgets/${ownId}/deliver`
   expect((await postJson(buildApp("cashier", CASH), deliverPath, {})).status).toBe(403)
-  expect((await postJson(buildApp("dentist", DENT1), deliverPath, {})).status).toBe(200)
+  expect((await postJson(buildApp("clinician", DENT1), deliverPath, {})).status).toBe(200)
   const cashierDecision = await postJson(buildApp("cashier", CASH), `/patients/${PAT_A}/budgets/${ownId}/decision`, {
     decisions: [{ planItemId: ITEM3, decision: "aceptado" }],
   })
   expect(cashierDecision.status).toBe(200)
 })
 
-it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions.read; admin configura", async () => {
+it("comisiones: professional propias sin ajenas ni resultado; cashier sin commissions.read; admin configura", async () => {
   const month = "year=2026&month=9&currency=PEN"
   expect((await buildApp("member", MEMBER).request(`/commissions/my?${month}`)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(`/commissions/my?${month}`)).status).toBe(403)
 
-  const dent2 = buildApp("dentist", DENT2)
+  const dent2 = buildApp("clinician", DENT2)
   expect((await dent2.request(`/commissions/my?${month}`)).status).toBe(200)
   expect((await dent2.request(`/commissions/monthly?professionalUserId=${DENT1}&${month}`)).status).toBe(403)
   expect((await dent2.request(`/reports/finance?period=2026-09`)).status).toBe(403)
@@ -562,9 +562,9 @@ it("Inicio: cada rol recibe su «Hoy» y nada de la caja o la agenda que no pued
   expect(reception.cash).toBeNull()
   expect(reception.waiting.some((row) => row.kind === "budgets")).toBe(false)
   // Odontólogo: sus propias citas, pida la sede que pida; sin caja.
-  const dentist = await home("dentist", DENT1, `?branch=${BRANCH_A}`)
-  expect(dentist.today).toMatchObject({ scope: "mine", branch: null })
-  expect(dentist.cash).toBeNull()
+  const professional = await home("clinician", DENT1, `?branch=${BRANCH_A}`)
+  expect(professional.today).toMatchObject({ scope: "mine", branch: null })
+  expect(professional.cash).toBeNull()
   // Caja: la caja de la sede; sin agenda.
   const cashier = await home("cashier", CASH, `?branch=${BRANCH_A}`)
   expect(cashier.today).toBeNull()

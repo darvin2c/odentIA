@@ -29,7 +29,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   })
 
   it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
-    expect(ids("dentist")).toEqual([
+    expect(ids("clinician")).toEqual([
       "resumen",
       "conversaciones",
       "citas",
@@ -38,11 +38,11 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
       "datos",
     ])
     // Un solo Plan: ni la coordinación, ni Tratamientos, ni Controles aparte (ADR 0034).
-    const sections = visibleSections(as("dentist")).map((section) => section.id)
+    const sections = visibleSections(as("clinician")).map((section) => section.id)
     for (const retired of ["coordinacion", "recorrido", "controles"])
       expect(sections).not.toContain(retired)
     // Ni canales ni portal: son del CRM y de quien edita la filiación.
-    expect(areaNav("datos", as("dentist")).map((entry) => entry.label)).toEqual([
+    expect(areaNav("datos", as("clinician")).map((entry) => entry.label)).toEqual([
       "Datos personales",
       "Personas vinculadas",
       "Responsables",
@@ -84,7 +84,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
 
   it("una sección sin permiso cae en la entrada del rol; sin acceso no hay sección", () => {
     expect(resolveSection("odontograma", as("reception"))).toBe("resumen")
-    expect(resolveSection("cuenta", as("dentist"))).toBe("resumen")
+    expect(resolveSection("cuenta", as("clinician"))).toBe("resumen")
     expect(resolveSection("plan", as("admin"))).toBe("plan")
     expect(resolveSection(undefined, as("member"))).toBeNull()
   })
@@ -101,18 +101,18 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   })
 
   it("Clínica en cuatro secciones; el odontólogo ve 12 y el propietario 16 (ADR 0035)", () => {
-    expect(areaNav("clinica", as("dentist")).map((entry) => entry.label)).toEqual([
+    expect(areaNav("clinica", as("clinician")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
       "Odontograma",
       "Historia",
       "Documentos",
     ])
     // Periodontograma va debajo de Odontograma (issue 49): no suma una pestaña.
-    expect(subsectionNav("periodontograma", as("dentist")).map((entry) => entry.label)).toEqual(["Odontograma", "Periodontograma"])
-    expect(subsectionNav("odontograma", as("dentist"))).toHaveLength(2)
-    expect(subsectionNav("historia", as("dentist"))).toEqual([])
+    expect(subsectionNav("periodontograma", as("clinician")).map((entry) => entry.label)).toEqual(["Odontograma", "Periodontograma"])
+    expect(subsectionNav("odontograma", as("clinician"))).toHaveLength(2)
+    expect(subsectionNav("historia", as("clinician"))).toEqual([])
     expect(navSectionOf("periodontograma")).toBe("odontograma")
-    expect(visibleSections(as("dentist"))).toHaveLength(12)
+    expect(visibleSections(as("clinician"))).toHaveLength(12)
     expect(visibleSections(as("owner"))).toHaveLength(16)
     // Recepción y caja no cambian.
     expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
@@ -120,7 +120,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   })
 
   it("quien lee la clínica entra por el Resumen clínico; recepción por su Resumen y caja por Cobros", () => {
-    for (const role of ["dentist", "owner", "admin"]) {
+    for (const role of ["clinician", "owner", "admin"]) {
       expect(defaultSection(as(role))).toBe("resumen")
       expect(clinicalSummaryFor(as(role))).toBe(true)
     }
@@ -128,7 +128,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(clinicalSummaryFor(as("cashier"))).toBe(false)
     expect(defaultSection(as("cashier"))).toBe("cuenta")
     // Quien aún no es paciente no tiene historia: su Resumen no es clínico.
-    expect(clinicalSummaryFor(as("dentist"), false)).toBe(false)
+    expect(clinicalSummaryFor(as("clinician"), false)).toBe(false)
   })
 
   it("las secciones retiradas de Clínica abren la que hace ese trabajo", () => {

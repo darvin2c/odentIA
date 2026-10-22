@@ -50,11 +50,11 @@ const NUMBER_WORDS: Record<number, string> = { 2: "dos", 3: "tres", 4: "cuatro",
 
 /** Un bloqueo o una ausencia de la agenda, con sus días y horas de la sede (como `blind-2.ts`). */
 type Block = {
-  dentist: string | null
-  dentistId: string | null
+  professional: string | null
+  professionalId: string | null
   branch: string
   branchId: string
-  chair: string | null
+  room: string | null
   kind: string
   reason: string | null
   fromDay: string
@@ -197,15 +197,15 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
       appointments: number
       payments: number
       schedules: number
-      chairs: number
+      rooms: number
       expenses: number
     }>(sql`
       select (select count(*) from appointment a where a.organization_id = ${org} and a.branch_id = ${branchId})::int as appointments,
         (select count(*) from patient_payment p where p.organization_id = ${org} and p.branch_id = ${branchId} and p.voided_at is null)::int as payments,
         (select count(*) from professional_schedule s where s.organization_id = ${org} and s.branch_id = ${branchId} and s.is_active)::int as schedules,
-        (select count(*) from schedule_chair c where c.organization_id = ${org} and c.branch_id = ${branchId} and c.is_active)::int as chairs,
+        (select count(*) from schedule_room c where c.organization_id = ${org} and c.branch_id = ${branchId} and c.is_active)::int as rooms,
         (select count(*) from expense e where e.organization_id = ${org} and e.branch_id = ${branchId} and e.voided_at is null)::int as expenses`)
-    return row ?? { appointments: 0, payments: 0, schedules: 0, chairs: 0, expenses: 0 }
+    return row ?? { appointments: 0, payments: 0, schedules: 0, rooms: 0, expenses: 0 }
   }
   /** Una cifra de Reportes con una sede elegida en la pantalla: la misma cuenta, solo de esa sede. */
   const figIn = async (
@@ -286,7 +286,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
   /** Bloqueos y ausencias que tocan un tramo, con los días y horas de su sede. */
   const blocksIn = async (start: Date, end: Date): Promise<Block[]> => [
     ...(await tx.execute<Block>(sql`
-      select u.name as dentist, k.dentist_user_id as "dentistId", b.name as branch, b.id as "branchId", c.name as chair, k.kind, k.reason,
+      select u.name as professional, k.professional_user_id as "professionalId", b.name as branch, b.id as "branchId", c.name as room, k.kind, k.reason,
         to_char(k.starts_at at time zone coalesce(b.timezone, ${tz}), 'YYYY-MM-DD') as "fromDay",
         to_char(k.starts_at at time zone coalesce(b.timezone, ${tz}), 'HH24:MI') as "fromTime",
         to_char((k.ends_at - interval '1 second') at time zone coalesce(b.timezone, ${tz}), 'YYYY-MM-DD') as "lastDay",
@@ -294,8 +294,8 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         (extract(epoch from k.starts_at) * 1000)::float8 as "startMs", (extract(epoch from k.ends_at) * 1000)::float8 as "endMs"
       from schedule_block k
       join branch b on b.organization_id = k.organization_id and b.id = k.branch_id
-      left join "user" u on u.id = k.dentist_user_id
-      left join schedule_chair c on c.organization_id = k.organization_id and c.id = k.chair_id
+      left join "user" u on u.id = k.professional_user_id
+      left join schedule_room c on c.organization_id = k.organization_id and c.id = k.room_id
       where k.organization_id = ${org} and k.starts_at < ${end.toISOString()}::timestamptz and k.ends_at > ${start.toISOString()}::timestamptz
       order by k.starts_at, b.name`)),
   ]
@@ -326,7 +326,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         (extract(epoch from ((${day}::date::timestamp + make_interval(mins => s.end_min)) at time zone coalesce(b.timezone, ${tz}))) * 1000)::float8 as end
       from professional_schedule s
       join branch b on b.organization_id = s.organization_id and b.id = s.branch_id
-      where s.organization_id = ${org} and s.dentist_user_id = ${personId} and s.weekday = extract(dow from ${day}::date)::int
+      where s.organization_id = ${org} and s.professional_user_id = ${personId} and s.weekday = extract(dow from ${day}::date)::int
         and s.valid_from <= ${day}::date and (s.valid_until is null or s.valid_until > ${day}::date) and s.end_min > ${fromMin}
       order by s.start_min`)
     const dayStartIso = isoStart(day)
@@ -339,10 +339,10 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
     }>(sql`
       select k.branch_id as "branchId", (extract(epoch from k.starts_at) * 1000)::float8 as start, (extract(epoch from k.ends_at) * 1000)::float8 as end, 'bloqueo' as kind
       from schedule_block k where k.organization_id = ${org} and k.starts_at < ${dayEndIso}::timestamptz and k.ends_at > ${dayStartIso}::timestamptz
-        and (k.dentist_user_id = ${personId} or (k.dentist_user_id is null and k.chair_id is null))
+        and (k.professional_user_id = ${personId} or (k.professional_user_id is null and k.room_id is null))
       union all
       select null, (extract(epoch from a.starts_at) * 1000)::float8, (extract(epoch from a.ends_at) * 1000)::float8, 'cita' from appointment a
-      where a.organization_id = ${org} and a.dentist_user_id = ${personId} and a.status <> 'cancelada'
+      where a.organization_id = ${org} and a.professional_user_id = ${personId} and a.status <> 'cancelada'
         and a.starts_at < ${dayEndIso}::timestamptz and a.ends_at > ${dayStartIso}::timestamptz`)
     const byBranch = new Map<string, { branch: string; spans: Array<[number, number]> }>()
     for (const shift of shifts) {
@@ -396,7 +396,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
     }>(sql`
       select s.weekday, s.start_min as start, s.end_min as end, b.name as branch from professional_schedule s
       join branch b on b.organization_id = s.organization_id and b.id = s.branch_id
-      where s.organization_id = ${org} and s.dentist_user_id = ${personId} and s.valid_from <= ${today}::date and (s.valid_until is null or s.valid_until > ${today}::date)
+      where s.organization_id = ${org} and s.professional_user_id = ${personId} and s.valid_from <= ${today}::date and (s.valid_until is null or s.valid_until > ${today}::date)
       order by b.name, ((s.weekday + 6) % 7), s.start_min`)
     const names = ["domingos", "lunes", "martes", "miércoles", "jueves", "viernes", "sábados"]
     const time = (minutes: number) => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`
@@ -899,7 +899,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
           : `No puedo decirte por qué: odentIA registra lo que pasó, no sus causas. Lo registrado: en la ${surco.name} se atendieron ${own?.current ?? 0} citas ${days.current} contra ${own?.previous ?? 0} en ${days.sameAs}; en las otras sedes, ${words(others)}.`,
         criterio:
           "Trampa: odentIA no sabe causas. Se ofrecen «Citas atendidas» de Reportes por sede del mes en curso contra los mismos días del mes anterior, y lo registrado en Surco desde siempre (citas, cobros, horarios).",
-        nota: `Pacientes distintos atendidos, este mes contra los mismos días del mes anterior: ${listOf(list.map((branch) => ({ name: branch.name, value: `${peopleOf(branch.id).current} contra ${peopleOf(branch.id).previous}` })))}. En la ${surco.name}, desde siempre: ${facts.appointments} citas, ${facts.payments} cobros, ${facts.schedules} horarios, ${facts.chairs} unidades dentales y ${facts.expenses} gastos registrados.`,
+        nota: `Pacientes distintos atendidos, este mes contra los mismos días del mes anterior: ${listOf(list.map((branch) => ({ name: branch.name, value: `${peopleOf(branch.id).current} contra ${peopleOf(branch.id).previous}` })))}. En la ${surco.name}, desde siempre: ${facts.appointments} citas, ${facts.payments} cobros, ${facts.schedules} horarios, ${facts.rooms} unidades dentales y ${facts.expenses} gastos registrados.`,
         datos: { sede: surco, hechos: facts, atendidasPorSede: rows, pacientesPorSede: people },
       }
     },
@@ -928,7 +928,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         { branchId: branch.id },
       )
       const working = agenda.days.filter((day) => day.availMin > 0)
-      const names = await nameOf(working.map((day) => day.dentistUserId))
+      const names = await nameOf(working.map((day) => day.professionalUserId))
       const scheduled = sumOf(working, (day) => day.availMin)
       const booked = sumOf(working, (day) => day.occMin)
       const blocks = (await blocksIn(startOf(tomorrow), startOf(addDays(tomorrow, 1)))).filter(
@@ -952,7 +952,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         .join(", ")
       const people = working.map(
         (day) =>
-          `${the(names.get(day.dentistUserId) ?? "—")}${youToo(names.get(day.dentistUserId) ?? "")}, ${hoursOf(day.availMin - day.occMin)} libres de ${hoursOf(day.availMin)}`,
+          `${the(names.get(day.professionalUserId) ?? "—")}${youToo(names.get(day.professionalUserId) ?? "")}, ${hoursOf(day.availMin - day.occMin)} libres de ${hoursOf(day.availMin)}`,
       )
       return {
         respuesta: total
@@ -962,7 +962,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
           "Citas de mañana (día de la clínica) programadas o confirmadas en la sede, con el horario de mañana de cada profesional de la sede menos sus ausencias y bloqueos (la cuenta de Reportes › Agenda); si no hay citas, lo más cercano: las de hoy en la sede.",
         nota: noteOf([
           blocks.length
-            ? `Mañana en la sede: ${blocks.map((block) => `${block.chair ?? whoIs(block.dentist) ?? "la sede"} ${blockWhen(block)} (${blockWhy(block)})`).join("; ")}.`
+            ? `Mañana en la sede: ${blocks.map((block) => `${block.room ?? whoIs(block.professional) ?? "la sede"} ${blockWhen(block)} (${blockWhy(block)})`).join("; ")}.`
             : "Mañana no hay bloqueos ni ausencias en la sede.",
           next?.day
             ? `La siguiente fecha con citas en la ${branch.name} es el ${w.dayWords(next.day)}.`
@@ -975,7 +975,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
           manana: tomorrow,
           porEstado: status,
           horario: working.map((day) => ({
-            name: names.get(day.dentistUserId),
+            name: names.get(day.professionalUserId),
             availMin: day.availMin,
             occMin: day.occMin,
           })),
@@ -1031,7 +1031,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
       const fri = await freeOn(person.id, friday, AFTERNOON_MIN)
       const schedule = await scheduleWords(person.id)
       const absent = (await blocksIn(startOf(friday), startOf(addDays(friday, 1)))).filter(
-        (block) => block.dentistId === person.id,
+        (block) => block.professionalId === person.id,
       )
       // Lo más cercano: la primera tarde con horas libres desde hoy.
       let nearest: { day: string; free: Awaited<ReturnType<typeof freeOn>> } | null = null
@@ -1047,11 +1047,11 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         end: startOf(addDays(friday, 1)),
       })
       const others = agenda.days.filter(
-        (day) => day.dentistUserId !== person.id && day.availMin > day.occMin,
+        (day) => day.professionalUserId !== person.id && day.availMin > day.occMin,
       )
-      const names = await nameOf(others.map((day) => day.dentistUserId))
+      const names = await nameOf(others.map((day) => day.professionalUserId))
       const otherFree: Array<{ name: string; words: string; freeMin: number }> = []
-      for (const id of new Set(others.map((day) => day.dentistUserId))) {
+      for (const id of new Set(others.map((day) => day.professionalUserId))) {
         const free = await freeOn(id, friday, AFTERNOON_MIN)
         if (free.freeMin > 0)
           otherFree.push({ name: names.get(id) ?? "—", words: free.words, freeMin: free.freeMin })
@@ -1133,17 +1133,17 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
       type Today = {
         time: string
         patient: string
-        dentist: string
+        professional: string
         branch: string
         status: string
         arrived: boolean
         started: boolean
       }
       const rows: Today[] = await tx.execute<Today>(sql`
-        select to_char(a.starts_at at time zone ${tz}, 'HH24:MI') as time, pp.display_name as patient, u.name as dentist, b.name as branch, a.status,
+        select to_char(a.starts_at at time zone ${tz}, 'HH24:MI') as time, pp.display_name as patient, u.name as professional, b.name as branch, a.status,
           a.arrived_at is not null as arrived, a.starts_at <= ${nowIso}::timestamptz as started
         from appointment a
-        join "user" u on u.id = a.dentist_user_id
+        join "user" u on u.id = a.professional_user_id
         join branch b on b.organization_id = a.organization_id and b.id = a.branch_id
         ${h.joinPerson(sql`a.patient_id`)}
         where a.organization_id = ${org} and ${h.dayOf(sql`a.starts_at`)} = ${h.today}
@@ -1157,7 +1157,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         listSemi(
           list.map((row) => ({
             name: `${row.patient}, a las ${row.time}`,
-            value: `${withWho(row.dentist)}, ${row.branch}${row.status === "confirmada" ? ", confirmada" : ", sin confirmar"}`,
+            value: `${withWho(row.professional)}, ${row.branch}${row.status === "confirmada" ? ", confirmada" : ", sin confirmar"}`,
           })),
         )
       const counts = [
@@ -1199,7 +1199,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
       const name = monthLabel(h, last.window.from)
       const counts = [
         ...(await tx.execute<{ id: string; patients: number; appointments: number }>(sql`
-          select a.dentist_user_id as id, count(distinct a.patient_id)::int as patients, count(*)::int as appointments
+          select a.professional_user_id as id, count(distinct a.patient_id)::int as patients, count(*)::int as appointments
           from appointment a
           where a.organization_id = ${org} and a.status = 'atendida' and ${between(sql`a.starts_at`, last.window.start.toISOString(), last.window.end.toISOString())}
           group by 1`)),
@@ -1256,7 +1256,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
         from patient_charge c
         join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-        join "user" u on u.id = e.dentist_user_id
+        join "user" u on u.id = e.professional_user_id
         where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency}
           and ${between(sql`c.created_at`, yearScope.window.start.toISOString(), nowIso)}
         group by 1 order by sum(c.amount_cents) desc, 1`)
@@ -1303,7 +1303,7 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
           from appointment a
           join branch b on b.organization_id = a.organization_id and b.id = a.branch_id
           ${h.joinPerson(sql`a.patient_id`)}
-          where a.organization_id = ${org} and a.dentist_user_id = ${luis.id} and ${between(sql`a.starts_at`, isoStart(monday), isoStart(addDays(monday, 7)))}
+          where a.organization_id = ${org} and a.professional_user_id = ${luis.id} and ${between(sql`a.starts_at`, isoStart(monday), isoStart(addDays(monday, 7)))}
           order by a.starts_at`)),
       ]
       const active = rows.filter((row) => row.status !== "cancelada")
@@ -1368,14 +1368,14 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
           clinic: number
         }>(sql`
           with attended as (
-            select a.patient_id, a.dentist_user_id, a.starts_at from appointment a
+            select a.patient_id, a.professional_user_id, a.starts_at from appointment a
             where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at < ${nowIso}::timestamptz),
           cohort as (
-            select distinct dentist_user_id, patient_id from attended where starts_at >= ${since(24)} and starts_at < ${since(12)})
-          select c.dentist_user_id as id, u.name, count(*)::int as cohort,
-            count(*) filter (where exists (select 1 from attended v where v.patient_id = c.patient_id and v.dentist_user_id = c.dentist_user_id and v.starts_at >= ${since(12)}))::int as same,
+            select distinct professional_user_id, patient_id from attended where starts_at >= ${since(24)} and starts_at < ${since(12)})
+          select c.professional_user_id as id, u.name, count(*)::int as cohort,
+            count(*) filter (where exists (select 1 from attended v where v.patient_id = c.patient_id and v.professional_user_id = c.professional_user_id and v.starts_at >= ${since(12)}))::int as same,
             count(*) filter (where exists (select 1 from attended v where v.patient_id = c.patient_id and v.starts_at >= ${since(12)}))::int as clinic
-          from cohort c join "user" u on u.id = c.dentist_user_id
+          from cohort c join "user" u on u.id = c.professional_user_id
           group by 1, 2`)),
       ]
       const rate = (part: number, whole: number) => (whole > 0 ? part / whole : 0)
@@ -1406,36 +1406,36 @@ export function blindSolvers3(h: GoldenHelpers): GoldenSolvers {
       const nextMonday = addDays(monday, 7)
       const nextSunday = addDays(monday, 13)
       const blocks = await blocksIn(startOf(nextMonday), startOf(addDays(monday, 14)))
-      const absent = blocks.filter((block) => block.dentistId !== null)
-      const closed = blocks.filter((block) => block.dentistId === null && block.chair === null)
-      const chairs = blocks.filter((block) => block.dentistId === null && block.chair !== null)
+      const absent = blocks.filter((block) => block.professionalId !== null)
+      const closed = blocks.filter((block) => block.professionalId === null && block.room === null)
+      const rooms = blocks.filter((block) => block.professionalId === null && block.room !== null)
       const rest = (await blocksIn(h.now, startOf(nextMonday))).filter(
-        (block) => block.dentistId !== null,
+        (block) => block.professionalId !== null,
       )
       const closedWords = closed
         .map((block) => `la ${block.branch} cierra ${blockWhen(block)} (${blockWhy(block)})`)
         .join("; ")
-      const people = new Set(absent.map((block) => block.dentistId))
+      const people = new Set(absent.map((block) => block.professionalId))
       return {
         respuesta: absent.length
-          ? `La próxima semana (${spanWords(nextMonday, nextSunday)}) ${people.size === 1 ? "solo falta" : "faltan"} ${listOf(absent.map((block) => ({ name: `${whoIs(block.dentist)} ${blockWhen(block)}`, value: blockWhy(block) })))}. El resto del equipo tiene su horario de siempre.${closed.length ? ` Además, ${closedWords}.` : ""}`
+          ? `La próxima semana (${spanWords(nextMonday, nextSunday)}) ${people.size === 1 ? "solo falta" : "faltan"} ${listOf(absent.map((block) => ({ name: `${whoIs(block.professional)} ${blockWhen(block)}`, value: blockWhy(block) })))}. El resto del equipo tiene su horario de siempre.${closed.length ? ` Además, ${closedWords}.` : ""}`
           : `La próxima semana (${spanWords(nextMonday, nextSunday)}) nadie del equipo tiene una ausencia registrada: todos tienen su horario de siempre.${closed.length ? ` Pero ${closedWords}.` : ""}`,
         criterio:
           "Ausencias de profesionales (bloqueos de la agenda con profesional: vacaciones, permisos) que tocan la próxima semana entera, de lunes a domingo, con los días y horas de su sede; aparte, los cierres de sede y las unidades dentales bloqueadas.",
         nota: noteOf([
           "Las ausencias se registran en la agenda de los profesionales; recepción y caja no tienen agenda.",
           rest.length
-            ? `Lo que queda de esta semana: ${listOf(rest.map((block) => ({ name: `${whoIs(block.dentist)} ${blockWhen(block)}`, value: blockWhy(block) })))}.`
+            ? `Lo que queda de esta semana: ${listOf(rest.map((block) => ({ name: `${whoIs(block.professional)} ${blockWhen(block)}`, value: blockWhy(block) })))}.`
             : "En lo que queda de esta semana nadie tiene ausencias.",
-          chairs.length
-            ? `Unidades dentales bloqueadas la próxima semana: ${chairs.map((block) => `${block.chair} de la ${block.branch} ${blockWhen(block)} (${blockWhy(block)})`).join("; ")}.`
+          rooms.length
+            ? `Unidades dentales bloqueadas la próxima semana: ${rooms.map((block) => `${block.room} de la ${block.branch} ${blockWhen(block)} (${blockWhy(block)})`).join("; ")}.`
             : null,
         ]),
         datos: {
           semana: { desde: nextMonday, hasta: nextSunday },
           ausencias: absent,
           cierres: closed,
-          unidades: chairs,
+          unidades: rooms,
           restoDeEstaSemana: rest,
         },
       }

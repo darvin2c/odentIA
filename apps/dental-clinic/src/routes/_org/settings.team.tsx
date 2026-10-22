@@ -318,7 +318,7 @@ function TeamPage() {
           // Sin la lista de perfiles no se sabe: no se afirma que falte.
           if (!profilesLoaded) return <span className="text-muted-foreground">—</span>
           // Solo a quien atiende le falta para firmar; al resto no le aplica.
-          return ["dentist", "owner", "admin"].includes(row.original.role) ? (
+          return ["clinician", "owner", "admin"].includes(row.original.role) ? (
             <span className="text-muted-foreground">Sin registrar</span>
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -390,7 +390,7 @@ function TeamPage() {
       owner: 0,
       admin: 1,
       reception: 2,
-      dentist: 3,
+      clinician: 3,
       cashier: 4,
       member: 5,
     }

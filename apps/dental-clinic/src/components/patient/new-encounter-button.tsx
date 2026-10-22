@@ -25,15 +25,15 @@ import type { Encounter, PatientFull } from "../../lib/patients"
 /** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
 export interface AttendedAppointment {
   id: string
-  dentistUserId: string
+  professionalUserId: string
   /** Para decir «Atiendes la cita de la Dra. Ana Torres» cuando atiende otro. */
-  dentistName: string
+  professionalName: string
 }
 
 /** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
 interface OpenEncounterRef {
   id: string
-  dentistUserId: string
+  professionalUserId: string
 }
 
 /**
@@ -65,8 +65,8 @@ export function useAttendAppointment() {
       }
     },
     onSuccess: async (encounterId, input) => {
-      if (input.appointment.dentistUserId !== myUserId) {
-        toast.info(`Atiendes la cita de ${professionalSaid(input.appointment.dentistName, { full: true })}`)
+      if (input.appointment.professionalUserId !== myUserId) {
+        toast.info(`Atiendes la cita de ${professionalSaid(input.appointment.professionalName, { full: true })}`)
       }
       await Promise.all([
         invalidateAppointmentQueries(queryClient),
@@ -165,7 +165,7 @@ export function NewEncounterButton({
     Boolean(userId) && professionals.some((m) => m.userId === userId)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [reason, setReason] = useState("")
-  const [dentistUserId, setDentistUserId] = useState(eligible(myUserId) ? myUserId : "")
+  const [professionalUserId, setProfessionalUserId] = useState(eligible(myUserId) ? myUserId : "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -180,14 +180,14 @@ export function NewEncounterButton({
   // En la página de la persona: si hoy tiene cita, atender es un clic y se une a ella.
   const todayVisit = useTodayAppointment(patientId, canWrite && canSeeAgenda && !appointment && !inProgressId)
   const visit: AttendedAppointment | null =
-    appointment ?? (todayVisit ? { id: todayVisit.id, dentistUserId: todayVisit.dentistUserId, dentistName: todayVisit.dentistName } : null)
+    appointment ?? (todayVisit ? { id: todayVisit.id, professionalUserId: todayVisit.professionalUserId, professionalName: todayVisit.professionalName } : null)
   const open = (id: string) =>
     void navigate({
       to: "/patients/$patientId/encounters/$encounterId",
       params: { patientId, encounterId: id },
     })
   const start = async () => {
-    if (saving || !reason.trim() || !dentistUserId) return
+    if (saving || !reason.trim() || !professionalUserId) return
     setSaving(true)
     setError(null)
     try {
@@ -195,7 +195,7 @@ export function NewEncounterButton({
         method: "POST",
         body: JSON.stringify({
           reason: reason.trim(),
-          dentistUserId,
+          professionalUserId,
           // Sin cita, la sede en la que se trabaja: así lo que quede por cobrar
           // aparece en la caja de esa sede.
           ...(sede.branchId ? { branchId: sede.branchId } : {}),
@@ -284,7 +284,7 @@ export function NewEncounterButton({
         isDirty={reason.trim().length > 0}
         error={error}
         submitLabel="Atender"
-        submitDisabled={!reason.trim() || !dentistUserId || saving}
+        submitDisabled={!reason.trim() || !professionalUserId || saving}
       >
         <Field>
           <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
@@ -300,15 +300,15 @@ export function NewEncounterButton({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="new-encounter-dentist">Profesional que atiende</FieldLabel>
+          <FieldLabel htmlFor="new-encounter-professional">Profesional que atiende</FieldLabel>
           <Select
-            value={dentistUserId}
+            value={professionalUserId}
             items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
             onValueChange={(value) => {
-              if (value) setDentistUserId(value)
+              if (value) setProfessionalUserId(value)
             }}
           >
-            <SelectTrigger id="new-encounter-dentist" aria-label="Profesional que atiende">
+            <SelectTrigger id="new-encounter-professional" aria-label="Profesional que atiende">
               <SelectValue placeholder="Selecciona el profesional…" />
             </SelectTrigger>
             <SelectContent>

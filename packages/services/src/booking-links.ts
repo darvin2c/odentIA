@@ -439,7 +439,7 @@ export interface BookingLinkAppointment {
   branchAddress: string | null
   /** «Cómo llegar» a la sede (Google Maps); null sin dirección. */
   branchDirectionsUrl: string | null
-  dentistName: string
+  professionalName: string
   serviceName: string | null
 }
 
@@ -455,11 +455,11 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
       branchAddress: branchAddressColumns,
       branchPlaceId: branch.googlePlaceId,
       branchTimeZone: branch.timezone,
-      dentistName: user.name,
+      professionalName: user.name,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
     .limit(1)
   if (!row) return null
@@ -478,7 +478,7 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
     branchName: row.branchName,
     branchAddress: (await branchAddressWriter(tx, orgId))(row.branchAddress),
     branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({ address: row.branchAddress, placeId: row.branchPlaceId }),
-    dentistName: row.dentistName,
+    professionalName: row.professionalName,
     serviceName: row.serviceName,
   }
 }
@@ -566,9 +566,9 @@ export async function clinicNameOf(tx: Db, orgId: string): Promise<string> {
 export interface BookingLinkSlot {
   startsAt: string
   endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
+  professionalUserId: string
+  professionalName: string
+  roomId: string | null
 }
 
 /** Horarios libres de una sede, día por día: los mismos huecos reales que ve recepción, sin lo que ya pasó. */
@@ -600,7 +600,7 @@ export async function listWeekSlots(
     timeZone = day.timeZone
     truncated ||= day.truncated
     for (const slot of day.slots) {
-      slots.push({ startsAt: slot.startsAt, endsAt: slot.endsAt, dentistUserId: slot.dentistUserId, dentistName: slot.dentistName, chairId: slot.chairId })
+      slots.push({ startsAt: slot.startsAt, endsAt: slot.endsAt, professionalUserId: slot.professionalUserId, professionalName: slot.professionalName, roomId: slot.roomId })
     }
   }
   return { slots, timeZone, truncated }
@@ -789,7 +789,7 @@ export async function reserveBookingLink(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string; startsAt: string; dentistUserId: string; chairId?: string; planItemIds?: string[] },
+  input: { branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[] },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true)
@@ -814,8 +814,8 @@ export async function reserveBookingLink(
   const created = await createAppointment(tx, orgId, `contact:${link.row.contactId}`, {
     branchId: input.branchId,
     patientId,
-    dentistUserId: input.dentistUserId,
-    ...(input.chairId ? { chairId: input.chairId } : {}),
+    professionalUserId: input.professionalUserId,
+    ...(input.roomId ? { roomId: input.roomId } : {}),
     ...(!forTreatment && link.row.serviceId ? { serviceId: link.row.serviceId } : {}),
     ...(forTreatment ? { planItemIds: input.planItemIds } : {}),
     startsAt: input.startsAt,
@@ -839,8 +839,8 @@ export async function reserveBookingLink(
     orgId,
     link.row,
     {
-      note: `Reservó desde su enlace: ${view.serviceName ?? "cita"} el ${when} en ${view.branchName}, con ${view.dentistName}.`,
-      message: `Listo: ${what} quedó para el ${when} en ${view.branchName}, con ${view.dentistName}.`,
+      note: `Reservó desde su enlace: ${view.serviceName ?? "cita"} el ${when} en ${view.branchName}, con ${view.professionalName}.`,
+      message: `Listo: ${what} quedó para el ${when} en ${view.branchName}, con ${view.professionalName}.`,
       key: `enlace-reserva:${link.row.id}:${created.id}`,
       reason: "La persona reservó desde su enlace",
     },
@@ -866,7 +866,7 @@ export async function changeBookingLinkAppointment(
   tx: Db,
   orgId: string,
   token: string,
-  input: { startsAt: string; dentistUserId: string; chairId?: string },
+  input: { startsAt: string; professionalUserId: string; roomId?: string },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
@@ -885,8 +885,8 @@ export async function changeBookingLinkAppointment(
     orgId,
     link.row,
     {
-      note: `Cambió su cita desde su enlace: ahora es el ${when} en ${view.branchName}, con ${view.dentistName}.`,
-      message: `Listo: tu cita quedó cambiada para el ${when} en ${view.branchName}, con ${view.dentistName}.`,
+      note: `Cambió su cita desde su enlace: ahora es el ${when} en ${view.branchName}, con ${view.professionalName}.`,
+      message: `Listo: tu cita quedó cambiada para el ${when} en ${view.branchName}, con ${view.professionalName}.`,
       key: `enlace-cambio:${link.row.id}:${view.startsAt}`,
       reason: "La persona cambió su cita desde su enlace",
     },

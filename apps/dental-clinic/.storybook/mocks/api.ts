@@ -510,7 +510,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
             indications: null,
             examination: null,
             branchId: null,
-            dentistUserId: "demo-user",
+            professionalUserId: "demo-user",
             createdAt: at(3),
             updatedAt: at(1),
           },

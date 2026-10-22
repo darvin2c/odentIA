@@ -134,7 +134,7 @@ export function PeriodontogramaTab({
                 <div>
                   <b>{visitName(index)}</b>
                   <p className="text-sm text-muted-foreground">
-                    {[visitDate(visit.date), visit.dentistName, draft ? "en la atención en curso" : "cerrado con la atención"]
+                    {[visitDate(visit.date), visit.professionalName, draft ? "en la atención en curso" : "cerrado con la atención"]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>

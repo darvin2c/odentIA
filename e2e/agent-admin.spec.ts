@@ -41,10 +41,10 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   })
   // La lleva alguien que ya no está en la clínica: quien sigue atendiendo la ve en
   // su «Te espera» y la línea solo cuenta las que nadie más verá.
-  const formerDentist = crypto.randomUUID()
-  await fixtureDb.insert(user).values({ id: formerDentist, name: "Dr. Ya No Atiende", email: `${formerDentist}@admin.test`, emailVerified: true })
+  const formerProfessional = crypto.randomUUID()
+  await fixtureDb.insert(user).values({ id: formerProfessional, name: "Dr. Ya No Atiende", email: `${formerProfessional}@admin.test`, emailVerified: true })
   await fixtureDb.insert(encounter).values({
-    organizationId: org.id, patientId: patient.id, dentistUserId: formerDentist,
+    organizationId: org.id, patientId: patient.id, professionalUserId: formerProfessional,
     startedAt: new Date(Date.now() - 3 * 86_400_000),
   })
 

@@ -11,7 +11,7 @@ import { automationJob } from "@odentia/db/schema/automation"
 import {
   sendOutbound,
   addContactIdentity,
-  createChair,
+  createRoom,
   createConnection,
   createContact,
   createAppointment,
@@ -1014,22 +1014,22 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   const branchId = createdBranch!.id
   const stamp = Date.now()
   const actorId = `agent-actor-${stamp}`
-  const dentistId = `agent-dentist-${stamp}`
+  const professionalId = `agent-professional-${stamp}`
   await ownerDb.insert(user).values([
     { id: actorId, name: "Actor Agente", email: `actor-${stamp}@example.test` },
-    { id: dentistId, name: "Dentista Agente", email: `dentista-${stamp}@example.test` },
+    { id: professionalId, name: "Dentista Agente", email: `dentista-${stamp}@example.test` },
   ])
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Unidad dental Agente" }))
-  const chairId = createdChair!.id
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const createdRoom = await withOrgContext(appDb, "org_a", (tx) =>
+    createRoom(tx, "org_a", { branchId, name: "Unidad dental Agente" }))
+  const roomId = createdRoom!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
       branchId,
-      dentistUserId: dentistId,
+      professionalUserId: professionalId,
       rules: [1, 2, 3, 4, 5].flatMap((weekday) => [
         { weekday, startMin: 9 * 60, endMin: 13 * 60 },
       ]),
@@ -1066,16 +1066,16 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(out.split("\n")[0]).toContain("hora local de la sede")
   const firstLine = out.split("\n")[1] ?? ""
   const optionBranch = firstLine.match(/sede ([0-9a-f-]{36})/i)?.[1]
-  const optionChair = firstLine.match(/unidad dental ([0-9a-f-]{36})/i)?.[1]
-  const optionDentist = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
+  const optionRoom = firstLine.match(/unidad dental ([0-9a-f-]{36})/i)?.[1]
+  const optionProfessional = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
   const optionStart = firstLine.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1]
   const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
   expect(optionBranch).toBe(branchId)
-  expect(optionChair).toBe(chairId)
+  expect(optionRoom).toBe(roomId)
   // El agente ve la referencia del profesional, nunca su usuario.
-  expect(optionDentist).toBe(professionalRef("org_a", dentistId))
-  expect(out).not.toContain(dentistId)
-  if (!optionStart || !startClock || !endClock || !optionDentist || !optionChair || !optionBranch) {
+  expect(optionProfessional).toBe(professionalRef("org_a", professionalId))
+  expect(out).not.toContain(professionalId)
+  if (!optionStart || !startClock || !endClock || !optionProfessional || !optionRoom || !optionBranch) {
     throw new Error("El hueco no contiene los datos necesarios para reservar")
   }
   // La hora local que lee la persona es la del instante en Lima.
@@ -1095,8 +1095,8 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booking).toBeDefined()
   await booking!.invoke({
     patientId,
-    dentistUserId: optionDentist,
-    chairId: optionChair,
+    professionalUserId: optionProfessional,
+    roomId: optionRoom,
     startsAt: optionStart,
     branchId: optionBranch,
     durationMin,
@@ -1110,11 +1110,11 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(confirmed).toContain("Confirmado y ejecutado")
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(
-      and(eq(appointment.patientId, patientId), eq(appointment.chairId, chairId))))
+      and(eq(appointment.patientId, patientId), eq(appointment.roomId, roomId))))
   expect(rows).toHaveLength(1)
   const booked = rows[0]!
   expect(booked.branchId).toBe(branchId)
-  expect(booked.dentistUserId).toBe(dentistId)
+  expect(booked.professionalUserId).toBe(professionalId)
   expect(booked.durationMin).toBe(45)
   expect(booked.startsAt.toISOString()).toBe(optionStart)
   expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
@@ -1129,22 +1129,22 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const branchId = createdBranch!.id
   const stamp = Date.now()
   const actorId = `agent-actor-reprog-${stamp}`
-  const dentistId = `agent-dentist-reprog-${stamp}`
+  const professionalId = `agent-professional-reprog-${stamp}`
   await ownerDb.insert(user).values([
     { id: actorId, name: "Actor Reprog", email: `actor-reprog-${stamp}@example.test` },
-    { id: dentistId, name: "Dentista Reprog", email: `dentista-reprog-${stamp}@example.test` },
+    { id: professionalId, name: "Dentista Reprog", email: `dentista-reprog-${stamp}@example.test` },
   ])
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Unidad dental Reprog" }))
-  const chairId = createdChair!.id
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const createdRoom = await withOrgContext(appDb, "org_a", (tx) =>
+    createRoom(tx, "org_a", { branchId, name: "Unidad dental Reprog" }))
+  const roomId = createdRoom!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
       branchId,
-      dentistUserId: dentistId,
+      professionalUserId: professionalId,
       rules: [1, 2, 3, 4, 5].flatMap((weekday) => [
         { weekday, startMin: 9 * 60, endMin: 13 * 60 },
       ]),
@@ -1172,7 +1172,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   }
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     createAppointment(tx, "org_a", actorId, {
-      patientId, dentistUserId: dentistId, chairId, branchId,
+      patientId, professionalUserId: professionalId, roomId, branchId,
       startsAt: dayAt(0), durationMin: 45,
     }))
   const ctx: AgentToolCtx = {
@@ -1259,16 +1259,16 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
   const branchId = createdBranch!.id
   const stamp = Date.now()
   const actorId = `agent-actor-confirma-${stamp}`
-  const dentistId = `agent-dentist-confirma-${stamp}`
+  const professionalId = `agent-professional-confirma-${stamp}`
   await ownerDb.insert(user).values([
     { id: actorId, name: "Actor Confirma", email: `actor-confirma-${stamp}@example.test` },
-    { id: dentistId, name: "Dra. Confirma", email: `dentista-confirma-${stamp}@example.test` },
+    { id: professionalId, name: "Dra. Confirma", email: `dentista-confirma-${stamp}@example.test` },
   ])
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Unidad dental Confirma" }))
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const room = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: "Unidad dental Confirma" }))
   const { conversationId } = await ingestText("tg:confirma-cita", "evt-confirma-cita", "Sí, ahí estaré")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
@@ -1287,7 +1287,7 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
   const book = (patientId: string, inDays: number) =>
     withOrgContext(appDb, "org_a", (tx) =>
       createAppointment(tx, "org_a", actorId, {
-        patientId, dentistUserId: dentistId, chairId: chair!.id, branchId,
+        patientId, professionalUserId: professionalId, roomId: room!.id, branchId,
         startsAt: new Date(Date.now() + inDays * 86_400_000).toISOString(), durationMin: 30, outsideSchedule: true, notice: false,
       }))
   const booked = await book(mine, 3)
@@ -1325,10 +1325,10 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
   }
   const tools = makeAgentTools(ctx)
   // El agente solo conoce al profesional por su referencia: la de alguien con horario en la clínica.
-  const { dentistId } = await bookingFixture(conversationId, "doble-si")
+  const { professionalId } = await bookingFixture(conversationId, "doble-si")
   // La cita propuesta espera el sí del interlocutor (los datos solo tienen que validar).
   const booked = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
-    patientId: randomUUID(), dentistUserId: professionalRef("org_a", dentistId), chairId: randomUUID(),
+    patientId: randomUUID(), professionalUserId: professionalRef("org_a", professionalId), roomId: randomUUID(),
     startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
   }))
   expect(booked).toContain("pide al interlocutor que confirme")
@@ -1458,20 +1458,20 @@ async function bookingFixture(conversationId: string, label: string) {
   const branchId = createdBranch!.id
   const stamp = Date.now()
   const actorId = `actor-${label}-${stamp}`
-  const dentistId = `dentista-${label}-${stamp}`
+  const professionalId = `dentista-${label}-${stamp}`
   await ownerDb.insert(user).values([
     { id: actorId, name: `Actor ${label}`, email: `actor-${label}-${stamp}@example.test` },
-    { id: dentistId, name: `Dentista ${label}`, email: `dentista-${label}-${stamp}@example.test` },
+    { id: professionalId, name: `Dentista ${label}`, email: `dentista-${label}-${stamp}@example.test` },
   ])
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Unidad dental ${label}` }))
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const room = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: `Unidad dental ${label}` }))
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
       branchId,
-      dentistUserId: dentistId,
+      professionalUserId: professionalId,
       rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
     }))
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1482,7 +1482,7 @@ async function bookingFixture(conversationId: string, label: string) {
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
-  return { branchId, chairId: chair!.id, dentistId, actorId, patientId, contactId }
+  return { branchId, roomId: room!.id, professionalId, actorId, patientId, contactId }
 }
 
 /** Próximo lunes con al menos tres días de margen, a medianoche de Lima. */
@@ -1514,8 +1514,8 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
         "proponer_cita",
         {
           patientId: fx.patientId,
-          dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
+          professionalUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
+          roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
@@ -1606,21 +1606,21 @@ it("una respuesta con un precio que no está en lo consultado no sale y, a la se
   // este profesional llega en los datos de la clínica y lleva el mismo «99»
   // del precio inventado. Con los profesionales de otras pruebas (ids con
   // Date.now) pasaba lo mismo a veces y la respuesta salía.
-  const dentistId = "dentista-precio-185"
-  expect(professionalRef("org_a", dentistId)).toBe("pro-99d040905f")
+  const professionalId = "dentista-precio-185"
+  expect(professionalRef("org_a", professionalId)).toBe("pro-99d040905f")
   const [sede] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede Precio", timezone: "America/Lima" })
     .returning({ id: branch.id })
-  await ownerDb.insert(user).values({ id: dentistId, name: "Dentista Precio", email: `${dentistId}@example.test` })
+  await ownerDb.insert(user).values({ id: professionalId, name: "Dentista Precio", email: `${professionalId}@example.test` })
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
   const schedule = (weekdays: number[]) =>
     withOrgContext(appDb, "org_a", (tx) =>
-      setProfessionalSchedule(tx, "org_a", dentistId, {
+      setProfessionalSchedule(tx, "org_a", professionalId, {
         branchId: sede!.id,
-        dentistUserId: dentistId,
+        professionalUserId: professionalId,
         rules: weekdays.map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
       }))
   await schedule([1, 2, 3, 4, 5])
@@ -2051,8 +2051,8 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
         "proponer_cita",
         {
           patientId: "00000000-0000-4000-8000-0000000000aa",
-          dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
+          professionalUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
+          roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
@@ -2711,17 +2711,17 @@ it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe
   const gaps = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
     branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45,
   }))
-  expect(gaps).not.toContain(fx.dentistId)
+  expect(gaps).not.toContain(fx.professionalId)
   const line = gaps.split("\n").find((row) => row.startsWith("- "))!
   const ref = line.match(/profesional (pro-[0-9a-f]{10})\]/)?.[1]
-  expect(ref).toBe(professionalRef("org_a", fx.dentistId))
+  expect(ref).toBe(professionalRef("org_a", fx.professionalId))
   const propose = tools.find((t) => t.name === "proponer_cita")!
-  const slot = { patientId: fx.patientId, chairId: fx.chairId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45 }
+  const slot = { patientId: fx.patientId, roomId: fx.roomId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45 }
   // Un id de usuario escrito por el modelo no sirve.
-  expect(String(await propose.invoke({ ...slot, dentistUserId: fx.dentistId }))).toContain("no es de un hueco de buscar_huecos")
-  await propose.invoke({ ...slot, dentistUserId: ref })
+  expect(String(await propose.invoke({ ...slot, professionalUserId: fx.professionalId }))).toContain("no es de un hueco de buscar_huecos")
+  await propose.invoke({ ...slot, professionalUserId: ref })
   const [proposal] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  expect(proposal?.payload).toMatchObject({ dentistUserId: fx.dentistId })
+  expect(proposal?.payload).toMatchObject({ professionalUserId: fx.professionalId })
 })
 
 /** Un modelo que, mientras «redacta», deja que pase algo en la base (el equipo toma o cierra la conversación). */

@@ -7,7 +7,7 @@ import { Fingerprint } from "lucide-react"
 import { useEffect, useState } from "react"
 import { AppointmentBlock } from "../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
-import { DentistSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
+import { ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
 import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
@@ -587,8 +587,8 @@ function Reschedule({ sessionToken, appointment, onDone, onKeep }: { sessionToke
       reschedulePortalAppointmentApi(sessionToken, appointment.id, {
         expectedVersion: appointment.version,
         startsAt: slot.startsAt,
-        dentistUserId: slot.dentistUserId,
-        ...(slot.chairId ? { chairId: slot.chairId } : {}),
+        professionalUserId: slot.professionalUserId,
+        ...(slot.roomId ? { roomId: slot.roomId } : {}),
       }),
     onSuccess: onDone,
     onError: () => {
@@ -605,7 +605,7 @@ function Reschedule({ sessionToken, appointment, onDone, onKeep }: { sessionToke
           Hoy la tienes el {longDay(appointment.startsAt, appointment.timeZone ?? zone).toLowerCase()}, {timeLabel(appointment.startsAt, appointment.timeZone ?? zone)} · Sede {appointment.branchName}.
         </p>
       </div>
-      <DentistSelect state={week} id="portal-profesional" onChange={() => setChosen(null)} />
+      <ProfessionalSelect state={week} id="portal-profesional" onChange={() => setChosen(null)} />
       <WeekSlotsGrid state={week} chosen={chosen} onChoose={setChosen} minutes={minutes} />
       {move.isError ? (
         <p role="alert" className="text-sm text-destructive">

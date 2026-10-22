@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patient } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
@@ -148,19 +148,19 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 844 })
     // De 9 a 13 todos los días; se guarda hoy, así que el mes pasado usa el de hoy y lo dice.
     await call(page, "PUT", "/api/agenda/schedules", org.slug, {
-      branchId: owner.branchId, dentistUserId: owner.user.id,
+      branchId: owner.branchId, professionalUserId: owner.user.id,
       rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 540, endMin: 780 })),
     })
     // Una cita atendida de una hora el día 10 del mes pasado, a las 10:00 de Lima.
     const { year, month, daysLastMonth } = limaMonth()
-    const chairId = randomUUID()
-    await fixtureDb.insert(scheduleChair).values({ id: chairId, organizationId: org.id, branchId: owner.branchId, name: "Unidad dental de prueba" })
+    const roomId = randomUUID()
+    await fixtureDb.insert(scheduleRoom).values({ id: roomId, organizationId: org.id, branchId: owner.branchId, name: "Unidad dental de prueba" })
     const [person] = await fixtureDb.insert(contact).values({ organizationId: org.id, displayName: "Rosa Paz" }).returning({ id: contact.id })
     const patientId = randomUUID()
     await fixtureDb.insert(patient).values({ id: patientId, organizationId: org.id, personId: person!.id, patientNumber: 1 })
     const startsAt = new Date(Date.UTC(year, month - 2, 10, 15))
     await fixtureDb.insert(appointment).values({
-      organizationId: org.id, branchId: owner.branchId, patientId, chairId, dentistUserId: owner.user.id,
+      organizationId: org.id, branchId: owner.branchId, patientId, roomId, professionalUserId: owner.user.id,
       serviceName: "Evaluación", startsAt, endsAt: new Date(startsAt.getTime() + 60 * 60_000), durationMin: 60, status: "atendida",
     })
 

@@ -56,7 +56,7 @@ export interface AgentProposal {
     patientName: string | null
     channel: string | null
     branchName: string | null
-    dentistName: string | null
+    professionalName: string | null
     opportunityTitle: string | null
     beforeSummary: string | null
     afterSummary: string

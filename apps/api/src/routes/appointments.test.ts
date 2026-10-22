@@ -65,9 +65,9 @@ function buildApp(role: string): Hono {
 }
 
 const ORG = "org_agenda_api"
-const DENTIST = "api-agenda-dentist"
+const PROFESSIONAL = "api-agenda-professional"
 let branchId = ""
-let chairId = ""
+let roomId = ""
 let patientId = ""
 
 const START = "2026-10-12T14:00:00Z"
@@ -108,11 +108,11 @@ beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "user" ("id", "name", "email") values
       ('api-agenda-actor', 'Recepción API', 'api-agenda-actor@example.test'),
-      (${DENTIST}, 'Dra. API Uno', 'api-agenda-dentist@example.test')`)
+      (${PROFESSIONAL}, 'Dra. API Uno', 'api-agenda-professional@example.test')`)
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-api-actor', ${ORG}, 'api-agenda-actor', 'owner', now()),
-      ('m-api-dentist', ${ORG}, ${DENTIST}, 'member', now())`)
+      ('m-api-professional', ${ORG}, ${PROFESSIONAL}, 'member', now())`)
   const [paciente] = await ownerDb.execute<{ id: string }>(sql`
     with pp as (insert into "contact" ("organization_id", "display_name") values (${ORG}, 'Paciente API') returning "id")
     insert into "patient" ("organization_id", "person_id", "patient_number")
@@ -128,7 +128,7 @@ const json = { "content-type": "application/json" }
 
 it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner sí", async () => {
   const member = buildApp("member")
-  const denied = await member.request("/agenda/chairs", {
+  const denied = await member.request("/agenda/rooms", {
     method: "POST",
     headers: json,
     body: JSON.stringify({ branchId, name: "Unidad dental API" }),
@@ -138,13 +138,13 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
   expect(memberReads.status).toBe(403)
 
   const owner = buildApp("owner")
-  const created = await owner.request("/agenda/chairs", {
+  const created = await owner.request("/agenda/rooms", {
     method: "POST",
     headers: json,
     body: JSON.stringify({ branchId, name: "Unidad dental API" }),
   })
   expect(created.status).toBe(201)
-  chairId = ((await created.json()) as { data: { id: string } }).data.id
+  roomId = ((await created.json()) as { data: { id: string } }).data.id
 
   const reception = buildApp("reception")
   const resources = await reception.request(`/agenda/resources?branchId=${branchId}`)
@@ -153,12 +153,12 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
     data: {
       timeZone: string
       professionals: Array<{ id: string; label: string }>
-      chairs: Array<{ id: string; label: string }>
+      rooms: Array<{ id: string; label: string }>
     }
   }
   expect(body.data.timeZone).toBe("America/Lima")
-  expect(body.data.professionals.map((p) => p.id)).toContain(DENTIST)
-  expect(body.data.chairs.map((c) => c.id)).toEqual([chairId])
+  expect(body.data.professionals.map((p) => p.id)).toContain(PROFESSIONAL)
+  expect(body.data.rooms.map((c) => c.id)).toEqual([roomId])
 })
 
 it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () => {
@@ -169,7 +169,7 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     headers: json,
     body: JSON.stringify({
       branchId,
-      dentistUserId: DENTIST,
+      professionalUserId: PROFESSIONAL,
       rules: [
         { weekday: 1, startMin: 540, endMin: 780 },
         { weekday: 1, startMin: 840, endMin: 1080 },
@@ -182,8 +182,8 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     body: JSON.stringify({
       branchId,
       patientId,
-      dentistUserId: DENTIST,
-      chairId,
+      professionalUserId: PROFESSIONAL,
+      roomId,
       startsAt: START,
       durationMin: 45,
       reason: "Control",
@@ -206,8 +206,8 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     body: JSON.stringify({
       branchId,
       patientId,
-      dentistUserId: DENTIST,
-      chairId,
+      professionalUserId: PROFESSIONAL,
+      roomId,
       startsAt: "2026-10-12T14:30:00Z",
       durationMin: 30,
     }),
@@ -256,8 +256,8 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     body: JSON.stringify({
       branchId,
       patientId,
-      dentistUserId: DENTIST,
-      chairId,
+      professionalUserId: PROFESSIONAL,
+      roomId,
       startsAt: "2026-10-12T16:00:00Z",
       durationMin: 30,
     }),
@@ -270,7 +270,7 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   const created = await owner.request("/appointments", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, patientId, dentistUserId: DENTIST, chairId, startsAt: "2026-10-12T15:00:00Z", durationMin: 15, outsideSchedule: true }),
+    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt: "2026-10-12T15:00:00Z", durationMin: 15, outsideSchedule: true }),
   })
   expect(created.status).toBe(201)
   const cita = ((await created.json()) as { data: { id: string; notice?: unknown } }).data
@@ -287,8 +287,8 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   // edita sus datos: el odontólogo ve la cita sin el aviso.
   const missing = (context as unknown as { missingData: Array<{ key: string }> | null }).missingData
   expect(missing?.map((datum) => datum.key)).toContain("birthDate")
-  const forDentist = await buildApp("dentist").request(`/appointments/${cita.id}/context`)
-  expect(((await forDentist.json()) as { data: { missingData: unknown } }).data.missingData).toBeNull()
+  const forProfessional = await buildApp("clinician").request(`/appointments/${cita.id}/context`)
+  expect(((await forProfessional.json()) as { data: { missingData: unknown } }).data.missingData).toBeNull()
   // Caja no ve la agenda: tampoco lo que dice la cita de la persona.
   expect((await buildApp("cashier").request(`/appointments/${cita.id}/context`)).status).toBe(403)
   await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })
@@ -310,36 +310,36 @@ it("unidades dentales: administrarlas exige configuración; desactivada sale de 
   const owner = buildApp("owner")
   const reception = buildApp("reception")
   const patch = (app: Hono, id: string, body: unknown) =>
-    app.request(`/agenda/chairs/${id}`, { method: "PATCH", headers: json, body: JSON.stringify(body) })
+    app.request(`/agenda/rooms/${id}`, { method: "PATCH", headers: json, body: JSON.stringify(body) })
 
   // Recepción reserva, pero no ve la lista de administración ni cambia una unidad dental.
-  expect((await reception.request(`/agenda/chairs?branchId=${branchId}`)).status).toBe(403)
-  expect((await patch(reception, chairId, { name: "Otro nombre" })).status).toBe(403)
-  expect((await patch(reception, chairId, { isActive: false })).status).toBe(403)
+  expect((await reception.request(`/agenda/rooms?branchId=${branchId}`)).status).toBe(403)
+  expect((await patch(reception, roomId, { name: "Otro nombre" })).status).toBe(403)
+  expect((await patch(reception, roomId, { isActive: false })).status).toBe(403)
 
-  expect((await owner.request("/agenda/chairs")).status).toBe(400)
-  expect((await patch(owner, chairId, {})).status).toBe(400)
-  expect((await patch(owner, chairId, { name: "  " })).status).toBe(400)
-  expect((await patch(owner, chairId, { color: "rojo" })).status).toBe(400)
+  expect((await owner.request("/agenda/rooms")).status).toBe(400)
+  expect((await patch(owner, roomId, {})).status).toBe(400)
+  expect((await patch(owner, roomId, { name: "  " })).status).toBe(400)
+  expect((await patch(owner, roomId, { color: "rojo" })).status).toBe(400)
   expect((await patch(owner, "no-es-un-id", { name: "Unidad dental" })).status).toBe(404)
   expect((await patch(owner, crypto.randomUUID(), { name: "Unidad dental" })).status).toBe(404)
 
-  const renamed = await patch(owner, chairId, { name: "Unidad dental Uno" })
+  const renamed = await patch(owner, roomId, { name: "Unidad dental Uno" })
   expect(renamed.status).toBe(200)
-  expect(await renamed.json()).toEqual({ data: { id: chairId, name: "Unidad dental Uno", isActive: true } })
+  expect(await renamed.json()).toEqual({ data: { id: roomId, name: "Unidad dental Uno", isActive: true } })
 
-  expect((await patch(owner, chairId, { isActive: false })).status).toBe(200)
+  expect((await patch(owner, roomId, { isActive: false })).status).toBe(200)
   const resources = await reception.request(`/agenda/resources?branchId=${branchId}`)
-  expect(((await resources.json()) as { data: { chairs: unknown[] } }).data.chairs).toEqual([])
-  const listed = await owner.request(`/agenda/chairs?branchId=${branchId}`)
+  expect(((await resources.json()) as { data: { rooms: unknown[] } }).data.rooms).toEqual([])
+  const listed = await owner.request(`/agenda/rooms?branchId=${branchId}`)
   expect(listed.status).toBe(200)
-  const chairs = ((await listed.json()) as { data: Array<{ id: string; name: string; isActive: boolean }> }).data
-  expect(chairs).toMatchObject([{ id: chairId, name: "Unidad dental Uno", isActive: false }])
+  const rooms = ((await listed.json()) as { data: Array<{ id: string; name: string; isActive: boolean }> }).data
+  expect(rooms).toMatchObject([{ id: roomId, name: "Unidad dental Uno", isActive: false }])
 
-  expect((await patch(owner, chairId, { isActive: true })).status).toBe(200)
+  expect((await patch(owner, roomId, { isActive: true })).status).toBe(200)
   const again = await reception.request(`/agenda/resources?branchId=${branchId}`)
-  expect(((await again.json()) as { data: { chairs: Array<{ label: string }> } }).data.chairs).toEqual([
-    { id: chairId, label: "Unidad dental Uno" },
+  expect(((await again.json()) as { data: { rooms: Array<{ label: string }> } }).data.rooms).toEqual([
+    { id: roomId, label: "Unidad dental Uno" },
   ])
 })
 
@@ -350,7 +350,7 @@ it("«Llegó»: lo marcan recepción y el odontólogo, caja no; el estado no se 
   const created = await owner.request("/appointments", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, patientId, dentistUserId: DENTIST, chairId, startsAt, durationMin: 15, outsideSchedule: true }),
+    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt, durationMin: 15, outsideSchedule: true }),
   })
   expect(created.status).toBe(201)
   const cita = ((await created.json()) as { data: { id: string; version: number } }).data
@@ -374,7 +374,7 @@ it("«Llegó»: lo marcan recepción y el odontólogo, caja no; el estado no se 
     body: JSON.stringify({ expectedVersion: 2, status: "atendida" }),
   })
   expect(viaPatch.status).toBe(400)
-  expect((await arrive("dentist", false)).status).toBe(200)
+  expect((await arrive("clinician", false)).status).toBe(200)
   expect((await arrive("reception", "si" as unknown as boolean)).status).toBe(400)
   await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })
 })

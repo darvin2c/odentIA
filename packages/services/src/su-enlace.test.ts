@@ -14,7 +14,7 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
 import { expect, it } from "vitest"
-import { createChair } from "./appointments.js"
+import { createRoom } from "./appointments.js"
 import { issuePersonalLink, listBookingLinkSlots, reserveBookingLink, revokePersonalLinks } from "./booking-links.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { hidePersonalLinkRefs, personalLinkRef, personalLinkToken, resolvePersonalLinkRefs } from "./personal-link-token.js"
@@ -340,7 +340,7 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
 
     // Un token de «confirmar» de un correo, aún vigente, da su enlace con esa cita.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-    const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+    const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     const startsAt = new Date(Date.now() + 3 * 86_400_000)
     const [booked] = await ownerDb
       .insert(appointment)
@@ -348,8 +348,8 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
         organizationId: ORG,
         branchId: site!.id,
         patientId: ana.patientId,
-        dentistUserId: f.actor,
-        chairId: chair.id,
+        professionalUserId: f.actor,
+        roomId: room.id,
         startsAt,
         endsAt: new Date(startsAt.getTime() + 30 * 60_000),
         durationMin: 30,
@@ -388,11 +388,11 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await f.run((tx) => decidePersonalLinkBudget(tx, ORG, link.token, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" }).returning({ id: branch.id })
-  await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, ORG, f.actor, {
       branchId: site!.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
     }),
   )
@@ -402,7 +402,7 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   const { slots } = await f.run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))
   const [first, second] = slots
   if (!first || !second) throw new Error("Sin horarios")
-  const pick = (slot: typeof first) => ({ branchId: site!.id, startsAt: slot.startsAt, dentistUserId: slot.dentistUserId, ...(slot.chairId ? { chairId: slot.chairId } : {}), planItemIds: [item.id] })
+  const pick = (slot: typeof first) => ({ branchId: site!.id, startsAt: slot.startsAt, professionalUserId: slot.professionalUserId, ...(slot.roomId ? { roomId: slot.roomId } : {}), planItemIds: [item.id] })
   await f.run((tx) => reserveBookingLink(tx, ORG, link.token, pick(first)))
   // Un segundo toque, o el mismo tratamiento en otro horario, no crea otra cita.
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, pick(second)))).rejects.toMatchObject({ code: "BOOKING_ALREADY_SCHEDULED" })
@@ -464,11 +464,11 @@ it("Inicio: quien terminó su registro hoy y tiene cita hoy sale en «Te espera�
   const f = await clinicalFixture()
   const carla = await minimal(f, { given: "Carla", surname: "Núñez" })
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "UTC" }).returning({ id: branch.id })
-  const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
   const startsAt = new Date(Date.now() + 60_000)
   const [booked] = await ownerDb
     .insert(appointment)
-    .values({ organizationId: ORG, branchId: site!.id, patientId: carla.patientId, dentistUserId: f.actor, chairId: chair.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 })
+    .values({ organizationId: ORG, branchId: site!.id, patientId: carla.patientId, professionalUserId: f.actor, roomId: room.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 })
     .returning({ id: appointment.id })
   const access: WorkspaceAccess = {
     patients: true, appointments: true, conversations: false, tasks: false, finance: false, clinical: false,
@@ -481,7 +481,7 @@ it("Inicio: quien terminó su registro hoy y tiene cita hoy sale en «Te espera�
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla.personId, patientId: carla.patientId }, { secretsKey: KEY }))
   await f.run((tx) => submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1994-07-07" } }))
   expect(await rows()).toEqual([
-    expect.objectContaining({ kind: "registrationDone", appointmentId: booked!.id, patientId: carla.patientId, patientName: "Carla Núñez", dentistName: "Clínico" }),
+    expect.objectContaining({ kind: "registrationDone", appointmentId: booked!.id, patientId: carla.patientId, patientName: "Carla Núñez", professionalName: "Clínico" }),
   ])
 
   // Llegó: la fila se va.

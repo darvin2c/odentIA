@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patient, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
@@ -112,11 +112,11 @@ it("cambiar el nombre en la ficha se ve en Personas, Bandeja, Agenda y el PDF", 
     .returning({ id: channelConnection.id })
   await ownerDb.insert(conversation).values({ organizationId: "org_a", contactId: personId, channelConnectionId: connection!.id, externalThreadId: randomUUID() })
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" }).returning({ id: scheduleChair.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" }).returning({ id: scheduleRoom.id })
   const startsAt = new Date(Date.now() + 86_400_000)
   const [visit] = await ownerDb
     .insert(appointment)
-    .values({ organizationId: "org_a", branchId: site!.id, patientId: f.patient.id, chairId: chair!.id, dentistUserId: f.actor, startsAt, endsAt: new Date(startsAt.getTime() + 1_800_000), durationMin: 30 })
+    .values({ organizationId: "org_a", branchId: site!.id, patientId: f.patient.id, roomId: room!.id, professionalUserId: f.actor, startsAt, endsAt: new Date(startsAt.getTime() + 1_800_000), durationMin: 30 })
     .returning({ id: appointment.id })
   const [budget] = await ownerDb
     .insert(treatmentBudget)

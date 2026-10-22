@@ -1119,7 +1119,7 @@ function CashTab({
                   {attended.map(({ row, at }) => {
                     const left =
                       row.lastAttended?.at === at
-                        ? `Salió a las ${formatClock(at, locale, zone)}${row.lastAttended.dentistName ? ` · ${row.lastAttended.dentistName}` : ""}`
+                        ? `Salió a las ${formatClock(at, locale, zone)}${row.lastAttended.professionalName ? ` · ${row.lastAttended.professionalName}` : ""}`
                         : `Anotado hoy a las ${formatClock(at, locale, zone)}`
                     const older =
                       row.oldestSince && dayKeyOf(row.oldestSince, zone) < today

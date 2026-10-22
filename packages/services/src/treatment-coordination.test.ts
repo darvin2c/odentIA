@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
 import { expect, it } from "vitest"
-import { createChair } from "./appointments.js"
+import { createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createFollowUp, listFollowUps } from "./follow-ups.js"
@@ -21,20 +21,20 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
     id: randomUUID(),
     organizationId: "org_a",
     userId: f.actor,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   })
   const [site] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede coordinación", timezone: "America/Lima" })
     .returning()
-  const chair = await f.run((tx) =>
-    createChair(tx, "org_a", { branchId: site.id, name: "Coordinación" }),
+  const room = await f.run((tx) =>
+    createRoom(tx, "org_a", { branchId: site.id, name: "Coordinación" }),
   )
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       rules: Array.from({ length: 7 }, (_, weekday) => ({
         weekday,
         startMin: 8 * 60,
@@ -78,8 +78,8 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
     scheduleFollowUpFromCoordination(tx, ...f.args, control.id, {
       appointment: {
         branchId: site.id,
-        chairId: chair.id,
-        dentistUserId: f.actor,
+        roomId: room.id,
+        professionalUserId: f.actor,
         startsAt,
         durationMin: 30,
       },

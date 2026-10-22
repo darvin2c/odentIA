@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { scheduleChair } from "@odentia/db/schema/agenda"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
@@ -111,7 +111,7 @@ describe("responder", () => {
     // Un horario que dejó de valer (ADR 0060) no cuenta: sigue sin haber horario.
     const [old] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Sede de antes", timezone: "America/Lima" }).returning({ id: branch.id })
     await ownerDb.insert(professionalSchedule).values({
-      organizationId: ORG, branchId: old!.id, dentistUserId: USER, weekday: 2, startMin: 540, endMin: 780,
+      organizationId: ORG, branchId: old!.id, professionalUserId: USER, weekday: 2, startMin: 540, endMin: 780,
       isActive: false, validFrom: "2026-01-05", validUntil: "2026-02-02",
     })
     const empty = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo reservar una cita?", screen: "/agenda" }))
@@ -128,8 +128,8 @@ describe("responder", () => {
 
     // Con unidad dental, horario y servicio ya no falta nada: responde con la guía.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Sede Ayuda", timezone: "America/Lima" }).returning({ id: branch.id })
-    await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental 1" })
-    await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: site!.id, dentistUserId: USER, weekday: 1, startMin: 540, endMin: 780 })
+    await ownerDb.insert(scheduleRoom).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental 1" })
+    await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: site!.id, professionalUserId: USER, weekday: 1, startMin: 540, endMin: 780 })
     const ready = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo mover esta cita?", screen: "/agenda" }))
     expect(ready.blockers.map((item) => item.text)).toEqual(["Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida."])
   })

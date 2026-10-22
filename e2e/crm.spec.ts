@@ -607,14 +607,14 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   fixtureDb,
 }, info) => {
   const { page, org } = owner
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: randomUUID(),
     answers: { demographics: { displayName: "Eva Rojas", docType: "DNI", docNumber: "45678902" }, respondent: "staff", privacyAccepted: false },
   }, 201)
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
     branchId: owner.branchId,
-    dentistUserId: owner.user.id,
+    professionalUserId: owner.user.id,
     rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
   }, 200)
   const tg = await createTelegramConnection(page, org.slug)

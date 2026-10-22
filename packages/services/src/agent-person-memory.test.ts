@@ -22,7 +22,7 @@ import {
 import { addAgentCaseNote } from "./agent-case.js"
 import { getCaseBrief, parseHandoffSaid } from "./agent-case-brief.js"
 import { annotateHandoff, createHandoff, listHandoffs } from "./agent-operations.js"
-import { createChair } from "./appointments.js"
+import { createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import {
   cancelBookingLinkAppointment,
@@ -234,14 +234,14 @@ describe("memoria de la persona", () => {
 
     // Su cita: la próxima en pie; si no hay, la última que pasó. Solo cuándo, dónde y con quién.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Surco", timezone: "America/Lima" }).returning({ id: branch.id })
-    const dentist = "dentista-ultima"
-    await ownerDb.insert(user).values([{ id: dentist, name: "Dra. Ana Torres", email: "ana.torres@ultima.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    const chair = await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental U" }))
+    const professional = "dentista-ultima"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dra. Ana Torres", email: "ana.torres@ultima.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    const room = await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental U" }))
     const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Rosa Díaz", givenNames: "Rosa", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: rosa.contactId, relationship: "self", isPreferred: true }))
     const visit = (startsAt: Date, status: string) => ({
-      organizationId: ORG, branchId: site!.id, patientId: created!.id, dentistUserId: dentist, chairId: chair.id,
+      organizationId: ORG, branchId: site!.id, patientId: created!.id, professionalUserId: professional, roomId: room.id,
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status,
       serviceName: "Endodoncia", reason: "Dolor de muela",
     })
@@ -250,7 +250,7 @@ describe("memoria de la persona", () => {
     await ownerDb.insert(appointment).values([visit(past, "atendida"), visit(new Date(past.getTime() + 86_400_000), "cancelada")])
     const afterPast = (await run((tx) => getPersonMemory(tx, ORG, rosa.contactId, { lastTime: { appointments: true } }))).lastTime!
     expect(afterPast.appointment).toEqual({
-      startsAt: past.toISOString(), status: "atendida", upcoming: false, branchName: "Surco", dentistName: "Dra. Ana Torres",
+      startsAt: past.toISOString(), status: "atendida", upcoming: false, branchName: "Surco", professionalName: "Dra. Ana Torres",
     })
     await ownerDb.insert(appointment).values([visit(future, "programada")])
     const withNext = (await run((tx) => getPersonMemory(tx, ORG, rosa.contactId, { lastTime: { appointments: true } }))).lastTime!
@@ -331,14 +331,14 @@ describe("reservar desde un enlace", () => {
     await expect(run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_NEEDS_PATIENT" })
 
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Miraflores", timezone: "America/Lima" }).returning({ id: branch.id })
-    const dentist = "dentista-enlace"
-    await ownerDb.insert(user).values([{ id: dentist, name: "Dra. Lucía Salas", email: "lucia.salas@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+    const professional = "dentista-enlace"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dra. Lucía Salas", email: "lucia.salas@enlace.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
         branchId: site!.id,
-        dentistUserId: dentist,
+        professionalUserId: professional,
         rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
       }))
     const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Eva María Rojas", givenNames: "Eva María", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
@@ -369,22 +369,22 @@ describe("reservar desde un enlace", () => {
     const range = { branchId: site!.id, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
     const { slots } = await run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))
     expect(slots.length).toBeGreaterThan(0)
-    expect(slots[0]).toMatchObject({ dentistUserId: dentist, dentistName: "Dra. Lucía Salas" })
+    expect(slots[0]).toMatchObject({ professionalUserId: professional, professionalName: "Dra. Lucía Salas" })
     // Otra organización, o un enlace mal escrito, no encuentran nada.
     await expect(run((tx) => getBookingLinkView(tx, OTHER, link.token), OTHER)).rejects.toMatchObject({ status: 404 })
     await expect(run((tx) => getBookingLinkView(tx, ORG, "no-es-un-enlace"))).rejects.toMatchObject({ status: 404 })
 
     const chosen = slots[0]!
     const booked = await run((tx) =>
-      reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: chosen.startsAt, dentistUserId: chosen.dentistUserId, ...(chosen.chairId ? { chairId: chosen.chairId } : {}) }, { secretsKey: KEY }))
-    expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "Miraflores", dentistName: "Dra. Lucía Salas" })
+      reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }, { secretsKey: KEY }))
+    expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "Miraflores", professionalName: "Dra. Lucía Salas" })
     const rows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))
     expect(rows.map((row) => [row.status, row.source, row.createdBy, row.conversationId])).toEqual([["programada", "enlace", null, eva.conversationId]])
     // El enlace no reserva dos veces y la página muestra la cita; ese horario ya no se ofrece.
     const after = await run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))
     expect(after.slots.map((slot) => slot.startsAt)).not.toContain(chosen.startsAt)
     await expect(run((tx) =>
-      reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: slots[1]!.startsAt, dentistUserId: dentist }))).rejects.toMatchObject({ code: "BOOKING_LINK_USED" })
+      reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: slots[1]!.startsAt, professionalUserId: professional }))).rejects.toMatchObject({ code: "BOOKING_LINK_USED" })
     expect((await run((tx) => getBookingLinkView(tx, ORG, link.token))).appointment).toMatchObject({ startsAt: chosen.startsAt, canChange: true, cancelled: false })
     // El agente y quien tome el caso lo ven: queda anotado en el caso.
     const brief = await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))
@@ -394,7 +394,7 @@ describe("reservar desde un enlace", () => {
     const other = after.slots[0]!
     await expect(run((tx) => listBookingLinkSlots(tx, ORG, link.token, { ...range, branchId: "00000000-0000-4000-8000-000000000099" }))).rejects.toMatchObject({ status: 400 })
     const moved = await run((tx) =>
-      changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: other.startsAt, dentistUserId: other.dentistUserId }, { secretsKey: KEY }))
+      changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: other.startsAt, professionalUserId: other.professionalUserId }, { secretsKey: KEY }))
     expect(moved).toMatchObject({ startsAt: other.startsAt, canChange: true })
     const movedRows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))
     expect(movedRows.map((row) => [row.id, row.status, row.startsAt.toISOString()])).toEqual([[rows[0]!.id, "programada", other.startsAt]])
@@ -407,7 +407,7 @@ describe("reservar desde un enlace", () => {
     expect((await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))).map((row) => row.status)).toEqual(["cancelada"])
     await expect(run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
     await expect(run((tx) =>
-      changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: chosen.startsAt, dentistUserId: dentist }))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
+      changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: chosen.startsAt, professionalUserId: professional }))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
     await expect(run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
     const notes = (await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))).known.map((item) => item.text).join(" ")
     expect(notes).toContain("Cambió su cita desde su enlace")
@@ -418,14 +418,14 @@ describe("reservar desde un enlace", () => {
 describe("reservar desde un enlace quien recién se contacta", () => {
   it("elige, deja sus datos esenciales y reserva; la ficha la crea el registro y queda señalado lo que falta", async () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "San Isidro", timezone: "America/Lima" }).returning({ id: branch.id })
-    const dentist = "dentista-nuevo"
-    await ownerDb.insert(user).values([{ id: dentist, name: "Dr. Mario Paz", email: "mario.paz@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental A" }))
+    const professional = "dentista-nuevo"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dr. Mario Paz", email: "mario.paz@enlace.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental A" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
         branchId: site!.id,
-        dentistUserId: dentist,
+        professionalUserId: professional,
         rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
       }))
     // La clínica activa su registro de pacientes: define qué datos pide y su aviso de privacidad.
@@ -449,7 +449,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const range = { branchId: site!.id, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString() }
     const { slots } = await run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))
     const chosen = slots[0]!
-    const choice = { branchId: site!.id, startsAt: chosen.startsAt, dentistUserId: chosen.dentistUserId, ...(chosen.chairId ? { chairId: chosen.chairId } : {}) }
+    const choice = { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }
     await expect(run((tx) => reserveBookingLink(tx, ORG, link.token, choice, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_NEEDS_REGISTRATION" })
     expect(await ownerDb.select().from(appointment).where(eq(appointment.conversationId, nuevo.conversationId))).toEqual([])
 
@@ -507,7 +507,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     await expect(run((tx) => getBookingLinkRegistrationForm(tx, ORG, link.token))).rejects.toMatchObject({ code: "BOOKING_ALREADY_PATIENT" })
     await expect(send(essentials)).rejects.toMatchObject({ code: "BOOKING_ALREADY_PATIENT" })
     const booked = await run((tx) => reserveBookingLink(tx, ORG, link.token, choice, { secretsKey: KEY }))
-    expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "San Isidro", dentistName: "Dr. Mario Paz" })
+    expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "San Isidro", professionalName: "Dr. Mario Paz" })
     const rows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, registered.id))
     expect(rows.map((row) => [row.status, row.source])).toEqual([["programada", "enlace"]])
   })

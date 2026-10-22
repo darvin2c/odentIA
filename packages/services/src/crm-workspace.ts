@@ -84,7 +84,7 @@ export interface CrmNextAppointment {
   status: string
   branchName: string
   timeZone: string
-  dentistName: string
+  professionalName: string
   serviceName: string | null
 }
 
@@ -119,7 +119,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
       branchName: branch.name,
       branchZone: branch.timezone,
       orgZone: orgProfile.timezone,
-      dentistName: user.name,
+      professionalName: user.name,
       serviceName: appointment.serviceName,
     })
     .from(appointment)
@@ -135,7 +135,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(branch, and(eq(branch.id, appointment.branchId), eq(branch.organizationId, orgId)))
     .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
     .where(
       and(
         eq(appointment.organizationId, orgId),
@@ -154,7 +154,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
     status: row.status,
     branchName: row.branchName,
     timeZone: row.branchZone ?? row.orgZone ?? NEUTRAL_TIMEZONE,
-    dentistName: row.dentistName,
+    professionalName: row.professionalName,
     serviceName: row.serviceName,
   }
 }

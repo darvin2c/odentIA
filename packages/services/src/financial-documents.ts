@@ -372,8 +372,8 @@ export async function getDocumentSendOptions(
   actor: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<DocumentSendOptions> {
   const documentType = assertDocumentType(input.documentType)
-  if (documentType === "budget" && actor.memberRole === "dentist" && actor.actorUserId)
-    await requireDentistOwnPlan(tx, orgId, actor.actorUserId, patientId, input.documentId)
+  if (documentType === "budget" && actor.memberRole === "clinician" && actor.actorUserId)
+    await requireProfessionalOwnPlan(tx, orgId, actor.actorUserId, patientId, input.documentId)
   const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, patientId, documentType, input.documentId)
   const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId, documentType)
   if (recipients.length === 0) throw notFound("Destinatario del documento")
@@ -578,7 +578,7 @@ async function deliverIfDraft(
 
 // Lo propio del odontólogo al enviar presupuestos ya entregados: lo que él
 // indicó (`deliverBudget` aplica la misma regla al entregar el borrador).
-async function requireDentistOwnPlan(
+async function requireProfessionalOwnPlan(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -597,7 +597,7 @@ async function requireDentistOwnPlan(
     )
     .limit(1)
   if (!head) throw notFound("Presupuesto")
-  await requireOwnBudget(tx, orgId, budgetId, actorUserId, "dentist")
+  await requireOwnBudget(tx, orgId, budgetId, actorUserId, "clinician")
 }
 
 // --- Envío ----------------------------------------------------------------------
@@ -1020,8 +1020,8 @@ export async function sendFinancialDocument(
     subject = `Ticket N.º ${snap.numberLabel} · ${snap.org.tradeName}`
     defaultBody = "Te enviamos tu ticket de cobro en PDF."
   } else {
-    if (memberRole === "dentist") {
-      await requireDentistOwnPlan(tx, orgId, actorUserId, input.patientId, input.documentId)
+    if (memberRole === "clinician") {
+      await requireProfessionalOwnPlan(tx, orgId, actorUserId, input.patientId, input.documentId)
     }
     deliveredBudget = await deliverIfDraft(tx, orgId, actorUserId, memberRole, input.patientId, input.documentId)
     const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId, {

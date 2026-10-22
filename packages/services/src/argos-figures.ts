@@ -1407,8 +1407,8 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
     tx
       .selectDistinct({
         name: user.name,
-        attends: sql<boolean>`(exists (select 1 from ${professionalSchedule} s where s.organization_id = ${member.organizationId} and s.dentist_user_id = ${member.userId})
-          or exists (select 1 from ${appointment} a where a.organization_id = ${member.organizationId} and a.dentist_user_id = ${member.userId}))`,
+        attends: sql<boolean>`(exists (select 1 from ${professionalSchedule} s where s.organization_id = ${member.organizationId} and s.professional_user_id = ${member.userId})
+          or exists (select 1 from ${appointment} a where a.organization_id = ${member.organizationId} and a.professional_user_id = ${member.userId}))`,
       })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
@@ -1440,7 +1440,7 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
   }
 }
 
-const ROLE_WORDS: Record<string, string> = { owner: "propietario", admin: "administración", dentist: "odontología", reception: "recepción", cashier: "caja" }
+const ROLE_WORDS: Record<string, string> = { owner: "propietario", admin: "administración", clinician: "odontología", reception: "recepción", cashier: "caja" }
 
 /**
  * Quien pregunta, con el rol con que pregunta (como lo dice la vista

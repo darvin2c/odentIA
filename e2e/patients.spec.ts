@@ -437,7 +437,7 @@ function bornYearsAgo(years: number): string {
   return date.toISOString().slice(0, 10)
 }
 
-for (const role of ["reception", "dentist", "cashier"] as const) {
+for (const role of ["reception", "clinician", "cashier"] as const) {
   test(`ficha por rol: ${role} entra a su área y solo ve lo que su permiso autoriza`, async ({
     owner,
     fixtureDb,
@@ -497,7 +497,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       await openSection(page, "Datos")
       await expect(page.getByRole("heading", { name: "Datos personales" })).toBeVisible()
     }
-    if (role === "dentist") {
+    if (role === "clinician") {
       await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Clínica", "Plan", "Datos"])
       // Sin el CRM ve sus conversaciones sin errores; las notas son de recepción.
       expect(chats.status).toBe(200)

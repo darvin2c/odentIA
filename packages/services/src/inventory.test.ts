@@ -518,7 +518,7 @@ it("registrar uso, trasladar, agregar sin compra y ajustar un lote: cada uno con
   const patient = (await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: "Lucía Paredes", patientNumber: 1 }))[0]!
   const [today] = await ownerDb
     .insert(encounter)
-    .values({ organizationId: c.orgId, patientId: patient.id, dentistUserId: c.actor, reason: "Limpieza" })
+    .values({ organizationId: c.orgId, patientId: patient.id, professionalUserId: c.actor, reason: "Limpieza" })
     .returning({ id: encounter.id })
 
   // Uso con paciente: sale del lote que vence primero y se une a su atención de hoy.

@@ -130,7 +130,7 @@ beforeAll(async () => {
   // Quien prepara: odontólogo con colegiatura (entregar un presupuesto lo firma).
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Dra. Ruiz", email: `${actor}@example.test` })
-  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: ORG, userId: actor, role: "dentist", createdAt: new Date() })
+  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: ORG, userId: actor, role: "clinician", createdAt: new Date() })
   await ownerDb
     .insert(professionalProfile)
     .values({ organizationId: ORG, userId: actor, professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345" })
@@ -217,7 +217,7 @@ async function patientOf(contactId: string, name: string, relationship: "self" |
 async function budgetOf(patientId: string, options: { deliver: boolean; crown?: boolean }) {
   const [session] = await ownerDb
     .insert(encounter)
-    .values({ organizationId: ORG, patientId, dentistUserId: clinic.actor, reason: "Consulta" })
+    .values({ organizationId: ORG, patientId, professionalUserId: clinic.actor, reason: "Consulta" })
     .returning({ id: encounter.id })
   const tooth: Record<number, string> = {}
   for (const piece of [16, 26, 36]) {

@@ -11,11 +11,11 @@ import { usePermission } from "../../lib/crm"
 
 export function AttendingForNotice({
   appointmentId,
-  encounterDentistUserId,
+  encounterProfessionalUserId,
 }: {
   appointmentId: string | null
   /** Quien lleva la atención. */
-  encounterDentistUserId: string
+  encounterProfessionalUserId: string
 }) {
   const canSeeAgenda = usePermission("appointments.read")
   const query = useQuery({
@@ -24,10 +24,10 @@ export function AttendingForNotice({
     queryFn: () => apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointmentId}`),
   })
   const visit = query.data?.data
-  if (!visit || visit.dentistUserId === encounterDentistUserId) return null
+  if (!visit || visit.professionalUserId === encounterProfessionalUserId) return null
   return (
     <p role="note" className="rounded-lg bg-info-soft px-3 py-2 text-sm text-foreground">
-      Atiendes la cita de {professionalSaid(visit.dentistName, { full: true })}
+      Atiendes la cita de {professionalSaid(visit.professionalName, { full: true })}
     </p>
   )
 }

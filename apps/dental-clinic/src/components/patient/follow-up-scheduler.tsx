@@ -206,7 +206,7 @@ function ScheduleForm({
         schedule.mutate({
           appointment: {
             branchId: resources.branchId,
-            dentistUserId: target.columnId,
+            professionalUserId: target.columnId,
             serviceId: serviceId || undefined,
             startsAt: target.start,
             endsAt: target.end,
@@ -232,7 +232,7 @@ function ScheduleForm({
               <span className="font-bold">
                 {rangeSaid(item.startsAt, item.endsAt, timeZone, today)}
               </span>{" "}
-              <span className="text-muted-foreground">con {shortName(item.dentistName)}</span>
+              <span className="text-muted-foreground">con {shortName(item.professionalName)}</span>
             </span>
             <SubmitButton
               variant="outline"

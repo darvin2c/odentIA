@@ -6,7 +6,7 @@ interface DemoAppointment {
   id: string
   title: string
   professionalId: string
-  chairId: string
+  roomId: string
   start: string
   end: string
   status: ScheduleStatus
@@ -16,7 +16,7 @@ const base: DemoAppointment = {
   id: "a",
   title: "Persona",
   professionalId: "ana",
-  chairId: "one",
+  roomId: "one",
   start: "2026-09-24T14:00:00Z",
   end: "2026-09-24T15:00:00Z",
   status: "confirmada",
@@ -31,14 +31,14 @@ describe("solapamientos de recursos ocupables", () => {
   it("detecta conflictos independientes de profesional y unidad dental aunque el otro recurso cambie", () => {
     const conflicts = findScheduleConflicts([
       base,
-      appointment("b", { chairId: "two" }),
+      appointment("b", { roomId: "two" }),
       appointment("c", { professionalId: "luis" }),
     ])
-    expect(conflicts.get("a")).toEqual({ professional: true, chair: true })
-    expect(conflicts.get("b")).toEqual({ professional: true, chair: false })
-    expect(conflicts.get("c")).toEqual({ professional: false, chair: true })
+    expect(conflicts.get("a")).toEqual({ professional: true, room: true })
+    expect(conflicts.get("b")).toEqual({ professional: true, room: false })
+    expect(conflicts.get("c")).toEqual({ professional: false, room: true })
     expect(
-      findScheduleConflicts([base, appointment("d", { professionalId: "luis", chairId: "two" })])
+      findScheduleConflicts([base, appointment("d", { professionalId: "luis", roomId: "two" })])
         .size,
     ).toBe(0)
   })

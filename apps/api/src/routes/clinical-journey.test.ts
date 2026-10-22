@@ -3,7 +3,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
-import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
+import { createRoom, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { createHash } from "node:crypto"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
@@ -260,7 +260,7 @@ beforeAll(async () => {
   )
   // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
   await ownerDb.execute(
-    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'clinician', now()) on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
@@ -324,13 +324,13 @@ it("controles: alta, programación, cierre contra atención finalizada y cancela
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede controles", timezone: "America/Lima" })
     .returning()
-  const chair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId: site.id, name: "Control" }),
+  const room = await withOrgContext(appDb, "org_a", (tx) =>
+    createRoom(tx, "org_a", { branchId: site.id, name: "Control" }),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", "u-1", {
       branchId: site.id,
-      dentistUserId: "u-1",
+      professionalUserId: "u-1",
       rules: Array.from({ length: 7 }, (_, weekday) => ({
         weekday,
         startMin: 8 * 60,
@@ -343,12 +343,12 @@ it("controles: alta, programación, cierre contra atención finalizada y cancela
     buildApp("reception"),
     `/patients/${patientId}/follow-ups/${followUpId}/schedule`,
     {
-      appointment: { chairId: chair.id, dentistUserId: "u-1", startsAt },
+      appointment: { roomId: room.id, professionalUserId: "u-1", startsAt },
     },
   )
   expect(denied.status).toBe(403)
   const scheduled = await post(app, `/patients/${patientId}/follow-ups/${followUpId}/schedule`, {
-    appointment: { chairId: chair.id, dentistUserId: "u-1", startsAt },
+    appointment: { roomId: room.id, professionalUserId: "u-1", startsAt },
   })
   expect(scheduled.status).toBe(200)
   const programmed = (await json<{ data: { status: string; appointmentId: string } }>(scheduled))
@@ -796,7 +796,7 @@ it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por
 
   // Odontología recorre el tratamiento sin caja: la ruta es clínica, pero
   // cargos, pagos y saldos solo viajan con `finance.read`.
-  const clinicalOnly = await buildApp("dentist").request(
+  const clinicalOnly = await buildApp("clinician").request(
     `/patients/${patientId}/treatments/${linkedItemId}/journey`,
   )
   expect(clinicalOnly.status).toBe(200)

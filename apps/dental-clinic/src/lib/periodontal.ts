@@ -61,7 +61,7 @@ export interface PeriodontalChart {
   /** Fecha de la atención en que se sondeó. */
   date: string
   encounterStatus: string
-  dentistName: string | null
+  professionalName: string | null
   expectedTeeth: number[]
   implantTeeth: number[]
   teeth: PeriodontalToothRecord[]
@@ -81,7 +81,7 @@ export interface PeriodontalChartListItem {
   encounterId: string
   date: string
   encounterStatus: string
-  dentistName: string | null
+  professionalName: string | null
   bleedingPercent: number | null
   plaquePercent: number | null
   sitesFrom4mm: number

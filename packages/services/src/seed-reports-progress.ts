@@ -271,11 +271,11 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
   const { timezone, currency } = await getOrgLocale(tx, orgId)
   const [day] = await tx.execute<{ start: Date | string }>(sql`select (date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone}) as start`)
   const dayStart = new Date(day?.start ?? Date.now()).getTime()
-  const dentists = await tx.execute<{ userId: string; signerName: string; registration: string }>(sql`
-    select distinct on (e.dentist_user_id) e.dentist_user_id as "userId", e.signer_name as "signerName", e.signer_registration as registration
+  const professionals = await tx.execute<{ userId: string; signerName: string; registration: string }>(sql`
+    select distinct on (e.professional_user_id) e.professional_user_id as "userId", e.signer_name as "signerName", e.signer_registration as registration
     from encounter e
     where e.organization_id = ${orgId} and e.branch_id = ${branchId} and e.status = 'finalizada' and e.signer_registration is not null
-    order by e.dentist_user_id, e.finalized_at desc`)
+    order by e.professional_user_id, e.finalized_at desc`)
   const patients = await tx.execute<{ id: string }>(sql`
     select p.id from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where p.organization_id = ${orgId}
@@ -287,14 +287,14 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
     .select({ id: serviceCatalog.id, code: serviceCatalog.code, name: serviceCatalog.name, priceCents: serviceCatalog.priceCents })
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.code, [...new Set(TODAY_VISITS.map((visit) => visit.code))])))
-  if (dentists.length === 0 || patients.length < TODAY_VISITS.length) return 0
+  if (professionals.length === 0 || patients.length < TODAY_VISITS.length) return 0
   const span = Math.max(Date.now() - dayStart, 60_000)
   let count = 0
   for (const [index, visit] of TODAY_VISITS.entries()) {
     const service = services.find((row) => row.code === visit.code)
     const patientId = patients[index]?.id
-    const dentist = dentists[index % dentists.length]
-    if (!service || service.priceCents === null || !patientId || !dentist) continue
+    const professional = professionals[index % professionals.length]
+    if (!service || service.priceCents === null || !patientId || !professional) continue
     // Repartidas en lo que va del día: nunca en el futuro, aunque la semilla corra temprano.
     const endedAt = new Date(dayStart + Math.round((span * (index + 1)) / (TODAY_VISITS.length + 1)))
     const startedAt = new Date(endedAt.getTime() - 30 * 60_000)
@@ -306,13 +306,13 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
       organizationId: orgId,
       patientId,
       branchId,
-      dentistUserId: dentist.userId,
+      professionalUserId: professional.userId,
       reason: service.name,
       evolution: TODAY_MARK,
       startedAt,
-      signerName: dentist.signerName,
+      signerName: professional.signerName,
       signerTitle: "Cirujano dentista",
-      signerRegistration: dentist.registration,
+      signerRegistration: professional.registration,
     })
     await tx.insert(encounterProcedure).values({
       id: procedureId,
@@ -323,11 +323,11 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
       quantity: 1,
       priceCents: service.priceCents,
       currency,
-      createdBy: dentist.userId,
+      createdBy: professional.userId,
       createdAt: endedAt,
     })
     await tx.execute(sql`
-      update encounter set status = 'finalizada', ended_at = ${endedAt.toISOString()}::timestamptz, finalized_at = ${endedAt.toISOString()}::timestamptz, finalized_by = dentist_user_id
+      update encounter set status = 'finalizada', ended_at = ${endedAt.toISOString()}::timestamptz, finalized_at = ${endedAt.toISOString()}::timestamptz, finalized_by = professional_user_id
       where organization_id = ${orgId} and id = ${encounterId}`)
     await tx.insert(patientCharge).values({
       id: chargeId,
@@ -338,7 +338,7 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
       description: service.name,
       amountCents: service.priceCents,
       currency,
-      createdBy: dentist.userId,
+      createdBy: professional.userId,
       createdAt: endedAt,
     })
     if (visit.paid) {

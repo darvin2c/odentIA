@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
 import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeGap, agentKnowledgeRevision, agentLesson, agentPersonFact, agentProposal, agentReviewItem, agentRunLedger, agentTestCase } from "@odentia/db/schema/agent"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
 import { and, asc, desc, eq, gt } from "drizzle-orm"
@@ -116,10 +116,10 @@ export async function seedAgent(
     // Referencias reales para que aprobar la propuesta en dev ejecute de
     // verdad: unidad dental de la sede y una cita futura programada (su versión se
     // lee aquí porque el seed purga y recrea la org en cada ejecución).
-    const [chair] = await tx
-      .select({ id: scheduleChair.id })
-      .from(scheduleChair)
-      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.branchId, branchId)))
+    const [room] = await tx
+      .select({ id: scheduleRoom.id })
+      .from(scheduleRoom)
+      .where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.branchId, branchId)))
       .limit(1)
     const [futureAppointment] = await tx
       .select({ id: appointment.id, version: appointment.version, patientId: appointment.patientId })
@@ -157,8 +157,8 @@ export async function seedAgent(
         payload: {
           patientId: input.patientId,
           branchId,
-          dentistUserId: ownerUserId,
-          chairId: chair?.id,
+          professionalUserId: ownerUserId,
+          roomId: room?.id,
           durationMin: 30,
           startsAt: lima(2, "15:00"),
         },

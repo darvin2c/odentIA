@@ -498,7 +498,7 @@ it("salud revierte todo si una fila es inválida y exige colecciones completas",
 async function draftFor(patientId: string, orgId = "org_a"): Promise<string> {
   await seedUserAndCie()
   const [row] = await ownerDb.execute<{ id: string }>(
-    sql`insert into "encounter" ("organization_id", "patient_id", "dentist_user_id", "reason")
+    sql`insert into "encounter" ("organization_id", "patient_id", "professional_user_id", "reason")
         values (${orgId}, ${patientId}::uuid, ${ACTOR}, 'Control') returning "id"`,
   )
   return row!.id
@@ -671,7 +671,7 @@ it("odontograma firmado: instantánea inmutable con la firma del perfil; bloquea
   )
   await ownerDb.execute(
     sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
-        values (${crypto.randomUUID()}, 'org_a', ${signer}, 'dentist', now())`,
+        values (${crypto.randomUUID()}, 'org_a', ${signer}, 'clinician', now())`,
   )
   await expect(
     withOrgContext(appDb, "org_a", (tx) => createOdontogramAssessment(tx, "org_a", signer, p.id, base)),

@@ -122,7 +122,7 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
                       <span className="w-12 shrink-0 font-semibold tabular-nums">{formatClock(item.startsAt, locale, today.timezone)}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate font-semibold">{item.patientName}</span>
-                        <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.dentistName, item.serviceName])}</span>
+                        <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.professionalName, item.serviceName])}</span>
                       </span>
                       <VisitText item={item} now={now} timeZone={today.timezone} />
                     </Link>
@@ -218,7 +218,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
         pending={attend.isPending && attend.variables?.appointment.id === item.id}
         aria-label={`Atender: ${item.patientName}`}
         onClick={() =>
-          attend.mutate({ patientId: item.patientId, appointment: { id: item.id, dentistUserId: item.dentistUserId, dentistName: item.dentistName } })
+          attend.mutate({ patientId: item.patientId, appointment: { id: item.id, professionalUserId: item.professionalUserId, professionalName: item.professionalName } })
         }
       >
         Atender
@@ -256,10 +256,10 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
               <Link
                 to="/patients/$patientId/encounters/$encounterId"
                 params={{ patientId: item.patientId, encounterId: item.encounter.id }}
-                aria-label={`${item.encounter.dentistUserId === myUserId ? "Seguir la atención" : "Ver la atención"}: ${item.patientName}`}
+                aria-label={`${item.encounter.professionalUserId === myUserId ? "Seguir la atención" : "Ver la atención"}: ${item.patientName}`}
                 className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
               >
-                {item.encounter.dentistUserId === myUserId ? "Seguir la atención" : "Ver la atención"}
+                {item.encounter.professionalUserId === myUserId ? "Seguir la atención" : "Ver la atención"}
               </Link>
             ) : null,
           )}

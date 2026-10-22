@@ -67,7 +67,7 @@ export interface PersonLastTime {
     status: string
     upcoming: boolean
     branchName: string
-    dentistName: string | null
+    professionalName: string | null
   } | null
   /** La última vez que su caso pasó a una persona. El motivo se omite si parece información de salud. */
   handoff: { at: string; reason: string | null } | null
@@ -262,13 +262,13 @@ async function getPersonLastTime(tx: Db, orgId: string, contactId: string, ownPa
   let visit: PersonLastTime["appointment"] = null
   if (ownPatientId) {
     const now = new Date()
-    const fields = { startsAt: appointment.startsAt, status: appointment.status, branchName: branch.name, dentistName: user.name }
+    const fields = { startsAt: appointment.startsAt, status: appointment.status, branchName: branch.name, professionalName: user.name }
     const mine = and(eq(appointment.organizationId, orgId), eq(appointment.patientId, ownPatientId))
     const [next] = await tx
       .select(fields)
       .from(appointment)
       .innerJoin(branch, eq(branch.id, appointment.branchId))
-      .leftJoin(user, eq(user.id, appointment.dentistUserId))
+      .leftJoin(user, eq(user.id, appointment.professionalUserId))
       .where(and(mine, inArray(appointment.status, [...OCCUPYING_STATUSES]), gte(appointment.startsAt, now)))
       .orderBy(asc(appointment.startsAt))
       .limit(1)
@@ -278,7 +278,7 @@ async function getPersonLastTime(tx: Db, orgId: string, contactId: string, ownPa
           .select(fields)
           .from(appointment)
           .innerJoin(branch, eq(branch.id, appointment.branchId))
-          .leftJoin(user, eq(user.id, appointment.dentistUserId))
+          .leftJoin(user, eq(user.id, appointment.professionalUserId))
           .where(and(mine, ne(appointment.status, "cancelada"), lt(appointment.startsAt, now)))
           .orderBy(desc(appointment.startsAt))
           .limit(1)
@@ -288,7 +288,7 @@ async function getPersonLastTime(tx: Db, orgId: string, contactId: string, ownPa
         status: row.status,
         upcoming: next !== undefined,
         branchName: row.branchName,
-        dentistName: row.dentistName,
+        professionalName: row.professionalName,
       }
     }
   }

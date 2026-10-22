@@ -107,16 +107,16 @@ export type WaitInRoom = {
 
 export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, span: Span): Promise<WaitInRoom> {
   const rows = await tx.execute<{ userId: string | null; name: string | null; median: number | string | null; measured: number }>(sql`
-    select e.dentist_user_id as "userId", u.name,
+    select e.professional_user_id as "userId", u.name,
       percentile_cont(0.5) within group (order by extract(epoch from (e.started_at - a.arrived_at)) / 60) as median,
       count(*)::int as measured
     from appointment a
     join encounter e on e.organization_id=a.organization_id and e.appointment_id=a.id and e.status<>'anulada'
-    join "user" u on u.id=e.dentist_user_id
+    join "user" u on u.id=e.professional_user_id
     where a.organization_id=${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
       and a.arrived_at is not null and a.arrived_at < e.started_at
       ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
-    group by grouping sets ((e.dentist_user_id, u.name), ())`)
+    group by grouping sets ((e.professional_user_id, u.name), ())`)
   const minutes = (value: number | string | null) => (value === null ? null : Math.round(Number(value)))
   const whole = rows.find((row) => row.userId === null)
   return {
@@ -131,10 +131,10 @@ export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope,
 
 // --- Pacientes ------------------------------------------------------------------------------
 
-/** La primera cita atendida de cada persona: `first_visit(id, patient_id, starts_at, branch_id, service_name, dentist_user_id)`. */
+/** La primera cita atendida de cada persona: `first_visit(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`. */
 export function firstVisitSql(orgId: string): SQL {
   return sql`first_visit as (
-      select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
+      select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, professional_user_id
       from appointment where organization_id=${orgId} and status='atendida'
       order by patient_id, starts_at, id
     )`
@@ -322,7 +322,7 @@ export async function getReportList(
         from appointment a
         join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=a.branch_id and b.organization_id=${orgId}
-        join "user" u on u.id=a.dentist_user_id
+        join "user" u on u.id=a.professional_user_id
         where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
           ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
         order by a.starts_at desc, a.id limit ${limit}`)),
@@ -353,7 +353,7 @@ export async function getReportList(
         from first_visit v
         join patient p on p.id=v.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=v.branch_id and b.organization_id=${orgId}
-        join "user" u on u.id=v.dentist_user_id
+        join "user" u on u.id=v.professional_user_id
         where v.starts_at >= ${start} and v.starts_at < ${end}
           ${scope.branch ? sql`and v.branch_id=${scope.branch.id}` : sql``}
         order by v.starts_at desc, v.id limit ${limit}`)),

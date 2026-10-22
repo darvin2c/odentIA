@@ -91,12 +91,12 @@ describe("selección de recursos", () => {
     expect(luis.getAttribute("aria-selected")).toBe("false")
   })
   it("limpiar filtros conserva fecha, vista y agrupación y no ofrece ordenar", async () => {
-    mount("/?date=2026-09-25&view=board&group=chairs&q=Rosa&professionals=none", true)
+    mount("/?date=2026-09-25&view=board&group=rooms&q=Rosa&professionals=none", true)
     const clear = await screen.findAllByRole("button", { name: "Limpiar" })
     fireEvent.click(clear[0])
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe(
-        "date=2026-09-25;view=board;group=chairs;q=;professionals=",
+        "date=2026-09-25;view=board;group=rooms;q=;professionals=",
       ),
     )
     expect(screen.queryByRole("button", { name: /Ordenar/ })).toBeNull()

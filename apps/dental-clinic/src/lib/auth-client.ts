@@ -26,7 +26,7 @@ export const authClient = createAuthClient({
         admin: adminAc,
         member: memberAc,
         reception: staffRole,
-        dentist: staffRole,
+        clinician: staffRole,
         cashier: staffRole,
       },
     }),

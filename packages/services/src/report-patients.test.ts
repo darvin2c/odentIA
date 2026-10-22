@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -65,7 +65,7 @@ async function clinic() {
   await insertOrg(ownerDb, orgId, `pacientes-${orgId}`)
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Dra. Ana", email: `${actor}@pacientes.test` })
   await makeSigner(orgId, actor)
@@ -109,8 +109,8 @@ async function clinic() {
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       branchId: site!.id,
-      chairId: chair!.id,
-      dentistUserId: actor,
+      roomId: room!.id,
+      professionalUserId: actor,
       patientId,
       serviceName: "Evaluación",
       startsAt: new Date(startsAt),
@@ -119,7 +119,7 @@ async function clinic() {
       status,
       ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
     })
-  return { orgId, run, branchId: site!.id, chairId: chair!.id, actor, service: service!, person, channel, wrote, visit }
+  return { orgId, run, branchId: site!.id, roomId: room!.id, actor, service: service!, person, channel, wrote, visit }
 }
 
 it("el embudo y Oportunidades dan las mismas cifras: agendar, presentar y aceptar son sus momentos", async () => {
@@ -136,7 +136,7 @@ it("el embudo y Oportunidades dan las mismas cifras: agendar, presentar y acepta
     startsAt.setUTCHours(hour + 8, 0, 0, 0)
     return c.run((tx) =>
       createAppointment(tx, c.orgId, c.actor, {
-        branchId: c.branchId, chairId: c.chairId, patientId, dentistUserId: c.actor, serviceId: c.service.id,
+        branchId: c.branchId, roomId: c.roomId, patientId, professionalUserId: c.actor, serviceId: c.service.id,
         startsAt: startsAt.toISOString(), outsideSchedule: true,
       }),
     )
@@ -145,7 +145,7 @@ it("el embudo y Oportunidades dan las mismas cifras: agendar, presentar y acepta
   const present = async (patientId: string) => {
     const booked = await book(patientId)
     await ownerDb.update(appointment).set({ status: "atendida" }).where(eq(appointment.id, booked.id))
-    const [session] = await ownerDb.insert(encounter).values({ organizationId: c.orgId, patientId, dentistUserId: c.actor, reason: "Evaluación" }).returning()
+    const [session] = await ownerDb.insert(encounter).values({ organizationId: c.orgId, patientId, professionalUserId: c.actor, reason: "Evaluación" }).returning()
     const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId, title: "Plan", originEncounterId: session!.id }).returning()
     const item = await c.run((tx) => addPlanItem(tx, c.orgId, c.actor, patientId, { serviceId: c.service.id, planId: plan!.id, sourceEncounterId: session!.id }))
     const budget = await c.run((tx) => createBudget(tx, c.orgId, c.actor, patientId, { planId: plan!.id, itemIds: [item.id] }))
@@ -250,7 +250,7 @@ it("cada paso cuenta a quien llegó a él o a uno posterior: cancelar sin otra c
     startsAt.setUTCHours(hour, 0, 0, 0)
     return c.run((tx) =>
       createAppointment(tx, c.orgId, c.actor, {
-        branchId: c.branchId, chairId: c.chairId, patientId, dentistUserId: c.actor, serviceId: c.service.id,
+        branchId: c.branchId, roomId: c.roomId, patientId, professionalUserId: c.actor, serviceId: c.service.id,
         startsAt: startsAt.toISOString(), outsideSchedule: true,
       }),
     )
@@ -259,11 +259,11 @@ it("cada paso cuenta a quien llegó a él o a uno posterior: cancelar sin otra c
   await c.run((tx) => setAppointmentStatus(tx, c.orgId, c.actor, cancelled.id, "cancelada", { notice: false }))
   await c.visit(ines.patientId, new Date(Date.now() - DAY).toISOString(), "no_asistio")
   await ownerDb.insert(encounter).values({
-    organizationId: c.orgId, patientId: julia.patientId, dentistUserId: c.actor, reason: "Dolor", status: "finalizada", finalizedAt: new Date(),
+    organizationId: c.orgId, patientId: julia.patientId, professionalUserId: c.actor, reason: "Dolor", status: "finalizada", finalizedAt: new Date(),
     signerName: "Dra. Ana", signerRegistration: "COP 1234",
   })
   await book(karla.patientId, 15)
-  const [session] = await ownerDb.insert(encounter).values({ organizationId: c.orgId, patientId: karla.patientId, dentistUserId: c.actor, reason: "Evaluación" }).returning()
+  const [session] = await ownerDb.insert(encounter).values({ organizationId: c.orgId, patientId: karla.patientId, professionalUserId: c.actor, reason: "Evaluación" }).returning()
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId: karla.patientId, title: "Plan", originEncounterId: session!.id }).returning()
   const item = await c.run((tx) => addPlanItem(tx, c.orgId, c.actor, karla.patientId, { serviceId: c.service.id, planId: plan!.id, sourceEncounterId: session!.id }))
   const budget = await c.run((tx) => createBudget(tx, c.orgId, c.actor, karla.patientId, { planId: plan!.id, itemIds: [item.id] }))

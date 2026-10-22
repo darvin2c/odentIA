@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -25,8 +25,8 @@ async function clinic() {
   await insertOrg(ownerDb, orgId, `invitar-${orgId}`)
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: LIMA }).returning()
-  const [chair] = await ownerDb
-    .insert(scheduleChair)
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
     .values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" })
     .returning()
   const actor = randomUUID()
@@ -40,8 +40,8 @@ async function clinic() {
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       branchId: site!.id,
-      chairId: chair!.id,
-      dentistUserId: actor,
+      roomId: room!.id,
+      professionalUserId: actor,
       patientId,
       serviceName: "Limpieza",
       startsAt: new Date(startsAt),

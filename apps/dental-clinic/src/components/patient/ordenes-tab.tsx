@@ -322,7 +322,7 @@ export function NewOrderDrawer({
   })
   // Un colega es quien atiende en la clínica (el servidor lo vuelve a comprobar).
   const colleagues = members.filter(
-    (m) => m.userId !== myUserId && ["dentist", "owner", "admin"].includes(m.role),
+    (m) => m.userId !== myUserId && ["clinician", "owner", "admin"].includes(m.role),
   )
 
   const createMutation = useMutation({

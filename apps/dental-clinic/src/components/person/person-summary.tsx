@@ -308,7 +308,7 @@ export function PersonSummary({
                       ? [
                           appointmentWhen(upcoming),
                           upcoming.serviceName ?? upcoming.reason,
-                          upcoming.dentistName,
+                          upcoming.professionalName,
                         ]
                           .filter(Boolean)
                           .join(" · ")

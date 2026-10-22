@@ -45,7 +45,7 @@ const BRANCH_REASONS: Reason[] = [
 
 /** De quién es: de un profesional (vacaciones, permisos) o de la sede (feriados, cierres). */
 export type AbsenceScope =
-  | { kind: "person"; dentistUserId: string; name: string }
+  | { kind: "person"; professionalUserId: string; name: string }
   | { kind: "branch"; name: string }
 
 function toMinutes(label: string): number {
@@ -77,7 +77,7 @@ export function AbsenceForm({
   timeZone,
   today,
   scope,
-  chairs,
+  rooms,
   onClose,
   onSaved,
 }: {
@@ -86,12 +86,12 @@ export function AbsenceForm({
   today: string
   scope: AbsenceScope
   /** Unidades dentales de la sede: un cierre puede ser de una sola (mantenimiento). */
-  chairs: { id: string; label: string }[]
+  rooms: { id: string; label: string }[]
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
   const person = scope.kind === "person"
-  const who = person ? scope.dentistUserId : null
+  const who = person ? scope.professionalUserId : null
   const reasons = person ? PERSON_REASONS : BRANCH_REASONS
   const [reason, setReason] = React.useState<ReasonId>(reasons[0]?.id ?? "otro")
   const [other, setOther] = React.useState("")
@@ -100,7 +100,7 @@ export function AbsenceForm({
   const [allDay, setAllDay] = React.useState(true)
   const [fromTime, setFromTime] = React.useState("12:00")
   const [toTime, setToTime] = React.useState("14:00")
-  const [chairId, setChairId] = React.useState("")
+  const [roomId, setRoomId] = React.useState("")
   const [error, setError] = React.useState("")
   const reasonId = React.useId()
   const allDayId = React.useId()
@@ -114,7 +114,7 @@ export function AbsenceForm({
 
   // Citas en pie que quedan dentro: se avisa antes de guardar.
   const affectedQuery = useQuery({
-    queryKey: ["agenda", "ausencia", branchId, who, chairId, startsAt, endsAt],
+    queryKey: ["agenda", "ausencia", branchId, who, roomId, startsAt, endsAt],
     enabled: valid,
     queryFn: () => {
       const params = new URLSearchParams({
@@ -124,7 +124,7 @@ export function AbsenceForm({
         status: "programada,confirmada",
       })
       if (who) params.set("professionals", who)
-      if (chairId) params.set("chairs", chairId)
+      if (roomId) params.set("rooms", roomId)
       return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
     },
   })
@@ -144,8 +144,8 @@ export function AbsenceForm({
         method: "POST",
         body: JSON.stringify({
           branchId,
-          dentistUserId: who,
-          chairId: chairId || null,
+          professionalUserId: who,
+          roomId: roomId || null,
           kind: chosen?.kind ?? "bloqueo",
           reason: text || undefined,
           startsAt,
@@ -282,16 +282,16 @@ export function AbsenceForm({
           Todo el día
         </FieldLabel>
 
-        {!person && chairs.length > 0 ? (
+        {!person && rooms.length > 0 ? (
           <div className="grid gap-2">
             <FieldLabel htmlFor="ausencia-sillon">Qué se cierra</FieldLabel>
             <ChoiceSelect
               id="ausencia-sillon"
-              value={chairId}
-              onChange={(event) => setChairId(event.target.value)}
+              value={roomId}
+              onChange={(event) => setRoomId(event.target.value)}
             >
               <option value="">Toda la sede</option>
-              {chairs.map((item) => (
+              {rooms.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
                 </option>

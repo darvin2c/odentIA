@@ -53,7 +53,7 @@ export function OpenEncounterCard({
   const canWrite = usePermission("clinical.write")
   const myUserId = useMyUserId()
   const memberName = useMemberName()
-  const mine = encounter.dentistUserId === myUserId
+  const mine = encounter.professionalUserId === myUserId
   const missing = encounter.missing.map((key) => MISSING_LABELS[key])
   return (
     <section
@@ -66,7 +66,7 @@ export function OpenEncounterCard({
           <span className="font-normal text-muted-foreground">
             {" "}
             · {formatClock(encounter.startedAt)}
-            {mine ? "" : ` · atiende ${memberName(encounter.dentistUserId)}`}
+            {mine ? "" : ` · atiende ${memberName(encounter.professionalUserId)}`}
           </span>
         </h2>
         <p className="text-sm">
@@ -226,7 +226,7 @@ export function LastVisitCard({
 }): React.JSX.Element {
   const memberName = useMemberName()
   const visit = summary.lastVisit
-  const dentist = summary.lastEncounter?.dentistUserId
+  const professional = summary.lastEncounter?.professionalUserId
   const gums = summary.periodontal
   // «Encías: Periodontitis · Estadio III · Grado B · sangrado 10 % (12 oct)».
   const gumsLine = gums
@@ -264,7 +264,7 @@ export function LastVisitCard({
           </p>
           <p className="text-muted-foreground">
             {[
-              dentist ? memberName(dentist) : null,
+              professional ? memberName(professional) : null,
               visit.diagnoses.length > 0 ? visit.diagnoses.join(", ") : null,
               visit.teeth.length > 0
                 ? `${visit.teeth.length === 1 ? "pieza" : "piezas"} ${visit.teeth.join(", ")}`
@@ -324,7 +324,7 @@ export function UpcomingCard({
           <p className="text-muted-foreground">No disponible</p>
         ) : upcoming ? (
           <p className="font-medium">
-            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.dentistName]
+            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.professionalName]
               .filter(Boolean)
               .join(" · ")}
           </p>

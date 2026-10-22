@@ -153,8 +153,8 @@ export async function getBranchHours(tx: Db, orgId: string, now = new Date()): P
       and(
         eq(scheduleBlock.organizationId, orgId),
         inArray(scheduleBlock.branchId, ids),
-        isNull(scheduleBlock.dentistUserId),
-        isNull(scheduleBlock.chairId),
+        isNull(scheduleBlock.professionalUserId),
+        isNull(scheduleBlock.roomId),
         gt(scheduleBlock.endsAt, now),
         lt(scheduleBlock.startsAt, until),
       ),
@@ -195,7 +195,7 @@ export async function resolveProfessionalRef(tx: Db, orgId: string, ref: string)
   const wanted = ref.trim()
   if (!/^pro-[0-9a-f]{10}$/.test(wanted)) return null
   const rows = await tx
-    .selectDistinct({ userId: professionalSchedule.dentistUserId })
+    .selectDistinct({ userId: professionalSchedule.professionalUserId })
     .from(professionalSchedule)
     .where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true)))
   return rows.find((row) => professionalRef(orgId, row.userId) === wanted)?.userId ?? null
@@ -208,13 +208,13 @@ export async function resolveProfessionalRef(tx: Db, orgId: string, ref: string)
 export async function listAgentProfessionals(tx: Db, orgId: string): Promise<AgentProfessionalInfo[]> {
   const rows = await tx
     .select({
-      userId: professionalSchedule.dentistUserId,
+      userId: professionalSchedule.professionalUserId,
       name: user.name,
       branchName: branch.name,
       weekday: professionalSchedule.weekday,
     })
     .from(professionalSchedule)
-    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .innerJoin(user, eq(user.id, professionalSchedule.professionalUserId))
     .innerJoin(branch, eq(branch.id, professionalSchedule.branchId))
     .where(
       and(

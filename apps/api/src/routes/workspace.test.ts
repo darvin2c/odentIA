@@ -42,7 +42,7 @@ const storageStub: Storage = {
 const ORG = "org_workspace_api"
 const OWNER = "api-ws-owner"
 const RECEPTION = "api-ws-reception"
-const DENTIST = "api-ws-dentist"
+const PROFESSIONAL = "api-ws-professional"
 
 function buildApp(role: string, userId: string): Hono {
   const deps: CrmDeps = {
@@ -89,12 +89,12 @@ beforeAll(async () => {
     insert into "user" ("id", "name", "email") values
       (${OWNER}, 'Dueña API', 'ws-owner@example.test'),
       (${RECEPTION}, 'Recepción API', 'ws-reception@example.test'),
-      (${DENTIST}, 'Dra. API', 'ws-dentist@example.test')`)
+      (${PROFESSIONAL}, 'Dra. API', 'ws-professional@example.test')`)
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-ws-owner', ${ORG}, ${OWNER}, 'owner', now()),
       ('m-ws-reception', ${ORG}, ${RECEPTION}, 'reception', now()),
-      ('m-ws-dentist', ${ORG}, ${DENTIST}, 'dentist', now())`)
+      ('m-ws-professional', ${ORG}, ${PROFESSIONAL}, 'clinician', now())`)
 }, 180_000)
 
 afterAll(async () => {
@@ -116,14 +116,14 @@ async function titles(app: Hono): Promise<{ titles: string[]; unread: number }> 
 it("cada aviso llega a quien tiene el permiso que declara, también los de escritura", async () => {
   await notice(OWNER, "plantilla", "WhatsApp aprobó tu mensaje «Retomar la conversación»", "settings.write")
   await notice(OWNER, "modelo", "El agente no puede usar el modelo", "agent.write")
-  await notice(DENTIST, "comision", "Se registró el pago de tu comisión", "commissions.read")
+  await notice(PROFESSIONAL, "comision", "Se registró el pago de tu comisión", "commissions.read")
   // Un aviso que pide un permiso que el rol no tiene no se entrega.
   await notice(RECEPTION, "ajeno", "Aviso de configuración", "settings.write")
   expect((await titles(buildApp("owner", OWNER))).titles).toEqual([
     "El agente no puede usar el modelo",
     "WhatsApp aprobó tu mensaje «Retomar la conversación»",
   ])
-  expect((await titles(buildApp("dentist", DENTIST))).titles).toEqual(["Se registró el pago de tu comisión"])
+  expect((await titles(buildApp("clinician", PROFESSIONAL))).titles).toEqual(["Se registró el pago de tu comisión"])
   expect((await titles(buildApp("reception", RECEPTION))).titles).toEqual([])
 })
 
@@ -139,7 +139,7 @@ it("«Marcar todo leído» deja la campana sin pendientes", async () => {
 it("recepción abre a quién no pudo escribirle el agente con el mismo permiso con que ve la fila", async () => {
   expect((await buildApp("reception", RECEPTION).request("/agent/admin/unreached")).status).toBe(200)
   // Quien no ve la fila tampoco abre el detalle.
-  expect((await buildApp("dentist", DENTIST).request("/agent/admin/unreached")).status).toBe(403)
+  expect((await buildApp("clinician", PROFESSIONAL).request("/agent/admin/unreached")).status).toBe(403)
 })
 
 it("responder o tomar un tema desde Inicio es de quien escribe en conversaciones o responde sus temas (caja), no de cualquiera", async () => {

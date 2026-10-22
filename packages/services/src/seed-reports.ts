@@ -33,7 +33,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { addMonths, currentMonthIn, monthStart, type YearMonth } from "./report-periods.js"
 
-export interface ReportsSeedDentist {
+export interface ReportsSeedProfessional {
   userId: string
   /** Como firma al cerrar (la base lo exige). */
   signerName: string
@@ -50,8 +50,8 @@ export interface ReportsSeedInput {
   orgId: string
   ownerUserId: string
   /** Sedes con historia, cada una con sus unidades dentales. */
-  branches: Array<{ id: string; chairIds: string[]; rent: number }>
-  dentists: ReportsSeedDentist[]
+  branches: Array<{ id: string; roomIds: string[]; rent: number }>
+  professionals: ReportsSeedProfessional[]
   /** Servicios del tarifario que se atienden, con su precio y duración. */
   services: Array<{ id: string; name: string; priceCents: number; durationMin: number; weight: number; firstVisit?: boolean }>
   /** Pacientes que ya existían: vuelven en la historia. */
@@ -130,9 +130,9 @@ function localDay(date: Date, timezone: string): { weekday: number; monthDay: st
 interface PlannedVisit {
   id: string
   patientIndex: number
-  dentist: ReportsSeedDentist
+  professional: ReportsSeedProfessional
   branchId: string
-  chairId: string
+  roomId: string
   service: ReportsSeedInput["services"][number]
   startsAt: Date
   status: "atendida" | "no_asistio" | "cancelada"
@@ -188,15 +188,15 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     // La clínica crece: hace dos años llenaba un 25 % menos.
     const growth = 0.75 + 0.25 * (day / totalDays)
     const season = SEASON[month] ?? 1
-    for (const [dentistIndex, dentist] of input.dentists.entries()) {
-      if (!dentist.weekdays.includes(weekday)) continue
-      const branch = input.branches.find((item) => item.id === dentist.branchId)
+    for (const [professionalIndex, professional] of input.professionals.entries()) {
+      if (!professional.weekdays.includes(weekday)) continue
+      const branch = input.branches.find((item) => item.id === professional.branchId)
       if (!branch) continue
-      const hours = dentist.afternoonOnly ? AFTERNOON : weekday === 6 ? MORNING : [...MORNING, ...AFTERNOON]
+      const hours = professional.afternoonOnly ? AFTERNOON : weekday === 6 ? MORNING : [...MORNING, ...AFTERNOON]
       for (const hour of hours) {
         // De 3 a 6 de la tarde la agenda se llena menos: ahí quedan las horas libres.
         const afternoonDip = hour >= 15 && hour < 18 ? 0.72 : 1
-        if (!random.chance(Math.min(0.97, dentist.occupancy * growth * season * afternoonDip))) continue
+        if (!random.chance(Math.min(0.97, professional.occupancy * growth * season * afternoonDip))) continue
         // La primera visita es una evaluación de una persona nueva.
         const isFirst = random.chance(0.11)
         const patientIndex = isFirst || pool.length < 30 ? newPatient() : (pool[Math.max(0, pool.length - 1 - Math.floor(random.next() ** 2 * pool.length))] as number)
@@ -210,9 +210,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         visits.push({
           id: randomUUID(),
           patientIndex,
-          dentist,
+          professional,
           branchId: branch.id,
-          chairId: branch.chairIds[dentistIndex % branch.chairIds.length] as string,
+          roomId: branch.roomIds[professionalIndex % branch.roomIds.length] as string,
           service,
           startsAt: new Date(dayStart.getTime() + hour * 3_600_000 + random.pick([0, 0, 15]) * 60_000),
           status,
@@ -385,9 +385,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           id: visit.id,
           organizationId: input.orgId,
           branchId: visit.branchId,
-          chairId: visit.chairId,
+          roomId: visit.roomId,
           patientId: patientOf(visit.patientIndex),
-          dentistUserId: visit.dentist.userId,
+          professionalUserId: visit.professional.userId,
           serviceId: visit.service.id,
           serviceName: visit.service.name,
           startsAt: visit.startsAt,
@@ -430,14 +430,14 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           organizationId: input.orgId,
           patientId: patientOf(row.visit.patientIndex),
           branchId: row.visit.branchId,
-          dentistUserId: row.visit.dentist.userId,
+          professionalUserId: row.visit.professional.userId,
           appointmentId: row.visit.id,
           reason: row.visit.service.name,
           evolution: "Procedimiento sin complicaciones.",
           startedAt: row.startedAt,
-          signerName: row.visit.dentist.signerName,
+          signerName: row.visit.professional.signerName,
           signerTitle: "Cirujano dentista",
-          signerRegistration: row.visit.dentist.registration,
+          signerRegistration: row.visit.professional.registration,
         })),
       )
       await tx.insert(encounterProcedure).values(
@@ -450,13 +450,13 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           quantity: row.visit.quantity,
           priceCents: row.visit.service.priceCents,
           currency,
-          createdBy: row.visit.dentist.userId,
+          createdBy: row.visit.professional.userId,
           createdAt: row.endedAt,
         })),
       )
       // Se cierran juntas: la firma ya está y el cierre es la hora de fin.
       await tx.execute(sql`
-        update encounter e set status = 'finalizada', ended_at = v.ended_at, finalized_at = v.ended_at, finalized_by = e.dentist_user_id
+        update encounter e set status = 'finalizada', ended_at = v.ended_at, finalized_at = v.ended_at, finalized_by = e.professional_user_id
         from (values ${sql.join(
           rows.map((row) => sql`(${row.id}::uuid, ${row.endedAt.toISOString()}::timestamptz)`),
           sql`, `,
@@ -503,7 +503,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       description: visit.service.name,
       amountCents: cents,
       currency,
-      createdBy: visit.dentist.userId,
+      createdBy: visit.professional.userId,
       createdAt: item.endedAt,
     })
     const sameDay = new Date(item.endedAt.getTime() + 5 * 60_000)
@@ -531,7 +531,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     services: input.services.filter((service) => !service.firstVisit),
     evaluations: done
       .filter((item) => item.visit.service.firstVisit && item.visit.patientIndex >= input.patientIds.length)
-      .map((item) => ({ patientId: patientOf(item.visit.patientIndex), dentistUserId: item.visit.dentist.userId, encounterId: item.encounterId, endedAt: item.endedAt })),
+      .map((item) => ({ patientId: patientOf(item.visit.patientIndex), professionalUserId: item.visit.professional.userId, encounterId: item.encounterId, endedAt: item.endedAt })),
   })
 
   // --- Gastos del mes, por sede -------------------------------------------------------------
@@ -547,7 +547,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     const start = monthStart(timezone, month.year, month.month).getTime()
     for (const branch of input.branches) {
       const revenue = income.get(`${branch.id}:${new Date(start + 15 * 86_400_000).toISOString().slice(0, 7)}`) ?? 0
-      const staff = input.dentists.filter((dentist) => dentist.branchId === branch.id).length
+      const staff = input.professionals.filter((professional) => professional.branchId === branch.id).length
       for (const item of [
         { category: "Personal", concept: "Planilla del mes", cents: 4_200_00 + staff * 2_100_00, day: 28 },
         { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
@@ -578,8 +578,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       batch.map((holiday) => ({
         organizationId: input.orgId,
         branchId: holiday.branchId,
-        dentistUserId: null,
-        chairId: null,
+        professionalUserId: null,
+        roomId: null,
         kind: "bloqueo",
         reason: "Feriado",
         startsAt: holiday.day,
@@ -609,7 +609,7 @@ async function seedBudgets(
     random: Random
     historyEnd: number
     services: ReportsSeedInput["services"]
-    evaluations: Array<{ patientId: string; dentistUserId: string; encounterId: string; endedAt: Date }>
+    evaluations: Array<{ patientId: string; professionalUserId: string; encounterId: string; endedAt: Date }>
   },
 ): Promise<number> {
   const { random } = input
@@ -680,7 +680,7 @@ async function seedBudgets(
         patientId: plan.evaluation.patientId,
         title: "Plan de tratamiento",
         originEncounterId: plan.evaluation.encounterId,
-        createdBy: plan.evaluation.dentistUserId,
+        createdBy: plan.evaluation.professionalUserId,
         createdAt: plan.evaluation.endedAt,
       })),
     )
@@ -697,7 +697,7 @@ async function seedBudgets(
         currency: input.currency,
         decisionStatus: line.decision,
         sourceEncounterId: plan.evaluation.encounterId,
-        createdBy: plan.evaluation.dentistUserId,
+        createdBy: plan.evaluation.professionalUserId,
         createdAt: plan.evaluation.endedAt,
       })),
     )
@@ -711,7 +711,7 @@ async function seedBudgets(
         budgetNumber: plan.number,
         title: "Plan de tratamiento",
         currency: input.currency,
-        createdBy: plan.evaluation.dentistUserId,
+        createdBy: plan.evaluation.professionalUserId,
         createdAt: plan.evaluation.endedAt,
       })),
     )
@@ -725,7 +725,7 @@ async function seedBudgets(
         position: 1,
         isRecommended: true,
         decision: plan.outcome === "aceptado" || plan.outcome === "parcial" ? "elegida" : "pendiente",
-        createdBy: plan.evaluation.dentistUserId,
+        createdBy: plan.evaluation.professionalUserId,
       })),
     )
   for (const batch of chunks(planItems))
@@ -744,7 +744,7 @@ async function seedBudgets(
         tariffPriceCents: line.service.priceCents,
         currency: input.currency,
         decision: line.decision,
-        createdBy: plan.evaluation.dentistUserId,
+        createdBy: plan.evaluation.professionalUserId,
       })),
     )
   // Entregados con su fecha y su respuesta: desde aquí la base ya no deja tocar las líneas.

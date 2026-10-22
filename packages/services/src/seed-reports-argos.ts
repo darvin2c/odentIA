@@ -16,7 +16,7 @@ import { newPatientsMany } from "./reports.js"
 export interface ReportsArgosSeedInput {
   orgId: string
   ownerUserId: string
-  dentistUserId: string
+  professionalUserId: string
 }
 
 function firstDay(value: { year: number; month: number }): string {
@@ -45,7 +45,7 @@ export async function seedReportsArgos(tx: Db, input: ReportsArgosSeedInput): Pr
   // Lo que Ana y el Dr. Luis fijaron: las citas del agente por sede y quién tiene más inasistencias.
   await tx.insert(reportPin).values([
     { organizationId: orgId, figure: "agente_citas", groupBy: "sede", createdBy: input.ownerUserId },
-    { organizationId: orgId, figure: "no_vinieron", groupBy: "profesional", createdBy: input.dentistUserId },
+    { organizationId: orgId, figure: "no_vinieron", groupBy: "profesional", createdBy: input.professionalUserId },
   ])
   return { pins: 2, goalText: formatMoney(goal, currency, locale) }
 }

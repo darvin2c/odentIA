@@ -40,7 +40,7 @@ const COUNTRIES: [code: string, name: string, dial: string][] = [
   ["UY", "Uruguay", "598"],
   ["VE", "Venezuela", "58"],
 ]
-const DENTISTS: [string, string][] = [
+const PROFESSIONALS: [string, string][] = [
   ["1", "1"],
   ["2-3", "2 a 3"],
   ["4-9", "4 a 9"],
@@ -89,7 +89,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
       clinicName: value("clinicName"),
       countryCode: country,
       city: value("city"),
-      dentists: value("dentists"),
+      professionals: value("professionals"),
       currentTool: value("currentTool"),
     }
     setPending(true)
@@ -226,12 +226,12 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
                 <input id="wl-clinicName" name="clinicName" autoComplete="organization" required maxLength={120} />
               </div>
               <div className="wl-field">
-                <label htmlFor="wl-dentists">Odontólogos que atienden</label>
-                <select id="wl-dentists" name="dentists" required defaultValue="">
+                <label htmlFor="wl-professionals">Odontólogos que atienden</label>
+                <select id="wl-professionals" name="professionals" required defaultValue="">
                   <option value="" disabled>
                     Elige
                   </option>
-                  {DENTISTS.map(([value, label]) => (
+                  {PROFESSIONALS.map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>

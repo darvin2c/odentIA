@@ -44,8 +44,8 @@ const reserveBody = z.strictObject({
   token,
   branchId: z.uuid(),
   startsAt: z.iso.datetime({ offset: true }),
-  dentistUserId: z.string().min(1).max(200),
-  chairId: z.uuid().optional(),
+  professionalUserId: z.string().min(1).max(200),
+  roomId: z.uuid().optional(),
   // «Elegir horario» de lo que aceptó en su presupuesto.
   planItemIds: z.array(z.uuid()).min(1).max(52).optional(),
 })

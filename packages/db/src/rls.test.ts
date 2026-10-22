@@ -241,7 +241,7 @@ it("org A no ve pacientes de org B; sin GUC ve cero filas", async () => {
 
 it("encuentros y planes de A son invisibles para B; las piezas cerradas no se borran", async () => {
   await ownerDb.execute(
-    sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`,
+    sql`insert into "user" (id,name,email) values ('rls-professional','Dentista','rls@example.test') on conflict (id) do nothing`,
   )
   await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title,is_legacy)
     values ('dddddddd-dddd-dddd-dddd-dddddddddddd','org_a','99999999-9999-9999-9999-999999999999','Plan RLS',false)
@@ -253,8 +253,8 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await ownerDb.execute(sql`insert into treatment_budget_option (id,organization_id,patient_id,budget_id,position,is_recommended)
     values ('cccccccc-0000-4000-8000-000000000001','org_a','99999999-9999-9999-9999-999999999999','cccccccc-cccc-cccc-cccc-cccccccccccc',1,true)
     on conflict (id) do nothing`)
-  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id) values
-    ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')
+  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,professional_user_id) values
+    ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-professional')
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,title,currency,status) values
     ('11111111-1111-4111-8111-111111111111','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','Restauración','PEN','pendiente')
@@ -363,7 +363,7 @@ it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async
 
 it("presupuestos, contextos versionados y vínculos atención-plan se aíslan por tenant", async () => {
   await ownerDb.execute(
-    sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`,
+    sql`insert into "user" (id,name,email) values ('rls-professional','Dentista','rls@example.test') on conflict (id) do nothing`,
   )
   // Presupuesto propio del test (número 2: el 1 lo siembra el test de encuentros).
   await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title,is_legacy)
@@ -375,8 +375,8 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,price_cents,currency,status)
     values ('ffffffff-ffff-ffff-ffff-ffffffffffff','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Corona',90000,'PEN','pendiente')
     on conflict (id) do nothing`)
-  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id,status) values
-    ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','rls-dentist','finalizada')
+  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,professional_user_id,status) values
+    ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','rls-professional','finalizada')
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into encounter_plan_item (organization_id,encounter_id,plan_item_id) values
     ('org_a','aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','ffffffff-ffff-ffff-ffff-ffffffffffff')
@@ -510,11 +510,11 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   ).rejects.toMatchObject({ cause: { code: "42501" } })
   // Lo agendado de un plan (ADR 0034) se aísla por tenant y es historia: no se borra.
   const [sillon] = await ownerDb.execute<{ id: string }>(sql`
-    insert into schedule_chair (organization_id,branch_id,name)
+    insert into schedule_room (organization_id,branch_id,name)
     values ('org_a','11111111-1111-1111-1111-111111111111','Unidad dental RLS') returning id`)
   const [cita] = await ownerDb.execute<{ id: string }>(sql`
-    insert into appointment (organization_id,branch_id,patient_id,dentist_user_id,chair_id,starts_at,ends_at,duration_min,status)
-    values ('org_a','11111111-1111-1111-1111-111111111111','99999999-9999-9999-9999-999999999999','rls-dentist',${sillon!.id},
+    insert into appointment (organization_id,branch_id,patient_id,professional_user_id,room_id,starts_at,ends_at,duration_min,status)
+    values ('org_a','11111111-1111-1111-1111-111111111111','99999999-9999-9999-9999-999999999999','rls-professional',${sillon!.id},
       now() + interval '2 days', now() + interval '2 days 30 minutes', 30, 'cancelada')
     returning id`)
   await ownerDb.execute(sql`insert into appointment_plan_item (organization_id,patient_id,appointment_id,plan_item_id)
@@ -799,7 +799,7 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   const borrador = "e1000000-0000-4000-8000-000000000012"
   const guarda = (constraint: string) => ({ cause: { code: "23514", constraint_name: constraint } })
   await ownerDb.execute(
-    sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`,
+    sql`insert into "user" (id,name,email) values ('rls-professional','Dentista','rls@example.test') on conflict (id) do nothing`,
   )
   await ownerDb.execute(sql`insert into diagnosis_code_release (system_key, edition, official, license, code_count)
     values ('ICD-10', 'rls', false, 'Solo pruebas', 2) on conflict do nothing`)
@@ -814,8 +814,8 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
         values ('org_a', ${paciente}::uuid, ${encounterId}::uuid, 'ICD-10', ${code}, 'confirmed') returning id`
 
   // Cerrar exige la firma con colegiatura.
-  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, dentist_user_id)
-    values (${cerrada}::uuid, 'org_a', ${paciente}::uuid, 'rls-dentist')`)
+  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, professional_user_id)
+    values (${cerrada}::uuid, 'org_a', ${paciente}::uuid, 'rls-professional')`)
   const [d1] = await ownerDb.execute<{ id: string }>(diagnostico(cerrada, "K02.1"))
   await expect(
     ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now() where id = ${cerrada}::uuid`),
@@ -826,13 +826,13 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   await expect(ownerDb.execute(diagnostico(cerrada, "K05.1"))).rejects.toMatchObject(guarda("encounter_child_draft_only"))
   await ownerDb.execute(sql`update encounter_diagnosis set status = 'resuelto', resolved_at = now() where id = ${d1!.id}::uuid`)
   await expect(
-    ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-dentist', void_reason = 'Error'
+    ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-professional', void_reason = 'Error'
       where id = ${d1!.id}::uuid`),
   ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
 
   // En borrador lo registrado no se reescribe: se anula, y la anulación es definitiva.
-  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, dentist_user_id)
-    values (${borrador}::uuid, 'org_a', ${paciente}::uuid, 'rls-dentist')`)
+  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, professional_user_id)
+    values (${borrador}::uuid, 'org_a', ${paciente}::uuid, 'rls-professional')`)
   const [d2] = await ownerDb.execute<{ id: string }>(diagnostico(borrador, "K05.1"))
   await expect(
     ownerDb.execute(sql`update encounter_diagnosis set note = 'otra' where id = ${d2!.id}::uuid`),
@@ -840,7 +840,7 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   await expect(
     ownerDb.execute(sql`update encounter_diagnosis set diagnosis_code = 'K02.1' where id = ${d2!.id}::uuid`),
   ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
-  await ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-dentist', void_reason = 'Duplicado'
+  await ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-professional', void_reason = 'Duplicado'
     where id = ${d2!.id}::uuid`)
   await expect(
     ownerDb.execute(sql`update encounter_diagnosis set voided_at = null, voided_by = null, void_reason = null
@@ -851,7 +851,7 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   await expect(
     ownerDb.execute(sql`update encounter set status = 'anulada' where id = ${borrador}::uuid`),
   ).rejects.toMatchObject(guarda("encounter_void_check"))
-  await ownerDb.execute(sql`update encounter set status = 'anulada', voided_at = now(), voided_by = 'rls-dentist',
+  await ownerDb.execute(sql`update encounter set status = 'anulada', voided_at = now(), voided_by = 'rls-professional',
     void_reason = 'Paciente equivocado' where id = ${borrador}::uuid`)
   await expect(
     ownerDb.execute(sql`update encounter set reason = 'Otro' where id = ${borrador}::uuid`),
@@ -859,20 +859,20 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
 
   // La cita de una atención existe y es del mismo paciente.
   await expect(
-    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, dentist_user_id, appointment_id)
-      values ('org_a', ${paciente}::uuid, 'rls-dentist', gen_random_uuid())`),
+    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, professional_user_id, appointment_id)
+      values ('org_a', ${paciente}::uuid, 'rls-professional', gen_random_uuid())`),
   ).rejects.toMatchObject({ cause: { code: "23503" } })
   const [unidad] = await ownerDb.execute<{ id: string }>(sql`
-    insert into schedule_chair (organization_id, branch_id, name)
+    insert into schedule_room (organization_id, branch_id, name)
     values ('org_a', '11111111-1111-1111-1111-111111111111', 'Unidad dental FK') returning id`)
   const [ajena] = await ownerDb.execute<{ id: string }>(sql`
-    insert into appointment (organization_id, branch_id, patient_id, dentist_user_id, chair_id, starts_at, ends_at, duration_min, status)
-    values ('org_a', '11111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999', 'rls-dentist', ${unidad!.id},
+    insert into appointment (organization_id, branch_id, patient_id, professional_user_id, room_id, starts_at, ends_at, duration_min, status)
+    values ('org_a', '11111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999', 'rls-professional', ${unidad!.id},
       now() + interval '3 days', now() + interval '3 days 30 minutes', 30, 'cancelada')
     returning id`)
   await expect(
-    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, dentist_user_id, appointment_id)
-      values ('org_a', ${paciente}::uuid, 'rls-dentist', ${ajena!.id}::uuid)`),
+    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, professional_user_id, appointment_id)
+      values ('org_a', ${paciente}::uuid, 'rls-professional', ${ajena!.id}::uuid)`),
   ).rejects.toMatchObject({ cause: { code: "23503" } })
 
   // Diagnósticos: aislados por organización y sin borrado para la app.

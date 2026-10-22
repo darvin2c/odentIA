@@ -201,8 +201,8 @@ it("recepción sube la tomografía y ve el avance, pero no la abre ni la descarg
 
 it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como llegaron", async () => {
   const id = await patientId()
-  const dentist = buildApp("dentist")
-  const started = await post(dentist, `/patients/${id}/imaging/uploads`, {
+  const professional = buildApp("clinician")
+  const started = await post(professional, `/patients/${id}/imaging/uploads`, {
     ...start,
     studyInstanceUid: `${STUDY}.9`,
   })
@@ -211,14 +211,14 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
   }
   for (const target of data.targets)
     bucket.set(target.url.replace("https://signed.example.com/put/", ""), dicomBytes(sizes[target.index]!))
-  await post(dentist, `/patients/${id}/imaging/uploads/${data.document.id}/confirm`, { indexes: [0, 1, 2] })
+  await post(professional, `/patients/${id}/imaging/uploads/${data.document.id}/confirm`, { indexes: [0, 1, 2] })
 
-  const files = await dentist.request(`/patients/${id}/imaging/studies/${data.document.id}/files`)
+  const files = await professional.request(`/patients/${id}/imaging/studies/${data.document.id}/files`)
   expect(files.status).toBe(200)
   const listed = ((await files.json()) as { data: { files: { index: number; url: string }[] } }).data.files
   expect(listed.map((file) => file.index)).toEqual([0, 1, 2])
 
-  const zip = await dentist.request(`/patients/${id}/imaging/studies/${data.document.id}/download`)
+  const zip = await professional.request(`/patients/${id}/imaging/studies/${data.document.id}/download`)
   expect(zip.status).toBe(200)
   expect(zip.headers.get("content-type")).toBe("application/zip")
   const bytes = new Uint8Array(await zip.arrayBuffer())
@@ -229,7 +229,7 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
 
   // Medidas: la odontóloga las guarda; recepción ni las lee ni las escribe.
   const measure = { kind: "distancia", view: "transversal", points: [[1, 2, 3], [1, 2, 14.8]], value: 11.8, toothNumber: 36 }
-  const savedMeasure = await post(dentist, `/patients/${id}/imaging/studies/${data.document.id}/measurements`, measure)
+  const savedMeasure = await post(professional, `/patients/${id}/imaging/studies/${data.document.id}/measurements`, measure)
   expect(savedMeasure.status).toBe(201)
   const reception = buildApp("reception")
   expect((await reception.request(`/patients/${id}/imaging/studies/${data.document.id}/measurements`)).status).toBe(403)
@@ -238,6 +238,6 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
   ).toBe(403)
 
   // La URL de un solo archivo no sirve para la tomografía: no hay uno solo.
-  const single = await dentist.request(`/patients/${id}/documents/${data.document.id}/url`)
+  const single = await professional.request(`/patients/${id}/documents/${data.document.id}/url`)
   expect(single.status).toBe(400)
 })

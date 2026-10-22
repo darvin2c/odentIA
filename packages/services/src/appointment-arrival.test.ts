@@ -8,7 +8,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   createAppointment,
-  createChair,
+  createRoom,
   getAppointment,
   moveAppointment,
   setAppointmentArrival,
@@ -44,11 +44,11 @@ async function scene() {
     .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: zone })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 0, endMin: 24 * 60 - 1 })),
     }),
   )
@@ -59,8 +59,8 @@ async function scene() {
       createAppointment(tx, "org_a", f.actor, {
         branchId: site.id,
         patientId: f.patient.id,
-        dentistUserId: f.actor,
-        chairId: chair.id,
+        professionalUserId: f.actor,
+        roomId: room.id,
         startsAt: new Date(
           Date.UTC(localToday.getUTCFullYear(), localToday.getUTCMonth(), localToday.getUTCDate() + dayOffset, hour, input.minute ?? 0) -
             offsetHours * 3_600_000,
@@ -71,7 +71,7 @@ async function scene() {
         notice: false,
       }),
     )
-  return { ...f, site, chair, book }
+  return { ...f, site, room, book }
 }
 
 it("«Llegó» confirma la cita, cancela sus recordatorios pendientes y «Deshacer» la devuelve como estaba", async () => {
@@ -112,7 +112,7 @@ it("llega tarde tras «No vino»: la cita se recupera si su hueco sigue libre y,
   const other = await clinicalFixture()
   const taken = await f.run((tx) =>
     createAppointment(tx, "org_a", f.actor, {
-      branchId: f.site.id, patientId: other.patient.id, dentistUserId: f.actor, chairId: f.chair.id,
+      branchId: f.site.id, patientId: other.patient.id, professionalUserId: f.actor, roomId: f.room.id,
       startsAt: late.startsAt, durationMin: 30, notice: false,
     }),
   )
@@ -153,7 +153,7 @@ it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora 
   const f = await scene()
   const visit = await f.book(0, 11, { reason: "Dolor de muela" })
   const opened = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id }))
-  expect(opened).toMatchObject({ appointmentId: visit.id, reason: "Dolor de muela", dentistUserId: f.actor })
+  expect(opened).toMatchObject({ appointmentId: visit.id, reason: "Dolor de muela", professionalUserId: f.actor })
   const attending = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
   expect(attending).toMatchObject({ status: "confirmada", visit: "en_atencion", encounter: { id: opened.id, status: "borrador" } })
   // La llegada que marca «Atender» es la hora de inicio: esa espera queda sin dato.
@@ -213,7 +213,7 @@ it("«Espera en sala» mide de la llegada al inicio de la atención, por profesi
   await unmarked.run((tx) => voidEncounter(tx, ...unmarked.args, unmarked.encounter.id, { reason: "Prueba" }))
   const walkIn = await unmarked.run((tx) =>
     createAppointment(tx, "org_a", f.actor, {
-      branchId: f.site.id, patientId: unmarked.patient.id, dentistUserId: f.actor, chairId: f.chair.id,
+      branchId: f.site.id, patientId: unmarked.patient.id, professionalUserId: f.actor, roomId: f.room.id,
       startsAt: new Date(Date.parse(waited.startsAt) + 3 * 3_600_000).toISOString(), durationMin: 30, notice: false,
     }),
   )

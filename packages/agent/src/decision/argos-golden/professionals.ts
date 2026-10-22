@@ -3,7 +3,7 @@ import { agendaMinutes, collectedByProfessional, getReportProfessionals } from "
 import { sql } from "drizzle-orm"
 import type { GoldenHelpers, GoldenSolvers } from "./helpers.js"
 
-export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
+export function professionalSolvers(h: GoldenHelpers): GoldenSolvers {
   const { tx, org, now, scope, money, fig, show, listOf, monthStart } = h
   const nowIso = now.toISOString()
   const yearAgo = new Date(now.getTime() - 365 * 86_400_000)
@@ -16,28 +16,28 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
   const hoursOf = (minutes: number): string => `${(Math.round((minutes / 60) * 10) / 10).toLocaleString(scope.locale)} h`
 
   /** Lo cargado este mes de lo que atendió cada uno: conceptos de procedimientos de sus atenciones firmadas, sin anulados. */
-  const chargedByDentist = () =>
+  const chargedByProfessional = () =>
     tx.execute<{ id: string; name: string; cents: string; charges: number; encounters: number }>(sql`
-      select e.dentist_user_id as id, u.name, sum(c.amount_cents)::text as cents, count(*)::int as charges, count(distinct e.id)::int as encounters
+      select e.professional_user_id as id, u.name, sum(c.amount_cents)::text as cents, count(*)::int as charges, count(distinct e.id)::int as encounters
       from patient_charge c
       join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
       join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-      join "user" u on u.id = e.dentist_user_id
+      join "user" u on u.id = e.professional_user_id
       where c.organization_id = ${org} and c.voided_at is null and c.created_at >= ${monthStart}::timestamptz and c.created_at < ${nowIso}::timestamptz
       group by 1, 2 order by sum(c.amount_cents) desc, 2`)
 
   /** Citas atendidas y pacientes distintos atendidos del mes, por profesional. */
-  const attendedByDentist = () =>
+  const attendedByProfessional = () =>
     tx.execute<{ id: string; name: string; patients: number; appointments: number }>(sql`
       select u.id, u.name, count(distinct a.patient_id)::int as patients, count(*)::int as appointments
-      from appointment a join "user" u on u.id = a.dentist_user_id
+      from appointment a join "user" u on u.id = a.professional_user_id
       where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at >= ${monthStart}::timestamptz and a.starts_at < ${nowIso}::timestamptz
       group by 1, 2 order by 3 desc, 4 desc, 2`)
 
   return {
     d1: async () => {
       const result = await fig("cobrado", "profesional")
-      const charged = await chargedByDentist()
+      const charged = await chargedByProfessional()
       const year = await fig("cobrado", "profesional", lastYear)
       const top = result.rows[0]
       const total = result.rows.reduce((sum, row) => sum + (row.value.value ?? 0), 0)
@@ -52,7 +52,7 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
     },
 
     d2: async () => {
-      const rows = await attendedByDentist()
+      const rows = await attendedByProfessional()
       const [all] = await tx.execute<{ patients: number }>(sql`
         select count(distinct a.patient_id)::int as patients from appointment a
         where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at >= ${monthStart}::timestamptz and a.starts_at < ${nowIso}::timestamptz`)
@@ -68,8 +68,8 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
 
     d3: async () => {
       const result = await fig("cobrado", "profesional")
-      const charged = await chargedByDentist()
-      const attended = await attendedByDentist()
+      const charged = await chargedByProfessional()
+      const attended = await attendedByProfessional()
       const clinic = await fig("cobrado")
       const producing = result.rows.filter((row) => (row.value.value ?? 0) > 0)
       const total = producing.reduce((sum, row) => sum + (row.value.value ?? 0), 0)
@@ -112,7 +112,7 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
           select u.name, sum(ep.quantity)::int as times, count(*)::int as lines, count(distinct e.id)::int as encounters
           from encounter_procedure ep
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-          join "user" u on u.id = e.dentist_user_id
+          join "user" u on u.id = e.professional_user_id
           where ep.organization_id = ${org} and ep.voided_at is null and e.started_at >= ${since}::timestamptz and e.started_at < ${nowIso}::timestamptz
           group by 1 order by 2 desc, 1`)
       const rows = await done(monthStart)
@@ -129,10 +129,10 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
 
     d6: async () => {
       const result = await fig("cobrado", "profesional")
-      const charged = await chargedByDentist()
-      const attended = await attendedByDentist()
+      const charged = await chargedByProfessional()
+      const attended = await attendedByProfessional()
       const payers = await tx.execute<{ id: string; patients: number }>(sql`
-        select e.dentist_user_id as id, count(distinct c.patient_id)::int as patients
+        select e.professional_user_id as id, count(distinct c.patient_id)::int as patients
         from patient_payment_application a
         join patient_payment pay on pay.organization_id = a.organization_id and pay.id = a.payment_id and pay.voided_at is null
         join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
@@ -173,11 +173,11 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
     d7: async () => {
       const [end] = await tx.execute<{ at: string }>(sql`select ((date_trunc('month', now() at time zone ${h.tz}) + interval '1 month') at time zone ${h.tz})::text as at`)
       const people = await tx.execute<{ id: string; name: string }>(sql`
-        select distinct s.dentist_user_id as id, u.name from professional_schedule s join "user" u on u.id = s.dentist_user_id
+        select distinct s.professional_user_id as id, u.name from professional_schedule s join "user" u on u.id = s.professional_user_id
         where s.organization_id = ${org} and s.is_active order by 2`)
       const rest: Array<{ name: string; minutes: number; availMin: number }> = []
       for (const person of people) {
-        const minutes = await agendaMinutes(tx, org, { start: now, end: new Date(end?.at ?? nowIso) }, { dentistUserId: person.id })
+        const minutes = await agendaMinutes(tx, org, { start: now, end: new Date(end?.at ?? nowIso) }, { professionalUserId: person.id })
         rest.push({
           name: person.name,
           minutes: minutes.days.reduce((total, day) => total + Math.max(0, day.availMin - day.occMin), 0),
@@ -202,7 +202,7 @@ export function dentistSolvers(h: GoldenHelpers): GoldenSolvers {
       const before = scope.window.previous
       const previousCollected = await collectedByProfessional(tx, org, { start: before.start, end: before.end }, scope.currency)
       const previousAttended = await tx.execute<{ id: string; attended: number }>(sql`
-        select a.dentist_user_id as id, count(*)::int as attended from appointment a
+        select a.professional_user_id as id, count(*)::int as attended from appointment a
         where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at >= ${before.start.toISOString()}::timestamptz and a.starts_at < ${before.end.toISOString()}::timestamptz
         group by 1`)
       const rows = report.rows.map((row) => ({

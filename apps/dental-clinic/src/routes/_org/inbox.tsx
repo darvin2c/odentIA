@@ -1630,7 +1630,7 @@ function ThreadView({
   // Promete responder después: se sugiere dejar el tema pendiente.
   const promises = replyTopic !== null && /\b(te (confirmo|aviso|escribo|respondo|cuento|averiguo)|consult|averigu|lo veo)/i.test(composer)
   // Caja también, para devolverle un pago (decisión 3): `TopicBand` se lo ofrece solo en los pagos.
-  const conversers = members.filter((member) => ["owner", "admin", "reception", "dentist", "cashier"].includes(member.role))
+  const conversers = members.filter((member) => ["owner", "admin", "reception", "clinician", "cashier"].includes(member.role))
   // «Responder por» (decisión 6 del pulido): otro canal de la persona, sin perder lo escrito.
   const switchTo = (next: string) => {
     if (next === id) return

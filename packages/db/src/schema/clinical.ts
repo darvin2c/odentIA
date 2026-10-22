@@ -819,7 +819,7 @@ export const encounter = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     branchId: uuid("branch_id").references(() => branch.id),
-    dentistUserId: text("dentist_user_id")
+    professionalUserId: text("professional_user_id")
       .notNull()
       .references(() => user.id),
     status: text("status").notNull().default("borrador"),
@@ -2089,7 +2089,7 @@ export const encounterDictationSuggestion = pgTable(
     encounterId: uuid("encounter_id")
       .notNull()
       .references(() => encounter.id, { onDelete: "cascade" }),
-    dentistUserId: text("dentist_user_id")
+    professionalUserId: text("professional_user_id")
       .notNull()
       .references(() => user.id),
     kind: text("kind").$type<DictationKind>().notNull(),

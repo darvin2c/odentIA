@@ -74,7 +74,7 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
       clinicName: `Clínica Sonrisa ${tag}`,
       countryCode: "PE",
       city: "Arequipa",
-      dentists: "2-3",
+      professionals: "2-3",
       currentTool: "cuaderno_excel",
     })
     .returning({ id: saasWaitlistRequest.id })

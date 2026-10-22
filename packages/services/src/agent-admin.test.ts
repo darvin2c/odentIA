@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import {
@@ -53,23 +53,23 @@ const all = () => true
 interface Clinic {
   orgId: string
   ownerId: string
-  dentistId: string
+  professionalId: string
   branchId: string
-  chairId: string
+  roomId: string
 }
 
 async function clinic(options: { admin?: boolean; reception?: boolean } = {}): Promise<Clinic> {
   const orgId = randomUUID()
   const ownerId = `owner-${orgId}`
-  const dentistId = `dentist-${orgId}`
+  const professionalId = `professional-${orgId}`
   await insertOrg(ownerDb, orgId, `admin-${orgId}`)
   await ownerDb.insert(user).values([
     { id: ownerId, name: "Ana Ruiz", email: `${ownerId}@admin.test`, emailVerified: true },
-    { id: dentistId, name: "Dra. Carla Ríos", email: `${dentistId}@admin.test`, emailVerified: true },
+    { id: professionalId, name: "Dra. Carla Ríos", email: `${professionalId}@admin.test`, emailVerified: true },
   ])
   await ownerDb.insert(member).values([
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
-    { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
+    { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
@@ -79,12 +79,12 @@ async function clinic(options: { admin?: boolean; reception?: boolean } = {}): P
     writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
-  return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id }
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  return { orgId, ownerId, professionalId, branchId: site!.id, roomId: room!.id }
 }
 
 /** Quien llevaba atenciones y ya no está en el equipo: nadie las ve en «Te espera». */
-async function formerDentist(c: Clinic): Promise<string> {
+async function formerProfessional(c: Clinic): Promise<string> {
   const id = `ex-${c.orgId}`
   await ownerDb.insert(user).values({ id, name: "Dr. Luis Paz", email: `${id}@admin.test`, emailVerified: true }).onConflictDoNothing()
   return id
@@ -111,7 +111,7 @@ async function acceptedBudget(c: Clinic, patientId: string, daysAgo: number) {
 async function noShow(c: Clinic, patientId: string, daysAgo: number) {
   const startsAt = new Date(Date.now() - daysAgo * DAY)
   await ownerDb.insert(appointment).values({
-    organizationId: c.orgId, branchId: c.branchId, patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+    organizationId: c.orgId, branchId: c.branchId, patientId, professionalUserId: c.professionalId, roomId: c.roomId,
     startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "no_asistio",
   })
 }
@@ -231,7 +231,7 @@ describe("lo que recomienda", () => {
       createdAt: new Date(Date.now() - 45 * DAY),
     })
     await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: await person(c, "Elena Vargas"), dentistUserId: await formerDentist(c), branchId: c.branchId,
+      organizationId: c.orgId, patientId: await person(c, "Elena Vargas"), professionalUserId: await formerProfessional(c), branchId: c.branchId,
       startedAt: new Date(Date.now() - 5 * DAY),
     })
     const advice = await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all))
@@ -256,8 +256,8 @@ describe("lo que recomienda", () => {
     const cashierRole = roleOf(["finance.read", "tasks.write", "patients.read"])
     expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, cashierRole, { actionable: true }))).recommendations.map((item) => item.key))
       .toEqual(["cobranza_vencida"])
-    const dentistRole = roleOf(["appointments.read", "clinical.read", "tasks.write"])
-    expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, dentistRole, { actionable: true }))).recommendations.map((item) => item.key))
+    const professionalRole = roleOf(["appointments.read", "clinical.read", "tasks.write"])
+    expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, professionalRole, { actionable: true }))).recommendations.map((item) => item.key))
       .not.toContain("seguimiento_no_asistencia")
     const reception = roleOf(["appointments.read", "crm.read", "tasks.write", "agent.decide"])
     expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, reception, { actionable: true }))).recommendations.map((item) => item.key))
@@ -306,11 +306,11 @@ describe("las líneas que dejan trabajo al equipo", () => {
     await acceptedBudget(c, after, 8)
     const signer = await person(c, "Elena Vargas")
     await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: signer, dentistUserId: await formerDentist(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+      organizationId: c.orgId, patientId: signer, professionalUserId: await formerProfessional(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
     })
     // La de quien sigue atendiendo ya le sale en «Te espera»: la línea no le deja otra tarea.
     await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: await person(c, "Mario Soto"), dentistUserId: c.dentistId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+      organizationId: c.orgId, patientId: await person(c, "Mario Soto"), professionalUserId: c.professionalId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
     })
     // Prendidas hace dos días: el presupuesto de 30 días ya cumplía la condición antes y no cuenta.
     await turnedOn(c, "presupuestos_sin_cita", 2)
@@ -340,7 +340,7 @@ describe("las líneas que dejan trabajo al equipo", () => {
     const c = await clinic()
     const signer = await person(c, "Elena Vargas")
     const [visit] = await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: signer, dentistUserId: await formerDentist(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+      organizationId: c.orgId, patientId: signer, professionalUserId: await formerProfessional(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
     }).returning({ id: encounter.id })
     await turnedOn(c, "atenciones_sin_firmar", 1)
     expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
@@ -366,7 +366,7 @@ describe("las líneas que dejan trabajo al equipo", () => {
     // Reservó su cita: la tarea ya no hace falta.
     const startsAt = new Date(Date.now() + 2 * DAY)
     await ownerDb.insert(appointment).values({
-      organizationId: c.orgId, branchId: c.branchId, patientId: late, dentistUserId: c.dentistId, chairId: c.chairId,
+      organizationId: c.orgId, branchId: c.branchId, patientId: late, professionalUserId: c.professionalId, roomId: c.roomId,
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
     })
     expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
@@ -390,7 +390,7 @@ describe("las líneas que dejan trabajo al equipo", () => {
     const last = tasks.at(-1)!
     const startsAt = new Date(Date.now() + 2 * DAY)
     await ownerDb.insert(appointment).values({
-      organizationId: c.orgId, branchId: c.branchId, patientId: last.patientId!, dentistUserId: c.dentistId, chairId: c.chairId,
+      organizationId: c.orgId, branchId: c.branchId, patientId: last.patientId!, professionalUserId: c.professionalId, roomId: c.roomId,
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
     })
     // Con dos por ciclo, el primero revisa las dos más viejas (siguen en pie) y el siguiente sigue desde ahí.

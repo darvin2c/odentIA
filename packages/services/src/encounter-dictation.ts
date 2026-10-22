@@ -548,7 +548,7 @@ export async function saveDictationSegment(
       organizationId: orgId,
       patientId,
       encounterId,
-      dentistUserId: actorUserId,
+      professionalUserId: actorUserId,
       kind: draft.kind,
       payload: withMeta(ready.payload, stamp({})),
       sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),

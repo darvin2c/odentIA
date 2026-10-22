@@ -234,7 +234,7 @@ export function EncounterContextBody({
         ) : (
           <div className="flex flex-col gap-1">
             <p>
-              {formatDate(previous.startedAt)} · {memberName(previous.dentistUserId)}
+              {formatDate(previous.startedAt)} · {memberName(previous.professionalUserId)}
             </p>
             {previous.reason ? <p>Motivo: {previous.reason}</p> : null}
             {previous.diagnosisCodes && previous.diagnosisCodes.length > 0 ? (

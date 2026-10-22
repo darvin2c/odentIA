@@ -4,7 +4,7 @@ import { blindSolvers2 } from "./blind-2.js"
 import { blindSolvers3 } from "./blind-3.js"
 import { blindSolvers4 } from "./blind-4.js"
 import { budgetSolvers } from "./budgets.js"
-import { dentistSolvers } from "./dentists.js"
+import { professionalSolvers } from "./professionals.js"
 import { financeSolvers } from "./finance.js"
 import { generatedSolvers1 } from "./generated-1.js"
 import { generatedSolvers2 } from "./generated-2.js"
@@ -27,7 +27,7 @@ export function ownerSolvers(h: GoldenHelpers): GoldenSolvers {
   return {
     ...financeSolvers(h),
     ...patientSolvers(h),
-    ...dentistSolvers(h),
+    ...professionalSolvers(h),
     ...budgetSolvers(h),
     ...marketingSolvers(h),
     ...strategySolvers(h),

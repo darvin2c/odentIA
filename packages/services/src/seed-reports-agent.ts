@@ -236,23 +236,23 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
     ).map((row) => [row.id, row.name]),
   )
   const consultations: Array<typeof saasAction.$inferInsert> = []
-  for (const dentist of input.dictating) {
-    const since = addMonths(currentMonthIn(timezone), -dentist.fromMonthsAgo)
+  for (const professional of input.dictating) {
+    const since = addMonths(currentMonthIn(timezone), -professional.fromMonthsAgo)
     const sinceAt = monthStart(timezone, since.year, since.month)
     const span = now.getTime() - sinceAt.getTime()
     const done = (await tx.execute(sql`
       select e.id, e.ended_at, pc.contact_id
       from encounter e
       left join patient_contact pc on pc.organization_id = e.organization_id and pc.patient_id = e.patient_id and pc.relationship = 'self'
-      where e.organization_id = ${orgId} and e.dentist_user_id = ${dentist.userId} and e.status = 'finalizada'
+      where e.organization_id = ${orgId} and e.professional_user_id = ${professional.userId} and e.status = 'finalizada'
         and e.appointment_id is not null and e.ended_at >= ${sinceAt.toISOString()}::timestamptz
       order by e.ended_at`)) as unknown as Array<{ id: string; ended_at: Date | string; contact_id: string | null }>
-    const [from, to] = dentist.share
+    const [from, to] = professional.share
     for (const row of done) {
       const endedAt = asDate(row.ended_at)
       const share = from + (to - from) * Math.min(1, Math.max(0, (endedAt.getTime() - sinceAt.getTime()) / span))
-      if (mark(`dictado:${dentist.userId}:${endedAt.toISOString()}`) >= share) continue
-      const name = names.get(dentist.userId)
+      if (mark(`dictado:${professional.userId}:${endedAt.toISOString()}`) >= share) continue
+      const name = names.get(professional.userId)
       consultations.push({
         organizationId: orgId,
         kind: "consulta",
@@ -270,12 +270,12 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   // --- Citas recuperadas: el Administrador escribió y el agente reservó ---------------------
   const yearAgo = addMonths(currentMonthIn(timezone), -12)
   const visits = (await tx.execute(sql`
-    select a.id, a.created_at, a.starts_at, a.ends_at, a.source, a.conversation_id, a.patient_id, a.dentist_user_id, pc.contact_id
+    select a.id, a.created_at, a.starts_at, a.ends_at, a.source, a.conversation_id, a.patient_id, a.professional_user_id, pc.contact_id
     from appointment a
     join patient_contact pc on pc.organization_id = a.organization_id and pc.patient_id = a.patient_id and pc.relationship = 'self'
     where a.organization_id = ${orgId} and a.status = 'atendida' and a.source in ('agent', 'enlace')
       and a.created_at >= ${monthStart(timezone, yearAgo.year, yearAgo.month).toISOString()}::timestamptz
-    order by a.starts_at, a.dentist_user_id`)) as unknown as Array<{
+    order by a.starts_at, a.professional_user_id`)) as unknown as Array<{
     id: string
     created_at: Date | string
     starts_at: Date | string
@@ -283,13 +283,13 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
     source: string
     conversation_id: string | null
     patient_id: string
-    dentist_user_id: string
+    professional_user_id: string
     contact_id: string
   }>
   const jobs: Array<typeof automationJob.$inferInsert> = []
   const recoveries: Array<typeof saasAction.$inferInsert> = []
   for (const visit of visits) {
-    const key = `${asDate(visit.starts_at).toISOString()}:${visit.dentist_user_id}`
+    const key = `${asDate(visit.starts_at).toISOString()}:${visit.professional_user_id}`
     const roll = mark(`recuperada:${key}`)
     if (roll >= RECOVERED_SHARE) continue
     const line = RECOVERY_KINDS[Math.floor((roll / RECOVERED_SHARE) * RECOVERY_KINDS.length)] ?? RECOVERY_KINDS[0]

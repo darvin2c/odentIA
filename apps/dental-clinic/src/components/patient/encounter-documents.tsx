@@ -479,7 +479,7 @@ export function EncounterDocumentsBlock({
           open
           patientId={patientId}
           encounterId={encounterId}
-          defaultProfessionalUserId={detail.encounter.dentistUserId}
+          defaultProfessionalUserId={detail.encounter.professionalUserId}
           templates={(formTemplates.data?.data ?? []).filter((t) => t.respondent !== "portal")}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {

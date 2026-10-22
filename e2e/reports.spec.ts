@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
 import { patient, patientPayment } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
@@ -25,8 +25,8 @@ function inMonth(monthsBack: number, day: number, hour = 15): Date {
 /** Dos meses de actividad real y aislada: citas, cobros y conversaciones. Ningún envío externo. */
 async function twoMonths(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
-  const chairId = randomUUID()
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  const roomId = randomUUID()
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   const people: Record<string, string> = {}
   for (const [index, name] of ["Ana Paz", "Bruno Díaz", "Carla Soto", "Diego Ruiz", "Elena Mora"].entries()) {
     people[name] = randomUUID()
@@ -36,7 +36,7 @@ async function twoMonths(db: Db, owner: OwnerFixture) {
   }
   const visit = (name: string, startsAt: Date, status: string, source = "recepcion") =>
     db.insert(appointment).values({
-      organizationId, branchId: owner.branchId, patientId: people[name]!, chairId, dentistUserId: owner.user.id,
+      organizationId, branchId: owner.branchId, patientId: people[name]!, roomId, professionalUserId: owner.user.id,
       serviceName: "Evaluación", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status, source,
     })
   // Mes pasado: tres atendidas, una inasistencia y una cancelación.
@@ -173,15 +173,15 @@ for (const width of [1440, 390]) {
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       const organizationId = owner.org.id
-      const chairId = randomUUID()
+      const roomId = randomUUID()
       const patientId = randomUUID()
-      await fixtureDb.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+      await fixtureDb.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
       const [person] = await fixtureDb.insert(contact).values({ organizationId, displayName: "Gabriel Núñez" }).returning({ id: contact.id })
       await fixtureDb.insert(patient).values({ id: patientId, organizationId, personId: person!.id, patientNumber: 1 })
       // Faltó hace veinte minutos y no tiene otra cita.
       const startsAt = new Date(Date.now() - 20 * 60_000)
       await fixtureDb.insert(appointment).values({
-        organizationId, branchId: owner.branchId, patientId, chairId, dentistUserId: owner.user.id,
+        organizationId, branchId: owner.branchId, patientId, roomId, professionalUserId: owner.user.id,
         serviceName: "Limpieza dental", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "no_asistio",
       })
       const month = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).format(startsAt)

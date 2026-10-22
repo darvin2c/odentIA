@@ -6,7 +6,7 @@
  * huecos por su cuenta. Toda función recibe `tx: Db` ya contextualizado.
  */
 import type { Db } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import {
   SCHEDULE_BLOCK_KINDS,
   professionalSchedule,
@@ -17,7 +17,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
-import { branchNotFound, chairNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
 
@@ -151,31 +151,31 @@ async function requireBranch(tx: Db, orgId: string, branchId: string) {
   return { ...row, timeZone: branchTimeZone(row.timezone, row.orgTimezone) }
 }
 
-async function requireDentist(tx: Db, orgId: string, dentistUserId: string) {
+async function requireProfessional(tx: Db, orgId: string, professionalUserId: string) {
   const [membership] = await tx
     .select({ id: member.id, name: user.name })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, dentistUserId)))
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, professionalUserId)))
     .limit(1)
   if (!membership) throw notFound("Profesional")
   return membership
 }
 
-async function requireChairInBranch(tx: Db, orgId: string, chairId: string, branchId: string) {
+async function requireRoomInBranch(tx: Db, orgId: string, roomId: string, branchId: string) {
   const [row] = await tx
-    .select({ id: scheduleChair.id, name: scheduleChair.name })
-    .from(scheduleChair)
+    .select({ id: scheduleRoom.id, name: scheduleRoom.name })
+    .from(scheduleRoom)
     .where(
       and(
-        eq(scheduleChair.organizationId, orgId),
-        eq(scheduleChair.id, chairId),
-        eq(scheduleChair.branchId, branchId),
-        eq(scheduleChair.isActive, true),
+        eq(scheduleRoom.organizationId, orgId),
+        eq(scheduleRoom.id, roomId),
+        eq(scheduleRoom.branchId, branchId),
+        eq(scheduleRoom.isActive, true),
       ),
     )
     .limit(1)
-  if (!row) throw chairNotFound()
+  if (!row) throw roomNotFound()
   return row
 }
 
@@ -201,7 +201,7 @@ export interface ScheduleRule extends ScheduleRuleInput {
 
 export interface ProfessionalScheduleView {
   branchId: string
-  dentistUserId: string
+  professionalUserId: string
   timeZone: string
   rules: ScheduleRule[]
   /** Desde qué día (de la sede) vale el horario de hoy; nulo sin horario. */
@@ -213,10 +213,10 @@ export async function getProfessionalSchedule(
   tx: Db,
   orgId: string,
   branchId: string,
-  dentistUserId: string,
+  professionalUserId: string,
 ): Promise<ProfessionalScheduleView> {
   const resolved = await requireBranch(tx, orgId, branchId)
-  await requireDentist(tx, orgId, dentistUserId)
+  await requireProfessional(tx, orgId, professionalUserId)
   const rows = await tx
     .select()
     .from(professionalSchedule)
@@ -224,14 +224,14 @@ export async function getProfessionalSchedule(
       and(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, branchId),
-        eq(professionalSchedule.dentistUserId, dentistUserId),
+        eq(professionalSchedule.professionalUserId, professionalUserId),
         eq(professionalSchedule.isActive, true),
       ),
     )
     .orderBy(asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
   return {
     branchId,
-    dentistUserId,
+    professionalUserId,
     timeZone: resolved.timeZone,
     rules: rows.map((row) => ({
       id: row.id,
@@ -255,10 +255,10 @@ export async function setProfessionalSchedule(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: { branchId: string; dentistUserId: string; rules: ScheduleRuleInput[] },
+  input: { branchId: string; professionalUserId: string; rules: ScheduleRuleInput[] },
 ): Promise<ProfessionalScheduleView> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
-  await requireDentist(tx, orgId, input.dentistUserId)
+  await requireProfessional(tx, orgId, input.professionalUserId)
   const seen = new Set<string>()
   for (const rule of input.rules) {
     assertWeekday(rule.weekday)
@@ -272,7 +272,7 @@ export async function setProfessionalSchedule(
   const scope = and(
     eq(professionalSchedule.organizationId, orgId),
     eq(professionalSchedule.branchId, input.branchId),
-    eq(professionalSchedule.dentistUserId, input.dentistUserId),
+    eq(professionalSchedule.professionalUserId, input.professionalUserId),
   )
   const current = await tx
     .select()
@@ -282,7 +282,7 @@ export async function setProfessionalSchedule(
   const same =
     current.length === input.rules.length &&
     current.every((row) => seen.has(`${row.weekday}:${row.startMin}:${row.endMin}`))
-  if (same) return getProfessionalSchedule(tx, orgId, input.branchId, input.dentistUserId)
+  if (same) return getProfessionalSchedule(tx, orgId, input.branchId, input.professionalUserId)
   const { year, month, day } = zonedPartsOf(new Date(), resolved.timeZone)
   const today = toISODate(year, month, day)
   // Lo que empezó hoy se reemplaza; lo de antes deja de valer hoy.
@@ -296,7 +296,7 @@ export async function setProfessionalSchedule(
       input.rules.map((rule) => ({
         organizationId: orgId,
         branchId: input.branchId,
-        dentistUserId: input.dentistUserId,
+        professionalUserId: input.professionalUserId,
         weekday: rule.weekday,
         startMin: rule.startMin,
         endMin: rule.endMin,
@@ -306,7 +306,7 @@ export async function setProfessionalSchedule(
       })),
     )
   }
-  return getProfessionalSchedule(tx, orgId, input.branchId, input.dentistUserId)
+  return getProfessionalSchedule(tx, orgId, input.branchId, input.professionalUserId)
 }
 
 /* Bloqueos y ausencias */
@@ -314,9 +314,9 @@ export async function setProfessionalSchedule(
 export interface ScheduleBlockItem {
   id: string
   branchId: string
-  dentistUserId: string | null
-  dentistName: string | null
-  chairId: string | null
+  professionalUserId: string | null
+  professionalName: string | null
+  roomId: string | null
   kind: ScheduleBlockKind
   reason: string | null
   startsAt: string
@@ -325,8 +325,8 @@ export interface ScheduleBlockItem {
 
 export interface CreateBlockInput {
   branchId: string
-  dentistUserId?: string | null
-  chairId?: string | null
+  professionalUserId?: string | null
+  roomId?: string | null
   kind?: string
   reason?: string
   startsAt: string
@@ -343,9 +343,9 @@ export async function listScheduleBlocks(
   const to = parseInstant(input.to, "to")
   if (to <= from) throw validation("El rango de bloqueos es inválido")
   const rows = await tx
-    .select({ block: scheduleBlock, dentistName: user.name })
+    .select({ block: scheduleBlock, professionalName: user.name })
     .from(scheduleBlock)
-    .leftJoin(user, eq(user.id, scheduleBlock.dentistUserId))
+    .leftJoin(user, eq(user.id, scheduleBlock.professionalUserId))
     .where(
       and(
         eq(scheduleBlock.organizationId, orgId),
@@ -358,9 +358,9 @@ export async function listScheduleBlocks(
   return rows.map((row) => ({
     id: row.block.id,
     branchId: row.block.branchId,
-    dentistUserId: row.block.dentistUserId,
-    dentistName: row.dentistName,
-    chairId: row.block.chairId,
+    professionalUserId: row.block.professionalUserId,
+    professionalName: row.professionalName,
+    roomId: row.block.roomId,
     kind: assertBlockKind(row.block.kind),
     reason: row.block.reason,
     startsAt: row.block.startsAt.toISOString(),
@@ -378,8 +378,8 @@ export async function createScheduleBlock(
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const endsAt = parseInstant(input.endsAt, "endsAt")
   if (endsAt <= startsAt) throw validation("El bloqueo debe terminar después de iniciar")
-  if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
-  if (input.chairId) await requireChairInBranch(tx, orgId, input.chairId, input.branchId)
+  if (input.professionalUserId) await requireProfessional(tx, orgId, input.professionalUserId)
+  if (input.roomId) await requireRoomInBranch(tx, orgId, input.roomId, input.branchId)
   // Sin profesional ni unidad dental, el bloqueo cierra la sede completa.
   const kind = assertBlockKind(input.kind ?? "bloqueo")
   const [created] = await tx
@@ -387,8 +387,8 @@ export async function createScheduleBlock(
     .values({
       organizationId: orgId,
       branchId: input.branchId,
-      dentistUserId: input.dentistUserId ?? null,
-      chairId: input.chairId ?? null,
+      professionalUserId: input.professionalUserId ?? null,
+      roomId: input.roomId ?? null,
       kind,
       reason: input.reason?.trim() || null,
       startsAt,
@@ -422,8 +422,8 @@ export async function deleteScheduleBlock(
 
 export interface AvailabilityCheck {
   branchId: string
-  dentistUserId: string
-  chairId: string
+  professionalUserId: string
+  roomId: string
   startsAt: Date
   endsAt: Date
   ignoreAppointmentId?: string
@@ -436,12 +436,12 @@ async function overlappingBlocks(
   orgId: string,
   check: AvailabilityCheck,
 ): Promise<typeof scheduleBlock.$inferSelect | undefined> {
-  const dentistScope = or(
-    isNull(scheduleBlock.dentistUserId),
-    eq(scheduleBlock.dentistUserId, check.dentistUserId),
+  const professionalScope = or(
+    isNull(scheduleBlock.professionalUserId),
+    eq(scheduleBlock.professionalUserId, check.professionalUserId),
   )
-  const chairScope = or(isNull(scheduleBlock.chairId), eq(scheduleBlock.chairId, check.chairId))
-  if (!dentistScope || !chairScope) return undefined
+  const roomScope = or(isNull(scheduleBlock.roomId), eq(scheduleBlock.roomId, check.roomId))
+  if (!professionalScope || !roomScope) return undefined
   const [row] = await tx
     .select()
     .from(scheduleBlock)
@@ -449,8 +449,8 @@ async function overlappingBlocks(
       and(
         eq(scheduleBlock.organizationId, orgId),
         eq(scheduleBlock.branchId, check.branchId),
-        dentistScope,
-        chairScope,
+        professionalScope,
+        roomScope,
         lt(scheduleBlock.startsAt, check.endsAt),
         gt(scheduleBlock.endsAt, check.startsAt),
       ),
@@ -467,8 +467,8 @@ async function overlappingAppointment(
   const conditions = [
     eq(appointment.organizationId, orgId),
     or(
-      eq(appointment.dentistUserId, check.dentistUserId),
-      eq(appointment.chairId, check.chairId),
+      eq(appointment.professionalUserId, check.professionalUserId),
+      eq(appointment.roomId, check.roomId),
     ),
     inArray(appointment.status, ["programada", "confirmada"]),
     lt(appointment.startsAt, check.endsAt),
@@ -497,8 +497,8 @@ export async function validateAvailability(
 ): Promise<void> {
   if (check.endsAt <= check.startsAt) throw validation("La cita debe terminar después de iniciar")
   const resolved = await requireBranch(tx, orgId, check.branchId)
-  await requireDentist(tx, orgId, check.dentistUserId)
-  await requireChairInBranch(tx, orgId, check.chairId, check.branchId)
+  await requireProfessional(tx, orgId, check.professionalUserId)
+  await requireRoomInBranch(tx, orgId, check.roomId, check.branchId)
   const rules = await tx
     .select()
     .from(professionalSchedule)
@@ -506,7 +506,7 @@ export async function validateAvailability(
       and(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, check.branchId),
-        eq(professionalSchedule.dentistUserId, check.dentistUserId),
+        eq(professionalSchedule.professionalUserId, check.professionalUserId),
         eq(professionalSchedule.isActive, true),
       ),
     )
@@ -558,8 +558,8 @@ export async function validateAvailability(
 
 export interface SlotsQuery {
   branchId: string
-  dentistUserId?: string
-  chairId?: string
+  professionalUserId?: string
+  roomId?: string
   serviceId?: string
   from: string
   to: string
@@ -570,21 +570,21 @@ export interface SlotsQuery {
   /** Descarta los huecos que empiezan antes de este instante (lo ya pasado no se ofrece). */
   notBefore?: string
   /** Solo el primer hueco de cada profesional: responde «quién puede atender primero». */
-  firstPerDentist?: boolean
+  firstPerProfessional?: boolean
   /**
    * Como mucho estos huecos por profesional y día, los primeros: así una
    * lista corta no se la queda una sola persona (decisión 16 de la fase 4).
    */
-  perDentistPerDay?: number
+  perProfessionalPerDay?: number
 }
 
 export interface AvailableSlot {
   startsAt: string
   endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
-  chairName: string | null
+  professionalUserId: string
+  professionalName: string
+  roomId: string | null
+  roomName: string | null
   timeZone: string
 }
 
@@ -660,18 +660,18 @@ export async function listAvailableSlots(
   if (!Number.isInteger(step) || step < 5 || step > 120) {
     throw validation("El paso debe estar entre 5 y 120 minutos")
   }
-  const perDay = input.perDentistPerDay
+  const perDay = input.perProfessionalPerDay
   if (perDay !== undefined && (!Number.isInteger(perDay) || perDay < 1 || perDay > 50)) {
-    throw validation("perDentistPerDay debe estar entre 1 y 50")
+    throw validation("perProfessionalPerDay debe estar entre 1 y 50")
   }
-  if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
+  if (input.professionalUserId) await requireProfessional(tx, orgId, input.professionalUserId)
   // Solo quien atiende el servicio, si alguien lo atiende en esta sede.
   const attending = input.serviceId ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId }) : null
-  if (attending && input.dentistUserId && !attending.dentistUserIds.includes(input.dentistUserId)) {
+  if (attending && input.professionalUserId && !attending.professionalUserIds.includes(input.professionalUserId)) {
     return { slots: [], truncated: false, timeZone, attending }
   }
-  const chairFilter = input.chairId
-    ? await requireChairInBranch(tx, orgId, input.chairId, input.branchId)
+  const roomFilter = input.roomId
+    ? await requireRoomInBranch(tx, orgId, input.roomId, input.branchId)
     : null
 
   const scheduleConditions = [
@@ -679,44 +679,44 @@ export async function listAvailableSlots(
     eq(professionalSchedule.branchId, input.branchId),
     eq(professionalSchedule.isActive, true),
   ]
-  if (input.dentistUserId) {
-    scheduleConditions.push(eq(professionalSchedule.dentistUserId, input.dentistUserId))
+  if (input.professionalUserId) {
+    scheduleConditions.push(eq(professionalSchedule.professionalUserId, input.professionalUserId))
   } else if (attending) {
-    scheduleConditions.push(inArray(professionalSchedule.dentistUserId, attending.dentistUserIds))
+    scheduleConditions.push(inArray(professionalSchedule.professionalUserId, attending.professionalUserIds))
   }
   const rules = await tx
-    .select({ rule: professionalSchedule, dentistName: user.name })
+    .select({ rule: professionalSchedule, professionalName: user.name })
     .from(professionalSchedule)
-    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .innerJoin(user, eq(user.id, professionalSchedule.professionalUserId))
     .where(and(...scheduleConditions))
     .orderBy(
-      asc(professionalSchedule.dentistUserId),
+      asc(professionalSchedule.professionalUserId),
       asc(professionalSchedule.weekday),
       asc(professionalSchedule.startMin),
     )
   if (rules.length === 0) return { slots: [], truncated: false, timeZone, attending }
   const notBefore = input.notBefore ? parseInstant(input.notBefore, "notBefore") : null
-  const dentistsWithRules = new Set(rules.map((entry) => entry.rule.dentistUserId))
+  const professionalsWithRules = new Set(rules.map((entry) => entry.rule.professionalUserId))
   const found = new Set<string>()
 
-  const chairs = await tx
-    .select({ id: scheduleChair.id, name: scheduleChair.name })
-    .from(scheduleChair)
+  const rooms = await tx
+    .select({ id: scheduleRoom.id, name: scheduleRoom.name })
+    .from(scheduleRoom)
     .where(
       and(
-        eq(scheduleChair.organizationId, orgId),
-        eq(scheduleChair.branchId, input.branchId),
-        eq(scheduleChair.isActive, true),
+        eq(scheduleRoom.organizationId, orgId),
+        eq(scheduleRoom.branchId, input.branchId),
+        eq(scheduleRoom.isActive, true),
       ),
     )
-    .orderBy(asc(scheduleChair.name))
+    .orderBy(asc(scheduleRoom.name))
 
   const [busyAppointments, blocks] = await Promise.all([
     tx
       .select({
         id: appointment.id,
-        dentistUserId: appointment.dentistUserId,
-        chairId: appointment.chairId,
+        professionalUserId: appointment.professionalUserId,
+        roomId: appointment.roomId,
         startsAt: appointment.startsAt,
         endsAt: appointment.endsAt,
       })
@@ -758,69 +758,69 @@ export async function listAvailableSlots(
     ).getUTCDay()
     // Lo de cada día se junta y se ordena por hora antes de cortar.
     const daySlots: AvailableSlot[] = []
-    const perDentist = new Map<string, number>()
+    const perProfessional = new Map<string, number>()
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
-      if (input.firstPerDentist && found.has(entry.rule.dentistUserId)) continue
+      if (input.firstPerProfessional && found.has(entry.rule.professionalUserId)) continue
       for (let minute = entry.rule.startMin; minute + slotMin <= entry.rule.endMin; minute += step) {
-        if (perDay !== undefined && (perDentist.get(entry.rule.dentistUserId) ?? 0) >= perDay) break
+        if (perDay !== undefined && (perProfessional.get(entry.rule.professionalUserId) ?? 0) >= perDay) break
         const startUtc = zonedTimeToUtc(dayLabel, minute, resolved.timeZone)
         const endUtc = new Date(startUtc.getTime() + slotMin * 60000)
         if (endUtc <= from || startUtc >= to) continue
         if (notBefore && startUtc < notBefore) continue
-        const dentistBusy = busyAppointments.some(
+        const professionalBusy = busyAppointments.some(
           (item) =>
-            item.dentistUserId === entry.rule.dentistUserId &&
+            item.professionalUserId === entry.rule.professionalUserId &&
             item.startsAt < endUtc &&
             item.endsAt > startUtc,
         )
-        if (dentistBusy) continue
+        if (professionalBusy) continue
         // Cierra el hueco si un bloqueo alcanza al profesional sin importar la unidad dental.
-        const dentistBlocked = blocks.some(
+        const professionalBlocked = blocks.some(
           (block) =>
-            (block.dentistUserId === null || block.dentistUserId === entry.rule.dentistUserId) &&
-            block.chairId === null &&
+            (block.professionalUserId === null || block.professionalUserId === entry.rule.professionalUserId) &&
+            block.roomId === null &&
             block.startsAt < endUtc &&
             block.endsAt > startUtc,
         )
-        if (dentistBlocked) continue
-        const chairFree = (chairId: string): boolean => {
+        if (professionalBlocked) continue
+        const roomFree = (roomId: string): boolean => {
           const busy = busyAppointments.some(
-            (item) => item.chairId === chairId && item.startsAt < endUtc && item.endsAt > startUtc,
+            (item) => item.roomId === roomId && item.startsAt < endUtc && item.endsAt > startUtc,
           )
           if (busy) return false
           return !blocks.some(
             (block) =>
-              (block.chairId === null || block.chairId === chairId) &&
-              (block.dentistUserId === null || block.dentistUserId === entry.rule.dentistUserId) &&
+              (block.roomId === null || block.roomId === roomId) &&
+              (block.professionalUserId === null || block.professionalUserId === entry.rule.professionalUserId) &&
               block.startsAt < endUtc &&
               block.endsAt > startUtc,
           )
         }
-        let chairId: string | null = null
-        let chairName: string | null = null
-        if (chairFilter) {
-          if (!chairFree(chairFilter.id)) continue
-          chairId = chairFilter.id
-          chairName = chairFilter.name
+        let roomId: string | null = null
+        let roomName: string | null = null
+        if (roomFilter) {
+          if (!roomFree(roomFilter.id)) continue
+          roomId = roomFilter.id
+          roomName = roomFilter.name
         } else {
-          const free = chairs.find((chair) => chairFree(chair.id))
+          const free = rooms.find((room) => roomFree(room.id))
           if (!free) continue
-          chairId = free.id
-          chairName = free.name
+          roomId = free.id
+          roomName = free.name
         }
         daySlots.push({
           startsAt: startUtc.toISOString(),
           endsAt: endUtc.toISOString(),
-          dentistUserId: entry.rule.dentistUserId,
-          dentistName: entry.dentistName,
-          chairId,
-          chairName,
+          professionalUserId: entry.rule.professionalUserId,
+          professionalName: entry.professionalName,
+          roomId,
+          roomName,
           timeZone,
         })
-        perDentist.set(entry.rule.dentistUserId, (perDentist.get(entry.rule.dentistUserId) ?? 0) + 1)
-        if (input.firstPerDentist) {
-          found.add(entry.rule.dentistUserId)
+        perProfessional.set(entry.rule.professionalUserId, (perProfessional.get(entry.rule.professionalUserId) ?? 0) + 1)
+        if (input.firstPerProfessional) {
+          found.add(entry.rule.professionalUserId)
           break
         }
       }
@@ -829,14 +829,14 @@ export async function listAvailableSlots(
     daySlots.sort(
       (a, b) =>
         a.startsAt.localeCompare(b.startsAt) ||
-        a.dentistName.localeCompare(b.dentistName, "es") ||
-        a.dentistUserId.localeCompare(b.dentistUserId),
+        a.professionalName.localeCompare(b.professionalName, "es") ||
+        a.professionalUserId.localeCompare(b.professionalUserId),
     )
     for (const slot of daySlots) {
       if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone, attending }
       slots.push(slot)
     }
-    if (input.firstPerDentist && found.size === dentistsWithRules.size) {
+    if (input.firstPerProfessional && found.size === professionalsWithRules.size) {
       return { slots, truncated: false, timeZone, attending }
     }
     if (dayEnd >= to) break
@@ -906,15 +906,15 @@ export interface AgendaAvailability {
    * ausencias, citas en pie (en cualquier sede) y lo ya pasado, y solo mientras
    * queda alguna unidad dental libre.
    */
-  free: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
+  free: Array<{ professionalUserId: string; startsAt: string; endsAt: string }>
   /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */
   professionals: Array<{
     id: string
     label: string
-    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+    nextFree: { startsAt: string; endsAt: string; roomId: string | null } | null
   }>
   /** Tramos de atención del rango, ya como instantes. */
-  open: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
+  open: Array<{ professionalUserId: string; startsAt: string; endsAt: string }>
   blocks: ScheduleBlockItem[]
   /**
    * Con servicio: si alguien lo atiende en la sede, la agenda ofrece solo a
@@ -954,15 +954,15 @@ export async function getAgendaAvailability(
     ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId })
     : null
   const rules = await tx
-    .select({ rule: professionalSchedule, dentistName: user.name })
+    .select({ rule: professionalSchedule, professionalName: user.name })
     .from(professionalSchedule)
-    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .innerJoin(user, eq(user.id, professionalSchedule.professionalUserId))
     .where(
       and(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, input.branchId),
         eq(professionalSchedule.isActive, true),
-        attending ? inArray(professionalSchedule.dentistUserId, attending.dentistUserIds) : undefined,
+        attending ? inArray(professionalSchedule.professionalUserId, attending.professionalUserIds) : undefined,
       ),
     )
     .orderBy(asc(user.name), asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
@@ -977,7 +977,7 @@ export async function getAgendaAvailability(
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
       open.push({
-        dentistUserId: entry.rule.dentistUserId,
+        professionalUserId: entry.rule.professionalUserId,
         startsAt: zonedTimeToUtc(dayLabel, entry.rule.startMin, resolved.timeZone).toISOString(),
         endsAt: zonedTimeToUtc(dayLabel, entry.rule.endMin, resolved.timeZone).toISOString(),
       })
@@ -998,27 +998,27 @@ export async function getAgendaAvailability(
       notBefore: now.toISOString(),
       // Recepción ve el primer cuarto de hora libre, no la hora que se ofrece a la persona.
       stepMin: 15,
-      firstPerDentist: true,
+      firstPerProfessional: true,
       ...(input.serviceId ? { serviceId: input.serviceId } : {}),
     }),
   ])
-  const nextByDentist = new Map(next.slots.map((slot) => [slot.dentistUserId, slot]))
+  const nextByProfessional = new Map(next.slots.map((slot) => [slot.professionalUserId, slot]))
   const professionals = new Map<string, AgendaAvailability["professionals"][number]>()
   for (const entry of rules) {
-    if (professionals.has(entry.rule.dentistUserId)) continue
-    const slot = nextByDentist.get(entry.rule.dentistUserId)
-    professionals.set(entry.rule.dentistUserId, {
-      id: entry.rule.dentistUserId,
-      label: entry.dentistName,
-      nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, chairId: slot.chairId } : null,
+    if (professionals.has(entry.rule.professionalUserId)) continue
+    const slot = nextByProfessional.get(entry.rule.professionalUserId)
+    professionals.set(entry.rule.professionalUserId, {
+      id: entry.rule.professionalUserId,
+      label: entry.professionalName,
+      nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, roomId: slot.roomId } : null,
     })
   }
   // Tramos reservables por profesional, con las mismas reglas que valida la reserva.
-  const [busy, chairRows] = await Promise.all([
+  const [busy, roomRows] = await Promise.all([
     tx
       .select({
-        dentistUserId: appointment.dentistUserId,
-        chairId: appointment.chairId,
+        professionalUserId: appointment.professionalUserId,
+        roomId: appointment.roomId,
         startsAt: appointment.startsAt,
         endsAt: appointment.endsAt,
       })
@@ -1033,13 +1033,13 @@ export async function getAgendaAvailability(
         ),
       ),
     tx
-      .select({ id: scheduleChair.id })
-      .from(scheduleChair)
+      .select({ id: scheduleRoom.id })
+      .from(scheduleRoom)
       .where(
         and(
-          eq(scheduleChair.organizationId, orgId),
-          eq(scheduleChair.branchId, input.branchId),
-          eq(scheduleChair.isActive, true),
+          eq(scheduleRoom.organizationId, orgId),
+          eq(scheduleRoom.branchId, input.branchId),
+          eq(scheduleRoom.isActive, true),
         ),
       ),
   ])
@@ -1050,25 +1050,25 @@ export async function getAgendaAvailability(
   ]
   const free: AgendaAvailability["free"] = []
   for (const professional of professionals.values()) {
-    const mine = (dentistUserId: string | null) =>
-      dentistUserId === null || dentistUserId === professional.id
-    const hours = open.filter((item) => item.dentistUserId === professional.id).map(spanOf)
+    const mine = (professionalUserId: string | null) =>
+      professionalUserId === null || professionalUserId === professional.id
+    const hours = open.filter((item) => item.professionalUserId === professional.id).map(spanOf)
     const taken: Span[] = [
-      ...blocks.filter((block) => block.chairId === null && mine(block.dentistUserId)).map(spanOf),
-      ...busy.filter((item) => item.dentistUserId === professional.id).map(spanOf),
+      ...blocks.filter((block) => block.roomId === null && mine(block.professionalUserId)).map(spanOf),
+      ...busy.filter((item) => item.professionalUserId === professional.id).map(spanOf),
       [0, now.getTime()],
     ]
-    const chairFree = chairRows.flatMap((chair) =>
+    const roomFree = roomRows.flatMap((room) =>
       subtractSpans(whole, [
-        ...busy.filter((item) => item.chairId === chair.id).map(spanOf),
+        ...busy.filter((item) => item.roomId === room.id).map(spanOf),
         ...blocks
-          .filter((block) => block.chairId === chair.id && mine(block.dentistUserId))
+          .filter((block) => block.roomId === room.id && mine(block.professionalUserId))
           .map(spanOf),
       ]),
     )
-    for (const [start, end] of intersectSpans(subtractSpans(hours, taken), chairFree)) {
+    for (const [start, end] of intersectSpans(subtractSpans(hours, taken), roomFree)) {
       free.push({
-        dentistUserId: professional.id,
+        professionalUserId: professional.id,
         startsAt: new Date(start).toISOString(),
         endsAt: new Date(end).toISOString(),
       })

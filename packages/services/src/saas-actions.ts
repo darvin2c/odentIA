@@ -189,9 +189,9 @@ export async function countConsultationAction(
     )
   if (!confirmed?.n) return false
   const [row] = await tx
-    .select({ dentist: user.name })
+    .select({ professional: user.name })
     .from(encounter)
-    .leftJoin(user, eq(user.id, encounter.dentistUserId))
+    .leftJoin(user, eq(user.id, encounter.professionalUserId))
     .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, input.encounterId)))
     .limit(1)
   const [self] = await tx
@@ -209,7 +209,7 @@ export async function countConsultationAction(
     occurredAt: input.at,
     contactId: self?.contactId ?? null,
     encounterId: input.encounterId,
-    detail: row?.dentist ? `Ordenó la consulta dictada por ${row.dentist}` : "Ordenó una consulta dictada",
+    detail: row?.professional ? `Ordenó la consulta dictada por ${row.professional}` : "Ordenó una consulta dictada",
     dedupeKey: `consulta:${input.encounterId}`,
   })
 }

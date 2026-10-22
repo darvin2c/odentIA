@@ -55,14 +55,14 @@ export interface WhenInput {
   /** Día en que se abre. */
   date?: string
   /** A quién se mira al abrir (null = cualquiera). */
-  dentistUserId?: string | null
+  professionalUserId?: string | null
   /** Hueco ya elegido antes de abrir (tocado en la rejilla). */
   startsAt?: string
   /**
    * Reprogramar: la cita que se mueve. Su hueco cuenta como libre, se marca
    * dónde está y el bloque se propone en otro sitio.
    */
-  moving?: { id: string; dentistUserId: string; startsAt: string; endsAt: string }
+  moving?: { id: string; professionalUserId: string; startsAt: string; endsAt: string }
   /** Falso mientras el «cuándo» no está a la vista: no se consulta nada. */
   enabled?: boolean
   /** Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039). */
@@ -77,7 +77,7 @@ export interface WhenState {
   open: ScheduleAvailability[]
   date: string
   week: string[]
-  dentistFilter: string | null
+  professionalFilter: string | null
   /** Lo elegido, si sigue valiendo para el día y el profesional que se miran. */
   shown: ScheduleRangeValue | null
   state: ScheduleRangeState | null
@@ -95,7 +95,7 @@ export interface WhenState {
   marker: ScheduleRangeMarker | undefined
   choose: (value: ScheduleRangeValue) => void
   goToDate: (date: string) => void
-  pickDentist: (id: string | null) => void
+  pickProfessional: (id: string | null) => void
   /** Cambia la duración conservando la hora de inicio. */
   resize: (minutes: number) => void
   refetch: () => void
@@ -107,14 +107,14 @@ export interface WhenState {
  */
 export function useWhen(input: WhenInput): WhenState {
   const { branchId, timeZone, today, toneOf, duration, moving } = input
-  const [dentistFilter, setDentistFilter] = React.useState<string | null>(
-    input.dentistUserId ?? null,
+  const [professionalFilter, setProfessionalFilter] = React.useState<string | null>(
+    input.professionalUserId ?? null,
   )
   const [date, setDate] = React.useState(input.date && input.date > today ? input.date : today)
   const [value, setValue] = React.useState<ScheduleRangeValue | null>(() =>
-    input.startsAt && input.dentistUserId
+    input.startsAt && input.professionalUserId
       ? {
-          columnId: input.dentistUserId,
+          columnId: input.professionalUserId,
           start: input.startsAt,
           end: new Date(Date.parse(input.startsAt) + duration * 60000).toISOString(),
         }
@@ -147,15 +147,15 @@ export function useWhen(input: WhenInput): WhenState {
   // Si quien se miraba no atiende el servicio elegido, se ve a quienes sí lo atienden.
   const lanes = React.useMemo(
     () =>
-      dentistFilter && team.some((item) => item.id === dentistFilter)
-        ? team.filter((item) => item.id === dentistFilter)
+      professionalFilter && team.some((item) => item.id === professionalFilter)
+        ? team.filter((item) => item.id === professionalFilter)
         : team,
-    [team, dentistFilter],
+    [team, professionalFilter],
   )
   const free = React.useMemo(
     (): ScheduleAvailability[] =>
       (availability?.free ?? []).map((item) => ({
-        columnId: item.dentistUserId,
+        columnId: item.professionalUserId,
         start: item.startsAt,
         end: item.endsAt,
       })),
@@ -164,7 +164,7 @@ export function useWhen(input: WhenInput): WhenState {
   const open = React.useMemo(
     (): ScheduleAvailability[] =>
       (availability?.open ?? []).map((item) => ({
-        columnId: item.dentistUserId,
+        columnId: item.professionalUserId,
         start: item.startsAt,
         end: item.endsAt,
       })),
@@ -172,7 +172,7 @@ export function useWhen(input: WhenInput): WhenState {
   )
   const movingFrom = moving ? Date.parse(moving.startsAt) : 0
   const movingTo = moving ? Date.parse(moving.endsAt) : 0
-  const movingDentist = moving?.dentistUserId
+  const movingProfessional = moving?.professionalUserId
 
   /** Primer hueco del día donde cabe la cita entre quienes se miran; si no cabe entera, el primero que haya. */
   const firstFit = React.useCallback(
@@ -184,7 +184,7 @@ export function useWhen(input: WhenInput): WhenState {
           const start = Date.parse(item.start)
           const end = Date.parse(item.end)
           // Al reprogramar, el sitio donde ya está la cita no se propone: se parte el tramo.
-          if (item.columnId === movingDentist && start < movingTo && end > movingFrom) {
+          if (item.columnId === movingProfessional && start < movingTo && end > movingFrom) {
             return [
               { columnId: item.columnId, start, end: movingFrom },
               { columnId: item.columnId, start: movingTo, end },
@@ -208,10 +208,10 @@ export function useWhen(input: WhenInput): WhenState {
         end: new Date(Math.min(pick.start + minutes * 60000, pick.end)).toISOString(),
       }
     },
-    [free, timeZone, moving, movingDentist, movingFrom, movingTo],
+    [free, timeZone, moving, movingProfessional, movingFrom, movingTo],
   )
   // Mientras la persona no haya movido el bloque, se propone el primer hueco de lo que mira.
-  const touched = React.useRef(Boolean(input.startsAt && input.dentistUserId))
+  const touched = React.useRef(Boolean(input.startsAt && input.professionalUserId))
   const seedPending = React.useRef(touched.current)
   const autoDate = React.useRef(!touched.current && !moving)
   React.useEffect(() => {
@@ -266,7 +266,7 @@ export function useWhen(input: WhenInput): WhenState {
     const range = dayRangeOf(moving.startsAt, moving.endsAt, date, timeZone)
     return range
       ? {
-          columnId: moving.dentistUserId,
+          columnId: moving.professionalUserId,
           start: moving.startsAt,
           end: moving.endsAt,
           label: `Ahora está aquí, ${hourLabel(range.startMinutes)}`,
@@ -282,7 +282,7 @@ export function useWhen(input: WhenInput): WhenState {
     open,
     date,
     week,
-    dentistFilter,
+    professionalFilter,
     shown,
     state: shown ? scheduleRangeState(shown, { free, open, timeZone }) : null,
     professional: team.find((item) => item.id === shown?.columnId),
@@ -309,9 +309,9 @@ export function useWhen(input: WhenInput): WhenState {
       touched.current = false
       setDate(next)
     },
-    pickDentist: (next) => {
+    pickProfessional: (next) => {
       touched.current = false
-      setDentistFilter(next)
+      setProfessionalFilter(next)
     },
     resize: (minutes) => {
       if (!value) return
@@ -331,7 +331,7 @@ export function WhenFields({ when }: { when: WhenState }) {
   const { date, week, shown, state, professional } = when
   const moving = when.input.moving != null
   const [changing, setChanging] = React.useState(false)
-  const current = when.team.find((item) => item.id === when.input.moving?.dentistUserId)
+  const current = when.team.find((item) => item.id === when.input.moving?.professionalUserId)
   return (
     <>
       {moving && !changing ? (
@@ -357,9 +357,9 @@ export function WhenFields({ when }: { when: WhenState }) {
             label="Profesional"
             resources={when.team}
             formatLabel={(item) => shortName(item.label)}
-            value={when.dentistFilter && when.team.some((item) => item.id === when.dentistFilter) ? when.dentistFilter : null}
+            value={when.professionalFilter && when.team.some((item) => item.id === when.professionalFilter) ? when.professionalFilter : null}
             allLabel="Cualquiera"
-            onChange={when.pickDentist}
+            onChange={when.pickProfessional}
           />
         </div>
       )}

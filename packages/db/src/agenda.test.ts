@@ -22,12 +22,12 @@ const BRANCH_A = "11111111-1111-4111-8111-111111111111"
 const BRANCH_B = "22222222-2222-4222-8222-222222222222"
 const PATIENT_A = "33333333-3333-4333-8333-333333333333"
 const PATIENT_B = "44444444-4444-4444-8444-444444444444"
-const CHAIR_A = "55555555-5555-4555-8555-555555555555"
-const CHAIR_A2 = "66666666-6666-4666-8666-666666666666"
-const CHAIR_B = "77777777-7777-4777-8777-777777777777"
-const DENTIST_A = "agenda-dentist-a"
-const DENTIST_A2 = "agenda-dentist-a2"
-const DENTIST_B = "agenda-dentist-b"
+const ROOM_A = "55555555-5555-4555-8555-555555555555"
+const ROOM_A2 = "66666666-6666-4666-8666-666666666666"
+const ROOM_B = "77777777-7777-4777-8777-777777777777"
+const PROFESSIONAL_A = "agenda-professional-a"
+const PROFESSIONAL_A2 = "agenda-professional-a2"
+const PROFESSIONAL_B = "agenda-professional-b"
 
 const T0 = "2026-09-25T15:00:00Z" // 10:00 Lima
 const T1 = "2026-09-25T15:45:00Z"
@@ -38,8 +38,8 @@ async function insertAppointment(
   overrides: Partial<{
     branchId: string
     patientId: string
-    dentistUserId: string
-    chairId: string
+    professionalUserId: string
+    roomId: string
     startsAt: string
     endsAt: string
     status: string
@@ -47,14 +47,14 @@ async function insertAppointment(
 ) {
   const row = await tx.execute<{ id: string }>(sql`
     insert into "appointment"
-      ("organization_id", "branch_id", "patient_id", "dentist_user_id", "chair_id",
+      ("organization_id", "branch_id", "patient_id", "professional_user_id", "room_id",
        "starts_at", "ends_at", "duration_min", "status")
     values (
       ${orgId},
       ${overrides.branchId ?? BRANCH_A}::uuid,
       ${overrides.patientId ?? PATIENT_A}::uuid,
-      ${overrides.dentistUserId ?? DENTIST_A},
-      ${overrides.chairId ?? CHAIR_A}::uuid,
+      ${overrides.professionalUserId ?? PROFESSIONAL_A},
+      ${overrides.roomId ?? ROOM_A}::uuid,
       ${overrides.startsAt ?? T0}::timestamptz,
       ${overrides.endsAt ?? T1}::timestamptz,
       45,
@@ -99,9 +99,9 @@ beforeAll(async () => {
       (${BRANCH_B}::uuid, ${ORG_B}, 'Sede B')`)
   await ownerDb.execute(sql`
     insert into "user" ("id", "name", "email") values
-      (${DENTIST_A}, 'Odontóloga A', 'dentist-agenda-a@example.test'),
-      (${DENTIST_A2}, 'Odontólogo A2', 'dentist-agenda-a2@example.test'),
-      (${DENTIST_B}, 'Odontólogo B', 'dentist-agenda-b@example.test')`)
+      (${PROFESSIONAL_A}, 'Odontóloga A', 'professional-agenda-a@example.test'),
+      (${PROFESSIONAL_A2}, 'Odontólogo A2', 'professional-agenda-a2@example.test'),
+      (${PROFESSIONAL_B}, 'Odontólogo B', 'professional-agenda-b@example.test')`)
   // La identidad vive en la persona (ADR 0044): cada ficha apunta a la suya.
   await ownerDb.execute(sql`
     with a as (insert into "contact" ("organization_id", "display_name") values (${ORG_A}, 'Paciente Agenda A') returning id),
@@ -111,14 +111,14 @@ beforeAll(async () => {
       union all select ${PATIENT_B}::uuid, ${ORG_B}, b.id, 9002 from b`)
   await withOrgContext(appDb, ORG_A, async (tx) => {
     await tx.execute(sql`
-      insert into "schedule_chair" ("id", "organization_id", "branch_id", "name") values
-        (${CHAIR_A}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A1'),
-        (${CHAIR_A2}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A2')`)
+      insert into "schedule_room" ("id", "organization_id", "branch_id", "name") values
+        (${ROOM_A}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A1'),
+        (${ROOM_A2}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A2')`)
   })
   await withOrgContext(appDb, ORG_B, (tx) =>
     tx.execute(sql`
-      insert into "schedule_chair" ("id", "organization_id", "branch_id", "name") values
-        (${CHAIR_B}::uuid, ${ORG_B}, ${BRANCH_B}::uuid, 'Unidad dental B1')`),
+      insert into "schedule_room" ("id", "organization_id", "branch_id", "name") values
+        (${ROOM_B}::uuid, ${ORG_B}, ${BRANCH_B}::uuid, 'Unidad dental B1')`),
   )
 }, 180_000)
 
@@ -131,7 +131,7 @@ it("rechaza el solapamiento del mismo profesional aunque cambie la unidad dental
   await expect(
     withOrgContext(appDb, ORG_A, (tx) =>
       insertAppointment(tx, ORG_A, {
-        chairId: CHAIR_A2,
+        roomId: ROOM_A2,
         startsAt: "2026-09-25T15:30:00Z",
         endsAt: "2026-09-25T16:15:00Z",
       }),
@@ -143,7 +143,7 @@ it("rechaza el solapamiento de la misma unidad dental aunque cambie el profesion
   await expect(
     withOrgContext(appDb, ORG_A, (tx) =>
       insertAppointment(tx, ORG_A, {
-        dentistUserId: DENTIST_A2,
+        professionalUserId: PROFESSIONAL_A2,
         startsAt: "2026-09-25T15:30:00Z",
         endsAt: "2026-09-25T16:15:00Z",
       }),

@@ -46,7 +46,7 @@ export interface BookingSeed {
   /** El paciente viene de un caso o de su ficha: no se cambia aquí. */
   lockedPatient?: boolean
   conversationId?: string
-  dentistUserId?: string | null
+  professionalUserId?: string | null
   /** Instante del hueco ya elegido. */
   startsAt?: string
   /** Día en que se abre el selector. */
@@ -189,7 +189,7 @@ export function BookingDrawer({
     toneOf,
     duration,
     date: seed.date,
-    dentistUserId: seed.dentistUserId,
+    professionalUserId: seed.professionalUserId,
     startsAt: seed.startsAt,
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: serviceId || undefined,
@@ -300,7 +300,7 @@ export function BookingDrawer({
         body: JSON.stringify({
           branchId,
           patientId: id,
-          dentistUserId: input.range.columnId,
+          professionalUserId: input.range.columnId,
           serviceId: serviceId || undefined,
           // Solo si la cita sigue siendo de quien vino del Plan.
           ...(planItemIds.length > 0 && id === seed.patient?.id ? { planItemIds } : {}),

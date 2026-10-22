@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { agentHandoff } from "@odentia/db/schema/agent"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
 import { encounter, encounterProcedure, patient, patientCharge, patientPayment, patientPaymentApplication } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
@@ -55,8 +55,8 @@ async function lastMonth(db: Db, owner: OwnerFixture) {
     .set({ planId: plan!.id, status: "activa", trialEndsAt: null, activatedAt: inMonth(1), currentPeriodStart: inMonth(0), currentPeriodEnd: inMonth(-1) })
     .where(eq(saasSubscription.organizationId, organizationId))
 
-  const chairId = randomUUID()
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  const roomId = randomUUID()
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   const person = async (name: string, number: number) => {
     const [who] = await db.insert(contact).values({ organizationId, displayName: name }).returning({ id: contact.id })
     const [row] = await db.insert(patient).values({ organizationId, personId: who!.id, patientNumber: number }).returning({ id: patient.id })
@@ -68,17 +68,17 @@ async function lastMonth(db: Db, owner: OwnerFixture) {
     const endsAt = new Date(startsAt.getTime() + 30 * 60_000)
     const [row] = await db
       .insert(appointment)
-      .values({ organizationId, branchId: owner.branchId, patientId, chairId, dentistUserId: owner.user.id, serviceName: "Limpieza dental", startsAt, endsAt, durationMin: 30, status: "atendida", source, createdAt: inMonth(1, day - 5, 10) })
+      .values({ organizationId, branchId: owner.branchId, patientId, roomId, professionalUserId: owner.user.id, serviceName: "Limpieza dental", startsAt, endsAt, durationMin: 30, status: "atendida", source, createdAt: inMonth(1, day - 5, 10) })
       .returning({ id: appointment.id })
     const [session] = await db
       .insert(encounter)
-      .values({ organizationId, patientId, branchId: owner.branchId, dentistUserId: owner.user.id, appointmentId: row!.id, reason: "Limpieza dental", evolution: "Sin complicaciones.", startedAt: startsAt, signerName: "Ana Pruebas", signerTitle: "Cirujano dentista", signerRegistration: "12345" })
+      .values({ organizationId, patientId, branchId: owner.branchId, professionalUserId: owner.user.id, appointmentId: row!.id, reason: "Limpieza dental", evolution: "Sin complicaciones.", startedAt: startsAt, signerName: "Ana Pruebas", signerTitle: "Cirujano dentista", signerRegistration: "12345" })
       .returning({ id: encounter.id })
     const [procedure] = await db
       .insert(encounterProcedure)
       .values({ organizationId, encounterId: session!.id, description: "Limpieza dental", quantity: 1, priceCents: cents, currency: "PEN", createdBy: owner.user.id, createdAt: endsAt })
       .returning({ id: encounterProcedure.id })
-    await db.execute(sql`update encounter set status = 'finalizada', ended_at = ${endsAt.toISOString()}::timestamptz, finalized_at = ${endsAt.toISOString()}::timestamptz, finalized_by = dentist_user_id where id = ${session!.id}`)
+    await db.execute(sql`update encounter set status = 'finalizada', ended_at = ${endsAt.toISOString()}::timestamptz, finalized_at = ${endsAt.toISOString()}::timestamptz, finalized_by = professional_user_id where id = ${session!.id}`)
     const [charge] = await db
       .insert(patientCharge)
       .values({ organizationId, patientId, encounterProcedureId: procedure!.id, branchId: owner.branchId, description: "Limpieza dental", amountCents: cents, currency: "PEN", createdBy: owner.user.id, createdAt: endsAt })

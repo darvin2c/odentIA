@@ -43,9 +43,9 @@ export interface PortalSessionInfo {
 export interface PortalSlot {
   startsAt: string
   endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
+  professionalUserId: string
+  professionalName: string
+  roomId: string | null
 }
 
 export interface PortalSlotsResult {
@@ -66,7 +66,7 @@ export interface PortalAppointment {
   branchAddress?: string | null
   branchDirectionsUrl?: string | null
   /** Quién la atiende: el bloque de la cita es el mismo de «Su enlace». */
-  dentistName: string
+  professionalName: string
   /** Zona de la sede: la hora de la cita se dice en ella. Ausente en respuestas antiguas. */
   timeZone?: string
   version: number
@@ -239,7 +239,7 @@ export async function cancelPortalAppointmentApi(sessionToken: string, appointme
 export async function reschedulePortalAppointmentApi(
   sessionToken: string,
   appointmentId: string,
-  input: { expectedVersion: number; startsAt: string; dentistUserId: string; chairId?: string },
+  input: { expectedVersion: number; startsAt: string; professionalUserId: string; roomId?: string },
 ): Promise<PortalAppointment> {
   const res = await portalFetch<{ data: PortalAppointment }>(
     sessionToken,

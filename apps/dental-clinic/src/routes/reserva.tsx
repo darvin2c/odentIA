@@ -10,7 +10,7 @@ import { AppointmentBlock } from "../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
 import { LinkConsentStep, LinkQuestionnaireStep } from "../components/public/link-steps"
 import { PersonalDataForm } from "../components/public/personal-data-form"
-import { capital, DentistSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
+import { capital, ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
 import { ApiError } from "../lib/api"
 import {
   answerLinkBudget,
@@ -715,7 +715,7 @@ function ChooseSlot({
   const act = useMutation({
     retry: false,
     mutationFn: (slot: WeekSlot) => {
-      const where = { startsAt: slot.startsAt, dentistUserId: slot.dentistUserId, ...(slot.chairId ? { chairId: slot.chairId } : {}) }
+      const where = { startsAt: slot.startsAt, professionalUserId: slot.professionalUserId, ...(slot.roomId ? { roomId: slot.roomId } : {}) }
       if (changing) return changeBooking(slug, { token, ...where })
       return reserveBooking(slug, {
         token,
@@ -802,7 +802,7 @@ function ChooseSlot({
               <p className="font-semibold">
                 {capital(shortDay(chosen.startsAt, timeZone))}, {timeLabel(chosen.startsAt, timeZone)} · {serviceName}
               </p>
-              <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}</p>
+              <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.professionalName].filter(Boolean).join(" · ")}</p>
             </div>
             <Button type="button" variant="link" className="h-auto min-h-11 shrink-0 p-0" aria-label="Cambiar horario" disabled={act.isPending} onClick={() => setEnteringData(false)}>
               Cambiar
@@ -895,7 +895,7 @@ function ChooseSlot({
                   {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
                 </div>
               ) : null}
-              {branch !== undefined ? <DentistSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
+              {branch !== undefined ? <ProfessionalSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
             </div>
           </section>
 
@@ -912,7 +912,7 @@ function ChooseSlot({
                 <p className="font-semibold">{longDay(chosen.startsAt, timeZone)}</p>
                 <p className="font-semibold">{timeLabel(chosen.startsAt, timeZone)}</p>
                 <p className="text-sm">{[serviceName, minutes ? `${minutes} minutos` : null].filter(Boolean).join(" · ")}</p>
-                <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}</p>
+                <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.professionalName].filter(Boolean).join(" · ")}</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Elige un día y una hora para {changing ? "cambiarla" : "reservar"}.</p>

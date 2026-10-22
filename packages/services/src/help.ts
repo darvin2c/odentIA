@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { scheduleChair } from "@odentia/db/schema/agenda"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { organization } from "@odentia/db/schema/auth"
@@ -99,8 +99,8 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
   }
   const total = async (query: Promise<Array<{ total: number }>>) => Number((await query)[0]?.total ?? 0)
   if (topic.id === "agenda" || topic.id === "disponibilidad") {
-    const chairs = await total(tx.select({ total: count() }).from(scheduleChair).where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.isActive, true))))
-    if (chairs === 0) out.push({ text: "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.", ...at("disponibilidad") })
+    const rooms = await total(tx.select({ total: count() }).from(scheduleRoom).where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.isActive, true))))
+    if (rooms === 0) out.push({ text: "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.", ...at("disponibilidad") })
     // Solo el vigente: cambiar un horario deja cerrado el anterior (ADR 0060), y ese ya no reserva nada.
     const schedules = await total(
       tx.select({ total: count() }).from(professionalSchedule).where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true))),

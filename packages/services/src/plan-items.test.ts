@@ -27,7 +27,7 @@ it("conserva dos sesiones, exige completar explícitamente y encadena revisiones
     sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Tratamiento','general','custom',120000,'PEN') returning id`,
   )
   const [first] = await ownerDb.execute<{ id: string }>(
-    sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
   )
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
   const args = ["org_a", "clinical-actor", patient.id] as const
@@ -59,7 +59,7 @@ it("conserva dos sesiones, exige completar explícitamente y encadena revisiones
   ).toBe("en_curso")
   await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${first.id}`)
   const [second] = await ownerDb.execute<{ id: string }>(
-    sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
   )
   await run((tx) => addEncounterProcedure(tx, ...args, second.id, { planItemId: item.id }))
   expect(
@@ -109,7 +109,7 @@ it("indica sin elegir plan: el plan abierto nace con la atención y recibe lo si
     sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Obturación','general','custom',90000,'PEN') returning id`,
   )
   const [encounter] = await ownerDb.execute<{ id: string }>(
-    sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'alt-actor') returning id`,
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'alt-actor') returning id`,
   )
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
   const args = ["org_a", "alt-actor", patient.id] as const

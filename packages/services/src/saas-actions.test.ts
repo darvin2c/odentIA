@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { encounter, patientContact } from "@odentia/db/schema/clinical"
@@ -152,7 +152,7 @@ describe("cita recuperada", () => {
       .from(patientContact)
       .where(and(eq(patientContact.patientId, fx.patient.id), eq(patientContact.relationship, "self")))
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
-    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental" }).returning()
+    const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental" }).returning()
     const bookedAt = new Date(Date.now() - bookedDaysAgo * 86_400_000)
     await ownerDb.insert(automationJob).values({
       organizationId: ORG,
@@ -169,8 +169,8 @@ describe("cita recuperada", () => {
       .values({
         organizationId: ORG,
         branchId: site!.id,
-        chairId: chair!.id,
-        dentistUserId: fx.actor,
+        roomId: room!.id,
+        professionalUserId: fx.actor,
         patientId: fx.patient.id,
         startsAt,
         endsAt: new Date(startsAt.getTime() + 30 * 60_000),

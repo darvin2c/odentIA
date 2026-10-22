@@ -394,37 +394,37 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
 const ATTENDING_ROLES = ORG_ROLES.filter((role) => canAccess(role, "clinical.write"))
 
 async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; dentist: string | null; dentist_id: string | null; started_at: Date | string; total: number }>(sql`
-    select e.id, p.id as patient_id, pp.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; professional: string | null; professional_id: string | null; started_at: Date | string; total: number }>(sql`
+    select e.id, p.id as patient_id, pp.display_name as name, u.name as professional, e.professional_user_id as professional_id, e.started_at,
            count(*) over ()::int as total
     from encounter e
     join patient p on p.id = e.patient_id and p.organization_id = e.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    left join "user" u on u.id = e.dentist_user_id
+    left join "user" u on u.id = e.professional_user_id
     where e.organization_id = ${orgId} and e.status = 'borrador'
       and e.started_at < now() - make_interval(days => ${days})
       -- Quien la lleva y sigue atendiendo ya la tiene en «Te espera» con lo que
       -- le falta (staleEncounter): la línea no le deja otra tarea igual.
       and not exists (
         select 1 from member m
-        where m.organization_id = e.organization_id and m.user_id = e.dentist_user_id
+        where m.organization_id = e.organization_id and m.user_id = e.professional_user_id
           and lower(m.role) in (${sql.join(ATTENDING_ROLES.map((role) => sql`${role}`), sql`, `)})
       )
       ${fresh(scope, sql`e.id::text`, sql`e.started_at + make_interval(days => ${days})`)}
     order by e.started_at asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
-  const byDentist = new Map<string, number>()
-  for (const row of rows) byDentist.set(row.dentist ?? "Sin profesional", (byDentist.get(row.dentist ?? "Sin profesional") ?? 0) + 1)
-  const who = [...byDentist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, n]) => `${name} tiene ${n}`)
+  const byProfessional = new Map<string, number>()
+  for (const row of rows) byProfessional.set(row.professional ?? "Sin profesional", (byProfessional.get(row.professional ?? "Sin profesional") ?? 0) + 1)
+  const who = [...byProfessional.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, n]) => `${name} tiene ${n}`)
   return {
     total,
     items: rows.map((row) => ({
       ...blank,
       id: row.id,
       personName: row.name,
-      line: `${row.dentist ?? "Sin profesional"} · abierta desde el ${dayOf(row.started_at, zone)}`,
+      line: `${row.professional ?? "Sin profesional"} · abierta desde el ${dayOf(row.started_at, zone)}`,
       patientId: row.patient_id,
-      ownerUserId: row.dentist_id,
+      ownerUserId: row.professional_id,
     })),
     title: `${total} ${plural(total, "atención lleva", "atenciones llevan")} más de ${days} ${plural(days, "día", "días")} sin firmar`,
     detail: who.length ? `${who.join(" y ")}.` : "",

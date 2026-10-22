@@ -415,7 +415,7 @@ export interface Encounter {
   organizationId?: string
   patientId?: string
   branchId: string | null
-  dentistUserId: string
+  professionalUserId: string
   /** borrador, finalizada o anulada. */
   status: string
   /** Cita que motivó la atención, si la hubo. */
@@ -690,7 +690,7 @@ export interface OpenEncounterBrief {
   id: string
   reason: string | null
   startedAt: string
-  dentistUserId: string
+  professionalUserId: string
   appointmentId: string | null
   diagnosisCount: number
   procedureCount: number
