@@ -25,3 +25,4 @@ export * from "./saas-billing.js"
 export * from "./consumer-complaints.js"
 export * from "./reports.js"
 export * from "./schemas.js"
+// Lo dental (ADR 0079) se importa de "@odentia/db/schema/dental": lo común no lo ve.

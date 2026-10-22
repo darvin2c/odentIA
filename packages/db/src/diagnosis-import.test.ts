@@ -33,11 +33,11 @@ it("acepta códigos con † y * y códigos sin punto, y calcula categorías, lo 
       "code,description\nK02,Caries dental\nK021,Caries de la dentina\nB00.2†,Gingivoestomatitis herpética\nK93.8*,Trastornos de otros órganos digestivos\n",
     ),
   )
-  expect(rows.map((row) => [row.code, row.isCategory, row.isDental])).toEqual([
-    ["K02", true, true],
-    ["K02.1", false, true],
-    ["B00.2", false, true],
-    ["K93.8", false, false],
+  expect(rows.map((row) => [row.code, row.isCategory])).toEqual([
+    ["K02", true],
+    ["K02.1", false],
+    ["B00.2", false],
+    ["K93.8", false],
   ])
   expect(rows[1]!.searchText).toBe("k02.1 k021 caries de la dentina")
   expect(
@@ -69,7 +69,6 @@ it("lee la tabulación de la CIE-11 de la OMS: solo categorías, sin los guiones
       code: "DA08.0",
       title: "Caries dental",
       uri: "http://id.who.int/icd/release/11/2024-01/mms/2",
-      isDental: true,
     }),
   ])
 })

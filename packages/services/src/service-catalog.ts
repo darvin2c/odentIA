@@ -23,11 +23,12 @@ import {
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
+import { and, asc, eq, getTableColumns, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { orgDentalProfile } from "./dental/profile.js"
+import { saveServiceFinding, serviceLeavesFinding, type TemplateDental, templateDentalColumns } from "./dental/service-finding.js"
 import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
 import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn } from "./procedure-codings.js"
 
@@ -35,10 +36,15 @@ function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
 }
 
-export type ServiceRow = typeof serviceCatalog.$inferSelect
+/** El servicio con lo que deja en la pieza, que vive en lo dental (ADR 0079). */
+export type ServiceRow = typeof serviceCatalog.$inferSelect & { leavesFinding: LeavesFinding | null }
 /** El servicio como lo lee una pantalla: con el nombre de su especialidad de la clínica. */
 export type ServiceListItem = ServiceRow & { specialtyName: string | null }
-export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect
+/** El tratamiento de la biblioteca con su parte dental (caras y lo que deja en la pieza). */
+export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateDental
+
+const serviceRowColumns = { ...getTableColumns(serviceCatalog), leavesFinding: serviceLeavesFinding }
+const templateRowColumns = { ...getTableColumns(treatmentTemplate), ...templateDentalColumns }
 
 
 export const SERVICE_STATES = ["active", "inactive"] as const
@@ -219,7 +225,7 @@ async function assertLeavesFinding(
 
 /**
  * Lo que deja un servicio de la biblioteca: lo que odentIA puso en su
- * tratamiento (`treatment_template.leaves_finding`, ADR 0069); null si no
+ * tratamiento (`dental_template_rule`, ADR 0069 y 0079); null si no
  * deja nada claro o no encaja con el ámbito.
  */
 function libraryLeavesFinding(template: TreatmentTemplateRow): LeavesFinding | null {
@@ -286,7 +292,7 @@ async function assertOwnCode(
 
 async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
   const [row] = await tx
-    .select()
+    .select(templateRowColumns)
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.id, templateId))
     .limit(1)
@@ -306,7 +312,7 @@ export async function getTemplate(
   templateId: string,
 ): Promise<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }> {
   const [row] = await tx
-    .select()
+    .select(templateRowColumns)
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.id, templateId))
     .limit(1)
@@ -356,9 +362,8 @@ const templateColumns = {
   name: treatmentTemplate.name,
   kind: treatmentTemplate.kind,
   scope: treatmentTemplate.scope,
-  surfaceCountMin: treatmentTemplate.surfaceCountMin,
-  surfaceCountMax: treatmentTemplate.surfaceCountMax,
-  leavesFinding: treatmentTemplate.leavesFinding,
+  product: treatmentTemplate.product,
+  ...templateDentalColumns,
   isCommon: treatmentTemplate.isCommon,
   codedOnly: treatmentTemplate.codedOnly,
   isActive: treatmentTemplate.isActive,
@@ -541,7 +546,7 @@ const serviceListColumns = {
   billingMode: serviceCatalog.billingMode,
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
-  leavesFinding: serviceCatalog.leavesFinding,
+  leavesFinding: serviceLeavesFinding,
   procedureSystem: serviceCatalog.procedureSystem,
   procedureCode: serviceCatalog.procedureCode,
   procedureVersion: serviceCatalog.procedureVersion,
@@ -642,7 +647,7 @@ export async function requireService(
   serviceId: string,
 ): Promise<ServiceRow> {
   const [row] = await tx
-    .select()
+    .select(serviceRowColumns)
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)
@@ -707,6 +712,7 @@ export async function createService(
   // columna no tiene valor por defecto).
   const currency = assertCurrency(input.currency ?? (await orgCurrency(tx, orgId)))
   let values: typeof serviceCatalog.$inferInsert
+  let leaves: LeavesFinding | null
   const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
@@ -733,12 +739,12 @@ export async function createService(
       billingMode: assertBillingMode(input.billingMode),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
-      leavesFinding:
-        input.leavesFinding === undefined
-          ? libraryLeavesFinding(tpl)
-          : await assertLeavesFinding(tx, orgId, input.leavesFinding, tpl.scope),
       isActive: input.isActive ?? true,
     }
+    leaves =
+      input.leavesFinding === undefined
+        ? libraryLeavesFinding(tpl)
+        : await assertLeavesFinding(tx, orgId, input.leavesFinding, tpl.scope)
   } else {
     const scope = assertScope(input.scope)
     values = {
@@ -755,20 +761,21 @@ export async function createService(
       billingMode: assertBillingMode(input.billingMode),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
-      leavesFinding: await assertLeavesFinding(tx, orgId, input.leavesFinding, scope),
       ...(await assertOwnCode(tx, list, input.officialCode, { creating: true })),
       isActive: input.isActive ?? true,
     }
+    leaves = await assertLeavesFinding(tx, orgId, input.leavesFinding, scope)
   }
   let row: ServiceRow
   try {
     const [created] = await tx.insert(serviceCatalog).values(values).returning()
     if (!created) throw new Error("No se pudo crear el servicio")
-    row = created
+    row = { ...created, leavesFinding: leaves }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
     throw conflict("DUPLICATE_CODE", "Ya existe una prestación con ese código interno")
   }
+  await saveServiceFinding(tx, row, leaves)
   await audit(tx, orgId, actorUserId, "catalog.service_created", row.id, {
     source: row.source,
     templateId: row.templateId,
@@ -809,6 +816,8 @@ export async function updateService(
 ): Promise<ServiceRow> {
   const current = await requireService(tx, orgId, serviceId)
   const set: Partial<typeof serviceCatalog.$inferInsert> = {}
+  // Lo que deja en la pieza va aparte, en lo dental; undefined = no cambia.
+  let leaves: LeavesFinding | null | undefined
   const fields: string[] = []
   const list = await orgServiceList(tx, orgId)
 
@@ -853,7 +862,7 @@ export async function updateService(
       if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
       // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
       if (patch.leavesFinding === undefined) {
-        set.leavesFinding = libraryLeavesFinding(tpl)
+        leaves = libraryLeavesFinding(tpl)
         fields.push("leavesFinding")
       }
       set.procedureSystem = null
@@ -930,14 +939,14 @@ export async function updateService(
     fields.push("isActive")
   }
   if (patch.leavesFinding !== undefined) {
-    set.leavesFinding = await assertLeavesFinding(
+    leaves = await assertLeavesFinding(
       tx,
       orgId,
       patch.leavesFinding,
       (set.scope ?? current.scope) as string | null,
     )
     fields.push("leavesFinding")
-  } else if (set.scope !== undefined && set.leavesFinding === undefined && current.leavesFinding) {
+  } else if (set.scope !== undefined && leaves === undefined && current.leavesFinding) {
     // Cambiar dónde se hace no deja un dibujo que ya no encaja.
     await assertLeavesFinding(tx, orgId, current.leavesFinding, set.scope)
   }
@@ -960,12 +969,13 @@ export async function updateService(
       .set({ ...set, updatedAt: new Date() })
       .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
       .returning()
-    updated = row
+    updated = row && { ...row, leavesFinding: leaves !== undefined ? leaves : current.leavesFinding }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
     throw conflict("DUPLICATE_CODE", "Ya existe una prestación con ese código interno")
   }
   if (!updated) throw notFound("Servicio del catálogo")
+  if (leaves !== undefined) await saveServiceFinding(tx, updated, leaves)
   await audit(tx, orgId, actorUserId, "catalog.service_updated", serviceId, { fields })
   return updated
 }
@@ -1009,7 +1019,7 @@ export async function fromTemplates(
   }
   await tx.execute(sql`select "id" from "organization" where "id" = ${orgId} for update`)
   const templates = await tx
-    .select()
+    .select(templateRowColumns)
     .from(treatmentTemplate)
     .where(inArray(treatmentTemplate.id, ids))
   if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
@@ -1021,7 +1031,7 @@ export async function fromTemplates(
   }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
-    .select()
+    .select(serviceRowColumns)
     .from(serviceCatalog)
     .where(
       and(
@@ -1059,13 +1069,14 @@ export async function fromTemplates(
         durationMin: assertDuration(item.durationMin),
         billingMode: assertBillingMode(item.billingMode),
         priceDisclosure,
-        // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
-        leavesFinding: libraryLeavesFinding(tpl),
         isActive: true,
       })
       .returning()
     if (!row) throw new Error("No se pudo incorporar la prestación")
-    created.push(row)
+    // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
+    const leaves = libraryLeavesFinding(tpl)
+    await saveServiceFinding(tx, row, leaves)
+    created.push({ ...row, leavesFinding: leaves })
     await audit(tx, orgId, actorUserId, "catalog.service_created", row.id, {
       source: "template",
       templateId: tpl.id,

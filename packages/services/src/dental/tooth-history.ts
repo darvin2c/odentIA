@@ -9,9 +9,9 @@ import {
   encounter,
   encounterDiagnosis,
   encounterProcedure,
-  odontogramEntry,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, inArray, or } from "drizzle-orm"
 import { listPatientDocuments } from "../clinical.js"
 import { validation } from "../errors.js"

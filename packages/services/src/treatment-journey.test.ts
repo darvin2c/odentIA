@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
-import { encounter, odontogramEntry, patientContact } from "@odentia/db/schema/clinical"
+import { encounter, patientContact } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { contact } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"

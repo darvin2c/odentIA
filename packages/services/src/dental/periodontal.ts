@@ -33,13 +33,8 @@ import {
 } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import {
-  encounter,
-  encounterDiagnosis,
-  odontogramEntry,
-  periodontalChart,
-  periodontalTooth,
-} from "@odentia/db/schema/clinical"
+import { encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
+import { odontogramEntry, periodontalChart, periodontalTooth } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm"
 import { insertOdontogramFinding, orgStrictVariants, voidOdontogramEntry } from "../clinical.js"

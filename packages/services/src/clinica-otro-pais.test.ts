@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { type Db, seedProcedureCodes, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { odontogramEntry } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { dentalProfileFor } from "@odentia/dental"

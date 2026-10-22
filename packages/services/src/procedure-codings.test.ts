@@ -2,6 +2,7 @@ import { clinicalProfileFor } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { procedureCode, procedureCodeSystem, treatmentTemplate } from "@odentia/db/schema/clinical"
+import { dentalTemplateRule } from "@odentia/db/schema/dental"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, getBudgetDetail } from "./budgets.js"
@@ -91,8 +92,6 @@ async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
         name: "Resina de una superficie (test)",
         kind: "restauradora",
         scope: "surfaces",
-        surfaceCountMin: 1,
-        surfaceCountMax: 1,
       },
     ])
     .onConflictDoNothing()
@@ -107,6 +106,11 @@ async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
   const resinaId = byKey.get("resina-una-superficie-test")!
   expect(fluorId).toBeTruthy()
   expect(resinaId).toBeTruthy()
+  // Lo dental del tratamiento (ADR 0079): una sola superficie.
+  await ownerDb
+    .insert(dentalTemplateRule)
+    .values({ templateId: resinaId, surfaceCountMin: 1, surfaceCountMax: 1 })
+    .onConflictDoNothing()
   // Un código por tratamiento en cada edición de una lista.
   await ownerDb.execute(
     sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")

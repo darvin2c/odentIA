@@ -36,8 +36,6 @@ import {
   encounterPlanItem,
   encounterProcedure,
   encounterSite,
-  odontogramAssessment,
-  odontogramEntry,
   orgCounter,
   patient,
   patientAllergy,
@@ -54,8 +52,6 @@ import {
   patientRegistration,
   patientRegistrationLink,
   patientResponsibility,
-  periodontalChart,
-  periodontalTooth,
   prescription,
   prescriptionItem,
   serviceCatalog,
@@ -67,6 +63,13 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import {
+  odontogramAssessment,
+  odontogramEntry,
+  periodontalChart,
+  periodontalTooth,
+  planItemFinding,
+} from "@odentia/db/schema/dental"
 import { consentDocument, consentTemplate, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
@@ -538,10 +541,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
   // Los ítems del plan referencian el hallazgo que los motivó: se suelta la
   // referencia antes de borrar el odontograma (los ítems se borran después).
-  await db
-    .update(treatmentPlanItem)
-    .set({ odontogramEntryId: null })
-    .where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
+  await db.delete(planItemFinding).where(inArray(planItemFinding.organizationId, SEED_ORGS))
   await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS))
   await db
     .delete(odontogramAssessment)

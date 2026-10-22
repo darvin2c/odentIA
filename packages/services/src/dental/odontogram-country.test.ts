@@ -1,15 +1,10 @@
-import { withDentalSite } from "./site.js"
+import { withPlanItemDental } from "./plan-finding.js"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { validateLeavesFinding } from "@odentia/dental"
 import { user } from "@odentia/db/schema/auth"
-import {
-  encounter,
-  encounterDiagnosis,
-  odontogramEntry,
-  serviceCatalog,
-  treatmentPlanItem,
-} from "@odentia/db/schema/clinical"
+import { encounter, encounterDiagnosis, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { odontogramEntry, serviceFinding } from "@odentia/db/schema/dental"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "../budgets.js"
@@ -284,7 +279,8 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   })
   // Otra vez no lo duplica.
   const [row] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
-  expect(await f.run((tx) => drawTreatedFinding(tx, ...f.args, draft, withDentalSite(row!)))).toBeNull()
+  const treated = await withPlanItemDental(ownerDb, f.orgId, row!)
+  expect(await f.run((tx) => drawTreatedFinding(tx, ...f.args, draft, treated))).toBeNull()
   expect(await left()).toHaveLength(1)
   // Si se anula su procedimiento deja de estar realizado y lo dibujado se anula.
   await f.run((tx) => voidEncounterProcedure(tx, ...f.args, draft, procedure.id, { reason: "Pieza equivocada" }))
@@ -311,9 +307,9 @@ it("la exodoncia de un servicio directo deja la pieza ausente con su causa en Pe
       source: "custom",
       priceCents: 9000,
       currency: "PEN",
-      leavesFinding: { condition: "missing_tooth" },
     })
     .returning()
+  await ownerDb.insert(serviceFinding).values({ serviceId: service!.id, organizationId: f.orgId, condition: "missing_tooth" })
   const [remnant] = await f.run((tx) =>
     addOdontogramEntries(tx, ...f.args, { toothNumber: 46, condition: "root_remnant", encounterId: draft }),
   )

@@ -14,6 +14,7 @@ export * from "./periodontal.js"
 export * from "./cbct-demo.js"
 export * from "./country.js"
 export * from "./site.js"
+export * from "./diagnoses.js"
 export type {
   FindingColorKind,
   FindingDefinition,

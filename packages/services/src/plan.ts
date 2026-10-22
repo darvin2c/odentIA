@@ -12,7 +12,6 @@ import {
   encounter,
   encounterPlanItem,
   encounterProcedure,
-  odontogramEntry,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
@@ -21,6 +20,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
@@ -32,6 +32,8 @@ import { serviceKindOf } from "./specialties.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
 import { siteColumns, withDentalSite } from "./dental/site.js"
+import { linkPlanItemFinding, type PlanItemFinding, withPlanDental, withPlanItemDental } from "./dental/plan-finding.js"
+import { templateDentalColumns } from "./dental/service-finding.js"
 import { drawTreatedFinding } from "./dental/treated-findings.js"
 
 /**
@@ -73,7 +75,7 @@ export const PLAN_ITEM_DECISIONS = [
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
 /** El ítem con su sitio dental a la vista (ADR 0079: la tabla guarda el sitio común). */
-export type PlanItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite
+export type PlanItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite & PlanItemFinding
 export type TreatmentPlanRow = typeof treatmentPlan.$inferSelect
 type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & DentalSite
 
@@ -209,11 +211,11 @@ function assertSite(
 /** Límites de superficies: de la plantilla, o 1–5 para ofertas propias. */
 export async function surfaceLimits(
   tx: Db,
-  service: ServiceRow,
+  service: { templateId: string | null },
 ): Promise<{ min: number | null; max: number | null }> {
   if (!service.templateId) return { min: 1, max: 5 }
   const [tpl] = await tx
-    .select()
+    .select(templateDentalColumns)
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.id, service.templateId))
     .limit(1)
@@ -288,7 +290,7 @@ async function lockItemRow(
     .limit(1)
     .for("update")
   if (!item) throw notFound("Ítem del plan")
-  return withDentalSite(item)
+  return withPlanItemDental(tx, orgId, item)
 }
 
 /** Lookup del presupuesto acotado a org + paciente (anti-traversal). */
@@ -380,7 +382,7 @@ async function withDecisions(
   orgId: string,
   rows: Array<typeof treatmentPlanItem.$inferSelect>,
 ): Promise<PlanItemWithProgress[]> {
-  const items = rows.map(withDentalSite)
+  const items = await withPlanDental(tx, orgId, rows)
   const ids = items.map((item) => item.id)
   const done = ids.length
     ? await tx
@@ -725,7 +727,6 @@ export async function addPlanItem(
       phase,
       plannedSessions,
       sortOrder,
-      odontogramEntryId: input.odontogramEntryId ?? null,
       scope,
       ...siteColumns(site),
       title: service.name,
@@ -740,6 +741,7 @@ export async function addPlanItem(
     })
     .returning()
   if (!row) throw new Error("No se pudo crear el ítem del plan")
+  await linkPlanItemFinding(tx, row, input.odontogramEntryId)
   await audit(tx, orgId, actorUserId, "plan.item_added", "treatment_plan_item", row.id, {
     patientId,
     planId: row.planId,
@@ -750,7 +752,7 @@ export async function addPlanItem(
     priceCents: service.priceCents,
     currency: service.currency,
   })
-  return { ...withDentalSite(row), decision: "pendiente" }
+  return { ...(await withPlanItemDental(tx, orgId, row)), decision: "pendiente" }
 }
 
 export interface AddPlanItemsBatchInput {
@@ -831,7 +833,7 @@ export async function addPlanItemsBatch(
       })
       .returning()
     if (!row) throw new Error("No se pudo crear el ítem del plan")
-    rows.push(withDentalSite(row))
+    rows.push({ ...withDentalSite(row), odontogramEntryId: null })
   }
   await audit(
     tx,
@@ -1041,7 +1043,7 @@ export async function updatePlanItem(
     patientId,
     fields,
   })
-  const item = withDentalSite(updated)
+  const item = await withPlanItemDental(tx, orgId, updated)
   return { ...item, decision: await itemDecision(tx, orgId, item) }
 }
 
@@ -1137,9 +1139,10 @@ export async function setPlanItemStatus(
   })
   // Lo tratado queda dibujado: lo que su servicio deja en la pieza (la resina,
   // una restauración) se registra en esta atención, una sola vez.
+  const done = await withPlanItemDental(tx, orgId, updated)
   if (input.status === "realizado" && input.encounterId)
-    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, withDentalSite(updated))
-  return { ...withDentalSite(updated), decision: updated.decisionStatus as PlanItemDecision }
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, done)
+  return { ...done, decision: updated.decisionStatus as PlanItemDecision }
 }
 
 export async function revisePlanItem(
@@ -1189,7 +1192,7 @@ export async function revisePlanItem(
     reason,
     supersededBy: revised.id,
   })
-  return { ...withDentalSite(revised), decision: revised.decisionStatus as PlanItemDecision }
+  return { ...(await withPlanItemDental(tx, orgId, revised)), decision: revised.decisionStatus as PlanItemDecision }
 }
 
 export interface PlanItemPlanningInput {

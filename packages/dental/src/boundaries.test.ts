@@ -10,12 +10,17 @@ import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
 
 const ROOT = join(import.meta.dirname, "..", "..", "..")
-const IMPORTS_DENTAL = /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)/
+// Las tablas del esquema dental (ADR 0079) también son lo dental.
+const IMPORTS_DENTAL =
+  /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/db\/schema\/dental"|from "\.\/dental\.js"/
 
 /**
  * Lo común que aún importa lo dental; cada entrega quita lo que separa. La
  * entrega 3 sumó budgets, global-search e imaging-studies: guardan el sitio
- * común pero la API sigue diciendo pieza y caras (salen en la entrega 5).
+ * común pero la API sigue diciendo pieza y caras (salen en la entrega 5). La
+ * entrega 4 sumó el recorrido del tratamiento y las pruebas que escriben en
+ * las tablas del esquema dental: salen cuando el cierre y la historia
+ * pregunten al producto (entrega 5).
  */
 const STILL_COUPLED = [
   "apps/api/src/routes/patients.ts",
@@ -28,18 +33,24 @@ const STILL_COUPLED = [
   "packages/services/src/clinica-otro-pais.test.ts",
   "packages/services/src/clinical-forms.ts",
   "packages/services/src/clinical.ts",
+  "packages/services/src/composite-keys.test.ts",
   "packages/services/src/diagnosis-codes.ts",
   "packages/services/src/encounter-diagnoses.ts",
   "packages/services/src/encounter-dictation.ts",
+  "packages/services/src/encounter-lifecycle.test.ts",
   "packages/services/src/encounters.ts",
   "packages/services/src/global-search.ts",
   "packages/services/src/imaging-studies.ts",
   "packages/services/src/index.ts",
+  "packages/services/src/patient-history.test.ts",
   "packages/services/src/patient-history.ts",
   "packages/services/src/plan.ts",
+  "packages/services/src/procedure-codings.test.ts",
   "packages/services/src/seed-dev.ts",
   "packages/services/src/service-catalog.ts",
   "packages/services/src/specialties.ts",
+  "packages/services/src/treatment-journey.test.ts",
+  "packages/services/src/treatment-journey.ts",
 ]
 
 /** Carpetas comunes: ninguno de sus archivos importa lo dental salvo la lista. */

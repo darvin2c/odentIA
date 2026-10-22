@@ -49,8 +49,6 @@ import {
   encounterSite,
   imagingStudy,
   imagingStudyFile,
-  odontogramAssessment,
-  odontogramEntry,
   patient,
   patientAllergy,
   patientAnamnesis,
@@ -65,6 +63,7 @@ import {
   treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { odontogramAssessment, odontogramEntry, planItemFinding } from "@odentia/db/schema/dental"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { allergyReviewDue } from "./allergies.js"
@@ -1778,7 +1777,7 @@ export async function closingOdontogramOf(
   const done = await tx
     .select({
       planId: treatmentPlanItem.planId,
-      entryId: treatmentPlanItem.odontogramEntryId,
+      entryId: planItemFinding.odontogramEntryId,
       itemId: treatmentPlanItem.id,
     })
     .from(encounterPlanItem)
@@ -1789,6 +1788,7 @@ export async function closingOdontogramOf(
         eq(treatmentPlanItem.organizationId, encounterPlanItem.organizationId),
       ),
     )
+    .leftJoin(planItemFinding, eq(planItemFinding.planItemId, treatmentPlanItem.id))
     .where(
       and(
         eq(encounterPlanItem.organizationId, orgId),

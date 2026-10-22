@@ -547,6 +547,20 @@
       "when": 1792692575383,
       "tag": "0077_sitio_comun_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1792697743210,
+      "tag": "0078_esquema_dental",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1792698036812,
+      "tag": "0079_esquema_dental_reglas",
+      "breakpoints": true
     }
   ]
 }
