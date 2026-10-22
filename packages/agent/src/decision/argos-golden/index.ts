@@ -1,4 +1,6 @@
-/** Las respuestas correctas de las preguntas del dueño (`eval/argos-owner.json`), por área, y de las generadas (`eval/argos-generadas.json`). */
+/** Las respuestas correctas de las preguntas del dueño (`eval/argos-owner.json`), por área, de las generadas (`eval/argos-generadas.json`) y de las escritas a ciegas (`eval/argos-blind.json`). */
+import { blindSolvers1 } from "./blind-1.js"
+import { blindSolvers2 } from "./blind-2.js"
 import { budgetSolvers } from "./budgets.js"
 import { dentistSolvers } from "./dentists.js"
 import { financeSolvers } from "./finance.js"
@@ -39,5 +41,7 @@ export function ownerSolvers(h: GoldenHelpers): GoldenSolvers {
     ...generatedSolvers6(h),
     ...generatedSolvers7(h),
     ...generatedSolvers8(h),
+    ...blindSolvers1(h),
+    ...blindSolvers2(h),
   }
 }

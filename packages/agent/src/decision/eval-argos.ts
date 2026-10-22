@@ -44,8 +44,9 @@ function arg(name: string, fallback: string): string {
 const env = process.env
 const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/argos-holdout.json")), "utf8")) as { preguntas: Question[] }
 const goldenPath = arg("golden", "")
-const goldenFile = goldenPath ? (JSON.parse(readFileSync(resolve(goldenPath), "utf8")) as { calculado?: string; respuestas: Array<{ id: string; respuesta: string }> }) : null
-const golden = new Map<string, string>(goldenFile ? goldenFile.respuestas.map((row) => [row.id, row.respuesta]) : [])
+const goldenFile = goldenPath ? (JSON.parse(readFileSync(resolve(goldenPath), "utf8")) as { calculado?: string; respuestas: Array<{ id: string; respuesta: string; nota?: string }> }) : null
+// La nota trae las otras lecturas válidas de la pregunta: quien califica también la lee.
+const golden = new Map<string, { respuesta: string; nota?: string }>(goldenFile ? goldenFile.respuestas.map((row) => [row.id, row]) : [])
 // Las respuestas correctas cuentan «hasta esta hora»: Argos responde a esa misma hora, o un cobro de los minutos
 // que tarda la vuelta cambia la cifra de «los mismos días» (pasó con un pago de las 13:15).
 const at = goldenFile?.calculado ? new Date(goldenFile.calculado) : undefined
@@ -149,7 +150,8 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     id: question.id,
     texto: question.texto,
     espera: question.espera,
-    correcta: golden.get(question.id) ?? null,
+    correcta: golden.get(question.id)?.respuesta ?? null,
+    nota: golden.get(question.id)?.nota ?? null,
     kind: answer.kind,
     periodo: periodLine(answer),
     argos: said(answer),
@@ -166,6 +168,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   out.push(row)
   console.log(`\n### ${row.id} · ${row.texto}${row.espera === "trampa" ? " (trampa)" : ""}`)
   if (row.correcta) console.log(`- Correcta: ${row.correcta}`)
+  if (row.nota) console.log(`- Nota (otra lectura válida): ${row.nota}`)
   if (row.periodo) console.log(`- Periodo (arriba de la respuesta): ${row.periodo}`)
   if (row.elige) console.log(`- Antes de responder, la pantalla pregunta: ${row.elige}`)
   console.log(`- Argos: ${row.argos}`)
