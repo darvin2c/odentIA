@@ -13,7 +13,7 @@ it("la CIE-11 incluida es la de la OMS (SHA-256 del .zip) y trae los capítulos 
   // Cada código con su URI de la OMS (licencia, cláusula 1.2.3).
   expect(rows.every((row) => row.uri?.startsWith("http://id.who.int/icd/release/11/mms/"))).toBe(true)
   const byCode = new Map(rows.map((row) => [row.code, row]))
-  expect(byCode.get("DA08")).toMatchObject({ isCategory: true, isDental: true })
+  expect(byCode.get("DA08")).toMatchObject({ isCategory: true })
   expect(byCode.get("DA08.0")).toMatchObject({ title: "Caries dental", isCategory: false })
   // Lo único sin traducir en 2026-01 queda con su título oficial en inglés.
   expect(byCode.get("QA47.6")?.title).toBe("Multiple other than twins, born in hospital")

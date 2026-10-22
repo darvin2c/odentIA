@@ -350,30 +350,44 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
     }
 
     for (const t of templates) {
-      const leaves = t.leaves ? JSON.stringify(t.leaves) : null
+      // Lo dental del tratamiento (caras y lo que deja en la pieza) va en
+      // `dental_template_rule` (ADR 0079); cambiarlo también sube la versión.
+      const rule = sql`row(${t.min}::int, ${t.max}::int, ${t.leaves?.condition ?? null}::text, ${t.leaves?.variant ?? null}::text)::text`
+      const storedRule = sql`coalesce((select row(r."surface_count_min", r."surface_count_max", r."leaves_condition", r."leaves_variant")::text
+        from "dental_template_rule" r where r."template_id" = "treatment_template"."id"), row(null::int, null::int, null::text, null::text)::text)`
       await tx.execute(
         sql`insert into "treatment_template"
-        ("key", "name", "specialty", "scope", "surface_count_min", "surface_count_max", "leaves_finding", "is_common", "coded_only", "is_active", "version")
-        values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, ${t.min}, ${t.max}, ${leaves}::jsonb, ${t.common}, ${t.codedOnly}, true, 1)
+        ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "is_active", "version")
+        values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, 'dental', ${t.common}, ${t.codedOnly}, true, 1)
         on conflict ("key") do update set
           "name" = excluded."name",
           "specialty" = excluded."specialty",
           "scope" = excluded."scope",
-          "surface_count_min" = excluded."surface_count_min",
-          "surface_count_max" = excluded."surface_count_max",
-          "leaves_finding" = excluded."leaves_finding",
+          "product" = excluded."product",
           "is_common" = excluded."is_common",
           "coded_only" = excluded."coded_only",
           "is_active" = true,
           "version" = "treatment_template"."version" + (
-            ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope",
-             "treatment_template"."surface_count_min", "treatment_template"."surface_count_max",
-             "treatment_template"."leaves_finding")
+            ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope", ${storedRule})
             IS DISTINCT FROM
-            (excluded."name", excluded."specialty", excluded."scope",
-             excluded."surface_count_min", excluded."surface_count_max", excluded."leaves_finding")
+            (excluded."name", excluded."specialty", excluded."scope", ${rule})
           )::int`,
       )
+      if (t.min === null && t.max === null && !t.leaves) {
+        await tx.execute(
+          sql`delete from "dental_template_rule" where "template_id" = (select "id" from "treatment_template" where "key" = ${t.key})`,
+        )
+      } else {
+        await tx.execute(
+          sql`insert into "dental_template_rule" ("template_id", "surface_count_min", "surface_count_max", "leaves_condition", "leaves_variant")
+          select "id", ${t.min}, ${t.max}, ${t.leaves?.condition ?? null}, ${t.leaves?.variant ?? null} from "treatment_template" where "key" = ${t.key}
+          on conflict ("template_id") do update set
+            "surface_count_min" = excluded."surface_count_min",
+            "surface_count_max" = excluded."surface_count_max",
+            "leaves_condition" = excluded."leaves_condition",
+            "leaves_variant" = excluded."leaves_variant"`,
+        )
+      }
     }
     // Lo que ya no está en la biblioteca (las plantillas `cpms:` de antes)
     // queda inactivo; las filas se conservan para los servicios que las usan.

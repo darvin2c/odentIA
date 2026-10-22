@@ -152,7 +152,6 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
             title: diagnosisCatalog.title,
             uri: diagnosisCatalog.uri,
             isCategory: diagnosisCatalog.isCategory,
-            isDental: diagnosisCatalog.isDental,
             searchText: diagnosisCatalog.searchText,
           })
           .from(diagnosisCatalog)
@@ -166,7 +165,6 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
         old.edition !== load.edition ||
         old.title !== row.title ||
         old.uri !== row.uri ||
-        old.isDental !== row.isDental ||
         old.searchText !== row.searchText
       )
     })
@@ -182,7 +180,6 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
             title: row.title,
             uri: row.uri,
             isCategory: row.isCategory,
-            isDental: row.isDental,
             searchText: row.searchText,
           })),
         )
@@ -192,7 +189,6 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
             edition: sql`excluded."edition"`,
             title: sql`excluded."title"`,
             uri: sql`excluded."uri"`,
-            isDental: sql`excluded."is_dental"`,
             searchText: sql`excluded."search_text"`,
           },
         })

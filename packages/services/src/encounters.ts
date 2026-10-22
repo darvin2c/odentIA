@@ -21,17 +21,15 @@ import {
   encounterPlanItem,
   encounterProcedure,
   encounterSite,
-  odontogramEntry,
   patient,
   patientCharge,
-  periodontalChart,
-  periodontalTooth,
   prescription,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { odontogramEntry, periodontalChart, periodontalTooth, planItemFinding } from "@odentia/db/schema/dental"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAccess } from "@odentia/auth/permissions"
@@ -2000,16 +1998,16 @@ async function resolveTreatedFindings(
   at: Date,
 ): Promise<void> {
   const items = await tx
-    .select({ id: treatmentPlanItem.id, entryId: treatmentPlanItem.odontogramEntryId })
+    .select({ id: treatmentPlanItem.id, entryId: planItemFinding.odontogramEntryId })
     .from(encounterPlanItem)
     .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
+    .innerJoin(planItemFinding, eq(planItemFinding.planItemId, treatmentPlanItem.id))
     .where(
       and(
         eq(encounterPlanItem.organizationId, orgId),
         eq(encounterPlanItem.encounterId, encounterId),
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.status, "realizado"),
-        isNotNull(treatmentPlanItem.odontogramEntryId),
       ),
     )
   for (const item of items) {

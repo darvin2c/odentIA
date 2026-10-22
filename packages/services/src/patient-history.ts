@@ -10,8 +10,6 @@ import {
   encounterDiagnosis,
   encounterProcedure,
   encounterSite,
-  odontogramAssessment,
-  odontogramEntry,
   patientAnamnesis,
   patientDocument,
   prescription,
@@ -21,6 +19,7 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { odontogramAssessment, odontogramEntry } from "@odentia/db/schema/dental"
 import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"

@@ -1,4 +1,4 @@
-import { odontogramAssessment } from "@odentia/db/schema/clinical"
+import { odontogramAssessment } from "@odentia/db/schema/dental"
 import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { expect, it } from "vitest"
 import { createClinicalOrder } from "./clinical-forms.js"

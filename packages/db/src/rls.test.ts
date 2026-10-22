@@ -803,9 +803,9 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   )
   await ownerDb.execute(sql`insert into diagnosis_code_release (system_key, edition, official, license, code_count)
     values ('ICD-10', 'rls', false, 'Solo pruebas', 2) on conflict do nothing`)
-  await ownerDb.execute(sql`insert into diagnosis_code (system_key, code, edition, title, is_dental, search_text) values
-    ('ICD-10', 'K02.1', 'rls', 'Caries de la dentina', true, 'k02.1 caries de la dentina'),
-    ('ICD-10', 'K05.1', 'rls', 'Gingivitis crónica', true, 'k05.1 gingivitis cronica')
+  await ownerDb.execute(sql`insert into diagnosis_code (system_key, code, edition, title, search_text) values
+    ('ICD-10', 'K02.1', 'rls', 'Caries de la dentina', 'k02.1 caries de la dentina'),
+    ('ICD-10', 'K05.1', 'rls', 'Gingivitis crónica', 'k05.1 gingivitis cronica')
     on conflict do nothing`)
   await insertContact(ownerDb, persona, "org_a", "Paciente Diagnóstico")
   await insertPatient(ownerDb, paciente, "org_a", persona, 9101, "Paciente Diagnóstico")
@@ -890,8 +890,8 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
   expect(await appDb.execute(sql`select code from diagnosis_code where edition = 'rls'`)).toHaveLength(2)
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      tx.execute(sql`insert into diagnosis_code (system_key, code, edition, title, is_dental, search_text)
-        values ('ICD-10', 'K99.9', 'rls', 'Intrusa', false, 'k99.9')`),
+      tx.execute(sql`insert into diagnosis_code (system_key, code, edition, title, search_text)
+        values ('ICD-10', 'K99.9', 'rls', 'Intrusa', 'k99.9')`),
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
   await expect(
@@ -1092,10 +1092,37 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const repetidas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('public', 'admin', 'catalog', 'auth') and c.relkind in ('r', 'p', 'v')
+    where n.nspname in ('public', 'admin', 'catalog', 'auth', 'dental') and c.relkind in ('r', 'p', 'v')
     group by c.relname having count(*) > 1
   `)) as unknown as { tabla: string }[]
   expect(repetidas).toEqual([])
+
+  // Lo dental vive en su esquema (ADR 0079), y lo común no guarda pieza, caras
+  // ni nada del odontograma: el sitio es sistema, código y calificadores.
+  const dental = (await ownerDb.execute(sql`
+    select c.relname as "tabla"
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'dental' and c.relkind in ('r', 'p')
+    order by 1
+  `)) as unknown as { tabla: string }[]
+  expect(dental.map((r) => r.tabla)).toEqual([
+    "odontogram_assessment",
+    "odontogram_entry",
+    "periodontal_chart",
+    "periodontal_tooth",
+    "plan_item_finding",
+    "service_finding",
+  ])
+  const columnasDentales = (await ownerDb.execute(sql`
+    select c.relname || '.' || a.attname as "columna"
+    from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname in ('public', 'catalog') and c.relkind in ('r', 'p') and a.attnum > 0 and not a.attisdropped
+      and c.relname <> 'dental_template_rule'
+      and (a.attname in ('tooth_number', 'surfaces', 'quadrant', 'arch', 'leaves_finding', 'is_dental')
+        or a.attname like 'odontogram%' or a.attname like 'periodontal%' or a.attname like '%tooth%')
+    order by 1
+  `)) as unknown as { columna: string }[]
+  expect(columnasDentales).toEqual([])
 
   // Una tabla con organization_id que el rol app alcanza sin RLS mostraría las
   // filas de todas las clínicas. member e invitation son del adaptador de
@@ -1103,7 +1130,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
   const abiertas = (await ownerDb.execute(sql`
     select c.relname as "tabla"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity
+    where n.nspname in ('public', 'dental') and c.relkind in ('r', 'p') and not c.relrowsecurity
       and has_table_privilege(${APP_ROLE}, c.oid, 'select, insert, update, delete')
       and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'organization_id' and not a.attisdropped)
     order by 1

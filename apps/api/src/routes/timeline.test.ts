@@ -112,8 +112,8 @@ beforeAll(async () => {
       insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
       values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
     )
-    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
-    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
     from (values ('K02.1', 'Caries de la dentina')) as v(code, title)
     on conflict do nothing`,
   )

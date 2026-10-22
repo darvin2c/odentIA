@@ -27,15 +27,12 @@ import {
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
 import {
+  dentalDiagnosisPattern,
   findingDefinition,
 } from "@odentia/dental"
 import type { Db } from "@odentia/db"
-import {
-  diagnosisCatalog,
-  encounter,
-  encounterDiagnosis,
-  odontogramEntry,
-} from "@odentia/db/schema/clinical"
+import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
@@ -180,7 +177,8 @@ export async function searchDiagnosisCodes(
     .orderBy(
       desc(sql`${diagnosisCatalog.code} = ${code}`),
       desc(sql`starts_with(${diagnosisCatalog.code}, ${code})`),
-      desc(diagnosisCatalog.isDental),
+      // Lo odontológico primero (ADR 0079: lo dice el producto, no la lista).
+      desc(sql`${diagnosisCatalog.code} ~ ${dentalDiagnosisPattern(system)}`),
       asc(diagnosisCatalog.code),
     )
     .limit(Math.min(Math.max(limit, 1), 50))

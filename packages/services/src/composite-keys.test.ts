@@ -2,7 +2,8 @@
  * Claves compuestas de la fase 3: lo que nombra otra fila
  * clínica la nombra dentro de la misma organización y del mismo paciente.
  */
-import { odontogramAssessment, odontogramEntry, treatmentBudgetOption } from "@odentia/db/schema/clinical"
+import { treatmentBudgetOption } from "@odentia/db/schema/clinical"
+import { odontogramAssessment, odontogramEntry } from "@odentia/db/schema/dental"
 import { expect, it } from "vitest"
 import { createBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"

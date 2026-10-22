@@ -1,7 +1,7 @@
 /**
  * Lo tratado queda dibujado (fase 3, tablero 4; ADR 0036). Al completar un
  * tratamiento —«Completar» en «Hecho hoy» o el servicio directo, que nace
- * realizado— su servicio dice qué deja en la pieza (`leaves_finding`) y ese
+ * realizado— su servicio dice qué deja en la pieza (`dental.service_finding`) y ese
  * hallazgo se registra en la atención, con el tratamiento que lo dejó
  * (`left_by_plan_item_id`). Una sola vez por tratamiento: completar otra vez
  * no lo duplica, y si el tratamiento deja de estar realizado (se anula su
@@ -9,10 +9,12 @@
  */
 import { findingLeftByTreatment, type LeavesFinding } from "@odentia/dental"
 import type { Db } from "@odentia/db"
-import { odontogramEntry, serviceCatalog } from "@odentia/db/schema/clinical"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, isNull, ne } from "drizzle-orm"
 import { insertOdontogramFinding, orgStrictVariants } from "../clinical.js"
+import { serviceLeavesFinding } from "./service-finding.js"
 
 /** Lo del tratamiento que hace falta para dibujarlo. */
 export interface TreatedItem {
@@ -64,7 +66,7 @@ export async function drawTreatedFinding(
 ) {
   if (!item.serviceId || item.toothNumber == null) return null
   const [service] = await tx
-    .select({ leaves: serviceCatalog.leavesFinding })
+    .select({ leaves: serviceLeavesFinding })
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, item.serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)

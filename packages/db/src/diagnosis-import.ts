@@ -3,7 +3,6 @@ import { inflateRawSync } from "node:zlib"
 import {
   type DiagnosisSystemKey,
   diagnosisSearchText,
-  isDentalDiagnosis,
   isDiagnosisCodeFormat,
   normalizeDiagnosisCode,
 } from "@odentia/clinical"
@@ -26,7 +25,6 @@ export interface DiagnosisSourceRow {
 
 export interface DiagnosisCatalogRow extends DiagnosisSourceRow {
   isCategory: boolean
-  isDental: boolean
   searchText: string
 }
 
@@ -311,7 +309,6 @@ export function prepareDiagnosisRows(
   return [...seen.values()].map((row) => ({
     ...row,
     isCategory: prefixes.has(row.code),
-    isDental: isDentalDiagnosis(system, row.code),
     searchText: diagnosisSearchText(row.code, row.title),
   }))
 }

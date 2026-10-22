@@ -1,12 +1,12 @@
 /**
  * Lo tratado queda dibujado (fase 3, tablero 4; ADR 0036): cada servicio dice
- * qué deja en la pieza al completarse (`service_catalog.leaves_finding`). La
+ * qué deja en la pieza al completarse (`dental.service_finding`). La
  * resina deja «Restauración definitiva · resina» en buen estado (azul); la
  * exodoncia, una pieza ausente. Solo se registra lo observado tras el acto
  * (NTS 188, 5.8): nunca lo planificado.
  *
  * odentIA lo deja puesto en cada tratamiento de su biblioteca
- * (`treatment_template.leaves_finding`, ADR 0069), solo en los que dejan algo
+ * (`catalog.dental_template_rule`, ADR 0069 y 0079), solo en los que dejan algo
  * claro en una pieza; en un servicio propio se elige al crearlo o editarlo.
  * Lo que es por arcada o por tramo (prótesis, puentes) no se dibuja solo: se
  * registra en la atención. La corona temporal tampoco: pide escribir su

@@ -3,7 +3,6 @@ import {
   clinicalFollowUp,
   encounter,
   encounterProcedure,
-  odontogramEntry,
   prescription,
   prescriptionItem,
   treatmentBudget,
@@ -11,8 +10,10 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { listPatientDocuments } from "./clinical.js"
+import { withPlanItemDental } from "./dental/plan-finding.js"
 import { notFound } from "./errors.js"
 import { getPatientAccount } from "./payments.js"
 import { requirePatient } from "./patients.js"
@@ -188,11 +189,13 @@ export async function getTreatmentJourney(
     eq(treatmentPlanItem.organizationId, orgId),
     eq(treatmentPlanItem.patientId, patientId),
   )
-  const [item] = await tx
+  const [row] = await tx
     .select()
     .from(treatmentPlanItem)
     .where(and(scope, eq(treatmentPlanItem.id, itemId)))
-  if (!item) throw notFound("Tratamiento")
+  if (!row) throw notFound("Tratamiento")
+  // Con su hallazgo de origen, que vive en lo dental (ADR 0079).
+  const item = await withPlanItemDental(tx, orgId, row)
   const [plan] = await tx
     .select()
     .from(treatmentPlan)

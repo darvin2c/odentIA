@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { type DiagnosisSystemKey, diagnosisSearchText, isDentalDiagnosis } from "@odentia/clinical"
+import { type DiagnosisSystemKey, diagnosisSearchText } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import {
@@ -74,7 +74,6 @@ export async function seedDiagnosisCodes(
         edition: "prueba",
         title: item.title,
         isCategory: item.isCategory ?? false,
-        isDental: isDentalDiagnosis(system, item.code),
         searchText: diagnosisSearchText(item.code, item.title),
       })
       .onConflictDoNothing()

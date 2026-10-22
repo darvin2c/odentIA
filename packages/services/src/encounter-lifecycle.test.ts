@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { encounter, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
+import { encounter, patientCharge } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/dental"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
