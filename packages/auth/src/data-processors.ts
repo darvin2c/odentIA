@@ -32,16 +32,19 @@ export interface DataProcessor {
   use: DataProcessorUse
 }
 
-/** Lo que solo odentIA sabe y aún no está escrito: se completa aquí, una vez. */
-const SERVER_PROVIDER = "[Por completar: proveedor del servidor]"
-const SERVER_COUNTRY = "[Por completar: país]"
-const MAIL_PROVIDER = "[Por completar: proveedor de correo]"
-const MAIL_COUNTRY = "[Por completar: país]"
+/**
+ * Dónde está el servidor y quién envía los correos. El país es el del centro
+ * de datos que eligió odentIA, no el de la empresa: se confirma en su panel.
+ */
+const SERVER_PROVIDER = "OVHcloud"
+const SERVER_COUNTRY = "[Por confirmar: país del centro de datos]"
+const MAIL_PROVIDER = "Zoho CPaaS (antes ZeptoMail)"
+const MAIL_COUNTRY = "[Por confirmar: región de la cuenta de Zoho]"
 
 export const DATA_PROCESSORS: readonly DataProcessor[] = [
   {
     id: "servidor",
-    name: `Servidor: ${SERVER_PROVIDER}`,
+    name: "OVH SAS (OVHcloud)",
     short: SERVER_PROVIDER,
     purpose: "Alojar la aplicación y la base de datos, con copias de seguridad diarias.",
     data: "Todos los datos de la cuenta y de los pacientes.",
@@ -62,7 +65,7 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
   },
   {
     id: "correo",
-    name: `Correo transaccional por SMTP: ${MAIL_PROVIDER}`,
+    name: "Zoho Corporation (Zoho CPaaS, antes ZeptoMail)",
     short: MAIL_PROVIDER,
     purpose: "Enviar los correos del sistema: invitaciones, avisos, recetas y comprobantes.",
     data: "Nombre y correo del destinatario y contenido del mensaje.",
