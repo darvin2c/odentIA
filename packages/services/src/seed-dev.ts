@@ -122,6 +122,8 @@ import {
 } from "./imaging-studies.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
+import { addCalendarDays, createDataRequest, respondDataRequest, verifyDataRequest } from "./data-requests.js"
+import { clinicToday } from "./inventory-stock.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   addEncounterAddendum,
@@ -415,6 +417,8 @@ async function wipeSeed(): Promise<void> {
     "address_lookup_day",
     // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
     "clinical_access_log",
+    // Los pedidos sobre sus datos referencian a la persona vinculada (ADR 0080).
+    "patient_data_request",
     "portal_session",
     "portal_link",
     "channel_template",
@@ -3190,6 +3194,30 @@ await db.transaction((tx) =>
     grantedByContactId: rosaContactId,
   }),
 )
+// Pedidos sobre sus datos (ADR 0080): Rosa pidió una copia de su historia por
+// WhatsApp hace dos días (pendiente, sale en «Te espera» al acercarse el plazo)
+// y antes había pedido corregir su dirección, ya respondido.
+await db.transaction(async (tx) => {
+  const today = await clinicToday(tx, ORG_A)
+  await createDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, {
+    kind: "copia",
+    requesterContactId: rosaContactId,
+    channel: "whatsapp",
+    requestedOn: addCalendarDays(today, -2),
+    said: "Quiero una copia de mi historia, me cambio de clínica",
+  })
+  const fix = await createDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, {
+    kind: "corregir",
+    requesterContactId: rosaContactId,
+    channel: "clinica",
+    requestedOn: addCalendarDays(today, -20),
+    said: "Me mudé",
+  })
+  await verifyDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, fix.id, { how: "documento" })
+  await respondDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, fix.id, {
+    resolution: "Se cambió su dirección a Jr. Las Begonias 120, dpto. 302",
+  })
+})
 // --- Fase 2.1 (ADR 0030): Pedro Ríos llamó y recepción le dio cita desde la
 // Agenda con lo mínimo (nombres, apellidos y teléfono), aunque el registro pide
 // la fecha de nacimiento: su página dice lo que falta. Dijo por teléfono que
@@ -4137,6 +4165,7 @@ async function summary(orgId: string, label: string): Promise<string> {
     "patient_charge",
     "patient_payment",
     "patient_responsibility",
+    "patient_data_request",
     "treatment_plan_item",
     "patient_document",
   ] as const

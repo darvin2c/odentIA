@@ -20,6 +20,19 @@ describe("textos de «Te espera»", () => {
     expect(waitingText(task({ mine: false, assigneeName: null }), context).detail).toBe("Sin fecha · Sin responsable")
   })
 
+  it("un pedido sobre sus datos dice qué pidió, hasta cuándo y si falta comprobar que es ella (ADR 0080)", () => {
+    const row: WaitingRow = {
+      kind: "dataRequest", id: "r1", patientId: "p1", patientName: "Rosa Quispe", request: "copia", dueOn: "2026-10-15", verified: false,
+    }
+    expect(waitingText(row, context)).toEqual({
+      title: "Rosa Quispe pidió una copia de su historia",
+      detail: "Responder hasta el jueves 15 oct · falta comprobar que es ella",
+      action: "Atender",
+    })
+    expect(waitingText({ ...row, verified: true }, context).detail).toBe("Responder hasta el jueves 15 oct")
+    expect(waitingKey(row)).toBe("dataRequest:r1")
+  })
+
   it("un caso del agente se llama siempre igual y dice su urgencia con palabras", () => {
     const row: WaitingRow = {
       kind: "case", id: "h1", priority: "alta", reason: "pregunta por un reembolso", contactName: "Lucía Paredes", channel: null,

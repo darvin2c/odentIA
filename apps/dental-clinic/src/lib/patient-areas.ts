@@ -140,12 +140,23 @@ export const PATIENT_SECTIONS = [
     permission: "patients.write",
     patient: true,
   },
+  // «Sus datos y la ley» (ADR 0080): quién consultó su historia y lo que
+  // pidió sobre sus datos. Los atienden Recepción y Administración.
   {
     id: "accesos",
     area: "datos",
     label: "Consultas a la historia",
     permission: "audit.read",
     patient: true,
+    group: "Sus datos y la ley",
+  },
+  {
+    id: "pedidos",
+    area: "datos",
+    label: "Pedidos sobre sus datos",
+    permission: "patients.write",
+    patient: true,
+    group: "Sus datos y la ley",
   },
 ] as const satisfies ReadonlyArray<{
   id: string
@@ -159,6 +170,8 @@ export const PATIENT_SECTIONS = [
   patient: boolean
   /** Va debajo de otra sección: no suma una pestaña, se elige dentro de ella. */
   parent?: string
+  /** Título del grupo en el menú lateral de la pestaña y en el selector del celular. */
+  group?: string
 }>
 
 export type PatientSection = (typeof PATIENT_SECTIONS)[number]
@@ -291,6 +304,19 @@ export interface AreaNavEntry {
   /** Id de la sección: valor de la pestaña de segundo nivel. */
   value: PatientSectionId
   label: string
+  /** Título de su grupo, si va en uno («Sus datos y la ley»). */
+  group?: string
+}
+
+/**
+ * Pestañas que muestran sus secciones en un menú lateral en vez de una barra:
+ * Datos tiene siete y la barra se desbordaba (lienzo del lote 2, ADR 0080).
+ */
+export const SIDE_NAV_AREAS: ReadonlySet<PatientAreaId> = new Set(["datos"])
+
+/** El título del grupo de una sección, si va en uno. */
+export function sectionGroup(id: PatientSectionId): string | undefined {
+  return (sectionOf(id) as { group?: string }).group
 }
 
 /** La sección de la que cuelga otra (Periodontograma → Odontograma); ella misma si no cuelga de ninguna. */
@@ -303,7 +329,10 @@ export function navSectionOf(id: PatientSectionId): PatientSectionId {
 export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
   return visibleSections(can, isPatient)
     .filter((section) => section.area === area && !(section as { parent?: string }).parent)
-    .map((section) => ({ value: section.id, label: section.label }))
+    .map((section) => {
+      const group = (section as { group?: string }).group
+      return { value: section.id, label: section.label, ...(group ? { group } : {}) }
+    })
 }
 
 /**

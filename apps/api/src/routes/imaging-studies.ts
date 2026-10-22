@@ -16,11 +16,11 @@ import {
   setImagingThumbnail,
   startImagingStudyUpload,
 } from "@odentia/services"
-import { Zip, ZipPassThrough } from "fflate"
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { zipStream } from "../lib/zip-stream.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
@@ -86,38 +86,6 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
   return out
 }
 
-/** ZIP sin compresión que se arma mientras se envía: un archivo tras otro. */
-async function* zipStream(
-  entries: readonly { name: string; open: () => Promise<ReadableStream<Uint8Array>> }[],
-  mtime: Date,
-): AsyncGenerator<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  let failure: Error | null = null
-  const zip = new Zip((error, chunk) => {
-    if (error) failure = error
-    else chunks.push(chunk)
-  })
-  const drain = function* () {
-    if (failure) throw failure
-    while (chunks.length) yield chunks.shift()!
-  }
-  for (const entry of entries) {
-    const file = new ZipPassThrough(entry.name)
-    file.mtime = mtime
-    zip.add(file)
-    const reader = (await entry.open()).getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      file.push(value)
-      yield* drain()
-    }
-    file.push(new Uint8Array(0), true)
-    yield* drain()
-  }
-  zip.end()
-  yield* drain()
-}
 
 export function createImagingStudiesRoute(deps: CrmDeps) {
   const app = new Hono()

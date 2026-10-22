@@ -1,6 +1,6 @@
 {
-  "id": "d3fd4581-21e0-4d75-8ddc-ad4d31451f0a",
-  "prevId": "ab26133e-e52c-4078-8885-12b7886988d6",
+  "id": "35bf30f2-a92c-4015-829c-e6b46a2929a7",
+  "prevId": "65959d2d-120f-4596-9dcb-29391ed92257",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -10646,24 +10646,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": false
-        },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
         },
         "encounter_id": {
           "name": "encounter_id",
@@ -11459,20 +11446,14 @@
           "notNull": true,
           "default": false
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": false
         },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
+        "surfaces": {
+          "name": "surfaces",
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,
@@ -12100,30 +12081,36 @@
           "primaryKey": false,
           "notNull": false
         },
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "scope": {
           "name": "scope",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
+        "surfaces": {
+          "name": "surfaces",
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'"
+        },
+        "quadrant": {
+          "name": "quadrant",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "description": {
           "name": "description",
@@ -12333,8 +12320,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.encounter_site": {
-      "name": "encounter_site",
+    "public.encounter_tooth": {
+      "name": "encounter_tooth",
       "schema": "",
       "columns": {
         "id": {
@@ -12356,15 +12343,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": true
         },
@@ -12377,8 +12358,8 @@
         }
       },
       "indexes": {
-        "encounter_site_encounter_site_uidx": {
-          "name": "encounter_site_encounter_site_uidx",
+        "encounter_tooth_encounter_tooth_uidx": {
+          "name": "encounter_tooth_encounter_tooth_uidx",
           "columns": [
             {
               "expression": "encounter_id",
@@ -12387,13 +12368,7 @@
               "nulls": "last"
             },
             {
-              "expression": "site_system",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "site_code",
+              "expression": "tooth_number",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -12406,9 +12381,9 @@
         }
       },
       "foreignKeys": {
-        "encounter_site_organization_id_organization_id_fk": {
-          "name": "encounter_site_organization_id_organization_id_fk",
-          "tableFrom": "encounter_site",
+        "encounter_tooth_organization_id_organization_id_fk": {
+          "name": "encounter_tooth_organization_id_organization_id_fk",
+          "tableFrom": "encounter_tooth",
           "columnsFrom": [
             "organization_id"
           ],
@@ -12419,9 +12394,9 @@
           "onUpdate": "no action",
           "onDelete": "no action"
         },
-        "encounter_site_encounter_id_encounter_id_fk": {
-          "name": "encounter_site_encounter_id_encounter_id_fk",
-          "tableFrom": "encounter_site",
+        "encounter_tooth_encounter_id_encounter_id_fk": {
+          "name": "encounter_tooth_encounter_id_encounter_id_fk",
+          "tableFrom": "encounter_tooth",
           "columnsFrom": [
             "encounter_id"
           ],
@@ -12492,24 +12467,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": false
-        },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
         },
         "created_by": {
           "name": "created_by",
@@ -15413,6 +15375,279 @@
       },
       "isRLSEnabled": false
     },
+    "public.patient_data_request": {
+      "name": "patient_data_request",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requester_contact_id": {
+          "name": "requester_contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_on": {
+          "name": "requested_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "said": {
+          "name": "said",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendiente'"
+        },
+        "verified_how": {
+          "name": "verified_how",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_by": {
+          "name": "verified_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patient_data_request_org_patient_idx": {
+          "name": "patient_data_request_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "patient_data_request_org_pending_idx": {
+          "name": "patient_data_request_org_pending_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "due_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"patient_data_request\".\"status\" = 'pendiente'",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "patient_data_request_organization_id_organization_id_fk": {
+          "name": "patient_data_request_organization_id_organization_id_fk",
+          "tableFrom": "patient_data_request",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "patient_data_request_verified_by_user_id_fk": {
+          "name": "patient_data_request_verified_by_user_id_fk",
+          "tableFrom": "patient_data_request",
+          "columnsFrom": [
+            "verified_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "patient_data_request_resolved_by_user_id_fk": {
+          "name": "patient_data_request_resolved_by_user_id_fk",
+          "tableFrom": "patient_data_request",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "patient_data_request_created_by_user_id_fk": {
+          "name": "patient_data_request_created_by_user_id_fk",
+          "tableFrom": "patient_data_request",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "patient_data_request_requester_fk": {
+          "name": "patient_data_request_requester_fk",
+          "tableFrom": "patient_data_request",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "requester_contact_id"
+          ],
+          "tableTo": "patient_contact",
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "contact_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "patient_data_request_kind_check": {
+          "name": "patient_data_request_kind_check",
+          "value": "\"patient_data_request\".\"kind\" IN ('copia','corregir','mensajes')"
+        },
+        "patient_data_request_channel_check": {
+          "name": "patient_data_request_channel_check",
+          "value": "\"patient_data_request\".\"channel\" IN ('clinica','whatsapp','correo','portal')"
+        },
+        "patient_data_request_status_check": {
+          "name": "patient_data_request_status_check",
+          "value": "\"patient_data_request\".\"status\" IN ('pendiente','respondida','denegada')"
+        },
+        "patient_data_request_verified_check": {
+          "name": "patient_data_request_verified_check",
+          "value": "\"patient_data_request\".\"verified_how\" IS NULL OR \"patient_data_request\".\"verified_how\" IN ('documento','portal','representante')"
+        },
+        "patient_data_request_resolved_check": {
+          "name": "patient_data_request_resolved_check",
+          "value": "(\"patient_data_request\".\"status\" = 'pendiente') = (\"patient_data_request\".\"resolved_at\" IS NULL)"
+        },
+        "patient_data_request_due_check": {
+          "name": "patient_data_request_due_check",
+          "value": "\"patient_data_request\".\"due_on\" >= \"patient_data_request\".\"requested_on\""
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.patient_document": {
       "name": "patient_document",
       "schema": "",
@@ -15711,15 +15946,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_codes": {
-          "name": "site_codes",
-          "type": "text[]",
+        "tooth_numbers": {
+          "name": "tooth_numbers",
+          "type": "smallint[]",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'"
@@ -20374,24 +20603,30 @@
           "primaryKey": false,
           "notNull": false
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": false
         },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
+        "surfaces": {
+          "name": "surfaces",
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'"
+        },
+        "quadrant": {
+          "name": "quadrant",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "codings": {
           "name": "codings",
@@ -21216,30 +21451,36 @@
           "primaryKey": false,
           "notNull": false
         },
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "scope": {
           "name": "scope",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "site_system": {
-          "name": "site_system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_code": {
-          "name": "site_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "site_qualifiers": {
-          "name": "site_qualifiers",
+        "surfaces": {
+          "name": "surfaces",
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'"
+        },
+        "quadrant": {
+          "name": "quadrant",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "title": {
           "name": "title",

@@ -699,6 +699,72 @@ export const clinicalAccessLog = pgTable(
   ],
 )
 
+/**
+ * Pedido de la persona sobre sus datos (issue 50, ADR 0080): una copia, una
+ * corrección o no recibir mensajes. Lo pide la propia persona o su
+ * representante legal (una persona vinculada al paciente); se responde en
+ * `DATA_REQUEST_DAYS` días corridos desde el día siguiente, en cualquier país.
+ * Pendiente → respondida o denegada; nada se borra.
+ */
+export const patientDataRequest = pgTable(
+  "patient_data_request",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    kind: text("kind").notNull(),
+    /** Quien lo pide: la propia persona o su representante legal. */
+    requesterContactId: uuid("requester_contact_id").notNull(),
+    /** Por dónde llegó el pedido. */
+    channel: text("channel").notNull(),
+    /** Día en que lo pidió y día límite para responder (en la zona de la clínica). */
+    requestedOn: date("requested_on").notNull(),
+    dueOn: date("due_on").notNull(),
+    /** Lo que dijo, si se anotó. */
+    said: text("said"),
+    status: text("status").notNull().default("pendiente"),
+    /** Cómo se comprobó que es ella o su representante; nunca por el teléfono. */
+    verifiedHow: text("verified_how"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verifiedBy: text("verified_by").references(() => user.id),
+    /** Qué se entregó o hizo, o por qué se denegó. */
+    resolution: text("resolution"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "patient_data_request_requester_fk",
+      columns: [table.organizationId, table.patientId, table.requesterContactId],
+      foreignColumns: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+    }),
+    index("patient_data_request_org_patient_idx").on(table.organizationId, table.patientId),
+    index("patient_data_request_org_pending_idx")
+      .on(table.organizationId, table.dueOn)
+      .where(sql`${table.status} = 'pendiente'`),
+    check("patient_data_request_kind_check", sql`${table.kind} IN ('copia','corregir','mensajes')`),
+    check(
+      "patient_data_request_channel_check",
+      sql`${table.channel} IN ('clinica','whatsapp','correo','portal')`,
+    ),
+    check(
+      "patient_data_request_status_check",
+      sql`${table.status} IN ('pendiente','respondida','denegada')`,
+    ),
+    check(
+      "patient_data_request_verified_check",
+      sql`${table.verifiedHow} IS NULL OR ${table.verifiedHow} IN ('documento','portal','representante')`,
+    ),
+    check(
+      "patient_data_request_resolved_check",
+      sql`(${table.status} = 'pendiente') = (${table.resolvedAt} IS NULL)`,
+    ),
+    check("patient_data_request_due_check", sql`${table.dueOn} >= ${table.requestedOn}`),
+  ],
+)
+
 /** Odontograma FDI (ISO 3950) por pieza/superficie (append-only); la NTS 188 rige solo en Perú (ADR 0036).
  * Los hallazgos nuevos usan status='recorded'; la anulación es una corrección
  * auditable (voidedAt/voidedBy/voidReason + proyección status='voided') que

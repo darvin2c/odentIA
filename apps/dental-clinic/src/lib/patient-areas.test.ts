@@ -28,6 +28,21 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(resolveSection("plan", as("reception"))).toBe("plan")
   })
 
+  it("los pedidos sobre sus datos los ven Recepción y Administración, en el grupo «Sus datos y la ley» (ADR 0080)", () => {
+    const datos = (role: string) => areaNav("datos", as(role)).map((entry) => entry.value)
+    expect(datos("reception")).toContain("pedidos")
+    expect(datos("owner")).toContain("pedidos")
+    expect(datos("clinician")).not.toContain("pedidos")
+    expect(datos("cashier")).not.toContain("pedidos")
+    // Solo con ficha: quien aún no es paciente no tiene historia que pedir.
+    expect(areaNav("datos", as("owner"), false).map((entry) => entry.value)).not.toContain("pedidos")
+    const owner = areaNav("datos", as("owner"))
+    expect(owner.filter((entry) => entry.group === "Sus datos y la ley").map((entry) => entry.value)).toEqual([
+      "accesos",
+      "pedidos",
+    ])
+  })
+
   it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
     expect(ids("clinician")).toEqual([
       "resumen",
@@ -100,7 +115,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("Clínica en cuatro secciones; el odontólogo ve 12 y el propietario 16 (ADR 0035)", () => {
+  it("Clínica en cuatro secciones; el odontólogo ve 12 y el propietario 17 (ADR 0035 y 0080)", () => {
     expect(areaNav("clinica", as("clinician")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
       "Odontograma",
@@ -113,7 +128,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(subsectionNav("historia", as("clinician"))).toEqual([])
     expect(navSectionOf("periodontograma")).toBe("odontograma")
     expect(visibleSections(as("clinician"))).toHaveLength(12)
-    expect(visibleSections(as("owner"))).toHaveLength(16)
+    expect(visibleSections(as("owner"))).toHaveLength(17)
     // Recepción y caja no cambian.
     expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
     expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")
