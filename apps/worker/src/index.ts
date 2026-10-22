@@ -166,6 +166,7 @@ const queues: QueueDef[] = [
         ownerDb,
         secretsKey,
         publicBaseUrl: env.WEB_URL,
+        storage,
         senderMode: env.CHANNEL_SENDER_MODE,
         alreadyTold: createAlreadyTold(db, { secretsKey, platform: agentRuntime.platform, decisions: agentRuntime.decisions }),
         embedder,

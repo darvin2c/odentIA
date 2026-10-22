@@ -119,7 +119,15 @@ export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
  * guarda con el nombre que manda el servidor (`content-disposition`).
  */
 export async function apiDownload(path: string, fallbackName: string): Promise<void> {
-  const response = await fetch(`${API_URL}${path}`, { credentials: "include", headers: contextHeaders() })
+  await saveDownload(await fetch(`${API_URL}${path}`, { credentials: "include", headers: contextHeaders() }), fallbackName)
+}
+
+/**
+ * Guarda en el teléfono o la computadora el archivo de una respuesta, con el
+ * nombre que manda el servidor (`content-disposition`); un error de la API se
+ * lanza como `ApiError`. Lo usan también las páginas públicas.
+ */
+export async function saveDownload(response: Response, fallbackName: string): Promise<void> {
   if (!response.ok) {
     let shape: ApiErrorShape = {}
     try {

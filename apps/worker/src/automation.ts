@@ -17,6 +17,8 @@ export interface AutomationWorkerDeps {
   senderMode: "mock" | "live"
   /** Lee lo último que escribió la persona antes de escribirle por un seguimiento. */
   alreadyTold?: TickDeps["alreadyTold"]
+  /** Para la invitación de calendario que va en los avisos de cita por correo. */
+  storage?: TickDeps["storage"]
   /** Vectoriza el índice de búsqueda del agente en cada ciclo; sin él, no se toca. */
   embedder?: SearchEmbedder
 }
@@ -60,7 +62,7 @@ function refreshSearchInBackground(deps: AutomationWorkerDeps, embedder: SearchE
  * nunca el origen webhook/API) para los enlaces /c/ y /baja/.
  */
 export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boolean> {
-  const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold, embedder } = deps
+  const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold, embedder, storage } = deps
   let pending = 0
   for (let i = 0; i < MAX_DRAIN; i++) {
     const rows = (await appDb.execute(
@@ -84,6 +86,7 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
     publicBaseUrl,
     templates: { fetch, validateExternal: senderMode === "live" },
     alreadyTold,
+    ...(storage ? { storage } : {}),
     // Lo que el agente escribe por su cuenta (insistir, despedirse) sale con el formato del canal.
     format: (text, channel, opts) => formatForChannel(text, channel, opts),
   })

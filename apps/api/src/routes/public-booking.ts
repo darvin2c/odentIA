@@ -8,6 +8,7 @@ import {
   confirmBookingLinkAppointment,
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
+  getBookingLinkCalendar,
   getBookingLinkRegistrationForm,
   getBranchDirections,
   suggestAddresses,
@@ -30,6 +31,7 @@ import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
+import { calendarResponse } from "../lib/calendar-response.js"
 import { errorBody } from "../lib/error.js"
 import { keepRegistrationHold } from "../lib/registration-hold.js"
 
@@ -377,6 +379,21 @@ export function createPublicBookingRoute(deps: {
       })
     } catch (error) {
       if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message), error.status)
+      throw error
+    }
+  })
+
+  // «Añadir al calendario» de su cita (issue 46). Es un POST por lo mismo que «Tus papeles».
+  app.post("/:slug/calendar", async (c) => {
+    const body = z.strictObject({ token }).safeParse(await bodyOf(c))
+    if (!body.success) return unavailable(c)
+    try {
+      return calendarResponse(await inOrg(c, (tx, orgId) => getBookingLinkCalendar(tx, orgId, body.data.token)))
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        if (error.status === 404) return unavailable(c)
+        return c.json(errorBody(c, error.code, error.message), error.status)
+      }
       throw error
     }
   })

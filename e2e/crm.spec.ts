@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { readFile } from "node:fs/promises"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import type { Page } from "@playwright/test"
@@ -682,6 +683,18 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   expect(confirmations.filter((row) => row.action === "enviar_mensaje").map((row) => String((row.payload as { text?: string }).text))).toEqual([
     expect.stringMatching(/^Listo: tu cita quedó para el /),
   ])
+
+  // «Añadir al calendario» baja el archivo que arma el servidor: el mismo evento que el del correo (issue 46).
+  const download = page.waitForEvent("download")
+  await page.getByRole("button", { name: "Añadir al calendario" }).click()
+  const file = await download
+  expect(file.suggestedFilename()).toBe("cita.ics")
+  const ics = (await readFile((await file.path())!, "utf8")).replace(/\r\n /g, "")
+  expect(ics).toContain(`UID:${rows[0]!.id}@odentia`)
+  expect(ics).toContain("SEQUENCE:0")
+  expect(ics).toMatch(/\r\nDTSTART;TZID=[^:]+:\d{8}T\d{6}\r\n/)
+  expect(ics).toMatch(/\r\nSUMMARY:Cita en [^\r]+\r\n/)
+  expect(ics).not.toContain("Consulta")
 
   // El enlace no reserva dos veces: al volver es «Su enlace», con «Tu cita», y desde ahí se cambia o se cancela.
   await page.setViewportSize({ width: 390, height: 844 })

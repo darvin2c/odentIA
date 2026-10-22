@@ -254,6 +254,8 @@ export type MessageRoute =
       conversationId: string
       /** Solo en `plantilla`. */
       template?: { name: string; language: string }
+      /** Solo en `correo`: el buzón de la clínica que envía y la dirección de la persona. */
+      addresses?: { from: string; to: string }
     }
   | { cause: AutomationCause; detail: string }
 
@@ -290,7 +292,7 @@ async function routeFacts(
   const identity = identities.find((row) => !row.noWhatsappAt)
   const noWhatsapp = !identity && identities.length > 0
   const connections = await tx
-    .select({ id: channelConnection.id, channel: channelConnection.channel })
+    .select({ id: channelConnection.id, channel: channelConnection.channel, externalId: channelConnection.externalId })
     .from(channelConnection)
     .where(
       and(
@@ -486,7 +488,12 @@ export async function routeMessage(
   if (spec && mailbox && facts.email) {
     try {
       const thread = await openEmailThread(tx, orgId, null, { contactId, email: facts.email }, mailbox)
-      return { via: "correo", channel: "email", conversationId: thread.id }
+      return {
+        via: "correo",
+        channel: "email",
+        conversationId: thread.id,
+        ...(mailbox.externalId ? { addresses: { from: mailbox.externalId, to: facts.email } } : {}),
+      }
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
       mailboxProblem = error.message

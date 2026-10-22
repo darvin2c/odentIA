@@ -19,49 +19,13 @@ export interface AppointmentBlockData {
 }
 
 /**
- * Identificador del evento (UID, RFC 5545): el mismo en cada descarga de la
- * misma cita, para que al cambiarla de horario el calendario actualice su
- * evento en vez de añadir otro. Sale de una huella: no lleva el enlace ni
- * ningún dato de la persona, porque los calendarios se sincronizan con terceros.
- */
-async function calendarUid(key: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`odentia:cita:${key}`))
-  const hex = Array.from(new Uint8Array(digest).subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")
-  return `${hex}@odentia`
-}
-
-/** La cita como archivo de calendario (iCalendar, RFC 5545). */
-function calendarFile(clinicName: string, appointment: AppointmentBlockData, uid: string): string {
-  const stamp = (instant: string | Date) => new Date(instant).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
-  const text = (value: string) => value.replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n")
-  const where = [`Sede ${appointment.branchName}`, appointment.branchAddress].filter(Boolean).join(", ")
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//odentIA//Su enlace//ES",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${stamp(new Date())}`,
-    `DTSTART:${stamp(appointment.startsAt)}`,
-    `DTEND:${stamp(appointment.endsAt)}`,
-    // Sin el servicio: un título de calendario no lleva datos clínicos.
-    `SUMMARY:${text(`Cita en ${clinicName}`)}`,
-    `LOCATION:${text(where)}`,
-    `DESCRIPTION:${text(`Con ${appointment.professionalName}`)}`,
-    "END:VEVENT",
-    "END:VCALENDAR",
-  ].join("\r\n")
-}
-
-/**
  * «Tu cita»: día y hora, dónde y con quién; confirmar, cambiar, cancelar,
  * cómo llegar y añadir al calendario. El mismo bloque en «Su enlace» y en el portal.
  */
 export function AppointmentBlock({
   title,
-  clinicName,
   appointment,
-  calendarKey,
+  onAddToCalendar,
   canChange,
   canConfirm,
   confirming,
@@ -72,10 +36,12 @@ export function AppointmentBlock({
   onConfirm,
 }: {
   title: string
-  clinicName: string
   appointment: AppointmentBlockData
-  /** Lo que identifica a la cita para el UID del calendario. */
-  calendarKey: string
+  /**
+   * Descarga el `.ics` de la cita, que arma el servidor (issue 46): el mismo
+   * evento que el del correo, así el calendario no la duplica.
+   */
+  onAddToCalendar: () => Promise<void>
   canChange: boolean
   canConfirm: boolean
   confirming: boolean
@@ -87,14 +53,18 @@ export function AppointmentBlock({
 }) {
   const [asking, setAsking] = useState(false)
   const when = `${longDay(appointment.startsAt, appointment.timeZone)} · ${timeLabel(appointment.startsAt, appointment.timeZone)}`
+  const [saving, setSaving] = useState(false)
+  const [calendarError, setCalendarError] = useState(false)
   const addToCalendar = async () => {
-    const file = calendarFile(clinicName, appointment, await calendarUid(calendarKey))
-    const url = URL.createObjectURL(new Blob([file], { type: "text/calendar;charset=utf-8" }))
-    const link = document.createElement("a")
-    link.href = url
-    link.download = "mi-cita.ics"
-    link.click()
-    URL.revokeObjectURL(url)
+    setSaving(true)
+    setCalendarError(false)
+    try {
+      await onAddToCalendar()
+    } catch {
+      setCalendarError(true)
+    } finally {
+      setSaving(false)
+    }
   }
   return (
     <section aria-label={title} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
@@ -107,9 +77,9 @@ export function AppointmentBlock({
         <p>{[appointment.serviceName, `Sede ${appointment.branchName}`, appointment.professionalName].filter(Boolean).join(" · ")}</p>
         {appointment.branchAddress ? <p className="text-muted-foreground">{appointment.branchAddress}</p> : null}
       </div>
-      {error ? (
+      {error || calendarError ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {error ?? "No pudimos descargar tu cita. Intenta de nuevo."}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
@@ -138,9 +108,9 @@ export function AppointmentBlock({
             Cómo llegar
           </Button>
         ) : null}
-        <Button type="button" variant="ghost" className="min-h-11" onClick={() => void addToCalendar()}>
+        <SubmitButton type="button" variant="ghost" className="min-h-11" pending={saving} onClick={() => void addToCalendar()}>
           Añadir al calendario
-        </Button>
+        </SubmitButton>
       </div>
       <ConfirmDialog
         open={asking}

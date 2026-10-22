@@ -27,6 +27,7 @@ import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
 import { contactDecides } from "./responsibilities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { appointmentCalendarDownload } from "./appointment-calendar.js"
 
 /**
  * «Su enlace» (fase 3, decisión 8; ADR 0037, que amplía el 0014): la página
@@ -850,6 +851,17 @@ export async function reserveBookingLink(
 }
 
 /** La cita del enlace, si aún se puede tocar desde aquí. */
+/**
+ * «Añadir al calendario» de «Su enlace» (issue 46): el `.ics` de la cita que
+ * muestra el enlace, el mismo evento que el del portal y el del correo. Una
+ * cita cancelada sale cancelada, para que el calendario la quite.
+ */
+export async function getBookingLinkCalendar(tx: Db, orgId: string, token: string): Promise<string> {
+  const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
+  if (!link.appointment) throw notFound("Cita")
+  return appointmentCalendarDownload(tx, orgId, link.appointment.id)
+}
+
 function changeableAppointment(link: ResolvedPersonalLink): ShownAppointment {
   const current = link.appointment
   if (!current) throw linkExpired()

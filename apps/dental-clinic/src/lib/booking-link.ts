@@ -1,5 +1,5 @@
 import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
-import { ApiError } from "./api"
+import { ApiError, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
 import type { PortalBudget } from "./portal"
 
@@ -142,37 +142,23 @@ export function chooseLinkMessages(
  * registros de acceso ni en el Referer.
  */
 export async function downloadLinkPaper(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id" | "title">): Promise<void> {
-  const response = await fetch(`${base(slug)}/papers/${encodeURIComponent(paper.id)}`, {
+  await saveDownload(await linkPost(`${base(slug)}/papers/${encodeURIComponent(paper.id)}`, { token, kind: paper.kind }), `${paper.title}.pdf`)
+}
+
+/** «Añadir al calendario» de su cita: el `.ics` que arma el servidor (issue 46). */
+export async function downloadLinkCalendar(slug: string, token: string): Promise<void> {
+  await saveDownload(await linkPost(`${base(slug)}/calendar`, { token }), "cita.ics")
+}
+
+/** Un POST del enlace que devuelve un archivo: el token va en el cuerpo, nunca en la dirección. */
+function linkPost(url: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(url, {
     method: "POST",
     credentials: "omit",
     referrerPolicy: "no-referrer",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token, kind: paper.kind }),
+    body: JSON.stringify(body),
   })
-  if (!response.ok) {
-    let shape: { code?: string; message?: string; request_id?: string } = {}
-    try {
-      shape = ((await response.json()) as { error?: typeof shape }).error ?? {}
-    } catch {
-      // respuesta no-JSON: sin detalle
-    }
-    throw new ApiError(response.status, shape)
-  }
-  const disposition = response.headers.get("content-disposition") ?? ""
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${paper.title}.pdf`
-  const url = URL.createObjectURL(await response.blob())
-  try {
-    const anchor = document.createElement("a")
-    anchor.href = url
-    anchor.download = filename
-    anchor.rel = "noreferrer"
-    document.body.append(anchor)
-    anchor.click()
-    anchor.remove()
-  } finally {
-    // Se libera después del clic: el navegador ya tomó el archivo.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
 }
 
 export function fetchBookingSlots(

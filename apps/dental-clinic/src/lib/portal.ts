@@ -7,7 +7,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser"
 import { API_URL } from "./auth-client"
-import { ApiError, apiFetch } from "./api"
+import { ApiError, apiFetch, saveDownload } from "./api"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /** Alcance autorizado congelado en enlace/sesión (UX en español, claves estables). */
@@ -229,6 +229,14 @@ export async function confirmPortalAppointmentApi(
     { method: "POST" },
   )
   return res.data
+}
+
+/** «Añadir al calendario» de una cita: el `.ics` que arma el servidor (issue 46). */
+export async function downloadPortalCalendar(sessionToken: string, appointmentId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/public/portal/appointments/${encodeURIComponent(appointmentId)}/calendar`, {
+    headers: { authorization: `Bearer ${sessionToken}` },
+  })
+  await saveDownload(response, "cita.ics")
 }
 
 export async function cancelPortalAppointmentApi(sessionToken: string, appointmentId: string): Promise<PortalAppointment> {

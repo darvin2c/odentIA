@@ -33,6 +33,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } from "./admin-lines.js"
 import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
+import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_DATA_NOTICE_KEY,
@@ -1649,6 +1650,8 @@ async function dataNoticeFor(
 
 export interface DeliverDeps {
   secretsKey: Buffer
+  /** Para adjuntar la invitación de calendario a los avisos de cita por correo; sin él, va solo el texto. */
+  storage?: Storage
   /** Origen público de la plataforma, para los enlaces que van en el correo. */
   publicBaseUrl?: string
   /**
@@ -2375,15 +2378,41 @@ export async function deliverJob(
         // Un aviso de lo que pasó no tiene baja de un toque: solo «Elegir mis mensajes».
         if (purpose !== "avisos") links.optOut = await createUnsubscribeLink(tx, orgId, contactId, base, { jobId: job.id })
       }
-      sent = await sendOutbound(tx, orgId, {
-        conversationId: route.conversationId,
-        senderKind: "agent",
-        content: {
-          type: "text",
-          text: emailBody({ ...composed, text: linkedText }, profile?.tradeName?.trim() || profile?.legalName || "", links),
-          ...(links.optOut ? { listUnsubscribe: links.optOut } : {}),
-        },
-      })
+      const clinic = profile?.tradeName?.trim() || profile?.legalName || ""
+      const text = emailBody({ ...composed, text: linkedText }, clinic, links)
+      // El aviso de una cita reservada, movida o cancelada lleva la invitación
+      // de calendario (issue 46, ADR 0081): el mismo evento se actualiza o se borra.
+      const invite =
+        deps.storage && route.addresses && job.appointmentId && APPOINTMENT_NOTICE_KINDS.has(job.kind)
+          ? await appointmentCalendarInvite(
+              tx,
+              orgId,
+              job.appointmentId,
+              { organizer: { email: route.addresses.from, name: clinic || null }, attendee: { email: route.addresses.to } },
+              now,
+            )
+          : null
+      if (invite && deps.storage) {
+        const mimeType = `${APPOINTMENT_CALENDAR_MIME}; charset=utf-8; method=${invite.method}`
+        const ref = await deps.storage.putAttachment({
+          orgId,
+          conversationId: route.conversationId,
+          bytes: new TextEncoder().encode(invite.text),
+          contentType: mimeType,
+          ext: "ics",
+        })
+        sent = await sendOutbound(tx, orgId, {
+          conversationId: route.conversationId,
+          senderKind: "agent",
+          content: { type: "media", attachment: { ...ref, mimeType, filename: APPOINTMENT_CALENDAR_FILENAME }, caption: text },
+        })
+      } else {
+        sent = await sendOutbound(tx, orgId, {
+          conversationId: route.conversationId,
+          senderKind: "agent",
+          content: { type: "text", text, ...(links.optOut ? { listUnsubscribe: links.optOut } : {}) },
+        })
+      }
     } else {
       sent = await sendOutbound(tx, orgId, {
         conversationId: route.conversationId,
@@ -2547,6 +2576,9 @@ const NOTICE_OF: Record<AppointmentChange, AppointmentNoticeKey> = {
   movida: "aviso_cita_movida",
   cancelada: "aviso_cita_cancelada",
 }
+
+/** Los avisos de un cambio de cita: por correo llevan la invitación de calendario. */
+const APPOINTMENT_NOTICE_KINDS: ReadonlySet<string> = new Set(Object.values(NOTICE_OF))
 
 /**
  * Lo que «Recordar la cita» hace cuando la cita cambia: el agente le avisa a la

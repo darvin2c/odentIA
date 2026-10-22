@@ -22,6 +22,7 @@ import {
   confirmBooking,
   fetchBookingLink,
   fetchBookingSlots,
+  downloadLinkCalendar,
   downloadLinkPaper,
   type MessageChoice,
   type PersonalLinkMessages,
@@ -305,9 +306,8 @@ function PersonalLinkPage() {
         {appointment && !appointment.cancelled ? (
           <AppointmentBlock
             title="Tu cita"
-            clinicName={view.clinicName}
             appointment={appointment}
-            calendarKey={`${slug}:${token}`}
+            onAddToCalendar={() => downloadLinkCalendar(slug, token)}
             canChange={appointment.canChange}
             canConfirm={appointment.canConfirm}
             confirming={confirm.isPending}
@@ -582,9 +582,8 @@ function BookedOnly({ view, appointment, slug, token }: { view: PersonalLinkView
         </div>
         <AppointmentBlock
           title="Tu cita"
-          clinicName={view.clinicName}
           appointment={appointment}
-          calendarKey={`${slug}:${token}`}
+          onAddToCalendar={() => downloadLinkCalendar(slug, token)}
           canChange={false}
           canConfirm={false}
           confirming={false}
