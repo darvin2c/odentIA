@@ -21,10 +21,17 @@ async function personOf(page: Page, slug: string, patientId: string): Promise<st
   return found.personId
 }
 
-/** Abre una sección de la página por su navegación: pestaña, sección y, si aplica, tipo. */
+/**
+ * Abre una sección de la página por su navegación: pestaña, sección y, si
+ * aplica, tipo. Las secciones de Datos van en el menú lateral (ADR 0080), no
+ * en pestañas.
+ */
 async function openSection(page: Page, ...names: string[]): Promise<void> {
+  const sideNav = page.getByRole("navigation", { name: /^Secciones de / })
   for (const name of names) {
-    const tab = page.getByRole("tab", { name, exact: true })
+    const tab = page
+      .getByRole("tab", { name, exact: true })
+      .or(sideNav.getByRole("button", { name, exact: true }))
     await expect(tab).toBeEnabled()
     await tab.click()
   }
