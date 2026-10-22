@@ -14,6 +14,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
+import { dueDataRequests } from "./data-requests.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
@@ -844,6 +845,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unsentBudgets: access.sendsBudgets ? await waitingUnsentBudgets(tx, orgId, dayStart) : null,
     possibleDuplicates: system.duplicates,
     portalReentries: system.reentries,
+    // Los pedidos sobre sus datos, para quien los atiende (ADR 0080).
+    dataRequests: options.can?.("patients.write") ? (await dueDataRequests(tx, orgId, day.date)).map(({ kind, ...item }) => ({ ...item, request: kind }))
+      : [],
     conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,
