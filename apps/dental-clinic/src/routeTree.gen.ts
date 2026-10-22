@@ -59,6 +59,7 @@ import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.aud
 import { Route as OrgSettingsAvailabilityRouteImport } from './routes/_org/settings.availability'
 import { Route as OrgSettingsBranchesRouteImport } from './routes/_org/settings.branches'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
+import { Route as OrgSettingsDataProtectionRouteImport } from './routes/_org/settings.data-protection'
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
 import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
 import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
@@ -333,6 +334,12 @@ const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
   path: '/channels',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsDataProtectionRoute =
+  OrgSettingsDataProtectionRouteImport.update({
+    id: '/data-protection',
+    path: '/data-protection',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
 const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
   id: '/fields',
   path: '/fields',
@@ -500,6 +507,7 @@ export interface FileRoutesByFullPath {
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
@@ -571,6 +579,7 @@ export interface FileRoutesByTo {
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
@@ -646,6 +655,7 @@ export interface FileRoutesById {
   '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/_org/settings/branches': typeof OrgSettingsBranchesRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
+  '/_org/settings/data-protection': typeof OrgSettingsDataProtectionRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
   '/_org/settings/forms': typeof OrgSettingsFormsRoute
   '/_org/settings/mail': typeof OrgSettingsMailRoute
@@ -721,6 +731,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/data-protection'
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
@@ -792,6 +803,7 @@ export interface FileRouteTypes {
     | '/settings/availability'
     | '/settings/branches'
     | '/settings/channels'
+    | '/settings/data-protection'
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
@@ -866,6 +878,7 @@ export interface FileRouteTypes {
     | '/_org/settings/availability'
     | '/_org/settings/branches'
     | '/_org/settings/channels'
+    | '/_org/settings/data-protection'
     | '/_org/settings/fields'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
@@ -1262,6 +1275,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsChannelsRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/data-protection': {
+      id: '/_org/settings/data-protection'
+      path: '/data-protection'
+      fullPath: '/settings/data-protection'
+      preLoaderRoute: typeof OrgSettingsDataProtectionRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/fields': {
       id: '/_org/settings/fields'
       path: '/fields'
@@ -1441,6 +1461,7 @@ interface OrgSettingsRouteChildren {
   OrgSettingsAvailabilityRoute: typeof OrgSettingsAvailabilityRoute
   OrgSettingsBranchesRoute: typeof OrgSettingsBranchesRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
+  OrgSettingsDataProtectionRoute: typeof OrgSettingsDataProtectionRoute
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
   OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
   OrgSettingsMailRoute: typeof OrgSettingsMailRoute
@@ -1465,6 +1486,7 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsAvailabilityRoute: OrgSettingsAvailabilityRoute,
   OrgSettingsBranchesRoute: OrgSettingsBranchesRoute,
   OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
+  OrgSettingsDataProtectionRoute: OrgSettingsDataProtectionRoute,
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
   OrgSettingsFormsRoute: OrgSettingsFormsRoute,
   OrgSettingsMailRoute: OrgSettingsMailRoute,

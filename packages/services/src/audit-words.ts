@@ -283,6 +283,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "patient.record_locked": say("Borró los datos de una persona a su pedido y bloqueó su historia"),
   "patient.record_opened": say("Abrió con motivo una historia bloqueada, para leerla"),
   "patient.record_unlocked": say("Desbloqueó una historia: la persona vuelve a atenderse"),
+  "data_protection.downloaded": say("Descargó el registro de actividades de tratamiento"),
   "consent.pdf": say("Guardó el PDF de un consentimiento firmado"),
   "consent.revoke_pdf": say("Guardó el PDF de la revocación de un consentimiento"),
   "consent.cancel": say("Anuló un consentimiento"),

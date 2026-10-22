@@ -312,6 +312,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [{ q: "¿Dónde configuro los horarios?", a: "En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención." }],
   },
   {
+    id: "proteccion-de-datos",
+    path: "/settings/data-protection",
+    title: "Protección de datos",
+    parent: SETTINGS,
+    purpose: "Qué datos guarda la clínica, para qué y quién más los toca: el registro de actividades de tratamiento que pide la ley de datos personales. Se arma solo con lo que la clínica usa y se descarga en PDF para la autoridad.",
+    terms: ["protección de datos", "datos personales", "registro de actividades", "ley de datos", "encargados", "subencargados", "proveedores", "transferencia internacional", "autoridad de datos", "ANPD", "privacidad"],
+    faqs: [
+      { q: "¿Qué le entrego a la autoridad si me pide el registro de mis datos?", a: "En Configuración › Protección de datos, «Descargar para la autoridad» arma un PDF con lo que la clínica usa ese día." },
+      { q: "¿Por qué aparece un proveedor que no contraté?", a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes." },
+    ],
+  },
+  {
     id: "especialidades",
     path: "/settings/specialties",
     title: "Especialidades",

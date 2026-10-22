@@ -16,6 +16,7 @@ La persona tiene derecho a pedir una copia de sus datos, que se corrijan o que n
 - **Quién:** Recepción y Administración registran, comprueban, envían y responden (`patients.write`). Recepción nunca ve lo clínico: «Enviar» arma el PDF en el servidor y se lo manda a la persona sin mostrarlo. Descargar el ZIP (PDF, FHIR e imágenes con los cortes de cada tomografía) es de quien lee la ficha clínica (`clinical.read`) y queda en «Consultas a la historia» y en la auditoría.
 - **Inicio › Te espera** muestra el pedido desde 3 días antes de su plazo y siempre que venció.
 - **Borrar es borrar lo no clínico y bloquear la historia** (fase 2). Se borran sus conversaciones con lo que el agente dejó en ellas, oportunidades, tareas, notas, correo, etiquetas, campos propios, lo que el agente recuerda, sus mensajes automáticos y su acceso al portal; sus citas por venir se cancelan sin avisarle y sus mensajes se apagan. La historia, los cobros y los comprobantes se guardan, porque la ley los pide; nombre, documento y teléfono quedan solo dentro de la historia. Lo hace solo Administración (`patients.erase`), escribiendo BORRAR, y el pedido queda respondido con el detalle. La aplicación no tiene DELETE en esas tablas: el borrado es la función `erase_person_data`, que solo actúa dentro de la clínica activa.
+- **El registro de actividades de tratamiento se arma solo** (Configuración › Protección de datos, solo Administración): qué datos guarda la clínica, para qué, quién más los toca y cómo atendió los pedidos del año, con un PDF para la autoridad. No se escribe nada en esa pantalla: lo que falta se completa donde vive. Los proveedores salen de una sola lista (`@odentia/auth/data-processors`), la misma de la página pública de subencargados; un canal conectado, los agentes o el dictado suman a su proveedor.
 - **Bloqueada es archivada y algo más** (`contact.record_locked_at`): no sale en búsquedas, agenda, listas ni reportes, y el agente no la ve. Para los demás no existe (404). Administración la ve en «Historias bloqueadas» y la abre con motivo: «Vuelve a atenderse» la desbloquea entera (lo borrado no vuelve); otro motivo la abre a quien lo pide durante una hora, solo para leer, y queda en «Consultas a la historia».
 
 ## Alternativas descartadas
@@ -25,6 +26,7 @@ La persona tiene derecho a pedir una copia de sus datos, que se corrijan o que n
 - **Que Recepción descargue la historia:** rompe la regla de que lo clínico no llega a Recepción.
 - **Borrar la persona entera:** la ley pide guardar la historia y los comprobantes; la ficha y sus cobros dependen de ella.
 - **Que Recepción borre:** no se puede deshacer; queda para quien responde por la clínica.
+- **Un registro de actividades que la clínica escribe a mano:** cambia cada vez que conecta un canal o enciende un agente, y no sabe qué proveedores usa odentIA por detrás.
 - **Enviar el ZIP o el FHIR por WhatsApp:** WhatsApp no acepta esos archivos; se envía el PDF y el ZIP se descarga.
 
 ## Consecuencias
@@ -40,4 +42,5 @@ La persona tiene derecho a pedir una copia de sus datos, que se corrijan o que n
 
 - `packages/services/src/data-requests.ts`, `patient-record.ts`, `data-erasure.ts`; `packages/clinical/src/fhir.ts`.
 - `apps/api/src/routes/patient-data-requests.ts`, `apps/api/src/lib/record-lock.ts`; migraciones `0074`, `0075`, `0081` y `0082`.
+- `packages/services/src/data-protection.ts`, `packages/auth/src/data-processors.ts`, `apps/api/src/routes/data-protection.ts`.
 - Lienzo «Datos del paciente: copia, corrección y borrado» (aprobado el 2026-10-22).
