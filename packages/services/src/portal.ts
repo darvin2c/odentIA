@@ -37,6 +37,7 @@ import { requirePatient } from "./patients.js"
 import { contactDecides } from "./responsibilities.js"
 import { getPatientAccount } from "./payments.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
+import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -1032,6 +1033,28 @@ export async function getPortalAppointments(
     endsAt: row.endsAt.toISOString(),
     timeZone: branchTimeZone ?? clinicZone,
   }))
+}
+
+/**
+ * «Añadir al calendario» del portal (issue 46): el `.ics` de una cita del
+ * paciente, el mismo evento que el de «Su enlace» y el del correo.
+ */
+export async function getPortalAppointmentCalendar(tx: Db, ctx: PortalContext, appointmentId: string): Promise<string> {
+  requireScope(ctx.session, "appointments")
+  const [row] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, ctx.orgId),
+        eq(appointment.id, appointmentId),
+        eq(appointment.patientId, ctx.session.patientId),
+      ),
+    )
+    .limit(1)
+  if (!row) throw notFound("Cita")
+  await logAccess(tx, ctx.orgId, ctx.session.id, "appointments.calendar", "appointment", row.id)
+  return appointmentCalendarDownload(tx, ctx.orgId, row.id)
 }
 
 /** Una cita del paciente como la ve el portal. */

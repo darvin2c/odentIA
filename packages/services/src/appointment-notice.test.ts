@@ -32,8 +32,9 @@ import { createContact, listContacts } from "./contacts.js"
 import { listConversations, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
+import { getBookingLinkCalendar, issuePersonalLink } from "./booking-links.js"
 import { resolvePersonalLinkRefs } from "./personal-link-token.js"
-import { reschedulePortalAppointment } from "./portal.js"
+import { getPortalAppointmentCalendar, reschedulePortalAppointment } from "./portal.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { getPersonalLinkView } from "./su-enlace.js"
@@ -291,6 +292,37 @@ describe("al cambiar la cita, el agente le avisa", () => {
     )
     expect(new Date(moved.startsAt).getTime()).toBe(to.getTime())
     expect(await jobsOf(c)).toEqual([])
+  })
+
+  it("«Añadir al calendario»: el portal y «Su enlace» bajan el mismo evento, y el portal solo el suyo (issue 46)", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"] })
+    const other = await person(c, "Otra Persona", { consent: ["recordatorio"] })
+    const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    const foreign = await book(c, other.patientId, later(4 * DAY), { notice: false })
+    const [session] = await ownerDb
+      .insert(portalSession)
+      .values({
+        organizationId: c.orgId,
+        patientId: rosa.patientId,
+        contactId: rosa.contactId,
+        scope: { appointments: true, budgets: false, account: false, documents: [] },
+        tokenHash: randomUUID(),
+        expiresAt: new Date(Date.now() + HOUR),
+      })
+      .returning()
+    const ctx = { orgId: c.orgId, session: session!, patientName: "Rosa Quispe" }
+    const fromPortal = await run(c, (tx) => getPortalAppointmentCalendar(tx, ctx, booked.id))
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: rosa.contactId, patientId: rosa.patientId, appointmentId: booked.id }, { secretsKey: KEY }),
+    )
+    const fromLink = await run(c, (tx) => getBookingLinkCalendar(tx, c.orgId, link.token))
+    const event = (text: string) => text.split("\r\n").filter((line) => /^(UID|SEQUENCE|DTSTART|DTEND|SUMMARY):/.test(line.replace(/;TZID=[^:]+/, "")))
+    expect(event(fromPortal)).toEqual(event(fromLink))
+    expect(fromPortal).toContain(`UID:${booked.id}@odentia`)
+    expect(fromPortal).toContain("SUMMARY:Cita en Clínica Sonríe")
+    expect(fromPortal).not.toContain("METHOD:")
+    await expect(run(c, (tx) => getPortalAppointmentCalendar(tx, ctx, foreign.id))).rejects.toMatchObject({ status: 404 })
   })
 
   it("con el Administrador apagado no queda nada en camino", async () => {

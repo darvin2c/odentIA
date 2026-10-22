@@ -64,6 +64,7 @@ import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
+import type { Storage } from "./storage.js"
 
 /* ---------- Argos: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
 
@@ -1356,6 +1357,8 @@ export async function getAdminOverview(tx: Db, orgId: string, can: (permission: 
 export interface TickDeps {
   secretsKey: Buffer
   publicBaseUrl: string
+  /** La invitación de calendario de los avisos de cita (`DeliverDeps.storage`). */
+  storage?: Storage
   limit?: number
   /** Para pedir plantillas al proveedor. Sin esto, el ciclo no pide ninguna. */
   templates?: TemplateDeps
@@ -1482,7 +1485,12 @@ export async function tickAutomations(
         tx,
         orgId,
         now,
-        { secretsKey: deps.secretsKey, publicBaseUrl: deps.publicBaseUrl, alreadyTold: deps.alreadyTold },
+        {
+          secretsKey: deps.secretsKey,
+          publicBaseUrl: deps.publicBaseUrl,
+          alreadyTold: deps.alreadyTold,
+          ...(deps.storage ? { storage: deps.storage } : {}),
+        },
         deps.limit ?? 25,
       )
     })

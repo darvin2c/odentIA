@@ -24,6 +24,7 @@ import {
   cancelAppointmentByToken,
   confirmAppointmentByToken,
   deliverDueJobs,
+  enqueueAppointmentNotice,
   getMessagePermissions,
   getPublicLinkInfo,
   handleAutomationReply,
@@ -51,6 +52,7 @@ import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import type { Storage } from "./storage.js"
 import { setWritingHours } from "./writing-hours.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -1745,5 +1747,91 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
     // La propuesta sigue esperando; nada quedó a medias.
     expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items.map((item) => item.id)).toEqual([late.id])
     expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, other.patientId))).toHaveLength(0)
+  })
+})
+
+describe("La invitación de calendario en los avisos de cita por correo (issue 46)", () => {
+  /** Guarda lo que se adjunta, como lo haría el bucket. */
+  function capturingStorage() {
+    const stored: Array<{ contentType: string; text: string }> = []
+    const unused = async (): Promise<never> => {
+      throw new Error("no usado")
+    }
+    const storage: Storage = {
+      putAvatar: unused,
+      deleteByUrl: async () => {},
+      putAttachment: async ({ orgId, conversationId, bytes, contentType, ext }) => {
+        stored.push({ contentType, text: new TextDecoder().decode(bytes) })
+        return { objectKey: `${orgId}/${conversationId}/${stored.length}.${ext}`, mimeType: contentType, filename: `adjunto.${ext}`, size: bytes.byteLength }
+      },
+      attachmentUrl: async (key) => `https://signed.example.com/${key}`,
+      deleteAttachment: async () => {},
+      putPatientDocument: unused,
+      putPatientAvatar: unused,
+    }
+    return { storage, stored }
+  }
+
+  it("reservar, mover y cancelar: el mismo evento, con su versión, y al final se borra", async () => {
+    const c = await clinic({ whatsapp: false, email: true, anyHour: true })
+    await ruleOn(c, "recordatorio_cita", new Date(Date.now() - DAY))
+    const p = await person(c, "Jorge Salas", { whatsapp: false, email: "jorge@example.com", consent: ["recordatorio"] })
+    const startsAt = new Date(Math.ceil((Date.now() + 3 * DAY) / HOUR) * HOUR)
+    const id = await appointmentFor(c, p.patientId, startsAt)
+    const { storage, stored } = capturingStorage()
+    const send = async (change: "reservada" | "movida" | "cancelada") => {
+      expect(await run(c, (tx) => enqueueAppointmentNotice(tx, c.orgId, id, change))).toEqual({ queued: true })
+      const now = new Date()
+      const results = await run(c, (tx) => deliverDueJobs(tx, c.orgId, now, { secretsKey: KEY, publicBaseUrl: "https://clinica.test", storage }))
+      expect(results.map((result) => result.outcome)).toEqual(["enviado"])
+      const jobs = await jobsOf(c)
+      return messageOf(jobs[jobs.length - 1]!.sentMessageId)
+    }
+    const lines = (text: string) => text.replace(/\r\n /g, "").split("\r\n")
+
+    const booked = await send("reservada")
+    // El mismo correo de siempre, con el archivo adjunto.
+    expect(booked.contentType).toBe("document")
+    expect(booked.body?.split("\n")[0]).toContain("Clínica Sonríe")
+    expect(booked.attachments).toEqual([expect.objectContaining({ filename: "cita.ics", mimeType: "text/calendar; charset=utf-8; method=REQUEST" })])
+    const first = lines(stored[0]!.text)
+    expect(first).toContain("METHOD:REQUEST")
+    expect(first).toContain(`UID:${id}@odentia`)
+    expect(first).toContain("SEQUENCE:0")
+    expect(first).toContain("SUMMARY:Cita en Clínica Sonríe")
+    expect(first).toContain(`ORGANIZER;CN="Clínica Sonríe":mailto:clinica-${c.orgId}@example.com`)
+    expect(first).toContain("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE:mailto:jorge@example.com")
+    expect(first.some((line) => line.startsWith("DTSTART;TZID=America/Lima:"))).toBe(true)
+    expect(first.join("\n")).toContain("Con Dra. Ana Torres")
+
+    // Moverla sube la versión: el calendario actualiza el mismo evento.
+    await ownerDb.update(appointment).set({ startsAt: new Date(startsAt.getTime() + HOUR), endsAt: new Date(startsAt.getTime() + HOUR + 30 * 60_000), version: 2 }).where(eq(appointment.id, id))
+    await send("movida")
+    const moved = lines(stored[1]!.text)
+    expect(moved).toContain("METHOD:REQUEST")
+    expect(moved).toContain(`UID:${id}@odentia`)
+    expect(moved).toContain("SEQUENCE:1")
+
+    // Cancelarla la borra del calendario.
+    await ownerDb.update(appointment).set({ status: "cancelada", version: 3 }).where(eq(appointment.id, id))
+    const cancelled = await send("cancelada")
+    expect(cancelled.attachments).toEqual([expect.objectContaining({ mimeType: "text/calendar; charset=utf-8; method=CANCEL" })])
+    const gone = lines(stored[2]!.text)
+    expect(gone).toContain("METHOD:CANCEL")
+    expect(gone).toContain("STATUS:CANCELLED")
+    expect(gone).toContain("SEQUENCE:2")
+  })
+
+  it("el recordatorio sigue siendo solo texto", async () => {
+    const c = await clinic({ whatsapp: false, email: true })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - DAY))
+    const p = await person(c, "Rosa Pérez", { whatsapp: false, email: "rosa@example.com", consent: ["recordatorio"] })
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    const { storage, stored } = capturingStorage()
+    await run(c, (tx) => deliverDueJobs(tx, c.orgId, NOW, { secretsKey: KEY, publicBaseUrl: "https://clinica.test", storage }))
+    const [job] = await jobsOf(c)
+    expect((await messageOf(job!.sentMessageId)).contentType).toBe("text")
+    expect(stored).toEqual([])
   })
 })

@@ -5,6 +5,7 @@ import {
   decidePortalBudget,
   exchangePortalToken,
   getPortalAccount,
+  getPortalAppointmentCalendar,
   getPortalQuestionnaire,
   getPortalAppointments,
   getPortalDocumentUrl,
@@ -32,6 +33,7 @@ import { getConnInfo } from "@hono/node-server/conninfo"
 import { bodyLimit } from "hono/body-limit"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { calendarResponse } from "../lib/calendar-response.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { portalOrigin, portalOrganization } from "../lib/portal-origin.js"
@@ -128,6 +130,8 @@ export function createPublicPortalRoute(deps: {
   async function portalCall<T>(
     c: Context,
     fn: (tx: Db, ctx: PortalContext) => Promise<T>,
+    /** Cómo se entrega lo que devuelve: JSON, salvo un archivo. */
+    respond: (data: T) => Response = (data) => c.json({ data }, 200),
   ): Promise<Response> {
     const raw = sessionTokenOf(c)
     if (!raw) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión del portal requerida"), 401)
@@ -141,7 +145,7 @@ export function createPublicPortalRoute(deps: {
         const ctx = await requirePortalSession(tx, orgId, raw)
         return fn(tx, ctx)
       })
-      return c.json({ data }, 200)
+      return respond(data)
     } catch (error) {
       if (error instanceof ServiceError && error.code === "PORTAL_FORBIDDEN") {
         return unavailable(c)
@@ -261,6 +265,17 @@ export function createPublicPortalRoute(deps: {
     if (!query.success) return validationError(c, query.error.issues)
     return portalCall(c, (tx, ctx) =>
       getPortalRescheduleSlots(tx, ctx, params.data.id, { from: query.data.from, to: query.data.to }),
+    )
+  })
+
+  // «Añadir al calendario»: el `.ics` de la cita, el mismo evento que el del correo (issue 46).
+  app.get("/appointments/:id/calendar", async (c) => {
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return portalCall(
+      c,
+      (tx, ctx) => getPortalAppointmentCalendar(tx, ctx, params.data.id),
+      (text) => calendarResponse(text),
     )
   })
 

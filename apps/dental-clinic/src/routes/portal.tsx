@@ -12,6 +12,7 @@ import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
   confirmPortalAppointmentApi,
+  downloadPortalCalendar,
   decidePortalBudgetApi,
   exchangePortalTokenApi,
   fetchPortalAccount,
@@ -547,9 +548,8 @@ function NextAppointment({ sessionToken }: { sessionToken: string }) {
     <>
       <AppointmentBlock
         title="Tu próxima cita"
-        clinicName={next.branchName}
         appointment={{ ...next, timeZone, confirmed: next.status === "confirmada" }}
-        calendarKey={`portal:${next.id}`}
+        onAddToCalendar={() => downloadPortalCalendar(sessionToken, next.id)}
         canChange={future}
         canConfirm={future && next.status === "programada"}
         confirming={confirm.isPending}
