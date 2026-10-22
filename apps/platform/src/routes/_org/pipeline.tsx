@@ -22,7 +22,7 @@ import {
 import { type InfiniteData, useInfiniteQuery, useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Plus, Undo2, UserRound } from "lucide-react"
+import { ArrowRight, Bot, CalendarClock, Check, Circle, Columns3, GripVertical, List, Plus, Undo2, UserRound, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type CloseTarget, CloseOpportunityDialog } from "../../components/crm/close-opportunity-dialog"
 import { dueWords, isOverdue, moneyText } from "../../components/crm/crm-helpers"
@@ -54,14 +54,47 @@ interface SummaryStage {
   stageId: string
   count: number
   amounts: Array<{ currency: string; amountCents: string }>
+  won: number
+  lost: number
+  wonAmounts: Array<{ currency: string; amountCents: string }>
 }
 
 interface Summary {
   total: number
   open: number
+  won: number
+  lost: number
   openAmounts: Array<{ currency: string; amountCents: string }>
   stages: SummaryStage[]
 }
+
+/** Un tramo del tablero: «Decidió» tiene dos mitades, Ganadas y Perdidas (issue 101). */
+type BoardColumn = Stage & { columnId: string; outcome: "won" | "lost" | null }
+
+function isColumn(column: BoardColumn, id: unknown): boolean {
+  return column.columnId === id || (column.outcome === null && column.id === id)
+}
+
+/**
+ * Las columnas reparten el ancho disponible, sin pasar de 26 rem ni bajar de
+ * 17 rem; si no caben, el tablero se desplaza de lado (issue 101).
+ */
+const COLUMN_WIDTH_CLASS = "w-[min(17rem,82vw)] shrink-0 lg:w-auto lg:min-w-[17rem] lg:max-w-[26rem] lg:flex-1 lg:basis-0"
+
+/** Cada paso es una columna; «Decidió» es una sola columna con Ganadas arriba y Perdidas abajo. */
+function boardGroups(stages: Stage[]): BoardColumn[][] {
+  return stages.map((stage): BoardColumn[] =>
+    stage.moment === "decidio"
+      ? [
+          { ...stage, columnId: `${stage.id}:won`, outcome: "won", name: "Ganadas" },
+          { ...stage, columnId: `${stage.id}:lost`, outcome: "lost", name: "Perdidas" },
+        ]
+      : [{ ...stage, columnId: stage.id, outcome: null }],
+  )
+}
+
+/** Cada vista de la lista pide su estado al servidor. */
+const STATUS_OF: Record<string, string | undefined> = { abiertas: "open", ganadas: "won", perdidas: "lost" }
 
 const CARD_LIMIT = 30
 const useBoardLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
@@ -109,7 +142,9 @@ function PipelinePage() {
   const pipelines = useMemo(() => pipelinesQuery.data?.data ?? [], [pipelinesQuery.data])
   const pipeline = pipelines.find((p) => p.id === embudo) ?? pipelines.find((p) => p.isDefault) ?? pipelines[0] ?? null
   const stages = useMemo(() => pipeline?.stages ?? [], [pipeline])
-  const filterKey = [q, responsable, onlyDue] as const
+  const movio = listSearch.get("movio") ?? "todas"
+  const estado = listSearch.get("estado") ?? "todas"
+  const filterKey = [q, responsable, onlyDue, movio] as const
 
   function pipelineParams(withStage?: string): URLSearchParams {
     const params = new URLSearchParams({ recent: "true" })
@@ -119,6 +154,15 @@ function PipelinePage() {
     if (responsable === "mias") params.set("assignedUserId", myUserId)
     if (responsable === "recepcion") params.set("assignedUserId", "none")
     if (onlyDue) params.set("taskDue", "true")
+    if (movio === "agente") params.set("byAgent", "true")
+    return params
+  }
+
+  /** La lista pide además su estado (Abiertas, Ganadas o Perdidas); el tablero lo pide por columna. */
+  function listParams(): URLSearchParams {
+    const params = pipelineParams()
+    const status = STATUS_OF[estado]
+    if (status) params.set("status", status)
     return params
   }
 
@@ -298,6 +342,15 @@ function PipelinePage() {
               ],
             },
             {
+              key: "movio",
+              label: "Quién lo movió",
+              type: "select",
+              options: [
+                { value: "todas", label: "Todas" },
+                { value: "agente", label: "Movidas por el agente" },
+              ],
+            },
+            {
               key: "tarea",
               label: "Tarea",
               type: "select",
@@ -310,7 +363,7 @@ function PipelinePage() {
           sortOptions={[]}
           searchPlaceholder="Buscar por persona o interés…" searchLabel="Buscar en oportunidades"
           searchPending={boardFetching + listFetching > 0}
-          resetKeys={["q", "asignado", "tarea"]}
+          resetKeys={["q", "asignado", "tarea", "movio"]}
         />
         <ViewTabs
           label="Vista de oportunidades"
@@ -332,13 +385,16 @@ function PipelinePage() {
         </p>
       ) : null}
       {vista === "lista" ? (
-        <PipelineListView
-          stages={stages}
-          params={pipelineParams()}
-          queryKey={["pipeline-list", pipeline.id, ...filterKey]}
-          memberName={memberName}
-          actions={actions}
-        />
+        <>
+          <EstadoFilter estado={estado} summary={summary} onChange={(next) => listSearch.setParam("estado", next === "todas" ? undefined : next)} />
+          <PipelineListView
+            stages={stages}
+            params={listParams()}
+            queryKey={["pipeline-list", pipeline.id, ...filterKey, estado]}
+            memberName={memberName}
+            actions={actions}
+          />
+        </>
       ) : (
         <BoardColumns
           pipelineId={pipeline.id}
@@ -430,29 +486,40 @@ function BoardColumns(props: {
   pendingId: string | null
   feedback: MoveFeedback | null
 }) {
-  const { stages, actions } = props
+  const { actions } = props
+  const groups = useMemo(() => boardGroups(props.stages), [props.stages])
+  const columns = useMemo(() => groups.flat(), [groups])
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
   const [dragged, setDragged] = useState<OpportunityListItem | null>(null)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [dropAccepted, setDropAccepted] = useState(false)
   const keyboardCoordinates = useCallback<KeyboardCoordinateGetter>((event, { currentCoordinates, context }) => {
-    const direction = event.code === "ArrowRight" || event.code === "ArrowDown" ? 1 : event.code === "ArrowLeft" || event.code === "ArrowUp" ? -1 : 0
-    if (!direction) return
+    const horizontal = event.code === "ArrowRight" ? 1 : event.code === "ArrowLeft" ? -1 : 0
+    const vertical = event.code === "ArrowDown" ? 1 : event.code === "ArrowUp" ? -1 : 0
+    if (!horizontal && !vertical) return
     event.preventDefault()
     const currentId = context.over?.id ?? context.active?.data.current?.card.stageId
-    const index = stages.findIndex((stage) => stage.id === currentId)
-    const target = stages[index + direction]
-    const rect = target && context.droppableRects.get(target.id)
-    if (!rect || !context.collisionRect) return
-    return { x: currentCoordinates.x + rect.left - context.collisionRect.left + (rect.width - context.collisionRect.width) / 2, y: currentCoordinates.y }
-  }, [stages])
+    const groupIndex = groups.findIndex((group) => group.some((column) => isColumn(column, currentId)))
+    const group = groups[groupIndex] ?? []
+    // Dentro de «Decidió», arriba y abajo pasan de Ganadas a Perdidas; a los lados, al paso vecino.
+    const target = vertical
+      ? group[group.findIndex((column) => isColumn(column, currentId)) + vertical]
+      : groups[groupIndex + horizontal]?.[0]
+    const rect = target && context.droppableRects.get(target.columnId)
+    if (!target || !rect || !context.collisionRect) return
+    return {
+      x: currentCoordinates.x + rect.left - context.collisionRect.left + (rect.width - context.collisionRect.width) / 2,
+      // Solo al cambiar de mitad se mueve en vertical; a los lados se mantiene la altura.
+      y: vertical ? currentCoordinates.y + rect.top - context.collisionRect.top + (rect.height - context.collisionRect.height) / 2 : currentCoordinates.y,
+    }
+  }, [groups])
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: "auto" }),
   )
-  const stageName = (id: string | number) => stages.find((stage) => stage.id === id)?.name ?? "el paso"
+  const stageName = (id: string | number) => columns.find((column) => column.columnId === id)?.name ?? "el paso"
   return (
     <DndContext
       sensors={sensors}
@@ -468,12 +535,18 @@ function BoardColumns(props: {
       }}
       onDragEnd={(event: DragEndEvent) => {
         const source = event.active.data.current?.card as OpportunityListItem | undefined
-        const target = stages.find((stage) => stage.id === event.over?.id)
+        const target = columns.find((column) => column.columnId === event.over?.id)
         // Solo una entrega aceptada a un paso abierto permanece en destino;
         // «Decidió» pide antes el motivo y la tarjeta vuelve mientras tanto.
         setDropAccepted(Boolean(source && target && target.moment !== "decidio" && target.id !== source.stageId && actions.canMove && !actions.movePending))
         setDragged(null)
-        if (source && event.over) actions.onMoveRequest(source, String(event.over.id))
+        if (!source || !event.over || !target) return
+        // Ganadas y Perdidas: la columna ya dice el resultado; perdida pide su motivo.
+        if (target.outcome) {
+          if (source.status === "open" && actions.canMove && !actions.movePending) actions.onClose(source, target.outcome)
+          return
+        }
+        actions.onMoveRequest(source, String(event.over.id))
       }}
       accessibility={{
         screenReaderInstructions: {
@@ -497,23 +570,41 @@ function BoardColumns(props: {
             : ""}
       </p>
       <ScrollArea horizontal aria-label="Tablero de oportunidades" className="min-h-0 flex-1 rounded-2xl [&_[data-slot=scroll-area-viewport]]:overscroll-contain">
-        <div className="flex min-h-full w-max min-w-full items-stretch gap-4 pb-3">
-          {stages.map((stage) => (
-            <StageLoader
-              key={stage.id}
-              stage={stage}
-              stages={stages}
-              pipelineId={props.pipelineId}
-              filterKey={props.filterKey}
-              params={props.paramsFor(stage.id)}
-              total={props.summaryByStage[stage.id]?.count}
-              amount={stage.moment === "decidio" ? null : sumAmounts(props.summaryByStage[stage.id]?.amounts ?? [], orgLocale)}
-              memberName={props.memberName}
-              actions={actions}
-              pendingId={props.pendingId}
-              feedback={props.feedback}
-            />
-          ))}
+        <div className="flex min-h-full min-w-full items-stretch gap-4 pb-3">
+          {groups.map((group) => {
+            const renderColumn = (column: BoardColumn, embedded: boolean) => (
+              <StageLoader
+                key={column.columnId}
+                stage={column}
+                stages={props.stages}
+                pipelineId={props.pipelineId}
+                filterKey={props.filterKey}
+                params={props.paramsFor(column.id)}
+                total={column.outcome === "won" ? props.summaryByStage[column.id]?.won : column.outcome === "lost" ? props.summaryByStage[column.id]?.lost : props.summaryByStage[column.id]?.count}
+                amount={
+                  column.outcome === "won"
+                    ? sumAmounts(props.summaryByStage[column.id]?.wonAmounts ?? [], orgLocale)
+                    : column.outcome === "lost"
+                      ? null
+                      : sumAmounts(props.summaryByStage[column.id]?.amounts ?? [], orgLocale)
+                }
+                memberName={props.memberName}
+                actions={actions}
+                pendingId={props.pendingId}
+                feedback={props.feedback}
+                embedded={embedded}
+              />
+            )
+            const [first] = group
+            if (!first) return null
+            if (group.length === 1) return renderColumn(first, false)
+            // «Decidió»: una columna con sus dos mitades, cada una con su lista y su «Ver más».
+            return (
+              <div key={first.id} className={`flex min-w-0 flex-col gap-3 ${COLUMN_WIDTH_CLASS}`}>
+                {group.map((column) => renderColumn(column, true))}
+              </div>
+            )
+          })}
         </div>
       </ScrollArea>
       <DragOverlay transition={reducedMotion ? "none" : undefined} dropAnimation={reducedMotion || dropAccepted ? null : { duration: 220, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
@@ -529,9 +620,9 @@ function BoardColumns(props: {
 
 /** Una columna con su propia paginación por cursor: cada paso recorre su `nextCursor` con «Cargar más». */
 function StageLoader({
-  stage, stages, pipelineId, filterKey, params, total, amount, memberName, actions, pendingId, feedback,
+  stage, stages, pipelineId, filterKey, params, total, amount, memberName, actions, pendingId, feedback, embedded = false,
 }: {
-  stage: Stage
+  stage: BoardColumn
   stages: Stage[]
   pipelineId: string
   filterKey: readonly unknown[]
@@ -542,11 +633,14 @@ function StageLoader({
   actions: CardActions
   pendingId: string | null
   feedback: MoveFeedback | null
+  /** Una mitad de «Decidió»: ocupa el alto de su columna en vez de tener ancho propio. */
+  embedded?: boolean
 }) {
   const cardsQuery = useInfiniteQuery({
-    queryKey: ["pipeline-cards", pipelineId, stage.id, ...filterKey],
+    queryKey: ["pipeline-cards", pipelineId, stage.columnId, ...filterKey],
     queryFn: ({ pageParam }: { pageParam: string | null }) => {
       const search = new URLSearchParams(params)
+      if (stage.outcome) search.set("status", stage.outcome)
       search.set("limit", String(CARD_LIMIT))
       if (pageParam) search.set("cursor", pageParam)
       return apiFetch<{ data: OpportunityListItem[]; nextCursor: string | null }>(`/api/opportunities?${search}`)
@@ -556,7 +650,7 @@ function StageLoader({
   })
   const cards = useMemo(() => cardsQuery.data?.pages.flatMap((page) => page.data) ?? [], [cardsQuery.data])
   const { active } = useDndContext()
-  const { setNodeRef, isOver } = useDroppable({ id: stage.id, disabled: !actions.canMove || cardsQuery.isLoading || actions.movePending })
+  const { setNodeRef, isOver } = useDroppable({ id: stage.columnId, disabled: !actions.canMove || cardsQuery.isLoading || actions.movePending })
   const incoming = isOver && active?.data.current?.card.stageId !== stage.id
   const listRef = useRef<HTMLDivElement>(null)
   const positions = useRef(new Map<string, number>())
@@ -583,22 +677,16 @@ function StageLoader({
     positions.current = next
   }, [cards, incoming, pendingId, feedback])
   const decided = stage.moment === "decidio"
-  return (
-    <section
-      ref={setNodeRef}
-      aria-label={`Paso ${stage.name}`}
-      className={`flex w-[min(19rem,82vw)] min-w-0 shrink-0 flex-col rounded-2xl border p-2 transition-colors duration-200 motion-reduce:transition-none lg:w-[19rem] ${
-        incoming ? "border-primary/50 bg-primary/5 ring-2 ring-primary/10" : "border-transparent bg-muted/45"
-      }`}
-    >
+  const content = (
+    <>
       <header className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-3 rounded-t-xl bg-muted px-2 pb-4 pt-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${MOMENT_ACCENT[stage.moment]}`} />
+            <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${stage.outcome === "lost" ? "bg-rose-500" : stage.outcome === "won" ? "bg-emerald-600" : MOMENT_ACCENT[stage.moment]}`} />
             <span className="truncate">{stage.name}</span>
             <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{total ?? cards.length}</span>
           </h2>
-          <p className="mt-1.5 pl-4.5 text-xs tabular-nums text-muted-foreground">{decided ? "Últimos 30 días" : (amount ?? "Sin valor estimado")}</p>
+          <p className="mt-1.5 pl-4.5 text-xs tabular-nums text-muted-foreground">{decided ? [amount, "Últimos 30 días"].filter(Boolean).join(" · ") : (amount ?? "Sin valor estimado")}</p>
         </div>
       </header>
       <div ref={listRef} className="relative flex min-h-32 flex-1 flex-col gap-3 px-0.5 pb-1">
@@ -609,7 +697,7 @@ function StageLoader({
           >
             <ArrowRight aria-hidden className="size-5" />
             <span className="font-medium">Soltar en {stage.name}</span>
-            {decided && <span className="text-xs text-muted-foreground">Después eliges si se ganó o se perdió, con su motivo</span>}
+            {decided && <span className="text-xs text-muted-foreground">{stage.outcome === "lost" ? "Pedirá el motivo de la pérdida" : "Se marcará como ganada"}</span>}
           </div>
         )}
         {cardsQuery.isFetching && !cardsQuery.isLoading && !cardsQuery.isFetchingNextPage ? <DataRefreshMarker /> : null}
@@ -663,6 +751,17 @@ function StageLoader({
           </Button>
         )}
       </div>
+    </>
+  )
+  return (
+    <section
+      ref={setNodeRef}
+      aria-label={`Paso ${stage.name}`}
+      className={`flex min-w-0 flex-col rounded-2xl border p-2 transition-colors duration-200 motion-reduce:transition-none ${embedded ? "min-h-0 flex-1" : COLUMN_WIDTH_CLASS} ${
+        incoming ? "border-primary/50 bg-primary/5 ring-2 ring-primary/10" : "border-transparent bg-muted/45"
+      }`}
+    >
+      {embedded ? <ScrollArea className="min-h-0 flex-1">{content}</ScrollArea> : content}
     </section>
   )
 }
@@ -691,7 +790,7 @@ function DraggableCard({
       onTouchStart={(event) => {
         if (!(event.target as HTMLElement).closest("a,button,input")) listeners?.onTouchStart?.(event)
       }}
-      className={`group relative shrink-0 rounded-xl border bg-card p-4 text-sm transition-[opacity,box-shadow,border-color] duration-200 motion-reduce:transition-none ${
+      className={`group relative shrink-0 rounded-xl border p-4 text-sm transition-[opacity,box-shadow,border-color] duration-200 motion-reduce:transition-none ${card.status === "lost" ? "border-dashed border-border bg-muted/50" : "bg-card"} ${
         isDragging ? "border-dashed border-primary/40 opacity-25" : "border-border/50 shadow-sm hover:border-primary/25 hover:shadow-md"
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${saving ? "ring-2 ring-primary/20" : ""}`}
     >
@@ -752,6 +851,8 @@ function CardContents({
   const task = card.nextTask
   const overdue = task ? isOverdue(task.dueAt) : false
   const owner = card.assignedUserId ? memberName(card.assignedUserId) : "Recepción"
+  // El círculo dice de quién es la oportunidad (no quién la movió): «La lleva X» o «Sin responsable».
+  const ownerLabel = card.assignedUserId ? `La lleva ${owner}` : "Sin responsable · la ve Recepción"
   const taskOwner = task
     ? task.assigneeUserId
       ? memberName(task.assigneeUserId)
@@ -769,7 +870,16 @@ function CardContents({
           actions
         )}
       </div>
-      {card.why ? <p className="text-xs text-muted-foreground">{card.why}</p> : null}
+      {card.why ? (
+        card.lastOrigin === "agente" ? (
+          <p className="flex items-start gap-1.5 text-xs font-medium text-primary">
+            <Bot aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0">{card.why}</span>
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{card.why}</p>
+        )
+      ) : null}
       {task ? (
         <p className={`flex items-start gap-1.5 text-xs ${overdue ? "font-medium text-warning" : "text-muted-foreground"}`}>
           <CalendarClock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
@@ -781,17 +891,17 @@ function CardContents({
       ) : null}
       <div className="flex items-center justify-between gap-3">
         {card.status === "won" ? (
-          <Badge variant="success">Ganada</Badge>
+          <Badge variant="success"><Check aria-hidden className="size-3.5" />Ganada</Badge>
         ) : card.status === "lost" ? (
-          <Badge variant="destructive">Perdida</Badge>
+          <Badge variant="destructive"><X aria-hidden className="size-3.5" />Perdida</Badge>
         ) : (
           <span className="text-sm font-semibold tabular-nums tracking-tight">
             {money ?? (profile.isPending ? "…" : <span className="text-xs font-normal text-muted-foreground">Sin valor</span>)}
           </span>
         )}
         <span
-          title={`Responsable: ${owner}`}
-          aria-label={`Responsable: ${owner}`}
+          title={ownerLabel}
+          aria-label={ownerLabel}
           className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-card"
         >
           {card.assignedUserId ? owner.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("") : <UserRound aria-hidden className="size-3.5" />}
@@ -814,6 +924,34 @@ function CardContents({
           )}
         </p>
       )}
+    </div>
+  )
+}
+
+/** Botones de la lista: Todas, Abiertas, Ganadas y Perdidas, con su cuenta del servidor. */
+function EstadoFilter({ estado, summary, onChange }: { estado: string; summary: Summary | null; onChange: (next: string) => void }) {
+  const options = [
+    { value: "todas", label: "Todas", count: summary?.total },
+    { value: "abiertas", label: "Abiertas", count: summary?.open },
+    { value: "ganadas", label: "Ganadas", count: summary?.won },
+    { value: "perdidas", label: "Perdidas", count: summary?.lost },
+  ]
+  return (
+    <div role="group" aria-label="Ver oportunidades por estado" className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-pressed={estado === option.value}
+          className={estado === option.value ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground"}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+          {option.count !== undefined ? <span className="tabular-nums">{option.count}</span> : null}
+        </Button>
+      ))}
     </div>
   )
 }
@@ -860,9 +998,9 @@ function PipelineListView({
         meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.status === "won" ? (
-            <Badge variant="success">Ganada</Badge>
+            <Badge variant="success"><Check aria-hidden className="size-3.5" />Ganada</Badge>
           ) : row.original.status === "lost" ? (
-            <Badge variant="destructive">Perdida</Badge>
+            <Badge variant="destructive"><X aria-hidden className="size-3.5" />Perdida</Badge>
           ) : (
             <Badge variant="secondary">{row.original.stageName}</Badge>
           ),

@@ -143,6 +143,8 @@ export type BudgetWithTotals = BudgetRow & {
 /** Quién actúa en la ruta: el servidor limita al odontólogo a lo que indicó. */
 export interface BudgetActorOpts {
   memberRole?: string
+  /** Quién entrega el presupuesto: el agente o el equipo (la oportunidad lo dice). */
+  by?: "agente" | "persona"
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1405,6 +1407,7 @@ export async function deliverBudget(
     patientId,
     budgetId,
     serviceIds: [...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id))],
+    by: opts.by,
     total: { cents: full.totalCents, currency: updated.currency },
   })
   await notifyBudget(tx, orgId)

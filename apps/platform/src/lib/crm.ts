@@ -533,6 +533,8 @@ export interface OpportunityListItem {
   closeNote: string | null
   /** Por qué está donde está, dicho por el servidor con la fecha de la clínica. */
   why: string | null
+  /** Quién hizo el último movimiento: el agente se destaca en el tablero. */
+  lastOrigin: "persona" | "agente" | "automatico" | null
   nextTask: OpportunityTask | null
   createdAt: string
   updatedAt: string
