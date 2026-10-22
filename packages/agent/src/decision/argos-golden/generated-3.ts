@@ -111,11 +111,11 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
   const branchNamed = async (word: string) =>
     (await branches()).find((row) => row.name.toLowerCase().includes(word.toLowerCase())) ?? null
   /** Un profesional de la clínica por su nombre: quien tiene horario o citas en ella. */
-  const dentistNamed = async (word: string) => {
+  const professionalNamed = async (word: string) => {
     const [row] = await tx.execute<{ id: string; name: string }>(sql`
       select u.id, u.name from "user" u
       where u.name ilike ${`%${word}%`}
-        and (u.id in (select dentist_user_id from appointment where organization_id = ${org}) or u.id in (select dentist_user_id from professional_schedule where organization_id = ${org}))
+        and (u.id in (select professional_user_id from appointment where organization_id = ${org}) or u.id in (select professional_user_id from professional_schedule where organization_id = ${org}))
       order by u.name limit 1`)
     return row ?? null
   }
@@ -125,7 +125,7 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
     sql`join patient p on p.organization_id = ${org} and p.id = ${patientColumn} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.screen is null`
   /** Citas atendidas de pacientes sin Spam ni bloqueo, hasta ahora. */
   const attended = sql`attended as (
-    select a.id, a.patient_id, a.starts_at, a.ends_at, a.branch_id, a.dentist_user_id from appointment a ${person(sql`a.patient_id`)}
+    select a.id, a.patient_id, a.starts_at, a.ends_at, a.branch_id, a.professional_user_id from appointment a ${person(sql`a.patient_id`)}
     where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at < ${nowIso}::timestamptz)`
   const upcoming = (
     patientColumn: SQL,
@@ -723,7 +723,7 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
     },
 
     g067: async () => {
-      const ana = await dentistNamed("Ana Torres")
+      const ana = await professionalNamed("Ana Torres")
       if (!ana)
         return {
           respuesta: "No hay una Dra. Ana Torres en el equipo de la clínica.",
@@ -740,15 +740,15 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
         withoutHer: number
       }>(sql`
         with ${attended},
-        hers as (select patient_id, max(starts_at) as last from attended where dentist_user_id = ${ana.id} group by 1),
-        latest as (select distinct on (patient_id) patient_id, dentist_user_id from attended order by patient_id, starts_at desc, id desc)
+        hers as (select patient_id, max(starts_at) as last from attended where professional_user_id = ${ana.id} group by 1),
+        latest as (select distinct on (patient_id) patient_id, professional_user_id from attended order by patient_id, starts_at desc, id desc)
         select count(*)::int as patients,
           count(*) filter (where not ${upcoming(sql`x.patient_id`)})::int as unbooked,
           count(*) filter (where x.last >= ${monthsAgo(18)})::int as active,
           count(*) filter (where x.last >= ${monthsAgo(18)} and not ${upcoming(sql`x.patient_id`)})::int as "activeUnbooked",
-          count(*) filter (where l.dentist_user_id = ${ana.id})::int as own,
-          count(*) filter (where l.dentist_user_id = ${ana.id} and not ${upcoming(sql`x.patient_id`)})::int as "ownUnbooked",
-          count(*) filter (where not exists (select 1 from appointment n where n.organization_id = ${org} and n.patient_id = x.patient_id and n.dentist_user_id = ${ana.id}
+          count(*) filter (where l.professional_user_id = ${ana.id})::int as own,
+          count(*) filter (where l.professional_user_id = ${ana.id} and not ${upcoming(sql`x.patient_id`)})::int as "ownUnbooked",
+          count(*) filter (where not exists (select 1 from appointment n where n.organization_id = ${org} and n.patient_id = x.patient_id and n.professional_user_id = ${ana.id}
             and n.starts_at > ${nowIso}::timestamptz and n.status in ('programada','confirmada')))::int as "withoutHer"
         from hers x join latest l on l.patient_id = x.patient_id`)
       return {
@@ -860,7 +860,7 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
     },
 
     g071: async () => {
-      const luis = await dentistNamed("Luis Prado")
+      const luis = await professionalNamed("Luis Prado")
       if (!luis)
         return {
           respuesta: "No hay un Luis Prado en el equipo de la clínica.",
@@ -886,14 +886,14 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
             count(*) filter (where a.status in ('programada','confirmada') and a.ends_at < ${to.toISOString()}::timestamptz)::int as unmarked,
             count(*) filter (where a.status in ('programada','confirmada') and a.starts_at > ${to.toISOString()}::timestamptz)::int as coming
           from appointment a
-          where a.organization_id = ${org} and a.dentist_user_id = ${luis.id} and a.starts_at >= ${from.toISOString()}::timestamptz and a.starts_at < ${end.toISOString()}::timestamptz`)
+          where a.organization_id = ${org} and a.professional_user_id = ${luis.id} and a.starts_at >= ${from.toISOString()}::timestamptz and a.starts_at < ${end.toISOString()}::timestamptz`)
       const [week] = await count(weekStart, h.now, weekEnd)
       const lastWeek = new Date(weekStart.getTime() - 7 * DAY_MS)
       const lastNow = new Date(h.now.getTime() - 7 * DAY_MS)
       const [before] = await count(lastWeek, lastNow, lastNow)
       const [signed] = await tx.execute<{ count: number }>(sql`
         select count(*)::int as count from encounter e
-        where e.organization_id = ${org} and e.dentist_user_id = ${luis.id} and e.status = 'finalizada' and e.voided_at is null
+        where e.organization_id = ${org} and e.professional_user_id = ${luis.id} and e.status = 'finalizada' and e.voided_at is null
           and e.started_at >= ${weekStart.toISOString()}::timestamptz and e.started_at < ${nowIso}::timestamptz`)
       const attendedCount = week?.attended ?? 0
       const mondayWords = new Intl.DateTimeFormat(locale, {
@@ -917,7 +917,7 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
     },
 
     g072: async () => {
-      const ana = await dentistNamed("Ana Torres")
+      const ana = await professionalNamed("Ana Torres")
       if (!ana)
         return {
           respuesta: "No hay una Dra. Ana Torres en el equipo de la clínica.",
@@ -935,7 +935,7 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
         from patient_charge c
         join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-        where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency} and e.dentist_user_id = ${ana.id}
+        where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency} and e.professional_user_id = ${ana.id}
           and c.created_at >= ${scope.window.start.toISOString()}::timestamptz and c.created_at < ${scope.window.end.toISOString()}::timestamptz`)
       const name = monthLabel(h, monthOfKey(key))
       return {
@@ -960,14 +960,14 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
         with ${firstVisitSql(org)}
         select u.name, count(*) filter (where f.starts_at >= ${monthStart}::timestamptz and f.starts_at < ${nowIso}::timestamptz)::int as month,
           count(*) filter (where f.starts_at >= ${ps}::timestamptz and f.starts_at < ${pe}::timestamptz)::int as before
-        from first_visit f join "user" u on u.id = f.dentist_user_id
+        from first_visit f join "user" u on u.id = f.professional_user_id
         where f.starts_at >= ${ps}::timestamptz and f.starts_at < ${nowIso}::timestamptz
         group by 1 order by 2 desc, 3 desc, 1`)
       const alt = await tx.execute<{ name: string; patients: number }>(sql`
         with pd as (
-          select distinct on (patient_id, dentist_user_id) patient_id, dentist_user_id, starts_at from appointment
-          where organization_id = ${org} and status = 'atendida' order by patient_id, dentist_user_id, starts_at, id)
-        select u.name, count(*)::int as patients from pd join "user" u on u.id = pd.dentist_user_id
+          select distinct on (patient_id, professional_user_id) patient_id, professional_user_id, starts_at from appointment
+          where organization_id = ${org} and status = 'atendida' order by patient_id, professional_user_id, starts_at, id)
+        select u.name, count(*)::int as patients from pd join "user" u on u.id = pd.professional_user_id
         where pd.starts_at >= ${monthStart}::timestamptz and pd.starts_at < ${nowIso}::timestamptz
         group by 1 order by 2 desc, 1`)
       const result = await h.fig("pacientes_nuevos")
@@ -999,11 +999,11 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
       const [occupancy] = await occupancyMany(tx, org, [span])
       const names = await tx.execute<{ id: string; name: string }>(sql`
         select u.id, u.name from "user" u
-        where u.id in (select dentist_user_id from professional_schedule where organization_id = ${org})
-          or u.id in (select dentist_user_id from appointment where organization_id = ${org})`)
+        where u.id in (select professional_user_id from professional_schedule where organization_id = ${org})
+          or u.id in (select professional_user_id from appointment where organization_id = ${org})`)
       const nameOf = (id: string) => names.find((row) => row.id === id)?.name ?? id
       const worked = await tx.execute<{ id: string; minutes: number; appointments: number }>(sql`
-        select a.dentist_user_id as id, coalesce(sum(extract(epoch from a.ends_at - a.starts_at) / 60), 0)::int as minutes, count(*)::int as appointments
+        select a.professional_user_id as id, coalesce(sum(extract(epoch from a.ends_at - a.starts_at) / 60), 0)::int as minutes, count(*)::int as appointments
         from appointment a
         where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at >= ${span.start.toISOString()}::timestamptz and a.starts_at < ${span.end.toISOString()}::timestamptz
         group by 1`)
@@ -1046,8 +1046,8 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
         startMin: number
         endMin: number
       }>(sql`
-        select s.dentist_user_id as id, u.name, s.weekday, s.start_min as "startMin", s.end_min as "endMin"
-        from professional_schedule s join "user" u on u.id = s.dentist_user_id
+        select s.professional_user_id as id, u.name, s.weekday, s.start_min as "startMin", s.end_min as "endMin"
+        from professional_schedule s join "user" u on u.id = s.professional_user_id
         where s.organization_id = ${org} and s.branch_id = ${site.id} and s.is_active
         order by u.name, s.weekday, s.start_min`)
       const people = [...new Map(slots.map((slot) => [slot.id, slot.name])).entries()]
@@ -1091,13 +1091,13 @@ export function generatedSolvers3(h: GoldenHelpers): GoldenSolvers {
           .join("; ")
       }
       const recent = await tx.execute<{ name: string; appointments: number }>(sql`
-        select u.name, count(*)::int as appointments from appointment a join "user" u on u.id = a.dentist_user_id
+        select u.name, count(*)::int as appointments from appointment a join "user" u on u.id = a.professional_user_id
         where a.organization_id = ${org} and a.branch_id = ${site.id} and a.status = 'atendida'
           and a.starts_at >= ${nowIso}::timestamptz - interval '90 days' and a.starts_at < ${nowIso}::timestamptz
         group by 1 order by 2 desc, 1`)
       const elsewhere = await tx.execute<{ branch: string; names: string }>(sql`
         select b.name as branch, string_agg(distinct u.name, ', ') as names from professional_schedule s
-        join "user" u on u.id = s.dentist_user_id join branch b on b.id = s.branch_id
+        join "user" u on u.id = s.professional_user_id join branch b on b.id = s.branch_id
         where s.organization_id = ${org} and s.is_active and s.branch_id <> ${site.id} and b.is_active
         group by 1 order by 1`)
       return {

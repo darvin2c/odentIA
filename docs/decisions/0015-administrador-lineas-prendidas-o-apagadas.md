@@ -41,5 +41,5 @@ El objetivo es una sola superficie, simple para una clínica mediana, donde qued
 ## Referencias
 
 - `packages/services/src/admin-lines.ts`, `agent-admin.ts`, `admin-request.ts`, `admin-drafts.ts`, `automation.ts`, `automation-routing.ts`, `automation-messages.ts`, `channel-templates.ts`; `packages/agent/src/admin.ts`.
-- `packages/ui-patterns/src/flow-diagram.tsx`; `apps/platform/src/routes/_org/agent.administrador.tsx`.
+- `packages/ui-patterns/src/flow-diagram.tsx`; `apps/dental-clinic/src/routes/_org/agent.administrador.tsx`.
 - Migraciones `0064` a `0068`. Issue darvin2c/odentIA#61.

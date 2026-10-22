@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   createAppointment,
-  createChair,
+  createRoom,
   moveAppointment,
   setAppointmentStatus,
 } from "./appointments.js"
@@ -29,13 +29,13 @@ async function fixture() {
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede control", timezone: "America/Lima" })
     .returning()
-  const chair = await f.run((tx) =>
-    createChair(tx, "org_a", { branchId: site.id, name: "Control" }),
+  const room = await f.run((tx) =>
+    createRoom(tx, "org_a", { branchId: site.id, name: "Control" }),
   )
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       rules: Array.from({ length: 7 }, (_, weekday) => ({
         weekday,
         startMin: 8 * 60,
@@ -47,8 +47,8 @@ async function fixture() {
   const startsAt = `${date}T15:00:00.000Z`
   const reservation = {
     branchId: site.id,
-    chairId: chair.id,
-    dentistUserId: f.actor,
+    roomId: room.id,
+    professionalUserId: f.actor,
     startsAt,
     durationMin: 30,
   }

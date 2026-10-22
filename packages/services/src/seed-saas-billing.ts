@@ -293,11 +293,11 @@ export async function seedSaasBillingDemo(
 export const DEMO_FOUNDER_TOKEN = "fundadores-demo"
 
 const DEMO_WAITLIST = [
-  { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", dentists: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0 },
-  { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", dentists: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
-  { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", dentists: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
-  { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", dentists: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
-  { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", dentists: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
+  { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0 },
+  { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
+  { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", professionals: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
+  { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
+  { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", professionals: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
 ] as const
 
 /**
@@ -347,13 +347,13 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
  * `seed-dev` borra y recrea a Ana y a Luis, su membresía y la aceptación del
  * contrato (que se van con ellos).
  */
-export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string; dentistUserId: string; acceptedVersion: string }): Promise<void> {
+export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string; professionalUserId: string; acceptedVersion: string }): Promise<void> {
   const now = new Date()
   const day = 86_400_000
   const clinics = [
-    { id: "seed-aviso-por-vencer", name: "Ortodoncia Lima (demo)", slug: "orto-lima-demo", branches: ["Sede Centro", "Sede Jesús María"], dentist: false },
-    { id: "seed-aviso-solo-lectura", name: "Bocas Felices (demo)", slug: "bocas-felices-demo", branches: ["Sede Única"], dentist: true },
-    { id: "seed-aviso-tope", name: "Sonrisa Miraflores (demo)", slug: "sonrisa-miraflores-demo", branches: ["Sede Miraflores"], dentist: true },
+    { id: "seed-aviso-por-vencer", name: "Ortodoncia Lima (demo)", slug: "orto-lima-demo", branches: ["Sede Centro", "Sede Jesús María"], professional: false },
+    { id: "seed-aviso-solo-lectura", name: "Bocas Felices (demo)", slug: "bocas-felices-demo", branches: ["Sede Única"], professional: true },
+    { id: "seed-aviso-tope", name: "Sonrisa Miraflores (demo)", slug: "sonrisa-miraflores-demo", branches: ["Sede Miraflores"], professional: true },
   ] as const
   for (const clinic of clinics) {
     const [exists] = await db.select({ id: organization.id }).from(organization).where(eq(organization.id, clinic.id)).limit(1)
@@ -377,7 +377,7 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
       .insert(member)
       .values([
         { id: `${clinic.id}-ana`, organizationId: clinic.id, userId: input.ownerUserId, role: "owner", createdAt: now },
-        ...(clinic.dentist ? [{ id: `${clinic.id}-luis`, organizationId: clinic.id, userId: input.dentistUserId, role: "dentist", createdAt: now }] : []),
+        ...(clinic.professional ? [{ id: `${clinic.id}-luis`, organizationId: clinic.id, userId: input.professionalUserId, role: "clinician", createdAt: now }] : []),
       ])
       .onConflictDoNothing()
     await db

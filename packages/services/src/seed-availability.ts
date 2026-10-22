@@ -41,7 +41,7 @@ export async function seedAvailability(
     .where(
       and(
         eq(member.organizationId, input.orgId),
-        inArray(member.role, ["owner", "admin", "dentist"]),
+        inArray(member.role, ["owner", "admin", "clinician"]),
       ),
     )
   // Reemplazo acotado a la sede del seed (el seed-dev ya purga la org antes).
@@ -53,10 +53,10 @@ export async function seedAvailability(
         eq(professionalSchedule.branchId, input.branchId),
       ),
     )
-  for (const dentist of members) {
+  for (const professional of members) {
     await setProfessionalSchedule(tx, input.orgId, input.ownerUserId, {
       branchId: input.branchId,
-      dentistUserId: dentist.userId,
+      professionalUserId: professional.userId,
       rules: DEMO_RULES,
     })
   }
@@ -73,8 +73,8 @@ export async function seedAvailability(
   await tx.insert(scheduleBlock).values({
     organizationId: input.orgId,
     branchId: input.branchId,
-    dentistUserId: null,
-    chairId: null,
+    professionalUserId: null,
+    roomId: null,
     kind: "bloqueo",
     reason: "Fumigación de consultorios (demo)",
     startsAt: zonedTimeToUtc(tomorrow, 12 * 60, "America/Lima"),

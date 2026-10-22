@@ -6,11 +6,11 @@ interface Occupancy {
   end: string
   status: ScheduleStatus
   professionalId: string
-  chairId: string
+  roomId: string
 }
 export interface ScheduleConflict {
   professional: boolean
-  chair: boolean
+  room: boolean
 }
 
 /** Intervalos [inicio, fin): citas contiguas no chocan. Calcula antes de filtrar la vista. */
@@ -24,7 +24,7 @@ export function findScheduleConflicts(
     .sort((a, b) => a.start - b.start)
   for (const [field, kind] of [
     ["professionalId", "professional"],
-    ["chairId", "chair"],
+    ["roomId", "room"],
   ] as const) {
     const active = new Map<string, typeof occupied>()
     for (const item of occupied) {
@@ -34,7 +34,7 @@ export function findScheduleConflicts(
         for (const id of [previous.entry.id, item.entry.id]) {
           let conflict = conflicts.get(id)
           if (!conflict) {
-            conflict = { professional: false, chair: false }
+            conflict = { professional: false, room: false }
             conflicts.set(id, conflict)
           }
           conflict[kind] = true
@@ -49,7 +49,7 @@ export function findScheduleConflicts(
 
 export function conflictLabel(conflict: ScheduleConflict | undefined): string | undefined {
   if (!conflict) return undefined
-  return conflict.professional && conflict.chair
+  return conflict.professional && conflict.room
     ? "Solapamiento de profesional y unidad dental"
     : conflict.professional
       ? "Solapamiento de profesional"

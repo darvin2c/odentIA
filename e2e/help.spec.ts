@@ -135,7 +135,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await info.attach("ayuda-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Otro rol: la misma pregunta dice que no puede entrar ahí, y no ofrece llevarlo ---
-  await fixtureDb.update(member).set({ role: "dentist" })
+  await fixtureDb.update(member).set({ role: "clinician" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   const reply = await call<{ answers: Array<{ path: string | null; restriction: string | null }> }>(page, "POST", "/api/help/ask", org.slug, {
     question: "¿Cómo invito a alguien a mi equipo?", screen: "/agenda",

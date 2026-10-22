@@ -437,7 +437,7 @@ function bornYearsAgo(years: number): string {
   return date.toISOString().slice(0, 10)
 }
 
-for (const role of ["reception", "dentist", "cashier"] as const) {
+for (const role of ["reception", "clinician", "cashier"] as const) {
   test(`ficha por rol: ${role} entra a su área y solo ve lo que su permiso autoriza`, async ({
     owner,
     fixtureDb,
@@ -497,7 +497,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       await openSection(page, "Datos")
       await expect(page.getByRole("heading", { name: "Datos personales" })).toBeVisible()
     }
-    if (role === "dentist") {
+    if (role === "clinician") {
       await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Clínica", "Plan", "Datos"])
       // Sin el CRM ve sus conversaciones sin errores; las notas son de recepción.
       expect(chats.status).toBe(200)
@@ -857,7 +857,7 @@ test("una lista y un buscador: Pacientes, Contactos nuevos y Todos con sus vínc
   await expect(page.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
   // Familiares y tutores no son contactos nuevos: aparecen en Todos, con su vínculo.
   await expect(page.getByRole("link", { name: "Madre de Lucía" })).toHaveCount(0)
-  await page.getByRole("button", { name: "Todos", exact: true }).click()
+  await page.getByRole("tab", { name: "Todos", exact: true }).click()
   await expect(page.getByRole("link", { name: "Madre de Lucía" })).toBeVisible()
   await expect(page.getByText(/de Lucía Quispe/).first()).toBeVisible()
   // Busca por teléfono en toda la clínica.

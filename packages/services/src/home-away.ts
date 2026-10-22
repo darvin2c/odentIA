@@ -52,7 +52,7 @@ export async function recordHomeVisit(
   if (!firstToday || !previous) return null
 
   const since = previous.last_seen_at
-  const own = access.ownAppointments ? sql`and a.dentist_user_id = ${userId}` : sql``
+  const own = access.ownAppointments ? sql`and a.professional_user_id = ${userId}` : sql``
   const [counts] = await tx.execute<{ appointments: number; recovered: number; cases: number }>(sql`
     select
       ${

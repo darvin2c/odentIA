@@ -28,7 +28,7 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
@@ -278,7 +278,7 @@ export interface AgentPatientSummary {
     status: string
     branchName: string
     branchTimezone: string | null
-    dentistName: string
+    professionalName: string
   }>
   budgets: Array<{ number: number; title: string; status: string }>
   /** Citas por venir que no caben en `upcomingAppointments`: se dicen con su número. */
@@ -324,11 +324,11 @@ export async function getAgentPatientSummary(
       status: appointment.status,
       branchName: branch.name,
       branchTimezone: branch.timezone,
-      dentistName: user.name,
+      professionalName: user.name,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
-    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(user, eq(user.id, appointment.professionalUserId))
     .where(
       and(
         eq(appointment.organizationId, orgId),
@@ -394,7 +394,7 @@ export async function getAgentPatientSummary(
       status: a.status,
       branchName: a.branchName,
       branchTimezone: a.branchTimezone,
-      dentistName: a.dentistName,
+      professionalName: a.professionalName,
     })),
     budgets: budgetRows.slice(0, AGENT_SUMMARY_BUDGETS_SHOWN),
     moreAppointments,
@@ -410,7 +410,7 @@ export interface ContactAppointmentOption {
   startsAt: string
   branchName: string
   branchTimezone: string | null
-  dentistName: string
+  professionalName: string
 }
 
 /** Una cita de las que quedaron confirmadas, con si ya lo estaba. */
@@ -483,11 +483,11 @@ export async function confirmAppointmentByContact(
         startsAt: appointment.startsAt,
         branchName: branch.name,
         branchTimezone: branch.timezone,
-        dentistName: user.name,
+        professionalName: user.name,
       })
       .from(appointment)
       .innerJoin(branch, eq(branch.id, appointment.branchId))
-      .innerJoin(user, eq(user.id, appointment.dentistUserId))
+      .innerJoin(user, eq(user.id, appointment.professionalUserId))
       .where(
         and(
           eq(appointment.organizationId, orgId),
@@ -1045,25 +1045,25 @@ export interface FreeGapInput {
   /** Sin indicar, la del servicio y, si no hay servicio, la de una cita regular en la sede. */
   durationMin?: number
   branchId?: string
-  dentistUserId?: string
+  professionalUserId?: string
   /**
    * El identificador del profesional que recibe el agente (`professionalRef`):
    * «quiero cita con la Dra. Rojas». Solo sirve para pedir sus huecos.
    */
   professionalRef?: string
-  chairId?: string
+  roomId?: string
   serviceId?: string
 }
 
 export interface FreeGap {
   startsAt: string
   endsAt: string
-  dentistUserId: string
+  professionalUserId: string
   /** Lo que ve el agente en lugar del usuario (`professionalRef`): nunca recibe ids de usuario. */
   professionalRef: string
   /** Nombre del profesional, para decirlo a la persona. */
-  dentistName: string | null
-  chairId: string | null
+  professionalName: string | null
+  roomId: string | null
 }
 
 /**
@@ -1120,26 +1120,26 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
-  let dentistUserId = input.dentistUserId
+  let professionalUserId = input.professionalUserId
   if (input.professionalRef?.trim()) {
     const resolved = await resolveProfessionalRef(tx, orgId, input.professionalRef)
     if (!resolved) throw validation("Ese profesional no existe en la clínica: usa el identificador de la lista de profesionales")
-    dentistUserId = resolved
+    professionalUserId = resolved
   }
   const { slots, truncated, timeZone, attending } = await listAvailableSlots(tx, orgId, {
     branchId: input.branchId,
-    dentistUserId,
-    chairId: input.chairId,
+    professionalUserId,
+    roomId: input.roomId,
     serviceId: input.serviceId,
     from: from.toISOString(),
     to: to.toISOString(),
     ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
-    perDentistPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
+    perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
   })
   const shown = slots.slice(0, GAPS_SHOWN)
-  const ids = [...new Set([...shown.map((s) => s.dentistUserId), ...(attending?.dentistUserIds ?? [])])]
+  const ids = [...new Set([...shown.map((s) => s.professionalUserId), ...(attending?.professionalUserIds ?? [])])]
   const names = ids.length
     ? new Map(
         (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids))).map((row) => [row.id, row.name]),
@@ -1149,20 +1149,20 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     gaps: shown.map((s) => ({
       startsAt: s.startsAt,
       endsAt: s.endsAt,
-      dentistUserId: s.dentistUserId,
-      professionalRef: professionalRef(orgId, s.dentistUserId),
-      dentistName: names.get(s.dentistUserId) ?? null,
-      chairId: s.chairId,
+      professionalUserId: s.professionalUserId,
+      professionalRef: professionalRef(orgId, s.professionalUserId),
+      professionalName: names.get(s.professionalUserId) ?? null,
+      roomId: s.roomId,
     })),
     truncated: truncated || slots.length > GAPS_SHOWN,
     timeZone,
     attending: attending
       ? {
           specialtyName: attending.specialtyName,
-          names: attending.dentistUserIds.map((id) => names.get(id)).filter((name): name is string => Boolean(name)),
+          names: attending.professionalUserIds.map((id) => names.get(id)).filter((name): name is string => Boolean(name)),
         }
       : null,
-    professionalNotAttending: Boolean(attending && dentistUserId && !attending.dentistUserIds.includes(dentistUserId)),
+    professionalNotAttending: Boolean(attending && professionalUserId && !attending.professionalUserIds.includes(professionalUserId)),
   }
 }
 
@@ -1173,7 +1173,7 @@ export interface ProposalContext {
   patientName: string | null
   channel: string | null
   branchName: string | null
-  dentistName: string | null
+  professionalName: string | null
   opportunityTitle: string | null
   beforeSummary: string | null
   /** Siempre string: etiqueta del acto si el legado no trae evidencia. */
@@ -1660,7 +1660,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     }
     if (isUuid(payload.branchId)) branchIds.add(payload.branchId)
     // Los ids de usuario no son UUID (los pone el proveedor de identidad).
-    if (typeof payload.dentistUserId === "string" && payload.dentistUserId) userIds.add(payload.dentistUserId)
+    if (typeof payload.professionalUserId === "string" && payload.professionalUserId) userIds.add(payload.professionalUserId)
     if (row.action === "decidir_presupuesto" && isUuid(payload.budgetId)) budgetIds.add(payload.budgetId)
   }
   const [contacts, convs, opps, appts, patients, branches, users, budgets] = await Promise.all([
@@ -1808,11 +1808,11 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       channel: connectionId ? (channelByConnection.get(connectionId) ?? null) : null,
       branchName:
         typeof payload.branchId === "string" ? (branchById.get(payload.branchId as string) ?? null) : null,
-      dentistName:
-        typeof result.dentistName === "string"
-          ? (result.dentistName as string)
-          : typeof payload.dentistUserId === "string"
-            ? (userById.get(payload.dentistUserId as string) ?? null)
+      professionalName:
+        typeof result.professionalName === "string"
+          ? (result.professionalName as string)
+          : typeof payload.professionalUserId === "string"
+            ? (userById.get(payload.professionalUserId as string) ?? null)
             : null,
       opportunityTitle: opp?.title ?? null,
       beforeSummary: row.beforeSummary ?? null,
@@ -1850,8 +1850,8 @@ function uuidField(payload: Record<string, unknown>, key: string, label: string,
 function validatePayload(action: ProposalAction, payload: Record<string, unknown>): void {
   if (action === "reservar_cita") {
     if (typeof payload.patientId !== "string" || !payload.patientId) throw validation("patientId es obligatorio")
-    if (typeof payload.dentistUserId !== "string" || !payload.dentistUserId) throw validation("dentistUserId es obligatorio")
-    if (typeof payload.chairId !== "string" || !payload.chairId) throw validation("chairId es obligatorio")
+    if (typeof payload.professionalUserId !== "string" || !payload.professionalUserId) throw validation("professionalUserId es obligatorio")
+    if (typeof payload.roomId !== "string" || !payload.roomId) throw validation("roomId es obligatorio")
     if (typeof payload.startsAt !== "string" || Number.isNaN(Date.parse(payload.startsAt))) throw validation("startsAt inválido")
     return
   }
@@ -2411,7 +2411,7 @@ function dayAndHour(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">
  * lee, no reserva nada.
  */
 async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<boolean> {
-  if (typeof payload.startsAt !== "string" || typeof payload.dentistUserId !== "string" || typeof payload.chairId !== "string") {
+  if (typeof payload.startsAt !== "string" || typeof payload.professionalUserId !== "string" || typeof payload.roomId !== "string") {
     return false
   }
   const startsAt = new Date(payload.startsAt)
@@ -2420,19 +2420,19 @@ async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, u
   const endsAt = typeof payload.endsAt === "string" ? new Date(payload.endsAt) : new Date(startsAt.getTime() + minutes * 60_000)
   let branchId = typeof payload.branchId === "string" ? payload.branchId : null
   if (!branchId) {
-    const [chair] = await tx
-      .select({ branchId: scheduleChair.branchId })
-      .from(scheduleChair)
-      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, payload.chairId)))
+    const [room] = await tx
+      .select({ branchId: scheduleRoom.branchId })
+      .from(scheduleRoom)
+      .where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.id, payload.roomId)))
       .limit(1)
-    branchId = chair?.branchId ?? null
+    branchId = room?.branchId ?? null
   }
   if (!branchId) return false
   try {
     await validateAvailability(tx, orgId, {
       branchId,
-      dentistUserId: payload.dentistUserId,
-      chairId: payload.chairId,
+      professionalUserId: payload.professionalUserId,
+      roomId: payload.roomId,
       startsAt,
       endsAt,
     })
@@ -2470,11 +2470,11 @@ export async function listAwaitingAnswer(
   for (const proposal of enriched) {
     const action = proposal.action as AppointmentProposalAction
     const when = dayAndHour(proposal.payload.startsAt, zone)
-    const dentist = proposal.context.dentistName
+    const professional = proposal.context.professionalName
     let text: string
     let taken: boolean
     if (action === "reservar_cita") {
-      text = `Le propuse el ${when ?? "horario que eligió"}${dentist ? ` con ${dentist}` : ""}`
+      text = `Le propuse el ${when ?? "horario que eligió"}${professional ? ` con ${professional}` : ""}`
       taken = !(await proposedSlotFree(tx, orgId, proposal.payload))
     } else if (action === "reprogramar_cita") {
       text = `Le propuse mover su cita al ${when ?? "nuevo horario"}`
@@ -2651,8 +2651,8 @@ export async function executeProposal(
       const created = await createAppointment(tx, orgId, actorUserId, {
         branchId: typeof payload.branchId === "string" ? (payload.branchId as string) : undefined,
         patientId,
-        dentistUserId: payload.dentistUserId as string,
-        chairId: payload.chairId as string,
+        professionalUserId: payload.professionalUserId as string,
+        roomId: payload.roomId as string,
         serviceId: typeof payload.serviceId === "string" ? (payload.serviceId as string) : undefined,
         startsAt: payload.startsAt as string,
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
@@ -2666,7 +2666,7 @@ export async function executeProposal(
         // Se le dijo en la misma conversación: «Recordar la cita» no repite el aviso.
         notice: false,
       })
-      result = { appointmentId: created.id, startsAt: created.startsAt, dentistName: created.dentistName }
+      result = { appointmentId: created.id, startsAt: created.startsAt, professionalName: created.professionalName }
     } else if (action === "reprogramar_cita") {
       const appointmentId = payload.appointmentId as string
       const [liveAppt] = await tx
@@ -2696,8 +2696,8 @@ export async function executeProposal(
         expectedVersion: payload.expectedVersion as number,
         startsAt: payload.startsAt as string,
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
-        dentistUserId: typeof payload.dentistUserId === "string" ? (payload.dentistUserId as string) : undefined,
-        chairId: typeof payload.chairId === "string" ? (payload.chairId as string) : undefined,
+        professionalUserId: typeof payload.professionalUserId === "string" ? (payload.professionalUserId as string) : undefined,
+        roomId: typeof payload.roomId === "string" ? (payload.roomId as string) : undefined,
       }
       // Lo pide la persona en la conversación: la regla de la cita propia,
       // la misma del enlace y el portal (no empezó, hora futura, horizonte).
@@ -3535,28 +3535,28 @@ async function topicSourceMessage(tx: Db, orgId: string, conversationId: string,
  * equipo, nulo: el tema queda para recepción.
  */
 async function treatingProfessional(tx: Db, orgId: string, contactId: string): Promise<string | null> {
-  const rows = await tx.execute<{ dentist_user_id: string }>(sql`
-    select who.dentist_user_id from (
-      (select a.dentist_user_id, 0 as rank, a.starts_at as at from appointment a
+  const rows = await tx.execute<{ professional_user_id: string }>(sql`
+    select who.professional_user_id from (
+      (select a.professional_user_id, 0 as rank, a.starts_at as at from appointment a
         join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
         where a.organization_id = ${orgId} and p.person_id = ${contactId}
           and a.status = 'atendida' and a.starts_at <= now()
         order by a.starts_at desc limit 1)
       union all
-      (select a.dentist_user_id, 1 as rank, a.starts_at as at from appointment a
+      (select a.professional_user_id, 1 as rank, a.starts_at as at from appointment a
         join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
         where a.organization_id = ${orgId} and p.person_id = ${contactId}
           and a.status in ('programada', 'confirmada') and a.starts_at > now()
         order by a.starts_at asc limit 1)
     ) who
-    join member mb on mb.organization_id = ${orgId} and mb.user_id = who.dentist_user_id
+    join member mb on mb.organization_id = ${orgId} and mb.user_id = who.professional_user_id
     where not exists (
       select 1 from schedule_block b
-      where b.organization_id = ${orgId} and b.dentist_user_id = who.dentist_user_id
+      where b.organization_id = ${orgId} and b.professional_user_id = who.professional_user_id
         and b.starts_at <= now() and b.ends_at > now())
     order by who.rank
     limit 1`)
-  return rows[0]?.dentist_user_id ?? null
+  return rows[0]?.professional_user_id ?? null
 }
 
 const HANDOFF_BRIEF_CHARS = 400

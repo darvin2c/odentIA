@@ -250,7 +250,7 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   // Lo mínimo es para alguien nuevo o para la persona de la página (o alguien a
   // su cargo): sin vínculo con ella no se acepta; sin permiso de pacientes, tampoco.
   expect((await post("reception", { scope: "essentials", contacts: [] })).status).toBe(400)
-  expect((await post("dentist", { scope: "essentials", conversationId: thread!.id })).status).toBe(403)
+  expect((await post("clinician", { scope: "essentials", conversationId: thread!.id })).status).toBe(403)
   expect((await post("reception", { scope: "otro", conversationId: thread!.id })).status).toBe(400)
 
   const created = await post("reception", { scope: "essentials", conversationId: thread!.id })
@@ -272,7 +272,7 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
     })
   const postFresh = (role: string, phone: string | null) =>
     buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
-  expect((await postFresh("dentist", "+51987111222")).status).toBe(403)
+  expect((await postFresh("clinician", "+51987111222")).status).toBe(403)
   expect((await postFresh("reception", null)).status).toBe(400)
   const agenda = await postFresh("reception", "+51987111222")
   expect(agenda.status).toBe(201)
@@ -302,12 +302,12 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
     buildApp(role).request(`/patients/${patientId}${path}`, { method: "GET" })
   // Los guardas de caja no alcanzan a las subrutas clínicas ni de filiación.
   expect((await get("reception", "/responsibilities")).status).toBe(200)
-  expect((await get("dentist", "/responsibilities")).status).toBe(200)
-  expect((await get("dentist", "/follow-ups")).status).toBe(200)
-  expect((await get("dentist", "/prescriptions")).status).toBe(200)
+  expect((await get("clinician", "/responsibilities")).status).toBe(200)
+  expect((await get("clinician", "/follow-ups")).status).toBe(200)
+  expect((await get("clinician", "/prescriptions")).status).toBe(200)
   // Caja sigue cerrada para quien no cobra, y clínica para quien no atiende.
   // Presupuestos tienen permiso propio: el odontólogo lee los de su plan.
-  for (const role of ["reception", "dentist"]) {
+  for (const role of ["reception", "clinician"]) {
     expect((await get(role, "/account")).status).toBe(403)
     const charge = await buildApp(role).request(`/patients/${patientId}/charges`, {
       method: "POST",
@@ -318,7 +318,7 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   }
   // Recepción lee el presupuesto como documento de la persona (decisión 4).
   expect((await get("reception", "/budgets")).status).toBe(200)
-  expect((await get("dentist", "/budgets")).status).toBe(200)
+  expect((await get("clinician", "/budgets")).status).toBe(200)
   // «Qué sigue» del Plan: lo pide quien ve alguna parte del plan; quien solo
   // tiene tareas, no.
   expect((await get("reception", "/next-step")).status).toBe(200)
@@ -332,7 +332,7 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
     "followUps",
     "treatments",
   ])
-  expect((await get("dentist", "/coordination")).status).toBe(200)
+  expect((await get("clinician", "/coordination")).status).toBe(200)
   expect((await get("cashier", "/coordination")).status).toBe(403)
   // Cada lectura clínica atendida deja traza; la lee solo quien audita. Todos
   // los roles de prueba comparten usuario: se compara el contador de la franja.
@@ -350,20 +350,20 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   // (condiciones, medicación, salud declarada) se pide con `?clinical=1`
   // desde Clínica o la atención, y esa lectura sí la deja.
   const before = hitsOf(await readLog(), "antecedentes")
-  expect((await get("dentist", "")).status).toBe(200)
+  expect((await get("clinician", "")).status).toBe(200)
   expect(hitsOf(await readLog(), "antecedentes")).toBe(before)
-  expect((await get("dentist", "?clinical=1")).status).toBe(200)
-  const afterDentist = hitsOf(await readLog(), "antecedentes")
-  expect(afterDentist).toBe(before + 1)
+  expect((await get("clinician", "?clinical=1")).status).toBe(200)
+  const afterProfessional = hitsOf(await readLog(), "antecedentes")
+  expect(afterProfessional).toBe(before + 1)
   expect((await get("reception", "")).status).toBe(200)
   const entries = await readLog()
-  expect(hitsOf(entries, "antecedentes")).toBe(afterDentist)
+  expect(hitsOf(entries, "antecedentes")).toBe(afterProfessional)
   expect(entries.map((entry) => entry.resource).sort()).toEqual([
     "antecedentes",
     "controles",
     "recetas",
   ])
-  expect((await get("dentist", "/access-log")).status).toBe(403)
+  expect((await get("clinician", "/access-log")).status).toBe(403)
   expect((await get("reception", "/access-log")).status).toBe(403)
   expect((await get("cashier", "/account")).status).toBe(200)
   expect((await get("cashier", "/follow-ups")).status).toBe(403)
@@ -396,8 +396,8 @@ it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async (
 })
 
 it("GET /diagnosis-codes?q=caries busca en la lista de la clínica con rol clínico; member 403", async () => {
-  const dentist = buildApp("dentist")
-  const res = await dentist.request("/diagnosis-codes?q=caries", { method: "GET" })
+  const professional = buildApp("clinician")
+  const res = await professional.request("/diagnosis-codes?q=caries", { method: "GET" })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: { code: string }[] }
   expect(body.data.length).toBeGreaterThan(0)
@@ -625,11 +625,11 @@ it("atención en curso: solo cuál es y quién la lleva, para quien atiende y si
   const path = `/patients/${patientId}/open-encounter`
   expect((await buildApp("reception").request(path)).status).toBe(403)
   expect((await buildApp("cashier").request(path)).status).toBe(403)
-  const dentist = buildApp("dentist")
-  const none = await dentist.request(path)
+  const professional = buildApp("clinician")
+  const none = await professional.request(path)
   expect(none.status).toBe(200)
   expect(await none.json()).toEqual({ data: null })
-  const created = await dentist.request(`/patients/${patientId}/encounters`, {
+  const created = await professional.request(`/patients/${patientId}/encounters`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ reason: "Dolor" }),
@@ -643,9 +643,9 @@ it("atención en curso: solo cuál es y quién la lleva, para quien atiende y si
       }
     ).data.reduce((sum, entry) => sum + entry.hits, 0)
   const before = await log()
-  const open = await dentist.request(path)
+  const open = await professional.request(path)
   expect(open.status).toBe(200)
-  expect(await open.json()).toEqual({ data: { id: draft.id, dentistUserId: "u-1" } })
+  expect(await open.json()).toEqual({ data: { id: draft.id, professionalUserId: "u-1" } })
   // No es una lectura de la historia: no deja traza en la bitácora.
   expect(await log()).toBe(before)
 })
@@ -888,18 +888,18 @@ it("el periodontograma es parte de la clínica y su lectura queda en la bitácor
     return entries.find((entry) => entry.resource === "periodontograma")?.hits ?? 0
   }
   const before = await hits()
-  const list = await get("dentist", "/periodontal")
+  const list = await get("clinician", "/periodontal")
   expect(list.status).toBe(200)
   expect(((await list.json()) as { data: unknown[] }).data).toEqual([])
   expect(await hits()).toBe(before + 1)
   // Empezar exige una atención en borrador de quien la lleva: sin ella, 404.
-  const start = await buildApp("dentist").request(`/patients/${patientId}/periodontal`, {
+  const start = await buildApp("clinician").request(`/patients/${patientId}/periodontal`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ encounterId: crypto.randomUUID() }),
   })
   expect(start.status).toBe(404)
-  const invalid = await buildApp("dentist").request(`/patients/${patientId}/periodontal/compare?before=x&after=y`, { method: "GET" })
+  const invalid = await buildApp("clinician").request(`/patients/${patientId}/periodontal/compare?before=x&after=y`, { method: "GET" })
   expect(invalid.status).toBe(400)
 })
 
@@ -914,18 +914,18 @@ it("las alergias se agregan y se quitan una por una, solo quien escribe en la hi
     })
   // Recepción ve las alergias activas (`clinical.alerts`), pero no las cambia.
   expect((await post("reception", "", { substance: "Látex", severity: "leve" })).status).toBe(403)
-  const added = await post("dentist", "", { substanceSystem: "atc", substanceCode: "J01C", severity: "severa" })
+  const added = await post("clinician", "", { substanceSystem: "atc", substanceCode: "J01C", severity: "severa" })
   expect(added.status).toBe(201)
   const allergy = ((await added.json()) as { data: { id: string; substance: string } }).data
   expect(allergy.substance).toBe("Penicilinas (grupo)")
-  expect((await post("dentist", "", { substance: "penicilina" })).status).toBe(409)
+  expect((await post("clinician", "", { substance: "penicilina" })).status).toBe(409)
   expect((await post("reception", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(403)
-  expect((await post("dentist", `/${allergy.id}/remove`, { reason: "otro" })).status).toBe(400)
-  expect((await post("dentist", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(200)
-  expect((await post("dentist", `/${allergy.id}/restore`)).status).toBe(200)
-  const reviewed = await post("dentist", "/reviewed")
+  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "otro" })).status).toBe(400)
+  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(200)
+  expect((await post("clinician", `/${allergy.id}/restore`)).status).toBe(200)
+  const reviewed = await post("clinician", "/reviewed")
   expect(reviewed.status).toBe(200)
-  const health = await buildApp("dentist").request(`/patients/${fresh.id}/health`, { method: "GET" })
+  const health = await buildApp("clinician").request(`/patients/${fresh.id}/health`, { method: "GET" })
   const data = ((await health.json()) as { data: { allergyReviewDue: boolean; allergiesReviewedBy: string } }).data
   expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
 })

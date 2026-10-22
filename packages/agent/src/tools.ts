@@ -1099,7 +1099,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       for (const a of summary.upcomingAppointments) {
         const cuando = formatZoned(new Date(a.startsAt), { timezone: a.branchTimezone ?? zone.timezone, locale: zone.locale })
         lines.push(
-          `- Cita ${a.status} (id ${a.appointmentId}, versión ${a.version}) el ${cuando}, ${a.branchName} con ${a.dentistName}.`,
+          `- Cita ${a.status} (id ${a.appointmentId}, versión ${a.version}) el ${cuando}, ${a.branchName} con ${a.professionalName}.`,
         )
       }
       if (summary.moreAppointments > 0) {
@@ -1150,7 +1150,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       to: string
       durationMin?: number
       profesional?: string
-      chairId?: string
+      roomId?: string
       serviceId?: string
     }) => {
       const { profesional, ...rest } = input
@@ -1177,10 +1177,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ...gaps.map((g) => {
           const start = new Date(g.startsAt)
           const end = new Date(g.endsAt)
-          const chair = g.chairId ?? "sin unidad dental asignada: filtra por una unidad dental real o deriva"
+          const room = g.roomId ?? "sin unidad dental asignada: filtra por una unidad dental real o deriva"
           return (
-            `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.dentistName ? ` con ${g.dentistName}` : ""}` +
-            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${chair} · profesional ${g.professionalRef}]`
+            `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.professionalName ? ` con ${g.professionalName}` : ""}` +
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${room} · profesional ${g.professionalRef}]`
           )
         }),
         "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, unidad dental y profesional): nunca inventes IDs ni horas.",
@@ -1201,7 +1201,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           .string()
           .optional()
           .describe("El identificador de la lista de profesionales («pro-…»), cuando la persona pide a alguien en particular."),
-        chairId: z.string().uuid().optional(),
+        roomId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
       }),
     },
@@ -1288,8 +1288,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const proposeBooking = tool(
     async (input: {
       patientId: string
-      dentistUserId: string
-      chairId: string
+      professionalUserId: string
+      roomId: string
       startsAt: string
       branchId?: string
       serviceId?: string
@@ -1301,9 +1301,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
       // El agente solo conoce al profesional por su referencia («pro-…»): el usuario lo pone el servidor.
-      const dentistUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.dentistUserId))
-      if (!dentistUserId) return UNKNOWN_PROFESSIONAL
-      const { reason, ...payload } = { ...input, dentistUserId }
+      const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
+      if (!professionalUserId) return UNKNOWN_PROFESSIONAL
+      const { reason, ...payload } = { ...input, professionalUserId }
       return propose("reservar_cita", payload, "proponer_cita", reason)
     },
     {
@@ -1319,20 +1319,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       appointmentId: string
       startsAt: string
       expectedVersion: number
-      dentistUserId?: string
-      chairId?: string
+      professionalUserId?: string
+      roomId?: string
       reason?: string
     }) => {
       if (ctx.sandbox) return sandboxPropose("reprogramar_cita", await sandboxWhen(input.startsAt))
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reprogramar la cita ${input.appointmentId} al ${input.startsAt}.`
       }
-      let dentistUserId: string | undefined
-      if (input.dentistUserId) {
-        dentistUserId = (await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.dentistUserId as string))) ?? undefined
-        if (!dentistUserId) return UNKNOWN_PROFESSIONAL
+      let professionalUserId: string | undefined
+      if (input.professionalUserId) {
+        professionalUserId = (await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId as string))) ?? undefined
+        if (!professionalUserId) return UNKNOWN_PROFESSIONAL
       }
-      const { reason, ...payload } = { ...input, ...(dentistUserId ? { dentistUserId } : {}) }
+      const { reason, ...payload } = { ...input, ...(professionalUserId ? { professionalUserId } : {}) }
       return propose("reprogramar_cita", payload, "reprogramar_cita", reason)
     },
     {
@@ -1388,7 +1388,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       const zone = await orgZone()
       const said = (item: ContactAppointmentOption) =>
-        `${item.patientName}, el ${formatZoned(new Date(item.startsAt), { timezone: item.branchTimezone ?? zone.timezone, locale: zone.locale })}, en ${item.branchName} con ${item.dentistName}`
+        `${item.patientName}, el ${formatZoned(new Date(item.startsAt), { timezone: item.branchTimezone ?? zone.timezone, locale: zone.locale })}, en ${item.branchName} con ${item.professionalName}`
       if (result.outcome === "ninguna") {
         return "La persona no tiene citas por venir que confirmar. Si habla de otra cita, pregúntale cuál o pasa el caso a una persona."
       }

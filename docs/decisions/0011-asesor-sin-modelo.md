@@ -31,4 +31,4 @@ Quien administra una clínica mediana no tiene tiempo de recorrer agenda, presup
 
 ## Referencias
 
-- `packages/services/src/agent-advisor.ts`, `apps/api/src/routes/agent-advisor.ts`, `apps/platform/src/components/agent/advisor.tsx`, migración `0053`.
+- `packages/services/src/agent-advisor.ts`, `apps/api/src/routes/agent-advisor.ts`, `apps/dental-clinic/src/components/agent/advisor.tsx`, migración `0053`.

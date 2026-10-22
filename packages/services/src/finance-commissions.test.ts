@@ -53,7 +53,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     id: randomUUID(),
     organizationId: "org_a",
     userId: f.actor,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   })
   const branchId = await seedBranch()

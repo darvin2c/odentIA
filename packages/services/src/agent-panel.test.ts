@@ -92,7 +92,7 @@ it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cu
   // Espera al interlocutor: una cita propuesta en el hilo. Es lo único que queda pendiente.
   await run((tx) => createProposal(tx, ORG, {
     conversationId, action: "reservar_cita", idempotencyKey: "panel:cita-1",
-    payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
+    payload: { patientId: randomUUID(), professionalUserId: OWNER, roomId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
   // Un mensaje del agente sale directo: no queda nada que decidir.
   const message = await run((tx) => createProposal(tx, ORG, {

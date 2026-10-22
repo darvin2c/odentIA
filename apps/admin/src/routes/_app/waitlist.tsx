@@ -72,7 +72,7 @@ const ONE_LABEL: Record<Exclude<StatusFilter, "todas">, string> = {
   entro: "Entró",
   descartada: "Descartada",
 }
-const DENTISTS_LABEL: Record<string, string> = { "1": "1", "2-3": "2 a 3", "4-9": "4 a 9", "10+": "10 o más" }
+const PROFESSIONALS_LABEL: Record<string, string> = { "1": "1", "2-3": "2 a 3", "4-9": "4 a 9", "10+": "10 o más" }
 const TOOL_LABEL: Record<string, string> = {
   nada: "Nada",
   cuaderno_excel: "Cuaderno o Excel",
@@ -88,7 +88,7 @@ const row = z.object({
   clinicName: z.string(),
   countryCode: z.string(),
   city: z.string(),
-  dentists: z.string(),
+  professionals: z.string(),
   currentTool: z.string(),
   status: z.enum(["por_revisar", "invitada", "entro", "descartada"]),
   note: z.string().nullable(),
@@ -198,7 +198,7 @@ function WaitlistPage() {
         meta: { view: { primary: true } },
       },
       { id: "where", header: "Dónde", cell: ({ row: r }) => `${r.original.city}, ${countryName(r.original.countryCode)}` },
-      { id: "dentists", header: "Odontólogos", cell: ({ row: r }) => DENTISTS_LABEL[r.original.dentists] ?? r.original.dentists },
+      { id: "professionals", header: "Odontólogos", cell: ({ row: r }) => PROFESSIONALS_LABEL[r.original.professionals] ?? r.original.professionals },
       { id: "tool", header: "Usan hoy", cell: ({ row: r }) => TOOL_LABEL[r.original.currentTool] ?? r.original.currentTool },
       { id: "asked", header: "Pidió", cell: ({ row: r }) => askedText(r.original.createdAt, new Date()) },
       {
@@ -210,7 +210,7 @@ function WaitlistPage() {
     ],
     [],
   )
-  const columnVisibility: VisibilityState = compact ? { where: false, dentists: false, tool: false, asked: false, who: false } : {}
+  const columnVisibility: VisibilityState = compact ? { where: false, professionals: false, tool: false, asked: false, who: false } : {}
   const table = useReactTable({ data: rows, columns, state: { columnVisibility }, getCoreRowModel: getCoreRowModel() })
   const counts = list.data?.counts ?? {}
   const seats = list.data?.seats ?? null
@@ -477,7 +477,7 @@ function RequestDrawer({
                   {item.phone}
                 </a>
               </DetailField>
-              <DetailField label="Odontólogos">{DENTISTS_LABEL[item.dentists] ?? item.dentists}</DetailField>
+              <DetailField label="Odontólogos">{PROFESSIONALS_LABEL[item.professionals] ?? item.professionals}</DetailField>
               <DetailField label="Usan hoy">{TOOL_LABEL[item.currentTool] ?? item.currentTool}</DetailField>
             </DetailList>
           </DetailSection>

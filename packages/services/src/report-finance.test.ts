@@ -60,7 +60,7 @@ function currentMonth(): { year: number; month: number; key: string } {
 
 it("comisiones: las del reporte son las de Finanzas › Comisiones y su pago no se cuenta dos veces", async () => {
   const f = await clinicalFixture()
-  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "dentist", createdAt: new Date() })
+  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede reporte ${randomUUID()}` }).returning()
   const branchId = site!.id
   const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))

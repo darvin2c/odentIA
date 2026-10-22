@@ -39,7 +39,7 @@
  */
 
 /** Roles de membresía de la organización. */
-export const ORG_ROLES = ["owner", "admin", "reception", "dentist", "cashier", "member"] as const;
+export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier", "member"] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 /** Dominios con permisos `.read`/`.write`. */
@@ -80,7 +80,7 @@ export const ROLE_LABELS: Record<OrgRole, string> = {
   owner: "Propietario",
   admin: "Administrador",
   reception: "Recepción",
-  dentist: "Odontólogo",
+  clinician: "Odontólogo",
   cashier: "Caja",
   member: "Miembro",
 };
@@ -91,7 +91,7 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   admin: "Puede hacer todo en la clínica, menos nombrar o quitar propietarios.",
   reception:
     "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve el presupuesto como lo recibe la persona, lo envía, anota su respuesta y agenda lo aceptado, sin cambiar precios. Ve las alergias del paciente y sube la tomografía que trae. En Inventario ve lo que hay sin precios, recibe lo que llega y registra lo que se usa fuera de una atención. No ve la historia clínica, la caja ni la configuración del agente.",
-  dentist: "Pacientes, historia clínica, presupuestos de lo que indicó, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
+  clinician: "Pacientes, historia clínica, presupuestos de lo que indicó, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
   cashier: "Ve a los pacientes, lleva la caja, registra la respuesta a los presupuestos y ve las tareas. Sin historia clínica ni agenda.",
   member: "Acceso mínimo: solo ve las tareas.",
 };
@@ -148,7 +148,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "inventory.stock",
     "inventory.receive",
   ],
-  dentist: [
+  clinician: [
     "patients.read",
     "clinical.read",
     "clinical.write",

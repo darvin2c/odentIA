@@ -23,7 +23,7 @@ import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_KIND_KEYS } from 
 import { createOwnerDb } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
@@ -85,7 +85,7 @@ import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-oper
 import { ANSWER_READY_MESSAGE, replyId } from "./automation-messages.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
-import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
+import { createAppointment, createRoom, setAppointmentArrival } from "./appointments.js"
 import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
 import {
   addBudgetItems,
@@ -584,7 +584,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   // La atención referencia su cita (ADR 0002): las citas se borran después.
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
-  await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
+  await db.delete(scheduleRoom).where(inArray(scheduleRoom.organizationId, SEED_ORGS))
   await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
@@ -851,21 +851,21 @@ await db.insert(member).values([
     id: randomUUID(),
     organizationId: ORG_A,
     userId: LUIS_ID,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   },
   {
     id: randomUUID(),
     organizationId: ORG_A,
     userId: ROJAS_ID,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   },
   {
     id: randomUUID(),
     organizationId: ORG_A,
     userId: SALAS_ID,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   },
   { id: randomUUID(), organizationId: ORG_A, userId: CAJA_ID, role: "cashier", createdAt: new Date() },
@@ -873,7 +873,7 @@ await db.insert(member).values([
     id: randomUUID(),
     organizationId: ORG_B,
     userId: LUIS_ID,
-    role: "dentist",
+    role: "clinician",
     createdAt: new Date(),
   },
   {
@@ -892,22 +892,22 @@ await db.insert(processingAgreementAcceptance).values([
 // Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
 // clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
 // Título y colegio se escriben: el perfil no trae los de ningún país por defecto.
-const PERU_DENTIST = { professionalTitle: "Cirujano dentista", registrationBody: "COP" }
+const PERU_PROFESSIONAL = { professionalTitle: "Cirujano dentista", registrationBody: "COP" }
 await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
-  ...PERU_DENTIST,
+  ...PERU_PROFESSIONAL,
   signatureName: "Ana Torres",
   registrationNumber: "12345",
   specialtyRegistration: "RNE 1024",
 })
-await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_DENTIST, registrationNumber: "23456" })
-await setProfessionalProfile(db, ORG_A, ANA_ID, SALAS_ID, { ...PERU_DENTIST, signatureName: "Diego Salas", registrationNumber: "56789" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_PROFESSIONAL, registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, SALAS_ID, { ...PERU_PROFESSIONAL, signatureName: "Diego Salas", registrationNumber: "56789" })
 await setProfessionalProfile(db, ORG_A, ANA_ID, ROJAS_ID, {
-  ...PERU_DENTIST,
+  ...PERU_PROFESSIONAL,
   signatureName: "Elena Rojas",
   registrationNumber: "45678",
   specialtyRegistration: "RNE 2048",
 })
-await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_DENTIST, registrationNumber: "34567" })
+await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_PROFESSIONAL, registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
@@ -2930,7 +2930,7 @@ await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
 // reevaluación tras el raspado, como en el lienzo (tableros 4 y 11).
 await seedPeriodontalCase(db, {
   orgId: ORG_A,
-  dentistUserId: ANA_ID,
+  professionalUserId: ANA_ID,
   patientId: patientIdByName.get("Carlos Paredes")!,
   branchId: miraflores.id,
   daysAgo,
@@ -3516,9 +3516,9 @@ const surco = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
 })
 if (!surco) throw new Error("Falta la Sede Surco")
-const chairsMiraflores = await Promise.all(
+const roomsMiraflores = await Promise.all(
   ["Unidad dental 1", "Unidad dental 2", "Unidad dental 3"].map((name) =>
-    createChair(db, ORG_A, { branchId: miraflores.id, name }),
+    createRoom(db, ORG_A, { branchId: miraflores.id, name }),
   ),
 )
 const domainSeed = {
@@ -3536,7 +3536,7 @@ await db.transaction((tx) => seedAvailability(tx, domainSeed))
 // (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: miraflores.id,
-  dentistUserId: ROJAS_ID,
+  professionalUserId: ROJAS_ID,
   rules: [2, 4].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
 })
 // San Isidro, la segunda sede con historia: dos unidades dentales y el Dr. Salas
@@ -3545,22 +3545,22 @@ const sanIsidro = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede San Isidro")),
 })
 if (!sanIsidro) throw new Error("Falta la Sede San Isidro")
-const chairsSanIsidro = await Promise.all(
-  ["Unidad dental 1", "Unidad dental 2"].map((name) => createChair(db, ORG_A, { branchId: sanIsidro.id, name })),
+const roomsSanIsidro = await Promise.all(
+  ["Unidad dental 1", "Unidad dental 2"].map((name) => createRoom(db, ORG_A, { branchId: sanIsidro.id, name })),
 )
-await setProfessionalSchedule(db, ORG_A, ANA_ID, { branchId: miraflores.id, dentistUserId: SALAS_ID, rules: [] })
+await setProfessionalSchedule(db, ORG_A, ANA_ID, { branchId: miraflores.id, professionalUserId: SALAS_ID, rules: [] })
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: sanIsidro.id,
-  dentistUserId: SALAS_ID,
+  professionalUserId: SALAS_ID,
   rules: [1, 2, 3, 4, 5, 6].flatMap((weekday) => [
     { weekday, startMin: 9 * 60, endMin: 13 * 60 },
     ...(weekday === 6 ? [] : [{ weekday, startMin: 14 * 60, endMin: 18 * 60 }]),
   ]),
 })
-const chairA = (index: number): string => {
-  const chair = chairsMiraflores[index]
-  if (!chair) throw new Error("Faltan unidades dentales semilla")
-  return chair.id
+const roomA = (index: number): string => {
+  const room = roomsMiraflores[index]
+  if (!room) throw new Error("Faltan unidades dentales semilla")
+  return room.id
 }
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
 const lima = (dayOffset: number, hhmm: string): string => {
@@ -3574,17 +3574,17 @@ const lima = (dayOffset: number, hhmm: string): string => {
 // unidad dental en mantenimiento.
 const limaDay = (dayOffset: number): string => lima(dayOffset, "00:00")
 for (const block of [
-  { dentistUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },
-  { dentistUserId: LUIS_ID, kind: "ausencia", reason: "Vacaciones", startsAt: limaDay(6), endsAt: limaDay(9) },
+  { professionalUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },
+  { professionalUserId: LUIS_ID, kind: "ausencia", reason: "Vacaciones", startsAt: limaDay(6), endsAt: limaDay(9) },
   { kind: "bloqueo", reason: "Feriado", startsAt: limaDay(12), endsAt: limaDay(13) },
-  { chairId: chairA(2), kind: "bloqueo", reason: "Mantenimiento", startsAt: lima(3, "09:00"), endsAt: lima(3, "12:00") },
+  { roomId: roomA(2), kind: "bloqueo", reason: "Mantenimiento", startsAt: lima(3, "09:00"), endsAt: lima(3, "12:00") },
 ]) {
   await createScheduleBlock(db, ORG_A, ANA_ID, { branchId: miraflores.id, ...block })
 }
 const agendaSeed: Array<{
   patient: string
-  dentist: string
-  chair: number
+  professional: string
+  room: number
   day: number
   start: string
   end: string
@@ -3595,8 +3595,8 @@ const agendaSeed: Array<{
 }> = [
   {
     patient: "Rosa Quispe",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: 0,
     start: "09:00",
     end: "09:45",
@@ -3605,8 +3605,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Elena Huamán",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: 0,
     start: "10:00",
     end: "10:45",
@@ -3614,8 +3614,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Carlos Paredes",
-    dentist: LUIS_ID,
-    chair: 1,
+    professional: LUIS_ID,
+    room: 1,
     day: 0,
     start: "09:30",
     end: "10:00",
@@ -3624,8 +3624,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Lucía Fernández",
-    dentist: ANA_ID,
-    chair: 2,
+    professional: ANA_ID,
+    room: 2,
     day: 0,
     start: "11:00",
     end: "11:30",
@@ -3635,8 +3635,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Carmen Rojas",
-    dentist: LUIS_ID,
-    chair: 1,
+    professional: LUIS_ID,
+    room: 1,
     day: 1,
     start: "09:00",
     end: "09:45",
@@ -3644,8 +3644,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Rosa Quispe",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: 1,
     start: "09:00",
     end: "10:00",
@@ -3655,8 +3655,8 @@ const agendaSeed: Array<{
   // Tarde de hoy: la agenda muestra «lo que viene», huecos entre citas y por confirmar.
   {
     patient: "Carmen Rojas",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: 0,
     start: "15:00",
     end: "15:45",
@@ -3665,8 +3665,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Carlos Paredes",
-    dentist: LUIS_ID,
-    chair: 1,
+    professional: LUIS_ID,
+    room: 1,
     day: 0,
     start: "15:30",
     end: "16:30",
@@ -3674,8 +3674,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Elena Huamán",
-    dentist: LUIS_ID,
-    chair: 1,
+    professional: LUIS_ID,
+    room: 1,
     day: 0,
     start: "17:00",
     end: "17:30",
@@ -3684,8 +3684,8 @@ const agendaSeed: Array<{
   // Ayer: ejecutada, ausencia y cancelación (estas dos últimas liberan recurso).
   {
     patient: "Elena Huamán",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: -1,
     start: "09:00",
     end: "09:45",
@@ -3694,8 +3694,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Carlos Paredes",
-    dentist: LUIS_ID,
-    chair: 1,
+    professional: LUIS_ID,
+    room: 1,
     day: -1,
     start: "09:00",
     end: "09:30",
@@ -3704,8 +3704,8 @@ const agendaSeed: Array<{
   },
   {
     patient: "Carmen Rojas",
-    dentist: ANA_ID,
-    chair: 0,
+    professional: ANA_ID,
+    room: 0,
     day: -1,
     start: "09:00",
     end: "09:45",
@@ -3721,8 +3721,8 @@ for (const item of agendaSeed) {
   const reserved = await createAppointment(db, ORG_A, ANA_ID, {
     branchId: miraflores.id,
     patientId: seedPatientId,
-    dentistUserId: item.dentist,
-    chairId: chairA(item.chair),
+    professionalUserId: item.professional,
+    roomId: roomA(item.room),
     serviceId: serviceIdA(item.service),
     startsAt: lima(item.day, item.start),
     endsAt: lima(item.day, item.end),
@@ -3928,10 +3928,10 @@ const reportsHistory = await db.transaction((tx) => {
     orgId: ORG_A,
     ownerUserId: ANA_ID,
     branches: [
-      { id: miraflores.id, chairIds: chairsMiraflores.map((chair) => chair.id), rent: 6_500_00 },
-      { id: sanIsidro.id, chairIds: chairsSanIsidro.map((chair) => chair.id), rent: 4_800_00 },
+      { id: miraflores.id, roomIds: roomsMiraflores.map((room) => room.id), rent: 6_500_00 },
+      { id: sanIsidro.id, roomIds: roomsSanIsidro.map((room) => room.id), rent: 4_800_00 },
     ],
-    dentists: [
+    professionals: [
       { userId: ANA_ID, signerName: "Ana Torres", registration: "12345", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.8 },
       { userId: LUIS_ID, signerName: "Luis Prado", registration: "23456", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.66 },
       { userId: ROJAS_ID, signerName: "Elena Rojas", registration: "45678", branchId: miraflores.id, weekdays: [2, 4], afternoonOnly: true, occupancy: 0.85 },
@@ -3953,11 +3953,11 @@ const reportsHistory = await db.transaction((tx) => {
 // Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
 await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
 // Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
-const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
+const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
 // Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
 const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
 // Fases 5 y 6 de Reportes: dos respuestas de Argos fijadas en el Resumen y las metas del mes, con la del mes anterior.
-const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistUserId: LUIS_ID }))
+const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalUserId: LUIS_ID }))
 // Examen de Argos (issue 192): el avance de lo aceptado y los materiales que usaron las atenciones de los últimos 90 días.
 const reportsProgress = await db.transaction((tx) =>
   seedReportsProgress(tx, { orgId: ORG_A, ownerUserId: ANA_ID, branchIds: [miraflores.id, sanIsidro.id] }),
@@ -3966,7 +3966,7 @@ await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
   // Clínicas de Ana con los avisos de cobro de la franja (ADR 0065).
-  await seedClinicNoticesDemo(tx, { ownerUserId: ANA_ID, dentistUserId: LUIS_ID, acceptedVersion: LEGAL.agreement.version })
+  await seedClinicNoticesDemo(tx, { ownerUserId: ANA_ID, professionalUserId: LUIS_ID, acceptedVersion: LEGAL.agreement.version })
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })

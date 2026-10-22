@@ -34,4 +34,4 @@ Cada pantalla tenía su propio buscador y ninguno buscaba en las demás. Para en
 
 ## Referencias
 
-`packages/services/src/global-search.ts`, `packages/services/src/search-text.ts`, `packages/db/drizzle/0035_buscador_sin_tildes.sql`, `apps/api/src/routes/search.ts`, `apps/platform/src/components/global-search.tsx`.
+`packages/services/src/global-search.ts`, `packages/services/src/search-text.ts`, `packages/db/drizzle/0035_buscador_sin_tildes.sql`, `apps/api/src/routes/search.ts`, `apps/dental-clinic/src/components/global-search.tsx`.

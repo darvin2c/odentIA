@@ -42,7 +42,7 @@ Permitir que cada usuario complete su trabajo con facilidad mediante una experie
 
 Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este núcleo, no lo contradicen.
 
-- `apps/AGENTS.md`: responsabilidades de panel, platform, API y worker.
+- `apps/AGENTS.md`: responsabilidades de panel, dental-clinic, API y worker.
 - `packages/AGENTS.md`: límites de paquetes compartidos.
 - `packages/services/AGENTS.md`: contratos e invariantes de negocio.
 - `packages/db/AGENTS.md`: esquema, migraciones y catálogos.

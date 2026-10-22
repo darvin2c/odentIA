@@ -30,8 +30,8 @@ const scheduleInput = z.union([
       appointment: z
         .object({
           branchId: z.uuid().optional(),
-          dentistUserId: z.string().min(1),
-          chairId: z.uuid().optional(),
+          professionalUserId: z.string().min(1),
+          roomId: z.uuid().optional(),
           serviceId: z.uuid().optional(),
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),

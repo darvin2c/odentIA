@@ -95,8 +95,8 @@ beforeAll(async () => {
   for (const pro of bank.profesionales) {
     const id = `eval-pro-${index++}`
     await ownerDb.insert(user).values({ id, name: pro.nombre, email: `${id}@example.test` })
-    await ownerDb.insert(member).values({ id: `m-${id}`, organizationId: ORG, userId: id, role: "dentist", createdAt: new Date() })
-    await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: sede!.id, dentistUserId: id, weekday: 2, startMin: 540, endMin: 1080 })
+    await ownerDb.insert(member).values({ id: `m-${id}`, organizationId: ORG, userId: id, role: "clinician", createdAt: new Date() })
+    await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: sede!.id, professionalUserId: id, weekday: 2, startMin: 540, endMin: 1080 })
     for (const name of pro.especialidades) {
       const key = name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_")
       const [specialty] = await ownerDb

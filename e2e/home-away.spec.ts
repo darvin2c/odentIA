@@ -15,7 +15,7 @@ for (const viewport of [
     fixtureDb,
   }, info) => {
     await owner.page.setViewportSize({ width: viewport.width, height: viewport.height })
-    const { chairId } = await enableAgenda(owner)
+    const { roomId } = await enableAgenda(owner)
     const patient = await call<{ id: string }>(
       owner.page,
       "POST",
@@ -44,8 +44,8 @@ for (const viewport of [
       organizationId: owner.org.id,
       branchId: owner.branchId,
       patientId: patient.id,
-      dentistUserId: owner.user.id,
-      chairId,
+      professionalUserId: owner.user.id,
+      roomId,
       startsAt,
       endsAt: new Date(startsAt.getTime() + 30 * 60_000),
       durationMin: 30,

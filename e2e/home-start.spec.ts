@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientCharge } from "@odentia/db/schema/clinical"
 import { contact, crmTask } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
-import type { WorkspaceHome } from "../apps/platform/src/lib/workspace"
+import type { WorkspaceHome } from "../apps/dental-clinic/src/lib/workspace"
 import { tenant, tenantPattern } from "./env"
 import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
@@ -19,7 +19,7 @@ async function observe(page: Page, info: TestInfo, name: string) {
 
 async function prepareSchedule(owner: OwnerFixture) {
   await call(owner.page, "PUT", "/api/agenda/schedules", owner.org.slug, {
-    branchId: owner.branchId, dentistUserId: owner.user.id,
+    branchId: owner.branchId, professionalUserId: owner.user.id,
     rules: [{ weekday: 1, startMin: 540, endMin: 1020 }],
   })
 }
@@ -33,11 +33,11 @@ async function activeDay(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
   const patientId = randomUUID()
   const otherPatientId = randomUUID()
-  const otherDentist = randomUUID()
-  const chairId = randomUUID()
+  const otherProfessional = randomUUID()
+  const roomId = randomUUID()
   const contactId = randomUUID()
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
-  await db.insert(user).values({ id: otherDentist, name: "Dra. Otra Profesional", email: `${otherDentist}@inicio.test`, emailVerified: true })
+  await db.insert(user).values({ id: otherProfessional, name: "Dra. Otra Profesional", email: `${otherProfessional}@inicio.test`, emailVerified: true })
   // La identidad vive en la persona (ADR 0044): cada ficha apunta a la suya.
   const [withAppointment, ofOther] = await db
     .insert(contact)
@@ -50,13 +50,13 @@ async function activeDay(db: Db, owner: OwnerFixture) {
     { id: patientId, organizationId, personId: withAppointment!.id, patientNumber: 1 },
     { id: otherPatientId, organizationId, personId: ofOther!.id, patientNumber: 2 },
   ])
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   await db.insert(appointment).values([
     // La de quien inicia sesión es la última del día: la agenda de la sede lista desde la siguiente
     // cita en pie, así que esa fila está a la vista a cualquier hora en que corra la prueba.
-    { organizationId, branchId: owner.branchId, patientId: otherPatientId, chairId, dentistUserId: otherDentist, serviceName: "Control", status: "confirmada",
+    { organizationId, branchId: owner.branchId, patientId: otherPatientId, roomId, professionalUserId: otherProfessional, serviceName: "Control", status: "confirmada",
       startsAt: new Date(`${date}T18:00:00-05:00`), endsAt: new Date(`${date}T18:30:00-05:00`), durationMin: 30 },
-    { organizationId, branchId: owner.branchId, patientId, chairId, dentistUserId: owner.user.id, serviceName: "Profilaxis",
+    { organizationId, branchId: owner.branchId, patientId, roomId, professionalUserId: owner.user.id, serviceName: "Profilaxis",
       startsAt: new Date(`${date}T19:00:00-05:00`), endsAt: new Date(`${date}T19:30:00-05:00`), durationMin: 30 },
   ])
   await db.insert(crmTask).values({ organizationId, title: "Confirmar seguimiento pendiente", assigneeUserId: owner.user.id, createdBy: "user" })
@@ -104,7 +104,7 @@ for (const width of [1440, 390]) {
       const start = page.getByRole("region", { name: "Siguiente paso" })
       await expect(start.getByRole("link", { name: "Preparar una unidad dental", exact: true })).toBeInViewport()
       await observe(page, info, "parcial")
-      await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental inicial" }, 201)
+      await call(page, "POST", "/api/agenda/rooms", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental inicial" }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       await expect(start.getByRole("link", { name: "Registrar un paciente", exact: true })).toBeInViewport()
       await call(page, "POST", "/api/patients", owner.org.slug, {
@@ -124,7 +124,7 @@ for (const width of [1440, 390]) {
       await expect(agenda).toContainText("Hoy no hay citas en")
       await expect(page.getByText(/No acredita|los ceros no indican|Sin actividad todavía|Sin pendientes en este resumen/)).toHaveCount(0)
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
-      expect(home.setup).toEqual({ availability: true, chairs: true, patients: true, agent: true })
+      expect(home.setup).toEqual({ availability: true, rooms: true, patients: true, agent: true })
       expect(home.waiting).toEqual([])
       expect(home.today?.summary).toEqual({ total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
       await observe(page, info, "configurada-sin-pendientes")
@@ -195,7 +195,7 @@ for (const width of [1440, 390]) {
 
     test("odontólogo: solo sus pacientes de hoy, y cada fila abre la ficha", async ({ owner, fixtureDb }, info) => {
       await activeDay(fixtureDb, owner)
-      await setRole(fixtureDb, owner, "dentist")
+      await setRole(fixtureDb, owner, "clinician")
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
@@ -231,7 +231,7 @@ for (const width of [1440, 390]) {
       await expect(agenda.getByRole("link", { name: /Paciente con cita.*Llegó \d/ })).toBeVisible()
       await observe(page, info, "recepcion-llego")
       // Quien atiende la ve en «Sala de espera», con «Atender» en su botón.
-      await setRole(fixtureDb, owner, "dentist")
+      await setRole(fixtureDb, owner, "clinician")
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const sala = page.getByRole("region", { name: "Mis pacientes de hoy" }).getByRole("list", { name: "Sala de espera" })
       await expect(sala).toContainText("Paciente con cita")
@@ -306,7 +306,7 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link", { name: "Definir horarios", exact: true })).toBeInViewport()
     })
 
-    for (const role of ["reception", "dentist", "cashier"] as const) {
+    for (const role of ["reception", "clinician", "cashier"] as const) {
       test(`${role}: su «Hoy» y nada de configuración ajena`, async ({ owner, fixtureDb }, info) => {
         await setRole(fixtureDb, owner, role)
         const page = owner.page
@@ -316,8 +316,8 @@ for (const width of [1440, 390]) {
         await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
         await expect(page.getByRole("link", { name: "Definir horarios", exact: true })).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Te espera" }).getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
-        const block = role === "reception" ? "Agenda de hoy" : role === "dentist" ? "Mis pacientes de hoy" : "Caja de hoy"
-        const action = role === "reception" ? "Abrir la Agenda" : role === "dentist" ? "Ver mi agenda" : "Ir a Caja"
+        const block = role === "reception" ? "Agenda de hoy" : role === "clinician" ? "Mis pacientes de hoy" : "Caja de hoy"
+        const action = role === "reception" ? "Abrir la Agenda" : role === "clinician" ? "Ver mi agenda" : "Ir a Caja"
         for (const name of ["Agenda de hoy", "Mis pacientes de hoy", "Caja de hoy"]) {
           await expect(page.getByRole("region", { name, exact: true })).toHaveCount(name === block ? 1 : 0)
         }
@@ -325,10 +325,10 @@ for (const width of [1440, 390]) {
         expect(home.setup).toBeNull()
         expect(home.access.configure).toBe(false)
         expect(home.access.finance).toBe(role === "cashier")
-        expect(home.access.clinical).toBe(role === "dentist")
-        expect(home.today?.scope ?? null).toBe(role === "reception" ? "branch" : role === "dentist" ? "mine" : null)
+        expect(home.access.clinical).toBe(role === "clinician")
+        expect(home.today?.scope ?? null).toBe(role === "reception" ? "branch" : role === "clinician" ? "mine" : null)
         expect(home.cash === null).toBe(role !== "cashier")
-        const forbidden = await api(page, "PUT", "/api/agenda/schedules", owner.org.slug, { branchId: owner.branchId, dentistUserId: owner.user.id, rules: [] })
+        const forbidden = await api(page, "PUT", "/api/agenda/schedules", owner.org.slug, { branchId: owner.branchId, professionalUserId: owner.user.id, rules: [] })
         expect(forbidden.status).toBe(403)
         await observe(page, info, role)
         await page.getByRole("region", { name: block, exact: true }).getByRole("button", { name: action, exact: true }).click()

@@ -79,8 +79,8 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
     action: "reservar_cita",
     payload: {
       patientId: randomUUID(),
-      dentistUserId: owner.user.id,
-      chairId: randomUUID(),
+      professionalUserId: owner.user.id,
+      roomId: randomUUID(),
       startsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
     },
     afterSummary: "Cita el jueves a las 10:00",
@@ -310,7 +310,7 @@ test("panel del agente: recepción lo ve, otros roles no lo ven y el servidor lo
   await expect(panel).toBeHidden()
 
   // Odontología y caja: sin botón, sin entrada en el sidebar y 403 en servidor.
-  for (const role of ["dentist", "cashier"]) {
+  for (const role of ["clinician", "cashier"]) {
     await setRole(role)
     await gotoHydrated(page, tenant(org.slug, "/home"))
     await expect(agentButton(page)).toHaveCount(0)

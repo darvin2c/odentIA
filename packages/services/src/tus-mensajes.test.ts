@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { patientContact, paymentTicket } from "@odentia/db/schema/clinical"
@@ -50,25 +50,25 @@ const NOW = new Date("2026-10-06T15:00:00.000Z")
 interface Clinic {
   orgId: string
   ownerId: string
-  dentistId: string
+  professionalId: string
   branchId: string
-  chairId: string
+  roomId: string
   whatsappId: string
 }
 
 async function clinic(options: { approved?: string[]; email?: boolean } = {}): Promise<Clinic> {
   const orgId = randomUUID()
   const ownerId = `owner-${orgId}`
-  const dentistId = `dentist-${orgId}`
+  const professionalId = `professional-${orgId}`
   await insertOrg(ownerDb, orgId, `msg-${orgId}`)
   await ownerDb.update(orgProfile).set({ tradeName: "Clínica Sonríe" }).where(eq(orgProfile.organizationId, orgId))
   await ownerDb.insert(user).values([
     { id: ownerId, name: "Dueña", email: `${ownerId}@msg.test`, emailVerified: true },
-    { id: dentistId, name: "Dra. Ana Torres", email: `${dentistId}@msg.test`, emailVerified: true },
+    { id: professionalId, name: "Dra. Ana Torres", email: `${professionalId}@msg.test`, emailVerified: true },
   ])
   await ownerDb.insert(member).values([
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
-    { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
+    { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
   // Con el horario para escribir a toda hora: estas pruebas usan el reloj real.
   await ownerDb.insert(agentConfig).values({
@@ -78,7 +78,7 @@ async function clinic(options: { approved?: string[]; email?: boolean } = {}): P
     writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
   const templates = (options.approved ?? []).map((name) => ({ name, language: "es" }))
   const connection = await withOrgContext(appDb, orgId, (tx) =>
     createConnection(tx, orgId, KEY, {
@@ -91,7 +91,7 @@ async function clinic(options: { approved?: string[]; email?: boolean } = {}): P
       externalId: `clinica-${orgId}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
     })
   }
-  return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id, whatsappId: connection.id }
+  return { orgId, ownerId, professionalId, branchId: site!.id, roomId: room!.id, whatsappId: connection.id }
 }
 
 function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
@@ -142,7 +142,7 @@ async function reminded() {
   await ruleOn(c, "recordatorio_cita")
   const p = await person(c, "Lucía Paredes", { openWindow: true })
   await ownerDb.insert(appointment).values({
-    organizationId: c.orgId, branchId: c.branchId, patientId: p.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+    organizationId: c.orgId, branchId: c.branchId, patientId: p.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
     startsAt: new Date(NOW.getTime() + 24 * HOUR), endsAt: new Date(NOW.getTime() + 24.5 * HOUR), durationMin: 30, status: "programada",
   })
   await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
@@ -292,7 +292,7 @@ describe("la categoría manda y los retomar piden el sí", () => {
     await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId: yes.contactId, purpose: "novedades", status: "granted", source: "presencial" })
     for (const [index, who] of [cold, yes].entries()) {
       await ownerDb.insert(appointment).values({
-        organizationId: c.orgId, branchId: c.branchId, patientId: who.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        organizationId: c.orgId, branchId: c.branchId, patientId: who.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
         startsAt: new Date(NOW.getTime() + 24 * HOUR + index * HOUR), endsAt: new Date(NOW.getTime() + 24.5 * HOUR + index * HOUR), durationMin: 30, status: "programada",
       })
     }

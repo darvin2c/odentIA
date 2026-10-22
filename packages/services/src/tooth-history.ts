@@ -100,7 +100,7 @@ export async function getToothHistory(
           eq(encounter.organizationId, encounterProcedure.organizationId),
         ),
       )
-      .leftJoin(user, eq(user.id, encounter.dentistUserId))
+      .leftJoin(user, eq(user.id, encounter.professionalUserId))
       .where(
         and(
           eq(encounterProcedure.organizationId, orgId),

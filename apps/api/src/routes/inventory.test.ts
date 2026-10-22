@@ -21,7 +21,7 @@ const IMAGE = "dentalagent-postgres:18.6"
 const ORG = "org_inv"
 const OWNER = "u-inv-owner"
 const RECEPTION = "u-inv-recep"
-const DENTIST = "u-inv-dent"
+const PROFESSIONAL = "u-inv-dent"
 const BRANCH = "0b0b0b0b-0000-4000-8000-000000000001"
 const PATIENT = "0b0b0b0b-0000-4000-8000-000000000002"
 const PERSON = "0b0b0b0b-0000-4000-8000-000000000003"
@@ -95,7 +95,7 @@ beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
     values (${ORG}, 'Clínica Inventario', 'CL', 'CLP', 'America/Santiago', 'es-CL')`)
-  for (const [id, role] of [[OWNER, "owner"], [RECEPTION, "reception"], [DENTIST, "dentist"]] as const) {
+  for (const [id, role] of [[OWNER, "owner"], [RECEPTION, "reception"], [PROFESSIONAL, "clinician"]] as const) {
     await ownerDb.execute(sql`insert into "user" ("id", "name", "email") values (${id}, ${`Equipo ${role}`}, ${`${id}@example.test`})`)
     await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${id}`}, ${ORG}, ${id}, ${role}, now())`)
   }
@@ -129,8 +129,8 @@ async function orderedGloves(sku: string, boxes = 4) {
 }
 
 it("quien ve el inventario lo ve; recepción sin precios recibe lo que llega y registra el uso; lo demás es de quien lo lleva", async () => {
-  for (const role of ["dentist", "cashier", "member"] as const) {
-    const app = buildApp(role, DENTIST)
+  for (const role of ["clinician", "cashier", "member"] as const) {
+    const app = buildApp(role, PROFESSIONAL)
     const read = await call(app, "GET", "/products")
     expect(read.status, role).toBe(403)
     expectWords(read.body, "No tienes permiso para ver el inventario")

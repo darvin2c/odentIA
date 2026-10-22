@@ -23,7 +23,7 @@ export function branchNotFound(): ServiceError {
 }
 
 /** La unidad dental no existe (o no es de la organización): también en femenino. */
-export function chairNotFound(): ServiceError {
+export function roomNotFound(): ServiceError {
   return new ServiceError("NOT_FOUND", 404, "Unidad dental no encontrada")
 }
 

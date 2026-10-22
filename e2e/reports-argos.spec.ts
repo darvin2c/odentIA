@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import type { Db } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patient, patientPayment } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
 import { contact } from "@odentia/db/schema/crm"
@@ -32,8 +32,8 @@ function inMonth(monthsBack: number, day: number, hour = 15): Date {
 /** El mes pasado: tres atendidas y una inasistencia; un cobro en el mes en curso. */
 async function lastMonth(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
-  const chairId = randomUUID()
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  const roomId = randomUUID()
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   const people: Record<string, string> = {}
   for (const [index, name] of ["Ana Paz", "Bruno Díaz", "Carla Soto", "Diego Ruiz"].entries()) {
     people[name] = randomUUID()
@@ -42,7 +42,7 @@ async function lastMonth(db: Db, owner: OwnerFixture) {
   }
   const visit = (name: string, startsAt: Date, status: string) =>
     db.insert(appointment).values({
-      organizationId, branchId: owner.branchId, patientId: people[name]!, chairId, dentistUserId: owner.user.id,
+      organizationId, branchId: owner.branchId, patientId: people[name]!, roomId, professionalUserId: owner.user.id,
       serviceName: "Evaluación", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status, source: "recepcion",
     })
   await visit("Ana Paz", inMonth(1, 10), "atendida")

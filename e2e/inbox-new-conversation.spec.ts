@@ -86,9 +86,9 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await call(page, "PUT", "/api/patient-registration/config", org.slug, {
     expectedVersion: registration.version, enabled: false, fields: registration.fields, privacyNotice: "Aviso de prueba.",
   })
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId, name: "Unidad dental 1" }, 201)
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
-    branchId, dentistUserId: owner.user.id,
+    branchId, professionalUserId: owner.user.id,
     rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
   })
   await fixtureDb.update(member).set({ role: "reception" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
@@ -112,7 +112,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await info.attach("persona-ficha-minima", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Odontología escribe a las personas, pero no lee el CRM: sin «Contexto» ni «Nueva conversación» ---
-  await fixtureDb.update(member).set({ role: "dentist" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  await fixtureDb.update(member).set({ role: "clinician" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   await expect(page.getByText("Rosa Quispe").first()).toBeVisible()
   await expect(page.getByRole("button", { name: "Nueva conversación", exact: true })).toHaveCount(0)

@@ -5,7 +5,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { patientPayment } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
@@ -31,20 +31,20 @@ async function clinic() {
   await insertOrg(ownerDb, orgId, `argos-${orgId}`)
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const person = async (name: string, number: number) => (await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: number }))[0]!.id
-  const staff = async (name: string, role = "dentist") => {
+  const staff = async (name: string, role = "clinician") => {
     const id = randomUUID()
     await ownerDb.insert(user).values({ id, name, email: `${id}@argos.test` })
     await ownerDb.insert(member).values({ id: randomUUID(), organizationId: orgId, userId: id, role, createdAt: new Date() })
     return id
   }
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
-  const visit = (dentistUserId: string, patientId: string, startsAt: string, status: string) =>
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
+  const visit = (professionalUserId: string, patientId: string, startsAt: string, status: string) =>
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       branchId: site!.id,
-      chairId: chair!.id,
-      dentistUserId,
+      roomId: room!.id,
+      professionalUserId,
       patientId,
       serviceName: "Evaluación",
       startsAt: new Date(startsAt),

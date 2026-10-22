@@ -113,7 +113,7 @@ services:
 
   platform:
     build: *app-build
-    command: ["pnpm", "--filter", "@odentia/platform", "start"]
+    command: ["pnpm", "--filter", "@odentia/dental-clinic", "start"]
     env_file: *runtime-env-file
     environment:
       PORT: "3000"

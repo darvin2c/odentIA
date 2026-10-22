@@ -181,7 +181,7 @@ it("promociones: el uso y lo cobrado llegan solo a quien ve dinero", async () =>
   }
 
   // Recepción y odontología leen la promoción y sus precios, no su caja.
-  for (const role of ["reception", "dentist"]) {
+  for (const role of ["reception", "clinician"]) {
     const todas = await list(role, "todas")
     expect(todas.status).toBe(200)
     expect(todas.body.data.length).toBeGreaterThanOrEqual(3)

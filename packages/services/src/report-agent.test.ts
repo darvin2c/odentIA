@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { agentHandoff } from "@odentia/db/schema/agent"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import {
@@ -83,12 +83,12 @@ async function clinic(subscription?: { start: Date; end: Date }) {
     const values = { status: "activa", planId, activatedAt: subscription.start, currentPeriodStart: subscription.start, currentPeriodEnd: subscription.end, billingCycle: "mensual" }
     await ownerDb.insert(saasSubscription).values({ organizationId: orgId, ...values }).onConflictDoUpdate({ target: saasSubscription.organizationId, set: values })
   }
-  const dentist = randomUUID()
-  await ownerDb.insert(user).values({ id: dentist, name: "Dra. Ana Torres", email: `${dentist}@agent-report.test` })
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Dra. Ana Torres", email: `${professional}@agent-report.test` })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning()
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
-  return { orgId, dentist, branchId: site!.id, chairId: chair!.id, run }
+  return { orgId, professional, branchId: site!.id, roomId: room!.id, run }
 }
 type Clinic = Awaited<ReturnType<typeof clinic>>
 
@@ -107,8 +107,8 @@ async function visit(c: Clinic, patientId: string, input: { source: string; book
     .values({
       organizationId: c.orgId,
       branchId: c.branchId,
-      chairId: c.chairId,
-      dentistUserId: c.dentist,
+      roomId: c.roomId,
+      professionalUserId: c.professional,
       patientId,
       serviceName: "Limpieza dental",
       startsAt: input.startsAt,
@@ -134,7 +134,7 @@ async function charged(c: Clinic, visitRow: Awaited<ReturnType<typeof visit>>, i
       organizationId: c.orgId,
       patientId: visitRow.patientId,
       branchId: c.branchId,
-      dentistUserId: c.dentist,
+      professionalUserId: c.professional,
       appointmentId: visitRow.id,
       reason: "Limpieza dental",
       evolution: "Sin complicaciones.",
@@ -146,14 +146,14 @@ async function charged(c: Clinic, visitRow: Awaited<ReturnType<typeof visit>>, i
     .returning()
   const [procedure] = await ownerDb
     .insert(encounterProcedure)
-    .values({ organizationId: c.orgId, encounterId: session!.id, description: "Limpieza dental", quantity: 1, priceCents: input.cents, currency: "PEN", createdBy: c.dentist, createdAt: endedAt })
+    .values({ organizationId: c.orgId, encounterId: session!.id, description: "Limpieza dental", quantity: 1, priceCents: input.cents, currency: "PEN", createdBy: c.professional, createdAt: endedAt })
     .returning()
   await ownerDb.execute(sql`
-    update encounter set status = 'finalizada', ended_at = ${endedAt.toISOString()}::timestamptz, finalized_at = ${endedAt.toISOString()}::timestamptz, finalized_by = dentist_user_id
+    update encounter set status = 'finalizada', ended_at = ${endedAt.toISOString()}::timestamptz, finalized_at = ${endedAt.toISOString()}::timestamptz, finalized_by = professional_user_id
     where id = ${session!.id}`)
   const [charge] = await ownerDb
     .insert(patientCharge)
-    .values({ organizationId: c.orgId, patientId: visitRow.patientId, encounterProcedureId: procedure!.id, branchId: c.branchId, description: "Limpieza dental", amountCents: input.cents, currency: "PEN", createdBy: c.dentist, createdAt: endedAt })
+    .values({ organizationId: c.orgId, patientId: visitRow.patientId, encounterProcedureId: procedure!.id, branchId: c.branchId, description: "Limpieza dental", amountCents: input.cents, currency: "PEN", createdBy: c.professional, createdAt: endedAt })
     .returning()
   const [payment] = await ownerDb
     .insert(patientPayment)

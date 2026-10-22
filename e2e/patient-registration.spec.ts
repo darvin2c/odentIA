@@ -639,10 +639,10 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const { page, org } = owner
   // La clínica tiene activo su registro de pacientes: de ahí salen los datos que se piden y el aviso de privacidad.
   await publishConfig(page, org.slug)
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
     branchId: owner.branchId,
-    dentistUserId: owner.user.id,
+    professionalUserId: owner.user.id,
     rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
   }, 200)
   const tgConn = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, {

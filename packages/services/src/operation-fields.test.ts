@@ -56,7 +56,7 @@ describe("declaración de campos", () => {
 
 describe("mismas validaciones para la pantalla y para el agente", () => {
   it("un inicio sin zona se rechaza en los dos", () => {
-    const base = { patientId: UUID, dentistUserId: "u-1", chairId: UUID }
+    const base = { patientId: UUID, professionalUserId: "u-1", roomId: UUID }
     for (const schema of [operationBodySchema("cita.reservar"), operationAgentSchema("cita.reservar")]) {
       expect(schema.safeParse({ ...base, startsAt: "2026-10-12T15:00:00-05:00" }).success).toBe(true)
       expect(schema.safeParse({ ...base, startsAt: "mañana a las 3" }).success).toBe(false)

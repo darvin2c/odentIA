@@ -657,7 +657,7 @@ export function generatedSolvers7(h: GoldenHelpers): GoldenSolvers {
       const [person] = await tx.execute<{ id: string; name: string }>(sql`
         select u.id, u.name from "user" u
         where translate(lower(u.name), 'áéíóúü', 'aeiouu') like '%ana torres%'
-          and exists (select 1 from appointment a where a.organization_id = ${org} and a.dentist_user_id = u.id)
+          and exists (select 1 from appointment a where a.organization_id = ${org} and a.professional_user_id = u.id)
         limit 1`)
       if (!person) {
         return {
@@ -676,12 +676,12 @@ export function generatedSolvers7(h: GoldenHelpers): GoldenSolvers {
           select coalesce(sum(c.amount_cents), 0)::text as cents from patient_charge c
           join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-          where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency} and e.dentist_user_id = ${person.id}
+          where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency} and e.professional_user_id = ${person.id}
             and c.created_at >= ${start}::timestamptz and c.created_at < ${end}::timestamptz`)
         const [done] = await tx.execute<{ times: number }>(sql`
           select coalesce(sum(ep.quantity), 0)::int as times from encounter_procedure ep
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-          where ep.organization_id = ${org} and ep.voided_at is null and e.dentist_user_id = ${person.id}
+          where ep.organization_id = ${org} and ep.voided_at is null and e.professional_user_id = ${person.id}
             and e.started_at >= ${start}::timestamptz and e.started_at < ${end}::timestamptz`)
         return { charged: Number(charged?.cents ?? 0), procedures: done?.times ?? 0 }
       }

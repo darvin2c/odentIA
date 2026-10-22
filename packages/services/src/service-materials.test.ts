@@ -227,8 +227,8 @@ it("los materiales de un servicio se reemplazan enteros, solo con lo que se usa 
 it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y qué parte de las atenciones cubren", async () => {
   // Una clínica aparte: lo que cuentan las demás pruebas no se mezcla.
   await insertOrg(ownerDb, "org_m", "materiales")
-  const dentist = randomUUID()
-  await ownerDb.insert(user).values({ id: dentist, name: "Dra. Mat", email: `${dentist}@example.test` })
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Dra. Mat", email: `${professional}@example.test` })
   const service = async (name: string, isActive = true) => {
     const [row] = await ownerDb
       .insert(serviceCatalog)
@@ -251,7 +251,7 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y 
   const visit = async (acts: Array<{ serviceId: string; quantity?: number; voided?: boolean }>, daysAgo: number | null) => {
     const [row] = await ownerDb
       .insert(encounter)
-      .values({ organizationId: "org_m", patientId: person!.id, dentistUserId: dentist, reason: "Control" })
+      .values({ organizationId: "org_m", patientId: person!.id, professionalUserId: professional, reason: "Control" })
       .returning()
     for (const act of acts)
       await ownerDb.insert(encounterProcedure).values({
@@ -260,7 +260,7 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y 
         serviceId: act.serviceId,
         description: "Acto",
         quantity: act.quantity ?? 1,
-        ...(act.voided ? { voidedAt: new Date(), voidedBy: dentist, voidReason: "Error" } : {}),
+        ...(act.voided ? { voidedAt: new Date(), voidedBy: professional, voidReason: "Error" } : {}),
       })
     if (daysAgo !== null) {
       const at = new Date(Date.now() - daysAgo * 86_400_000)
@@ -271,7 +271,7 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y 
           startedAt: at,
           finalizedAt: at,
           endedAt: at,
-          finalizedBy: dentist,
+          finalizedBy: professional,
           signerName: "Dra. Mat",
           signerTitle: "Cirujano dentista",
           signerRegistration: "COP 12345",

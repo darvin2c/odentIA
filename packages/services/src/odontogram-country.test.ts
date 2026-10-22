@@ -70,7 +70,7 @@ async function attending(orgId: string) {
   const open = async () => {
     const [row] = await ownerDb
       .insert(encounter)
-      .values({ organizationId: orgId, patientId: person!.id, dentistUserId: actor, reason: "Control" })
+      .values({ organizationId: orgId, patientId: person!.id, professionalUserId: actor, reason: "Control" })
       .returning()
     return row!.id
   }

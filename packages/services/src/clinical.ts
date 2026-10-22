@@ -1432,7 +1432,7 @@ export async function addOdontogramEntries(
     )
   }
   const row = await requireDraftLink(tx, orgId, patientId, encounterId)
-  if (row.dentistUserId !== actorUserId) {
+  if (row.professionalUserId !== actorUserId) {
     throw conflict(
       "NOT_ATTENDING",
       "Otro profesional lleva esta atención: toma el relevo para continuarla",

@@ -30,7 +30,7 @@ const ROLE_USERS = [
     name: "Dr. Demo Odontólogo",
     firstName: "Demo",
     lastName: "Odontólogo",
-    role: "dentist",
+    role: "clinician",
   },
   {
     id: "seed-user-caja",

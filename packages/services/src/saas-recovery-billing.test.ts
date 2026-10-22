@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
@@ -55,8 +55,8 @@ async function clinic(start: Date, end: Date, billingCycle: "mensual" | "quincen
  * le reserva una cita: la escena de una cita recuperada, aún por venir.
  */
 async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bookedAt: Date; startsAt: Date }) {
-  const dentist = randomUUID()
-  await ownerDb.insert(user).values({ id: dentist, name: "Odontóloga", email: `${dentist}@recovery.test` })
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Odontóloga", email: `${professional}@recovery.test` })
   const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Rosa Quispe", patientNumber: await nextPatientNumber(ownerDb, orgId) })
   const [self] = await ownerDb
     .select({ contactId: patientContact.contactId })
@@ -64,7 +64,7 @@ async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bo
     .where(and(eq(patientContact.patientId, person!.id), eq(patientContact.relationship, "self")))
   const contactId = self!.contactId
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental" }).returning()
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental" }).returning()
   await ownerDb.insert(automationJob).values({
     organizationId: orgId,
     kind: "seguimiento_presupuesto",
@@ -94,8 +94,8 @@ async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bo
     .values({
       organizationId: orgId,
       branchId: site!.id,
-      chairId: chair!.id,
-      dentistUserId: dentist,
+      roomId: room!.id,
+      professionalUserId: professional,
       patientId: person!.id,
       startsAt: input.startsAt,
       endsAt: new Date(input.startsAt.getTime() + 30 * 60_000),

@@ -543,7 +543,7 @@ function resolveViteCli(appDir: string): string {
 
 async function runBuild(
   state: RunState,
-  app: "panel" | "platform" | "admin",
+  app: "panel" | "dental-clinic" | "admin",
   viteCli: string,
   outDir: string,
   env: Record<string, string>,
@@ -1017,7 +1017,7 @@ export async function main(args: string[]): Promise<number> {
   const metaPath = runtimeMetaPath(runId)
   const outDirs = {
     panel: join(ROOT, "apps", "panel", ".cache", "e2e", runId),
-    platform: join(ROOT, "apps", "platform", ".cache", "e2e", runId),
+    platform: join(ROOT, "apps", "dental-clinic", ".cache", "e2e", runId),
     admin: join(ROOT, "apps", "admin", ".cache", "e2e", runId),
   }
   const logsDir = join(dirname(metaPath), "logs")
@@ -1122,11 +1122,11 @@ export async function main(args: string[]): Promise<number> {
 
     const tBuilds = performance.now()
     const vitePanel = resolveViteCli(join(ROOT, "apps", "panel"))
-    const vitePlatform = resolveViteCli(join(ROOT, "apps", "platform"))
+    const vitePlatform = resolveViteCli(join(ROOT, "apps", "dental-clinic"))
     const viteAdmin = resolveViteCli(join(ROOT, "apps", "admin"))
     const builds = await Promise.allSettled([
       runBuild(state, "panel", vitePanel, outDirs.panel, childEnv),
-      runBuild(state, "platform", vitePlatform, outDirs.platform, childEnv),
+      runBuild(state, "dental-clinic", vitePlatform, outDirs.platform, childEnv),
       runBuild(state, "admin", viteAdmin, outDirs.admin, childEnv),
     ])
     for (const build of builds) {
@@ -1212,7 +1212,7 @@ export async function main(args: string[]): Promise<number> {
         String(appPorts.platform),
         "--strictPort",
       ],
-      join(ROOT, "apps", "platform"),
+      join(ROOT, "apps", "dental-clinic"),
       { ...childEnv, NODE_ENV: "production" },
     )
     await spawnListening(

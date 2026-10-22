@@ -59,7 +59,7 @@ export interface CommissionTotals {
 function commissionLinesSql(orgId: string, hull: Span, currency: string, branchId: string | undefined): SQL {
   const branch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
   return sql`live_app as materialized (
-      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.dentist_user_id as user_id
+      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.professional_user_id as user_id
       from patient_payment_application a
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
@@ -630,12 +630,12 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
   // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
   const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
-    select e.dentist_user_id as "userId", u.name,
+    select e.professional_user_id as "userId", u.name,
       sum(ep.price_cents::bigint * ep.quantity)::text as cents,
       sum(case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end)::text as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
-    join "user" u on u.id = e.dentist_user_id
+    join "user" u on u.id = e.professional_user_id
     left join lateral (
       -- Los cargos vigentes del procedimiento, juntos: con más de uno, lo atendido no se suma dos veces.
       select count(*) as charges, sum(greatest(c.amount_cents - coalesce(ap.applied, 0), 0)) as unpaid
@@ -650,7 +650,7 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
       and e.status = 'finalizada' and e.voided_at is null
       and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
-    group by e.dentist_user_id, u.name`)
+    group by e.professional_user_id, u.name`)
   const rates = await tx.execute<{ userId: string; name: string; rateBps: number }>(sql`
     select r.professional_user_id as "userId", u.name, r.rate_bps as "rateBps" from commission_rule r
     join "user" u on u.id = r.professional_user_id

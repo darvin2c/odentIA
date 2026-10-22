@@ -33,4 +33,4 @@ La dirección del paciente ya tenía la forma internacional (ADR 0036), pero la 
 
 ## Referencias
 
-`packages/clinical/src/postal-address.ts`, `packages/services/src/address-suggestions.ts`, `packages/services/src/branches.ts`, `apps/api/src/routes/address.ts`, `apps/platform/src/components/address/address-street-field.tsx`, migraciones 0059–0063.
+`packages/clinical/src/postal-address.ts`, `packages/services/src/address-suggestions.ts`, `packages/services/src/branches.ts`, `apps/api/src/routes/address.ts`, `apps/dental-clinic/src/components/address/address-street-field.tsx`, migraciones 0059–0063.

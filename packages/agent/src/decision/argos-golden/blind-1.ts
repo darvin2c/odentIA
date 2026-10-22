@@ -116,12 +116,12 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
   const figIn = async (figure: string, group: FigureGroup, period: string, branchId: string): Promise<FigureResult> =>
     computeFigure({ ...h.ctx, scope: await reportScope(tx, org, { period, branchId }, h.now) }, { figure, group })
   /** Un profesional de la clínica por su nombre: quien tiene horario o citas en ella. */
-  const dentistNamed = async (word: string) => {
+  const professionalNamed = async (word: string) => {
     const [row] = await tx.execute<{ id: string; name: string }>(sql`
       select u.id, u.name from "user" u
       where u.name ilike ${`%${word}%`}
-        and (u.id in (select dentist_user_id from appointment where organization_id = ${org})
-          or u.id in (select dentist_user_id from professional_schedule where organization_id = ${org}))
+        and (u.id in (select professional_user_id from appointment where organization_id = ${org})
+          or u.id in (select professional_user_id from professional_schedule where organization_id = ${org}))
       order by u.name limit 1`)
     return row ?? null
   }
@@ -234,7 +234,7 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
     },
 
     x13: async () => {
-      const person = await dentistNamed("Diego Salas")
+      const person = await professionalNamed("Diego Salas")
       if (!person) return { respuesta: "No hay un Dr. Diego Salas en el equipo de la clínica.", criterio: "El profesional no existe.", datos: {} }
       const result = await h.fig("comisiones", "profesional")
       const row = result.rows.find((item) => item.key === person.id) ?? rowNamed(result, /diego salas/i)
@@ -402,7 +402,7 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
         from patient_charge c
         join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
         join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
-        join "user" u on u.id = e.dentist_user_id
+        join "user" u on u.id = e.professional_user_id
         where c.organization_id = ${org} and c.voided_at is null and c.currency = ${currency}
           and c.created_at >= ${scope.window.start.toISOString()}::timestamptz and c.created_at < ${scope.window.end.toISOString()}::timestamptz
         group by 1 order by sum(c.amount_cents) desc, 1`)
@@ -464,7 +464,7 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
       const start = new Date(await dayStart(h, tomorrow))
       const end = new Date(await dayStart(h, w.addDays(tomorrow, 1)))
       const agenda = await agendaMinutes(tx, org, { start, end }, { branchId: branch.id })
-      const people = await tx.execute<{ id: string; name: string }>(sql`select id, name from "user" where id in (select dentist_user_id from professional_schedule where organization_id = ${org})`)
+      const people = await tx.execute<{ id: string; name: string }>(sql`select id, name from "user" where id in (select professional_user_id from professional_schedule where organization_id = ${org})`)
       const nameOf = (id: string) => people.find((row) => row.id === id)?.name ?? "—"
       const working = agenda.days.filter((day) => day.availMin > 0)
       const todayWords = [
@@ -495,14 +495,14 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
       return {
         respuesta: total
           ? `Mañana (${w.dayWords(tomorrow)}) en ${branch.name} hay ${plural(total, "cita", "citas")}: ${confirmed} ${confirmed === 1 ? "confirmada" : "confirmadas"} y ${total - confirmed} por confirmar.`
-          : `Mañana (${w.dayWords(tomorrow)}) no hay citas en ${branch.name}${count("manana", ["cancelada"]) ? ` (${plural(count("manana", ["cancelada"]), "se canceló", "se cancelaron")})` : ""}${coming?.all ? "" : ", y no queda ninguna cita por venir en ninguna sede"}.${working.length ? ` Mañana atiende${working.length > 1 ? "n" : ""} ahí ${working.map((day) => `${the(nameOf(day.dentistUserId))}, con ${hoursOf(day.availMin - day.occMin)} libres`).join(" y ")}.` : ` Mañana nadie tiene horario en ${branch.name}.`} Lo más cercano: ${todayTotal ? `hoy en ${branch.name} hubo ${plural(todayTotal, "cita", "citas")} (${todayWords})` : `hoy en ${branch.name} no hubo citas; ${lastWords}`}.`,
+          : `Mañana (${w.dayWords(tomorrow)}) no hay citas en ${branch.name}${count("manana", ["cancelada"]) ? ` (${plural(count("manana", ["cancelada"]), "se canceló", "se cancelaron")})` : ""}${coming?.all ? "" : ", y no queda ninguna cita por venir en ninguna sede"}.${working.length ? ` Mañana atiende${working.length > 1 ? "n" : ""} ahí ${working.map((day) => `${the(nameOf(day.professionalUserId))}, con ${hoursOf(day.availMin - day.occMin)} libres`).join(" y ")}.` : ` Mañana nadie tiene horario en ${branch.name}.`} Lo más cercano: ${todayTotal ? `hoy en ${branch.name} hubo ${plural(todayTotal, "cita", "citas")} (${todayWords})` : `hoy en ${branch.name} no hubo citas; ${lastWords}`}.`,
         criterio: "Citas de mañana (día de la clínica) programadas o confirmadas en la sede; si no hay, el horario de mañana en la sede (la cuenta de Reportes › Agenda) y las citas de hoy o, si hoy no hubo, las del último día con citas en la sede.",
         nota: coming?.next
           ? `La siguiente fecha con citas en ${branch.name} es el ${w.dayWords(coming.next)}. Citas por venir en toda la clínica: ${coming.all}.`
           : coming?.all
             ? `En ${branch.name} no hay ninguna cita por venir; en toda la clínica, ${plural(coming.all, "cita por venir", "citas por venir")}.`
             : `El mismo día de la semana pasada (${w.dayWords(w.addDays(tomorrow, -7))}) ${branch.name} tuvo ${plural(weekAgo?.total ?? 0, "cita", "citas")}, ${weekAgo?.attended ?? 0} ${weekAgo?.attended === 1 ? "atendida" : "atendidas"}.`,
-        datos: { sede: branch, manana: tomorrow, porEstado: status, porVenir: coming ?? null, ultimoDiaConCitas: lastDay ?? null, horarioManana: working.map((day) => ({ name: nameOf(day.dentistUserId), availMin: day.availMin, occMin: day.occMin })) },
+        datos: { sede: branch, manana: tomorrow, porEstado: status, porVenir: coming ?? null, ultimoDiaConCitas: lastDay ?? null, horarioManana: working.map((day) => ({ name: nameOf(day.professionalUserId), availMin: day.availMin, occMin: day.occMin })) },
       }
     },
 
@@ -553,13 +553,13 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
     },
 
     x16: async () => {
-      const person = await dentistNamed("Elena Rojas")
+      const person = await professionalNamed("Elena Rojas")
       if (!person) return { respuesta: "No hay una Dra. Elena Rojas en el equipo de la clínica.", criterio: "La profesional no existe.", datos: {} }
       const nextMonday = w.addDays(monday, 7)
       const nextSunday = w.addDays(monday, 13)
       const startIso = await dayStart(h, nextMonday)
       const endIso = await dayStart(h, w.addDays(monday, 14))
-      const minutes = await agendaMinutes(tx, org, { start: new Date(startIso), end: new Date(endIso) }, { dentistUserId: person.id })
+      const minutes = await agendaMinutes(tx, org, { start: new Date(startIso), end: new Date(endIso) }, { professionalUserId: person.id })
       const scheduled = minutes.days.reduce((sum, day) => sum + day.scheduledMin, 0)
       const free = minutes.days.reduce((sum, day) => sum + Math.max(0, day.availMin - day.occMin), 0)
       const booked = minutes.days.reduce((sum, day) => sum + day.occMin, 0)
@@ -571,17 +571,17 @@ export function blindSolvers1(h: GoldenHelpers): GoldenSolvers {
           (extract(epoch from ((d.day::timestamp + make_interval(mins => s.start_min)) at time zone coalesce(b.timezone, ${h.tz}))) * 1000)::float8 as start,
           (extract(epoch from ((d.day::timestamp + make_interval(mins => s.end_min)) at time zone coalesce(b.timezone, ${h.tz}))) * 1000)::float8 as end
         from d
-        join professional_schedule s on s.organization_id = ${org} and s.dentist_user_id = ${person.id} and s.weekday = extract(dow from d.day)::int
+        join professional_schedule s on s.organization_id = ${org} and s.professional_user_id = ${person.id} and s.weekday = extract(dow from d.day)::int
           and s.valid_from <= d.day and (s.valid_until is null or s.valid_until > d.day)
         join branch b on b.organization_id = s.organization_id and b.id = s.branch_id
         order by d.day, s.start_min`)
       const cuts = await tx.execute<{ branchId: string | null; start: number; end: number }>(sql`
         select k.branch_id as "branchId", (extract(epoch from k.starts_at) * 1000)::float8 as start, (extract(epoch from k.ends_at) * 1000)::float8 as end
         from schedule_block k where k.organization_id = ${org} and k.starts_at < ${endIso}::timestamptz and k.ends_at > ${startIso}::timestamptz
-          and (k.dentist_user_id = ${person.id} or (k.dentist_user_id is null and k.chair_id is null))
+          and (k.professional_user_id = ${person.id} or (k.professional_user_id is null and k.room_id is null))
         union all
         select null, (extract(epoch from a.starts_at) * 1000)::float8, (extract(epoch from a.ends_at) * 1000)::float8 from appointment a
-        where a.organization_id = ${org} and a.dentist_user_id = ${person.id} and a.status <> 'cancelada'
+        where a.organization_id = ${org} and a.professional_user_id = ${person.id} and a.status <> 'cancelada'
           and a.starts_at < ${endIso}::timestamptz and a.ends_at > ${startIso}::timestamptz`)
       const byDay = new Map<string, { branch: string; spans: Array<[number, number]> }>()
       for (const shift of shifts) {

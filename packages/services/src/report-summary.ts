@@ -183,15 +183,15 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
   const { window, currency } = scope
   const branchId = scope.branch?.id
   const professionals = await tx.execute<{ userId: string; name: string; attended: number; noShow: number; total: number }>(sql`
-    select a.dentist_user_id as "userId", u.name,
+    select a.professional_user_id as "userId", u.name,
       count(*) filter (where a.status = 'atendida')::int as attended,
       count(*) filter (where a.status = 'no_asistio')::int as "noShow",
       count(*)::int as total
-    from appointment a join "user" u on u.id = a.dentist_user_id
+    from appointment a join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
       and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))
       ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
-    group by a.dentist_user_id, u.name`)
+    group by a.professional_user_id, u.name`)
   const presentedBy = await tx.execute<{ userId: string; presented: number; accepted: number }>(sql`
     ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}`)}
     select created_by as "userId", count(distinct id)::int as presented,

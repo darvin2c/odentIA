@@ -34,5 +34,5 @@ El aviso al recetar comparaba textos: una alergia escrita «amoxi», con otra or
 
 - `packages/clinical/src/allergens.ts` (`ALLERGENS`, `codeAllergySubstance`, `allergyWarnings`, `HABITUAL_MEDICATIONS`).
 - `packages/services/src/allergies.ts`, `clinical.ts` (`persistPatientHealth`), `prescriptions.ts`.
-- `apps/platform/src/components/patient/allergies-card.tsx`, `clinical-panels.tsx` (receta).
+- `apps/dental-clinic/src/components/patient/allergies-card.tsx`, `clinical-panels.tsx` (receta).
 - Migraciones `0047_alergias_y_medicacion_codificadas` y `0048_alergias_y_medicacion_codificadas_datos`.

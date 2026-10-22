@@ -154,8 +154,8 @@ async function notifyBudget(tx: Db, orgId: string): Promise<void> {
   )
 }
 
-export function isDentist(memberRole?: string): boolean {
-  return (memberRole ?? "").trim().toLowerCase() === "dentist"
+export function isProfessional(memberRole?: string): boolean {
+  return (memberRole ?? "").trim().toLowerCase() === "clinician"
 }
 
 /**
@@ -187,7 +187,7 @@ async function assertOwnBudget(
   memberRole?: string,
   message = "Solo puedes actuar sobre presupuestos de lo que indicaste tú",
 ): Promise<void> {
-  if (!isDentist(memberRole) || !actorUserId) return
+  if (!isProfessional(memberRole) || !actorUserId) return
   const [own] = await tx
     .select({ id: treatmentBudget.id })
     .from(treatmentBudget)
@@ -198,7 +198,7 @@ async function assertOwnBudget(
 
 /** El odontólogo solo presupuesta lo que él indicó. */
 function assertOwnItems(items: ReadonlyArray<{ createdBy: string | null }>, actorUserId: string, memberRole?: string): void {
-  if (!isDentist(memberRole)) return
+  if (!isProfessional(memberRole)) return
   if (items.some((item) => item.createdBy !== actorUserId)) {
     throw new ServiceError("BUDGET_NOT_OWN_PLAN", 403, "Solo puedes presupuestar lo que indicaste tú")
   }
@@ -881,7 +881,7 @@ export async function removeBudgetItems(
     (line) => ids.includes(line.planItemId) && options.some((option) => option.id === line.optionId),
   )
   if (new Set(removed.map((line) => line.planItemId)).size !== ids.length) throw notFound("Línea del presupuesto")
-  if (isDentist(opts.memberRole)) {
+  if (isProfessional(opts.memberRole)) {
     const owners = await tx
       .select({ createdBy: treatmentPlanItem.createdBy })
       .from(treatmentPlanItem)
@@ -1823,7 +1823,7 @@ export async function listBudgets(
     eq(treatmentBudget.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentBudget.planId, planId))
-  if (isDentist(opts.memberRole) && opts.actorUserId) conditions.push(ownBudgetSql(opts.actorUserId))
+  if (isProfessional(opts.memberRole) && opts.actorUserId) conditions.push(ownBudgetSql(opts.actorUserId))
   const budgets = await tx
     .select()
     .from(treatmentBudget)

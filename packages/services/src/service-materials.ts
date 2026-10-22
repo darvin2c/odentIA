@@ -631,7 +631,7 @@ async function encounterRowOf(tx: Db, orgId: string, patientId: string, encounte
       id: encounter.id,
       patientId: encounter.patientId,
       branchId: encounter.branchId,
-      dentistUserId: encounter.dentistUserId,
+      professionalUserId: encounter.professionalUserId,
       status: encounter.status,
       startedAt: encounter.startedAt,
     })
@@ -661,11 +661,11 @@ async function usedByProduct(tx: Db, orgId: string, encounterId: string) {
 }
 
 function mayCorrect(
-  row: { status: string; branchId: string | null; dentistUserId: string },
+  row: { status: string; branchId: string | null; professionalUserId: string },
   actorUserId: string,
   can: Can,
 ): boolean {
-  return row.status === "finalizada" && row.branchId !== null && (row.dentistUserId === actorUserId || can("inventory.write"))
+  return row.status === "finalizada" && row.branchId !== null && (row.professionalUserId === actorUserId || can("inventory.write"))
 }
 
 /** «Materiales usados» de una atención (quien lee la atención). */
@@ -728,7 +728,7 @@ export async function correctEncounterMaterial(
   const row = await encounterRowOf(tx, orgId, patientId, encounterId, true)
   if (row.status !== "finalizada")
     throw conflict("ENCOUNTER_NOT_FINALIZED", "Los materiales se corrigen cuando la atención ya está firmada")
-  if (row.dentistUserId !== actorUserId && !can("inventory.write"))
+  if (row.professionalUserId !== actorUserId && !can("inventory.write"))
     throw forbidden("Corrigen los materiales quien atendió, el dueño y la administración")
   if (!row.branchId)
     throw conflict("ENCOUNTER_WITHOUT_BRANCH", "Esta atención no tiene sede: sus materiales no salieron de ningún almacén")

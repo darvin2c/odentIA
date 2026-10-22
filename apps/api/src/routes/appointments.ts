@@ -3,7 +3,7 @@ import {
   appointmentReminderReach,
   createAppointment,
   operationBodySchema,
-  createChair,
+  createRoom,
   createScheduleBlock,
   deleteScheduleBlock,
   getAgendaAvailability,
@@ -12,7 +12,7 @@ import {
   getPatientMissingData,
   getProfessionalSchedule,
   listAppointments,
-  listChairs,
+  listRooms,
   listScheduleBlocks,
   listScheduleResources,
   moveAppointment,
@@ -22,7 +22,7 @@ import {
   setBranchDefaultDuration,
   setProfessionalSchedule,
   updateAppointment,
-  updateChair,
+  updateRoom,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -43,7 +43,7 @@ const listQuery = z.object({
   to: z.iso.datetime({ offset: true }),
   branchId: z.uuid().optional(),
   professionals: z.string().optional(),
-  chairs: z.string().optional(),
+  rooms: z.string().optional(),
   status: z.string().optional(),
   q: z.string().max(200).optional(),
   patientId: z.uuid().optional(),
@@ -64,8 +64,8 @@ const patchInput = z
     expectedVersion: z.number().int().positive(),
     reason: z.string().max(500).nullable().optional(),
     serviceId: z.uuid().nullable().optional(),
-    dentistUserId: z.string().min(1).optional(),
-    chairId: z.uuid().optional(),
+    professionalUserId: z.string().min(1).optional(),
+    roomId: z.uuid().optional(),
   })
   .strict()
 
@@ -79,12 +79,12 @@ const statusInput = z.object({
   cancelNote: z.string().max(500).optional(),
 })
 
-const chairInput = z.object({
+const roomInput = z.object({
   branchId: z.uuid(),
   name: z.string().min(1).max(120),
 })
 
-const chairPatch = z
+const roomPatch = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     isActive: z.boolean().optional(),
@@ -99,14 +99,14 @@ const scheduleRuleInput = z.object({
 
 const scheduleInput = z.object({
   branchId: z.uuid(),
-  dentistUserId: z.string().min(1),
+  professionalUserId: z.string().min(1),
   rules: z.array(scheduleRuleInput).max(42),
 })
 
 const blockInput = z.object({
   branchId: z.uuid(),
-  dentistUserId: z.string().min(1).nullable().optional(),
-  chairId: z.uuid().nullable().optional(),
+  professionalUserId: z.string().min(1).nullable().optional(),
+  roomId: z.uuid().nullable().optional(),
   kind: z.enum(["bloqueo", "ausencia"]).optional(),
   reason: z.string().max(500).optional(),
   startsAt: z.iso.datetime({ offset: true }),
@@ -161,20 +161,20 @@ export function createAgendaRoute(deps: CrmDeps) {
     )
   })
 
-  app.post("/chairs", async (c) => {
+  app.post("/rooms", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
     }
-    const parsed = chairInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = roomInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createChair(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => createRoom(tx, orgId, parsed.data)),
     )
   })
 
   // Las unidades dentales de la sede para administrarlas: también las desactivadas.
-  app.get("/chairs", async (c) => {
+  app.get("/rooms", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la configuración de unidades dentales"), 403)
@@ -184,12 +184,12 @@ export function createAgendaRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "VALIDATION", "branchId es obligatorio"), 400)
     }
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listChairs(tx, orgId, { branchId })),
+      withOrgContext(deps.db, orgId, (tx) => listRooms(tx, orgId, { branchId })),
     )
   })
 
   // Renombrar una unidad dental, desactivarla o reactivarla.
-  app.patch("/chairs/:id", async (c) => {
+  app.patch("/rooms/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
@@ -198,10 +198,10 @@ export function createAgendaRoute(deps: CrmDeps) {
     if (!z.uuid().safeParse(id).success) {
       return c.json(errorBody(c, "NOT_FOUND", "Unidad dental no encontrada"), 404)
     }
-    const parsed = chairPatch.safeParse(await c.req.json().catch(() => null))
+    const parsed = roomPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => updateChair(tx, orgId, userId, id, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => updateRoom(tx, orgId, userId, id, parsed.data)),
     )
   })
 
@@ -242,13 +242,13 @@ export function createAgendaRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
     }
     const branchId = c.req.query("branchId")
-    const dentistUserId = c.req.query("dentistUserId")
-    if (!branchId || !z.uuid().safeParse(branchId).success || !dentistUserId) {
-      return c.json(errorBody(c, "VALIDATION", "branchId y dentistUserId son obligatorios"), 400)
+    const professionalUserId = c.req.query("professionalUserId")
+    if (!branchId || !z.uuid().safeParse(branchId).success || !professionalUserId) {
+      return c.json(errorBody(c, "VALIDATION", "branchId y professionalUserId son obligatorios"), 400)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getProfessionalSchedule(tx, orgId, branchId, dentistUserId),
+        getProfessionalSchedule(tx, orgId, branchId, professionalUserId),
       ),
     )
   })
@@ -328,13 +328,13 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     }
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { professionals, chairs, status, ...rest } = parsed.data
+    const { professionals, rooms, status, ...rest } = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listAppointments(tx, orgId, {
           ...rest,
           professionals: csv(professionals),
-          chairs: csv(chairs),
+          rooms: csv(rooms),
           statuses: csv(status),
         }),
       ),

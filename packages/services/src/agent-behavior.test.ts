@@ -120,7 +120,7 @@ describe("clave de idempotencia", () => {
  * (ADR 0021). Los datos solo tienen que pasar la validación; nadie la ejecuta.
  */
 function booking(startsAt = "2026-11-02T15:00:00.000Z"): Record<string, unknown> {
-  return { patientId: randomUUID(), dentistUserId: "owner-1", chairId: randomUUID(), startsAt }
+  return { patientId: randomUUID(), professionalUserId: "owner-1", roomId: randomUUID(), startsAt }
 }
 
 describe("recorrido comercial directo", () => {

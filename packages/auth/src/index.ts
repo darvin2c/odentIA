@@ -195,7 +195,7 @@ export function createAuth({
             team: [],
             ac: ["read"],
           }),
-          dentist: defaultAc.newRole({
+          clinician: defaultAc.newRole({
             organization: [],
             member: [],
             invitation: [],

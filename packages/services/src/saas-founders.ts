@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
-  SAAS_WAITLIST_DENTISTS,
+  SAAS_WAITLIST_PROFESSIONALS,
   SAAS_WAITLIST_STATUSES,
   SAAS_WAITLIST_TOOLS,
   type SaasSignupMode,
@@ -34,7 +34,7 @@ const DAY = 86_400_000
 export const FOUNDER_INVITATION_DAYS = 14
 
 export type { SaasSignupMode, SaasWaitlistStatus }
-export { SAAS_WAITLIST_DENTISTS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
+export { SAAS_WAITLIST_PROFESSIONALS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
 export { founderInvitationEmail, moneyText, waitlistReceivedEmail } from "./saas-emails.js"
 
 /* ---------- Cómo se abren clínicas ---------- */
@@ -86,7 +86,7 @@ export const waitlistInputSchema = z.strictObject({
     .toUpperCase()
     .regex(/^[A-Z]{2}$/, "Elige el país"),
   city: text(1, 80, "la ciudad"),
-  dentists: z.enum(SAAS_WAITLIST_DENTISTS, "Elige cuántos odontólogos atienden"),
+  professionals: z.enum(SAAS_WAITLIST_PROFESSIONALS, "Elige cuántos odontólogos atienden"),
   currentTool: z.enum(SAAS_WAITLIST_TOOLS, "Elige qué usan hoy"),
 })
 export type WaitlistInput = z.input<typeof waitlistInputSchema>
@@ -137,7 +137,7 @@ export interface WaitlistRow {
   clinicName: string
   countryCode: string
   city: string
-  dentists: string
+  professionals: string
   currentTool: string
   status: SaasWaitlistStatus
   note: string | null
@@ -265,7 +265,7 @@ function toWaitlistRow(
     clinicName: row.clinicName,
     countryCode: row.countryCode,
     city: row.city,
-    dentists: row.dentists,
+    professionals: row.professionals,
     currentTool: row.currentTool,
     status: row.status as SaasWaitlistStatus,
     note: row.note,

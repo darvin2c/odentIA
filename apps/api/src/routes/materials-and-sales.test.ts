@@ -23,8 +23,8 @@ const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ee".repeat(32))
 const ORG = "org_mat"
 const OWNER = "u-owner"
-const DENTIST = "u-dentist"
-const OTHER_DENTIST = "u-dentist-2"
+const PROFESSIONAL = "u-professional"
+const OTHER_PROFESSIONAL = "u-professional-2"
 const BRANCH = randomUUID()
 const SERVICE = randomUUID()
 const GLOVES = randomUUID()
@@ -115,8 +115,8 @@ beforeAll(async () => {
     values (${ORG}, 'Clínica Materiales', 'PE', 'PEN', 'America/Lima', 'es-PE')`)
   for (const [id, role] of [
     [OWNER, "owner"],
-    [DENTIST, "dentist"],
-    [OTHER_DENTIST, "dentist"],
+    [PROFESSIONAL, "clinician"],
+    [OTHER_PROFESSIONAL, "clinician"],
     ["u-reception", "reception"],
     ["u-cashier", "cashier"],
   ] as const) {
@@ -138,10 +138,10 @@ beforeAll(async () => {
   await ownerDb.execute(sql`insert into "patient" ("id", "organization_id", "person_id", "patient_number") values (${PATIENT}::uuid, ${ORG}, ${PERSON}::uuid, 1)`)
   // Una atención firmada por la odontóloga, en la sede.
   await ownerDb.execute(sql`
-    insert into "encounter" ("id", "organization_id", "patient_id", "branch_id", "dentist_user_id", "reason")
-    values (${ENCOUNTER}::uuid, ${ORG}, ${PATIENT}::uuid, ${BRANCH}::uuid, ${DENTIST}, 'Control')`)
+    insert into "encounter" ("id", "organization_id", "patient_id", "branch_id", "professional_user_id", "reason")
+    values (${ENCOUNTER}::uuid, ${ORG}, ${PATIENT}::uuid, ${BRANCH}::uuid, ${PROFESSIONAL}, 'Control')`)
   await ownerDb.execute(sql`
-    update "encounter" set "status" = 'finalizada', "finalized_at" = now(), "ended_at" = now(), "finalized_by" = ${DENTIST},
+    update "encounter" set "status" = 'finalizada', "finalized_at" = now(), "ended_at" = now(), "finalized_by" = ${PROFESSIONAL},
       "signer_name" = 'Dra. Ana', "signer_title" = 'Cirujano dentista', "signer_registration" = 'COP 1'
     where "id" = ${ENCOUNTER}::uuid`)
 }, 180_000)
@@ -152,10 +152,10 @@ afterAll(async () => {
 
 it("materiales de un servicio: los cambia quien lleva el inventario y el costo solo lo ve quien ve precios", async () => {
   const owner = buildApp("owner", OWNER)
-  const dentist = buildApp("dentist", DENTIST)
+  const professional = buildApp("clinician", PROFESSIONAL)
   const reception = buildApp("reception", "u-reception")
 
-  const denied = await call(dentist, "PUT", `/services/${SERVICE}/materials`, { items: [{ productId: GLOVES, quantity: 2 }] })
+  const denied = await call(professional, "PUT", `/services/${SERVICE}/materials`, { items: [{ productId: GLOVES, quantity: 2 }] })
   expect(denied.status).toBe(403)
   expect(denied.body.error.message).toBe("No tienes permiso para cambiar los materiales")
   expect((await call(reception, "PUT", `/services/${SERVICE}/materials`, { items: [] })).status).toBe(403)
@@ -188,8 +188,8 @@ it("materiales de un servicio: los cambia quien lleva el inventario y el costo s
   // En la lista: el número de materiales para quien ve Inventario; nada para los demás.
   const ownerList = await call(owner, "GET", "/services")
   expect(ownerList.body.data.find((row: { id: string }) => row.id === SERVICE)?.materials).toEqual({ count: 1, cost: null })
-  const dentistList = await call(dentist, "GET", "/services")
-  expect(dentistList.body.data.find((row: { id: string }) => row.id === SERVICE)).not.toHaveProperty("materials")
+  const professionalList = await call(professional, "GET", "/services")
+  expect(professionalList.body.data.find((row: { id: string }) => row.id === SERVICE)).not.toHaveProperty("materials")
 
   // «Empieza por estos 5» y el buscador de materiales son de quien los configura.
   expect((await call(owner, "GET", "/services/without-materials")).status).toBe(200)
@@ -208,7 +208,7 @@ it("vender desde Cobrar: lo busca y lo agrega quien cobra, con la sede y el prec
   })
   expect(found.body.data.items[0]).not.toHaveProperty("costCents")
   expect((await call(buildApp("reception", "u-reception"), "GET", `/finance/sale-products?branchId=${BRANCH}`)).status).toBe(403)
-  expect((await call(buildApp("dentist", DENTIST), "GET", `/finance/sale-products?branchId=${BRANCH}`)).status).toBe(403)
+  expect((await call(buildApp("clinician", PROFESSIONAL), "GET", `/finance/sale-products?branchId=${BRANCH}`)).status).toBe(403)
 
   const noBranch = await call(cashier, "POST", `/patients/${PATIENT}/charges`, { productId: BRUSH, quantity: 2 })
   expect(noBranch.status).toBe(400)
@@ -237,17 +237,17 @@ it("vender desde Cobrar: lo busca y lo agrega quien cobra, con la sede y el prec
 })
 
 it("materiales usados en la atención: los lee quien lee la historia y los corrige quien atendió o el dueño", async () => {
-  const dentist = buildApp("dentist", DENTIST)
-  const other = buildApp("dentist", OTHER_DENTIST)
+  const professional = buildApp("clinician", PROFESSIONAL)
+  const other = buildApp("clinician", OTHER_PROFESSIONAL)
   const owner = buildApp("owner", OWNER)
   const path = `/patients/${PATIENT}/encounters/${ENCOUNTER}/materials`
 
-  const empty = await call(dentist, "GET", path)
+  const empty = await call(professional, "GET", path)
   expect(empty.status).toBe(200)
   expect(empty.body.data).toEqual({ branch: { id: BRANCH, name: "Sede Miraflores" }, items: [], canCorrect: true })
   expect((await call(buildApp("cashier", "u-cashier"), "GET", path)).status).toBe(403)
 
-  const fixed = await call(dentist, "POST", path, { productId: GLOVES, quantity: 4, idempotencyKey: "form-1" })
+  const fixed = await call(professional, "POST", path, { productId: GLOVES, quantity: 4, idempotencyKey: "form-1" })
   expect(fixed.status).toBe(200)
   expect(fixed.body.data).toMatchObject({ changed: 4, items: [{ productId: GLOVES, quantity: 4, quantityText: "4 guantes" }] })
 

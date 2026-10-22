@@ -19,7 +19,7 @@
   "css.lint.unknownAtRules": "ignore",
   "tailwindCSS.experimental.configFile": {
     "apps/panel/src/styles/app.css": ["apps/panel/**/*"],
-    "apps/platform/src/styles/app.css": ["apps/platform/**/*"],
+    "apps/dental-clinic/src/styles/app.css": ["apps/dental-clinic/**/*"],
     "packages/ui/src/styles/globals.css": ["packages/**/*"]
   }
 }

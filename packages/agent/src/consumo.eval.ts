@@ -39,7 +39,7 @@ import {
   ADMIN_LINES,
   adminLineOf,
   AUTOMATION_MESSAGES,
-  createChair,
+  createRoom,
   createConnection,
   createKnowledgeEntry,
   createPaymentMethod,
@@ -317,34 +317,34 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   const start = new Date(end.getTime() - CLINIC.days * DAY)
   const owner = "owner-mes"
   // Ids neutros: un id que dijera «especialista» le soplaría al modelo algo que el sistema no le entrega.
-  const dentist = "usuario-mes-2"
+  const professional = "usuario-mes-2"
   const specialist = "usuario-mes-3"
 
   // ---------------------------------------------------------------- la clínica ---
   await ownerDb.execute(sql`insert into "user" ("id", "name", "email", "email_verified") values
-    (${owner}, 'Ana Ruiz', 'ana@mes.test', true), (${dentist}, 'Dra. Carla Ríos', 'carla@mes.test', true)`)
+    (${owner}, 'Ana Ruiz', 'ana@mes.test', true), (${professional}, 'Dra. Carla Ríos', 'carla@mes.test', true)`)
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-    ('m-owner-mes', ${ORG}, ${owner}, 'owner', now()), ('m-usuario-mes-2', ${ORG}, ${dentist}, 'dentist', now())`)
+    ('m-owner-mes', ${ORG}, ${owner}, 'owner', now()), ('m-usuario-mes-2', ${ORG}, ${professional}, 'clinician', now())`)
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const branchId = site!.id
-  const chair = await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 1" }))
+  const room = await inOrg((tx) => createRoom(tx, ORG, { branchId, name: "Unidad dental 1" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,
-      dentistUserId: dentist,
+      professionalUserId: professional,
       rules: [1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 18 * 60 })),
     }))
   // Un segundo profesional, adscrito a Endodoncia, que atiende dos días: lo que
   // la clínica sabe sobre quién hace cada cosa.
   await ownerDb.execute(sql`insert into "user" ("id", "name", "email", "email_verified") values (${specialist}, 'Dr. Luis Peña', 'luis@mes.test', true)`)
-  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-usuario-mes-3', ${ORG}, ${specialist}, 'dentist', now())`)
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-usuario-mes-3', ${ORG}, ${specialist}, 'clinician', now())`)
   const [endo] = await ownerDb.insert(orgSpecialty).values({ organizationId: ORG, key: "endodoncia", name: "Endodoncia" }).returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: endo!.id, userId: specialist })
-  await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 2" }))
+  await inOrg((tx) => createRoom(tx, ORG, { branchId, name: "Unidad dental 2" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,
-      dentistUserId: specialist,
+      professionalUserId: specialist,
       rules: [2, 4].map((weekday) => ({ weekday, startMin: 15 * 60, endMin: 19 * 60 })),
     }))
   await seedProcedureCodes(ownerDb)
@@ -462,7 +462,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   const appointments = await ownerDb
     .insert(appointment)
     .values(plan.map((item) => ({
-      organizationId: ORG, branchId, patientId: item.person.patientId, dentistUserId: dentist, chairId: chair.id,
+      organizationId: ORG, branchId, patientId: item.person.patientId, professionalUserId: professional, roomId: room.id,
       startsAt: item.startsAt, endsAt: item.endsAt, durationMin: 10, status: "programada",
     })))
     .returning({ id: appointment.id })

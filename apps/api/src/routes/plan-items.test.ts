@@ -993,9 +993,9 @@ it("plan: cancelar conserva la indicación y exige motivo", async () => {
   expect((await app.request(`/patients/${patientId}/plan/items/${item.id}`, { method: "DELETE" })).status).toBe(404)
 })
 
-it("plan: dentist lee 200, member ni lee ni muta ni decide (403 sin efectos)", async () => {
+it("plan: professional lee 200, member ni lee ni muta ni decide (403 sin efectos)", async () => {
   const admin = buildApp("admin")
-  const dentist = buildApp("dentist")
+  const professional = buildApp("clinician")
   const member = buildApp("member")
   const patientId = await createFreshPatient(admin, "Plan Permisos")
   const ctx = await setupPlan(admin, patientId)
@@ -1003,7 +1003,7 @@ it("plan: dentist lee 200, member ni lee ni muta ni decide (403 sin efectos)", a
   const budgetId = await createBudget(admin, patientId, ctx.planId, [item.id])
   await deliverBudget(admin, patientId, budgetId)
 
-  const read = await dentist.request(`/patients/${patientId}/plan`, { method: "GET" })
+  const read = await professional.request(`/patients/${patientId}/plan`, { method: "GET" })
   expect(read.status).toBe(200)
 
   const memberRead = await member.request(`/patients/${patientId}/plan`, { method: "GET" })

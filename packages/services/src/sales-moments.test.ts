@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { scheduleChair } from "@odentia/db/schema/agenda"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
@@ -35,19 +35,19 @@ async function ownContact(patientId: string): Promise<string> {
   return link!.contactId
 }
 
-let place: { branchId: string; chairId: string } | null = null
-async function agendaPlace(): Promise<{ branchId: string; chairId: string }> {
+let place: { branchId: string; roomId: string } | null = null
+async function agendaPlace(): Promise<{ branchId: string; roomId: string }> {
   if (place) return place
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
-  place = { branchId: site!.id, chairId: chair!.id }
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  place = { branchId: site!.id, roomId: room!.id }
   return place
 }
 
 it("agendar una cita mueve sola su oportunidad «Interesado» y la tarjeta dice por qué; las demás no se tocan", async () => {
   const f = await clinicalFixture()
   const contactId = await ownContact(f.patient.id)
-  const { branchId, chairId } = await agendaPlace()
+  const { branchId, roomId } = await agendaPlace()
   const older = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Limpieza" }, { userId: f.actor }))
   const wanted = await f.run((tx) =>
     createOpportunity(tx, "org_a", { contactId, title: "Tratamiento", serviceId: f.service.id }, { userId: null, origin: "agente" }),
@@ -60,7 +60,7 @@ it("agendar una cita mueve sola su oportunidad «Interesado» y la tarjeta dice 
   startsAt.setUTCHours(15, 0, 0, 0)
   await f.run((tx) =>
     createAppointment(tx, "org_a", f.actor, {
-      branchId, chairId, patientId: f.patient.id, dentistUserId: f.actor, serviceId: f.service.id,
+      branchId, roomId, patientId: f.patient.id, professionalUserId: f.actor, serviceId: f.service.id,
       startsAt: startsAt.toISOString(), outsideSchedule: true,
     }),
   )
@@ -113,7 +113,7 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
 it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otra cita; con otra por venir, no", async () => {
   const f = await clinicalFixture()
   const contactId = await ownContact(f.patient.id)
-  const { branchId, chairId } = await agendaPlace()
+  const { branchId, roomId } = await agendaPlace()
   const opp = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Evaluación", serviceId: f.service.id }))
   // Horas que no usa otra prueba de la misma unidad dental.
   const at = (days: number) => {
@@ -124,7 +124,7 @@ it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otr
   const book = (startsAt: Date) =>
     f.run((tx) =>
       createAppointment(tx, "org_a", f.actor, {
-        branchId, chairId, patientId: f.patient.id, dentistUserId: f.actor, serviceId: f.service.id,
+        branchId, roomId, patientId: f.patient.id, professionalUserId: f.actor, serviceId: f.service.id,
         startsAt: startsAt.toISOString(), outsideSchedule: true,
       }),
     )

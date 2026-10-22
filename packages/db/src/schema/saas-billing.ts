@@ -817,7 +817,7 @@ export const saasCommercialTerms = adminSchema.table(
 
 export const SAAS_WAITLIST_STATUSES = ["por_revisar", "invitada", "entro", "descartada"] as const
 export type SaasWaitlistStatus = (typeof SAAS_WAITLIST_STATUSES)[number]
-export const SAAS_WAITLIST_DENTISTS = ["1", "2-3", "4-9", "10+"] as const
+export const SAAS_WAITLIST_PROFESSIONALS = ["1", "2-3", "4-9", "10+"] as const
 export const SAAS_WAITLIST_TOOLS = ["nada", "cuaderno_excel", "otro_software"] as const
 
 /**
@@ -839,7 +839,7 @@ export const saasWaitlistRequest = adminSchema.table(
     /** ISO 3166-1 alfa-2. */
     countryCode: char("country_code", { length: 2 }).notNull(),
     city: text("city").notNull(),
-    dentists: text("dentists").notNull(),
+    professionals: text("professionals").notNull(),
     currentTool: text("current_tool").notNull(),
     status: text("status").notNull().default("por_revisar"),
     note: text("note"),
@@ -866,7 +866,7 @@ export const saasWaitlistRequest = adminSchema.table(
       "saas_waitlist_request_status_check",
       sql`${table.status} IN ('por_revisar','invitada','entro','descartada')`,
     ),
-    check("saas_waitlist_request_dentists_check", sql`${table.dentists} IN ('1','2-3','4-9','10+')`),
+    check("saas_waitlist_request_professionals_check", sql`${table.professionals} IN ('1','2-3','4-9','10+')`),
     check(
       "saas_waitlist_request_tool_check",
       sql`${table.currentTool} IN ('nada','cuaderno_excel','otro_software')`,

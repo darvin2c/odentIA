@@ -31,5 +31,5 @@ El equipo de una clínica mediana trabaja desde una lista, no desde varias que s
 ## Referencias
 
 - `packages/services/src/workspace.ts` (`settleWorkspaceNotifications`, `NOTICE_SUBJECTS`, `getWorkspaceHome`), `workspace-home.ts`, `conversation-state.ts` (`stillOpenWithPersonSql`), `automation.ts` (`remindedUnconfirmedSql`), `conversation-close.ts` (`getTaskResolvePreview`).
-- `apps/platform/src/components/home/waiting-list.tsx`, `components/workspace-notifications.tsx`, `components/crm/resolve-preview.tsx`, `lib/agent.ts` (`AGENT_CASE_ROW`, `AGENT_CASES_TITLE`).
+- `apps/dental-clinic/src/components/home/waiting-list.tsx`, `components/workspace-notifications.tsx`, `components/crm/resolve-preview.tsx`, `lib/agent.ts` (`AGENT_CASE_ROW`, `AGENT_CASES_TITLE`).
 - Migración `0085_un_pendiente_un_lugar`.

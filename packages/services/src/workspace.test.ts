@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { encounter, encounterProcedure, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
@@ -331,18 +331,18 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   ])
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima", createdAt: new Date(Date.now() - 60_000) }).returning({ id: branch.id })
   const [norte] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Norte", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
-  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
+  const [roomCentro] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  const [roomNorte] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: norte!.id, name: "Unidad dental 2" }).returning({ id: scheduleRoom.id })
   // Horas a minutos del reloj, dentro del mismo día de la sede: lo atendido ya pasó y
   // lo pendiente viene enseguida. Con horas fijas, una corrida al final del día de Lima
   // veía terminada la cita que debía ser «la siguiente».
   await outsideLimaMidnight()
-  const visit = async (name: string, minutesFromNow: number, status: string, dentistUserId: string, where: "centro" | "norte") => {
+  const visit = async (name: string, minutesFromNow: number, status: string, professionalUserId: string, where: "centro" | "norte") => {
     const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) })
     const startsAt = new Date(Math.floor(Date.now() / 60_000) * 60_000 + minutesFromNow * 60_000)
     await ownerDb.insert(appointment).values({
-      organizationId: orgId, patientId: person!.id, dentistUserId, status, serviceName: "Control",
-      branchId: where === "centro" ? centro!.id : norte!.id, chairId: where === "centro" ? chairCentro!.id : chairNorte!.id,
+      organizationId: orgId, patientId: person!.id, professionalUserId, status, serviceName: "Control",
+      branchId: where === "centro" ? centro!.id : norte!.id, roomId: where === "centro" ? roomCentro!.id : roomNorte!.id,
       startsAt, endsAt: new Date(startsAt.getTime() + 60_000), durationMin: 1,
     })
   }
@@ -368,7 +368,7 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
     ["Sin confirmar de Ana", "por_confirmar", false],
     ["No asistió", "no_vino", false],
   ])
-  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Unidad dental 1", serviceName: "Control" })
+  expect(first.today!.appointments[0]).toMatchObject({ professionalName: "Dr. Luis Vega", roomName: "Unidad dental 1", serviceName: "Control" })
 
   // La sede pedida filtra; una que no existe cae en la primera, sin mezclar sedes.
   const other = await home(reception, recipient, norte!.id)
@@ -377,15 +377,15 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   expect((await home(reception, recipient, randomUUID())).today!.branch).toEqual({ id: centro!.id, name: "Centro" })
 
   // Quien atiende: solo sus citas, de todas las sedes; lo que falta primero y lo atendido al final.
-  const dentist = await home({ ...reception, ownAppointments: true }, ana, norte!.id)
-  expect(dentist.today).toMatchObject({ scope: "mine", branch: null, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
-  expect(dentist.today!.appointments.map(row => [row.patientName, row.branchName, row.next])).toEqual([
+  const professional = await home({ ...reception, ownAppointments: true }, ana, norte!.id)
+  expect(professional.today).toMatchObject({ scope: "mine", branch: null, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
+  expect(professional.today!.appointments.map(row => [row.patientName, row.branchName, row.next])).toEqual([
     ["Ana en Norte", "Norte", true],
     ["Sin confirmar de Ana", "Centro", false],
     ["Atendida de Ana", "Centro", false],
   ])
-  expect(dentist.agendaLine).toBeNull()
-  expect(dentist.today!.appointments.some(row => row.dentistName === "Dr. Luis Vega")).toBe(false)
+  expect(professional.agendaLine).toBeNull()
+  expect(professional.today!.appointments.some(row => row.professionalName === "Dr. Luis Vega")).toBe(false)
 
   // Un rol sin agenda ni caja no recibe citas, caja ni filas de otros.
   const bare = await home(restricted, recipient)
@@ -413,8 +413,8 @@ it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus pla
   expect(cashier).toHaveLength(1)
   expect(cashier[0]).toMatchObject({ total: 2, oldestPresentedAt: presentedAt.toISOString() })
   expect(cashier[0]!.items.map(item => item.title)).toEqual(["Presentado", "Presentado"])
-  const dentist = await budgets({ ...restricted, clinical: true, ownAppointments: true }, luis)
-  expect(dentist[0]).toMatchObject({ total: 1 })
+  const professional = await budgets({ ...restricted, clinical: true, ownAppointments: true }, luis)
+  expect(professional[0]).toMatchObject({ total: 1 })
   expect(await budgets({ ...restricted, appointments: true, conversations: true, tasks: true, crm: true, agent: true }, recipient)).toEqual([])
 })
 
@@ -453,22 +453,22 @@ it("las tareas de otra persona no llegan a quien no dirige", async () => {
 it("la producción clínica excluye los actos anulados", async () => {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `produccion-${orgId.slice(0, 8)}`)
-  const dentist = randomUUID()
-  await ownerDb.insert(user).values({ id: dentist, name: "Dentista fase cero", email: `${dentist}@fase0.test`, emailVerified: true })
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Dentista fase cero", email: `${professional}@fase0.test`, emailVerified: true })
   const [account] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Paciente producción", patientNumber: 1 })
   // Ciclo real: borrador → actos (+ anulación en borrador) → cierre con firma.
   // Insertar actos en una atención ya finalizada viola encounter_child_draft_only.
-  const [visit] = await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: account!.id, dentistUserId: dentist }).returning({ id: encounter.id })
+  const [visit] = await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: account!.id, professionalUserId: professional }).returning({ id: encounter.id })
   const procedures = await ownerDb.insert(encounterProcedure).values([
     { organizationId: orgId, encounterId: visit!.id, description: "Resina vigente", priceCents: 30000, currency: "PEN" },
     { organizationId: orgId, encounterId: visit!.id, description: "Acto duplicado", priceCents: 99999, currency: "PEN" },
   ]).returning({ id: encounterProcedure.id, description: encounterProcedure.description })
   const anulado = procedures.find(procedure => procedure.description === "Acto duplicado")
   await ownerDb.update(encounterProcedure).set({ voidedAt: new Date(), voidReason: "Registro duplicado" }).where(eq(encounterProcedure.id, anulado!.id))
-  await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: dentist, signerName: "Dentista fase cero", signerRegistration: "12345" }).where(eq(encounter.id, visit!.id))
+  await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: professional, signerName: "Dentista fase cero", signerRegistration: "12345" }).where(eq(encounter.id, visit!.id))
   // Reportes › Finanzas › Comisiones: lo atendido es solo el acto vigente.
   const report = await withOrgContext(appDb, orgId, tx => getReportCommissions(tx, orgId, { period: "este_mes" }))
-  expect(report.rows).toEqual([expect.objectContaining({ userId: dentist, attendedCents: 30000, unpaidCents: 30000 })])
+  expect(report.rows).toEqual([expect.objectContaining({ userId: professional, attendedCents: 30000, unpaidCents: 30000 })])
 })
 
 it("un caso del agente sale una sola vez: ni su tarea ni su conversación se repiten, la campana no lo anuncia y el contador cuenta lo de cada quien", async () => {
@@ -582,16 +582,16 @@ it("un aviso se retira solo cuando su asunto se resuelve y vuelve a llegar si el
 it("una cita sin confirmar tras el primer recordatorio del agente aparece para llamar, con su teléfono, a quien ve la agenda", async () => {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `llamar-${orgId.slice(0, 8)}`)
-  const dentist = randomUUID()
-  await ownerDb.insert(user).values({ id: dentist, name: "Dra. Ruiz", email: `${dentist}@llamar.test`, emailVerified: true })
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Dra. Ruiz", email: `${professional}@llamar.test`, emailVerified: true })
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 2" }).returning({ id: scheduleRoom.id })
   const visit = async (name: string, status: string, reminder: "enviado" | "pendiente" | null, hours = 20) => {
     const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000), phone: "+51987654100" })
     const startsAt = new Date(Date.now() + hours * 3_600_000)
     const [row] = await ownerDb.insert(appointment).values({
-      organizationId: orgId, patientId: person!.id, dentistUserId: dentist, status, serviceName: "Evaluación",
-      branchId: centro!.id, chairId: chair!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+      organizationId: orgId, patientId: person!.id, professionalUserId: professional, status, serviceName: "Evaluación",
+      branchId: centro!.id, roomId: room!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
     }).returning({ id: appointment.id })
     if (reminder) {
       await ownerDb.insert(automationJob).values({
@@ -612,7 +612,7 @@ it("una cita sin confirmar tras el primer recordatorio del agente aparece para l
     { id: rosa, patientName: "Rosa Quispe", phone: "+51987654100", branchName: "Centro", serviceName: "Evaluación" },
   ])
   // Quien atiende no llama: no le llega.
-  const own = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, dentist, { ...reception, ownAppointments: true }))
+  const own = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, professional, { ...reception, ownAppointments: true }))
   expect(rowsOf(own.waiting, "unconfirmed")).toEqual([])
   // Confirmada, deja de esperar.
   await ownerDb.update(appointment).set({ status: "confirmada" }).where(eq(appointment.id, rosa))

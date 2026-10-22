@@ -12,7 +12,7 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { createChair } from "./appointments.js"
+import { createRoom } from "./appointments.js"
 import { type GlobalSearchResult, searchEverything, searchMeaningOwners } from "./global-search.js"
 import { insertTestPatients } from "./test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -22,13 +22,13 @@ setupTestDb()
 const ORG = `org_${randomUUID().slice(0, 8)}`
 const OTHER = `org_${randomUUID().slice(0, 8)}`
 const USER = `u-${ORG}`
-const DENTIST = `d-${ORG}`
+const PROFESSIONAL = `d-${ORG}`
 let luciaPersonId = ""
 let luciaPatientId = ""
 let madrePersonId = ""
 let leadPersonId = ""
 let serviceId = ""
-const OTHER_DENTIST = `d2-${ORG}`
+const OTHER_PROFESSIONAL = `d2-${ORG}`
 
 const run = <T>(orgId: string, fn: (tx: Db) => Promise<T>) => withOrgContext(appDb, orgId, fn)
 const as = (role: string, q: string, orgId = ORG) =>
@@ -48,11 +48,11 @@ beforeAll(async () => {
   await insertOrg(ownerDb, OTHER, OTHER)
   await ownerDb.insert(user).values([
     { id: USER, name: "Recepción Uno", email: `${USER}@buscar.test` },
-    { id: DENTIST, name: "Dra. Ana Pruebas", email: `${DENTIST}@buscar.test` },
-    { id: OTHER_DENTIST, name: "Dr. Otro", email: `${OTHER_DENTIST}@buscar.test` },
+    { id: PROFESSIONAL, name: "Dra. Ana Pruebas", email: `${PROFESSIONAL}@buscar.test` },
+    { id: OTHER_PROFESSIONAL, name: "Dr. Otro", email: `${OTHER_PROFESSIONAL}@buscar.test` },
   ])
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-    (${`m-${USER}`}, ${ORG}, ${USER}, 'reception', now()), (${`m-${DENTIST}`}, ${ORG}, ${DENTIST}, 'dentist', now())`)
+    (${`m-${USER}`}, ${ORG}, ${USER}, 'reception', now()), (${`m-${PROFESSIONAL}`}, ${ORG}, ${PROFESSIONAL}, 'clinician', now())`)
 
   const [lucia] = await insertTestPatients(ownerDb, {
     organizationId: ORG,
@@ -85,8 +85,8 @@ beforeAll(async () => {
     .insert(branch)
     .values({ organizationId: ORG, name: "Sede Centro", timezone: "America/Lima" })
     .returning({ id: branch.id })
-  const chair = await run(ORG, (tx) =>
-    createChair(tx, ORG, { branchId: sede!.id, name: "Unidad dental Uno" }),
+  const room = await run(ORG, (tx) =>
+    createRoom(tx, ORG, { branchId: sede!.id, name: "Unidad dental Uno" }),
   )
   const [service] = await ownerDb
     .insert(serviceCatalog)
@@ -104,13 +104,13 @@ beforeAll(async () => {
   await ownerDb.execute(sql`with plan as (
       insert into treatment_plan (organization_id, patient_id, title) values (${ORG}, ${luciaPatientId}, 'Plan') returning id)
     insert into treatment_budget (organization_id, patient_id, plan_id, budget_number, title, currency, created_by)
-    select ${ORG}, ${luciaPatientId}, plan.id, 45, 'Ortodoncia de Lucía', 'PEN', ${OTHER_DENTIST} from plan`)
+    select ${ORG}, ${luciaPatientId}, plan.id, 45, 'Ortodoncia de Lucía', 'PEN', ${OTHER_PROFESSIONAL} from plan`)
   await ownerDb.insert(appointment).values({
     organizationId: ORG,
     branchId: sede!.id,
     patientId: luciaPatientId,
-    dentistUserId: DENTIST,
-    chairId: chair.id,
+    professionalUserId: PROFESSIONAL,
+    roomId: room.id,
     serviceName: "Profilaxis (limpieza)",
     startsAt: new Date("2026-10-20T15:00:00Z"),
     endsAt: new Date("2026-10-20T15:30:00Z"),
@@ -147,7 +147,7 @@ beforeAll(async () => {
   await ownerDb.insert(clinicalNote).values({
     organizationId: ORG,
     patientId: luciaPatientId,
-    authorUserId: DENTIST,
+    authorUserId: PROFESSIONAL,
     note: "Dolor molar inferior derecho. Refiere bruxismo nocturno.",
   })
 }, 180_000)
@@ -196,7 +196,7 @@ describe("buscar sin tildes y con su dueño", () => {
 
   it("dice si encontró a una persona o algo de la historia, para que esa frase no vaya a los vectores", async () => {
     expect((await as("reception", "lucia")).personal).toBe(true)
-    expect((await as("dentist", "bruxismo")).personal).toBe(true)
+    expect((await as("clinician", "bruxismo")).personal).toBe(true)
     expect((await as("reception", "profilax")).personal).toBe(false)
   })
 
@@ -223,12 +223,12 @@ describe("buscar sin tildes y con su dueño", () => {
 
 describe("cada rol ve lo de su pantalla", () => {
   it("la historia clínica solo para quien la ve, y queda anotado lo que se mostró", async () => {
-    const dentist = await as("dentist", "bruxismo")
-    expect(owner(dentist, "Lucía Quispe")?.items[0]).toMatchObject({
+    const professional = await as("clinician", "bruxismo")
+    expect(owner(professional, "Lucía Quispe")?.items[0]).toMatchObject({
       kind: "nota",
       type: "clinica",
     })
-    expect(dentist.clinicalReads).toEqual([{ patientId: luciaPatientId, resource: "notas" }])
+    expect(professional.clinicalReads).toEqual([{ patientId: luciaPatientId, resource: "notas" }])
 
     const reception = await as("reception", "bruxismo")
     expect(reception.owners).toEqual([])
@@ -241,16 +241,16 @@ describe("cada rol ve lo de su pantalla", () => {
     expect(owner(cashier, "Lucía Ramos")).toBeUndefined()
     expect((await as("cashier", "blanqueamiento")).owners).toEqual([])
 
-    const dentist = await as("dentist", "lucia")
-    expect(owner(dentist, "Lucía Quispe")).toBeDefined()
-    expect(owner(dentist, "Lucía Ramos")).toBeUndefined()
+    const professional = await as("clinician", "lucia")
+    expect(owner(professional, "Lucía Quispe")).toBeDefined()
+    expect(owner(professional, "Lucía Ramos")).toBeUndefined()
   })
 
   it("el odontólogo solo ve los presupuestos que preparó o indicó, como en la ficha", async () => {
     expect(owner(await as("owner", "ortodoncia"), "Lucía Quispe")?.items[0]).toMatchObject({
       kind: "presupuesto",
     })
-    expect(await as("dentist", "ortodoncia")).toMatchObject({ owners: [] })
+    expect(await as("clinician", "ortodoncia")).toMatchObject({ owners: [] })
   })
 
   it("el filtro quita un tipo entero", async () => {

@@ -729,7 +729,7 @@ export async function getAgentReportList(tx: Db, orgId: string, query: ReportQue
       join patient p on p.id = a.patient_id and p.organization_id = ${orgId}
       join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
       join branch br on br.id = a.branch_id and br.organization_id = ${orgId}
-      join "user" u on u.id = a.dentist_user_id
+      join "user" u on u.id = a.professional_user_id
       where a.organization_id = ${orgId} and a.created_at >= ${at(window.start)} and a.created_at < ${at(window.end)}
         and a.source in (${agentSources()}) ${scope.branch ? sql`and a.branch_id = ${scope.branch.id}` : sql``}
       order by a.created_at desc, a.id limit ${limit}`)

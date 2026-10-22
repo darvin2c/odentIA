@@ -4,7 +4,7 @@ import { encounter, odontogramEntry, patientCharge } from "@odentia/db/schema/cl
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createAppointment, createChair, getAppointment } from "./appointments.js"
+import { createAppointment, createRoom, getAppointment } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { addClinicalNote, addOdontogramEntries } from "./clinical.js"
 import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
@@ -41,11 +41,11 @@ async function withAgenda() {
     })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
-      dentistUserId: f.actor,
+      professionalUserId: f.actor,
       rules: Array.from({ length: 7 }, (_, weekday) => ({
         weekday,
         startMin: 0,
@@ -59,14 +59,14 @@ async function withAgenda() {
       createAppointment(tx, "org_a", f.actor, {
         branchId: site.id,
         patientId: f.patient.id,
-        dentistUserId: f.actor,
-        chairId: chair.id,
+        professionalUserId: f.actor,
+        roomId: room.id,
         startsAt: `${date}T${String(hour).padStart(2, "0")}:00:00.000Z`,
         durationMin: 30,
         status: "confirmada",
       }),
     )
-  return { ...f, site, chair, date, book }
+  return { ...f, site, room, date, book }
 }
 
 /**
@@ -94,25 +94,25 @@ async function withZoneAgenda() {
     .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: zone })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
-  const schedule = (dentistUserId: string) =>
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
+  const schedule = (professionalUserId: string) =>
     f.run((tx) =>
       setProfessionalSchedule(tx, "org_a", f.actor, {
         branchId: site.id,
-        dentistUserId,
+        professionalUserId,
         rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 0, endMin: 24 * 60 - 1 })),
       }),
     )
   await schedule(f.actor)
   const localToday = new Date(Date.now() + offsetHours * 3_600_000)
   /** Cita a esa hora local, `dayOffset` días desde hoy en la zona de la sede. */
-  const bookLocal = (dayOffset: number, hour: number, minute: number, dentistUserId = f.actor) =>
+  const bookLocal = (dayOffset: number, hour: number, minute: number, professionalUserId = f.actor) =>
     f.run((tx) =>
       createAppointment(tx, "org_a", f.actor, {
         branchId: site.id,
         patientId: f.patient.id,
-        dentistUserId,
-        chairId: chair.id,
+        professionalUserId,
+        roomId: room.id,
         startsAt: new Date(
           Date.UTC(
             localToday.getUTCFullYear(),
@@ -142,7 +142,7 @@ it("sin cita indicada, la atención se une a la cita de hoy más cercana y al ce
   await f.run((tx) => scheduleFollowUp(tx, ...f.args, control.id, { appointmentId: near.id }))
   // La sede elegida por defecto no manda: manda la de la cita.
   const first = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor", branchId: null }))
-  expect(first).toMatchObject({ appointmentId: near.id, branchId: f.site.id, dentistUserId: f.actor })
+  expect(first).toMatchObject({ appointmentId: near.id, branchId: f.site.id, professionalUserId: f.actor })
   await f.ready(first.id)
   await f.run((tx) => finalizeEncounter(tx, ...f.args, first.id))
   expect((await f.run((tx) => getAppointment(tx, "org_a", near.id))).status).toBe("atendida")
@@ -214,15 +214,15 @@ it("por defecto atiende quien abre, aunque la cita sea de otro, y solo un profes
   // La cita es de Ana; quien pulsa (el actor) la cubre y es quien escribe.
   const visit = await f.bookLocal(0, 13, 30, colleague)
   await expect(
-    f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor", dentistUserId: cashier })),
+    f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor", professionalUserId: cashier })),
   ).rejects.toMatchObject({ status: 400 })
   const covered = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor" }))
-  expect(covered).toMatchObject({ appointmentId: visit.id, dentistUserId: f.actor })
+  expect(covered).toMatchObject({ appointmentId: visit.id, professionalUserId: f.actor })
   await f.run((tx) => voidEncounter(tx, ...f.args, covered.id, { reason: "Lo atiende Ana" }))
   const byColleague = await f.run((tx) =>
-    createEncounter(tx, ...f.args, { reason: "Dolor", dentistUserId: colleague }),
+    createEncounter(tx, ...f.args, { reason: "Dolor", professionalUserId: colleague }),
   )
-  expect(byColleague.dentistUserId).toBe(colleague)
+  expect(byColleague.professionalUserId).toBe(colleague)
 })
 
 it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su instantánea", async () => {
@@ -326,7 +326,7 @@ it("la atención nace de la cita y al cerrarse la deja atendida con su control r
   expect(draft).toMatchObject({
     appointmentId: visit.id,
     branchId: f.site.id,
-    dentistUserId: f.actor,
+    professionalUserId: f.actor,
   })
   await f.ready(draft.id)
   await f.run((tx) => finalizeEncounter(tx, ...f.args, draft.id))
@@ -441,7 +441,7 @@ it("otro profesional lee el borrador y solo lo continúa tomando el relevo", asy
   const taken = await f.run((tx) =>
     takeOverEncounter(tx, "org_a", colleague, f.patient.id, f.encounter.id),
   )
-  expect(taken.dentistUserId).toBe(colleague)
+  expect(taken.professionalUserId).toBe(colleague)
   await f.run((tx) =>
     updateEncounterDraft(tx, "org_a", colleague, f.patient.id, f.encounter.id, {
       evolution: "Sigo yo",
@@ -567,7 +567,7 @@ it("el perfil profesional no trae título ni colegio por defecto: los escribe la
   await ownerDb.insert(user).values({ id: newcomer, name: "Sin Perfil", email: `${newcomer}@example.test` })
   await ownerDb
     .insert(member)
-    .values({ id: randomUUID(), organizationId: "org_a", userId: newcomer, role: "dentist", createdAt: new Date() })
+    .values({ id: randomUUID(), organizationId: "org_a", userId: newcomer, role: "clinician", createdAt: new Date() })
   expect(await f.run((tx) => getProfessionalProfile(tx, "org_a", newcomer))).toMatchObject({
     professionalTitle: "",
     registrationBody: "",

@@ -1,6 +1,6 @@
 # 0064 · Cada tabla en el esquema de su dueño
 
-Fecha: 2026-10-18 · Estado: aceptada · Complementa [0063](0063-una-tabla-nueva-nace-cerrada-al-rol-de-la-app.md)
+Fecha: 2026-10-18 · Estado: aceptada · Complementa [0063](0063-una-tabla-nueva-nace-cerrada-al-rol-de-la-app.md) · Modificada por [0079](0079-un-nucleo-para-varios-productos.md): lo que solo usa un producto va en su esquema (`dental`).
 
 ## Problema
 

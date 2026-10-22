@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
 import { describe, expect, it } from "vitest"
@@ -16,7 +16,7 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 const owner = { appointments: true, ownAppointments: false, agent: true, allTasks: true }
-const dentist = { appointments: true, ownAppointments: true, agent: false, allTasks: false }
+const professional = { appointments: true, ownAppointments: true, agent: false, allTasks: false }
 const cashier = { appointments: false, ownAppointments: false, agent: false, allTasks: false }
 
 /** Hora de Lima (UTC−5) de un día de octubre de 2026. */
@@ -35,22 +35,22 @@ async function clinic() {
     .insert(branch)
     .values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" })
     .returning({ id: branch.id })
-  const [chair] = await ownerDb
-    .insert(scheduleChair)
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
     .values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" })
-    .returning({ id: scheduleChair.id })
+    .returning({ id: scheduleRoom.id })
   const [patient] = await insertTestPatients(ownerDb, {
     organizationId: orgId,
     displayName: "Lucía Ramos",
     patientNumber: await nextPatientNumber(ownerDb, orgId),
   })
-  const book = (createdAt: Date, source: string, dentistUserId: string) =>
+  const book = (createdAt: Date, source: string, professionalUserId: string) =>
     ownerDb.insert(appointment).values({
       organizationId: orgId,
       branchId: site!.id,
       patientId: patient!.id,
-      dentistUserId,
-      chairId: chair!.id,
+      professionalUserId,
+      roomId: room!.id,
       // Cada una a su hora: la unidad dental no admite dos citas a la vez.
       startsAt: new Date(createdAt.getTime() + 7 * 86_400_000),
       endsAt: new Date(createdAt.getTime() + 7 * 86_400_000 + 30 * 60_000),
@@ -90,11 +90,11 @@ describe("mientras no estabas", () => {
 
   it("el odontólogo cuenta solo sus citas y quien no ve la agenda no recibe números", async () => {
     const c = await clinic()
-    await visit(c.orgId, c.ana, dentist, lima(16, 18))
+    await visit(c.orgId, c.ana, professional, lima(16, 18))
     await visit(c.orgId, c.carmen, cashier, lima(16, 18))
     await c.book(lima(17, 11), "agent", c.ana)
     await c.book(lima(17, 12), "agent", c.carmen)
-    expect(await visit(c.orgId, c.ana, dentist, lima(19, 9))).toMatchObject({
+    expect(await visit(c.orgId, c.ana, professional, lima(19, 9))).toMatchObject({
       appointments: 1,
       cases: null,
     })

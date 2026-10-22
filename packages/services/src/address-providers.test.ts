@@ -21,7 +21,7 @@ describe("adaptadores de sugerencias de direcciones (issue 36)", () => {
             placePrediction: {
               placeId: "ChIJ-smile",
               structuredFormat: { mainText: { text: "Dental Smile Miraflores" }, secondaryText: { text: "Av. José Larco 345, Miraflores, Perú" } },
-              types: ["dentist", "health", "point_of_interest", "establishment"],
+              types: ["clinician", "health", "point_of_interest", "establishment"],
             },
           },
           { placePrediction: { placeId: "ChIJ-larco", structuredFormat: { mainText: { text: "Av. José Larco 345" } }, types: ["street_address"] } },

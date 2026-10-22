@@ -177,7 +177,7 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
   const [first, second] = created as [(typeof created)[number], (typeof created)[number]]
 
   // En la unidad dental: la persona dibuja; el profesional confirma con su perfil.
-  const inChair = await v.run((tx) =>
+  const inRoom = await v.run((tx) =>
     signConsentDocument(tx, "org_a", v.actor, first.id, {
       signerKind: "paciente",
       signerContactId: signer,
@@ -185,7 +185,7 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
       comprehensionConfirmed: true,
     }),
   )
-  expect(inChair).toMatchObject({
+  expect(inRoom).toMatchObject({
     status: "firmado",
     signatureMethod: "clinica",
     signatureLevel: "simple",
@@ -380,7 +380,7 @@ it("órdenes: imagen con el diagnóstico de la atención, resultado y cancelaci�
     { id: reception, name: "Recepción", email: `${reception}@example.test` },
   ])
   await ownerDb.insert(member).values([
-    { id: randomUUID(), organizationId: "org_a", userId: colleague, role: "dentist", createdAt: new Date() },
+    { id: randomUUID(), organizationId: "org_a", userId: colleague, role: "clinician", createdAt: new Date() },
     { id: randomUUID(), organizationId: "org_a", userId: reception, role: "reception", createdAt: new Date() },
   ])
   await expect(

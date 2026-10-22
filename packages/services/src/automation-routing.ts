@@ -163,11 +163,11 @@ export async function composeJobMessage(
         patientId: appointment.patientId,
         branchName: branch.name,
         branchZone: branch.timezone,
-        dentist: user.name,
+        professional: user.name,
       })
       .from(appointment)
       .innerJoin(branch, and(eq(branch.id, appointment.branchId), eq(branch.organizationId, orgId)))
-      .innerJoin(user, eq(user.id, appointment.dentistUserId))
+      .innerJoin(user, eq(user.id, appointment.professionalUserId))
       .where(and(eq(appointment.organizationId, orgId), inArray(appointment.id, ids)))
       .orderBy(asc(appointment.startsAt), asc(appointment.id))
     const first = rows[0]
@@ -184,7 +184,7 @@ export async function composeJobMessage(
           ? ""
           : `${await patientName(tx, orgId, row.patientId)}: `
         parts.push(
-          `${who}${dayPhrase(row.startsAt, now, rowZone, locale)}, a las ${timePhrase(row.startsAt, rowZone, locale)}, con ${row.dentist}`,
+          `${who}${dayPhrase(row.startsAt, now, rowZone, locale)}, a las ${timePhrase(row.startsAt, rowZone, locale)}, con ${row.professional}`,
         )
       }
       values.citas = parts.join("; ")

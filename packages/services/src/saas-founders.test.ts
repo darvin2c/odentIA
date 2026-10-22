@@ -41,7 +41,7 @@ function request(email: string) {
     clinicName: "Clínica Sonrisa",
     countryCode: "pe",
     city: "Arequipa",
-    dentists: "2-3" as const,
+    professionals: "2-3" as const,
     currentTool: "cuaderno_excel" as const,
   }
 }

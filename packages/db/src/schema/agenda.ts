@@ -33,8 +33,8 @@ export const OCCUPYING_STATUSES: readonly AppointmentStatus[] = ["programada", "
 
 /** Unidad dental/consultorio reservable de una sucursal. Sin tabla sala: si una
  * organización la necesita, colgará de aquí y la cita seguirá sin duplicarla. */
-export const scheduleChair = pgTable(
-  "schedule_chair",
+export const scheduleRoom = pgTable(
+  "schedule_room",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
@@ -46,8 +46,8 @@ export const scheduleChair = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("schedule_chair_org_id_uidx").on(table.organizationId, table.id),
-    index("schedule_chair_org_branch_idx").on(table.organizationId, table.branchId),
+    uniqueIndex("schedule_room_org_id_uidx").on(table.organizationId, table.id),
+    index("schedule_room_org_branch_idx").on(table.organizationId, table.branchId),
   ],
 )
 
@@ -68,12 +68,12 @@ export const appointment = pgTable(
     patientId: uuid("patient_id")
       .notNull()
       .references(() => patient.id),
-    dentistUserId: text("dentist_user_id")
+    professionalUserId: text("professional_user_id")
       .notNull()
       .references(() => user.id),
-    chairId: uuid("chair_id")
+    roomId: uuid("room_id")
       .notNull()
-      .references(() => scheduleChair.id),
+      .references(() => scheduleRoom.id),
     /** Motivo/servicio; snapshot de nombre para que el histórico no siga al catálogo. */
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
     serviceName: text("service_name"),
@@ -108,9 +108,9 @@ export const appointment = pgTable(
       table.branchId,
       table.startsAt,
     ),
-    index("appointment_org_dentist_range_idx").on(
+    index("appointment_org_professional_range_idx").on(
       table.organizationId,
-      table.dentistUserId,
+      table.professionalUserId,
       table.startsAt,
     ),
     index("appointment_org_patient_idx").on(table.organizationId, table.patientId),

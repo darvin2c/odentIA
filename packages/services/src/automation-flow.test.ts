@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
@@ -74,9 +74,9 @@ const all = () => true
 interface Clinic {
   orgId: string
   ownerId: string
-  dentistId: string
+  professionalId: string
   branchId: string
-  chairId: string
+  roomId: string
   whatsappId: string | null
 }
 
@@ -85,16 +85,16 @@ async function clinic(
 ): Promise<Clinic> {
   const orgId = randomUUID()
   const ownerId = `owner-${orgId}`
-  const dentistId = `dentist-${orgId}`
+  const professionalId = `professional-${orgId}`
   await insertOrg(ownerDb, orgId, `auto-${orgId}`)
   await ownerDb.update(orgProfile).set({ tradeName: "Clínica Sonríe" }).where(eq(orgProfile.organizationId, orgId))
   await ownerDb.insert(user).values([
     { id: ownerId, name: "Dueña", email: `${ownerId}@auto.test`, emailVerified: true },
-    { id: dentistId, name: "Dra. Ana Torres", email: `${dentistId}@auto.test`, emailVerified: true },
+    { id: professionalId, name: "Dra. Ana Torres", email: `${professionalId}@auto.test`, emailVerified: true },
   ])
   await ownerDb.insert(member).values([
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
-    { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
+    { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
   // Recepción (quien escribe) y el Administrador, encendidos. Con el horario
   // para escribir a toda hora cuando el caso usa el reloj real.
@@ -105,7 +105,7 @@ async function clinic(
     ...(options.anyHour ? { writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]) } : {}),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
   const templates = (options.approved ?? []).map((key) => ({ name: AUTOMATION_MESSAGES[key].template, language: "es" }))
   const connection =
     options.whatsapp === false
@@ -121,7 +121,7 @@ async function clinic(
       externalId: `clinica-${orgId}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
     })
   }
-  return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id, whatsappId: connection?.id ?? null }
+  return { orgId, ownerId, professionalId, branchId: site!.id, roomId: room!.id, whatsappId: connection?.id ?? null }
 }
 
 function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
@@ -178,7 +178,7 @@ async function appointmentFor(c: Clinic, patientId: string, startsAt: Date, stat
   const [row] = await ownerDb
     .insert(appointment)
     .values({
-      organizationId: c.orgId, branchId: c.branchId, patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+      organizationId: c.orgId, branchId: c.branchId, patientId, professionalUserId: c.professionalId, roomId: c.roomId,
       startsAt, endsAt: new Date(startsAt.getTime() + minutes * 60_000), durationMin: minutes, status,
     })
     .returning({ id: appointment.id })
@@ -328,7 +328,7 @@ describe("los lotes avanzan en orden y no repiten", () => {
       Array.from({ length: 205 }, (_, index) => {
         const startsAt = new Date(NOW.getTime() - 3 * DAY + index * 60_000)
         return {
-          organizationId: c.orgId, branchId: c.branchId, patientId: p.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+          organizationId: c.orgId, branchId: c.branchId, patientId: p.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
           startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "no_asistio",
         }
       }),
@@ -1440,7 +1440,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const later = await person(c, "Vence mañana")
     await opportunityFor(c, old.contactId, new Date(enabledAt.getTime() - HOUR))
     const dueAt = new Date(NOW.getTime() - 2 * HOUR)
-    const dueId = await opportunityFor(c, due.contactId, dueAt, { owner: c.dentistId })
+    const dueId = await opportunityFor(c, due.contactId, dueAt, { owner: c.professionalId })
     await opportunityFor(c, later.contactId, new Date(NOW.getTime() + DAY))
     // Apagada no anota nada.
     expect(await sync(c)).toEqual({ programados: 0, omitidos: 0 })
@@ -1449,7 +1449,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const [job] = await jobsOf(c)
     expect(job).toMatchObject({
       kind: "seguimiento_comercial", status: "pendiente", opportunityId: dueId, contactId: due.contactId, patientId: null,
-      payload: { dueAt: dueAt.toISOString(), taskId: (await followUpTask(dueId)).id, ownerUserId: c.dentistId },
+      payload: { dueAt: dueAt.toISOString(), taskId: (await followUpTask(dueId)).id, ownerUserId: c.professionalId },
     })
     // Repetir el ciclo no lo duplica.
     expect((await sync(c)).programados).toBe(0)
@@ -1527,7 +1527,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     // Dijeron que no a las novedades: retomar es promoción para WhatsApp y pide su sí (ADR 0040).
     const owned = await person(c, "Con responsable", { refused: ["novedades"] })
     const loose = await person(c, "Sin responsable", { refused: ["novedades"] })
-    const ownedId = await opportunityFor(c, owned.contactId, new Date(NOW.getTime() - HOUR), { owner: c.dentistId })
+    const ownedId = await opportunityFor(c, owned.contactId, new Date(NOW.getTime() - HOUR), { owner: c.professionalId })
     const looseId = await opportunityFor(c, loose.contactId, new Date(NOW.getTime() - HOUR))
     await sync(c)
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido"])
@@ -1537,7 +1537,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect(tasks.filter((task) => task.createdBy === "admin")).toEqual([])
     const taskOf = (opportunityId: string) => tasks.filter((task) => task.opportunityId === opportunityId)
     expect(taskOf(ownedId)).toEqual([expect.objectContaining({
-      title: "Llamar a Con responsable por Ortodoncia", assigneeUserId: c.dentistId,
+      title: "Llamar a Con responsable por Ortodoncia", assigneeUserId: c.professionalId,
       contactId: owned.contactId, status: "open",
       reason: "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
     })])
@@ -1690,13 +1690,13 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
   async function proposed(c: Clinic, startsAt: string) {
     // El profesional atiende todos los días de 8:00 a 20:00 en la sede.
     await ownerDb.insert(professionalSchedule).values(
-      Array.from({ length: 7 }, (_, weekday) => ({ organizationId: c.orgId, branchId: c.branchId, dentistUserId: c.dentistId, weekday, startMin: 480, endMin: 1200 })),
+      Array.from({ length: 7 }, (_, weekday) => ({ organizationId: c.orgId, branchId: c.branchId, professionalUserId: c.professionalId, weekday, startMin: 480, endMin: 1200 })),
     ).onConflictDoNothing()
     const p = await person(c, "Pedro Ruiz", { openWindow: true })
     const proposal = await run(c, (tx) =>
       createProposal(tx, c.orgId, {
         conversationId: p.conversationId!, action: "reservar_cita",
-        payload: { patientId: p.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt, durationMin: 30 },
+        payload: { patientId: p.patientId, branchId: c.branchId, professionalUserId: c.professionalId, roomId: c.roomId, startsAt, durationMin: 30 },
         idempotencyKey: `prueba:${randomUUID()}`,
       }),
     )
@@ -1726,14 +1726,14 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
     const done = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, proposal.id))
     expect(done.status).toBe("ejecutada")
     const booked = await ownerDb.select().from(appointment).where(eq(appointment.patientId, p.patientId))
-    expect(booked).toMatchObject([{ startsAt, chairId: c.chairId, dentistUserId: c.dentistId, status: "programada" }])
+    expect(booked).toMatchObject([{ startsAt, roomId: c.roomId, professionalUserId: c.professionalId, status: "programada" }])
     expect(await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).toEqual({ items: [], total: 0 })
     // Otra persona: le proponen el mismo horario, que ya no está libre.
     const other = await person(c, "Ana Gómez", { openWindow: true })
     const late = await run(c, (tx) =>
       createProposal(tx, c.orgId, {
         conversationId: other.conversationId!, action: "reservar_cita",
-        payload: { patientId: other.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt: startsAt.toISOString(), durationMin: 30 },
+        payload: { patientId: other.patientId, branchId: c.branchId, professionalUserId: c.professionalId, roomId: c.roomId, startsAt: startsAt.toISOString(), durationMin: 30 },
         idempotencyKey: `prueba:${randomUUID()}`,
       }),
     )

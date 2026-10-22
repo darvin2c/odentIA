@@ -629,7 +629,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
     },
     r52: async () => {
       const rows = await tx.execute<{ name: string; patients: number }>(sql`
-        select u.name, count(distinct a.patient_id)::int as patients from appointment a join "user" u on u.id = a.dentist_user_id
+        select u.name, count(distinct a.patient_id)::int as patients from appointment a join "user" u on u.id = a.professional_user_id
         where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= ${monthStart}::timestamptz and a.starts_at < now()
         group by 1 order by 2 desc, 1`)
       return {
@@ -1074,7 +1074,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
     r53: async () => {
       const rows = await tx.execute<{ name: string; times: number }>(sql`
         select u.name, sum(ep.quantity)::int as times from encounter_procedure ep ${done}
-        join "user" u on u.id = e.dentist_user_id
+        join "user" u on u.id = e.professional_user_id
         where ep.organization_id = ${ORG} and ep.voided_at is null and e.started_at >= ${monthStart}::timestamptz
         group by 1 order by 2 desc, 1`)
       return {
@@ -1086,7 +1086,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
     r54: async () => {
       const result = await fig("cobrado", "profesional")
       const hours = await tx.execute<{ id: string; name: string; minutes: number }>(sql`
-        select u.id, u.name, sum(a.duration_min)::int as minutes from appointment a join "user" u on u.id = a.dentist_user_id
+        select u.id, u.name, sum(a.duration_min)::int as minutes from appointment a join "user" u on u.id = a.professional_user_id
         where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= ${monthStart}::timestamptz and a.starts_at < ${nowIso}::timestamptz
         group by 1, 2`)
       const rows = result.rows
@@ -1146,11 +1146,11 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
     r59: async () => {
       const [end] = await tx.execute<{ at: string }>(sql`select ((date_trunc('month', now() at time zone ${tz}) + interval '1 month') at time zone ${tz})::text as at`)
       const people = await tx.execute<{ id: string; name: string }>(sql`
-        select distinct s.dentist_user_id as id, u.name from professional_schedule s join "user" u on u.id = s.dentist_user_id
+        select distinct s.professional_user_id as id, u.name from professional_schedule s join "user" u on u.id = s.professional_user_id
         where s.organization_id = ${ORG} and s.is_active order by 2`)
       const rest: Array<{ name: string; minutes: number }> = []
       for (const person of people) {
-        const minutes = await agendaMinutes(tx, ORG, { start: now, end: new Date(end?.at ?? nowIso) }, { dentistUserId: person.id })
+        const minutes = await agendaMinutes(tx, ORG, { start: now, end: new Date(end?.at ?? nowIso) }, { professionalUserId: person.id })
         rest.push({ name: person.name, minutes: minutes.days.reduce((total, day) => total + Math.max(0, day.availMin - day.occMin), 0) })
       }
       rest.sort((a, b) => b.minutes - a.minutes)
@@ -1168,7 +1168,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
         select u.name,
           count(*) filter (where a.starts_at >= ${monthStart}::timestamptz and a.starts_at < ${nowIso}::timestamptz)::int as current,
           count(*) filter (where a.starts_at >= ${before.start.toISOString()}::timestamptz and a.starts_at < ${before.end.toISOString()}::timestamptz)::int as previous
-        from appointment a join "user" u on u.id = a.dentist_user_id
+        from appointment a join "user" u on u.id = a.professional_user_id
         where a.organization_id = ${ORG} and a.status = 'atendida' and a.starts_at >= ${before.start.toISOString()}::timestamptz and a.starts_at < ${nowIso}::timestamptz
         group by 1 order by 2 desc, 1`)
       return {
@@ -1397,7 +1397,7 @@ const answers = await withOrgContext(db, ORG, async (tx) => {
       const rows = await tx.execute<{ name: string; units: number; encounters: number }>(sql`
         select coalesce(u.name, 'Sin atención') as name, sum(-m.quantity_delta)::int as units, count(distinct m.encounter_id)::int as encounters
         from stock_movement m left join encounter e on e.organization_id = m.organization_id and e.id = m.encounter_id
-        left join "user" u on u.id = e.dentist_user_id
+        left join "user" u on u.id = e.professional_user_id
         where ${consumed(monthStart)} group by 1 order by 2 desc, 1`)
       return {
         respuesta: `Por procedimiento no lo sé: el consumo se registra por atención. Por odontólogo, este mes: ${listOf(rows.map((row) => ({ name: row.name, value: `${row.units} unidades en ${row.encounters} atenciones` })))}.`,

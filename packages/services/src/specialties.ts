@@ -111,7 +111,7 @@ export interface AttendingRule {
   /** Nombre de la especialidad de la clínica, como se lee en pantalla. */
   specialtyName: string
   /** Quienes la atienden y tienen horario en esa sede. */
-  dentistUserIds: string[]
+  professionalUserIds: string[]
 }
 
 /**
@@ -144,7 +144,7 @@ export async function attendingRule(
       professionalSchedule,
       and(
         eq(professionalSchedule.organizationId, professionalSpecialty.organizationId),
-        eq(professionalSchedule.dentistUserId, professionalSpecialty.userId),
+        eq(professionalSchedule.professionalUserId, professionalSpecialty.userId),
         eq(professionalSchedule.branchId, input.branchId),
         eq(professionalSchedule.isActive, true),
       ),
@@ -152,5 +152,5 @@ export async function attendingRule(
     .where(and(eq(professionalSpecialty.organizationId, orgId), eq(professionalSpecialty.specialtyId, service.specialtyId)))
     .orderBy(sql`1`)
   if (rows.length === 0) return null
-  return { specialtyName: service.specialtyName, dentistUserIds: rows.map((row) => row.userId) }
+  return { specialtyName: service.specialtyName, professionalUserIds: rows.map((row) => row.userId) }
 }

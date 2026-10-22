@@ -297,7 +297,7 @@ beforeAll(async () => {
   )
   // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
   await ownerDb.execute(
-    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'clinician', now()) on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
@@ -803,9 +803,9 @@ it("encounters: procedure con tratamiento no aceptado responde 409 ITEM_NOT_ACCE
   expect(planBody.data.find((row) => row.id === item.id)?.status).toBe("pendiente")
 })
 
-it("encounters: dentist lee 200, member ni lee ni registra procedimiento (403 sin efectos)", async () => {
+it("encounters: professional lee 200, member ni lee ni registra procedimiento (403 sin efectos)", async () => {
   const admin = buildApp("admin")
-  const dentist = buildApp("dentist")
+  const professional = buildApp("clinician")
   const member = buildApp("member")
   const patientId = await createFreshPatient(admin, "Permisos Atencion")
   const ctx = await setupPlan(admin, patientId)
@@ -817,7 +817,7 @@ it("encounters: dentist lee 200, member ni lee ni registra procedimiento (403 si
   await deliverBudget(admin, patientId, budgetId)
   await decideBudget(admin, patientId, budgetId, [item.id])
 
-  const read = await dentist.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
+  const read = await professional.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
   expect(read.status).toBe(200)
 
   const memberRead = await member.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)

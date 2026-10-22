@@ -150,7 +150,7 @@ afterAll(async () => {
 
 describe("la página de la persona: cada bloque con su propio permiso", () => {
   it("todos los roles que ven personas abren la página; quien no, recibe 403", async () => {
-    for (const role of ["reception", "dentist", "cashier", "owner"]) {
+    for (const role of ["reception", "clinician", "cashier", "owner"]) {
       const res = await get(role, `/people/${personId}`)
       expect(res.status, role).toBe(200)
       const body = (await res.json()) as {
@@ -167,7 +167,7 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
   })
 
   it("caja y odontología solo ven pacientes: quien aún no lo es no existe para ellos", async () => {
-    for (const role of ["cashier", "dentist"]) {
+    for (const role of ["cashier", "clinician"]) {
       // Ni su página ni sus bloques: 404, como si no existiera.
       expect((await get(role, `/people/${leadId}`)).status, role).toBe(404)
       expect((await get(role, `/people/${guardianId}`)).status, role).toBe(404)
@@ -184,15 +184,15 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       expect(found.data, role).toEqual([])
     }
     // Odontología lee conversaciones, pero no las de quien no es paciente.
-    expect((await get("dentist", `/people/${leadId}/conversations`)).status).toBe(404)
-    expect((await get("dentist", `/people/${personId}/conversations`)).status).toBe(200)
+    expect((await get("clinician", `/people/${leadId}/conversations`)).status).toBe(404)
+    expect((await get("clinician", `/people/${personId}/conversations`)).status).toBe(200)
     // Recepción y quien dirige sí.
     for (const role of ["reception", "owner"]) {
       expect((await get(role, `/people/${leadId}`)).status, role).toBe(200)
       expect((await get(role, "/people?ver=por_registrar")).status, role).toBe(200)
     }
     // La página del paciente dice si quien habla por ella es paciente (su enlace) y su teléfono.
-    const page = (await (await get("dentist", `/people/${personId}`)).json()) as {
+    const page = (await (await get("clinician", `/people/${personId}`)).json()) as {
       data: { spokenForBy: { personId: string; isPatient: boolean; phone: string | null }[] }
     }
     expect(page.data.spokenForBy).toEqual([
@@ -215,23 +215,23 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
   })
 
   it("odontología: sin el CRM ve sus conversaciones, sin 403, y su clínica y su plan; no las notas ni la caja", async () => {
-    const ficha = (await (await get("dentist", `/patients/${patientId}`)).json()) as {
+    const ficha = (await (await get("clinician", `/patients/${patientId}`)).json()) as {
       data: { activeAllergies: { substance: string }[] }
     }
     expect(ficha.data.activeAllergies.map((row) => row.substance)).toEqual(["Penicilina"])
-    expect((await get("dentist", `/people/${personId}/conversations`)).status).toBe(200)
-    expect((await get("dentist", `/people/${personId}/notes`)).status).toBe(403)
-    expect((await get("dentist", `/patients/${patientId}/summary`)).status).toBe(200)
-    expect((await get("dentist", `/patients/${patientId}/plans`)).status).toBe(200)
-    expect((await get("dentist", `/patients/${patientId}/budgets`)).status).toBe(200)
-    expect((await get("dentist", `/patients/${patientId}/account`)).status).toBe(403)
+    expect((await get("clinician", `/people/${personId}/conversations`)).status).toBe(200)
+    expect((await get("clinician", `/people/${personId}/notes`)).status).toBe(403)
+    expect((await get("clinician", `/patients/${patientId}/summary`)).status).toBe(200)
+    expect((await get("clinician", `/patients/${patientId}/plans`)).status).toBe(200)
+    expect((await get("clinician", `/patients/${patientId}/budgets`)).status).toBe(200)
+    expect((await get("clinician", `/patients/${patientId}/account`)).status).toBe(403)
     // No edita la identidad ni archiva: es de quien lleva la filiación.
     expect(
-      (await send("dentist", "PATCH", `/people/${personId}/identity`, { phone: "+51911111111" }))
+      (await send("clinician", "PATCH", `/people/${personId}/identity`, { phone: "+51911111111" }))
         .status,
     ).toBe(403)
     expect(
-      (await send("dentist", "PUT", `/people/${personId}/archived`, { archived: true })).status,
+      (await send("clinician", "PUT", `/people/${personId}/archived`, { archived: true })).status,
     ).toBe(403)
   })
 
@@ -277,16 +277,16 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       return Object.fromEntries(log.data.map((row) => [row.resource, row.hits]))
     }
     const before = await hits()
-    expect((await get("dentist", `/people/${personId}`)).status).toBe(200)
-    expect((await get("dentist", `/patients/${patientId}`)).status).toBe(200)
+    expect((await get("clinician", `/people/${personId}`)).status).toBe(200)
+    expect((await get("clinician", `/patients/${patientId}`)).status).toBe(200)
     expect(await hits()).toEqual(before)
-    expect((await get("dentist", `/patients/${patientId}/summary`)).status).toBe(200)
+    expect((await get("clinician", `/patients/${patientId}/summary`)).status).toBe(200)
     const after = await hits()
     expect(after.resumen ?? 0).toBe((before.resumen ?? 0) + 1)
   })
 
   it("la ficha lleva a su persona y la lista separa pacientes y contactos nuevos", async () => {
-    const res = await get("dentist", `/people/by-patient/${patientId}`)
+    const res = await get("clinician", `/people/by-patient/${patientId}`)
     expect(((await res.json()) as { data: { personId: string } }).data.personId).toBe(personId)
     const view = async (ver: string) =>
       (await (await get("reception", `/people?ver=${ver}`)).json()) as {

@@ -270,7 +270,7 @@ export async function referralMany(
 /** Citas atendidas, de la sede si se eligió una: la base de activos, volvieron y sin venir. */
 function attendedSql(orgId: string, branchId: string | undefined): SQL {
   return sql`attended as (
-      select a.id, a.patient_id, a.starts_at, a.branch_id, a.service_name, a.dentist_user_id from appointment a
+      select a.id, a.patient_id, a.starts_at, a.branch_id, a.service_name, a.professional_user_id from appointment a
       where a.organization_id = ${orgId} and a.status = 'atendida' ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
     )`
 }
@@ -318,7 +318,7 @@ export async function returnedMany(
  * tendrá «Invitar a volver», #139): personas sin archivar cuya última cita
  * atendida fue antes de eso y que hoy no tienen cita por venir, presupuesto
  * que espere respuesta (`budgetAwaitsAnswerSql`) ni control pendiente. Da
- * `lapsed(id, patient_id, starts_at, branch_id, service_name, dentist_user_id)`
+ * `lapsed(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`
  * con su última cita atendida.
  */
 export function lapsedSql(orgId: string, scope: Pick<ReportScope, "branch" | "timezone">, now: Date): SQL {
@@ -510,7 +510,7 @@ export async function getPatientReportList(
         from lapsed v
         join patient p on p.id = v.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         left join branch br on br.id = v.branch_id and br.organization_id = ${orgId}
-        left join "user" u on u.id = v.dentist_user_id
+        left join "user" u on u.id = v.professional_user_id
         order by v.starts_at, v.patient_id limit ${limit}`)),
     ]
   } else {

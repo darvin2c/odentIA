@@ -47,4 +47,4 @@ Quien dirige la clínica pregunta cosas como «¿qué profesional tiene más ina
 
 ## Referencias
 
-`packages/services/src/report-figures.ts`, `report-questions.ts`, `report-ask.ts`, `packages/agent/src/decision/eval-reports.ts`, `packages/agent/eval/reportes-preguntas.json`, `apps/api/src/routes/reports.ts`, `apps/platform/src/components/reports/ask-argos.tsx`, `packages/db/drizzle/0045_argos_reportes_metas_y_lunes.sql` y `0046_…_reglas.sql`.
+`packages/services/src/report-figures.ts`, `report-questions.ts`, `report-ask.ts`, `packages/agent/src/decision/eval-reports.ts`, `packages/agent/eval/reportes-preguntas.json`, `apps/api/src/routes/reports.ts`, `apps/dental-clinic/src/components/reports/ask-argos.tsx`, `packages/db/drizzle/0045_argos_reportes_metas_y_lunes.sql` y `0046_…_reglas.sql`.

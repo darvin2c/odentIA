@@ -98,7 +98,7 @@ export interface CreateEncounterInput {
   appointmentId?: string | null
   branchId?: string | null
   /** Profesional que atiende; por defecto quien abre. Debe tener escritura clínica. */
-  dentistUserId?: string | null
+  professionalUserId?: string | null
   teeth?: number[]
   /**
    * Tratamientos del presupuesto para vincular a la atención. Deben estar
@@ -282,7 +282,7 @@ export async function requireEncounter(
 export function assertOpenDraft(row: EncounterRow, actorUserId: string): void {
   if (row.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
   if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
-  if (row.dentistUserId !== actorUserId) {
+  if (row.professionalUserId !== actorUserId) {
     throw conflict(
       "NOT_ATTENDING",
       "Otro profesional lleva esta atención: toma el relevo para continuarla",
@@ -432,10 +432,10 @@ export async function getOpenEncounterRef(
   tx: Db,
   orgId: string,
   patientId: string,
-): Promise<{ id: string; dentistUserId: string } | null> {
+): Promise<{ id: string; professionalUserId: string } | null> {
   await requirePatient(tx, orgId, patientId)
   const [row] = await tx
-    .select({ id: encounter.id, dentistUserId: encounter.dentistUserId })
+    .select({ id: encounter.id, professionalUserId: encounter.professionalUserId })
     .from(encounter)
     .where(
       and(
@@ -542,19 +542,19 @@ export async function createEncounter(
   // Profesional que atiende: por defecto quien abre (también desde la cita de
   // otro profesional: quien cubre a otro es quien escribe). Otro elegido debe
   // ser miembro con escritura clínica, nunca caja ni recepción.
-  let dentistUserId = actorUserId
-  if (input.dentistUserId && input.dentistUserId !== actorUserId) {
+  let professionalUserId = actorUserId
+  if (input.professionalUserId && input.professionalUserId !== actorUserId) {
     const [membership] = await tx
       .select({ role: member.role })
       .from(member)
-      .where(and(eq(member.organizationId, orgId), eq(member.userId, input.dentistUserId)))
+      .where(and(eq(member.organizationId, orgId), eq(member.userId, input.professionalUserId)))
       .limit(1)
     if (!membership) throw notFound("Profesional")
     if (!canAccess(membership.role, "clinical.write"))
       throw validation(
         "Quien atiende debe poder escribir en la historia clínica: elige a un profesional clínico",
       )
-    dentistUserId = input.dentistUserId
+    professionalUserId = input.professionalUserId
   }
   // pertenencia/estado/decisión ocurre antes de crear la atención para que un
   // planItemIds inválido no deje un borrador vacío (409/404/422, sin DRAFT_OPEN).
@@ -579,7 +579,7 @@ export async function createEncounter(
         organizationId: orgId,
         patientId,
         branchId,
-        dentistUserId,
+        professionalUserId,
         appointmentId: fromAppointment?.id ?? null,
         status: "borrador",
         reason,
@@ -2375,16 +2375,16 @@ export async function takeOverEncounter(
       "Solo se toma el relevo de una atención en curso",
     )
   }
-  if (locked.dentistUserId === actorUserId) return locked
+  if (locked.professionalUserId === actorUserId) return locked
   const [row] = await tx
     .update(encounter)
-    .set({ dentistUserId: actorUserId, updatedAt: new Date() })
+    .set({ professionalUserId: actorUserId, updatedAt: new Date() })
     .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Atención")
   await audit(tx, orgId, actorUserId, "encounter.taken_over", "encounter", encounterId, {
     patientId,
-    from: locked.dentistUserId,
+    from: locked.professionalUserId,
   })
   return row
 }

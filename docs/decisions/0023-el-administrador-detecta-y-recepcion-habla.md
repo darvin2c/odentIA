@@ -31,5 +31,5 @@ Eso dejaba dos reglas para lo mismo, una tabla de coordinación, una corrida del
 ## Referencias
 
 - `packages/services/src/admin-lines.ts`, `automation.ts` (`syncOpportunityFollowUps`), `automation-messages.ts`, `automation-routing.ts`, `agent-admin.ts`, `agent-operations.ts`.
-- `apps/platform/src/routes/_org/agent.approvals.tsx`, `components/agent-panel.tsx`, `routes/_org/home.tsx`, `routes/_org/inbox.tsx`.
+- `apps/dental-clinic/src/routes/_org/agent.approvals.tsx`, `components/agent-panel.tsx`, `routes/_org/home.tsx`, `routes/_org/inbox.tsx`.
 - Migración `0079_retomar_oportunidad_como_las_demas`.

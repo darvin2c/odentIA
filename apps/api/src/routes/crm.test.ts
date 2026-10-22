@@ -369,7 +369,7 @@ it("oportunidades: un «hola» no crea ninguna; se cierran con un motivo de la l
   const reopened = await owner.request(`/opportunities/${opp.id}/reopen`, { method: "POST" })
   expect(((await reopened.json()) as { data: unknown }).data).toMatchObject({ status: "open", stageId: budgetStage.id })
   // Quien no trabaja con ventas no cierra.
-  expect((await buildApp("dentist").request(`/opportunities/${opp.id}/close`, { method: "POST", headers: json, body: JSON.stringify({ outcome: "won", reason: "acepto" }) })).status).toBe(403)
+  expect((await buildApp("clinician").request(`/opportunities/${opp.id}/close`, { method: "POST", headers: json, body: JSON.stringify({ outcome: "won", reason: "acepto" }) })).status).toBe(403)
 })
 
 it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
@@ -446,14 +446,14 @@ it("tareas y campos van de punta a punta", async () => {
 it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiende, no", async () => {
   const json = { "content-type": "application/json" }
   const reception = buildApp("reception")
-  const dentist = buildApp("dentist")
+  const professional = buildApp("clinician")
   // Recepción los usa en el tablero y en la ficha del contacto, y también los define: es trabajo diario de ventas.
   expect((await reception.request("/pipelines")).status).toBe(200)
   expect((await reception.request("/fields")).status).toBe(200)
   for (const [path, body] of [
     ["/fields", { label: "Origen", type: "text" }],
   ] as const) {
-    const denied = await dentist.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
+    const denied = await professional.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
     expect(denied.status, path).toBe(403)
   }
   const byReception = await reception.request("/fields", { method: "POST", headers: json, body: JSON.stringify({ label: "Canal preferido", type: "text" }) })
@@ -478,7 +478,7 @@ it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiend
 
   // Un campo se edita: nombre y opciones; la clave no cambia.
   const edit = { label: "Origen", options: ["Redes", "Recomendación"] }
-  const refused = await dentist.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
+  const refused = await professional.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(refused.status).toBe(403)
   const edited = await owner.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(edited.status).toBe(200)
@@ -487,10 +487,10 @@ it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiend
   const pipelines = ((await (await owner.request("/pipelines")).json()) as { data: { id: string; stages: { id: string }[] }[] }).data
   const stageId = pipelines[0]?.stages[0]?.id ?? ""
   const rename = { method: "PATCH", headers: json, body: JSON.stringify({ name: "Recién llegado" }) }
-  expect((await dentist.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
+  expect((await professional.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
   expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
 
-  expect((await dentist.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
+  expect((await professional.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
   expect((await owner.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(200)
 })
 
@@ -596,7 +596,7 @@ it("«Escribirle»: el WhatsApp sale del número de la ficha; lo hace quien escr
     buildApp(role).request(`/contacts/${id}/write`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   // Caja no escribe a las personas: el servidor lo rechaza.
   expect((await write("cashier", rosa)).status).toBe(403)
-  const first = await write("dentist", rosa)
+  const first = await write("clinician", rosa)
   expect(first.status).toBe(200)
   const opened = ((await first.json()) as { data: { conversationId: string; channel: string; created: boolean; identityCreated: boolean } }).data
   expect(opened).toMatchObject({ channel: "whatsapp", created: true, identityCreated: true })
@@ -1208,7 +1208,7 @@ it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquea
     buildApp(role).request(`/conversations/${id}/block`, { method: "POST", headers: json, body: JSON.stringify(body) })
 
   // Odontología escribe en conversaciones pero no maneja contactos: no bloquea. Caja ni eso.
-  expect((await block("dentist", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(403)
+  expect((await block("clinician", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(403)
   expect((await block("cashier", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(403)
   expect((await block("reception", { reason: "amenazas", note: "" })).status).toBe(400)
   expect((await block("reception", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(200)
@@ -1219,12 +1219,12 @@ it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquea
   // A un bloqueado nadie le escribe.
   const write = await buildApp("reception").request(`/conversations/${id}/messages`, { method: "POST", headers: json, body: JSON.stringify({ text: "Hola" }) })
   expect(write.status).toBe(409)
-  expect((await buildApp("dentist").request(`/conversations/${id}/unblock`, { method: "POST" })).status).toBe(403)
+  expect((await buildApp("clinician").request(`/conversations/${id}/unblock`, { method: "POST" })).status).toBe(403)
   expect((await buildApp("reception").request(`/conversations/${id}/unblock`, { method: "POST" })).status).toBe(200)
 
   // «Es spam»: quien escribe en conversaciones; «No es spam» la devuelve.
   expect((await buildApp("cashier").request(`/conversations/${id}/spam`, { method: "POST" })).status).toBe(403)
-  expect((await buildApp("dentist").request(`/conversations/${id}/spam`, { method: "POST" })).status).toBe(200)
+  expect((await buildApp("clinician").request(`/conversations/${id}/spam`, { method: "POST" })).status).toBe(200)
   const listed = (await (await buildApp("reception").request("/conversations?view=spam")).json()) as { data: Array<{ id: string }> }
   expect(listed.data.map((item) => item.id)).toContain(id)
   const back = (await (await buildApp("reception").request(`/conversations/${id}/not-spam`, { method: "POST" })).json()) as {

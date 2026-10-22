@@ -25,5 +25,5 @@ La persona pulsa dos veces (en su clínica y en el panel) y ve una página inter
 
 ## Referencias
 
-- Issue 166. `apps/panel/src/routes/whatsapp.conectar.tsx`, `apps/panel/src/components/whatsapp/facebook-signup.tsx`, `apps/platform/src/components/whatsapp/facebook-signup.tsx`.
+- Issue 166. `apps/panel/src/routes/whatsapp.conectar.tsx`, `apps/panel/src/components/whatsapp/facebook-signup.tsx`, `apps/dental-clinic/src/components/whatsapp/facebook-signup.tsx`.
 - Guía de Meta leída el 2026-10-18: `https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation`.

@@ -33,4 +33,4 @@ Es el criterio del usuario y de la clínica, que lo entienden así de la Ley 297
 
 - `packages/services/src/automation.ts` (`mayWriteFirst`, `askGeneralPermissionAfterBooking`, `answerGeneralPermission`, `handleAutomationReply`), `automation-messages.ts` (`GENERAL_PERMISSION_QUESTION`, `generalPermissionButtons`), `data-consents.ts`, `patient-registration.ts`, `agent-admin.ts` (`permissionGaps`).
 - `packages/agent/src/run.ts` y la herramienta `responder_permiso_mensajes` (`tools.ts`).
-- `apps/platform/src/components/patient/message-permissions-section.tsx`, `components/agenda/booking-drawer.tsx`.
+- `apps/dental-clinic/src/components/patient/message-permissions-section.tsx`, `components/agenda/booking-drawer.tsx`.

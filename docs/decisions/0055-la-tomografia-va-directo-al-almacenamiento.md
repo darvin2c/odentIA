@@ -31,5 +31,5 @@ Una tomografía de haz cónico (CBCT) pesa entre 100 y 500 MB y llega como cient
 ## Referencias
 
 - `packages/services/src/imaging-studies.ts`, `apps/api/src/routes/imaging-studies.ts`
-- `apps/platform/src/lib/imaging-upload.ts` (lectura de la carpeta y cola de subida)
+- `apps/dental-clinic/src/lib/imaging-upload.ts` (lectura de la carpeta y cola de subida)
 - Lienzo «Visor de tomografía», tableros 3, 4, 9, 10 y decisiones 4 a 6

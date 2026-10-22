@@ -31,4 +31,4 @@ Se eligió modelar estados y vínculos en la base, no solo en la interfaz, porqu
 
 ## Referencias
 
-Propuesta UX (lienzo «UX ficha y atención clínica», filas 2, 6 y 7). Contratos actuales: `packages/db/src/schema/clinical.ts` (`encounter`, `encounterProcedure`, `odontogramEntry`, `clinicalNote`), `packages/services/src/encounters.ts`, `packages/services/src/clinical.ts`, `apps/platform/src/routes/_org/agenda.tsx`. Al implementar cada punto, la regla vigente se añade a `packages/services/AGENTS.md`.
+Propuesta UX (lienzo «UX ficha y atención clínica», filas 2, 6 y 7). Contratos actuales: `packages/db/src/schema/clinical.ts` (`encounter`, `encounterProcedure`, `odontogramEntry`, `clinicalNote`), `packages/services/src/encounters.ts`, `packages/services/src/clinical.ts`, `apps/dental-clinic/src/routes/_org/agenda.tsx`. Al implementar cada punto, la regla vigente se añade a `packages/services/AGENTS.md`.

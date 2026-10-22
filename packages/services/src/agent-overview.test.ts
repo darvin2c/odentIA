@@ -31,11 +31,11 @@ const KEY = secretsKeyFromEnv("ab".repeat(32))
 beforeAll(async () => {
   await ownerDb.insert(user).values([
     { id: OWNER, name: "Dueña Resumen", email: "owner@overview.test", emailVerified: true },
-    { id: "overview-dentist", name: "Odontólogo", email: "dentist@overview.test", emailVerified: true },
+    { id: "overview-professional", name: "Odontólogo", email: "professional@overview.test", emailVerified: true },
   ])
   await ownerDb.insert(member).values([
     { id: `m-${OWNER}`, userId: OWNER, organizationId: ORG, role: "owner", createdAt: new Date() },
-    { id: "m-overview-dentist", userId: "overview-dentist", organizationId: ORG, role: "dentist", createdAt: new Date() },
+    { id: "m-overview-professional", userId: "overview-professional", organizationId: ORG, role: "clinician", createdAt: new Date() },
   ])
 })
 

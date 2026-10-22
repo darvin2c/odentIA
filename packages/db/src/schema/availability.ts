@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { scheduleChair } from "./agenda.js"
+import { scheduleRoom } from "./agenda.js"
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
@@ -42,7 +42,7 @@ export const professionalSchedule = pgTable(
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branch.id),
-    dentistUserId: text("dentist_user_id")
+    professionalUserId: text("professional_user_id")
       .notNull()
       .references(() => user.id),
     weekday: smallint("weekday").notNull(),
@@ -58,10 +58,10 @@ export const professionalSchedule = pgTable(
   },
   (table) => [
     uniqueIndex("professional_schedule_org_id_uidx").on(table.organizationId, table.id),
-    index("professional_schedule_org_branch_dentist_idx").on(
+    index("professional_schedule_org_branch_professional_idx").on(
       table.organizationId,
       table.branchId,
-      table.dentistUserId,
+      table.professionalUserId,
     ),
     index("professional_schedule_org_valid_idx").on(table.organizationId, table.validFrom),
     check("professional_schedule_weekday_check", sql`${table.weekday} between 0 and 6`),
@@ -74,7 +74,7 @@ export const professionalSchedule = pgTable(
 
 /**
  * Excepción puntual: bloqueo de agenda o ausencia del profesional. Con
- * `dentistUserId` nulo afecta a toda la sede; con `chairId` nulo, a todos
+ * `professionalUserId` nulo afecta a toda la sede; con `roomId` nulo, a todos
  * las unidades dentales. El rango es UTC; la UI lo edita en la zona de la sucursal.
  */
 export const scheduleBlock = pgTable(
@@ -85,8 +85,8 @@ export const scheduleBlock = pgTable(
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branch.id),
-    dentistUserId: text("dentist_user_id").references(() => user.id),
-    chairId: uuid("chair_id").references(() => scheduleChair.id),
+    professionalUserId: text("professional_user_id").references(() => user.id),
+    roomId: uuid("room_id").references(() => scheduleRoom.id),
     kind: text("kind").notNull().default("bloqueo"),
     reason: text("reason"),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),

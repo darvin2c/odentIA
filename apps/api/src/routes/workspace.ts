@@ -32,7 +32,7 @@ function accessFor(role: string): WorkspaceAccess {
     taskAreas: taskAreasOfRole(role),
     configure: canAccess(role, "settings.write"),
     // El odontólogo ve solo su propio día, no la agenda de la sede.
-    ownAppointments: role === "dentist",
+    ownAppointments: role === "clinician",
     // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
     // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
     attends: canAccess(role, "clinical.write"),

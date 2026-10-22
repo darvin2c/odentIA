@@ -57,7 +57,7 @@ const ZONE = { locale: "es-PE", timezone: "America/Lima" }
 const run = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, ORG, fn)
 
 let branchId = ""
-let dentist = ""
+let professional = ""
 const ids: Record<string, string> = {}
 
 beforeAll(async () => {
@@ -67,21 +67,21 @@ beforeAll(async () => {
     .values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" })
     .returning({ id: branch.id })
   branchId = sede!.id
-  dentist = `info-dentist-${Date.now()}`
-  await ownerDb.insert(user).values({ id: dentist, name: "Dra. Ríos", email: `${dentist}@example.test` })
-  await ownerDb.insert(member).values({ id: `m-${dentist}`, organizationId: ORG, userId: dentist, role: "dentist", createdAt: new Date() })
+  professional = `info-professional-${Date.now()}`
+  await ownerDb.insert(user).values({ id: professional, name: "Dra. Ríos", email: `${professional}@example.test` })
+  await ownerDb.insert(member).values({ id: `m-${professional}`, organizationId: ORG, userId: professional, role: "clinician", createdAt: new Date() })
   // Dos turnos el lunes que se tocan y uno el sábado: el horario de la sede los une.
   await ownerDb.insert(professionalSchedule).values([
-    { organizationId: ORG, branchId, dentistUserId: dentist, weekday: 1, startMin: 540, endMin: 780 },
-    { organizationId: ORG, branchId, dentistUserId: dentist, weekday: 1, startMin: 780, endMin: 1080 },
-    { organizationId: ORG, branchId, dentistUserId: dentist, weekday: 6, startMin: 540, endMin: 840 },
+    { organizationId: ORG, branchId, professionalUserId: professional, weekday: 1, startMin: 540, endMin: 780 },
+    { organizationId: ORG, branchId, professionalUserId: professional, weekday: 1, startMin: 780, endMin: 1080 },
+    { organizationId: ORG, branchId, professionalUserId: professional, weekday: 6, startMin: 540, endMin: 840 },
   ])
   const [specialty] = await ownerDb
     .insert(orgSpecialty)
     // La del país (ADR 0069), renombrada por la clínica: el agente dice el nombre de la clínica.
     .values({ organizationId: ORG, key: "ortodoncia_ortopedia_maxilar", name: "Ortodoncia y frenillos" })
     .returning({ id: orgSpecialty.id })
-  await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: specialty!.id, userId: dentist })
+  await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: specialty!.id, userId: professional })
   // Renombrada por la clínica: las palabras de la calle siguen al tipo de la especialidad del país.
   const [aesthetic] = await ownerDb
     .insert(orgSpecialty)
@@ -127,7 +127,7 @@ describe("lo que sabe Informar", () => {
     const pros = await run((tx) => listAgentProfessionals(tx, ORG))
     expect(pros).toEqual([
       {
-        id: dentist,
+        id: professional,
         ref: expect.stringMatching(/^pro-[0-9a-f]{10}$/),
         name: "Dra. Ríos",
         specialties: ["Ortodoncia y frenillos"],
@@ -137,8 +137,8 @@ describe("lo que sabe Informar", () => {
     // Lo que lee el modelo: su identificador solo para pedir sus huecos, nunca su usuario.
     const line = formatAgentClinicData({ hours: [], professionals: pros, promotions: [], services: [], informs: true }, ZONE).join("\n")
     expect(line).toContain(`profesional ${pros[0]!.ref}`)
-    expect(line).not.toContain(dentist)
-    expect(await run((tx) => resolveProfessionalRef(tx, ORG, pros[0]!.ref))).toBe(dentist)
+    expect(line).not.toContain(professional)
+    expect(await run((tx) => resolveProfessionalRef(tx, ORG, pros[0]!.ref))).toBe(professional)
     expect(await run((tx) => resolveProfessionalRef(tx, ORG, "pro-0000000000"))).toBeNull()
   })
 
@@ -211,7 +211,7 @@ describe("lo que sabe Informar", () => {
     const now = Date.now()
     const ortho = ids["Ortodoncia con brackets"]!
     await run((tx) =>
-      createPromotion(tx, ORG, dentist, {
+      createPromotion(tx, ORG, professional, {
         name: "Sonrisa de primavera",
         startsAt: new Date(now - 86_400_000).toISOString(),
         endsAt: new Date(now + 20 * 86_400_000).toISOString(),
@@ -225,7 +225,7 @@ describe("lo que sabe Informar", () => {
       }),
     )
     await run((tx) =>
-      createPromotion(tx, ORG, dentist, {
+      createPromotion(tx, ORG, professional, {
         name: "Promo vencida",
         startsAt: new Date(now - 30 * 86_400_000).toISOString(),
         endsAt: new Date(now - 2 * 86_400_000).toISOString(),

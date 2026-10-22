@@ -57,7 +57,7 @@ async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () =
   const proposeAppointment = async (conversation: Conversation, summary: string) => {
     const [row] = await fixtureDb.insert(agentProposal).values({
       organizationId: org.id, contactId: conversation.contact.id, conversationId: conversation.id, action: "reservar_cita",
-      payload: { patientId: randomUUID(), dentistUserId: owner.user.id, chairId: randomUUID(), startsAt: "2026-11-03T15:00:00.000Z" },
+      payload: { patientId: randomUUID(), professionalUserId: owner.user.id, roomId: randomUUID(), startsAt: "2026-11-03T15:00:00.000Z" },
       afterSummary: summary, reason: "El interlocutor pidió una cita", idempotencyKey: randomUUID(),
     }).returning({ id: agentProposal.id })
     if (!row) throw new Error("No se pudo sembrar la propuesta")
@@ -299,7 +299,7 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   const { page, org } = owner
   await seedThreads(owner, fixtureDb, nextEventId)
   // Odontología conversa con pacientes pero no tiene permisos del agente.
-  await fixtureDb.update(member).set({ role: "dentist" })
+  await fixtureDb.update(member).set({ role: "clinician" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))

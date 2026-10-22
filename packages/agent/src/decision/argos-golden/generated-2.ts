@@ -167,7 +167,7 @@ export function generatedSolvers2(h: GoldenHelpers): GoldenSolvers {
       join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
       left join service_catalog s on s.organization_id = ep.organization_id and s.id = ep.service_id
       left join branch b on b.organization_id = e.organization_id and b.id = e.branch_id
-      left join "user" u on u.id = e.dentist_user_id
+      left join "user" u on u.id = e.professional_user_id
       where ep.organization_id = ${org} and ep.voided_at is null
         and e.started_at >= ${start}::timestamptz and e.started_at < ${end}::timestamptz ${where}
       group by 1 order by 2 desc, 1`)
@@ -643,18 +643,18 @@ export function generatedSolvers2(h: GoldenHelpers): GoldenSolvers {
 
     g036: async () => {
       const month = await namedMonth(10)
-      const [dentist] = await tx.execute<{ id: string; name: string }>(sql`
+      const [professional] = await tx.execute<{ id: string; name: string }>(sql`
         select u.id, u.name from "user" u where exists (select 1 from member m where m.organization_id = ${org} and m.user_id = u.id)
           and u.name ilike '%ana torres%' limit 1`)
       const resin = sql`and s.name ilike '%resina%'`
-      const rows = dentist
-        ? await done(month.start, month.end, sql`${resin} and e.dentist_user_id = ${dentist.id}`)
+      const rows = professional
+        ? await done(month.start, month.end, sql`${resin} and e.professional_user_id = ${professional.id}`)
         : []
-      const total = dentist
+      const total = professional
         ? await doneTotal(
             month.start,
             month.end,
-            sql`${resin} and e.dentist_user_id = ${dentist.id}`,
+            sql`${resin} and e.professional_user_id = ${professional.id}`,
           )
         : { times: 0, rows: 0, encounters: 0, patients: 0 }
       const everyone = await doneBy(
@@ -664,15 +664,15 @@ export function generatedSolvers2(h: GoldenHelpers): GoldenSolvers {
         resin,
       )
       return {
-        respuesta: !dentist
+        respuesta: !professional
           ? "No hay nadie llamado Ana Torres en el equipo."
           : total.times
-            ? `En ${month.words} la ${dentist.name} hizo ${total.times} resinas (${serviceWords(rows)}), a ${howMany(total.patients, "paciente", "pacientes")}.`
-            : `En ${month.words} la ${dentist.name} no hizo ninguna resina.`,
+            ? `En ${month.words} la ${professional.name} hizo ${total.times} resinas (${serviceWords(rows)}), a ${howMany(total.patients, "paciente", "pacientes")}.`
+            : `En ${month.words} la ${professional.name} no hizo ninguna resina.`,
         criterio:
           "Procedimientos sin anular con resina en el nombre (obturación con resina, resina fotocurable) en atenciones firmadas de la profesional, del mes nombrado (por el día de la atención), contando su cantidad.",
         nota: `Contando cada procedimiento una vez, sin su cantidad: ${total.rows}. Todo el equipo en ese mes: ${timesWords(everyone)}.`,
-        datos: { profesional: dentist ?? null, porServicio: rows, total, equipo: everyone },
+        datos: { profesional: professional ?? null, porServicio: rows, total, equipo: everyone },
       }
     },
 

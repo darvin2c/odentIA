@@ -75,5 +75,5 @@ En la Bandeja, Rosa aparecía dos veces si escribía por WhatsApp y por Telegram
 
 ## Referencias
 
-- Chat web: `apps/platform/public/chat.js`, `apps/platform/src/routes/embed.index.tsx`, `packages/services/src/webchat.ts`, `apps/api/src/routes/webchat.ts`, `packages/channels/src/web-chat.ts`, `packages/services/src/topic-reply.ts` (`forwardWebchatReply`) y las migraciones 0056 y 0057.
-- Una fila por persona: `packages/services/src/inbox-person.ts`, `personKeySql` y `VIEW_URGENCY` en `conversation-state.ts`, `listPersonMessages` y `markRead` en `conversations.ts`, y la Bandeja (`apps/platform/src/routes/_org/inbox.tsx`).
+- Chat web: `apps/dental-clinic/public/chat.js`, `apps/dental-clinic/src/routes/embed.index.tsx`, `packages/services/src/webchat.ts`, `apps/api/src/routes/webchat.ts`, `packages/channels/src/web-chat.ts`, `packages/services/src/topic-reply.ts` (`forwardWebchatReply`) y las migraciones 0056 y 0057.
+- Una fila por persona: `packages/services/src/inbox-person.ts`, `personKeySql` y `VIEW_URGENCY` en `conversation-state.ts`, `listPersonMessages` y `markRead` en `conversations.ts`, y la Bandeja (`apps/dental-clinic/src/routes/_org/inbox.tsx`).

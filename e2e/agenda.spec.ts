@@ -24,17 +24,17 @@ async function openBooking(page: Page): Promise<void> {
 }
 
 async function prepareAppointment(owner: OwnerFixture): Promise<{
-  chair: { id: string }
+  room: { id: string }
   patient: { id: string }
   appointment: { id: string; version: number }
   date: string
   startsAt: string
   endsAt: string
 }> {
-  const chair = await call<{ id: string }>(
+  const room = await call<{ id: string }>(
     owner.page,
     "POST",
-    "/api/agenda/chairs",
+    "/api/agenda/rooms",
     owner.org.slug,
     { branchId: owner.branchId, name: "Unidad dental 1" },
     201,
@@ -65,7 +65,7 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     owner.org.slug,
     {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
+      professionalUserId: owner.user.id,
       rules: [{ weekday, startMin: 17 * 60, endMin: 20 * 60 }],
     },
     200,
@@ -77,28 +77,28 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     owner.org.slug,
     {
       patientId: patient.id,
-      dentistUserId: owner.user.id,
-      chairId: chair.id,
+      professionalUserId: owner.user.id,
+      roomId: room.id,
       startsAt,
       endsAt,
       reason: "Control de ortodoncia",
     },
     201,
   )
-  return { chair, patient, appointment, date, startsAt, endsAt }
+  return { room, patient, appointment, date, startsAt, endsAt }
 }
 
 test("agenda: alta de unidad dental, paciente y cita visibles en el tenant", async ({ createOwner }) => {
   const owner = await createOwner("agenda")
   const { date } = await prepareAppointment(owner)
 
-  const resources = await call<{ chairs: { id: string; label: string }[] }>(
+  const resources = await call<{ rooms: { id: string; label: string }[] }>(
     owner.page,
     "GET",
     "/api/agenda/resources",
     owner.org.slug,
   )
-  expect(resources.chairs.map((item) => item.label)).toContain("Unidad dental 1")
+  expect(resources.rooms.map((item) => item.label)).toContain("Unidad dental 1")
 
   await gotoHydrated(owner.page, tenant(owner.org.slug, `/agenda?date=${date}`))
   await expect(owner.page).toHaveURL(tenantPattern(owner.org.slug, "/agenda"))
@@ -167,7 +167,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
     const local = new Date(Date.parse(iso) - 5 * 3_600_000).toISOString()
     return { date: local.slice(0, 10), hour: Number(local.slice(11, 13)) }
   }
-  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "POST", "/api/agenda/rooms", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   await call(
     page,
     "POST",
@@ -191,7 +191,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
     owner.org.slug,
     {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
+      professionalUserId: owner.user.id,
       rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
     },
     200,
@@ -332,19 +332,25 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("region", { name: /^Semana del/ })).toBeVisible()
   await shot("semana-escritorio")
 
-  // Teléfono: un profesional a la vez; lo libre se ve en la rejilla, no en la ficha.
+  // Teléfono: un profesional a la vez, elegido en la hoja de abajo; lo libre se ve
+  // en la rejilla, no en la ficha.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole("tab", { name: "Día", exact: true }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
-  await expect(page.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
+  await expect(page.getByRole("button", { name: /^Profesionales: / })).toContainText("Ana")
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-telefono")
+  await page.getByRole("button", { name: /^Profesionales: / }).click()
+  const sheet = page.getByRole("dialog", { name: "Días y profesionales" })
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
   // En teléfono también se puede ver por unidad dental.
-  await page.getByRole("button", { name: /^Profesionales/ }).click()
-  await expect(page.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
-  await shot("dia-telefono-sillones")
-  await page.getByRole("button", { name: /^Unidades dentales/ }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
+  await sheet.getByRole("button", { name: "Ver por unidad dental" }).click()
+  await expect(sheet.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
+  await shot("dia-telefono-unidades")
+  await sheet.getByRole("button", { name: "Ver por profesional" }).click()
+  await expect(sheet.getByRole("group", { name: "Profesionales" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(sheet).toBeHidden()
   await page.getByRole("tab", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
   await shot("lista-telefono")
@@ -424,7 +430,7 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
     owner.org.slug,
     {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
+      professionalUserId: owner.user.id,
       rules: [{ weekday: tomorrow.getUTCDay(), startMin: 8 * 60, endMin: 20 * 60 }],
     },
     200,
@@ -465,10 +471,10 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
     new Date(Date.now() - 5 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10)
   const tomorrow = limaDay(1)
   const dayAfter = limaDay(2)
-  const chair = await call<{ id: string }>(
+  const room = await call<{ id: string }>(
     page,
     "POST",
-    "/api/agenda/chairs",
+    "/api/agenda/rooms",
     owner.org.slug,
     { branchId: owner.branchId, name: "Unidad dental 1" },
     201,
@@ -495,7 +501,7 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
     owner.org.slug,
     {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
+      professionalUserId: owner.user.id,
       rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
     },
     200,
@@ -508,8 +514,8 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
     owner.org.slug,
     {
       patientId: patient.id,
-      dentistUserId: owner.user.id,
-      chairId: chair.id,
+      professionalUserId: owner.user.id,
+      roomId: room.id,
       startsAt: `${tomorrow}T15:00:00.000Z`,
       durationMin: 30,
     },
@@ -588,7 +594,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   const { page } = owner
   const shot = async (name: string) =>
     info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
-  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "POST", "/api/agenda/rooms", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   // Atiende todos los días de 09:00 a 13:00.
   await call(
     page,
@@ -597,7 +603,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
     owner.org.slug,
     {
       branchId: owner.branchId,
-      dentistUserId: owner.user.id,
+      professionalUserId: owner.user.id,
       rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
     },
     200,
@@ -721,7 +727,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
 
 test("agenda: solape responde 409 y movimiento con versión", async ({ createOwner }) => {
   const owner = await createOwner("agenda")
-  const { chair, patient, appointment, startsAt, endsAt } = await prepareAppointment(owner)
+  const { room, patient, appointment, startsAt, endsAt } = await prepareAppointment(owner)
 
   const conflict = await api<{ error: { code: string } }>(
     owner.page,
@@ -730,8 +736,8 @@ test("agenda: solape responde 409 y movimiento con versión", async ({ createOwn
     owner.org.slug,
     {
       patientId: patient.id,
-      dentistUserId: owner.user.id,
-      chairId: chair.id,
+      professionalUserId: owner.user.id,
+      roomId: room.id,
       startsAt,
       endsAt,
     },
@@ -754,13 +760,13 @@ test("agenda: otra organización no ve unidades dentales ni citas ajenas", async
   const second = await createOwner("agenda-b")
   const { date } = await prepareAppointment(first)
 
-  const resourcesB = await call<{ chairs: { id: string }[] }>(
+  const resourcesB = await call<{ rooms: { id: string }[] }>(
     second.page,
     "GET",
     "/api/agenda/resources",
     second.org.slug,
   )
-  expect(resourcesB.chairs).toHaveLength(0)
+  expect(resourcesB.rooms).toHaveLength(0)
   const listB = await call<unknown[] | { data?: unknown[] }>(
     second.page,
     "GET",

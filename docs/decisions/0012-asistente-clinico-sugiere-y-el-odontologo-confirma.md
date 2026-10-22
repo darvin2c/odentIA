@@ -45,4 +45,4 @@ El odontólogo registra la atención con las manos ocupadas o después, de memor
 
 ## Referencias
 
-- `packages/services/src/encounter-dictation.ts`, `packages/agent/src/dictation.ts`, `apps/api/src/routes/encounter-dictation.ts`, `apps/platform/src/components/patient/dictation-*.ts(x)`, operaciones `atencion.nota`, `atencion.diagnostico`, `plan.indicacion` y `control.crear`, migración `0054`.
+- `packages/services/src/encounter-dictation.ts`, `packages/agent/src/dictation.ts`, `apps/api/src/routes/encounter-dictation.ts`, `apps/dental-clinic/src/components/patient/dictation-*.ts(x)`, operaciones `atencion.nota`, `atencion.diagnostico`, `plan.indicacion` y `control.crear`, migración `0054`.

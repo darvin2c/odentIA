@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
-import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
@@ -54,25 +54,25 @@ const DAY = 24 * HOUR
 interface Clinic {
   orgId: string
   ownerId: string
-  dentistId: string
+  professionalId: string
   branchId: string
-  chairId: string
+  roomId: string
   whatsappId: string | null
 }
 
 async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessageKey[]; admin?: boolean } = {}): Promise<Clinic> {
   const orgId = randomUUID()
   const ownerId = `owner-${orgId}`
-  const dentistId = `dentist-${orgId}`
+  const professionalId = `professional-${orgId}`
   await insertOrg(ownerDb, orgId, `aviso-${orgId}`)
   await ownerDb.update(orgProfile).set({ tradeName: "Clínica Sonríe" }).where(eq(orgProfile.organizationId, orgId))
   await ownerDb.insert(user).values([
     { id: ownerId, name: "Dueña", email: `${ownerId}@aviso.test`, emailVerified: true },
-    { id: dentistId, name: "Dra. Ana Torres", email: `${dentistId}@aviso.test`, emailVerified: true },
+    { id: professionalId, name: "Dra. Ana Torres", email: `${professionalId}@aviso.test`, emailVerified: true },
   ])
   await ownerDb.insert(member).values([
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
-    { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
+    { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
   // Recepción y el Administrador encendidos y con el horario para escribir a toda hora: el reloj es el real.
   await ownerDb.insert(agentConfig).values({
@@ -82,12 +82,12 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
     writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
   // Atiende todo el día, toda la semana: mover una cita valida el horario.
   await withOrgContext(appDb, orgId, (tx) =>
     setProfessionalSchedule(tx, orgId, ownerId, {
       branchId: site!.id,
-      dentistUserId: dentistId,
+      professionalUserId: professionalId,
       rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 0, endMin: 24 * 60 })),
     }),
   )
@@ -100,7 +100,7 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
             channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA",
             config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S", templates },
           }, { fetch, validateExternal: false }))
-  return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id, whatsappId: connection?.id ?? null }
+  return { orgId, ownerId, professionalId, branchId: site!.id, roomId: room!.id, whatsappId: connection?.id ?? null }
 }
 
 function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
@@ -166,7 +166,7 @@ function later(ms: number): Date {
 const book = (c: Clinic, patientId: string, startsAt: Date, extra: { notice?: boolean } = {}) =>
   run(c, (tx) =>
     createAppointment(tx, c.orgId, c.ownerId, {
-      branchId: c.branchId, patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+      branchId: c.branchId, patientId, professionalUserId: c.professionalId, roomId: c.roomId,
       startsAt: startsAt.toISOString(), outsideSchedule: true, ...extra,
     }),
   )
@@ -286,7 +286,7 @@ describe("al cambiar la cita, el agente le avisa", () => {
       reschedulePortalAppointment(tx, { orgId: c.orgId, session: session!, patientName: "Rosa Quispe" }, booked.id, {
         expectedVersion: booked.version,
         startsAt: to.toISOString(),
-        dentistUserId: booked.dentistUserId,
+        professionalUserId: booked.professionalUserId,
       }),
     )
     expect(new Date(moved.startsAt).getTime()).toBe(to.getTime())
@@ -404,7 +404,7 @@ describe("cuándo le pide el agente confirmar", () => {
     await ownerDb.update(contact).set({ phone: "+51987654100" }).where(eq(contact.id, rosa.contactId))
     const booked = await run(c, (tx) =>
       createAppointment(tx, c.orgId, c.ownerId, {
-        branchId: c.branchId, patientId: rosa.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        branchId: c.branchId, patientId: rosa.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
         startsAt: later(3 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: rosa.conversationId!,
       }),
     )
@@ -510,7 +510,7 @@ describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
     expect(await run(c, (tx) => answerGeneralPermission(tx, c.orgId, { conversationId: rosa.conversationId!, granted: true }))).toBe("no_preguntado")
     await run(c, (tx) =>
       createAppointment(tx, c.orgId, c.ownerId, {
-        branchId: c.branchId, patientId: rosa.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        branchId: c.branchId, patientId: rosa.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
         startsAt: later(3 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: rosa.conversationId!, notice: false,
       }),
     )
@@ -533,7 +533,7 @@ describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
     await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId: ana.contactId, purpose: "novedades", status: "revoked", source: "registro" })
     await run(c, (tx) =>
       createAppointment(tx, c.orgId, c.ownerId, {
-        branchId: c.branchId, patientId: ana.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        branchId: c.branchId, patientId: ana.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
         startsAt: later(4 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: ana.conversationId!, notice: false,
       }),
     )
@@ -636,7 +636,7 @@ describe("«Contexto» de la conversación", () => {
     const next = await book(c, rosa.patientId, later(2 * DAY), { notice: false })
     const caps = { conversations: true, tasks: true, agent: false }
     const seen = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: { ...caps, appointments: true } }))
-    expect(seen.nextAppointment).toMatchObject({ id: next.id, patientName: "Rosa Quispe", branchName: "Centro", dentistName: "Dra. Ana Torres", timeZone: "America/Lima" })
+    expect(seen.nextAppointment).toMatchObject({ id: next.id, patientName: "Rosa Quispe", branchName: "Centro", professionalName: "Dra. Ana Torres", timeZone: "America/Lima" })
     expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null, avisos: null })
     const blind = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: caps }))
     expect(blind.nextAppointment).toBeNull()

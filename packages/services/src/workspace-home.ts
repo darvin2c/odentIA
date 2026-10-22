@@ -41,7 +41,7 @@ export interface WaitingRegistrationDone {
   /** Cuándo envió sus datos. */
   sentAt: string
   startsAt: string
-  dentistName: string | null
+  professionalName: string | null
 }
 
 export interface WaitingCase {
