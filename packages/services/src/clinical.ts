@@ -72,7 +72,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { orgDentalProfile } from "./dental/profile.js"
-import { siteCodesColumns, siteColumns, teethOfCodes, withDentalSite } from "./dental/site.js"
+import { type SiteColumns, siteCodesColumns, siteColumns, teethOfCodes, withDentalSite } from "./dental/site.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 
@@ -1956,6 +1956,15 @@ export async function odontogramLines(tx: Db, orgId: string, patientId: string) 
   return Object.entries(teeth)
     .map(([tooth, state]) => ({ tooth: Number(tooth), label: conditionLabel(state.condition), surfaces: state.surfaces }))
     .sort((a, b) => a.tooth - b.tooth)
+}
+
+/**
+ * La pieza y las caras de una fila con sitio, para la copia de la historia: la
+ * copia no lee el sitio común por su cuenta (ADR 0079 y 0080).
+ */
+export function toothAndSurfaces(row: SiteColumns): { toothNumber: number | null; surfaces: string[] } {
+  const { toothNumber, surfaces } = withDentalSite(row)
+  return { toothNumber, surfaces }
 }
 
 /**
