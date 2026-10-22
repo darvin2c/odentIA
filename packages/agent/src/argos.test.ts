@@ -483,6 +483,23 @@ describe("Argos sobre las vistas", () => {
     expect(again.text).toBe(answer.text)
   })
 
+  it("la respuesta que falla en el último turno tiene su corrección, y el id del cálculo delante de su columna se entiende", async () => {
+    const figure = (clave: string) => ({ clave, por: [], filtros: [], parte_del_total: false, limite: null, orden: "mayor" })
+    const calc = (id: string, clave: string) => ({ name: "calcular", args: { id, cifra: figure(clave), sql: "", periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })
+    const model = new ScriptedModel([
+      { tools: [{ name: "buscar_nombres", args: { textos: ["Surco"] } }] },
+      { tools: [calc("c1", "deuda_vencida")] },
+      { tools: [calc("c2", "te_deben")] },
+      { calculo: "c2", frase: "Te deben {deuda}.", frase_vacia: "Nadie debe.", titulo: "Lo que te deben" },
+      { calculo: "c2", frase: "Te deben {c2_te_deben_dinero}.", frase_vacia: "Nadie debe.", titulo: "Lo que te deben" },
+    ])
+    const answer = await ask(model, "¿Cuánto me deben?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    expect(answer.text).toMatch(/^Te deben S\/\s?0\.00\.$/)
+    expect(model.calls).toHaveLength(5)
+    expect(model.sent()).toMatch(/sus columnas son \{te_deben_dinero\}/)
+  })
+
   it("dos listas se juntan por lo que comparten, sin volver a consultar; la columna del otro cálculo se dice sin su id", async () => {
     const sqlCalc = (id: string, sql: string) => ({ name: "calcular", args: { id, cifra: null, sql, periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })
     const model = new ScriptedModel([

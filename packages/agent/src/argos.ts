@@ -735,13 +735,22 @@ export async function askArgos(
     const missing = ids.find((item) => !calcs.has(item))
     if (missing) return { problem: `no hay un cálculo «${missing}»: usa el id de uno de tus cálculos que corrió`, code: "HUECOS" }
     let calc = ids[0] ? calcs.get(ids[0]) : undefined
+    let base = ids[0] ?? ""
     if (calc && ids.length > 1) {
       const joined = joinCalcs(ids.map((item) => calcs.get(item) as ArgosCalc))
       if ("problem" in joined) return { problem: joined.problem, code: "HUECOS" }
       calc = joined
-      // Las columnas de la base van sin su id: {c2_concepto} es {concepto}.
-      const own = new RegExp(`\\{${joined.base.replace(/[^\w]/g, "")}_`, "g")
-      plan = { ...plan, frase: plan.frase.replace(own, "{"), frase_vacia: plan.frase_vacia.replace(own, "{") }
+      base = joined.base
+    }
+    if (calc) {
+      // Las columnas de un cálculo, o de la base de los que se juntan, van sin su id: {c2_concepto} es {concepto}
+      // si esa columna existe y la que lleva el id no.
+      const names = new Set(calc.result.columns.map((column) => column.name))
+      const own = (text: string) =>
+        text.replace(/\{(\w+)\}/g, (hole, name: string) =>
+          name.startsWith(`${base}_`) && !names.has(name) && names.has(name.slice(base.length + 1)) ? `{${name.slice(base.length + 1)}}` : hole,
+        )
+      plan = { ...plan, frase: own(plan.frase), frase_vacia: own(plan.frase_vacia) }
     }
     let result: ArgosQueryResult
     let binding: ArgosBinding
@@ -784,9 +793,10 @@ export async function askArgos(
       const messages = argosMessages(model.provider, ask)
       let unreadable = 0
       let answered = 0
-      for (let turn = 0; turn < ARGOS_MAX_TURNS && !plan; turn += 1) {
+      // Una respuesta que no se pudo usar tiene su corrección aunque llegue en el último turno: uno más, solo para responder.
+      for (let turn = 0; !plan && (turn < ARGOS_MAX_TURNS || (turn === ARGOS_MAX_TURNS && answered === 1)); turn += 1) {
         if (calcs.size) step("Revisando el resultado")
-        const reply = await model.invoke(messages, turn === ARGOS_MAX_TURNS - 1 ? TOOL_NAME : "required")
+        const reply = await model.invoke(messages, turn >= ARGOS_MAX_TURNS - 1 ? TOOL_NAME : "required")
         messages.push(reply)
         const calls = reply.tool_calls ?? []
         if (!calls.length) {
