@@ -19,7 +19,7 @@ import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { type ArgosDeps, type ArgosPlan, askArgos, rerunArgos, showArgosAnswer } from "./argos.js"
+import { ARGOS_PANEL_AWAY, type ArgosDeps, type ArgosPlan, askArgos, rerunArgos, routeArgosQuestion, showArgosAnswer } from "./argos.js"
 import type { DecisionModel } from "./decision/index.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -260,6 +260,30 @@ describe("Argos sobre las vistas", () => {
     expect(await ask(model, "¿Cómo agrego una sede?", "owner", "ayuda")).toMatchObject({ kind: "ayuda" })
     expect(model.calls).toHaveLength(0)
     expect(await lastQuestion()).toMatchObject({ outcome: "ayuda", usedModel: false })
+  })
+
+  it("en el panel, Jev solo despide como «otra cosa» si está seguro; la Ayuda sigue siendo suya y el buscador decide igual que antes", async () => {
+    const sure = (choice: "ayuda" | "otro", confidence: number): DecisionModel => ({
+      ...decides(choice),
+      decide: async (_, questions) => ({
+        answers: questions.map((question) => ({ id: question.id, kind: "choice", choice, probabilities: null, confidence })),
+        model: "guion",
+        usage: null,
+        latencyMs: 0,
+      }),
+    })
+    const panel = (model: DecisionModel) => routeArgosQuestion(model, "Ticket promedio por sede", () => "negocio", ARGOS_PANEL_AWAY)
+    expect(await panel(sure("otro", 0.48))).toBe("negocio")
+    expect(await panel(sure("otro", 1))).toBe("otro")
+    expect(await panel(sure("ayuda", 0.72))).toBe("ayuda")
+    expect(await routeArgosQuestion(sure("otro", 0.48), "Ticket promedio por sede")).toBe("otro")
+  })
+
+  it("Argos sabe quién pregunta y quién del equipo atiende pacientes", async () => {
+    const model = new ScriptedModel([COBRADO])
+    await ask(model, "¿Cuánto cobré yo este mes?")
+    expect(model.sent()).toMatch(/Quien pregunta: .+ \(propietario\)\. «Yo», «mis pacientes» o «lo que atendí» es esta persona\./)
+    expect(model.sent()).toMatch(/Atienden pacientes \(tienen horario o citas como profesional, lleven o no «Dr\.»\): /)
   })
 
   it("si el modelo responde algo que no se lee, se le pide otra vez una sola", async () => {

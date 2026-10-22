@@ -12,6 +12,7 @@ import { reviewArgosQuery } from "./argos-query.js"
 const NAMES: ArgosNames = {
   sedes: ["Sede Miraflores", "Sede San Isidro", "Sede Surco"],
   equipo: ["Dra. Ana Torres", "Luis Prado"],
+  atienden: ["Dra. Ana Torres", "Luis Prado"],
   especialidades: ["Cirugía oral", "Ortodoncia y Ortopedia Maxilar"],
   servicios: [
     { name: "Control de ortodoncia", specialty: "Ortodoncia y Ortopedia Maxilar" },

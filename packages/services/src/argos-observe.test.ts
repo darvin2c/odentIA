@@ -5,6 +5,7 @@ import { argosResultForModel } from "./argos-observe.js"
 const NAMES: ArgosNames = {
   sedes: ["Sede Surco"],
   equipo: ["Dra. Ana Torres"],
+  atienden: ["Dra. Ana Torres"],
   especialidades: [],
   servicios: [{ name: "Exodoncia simple", specialty: null }],
   productos: [],

@@ -511,6 +511,8 @@ describe("cuadre con Reportes", () => {
     const text = argosNamesText(names, "gestion")
     expect(text).toContain("Sedes: Sede Norte, Sede Sur.")
     expect(text).toContain("Equipo: Dra. Sur.")
+    // Quien atiende sale de su agenda (horario o citas), no de su título.
+    expect(names.atienden).toEqual(["Dra. Sur"])
     expect(text).toMatch(/Ortodoncia y Ortopedia Maxilar: Control de ortodoncia\./)
     expect(argosNamesText(await withOrgContext(appDb, orgId, (tx) => listArgosNames(tx, orgId, "clinico")), "clinico")).not.toContain("Productos:")
   })

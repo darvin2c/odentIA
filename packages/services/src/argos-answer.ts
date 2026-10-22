@@ -76,7 +76,7 @@ export function argosNamesText(names: ArgosNames, key: ArgosKey): string {
   const lines = [
     "Los nombres de esta clínica, como están en las vistas. En la consulta escríbelos tal cual aunque la pregunta los diga de otra forma («Surco» es la sede que lo lleva, «extracciones» son los servicios de exodoncia, «ortodoncia» es la especialidad que la nombra). Para un tipo de tratamiento, filtra por su especialidad si es toda una, o por los nombres de sus servicios.",
     `- Sedes: ${names.sedes.join(", ") || "ninguna"}.`,
-    `- Equipo: ${names.equipo.join(", ") || "nadie"}.`,
+    `- Equipo: ${names.equipo.join(", ") || "nadie"}. Atienden pacientes (tienen horario o citas como profesional, lleven o no «Dr.»): ${names.atienden.join(", ") || "nadie"}.`,
     services.length ? `- Servicios por especialidad:\n${services.join("\n")}` : "- Servicios: ninguno.",
     seesStock ? `- Productos: ${names.productos.join(", ") || "ninguno"}.` : "",
     names.promociones.length ? `- Promociones: ${names.promociones.join(", ")}.` : "",

@@ -14,11 +14,13 @@
  * con los nombres que sí hay, en vez de una cifra en cero.
  */
 import type { Db } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
+import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgSpecialty } from "@odentia/db/schema/clinical"
 import { product } from "@odentia/db/schema/inventory"
 import { promotion } from "@odentia/db/schema/promotions"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
 import { listArgosBranches } from "./argos-period.js"
@@ -1389,6 +1391,8 @@ export function argosFiguresText(key: ArgosKey): string {
 export interface ArgosNames {
   sedes: string[]
   equipo: string[]
+  /** Del equipo, quienes atienden pacientes: tienen horario o citas como profesional (como `equipo.atiende`), lleven o no «Dr.». */
+  atienden: string[]
   especialidades: string[]
   servicios: Array<{ name: string; specialty: string | null }>
   productos: string[]
@@ -1401,7 +1405,11 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
   const [branches, team, specialties, services, products, promotions] = await Promise.all([
     listArgosBranches(tx, orgId),
     tx
-      .selectDistinct({ name: user.name })
+      .selectDistinct({
+        name: user.name,
+        attends: sql<boolean>`(exists (select 1 from ${professionalSchedule} s where s.organization_id = ${member.organizationId} and s.dentist_user_id = ${member.userId})
+          or exists (select 1 from ${appointment} a where a.organization_id = ${member.organizationId} and a.dentist_user_id = ${member.userId}))`,
+      })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(eq(member.organizationId, orgId))
@@ -1424,11 +1432,29 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
   return {
     sedes: branches.map((item) => item.name),
     equipo: team.map((item) => item.name),
+    atienden: team.filter((item) => item.attends).map((item) => item.name),
     especialidades: specialties.map((item) => item.name),
     servicios: services.map((item) => ({ name: item.name, specialty: item.specialty })),
     productos: products.map((item) => item.name),
     promociones: promotions.map((item) => item.name),
   }
+}
+
+const ROLE_WORDS: Record<string, string> = { owner: "propietario", admin: "administración", dentist: "odontología", reception: "recepción", cashier: "caja" }
+
+/**
+ * Quien pregunta, con el rol con que pregunta (como lo dice la vista
+ * `equipo`): «yo», «mis pacientes» o «lo que atendí» es esa persona. Solo su
+ * nombre y su rol.
+ */
+export async function argosAsker(tx: Db, userId: string, memberRole: string): Promise<string | null> {
+  const [row] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  if (!row) return null
+  const roles = memberRole
+    .split(",")
+    .map((role) => ROLE_WORDS[role.trim()] ?? "otro")
+    .join(", ")
+  return `${row.name} (${roles})`
 }
 
 /** Para comparar nombres: sin tildes, sin mayúsculas, «×» como «x» y con un espacio entre palabras. */

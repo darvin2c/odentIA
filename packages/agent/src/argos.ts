@@ -21,6 +21,7 @@ import {
   type ArgosStoredAnswer,
   type ArgosStoredPlan,
   type ArgosWords,
+  argosAsker,
   bindArgosPeriod,
   argosCatalogText,
   argosChoiceOf,
@@ -224,6 +225,8 @@ export interface ArgosAsk {
   previous?: { text: string; query: string } | null
   /** Los nombres de la clínica como están en las vistas (`argosNamesText`). */
   names?: string
+  /** Quien pregunta, con su rol (`argosAsker`): «yo» es esa persona. */
+  asker?: string | null
 }
 
 /**
@@ -239,6 +242,7 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
     input.names ?? "",
+    input.asker ? `Quien pregunta: ${input.asker}. «Yo», «mis pacientes» o «lo que atendí» es esta persona.` : "",
     `Ahora en la clínica: ${now} (zona ${input.zone.timezone}).`,
     input.screen
       ? `En Reportes se ve el periodo «${input.screen.period}»${input.screen.branch ? ` y la sede «${input.screen.branch}»` : ", todas las sedes"}: úsalos si la pregunta no dice otro periodo o sede.`
@@ -393,22 +397,49 @@ export function routeByWords(text: string): ArgosRoute {
  * buscador, las palabras, para no poner a Argos primero ante un nombre; al
  * preguntarle a Argos, los datos, porque la persona ya lo eligió.
  */
-export async function routeArgosQuestion(model: DecisionModel | null, text: string, fallback: (text: string) => ArgosRoute = routeByWords): Promise<ArgosRoute> {
+export async function routeArgosQuestion(
+  model: DecisionModel | null,
+  text: string,
+  fallback: (text: string) => ArgosRoute = routeByWords,
+  /** Con qué seguridad dice que es «otra cosa»: por debajo (si el modelo la dice), decide `fallback`. */
+  awayAt?: number,
+): Promise<ArgosRoute> {
   if (!model) return fallback(text)
   try {
     const result = await model.decide(text, [ARGOS_ROUTE_QUESTION])
-    const choice = answerOf(result, ARGOS_ROUTE_QUESTION.id, "choice")?.choice
-    return ROUTES.find((route) => route === choice) ?? fallback(text)
+    const answer = answerOf(result, ARGOS_ROUTE_QUESTION.id, "choice")
+    const route = ROUTES.find((item) => item === answer?.choice)
+    if (!route) return fallback(text)
+    const sure = answer?.confidence ?? answer?.probabilities?.[route] ?? null
+    if (awayAt !== undefined && route === "otro" && sure !== null && sure < awayAt) return fallback(text)
+    return route
   } catch {
     return fallback(text)
   }
 }
 
 /** La fila del buscador para quien puede preguntarle a Argos: solo el texto viaja a Jev. Lo pagado lo mide quien llama. */
-export async function routeArgos(db: Db, deps: ArgosDeps, orgId: string, text: string, fallback: (text: string) => ArgosRoute = routeByWords): Promise<ArgosRoute> {
+export async function routeArgos(
+  db: Db,
+  deps: ArgosDeps,
+  orgId: string,
+  text: string,
+  fallback: (text: string) => ArgosRoute = routeByWords,
+  awayAt?: number,
+): Promise<ArgosRoute> {
   const decision = deps.decisionModel !== undefined ? deps.decisionModel : await createAdminDecisionModel(db, deps, orgId).catch(() => null)
-  return routeArgosQuestion(decision, text, fallback)
+  return routeArgosQuestion(decision, text, fallback, awayAt)
 }
+
+/**
+ * En el panel de Argos la persona ya eligió preguntarle: Jev solo la despide
+ * como «otra cosa» si está así de seguro; si duda, va a los datos. Medido con
+ * Jev el 2026-10-22: «hola» y «envíale un mensaje a Rosa» dan 1, «Ticket
+ * promedio de San Isidro vs Miraflores» 0,48. La Ayuda no pasa por aquí: tiene
+ * su respuesta («¿cómo creo una cita?» va a la Ayuda con 0,72). El mismo umbral
+ * que apartar un mensaje como fuera de tema o spam.
+ */
+export const ARGOS_PANEL_AWAY = 0.9
 
 export interface ArgosTable {
   columns: Array<{ name: string; label: string; kind: ArgosColumnKind }>
@@ -518,18 +549,19 @@ export async function askArgos(
     screen: input.screen ? await argosScreen(tx, input.orgId, input.screen, now) : null,
     branches: await listArgosBranches(tx, input.orgId),
     names: await listArgosNames(tx, input.orgId, key),
+    asker: await argosAsker(tx, input.userId, input.memberRole),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
   if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
 
   // Quien eligió «Preguntarle a Argos» con un nombre suelto («buscar») también recibe respuesta.
-  const route = input.routed ? "negocio" : await routeArgos(db, deps, input.orgId, input.text, () => "negocio")
+  const route = input.routed ? "negocio" : await routeArgos(db, deps, input.orgId, input.text, () => "negocio", ARGOS_PANEL_AWAY)
   if (route === "ayuda" || route === "otro") {
     await record(route, null, false)
     return { kind: route, message: ARGOS_WORDS[route] }
   }
 
-  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key) }
+  const ask: ArgosAsk = { question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key), asker: ready.asker }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
   const step = (text: string) => deps.onStep?.(text)
   /** Los pacientes que encontró buscar_nombres (D23): con varios, se calcula con el primero y la persona elige. */
