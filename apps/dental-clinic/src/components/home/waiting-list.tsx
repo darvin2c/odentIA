@@ -1,7 +1,8 @@
 import { Badge, Button, buttonVariants, cn, Textarea } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
+import { dueWords } from "../../lib/data-requests"
 import { Link } from "@tanstack/react-router"
-import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
+import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, ShieldCheck, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import { channelLabel } from "../../lib/channels"
@@ -68,7 +69,7 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
   )
 }
 
-function iconOf(row: WaitingRow): ReactNode {
+function iconOf(row: WaitingRow, context: HomeTextContext): ReactNode {
   if (row.kind === "unreached") return <AgentMark className="rounded-full" />
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.urgent ?? row.priority === "alta"} />
   if (row.kind === "staleEncounter") return <TypeIcon icon={Stethoscope} />
@@ -82,15 +83,20 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "inventory") return <TypeIcon icon={Package} />
   if (row.kind === "possibleDuplicate") return <TypeIcon icon={UsersRound} />
   if (row.kind === "portalReentry") return <TypeIcon icon={KeyRound} />
+  if (row.kind === "dataRequest") return <TypeIcon icon={ShieldCheck} urgent={row.dueOn < context.today} />
   if (row.kind === "budgets" || row.kind === "unsentBudget" || row.kind === "consentToPublish" || (row.kind === "more" && row.of === "unsentBudgets"))
     return <TypeIcon icon={FileText} />
   return <TypeIcon icon={SquareCheckBig} />
 }
 
 /** La insignia que acompaña al título: la urgencia de un caso o una tarea vencida. */
-function badgeOf(row: WaitingRow): ReactNode {
+function badgeOf(row: WaitingRow, context: HomeTextContext): ReactNode {
   if (row.kind === "case") return <HandoffUrgency priority={row.priority} urgent={row.urgent} />
   if (row.kind === "task" && row.due === "overdue") return <Badge variant="destructive">Vencida</Badge>
+  if (row.kind === "dataRequest") {
+    const words = dueWords(context.today, row.dueOn)
+    return <Badge variant={row.dueOn < context.today ? "destructive" : "warning"}>{words.charAt(0).toUpperCase() + words.slice(1)}</Badge>
+  }
   return null
 }
 
@@ -119,6 +125,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       if (row.patientId) return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "filiacion" }} {...props} />
       // Quien tenía el documento aún no es paciente: su página de persona.
       return row.personId ? <Link to="/people/$personId" params={{ personId: row.personId }} {...props} /> : null
+    case "dataRequest":
+      // Datos › Pedidos sobre sus datos: ahí se comprueba, se envía la copia y se responde.
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "pedidos" }} {...props} />
     case "portalReentry":
       // Datos › Acceso al portal: la fila de su acceso dice «Pidió volver a entrar» y ofrece «Enviar nuevo enlace».
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
@@ -252,7 +261,7 @@ function TopicReply({ row, context, onReply, onClose }: { row: RowOf<"case">; co
 
 function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow; context: HomeTextContext; handlers: WaitingHandlers; className?: string }) {
   const text = waitingText(row, context)
-  const badge = badgeOf(row)
+  const badge = badgeOf(row, context)
   const [replying, setReplying] = useState(false)
   const actions = quickActions(row, handlers, { open: replying, toggle: () => setReplying(true) })
   const key = waitingKey(row)
@@ -263,7 +272,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
   const stuck = row.kind === "case" && !row.canReply && handlers.noCaseBrief === true
   const content = (
     <>
-      {iconOf(row)}
+      {iconOf(row, context)}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-bold">
           {/* En escritorio la insignia abre el título; en teléfono baja al detalle. */}

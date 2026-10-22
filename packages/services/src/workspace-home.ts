@@ -154,6 +154,22 @@ export interface WaitingPossibleDuplicate {
 }
 
 /**
+ * Un pedido de la persona sobre sus datos que vence dentro de 3 días o ya
+ * venció (ADR 0080): «Rosa Quispe pidió una copia de su historia · vence en 3
+ * días». Lo ve quien atiende los pedidos.
+ */
+export interface WaitingDataRequest {
+  id: string
+  patientId: string
+  patientName: string
+  /** Qué pidió. */
+  request: "copia" | "corregir" | "mensajes"
+  dueOn: string
+  /** Ya se comprobó que es ella o su representante. */
+  verified: boolean
+}
+
+/**
  * Pidió volver a entrar al portal (cambió de teléfono, perdió el enlace): el
  * agente lo dejó aquí y recepción le envía un enlace nuevo, sin volver a
  * comprobar su identidad. El código se le dice aparte.
@@ -260,6 +276,7 @@ export type WaitingRow =
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
   | ({ kind: "possibleDuplicate" } & WaitingPossibleDuplicate)
   | ({ kind: "portalReentry" } & WaitingPortalReentry)
+  | ({ kind: "dataRequest" } & WaitingDataRequest)
   | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   | ({ kind: "stillOpen" } & WaitingStillOpen)
@@ -287,6 +304,8 @@ export interface WaitingParts {
   possibleDuplicates?: WaitingPossibleDuplicate[]
   /** Quien pidió volver a entrar al portal, del más antiguo al más reciente. */
   portalReentries?: WaitingPortalReentry[]
+  /** Pedidos sobre sus datos que vencen pronto o ya vencieron, del plazo más cercano al más lejano. */
+  dataRequests?: WaitingDataRequest[]
   conversations: { waiting: number; oldestAt: string | null } | null
   stillOpen?: WaitingStillOpen | null
   /** Tareas vencidas, de la que venció antes a la más reciente. */
@@ -311,6 +330,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const urgent = parts.cases.filter((item) => item.urgent)
   const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
   for (const item of urgentShown) rows.push({ kind: "case", ...item })
+
+  // Un pedido sobre sus datos tiene plazo legal: va justo después de lo urgente.
+  for (const item of (parts.dataRequests ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "dataRequest", ...item })
 
   // La ficha de esa persona sigue trabada por un borrador de otro día: va antes que lo del día.
   for (const item of parts.staleEncounters ?? []) rows.push({ kind: "staleEncounter", ...item })

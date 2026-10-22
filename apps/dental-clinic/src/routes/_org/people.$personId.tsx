@@ -30,6 +30,9 @@ import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { AccountTab } from "../../components/patient/account-tab"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
+import { DataRequestsPanel } from "../../components/patient/data-requests-panel"
+import { SectionSideNav } from "../../components/person/section-side-nav"
+import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
 import { DocumentosSection } from "../../components/patient/documentos-panel"
 import { HistoriaTab } from "../../components/patient/historia-tab"
 import { OdontogramaTab } from "../../components/dental/odontograma-tab"
@@ -57,7 +60,9 @@ import {
   type PageOf,
   type PatientSectionId,
   resolveSection,
+  SIDE_NAV_AREAS,
   sectionFromSearch,
+  sectionGroup,
   sectionOf,
   subsectionNav,
   visibleAreas,
@@ -185,6 +190,14 @@ function PersonPageRoute() {
     enabled: Boolean(patientId) && clinicalSummary,
     retry: false,
   })
+  // Los pedidos sobre sus datos pendientes: su número va junto a la sección (ADR 0080).
+  const dataRequests = useQuery({
+    queryKey: dataRequestsKey(patientId ?? ""),
+    queryFn: () => fetchDataRequests(patientId ?? ""),
+    enabled: Boolean(patientId) && can("patients.write"),
+    retry: false,
+  })
+  const pendingDataRequests = dataRequests.data?.requests.filter((r) => r.status === "pendiente").length ?? 0
   const openTab = (
     next: PatientSectionId,
     nextTooth?: number,
@@ -373,6 +386,8 @@ function PersonPageRoute() {
         return patientId ? <PatientPortalAccessSection patientId={patientId} /> : null
       case "accesos":
         return patientId ? <AccesosPanel patientId={patientId} /> : null
+      case "pedidos":
+        return patientId ? <DataRequestsPanel patientId={patientId} /> : null
     }
   }
 
@@ -403,18 +418,23 @@ function PersonPageRoute() {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {areas.map((area) => (
-            <SelectGroup key={area.id}>
-              <SelectLabel>{area.label}</SelectLabel>
-              {allSections
-                .filter((s) => s.area === area.id)
-                .map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-            </SelectGroup>
-          ))}
+          {areas.flatMap((area) => {
+            // Lo que va en un grupo («Sus datos y la ley») sale con su propio título.
+            const own = allSections.filter((s) => s.area === area.id)
+            const titles = [area.label, ...new Set(own.map((s) => sectionGroup(s.id)).filter((g): g is string => !!g))]
+            return titles.map((title, index) => (
+              <SelectGroup key={`${area.id}-${title}`}>
+                <SelectLabel>{title}</SelectLabel>
+                {own
+                  .filter((s) => (index === 0 ? !sectionGroup(s.id) : sectionGroup(s.id) === title))
+                  .map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+              </SelectGroup>
+            ))
+          })}
         </SelectContent>
       </Select>
     </div>
@@ -472,7 +492,19 @@ function PersonPageRoute() {
           </TabsList>
         </ScrollArea>
         <TabsContent value={current.area} className="pt-4">
-          {entries.length > 1 ? (
+          {entries.length > 1 && SIDE_NAV_AREAS.has(current.area) ? (
+            // Muchas secciones: menú lateral en vez de una barra que se desborda.
+            <div className="flex min-w-0 flex-col gap-6 sm:flex-row sm:items-start">
+              <SectionSideNav
+                label={`Secciones de ${areas.find((area) => area.id === current.area)?.label ?? "la página"}`}
+                entries={entries}
+                current={navSectionOf(current.id)}
+                badges={pendingDataRequests > 0 ? { pedidos: pendingDataRequests } : {}}
+                onOpen={openTab}
+              />
+              <div className="min-w-0 flex-1">{content()}</div>
+            </div>
+          ) : entries.length > 1 ? (
             <Tabs
               className="min-w-0 w-full gap-4"
               value={navSectionOf(current.id)}

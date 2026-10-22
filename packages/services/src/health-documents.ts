@@ -191,7 +191,7 @@ export async function getHealthDocumentSendOptions(
 
 // --- PDF -----------------------------------------------------------------------
 
-async function newWriter(title: string): Promise<{ pdf: PDFDocument; w: Writer }> {
+export async function newWriter(title: string): Promise<{ pdf: PDFDocument; w: Writer }> {
   const pdf = await PDFDocument.create()
   pdf.setTitle(safe(title))
   pdf.setProducer("odentIA")
@@ -203,7 +203,7 @@ async function newWriter(title: string): Promise<{ pdf: PDFDocument; w: Writer }
   return { pdf, w }
 }
 
-interface Establishment {
+export interface Establishment {
   legalName: string | null
   tradeName: string | null
   fiscalDocType: string | null
@@ -213,7 +213,7 @@ interface Establishment {
   timezone?: string | null
 }
 
-function header(w: Writer, establishment: Establishment | null) {
+export function header(w: Writer, establishment: Establishment | null) {
   if (!establishment) return
   w.text(establishment.tradeName ?? establishment.legalName ?? "", { size: 12, bold: true })
   w.text(
@@ -230,7 +230,7 @@ function header(w: Writer, establishment: Establishment | null) {
   w.gap()
 }
 
-function patientLine(person: {
+export function patientLine(person: {
   displayName: string
   patientNumber: number
   docType: string | null
@@ -242,7 +242,7 @@ function patientLine(person: {
   }${person.birthDate ? ` · nacimiento ${person.birthDate}` : ""}`
 }
 
-function zoneOf(establishment: Establishment | null): Zone {
+export function zoneOf(establishment: Establishment | null): Zone {
   return {
     locale: establishment?.locale || NEUTRAL_LOCALE,
     timezone: establishment?.timezone || NEUTRAL_TIMEZONE,

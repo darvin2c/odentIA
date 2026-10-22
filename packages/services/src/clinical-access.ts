@@ -29,6 +29,8 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "formularios",
   "consentimientos",
   "ordenes",
+  /** Descargó la historia completa (ADR 0080). */
+  "descarga",
 ] as const
 export type ClinicalAccessResource = (typeof CLINICAL_ACCESS_RESOURCES)[number]
 

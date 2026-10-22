@@ -8,12 +8,20 @@ import { formatMoney } from "@odentia/clinical"
 import { agentCaseRow, urgencyWord } from "./agent"
 import { ADMIN_NAME, withReceptionName } from "./agent-names"
 import { channelLabel } from "./channels"
+import { dayWords } from "./data-requests"
 import { timeAgo } from "./crm"
 import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
 import type { WaitingRow, WorkspaceTodaySummary } from "./workspace"
 
 /** Filas de «Te espera» a la vista en teléfono; el resto se abre con «Ver las otras N». */
 export const PHONE_ROWS = 5
+
+/** Lo que pidió, dicho en la fila de «Te espera»: «Rosa Quispe pidió una copia de su historia». */
+const DATA_REQUEST_PHRASE = {
+  copia: "una copia de su historia",
+  corregir: "corregir un dato",
+  mensajes: "no recibir mensajes",
+} as const
 
 export interface HomeTextContext {
   /** Día de la clínica (`YYYY-MM-DD`), como lo entrega el servidor. */
@@ -206,6 +214,15 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),
         action: "Revisar",
       }
+    case "dataRequest":
+      return {
+        title: `${row.patientName} pidió ${DATA_REQUEST_PHRASE[row.request]}`,
+        detail: joined([
+          `Responder hasta el ${dayWords(row.dueOn, context.locale)}`,
+          row.verified ? null : "falta comprobar que es ella",
+        ]),
+        action: "Atender",
+      }
     case "portalReentry":
       return {
         title: `${row.contactName} quiere volver a entrar al portal`,
@@ -306,7 +323,7 @@ export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descar
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
   if (row.kind === "registrationDone") return `registrationDone:${row.appointmentId}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`

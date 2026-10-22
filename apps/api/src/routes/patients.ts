@@ -115,6 +115,7 @@ import { createEncounterDictationRoute } from "./encounter-dictation.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
 import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
+import { createPatientDataRequestsRoute } from "./patient-data-requests.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
 import { createPatientTreatmentsRoute } from "./patient-treatments.js"
 
@@ -552,6 +553,8 @@ const CLINICAL_SUBPATHS = [
   "/periodontal",
   "/timeline",
   "/summary",
+  // La historia completa para entregarla (ADR 0080).
+  "/record",
 ]
 
 /**
@@ -601,6 +604,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/prescriptions", "recetas"],
   ["/documents", "documentos"],
   ["/imaging/studies", "documentos"],
+  ["/record", "descarga"],
 ]
 
 /** Mismo contrato que la reserva clínica del control (`patient-follow-ups.ts`). */
@@ -1756,6 +1760,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // El dictado del asistente clínico necesita el proveedor del modelo; sin él no se monta.
   if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))
+  app.route("/", createPatientDataRequestsRoute(deps))
   app.route("/", createPatientPaymentsRoute(deps))
   app.route("/", createPatientResponsibilitiesRoute(deps))
 
