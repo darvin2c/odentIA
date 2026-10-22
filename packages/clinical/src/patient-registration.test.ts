@@ -8,6 +8,7 @@ import {
   pendingRegistrationFields,
   registrationAnswersSchema,
   registrationConfigSchema,
+  registrationFieldAsked,
   type RegistrationAnswers,
   validateDemographics,
   validateRegistrationAnswers,
@@ -173,5 +174,19 @@ describe("lo de cada país en los datos de la persona", () => {
     const asksOrigin = { ...config, fields: { ...config.fields, origin: "optional" as const } }
     expect(validateRegistrationAnswers(asksOrigin, { ...adult, demographics: { ...adult.demographics, origin: "Arequipa" } }, publicContext)).toEqual({})
     expect(validateRegistrationAnswers(asksOrigin, { ...adult, demographics: { ...adult.demographics, phone: "+56912345678", origin: "Arequipa" } }, { ...publicContext, countryCode: "CL" })).toHaveProperty("demographics.origin")
+  })
+})
+
+describe("«Tu boca» es del producto dental (ADR 0079)", () => {
+  const asksBoca = {
+    ...DEFAULT_REGISTRATION_CONFIG,
+    fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, "dental.bruxismo": "optional" as const },
+  }
+  it("una clínica dental la pregunta si la pide; una médica nunca", () => {
+    expect(registrationFieldAsked(asksBoca, "dental.bruxismo", "PE")).toBe(true)
+    expect(registrationFieldAsked(asksBoca, "dental.bruxismo", "PE", "dental")).toBe(true)
+    expect(registrationFieldAsked(asksBoca, "dental.bruxismo", "PE", "medical")).toBe(false)
+    // Lo común se pregunta igual en los dos productos.
+    expect(registrationFieldAsked(asksBoca, "allergies", "PE", "medical")).toBe(true)
   })
 })

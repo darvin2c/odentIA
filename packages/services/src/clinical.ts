@@ -24,7 +24,6 @@ import {
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
 } from "@odentia/clinical"
-import { ISO_3950, isValidTooth, toothSiteCode } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -54,8 +53,12 @@ import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
-import { type SiteColumns, siteCodesColumns, siteColumns, teethOfCodes, withDentalSite } from "./dental/site.js"
 import { requirePatient } from "./patients.js"
+import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
+import { productHooks } from "./products.js"
+
+/** El «dónde» del producto de la clínica (odentIA: piezas y caras). */
+const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
 
 /** La atención en borrador de este paciente, bloqueada para escribir en ella. */
 export async function requireDraftLink(
@@ -1194,9 +1197,8 @@ export async function addClinicalNote(
   if (input.diagnosisCode || input.diagnosisType?.trim()) {
     throw validation("Registra el diagnóstico en la sección Diagnóstico de la atención")
   }
-  const toothNumber = input.toothNumber ?? null
-  if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
-    throw validation("Pieza FDI inválida")
+  const site = await siteOf(tx, orgId)
+  const noteSite = site.columns({ toothNumber: input.toothNumber ?? null })
   const [row] = await tx
     .insert(clinicalNote)
     .values({
@@ -1204,14 +1206,14 @@ export async function addClinicalNote(
       patientId,
       authorUserId: actorUserId,
       note,
-      ...siteColumns({ toothNumber }),
+      ...noteSite,
       encounterId: input.encounterId ?? null,
       kind: "evolucion",
     })
     .returning()
   if (!row) throw new Error("No se pudo guardar la nota")
   await audit(tx, orgId, actorUserId, "note.created", "clinical_note", row.id, { patientId })
-  return withDentalSite(row)
+  return withSite(site, row)
 }
 
 export async function listClinicalNotes(
@@ -1248,15 +1250,6 @@ export async function listClinicalNotes(
     nextCursor:
       rows.length > limit && last ? encodeCursor(last.createdAt.toISOString(), last.id) : null,
   }
-}
-
-/**
- * La pieza y las caras de una fila con sitio, para la copia de la historia: la
- * copia no lee el sitio común por su cuenta (ADR 0079 y 0080).
- */
-export function toothAndSurfaces(row: SiteColumns): { toothNumber: number | null; surfaces: string[] } {
-  const { toothNumber, surfaces } = withDentalSite(row)
-  return { toothNumber, surfaces }
 }
 
 // --- Documentos con contexto versionado ---
@@ -1388,14 +1381,13 @@ async function withImaging(
 }
 
 /** Piezas FDI múltiples: enteras válidas, únicas y ordenadas. Vacío = imagen general. */
-function normalizeDocumentTeeth(input: readonly number[] | null | undefined): number[] {
+function normalizeDocumentTeeth(site: ProductSite, input: readonly number[] | null | undefined): number[] {
   if (input == null) return []
   if (!Array.isArray(input)) throw validation("toothNumbers debe ser un arreglo")
   if (input.length > 52) throw validation("toothNumbers admite como máximo 52 piezas")
   const set = new Set<number>()
   for (const tooth of input) {
-    if (!Number.isInteger(tooth) || !isValidTooth(tooth))
-      throw validation(`Pieza FDI inválida: ${tooth}`)
+    if (site.code(tooth) === null) throw validation(site.invalid(tooth))
     set.add(tooth)
   }
   return [...set].sort((a, b) => a - b)
@@ -1481,12 +1473,18 @@ async function currentDocumentContext(
     )
     .orderBy(desc(patientDocumentContext.version))
   const [row] = await base.limit(1)
-  return row ? withTeeth(row) : null
+  return row ? withTeeth(await siteOf(tx, orgId), row) : null
 }
 
 /** El contexto con sus piezas a la vista, como lo devolvía la API (ADR 0079). */
-function withTeeth(row: typeof patientDocumentContext.$inferSelect): DocumentContextRow {
-  return { ...row, toothNumbers: teethOfCodes(row) }
+function withTeeth(site: ProductSite, row: typeof patientDocumentContext.$inferSelect): DocumentContextRow {
+  const teeth = row.siteSystem === site.system ? row.siteCodes.map((code) => site.value(code)) : []
+  return { ...row, toothNumbers: teeth.filter((tooth): tooth is number => tooth !== null) }
+}
+
+/** Los sitios sueltos de un documento → sus columnas (odentIA: piezas → códigos ISO 3950). */
+function siteCodesColumns(site: ProductSite, teeth: readonly number[]): { siteSystem: string | null; siteCodes: string[] } {
+  return teeth.length > 0 ? { siteSystem: site.system, siteCodes: teeth.map((tooth) => site.code(tooth)!) } : { siteSystem: null, siteCodes: [] }
 }
 
 /** Fusión explícita por columnas estables: nunca filtra encounterId/toothNumber
@@ -1661,7 +1659,8 @@ export async function registerPatientDocument(
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres")
   const image = normalizeImageInput(input.category, input)
   if (!input.storageKey) throw validation("storageKey es obligatorio")
-  const toothNumbers = normalizeDocumentTeeth(input.toothNumbers)
+  const site = await siteOf(tx, orgId)
+  const toothNumbers = normalizeDocumentTeeth(site, input.toothNumbers)
   const tags = normalizeDocumentTags(input.tags)
   // Al registrar solo se permite vincular borradores (la atención aún es mutable).
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
@@ -1693,7 +1692,7 @@ export async function registerPatientDocument(
       encounterId: input.encounterId ?? null,
       planItemId: input.planItemId ?? null,
       ...extendedDocumentLinks(input),
-      ...siteCodesColumns(toothNumbers),
+      ...siteCodesColumns(site, toothNumbers),
       tags,
       authorUserId: actorUserId,
     })
@@ -1706,8 +1705,8 @@ export async function registerPatientDocument(
         toothNumbers.map((toothNumber) => ({
           organizationId: orgId,
           encounterId: input.encounterId!,
-          siteSystem: ISO_3950,
-          siteCode: toothSiteCode(toothNumber),
+          siteSystem: site.system!,
+          siteCode: site.code(toothNumber)!,
         })),
       )
       .onConflictDoNothing()
@@ -1720,7 +1719,7 @@ export async function registerPatientDocument(
     encounterId: input.encounterId ?? null,
     planItemId: input.planItemId ?? null,
   })
-  return mergeDocumentContext(row, withTeeth(ctx))
+  return mergeDocumentContext(row, withTeeth(site, ctx))
 }
 
 /** Contexto vigente por documento (una fila por documento) acotado a org y
@@ -1743,7 +1742,8 @@ async function latestDocumentContexts(
     .from(patientDocumentContext)
     .where(and(...conditions))
     .orderBy(patientDocumentContext.documentId, desc(patientDocumentContext.version))
-  return rows.map(withTeeth)
+  const site = await siteOf(tx, orgId)
+  return rows.map((row) => withTeeth(site, row))
 }
 
 /** Filtros del archivo clínico. Sin `includeRetired` los retirados no aparecen. */
@@ -1785,8 +1785,8 @@ export async function listPatientDocuments(
         : sql`${takenAt} < (${value}::date + interval '1 day')`,
     )
   }
-  if (filters.tooth != null && !isValidTooth(filters.tooth))
-    throw validation(`Pieza FDI inválida: ${filters.tooth}`)
+  if (filters.tooth != null && (await siteOf(tx, orgId)).code(filters.tooth) === null)
+    throw validation((await siteOf(tx, orgId)).invalid(filters.tooth))
   const docs = await tx
     .select()
     .from(patientDocument)
@@ -1921,7 +1921,8 @@ export async function listDocumentContextHistory(
       ),
     )
     .orderBy(asc(patientDocumentContext.version))
-  return rows.map(withTeeth)
+  const site = await siteOf(tx, orgId)
+  return rows.map((row) => withTeeth(site, row))
 }
 
 /** Documento fusionado con su historial de contextos (detalle para el visor). */
@@ -1966,10 +1967,11 @@ export async function correctDocumentContext(
   }
   const encounterId = input.encounterId === undefined ? current.encounterId : input.encounterId
   const planItemId = input.planItemId === undefined ? current.planItemId : input.planItemId
+  const site = await siteOf(tx, orgId)
   const toothNumbers =
     input.toothNumbers === undefined || input.toothNumbers === null
       ? [...current.toothNumbers]
-      : normalizeDocumentTeeth(input.toothNumbers)
+      : normalizeDocumentTeeth(site, input.toothNumbers)
   const tags =
     input.tags === undefined || input.tags === null
       ? [...current.tags]
@@ -1990,7 +1992,7 @@ export async function correctDocumentContext(
         encounterId,
         planItemId,
         ...extended,
-        ...siteCodesColumns(toothNumbers),
+        ...siteCodesColumns(site, toothNumbers),
         tags,
         authorUserId: actorUserId,
       })
@@ -2006,7 +2008,7 @@ export async function correctDocumentContext(
     throw e
   }
   if (!inserted) throw new Error("No se pudo corregir el contexto del documento")
-  const next = withTeeth(inserted)
+  const next = withTeeth(site, inserted)
   await audit(
     tx,
     orgId,

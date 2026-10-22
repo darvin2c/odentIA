@@ -7,8 +7,6 @@
  * problemas.
  */
 
-import { isValidTooth, surfacesForTooth } from "@odentia/dental"
-import { siteColumns, withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
@@ -19,6 +17,11 @@ import { resolveDiagnosisCode, wasDiagnosedBefore } from "./diagnosis-codes.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { withSite } from "./product-hooks.js"
+import { productHooks } from "./products.js"
+
+/** El «dónde» del producto de la clínica (odentIA: pieza y caras). */
+const siteOf = async (tx: Db, orgId: string) => (await productHooks(tx, orgId)).site
 
 export const DIAGNOSIS_STATUSES = ["activo", "resuelto"] as const
 
@@ -58,20 +61,6 @@ async function audit(
   })
 }
 
-function cleanSurfaces(
-  surfaces: string[] | null | undefined,
-  toothNumber: number | null,
-): string[] {
-  const list = [...new Set((surfaces ?? []).map((s) => s.trim()).filter(Boolean))]
-  if (list.length === 0) return []
-  if (toothNumber === null) throw validation("Las superficies exigen una pieza")
-  const allowed = new Set<string>(surfacesForTooth(toothNumber))
-  for (const surface of list) {
-    if (!allowed.has(surface)) throw validation(`Superficie inválida para la pieza ${toothNumber}`)
-  }
-  return list.sort()
-}
-
 export async function addEncounterDiagnosis(
   tx: Db,
   orgId: string,
@@ -92,10 +81,9 @@ export async function addEncounterDiagnosis(
   if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
     throw validation("Elige si el diagnóstico es presuntivo o definitivo")
   const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
-  const toothNumber = input.toothNumber ?? null
-  if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
-    throw validation("Pieza FDI inválida")
-  const surfaces = cleanSurfaces(input.surfaces, toothNumber)
+  // Dónde, como lo valida el producto (odentIA: una pieza FDI y sus caras).
+  const site = await siteOf(tx, orgId)
+  const columns = site.columns({ toothNumber: input.toothNumber ?? null, surfaces: input.surfaces ?? [] })
   const note = input.note?.trim() || null
   if (note && note.length > 2000) throw validation("La nota admite hasta 2000 caracteres")
   const [row] = await tx
@@ -108,7 +96,7 @@ export async function addEncounterDiagnosis(
       diagnosisCode: found.code,
       diagnosisType: input.diagnosisType,
       previouslyDiagnosed,
-      ...siteColumns({ toothNumber, surfaces }),
+      ...columns,
       note,
       createdBy: actorUserId,
     })
@@ -120,7 +108,7 @@ export async function addEncounterDiagnosis(
     diagnosisSystem: found.system,
     diagnosisCode: found.code,
   })
-  return withDentalSite(row)
+  return withSite(await siteOf(tx, orgId), row)
 }
 
 export async function voidEncounterDiagnosis(
@@ -164,7 +152,7 @@ export async function voidEncounterDiagnosis(
     encounterId,
     reason,
   })
-  return withDentalSite(row)
+  return withSite(await siteOf(tx, orgId), row)
 }
 
 /** Marca un diagnóstico como resuelto o lo reactiva; vale también en atenciones cerradas. */
@@ -193,7 +181,7 @@ export async function setDiagnosisStatus(
     .limit(1)
   if (!current) throw notFound("Diagnóstico")
   if (current.voidedAt) throw new ServiceError("ALREADY_VOIDED", 409, "El diagnóstico está anulado")
-  if (current.status === status) return withDentalSite(current)
+  if (current.status === status) return withSite(await siteOf(tx, orgId), current)
   const now = new Date()
   const [row] = await tx
     .update(encounterDiagnosis)
@@ -206,7 +194,7 @@ export async function setDiagnosisStatus(
     from: current.status,
     to: status,
   })
-  return withDentalSite(row)
+  return withSite(await siteOf(tx, orgId), row)
 }
 
 /**
@@ -255,10 +243,11 @@ export async function listPatientDiagnoses(
       ),
     )
     .orderBy(asc(encounterDiagnosis.status), desc(encounterDiagnosis.createdAt))
+  const site = await siteOf(tx, orgId)
   return rows
     .filter((row) => row.encounterStatus !== "anulada")
     .map((row) => ({
-      ...withDentalSite(row.diagnosis),
+      ...withSite(site, row.diagnosis),
       description: row.description,
       encounterStartedAt: row.encounterStartedAt,
       authorName: row.authorName,

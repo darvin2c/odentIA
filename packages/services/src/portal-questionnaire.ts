@@ -7,6 +7,7 @@ import { and, desc, eq, isNull } from "drizzle-orm"
 import { assertAnswers, assertFormSchema, type FormSchemaDef } from "./clinical-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
+import { productHooks } from "./products.js"
 
 /**
  * Cuestionario previo a la cita desde el portal: lo responde el paciente o su
@@ -180,7 +181,10 @@ async function saveQuestionnaire(
   const template = await currentTemplate(tx, who.orgId)
   if (!template) throw notFound("Cuestionario")
   const schema = assertFormSchema(template.schema)
-  const answers = assertAnswers(schema, input.answers, { requireAll: input.submit === true })
+  const answers = assertAnswers(schema, input.answers, {
+    requireAll: input.submit === true,
+    site: (await productHooks(tx, who.orgId)).site,
+  })
   const existing = await latestResponse(tx, who, template.key)
   const open =
     existing && existing.status === "borrador" && !existing.submittedAt && existing.templateId === template.id

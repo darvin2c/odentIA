@@ -1,7 +1,8 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, findingDiagnosisCode, isDiagnosisSystem } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import {
+  dentalTemplateRule,
   odontogramAssessment,
   odontogramEntry,
   periodontalChart,
@@ -10,14 +11,19 @@ import {
 } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  dentalDiagnosisPattern,
   emptyPeriodontalTooth,
+  findingDefinition,
   type PeriodontalToothRecord,
   pendingProbingWords,
+  phaseForKind,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
+  TREATMENT_PHASES,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
+import { notFound } from "../errors.js"
 import type { TimelineItem } from "../patient-history.js"
-import type { ProductHooks } from "../product-hooks.js"
+import type { DiagnosisCandidate, ProductHooks } from "../product-hooks.js"
 import {
   type ClosingOdontogram,
   closingOdontogramOf,
@@ -27,7 +33,8 @@ import {
   signClosingOdontogram,
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
-import { withPlanItemDental } from "./plan-finding.js"
+import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
+import { dentalProductSite, siteColumns } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
 /**
@@ -153,6 +160,8 @@ export interface DentalEncounterDetailParts {
 }
 
 export const dentalHooks: ProductHooks = {
+  site: dentalProductSite,
+
   async closingParts(tx, { orgId, patientId, encounterId }) {
     const parts: DentalClosingParts = {
       // En clínicas de Perú, el odontograma que firmará este cierre.
@@ -281,6 +290,119 @@ export const dentalHooks: ProductHooks = {
         sql`select id, 'odontogram_signed'::text as kind, created_at from odontogram_assessment where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${outsideEncountersOnly ? sql`and encounter_id is null` : sql``}`,
       )
     return sources
+  },
+
+  planPhases: TREATMENT_PHASES,
+  phaseFor: (kind) => phaseForKind(kind),
+
+  async templateSurfaceLimits(tx, templateId) {
+    const [rule] = await tx
+      .select({ min: dentalTemplateRule.surfaceCountMin, max: dentalTemplateRule.surfaceCountMax })
+      .from(dentalTemplateRule)
+      .where(eq(dentalTemplateRule.templateId, templateId))
+      .limit(1)
+    return rule ?? { min: null, max: null }
+  },
+
+  async planItemCreated(tx, { orgId, patientId, item, input }) {
+    // Trazabilidad clínica: la indicación responde a un hallazgo real del paciente.
+    const entryId = typeof input.odontogramEntryId === "string" ? input.odontogramEntryId : null
+    if (!entryId) return
+    const [entry] = await tx
+      .select({ id: odontogramEntry.id })
+      .from(odontogramEntry)
+      .where(
+        and(
+          eq(odontogramEntry.id, entryId),
+          eq(odontogramEntry.organizationId, orgId),
+          eq(odontogramEntry.patientId, patientId),
+          isNull(odontogramEntry.voidedAt),
+        ),
+      )
+    if (!entry) throw notFound("Hallazgo del odontograma")
+    await linkPlanItemFinding(tx, item, entryId)
+  },
+
+  async planItemParts(tx, orgId, itemIds) {
+    const findings = await findingsOf(tx, orgId, itemIds)
+    return new Map(itemIds.map((id) => [id, { odontogramEntryId: findings.get(id) ?? null }]))
+  },
+
+  async journeyParts(tx, { orgId, patientId, planItemId }) {
+    const entryId = (await findingsOf(tx, orgId, [planItemId])).get(planItemId)
+    const [originFinding] = entryId
+      ? await tx
+          .select()
+          .from(odontogramEntry)
+          .where(
+            and(
+              eq(odontogramEntry.id, entryId),
+              eq(odontogramEntry.organizationId, orgId),
+              eq(odontogramEntry.patientId, patientId),
+            ),
+          )
+      : []
+    return { originFinding: originFinding ?? null }
+  },
+
+  async diagnosisCandidates(tx, { orgId, system, patientId, encounterId, finding }) {
+    if (!isDiagnosisSystem(system)) return []
+    const candidates: DiagnosisCandidate[] = []
+    const add = (
+      condition: string,
+      variant: string | null,
+      toothNumber: number | null,
+      surfaces: string[],
+    ) => {
+      const code = findingDiagnosisCode(system, condition, variant)
+      if (code)
+        candidates.push({
+          code,
+          finding: findingDefinition(condition)?.label ?? condition,
+          site: siteColumns({ toothNumber, surfaces }),
+        })
+    }
+    // Lo que se está marcando en la pieza.
+    if (finding && typeof finding.condition === "string")
+      add(
+        finding.condition,
+        typeof finding.variant === "string" ? finding.variant : null,
+        typeof finding.toothNumber === "number" ? finding.toothNumber : null,
+        Array.isArray(finding.surfaces) ? finding.surfaces.map(String) : [],
+      )
+    // Los hallazgos de esta atención.
+    if (patientId && encounterId)
+      for (const entry of await tx
+        .select({
+          condition: odontogramEntry.condition,
+          details: odontogramEntry.details,
+          toothNumber: odontogramEntry.toothNumber,
+          surface: odontogramEntry.surface,
+        })
+        .from(odontogramEntry)
+        .where(
+          and(
+            eq(odontogramEntry.organizationId, orgId),
+            eq(odontogramEntry.patientId, patientId),
+            eq(odontogramEntry.encounterId, encounterId),
+            isNull(odontogramEntry.voidedAt),
+          ),
+        )
+        .orderBy(asc(odontogramEntry.createdAt))) {
+        const variant = (entry.details as { variant?: unknown } | null)?.variant
+        add(
+          entry.condition,
+          typeof variant === "string" ? variant : null,
+          entry.toothNumber,
+          entry.surface ? [entry.surface] : [],
+        )
+      }
+    return candidates
+  },
+
+  preferredDiagnoses(system) {
+    // Lo odontológico primero: la boca, sus tumores, fisuras y las urgencias dentales.
+    return isDiagnosisSystem(system) ? dentalDiagnosisPattern(system) : null
   },
 
   async timelineItems(tx, orgId, idsOf) {

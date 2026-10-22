@@ -1,13 +1,7 @@
-import { type DentalSite, ISO_3950, toothSiteCode } from "@odentia/dental"
 import {
   parseVitals,
 } from "@odentia/clinical"
-import {
-  assertTreatmentSite,
-  VALID_FDI_TEETH,
-} from "@odentia/dental"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
-import { siteColumns, toothOfRow, withDentalSite } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -62,16 +56,23 @@ import {
   discountEncounterMaterials,
 } from "./service-materials.js"
 import { countConsultationAction } from "./saas-actions.js"
-import type { ProductParts } from "./product-hooks.js"
+import {
+  type ProductParts,
+  type ProductSite,
+  type SiteColumns,
+  type SiteFields,
+  siteInputOf,
+  withSite,
+} from "./product-hooks.js"
 import { productHooks } from "./products.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
-export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & DentalSite
-export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect & DentalSite
-export type EncounterNoteRow = typeof clinicalNote.$inferSelect & DentalSite
+export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
+export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect & SiteFields
+export type EncounterNoteRow = typeof clinicalNote.$inferSelect & SiteFields
 /** Documento con vínculos, piezas y etiquetas de su revisión vigente. */
 export type EncounterDocumentRow = PatientDocumentWithContext
-export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite
+export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & SiteFields
 
 export interface CreateEncounterInput {
   /**
@@ -182,7 +183,6 @@ const TEXT_LIMITS = {
   prognosis: 2000,
 } as const
 
-const FDI_SET: ReadonlySet<number> = new Set(VALID_FDI_TEETH)
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -217,25 +217,32 @@ async function audit(
   })
 }
 
-function assertFdi(tooth: number): void {
-  if (!Number.isInteger(tooth) || !FDI_SET.has(tooth))
-    throw validation(`Pieza dental inválida: ${tooth}`)
-}
+/** El «dónde» del producto de la clínica (odentIA: pieza, caras, cuadrante y arcada). */
+const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
 
-/** Valida FDI y elimina duplicados preservando el orden de llegada. */
-function dedupeTeeth(teeth: number[]): number[] {
-  if (!Array.isArray(teeth)) throw validation("teeth debe ser un arreglo de piezas FDI")
+/**
+ * Los sitios sueltos de la atención (odentIA: sus piezas), validados por el
+ * producto y sin repetir, en el orden de llegada.
+ */
+function dedupeTeeth(site: ProductSite, teeth: number[]): number[] {
+  if (!Array.isArray(teeth)) throw validation("teeth debe ser una lista")
   const out: number[] = []
-  const seen = new Set<number>()
   for (const t of teeth) {
-    assertFdi(t)
-    if (!seen.has(t)) {
-      seen.add(t)
-      out.push(t)
-    }
+    if (site.code(t) === null) throw validation(site.invalid(t))
+    if (!out.includes(t)) out.push(t)
   }
   return out
 }
+
+/** Dos sitios iguales: mismo sistema y código, y los mismos calificadores en cualquier orden. */
+const sameSite = (a: SiteColumns, b: SiteColumns) =>
+  a.siteSystem === b.siteSystem &&
+  a.siteCode === b.siteCode &&
+  JSON.stringify([...a.siteQualifiers].sort()) === JSON.stringify([...b.siteQualifiers].sort())
+
+/** Las filas de `encounter_site` de esos sitios sueltos. */
+const encounterSites = (site: ProductSite, orgId: string, encounterId: string, teeth: number[]) =>
+  teeth.map((t) => ({ organizationId: orgId, encounterId, siteSystem: site.system!, siteCode: site.code(t)! }))
 
 /** Trim + cota; null/undefined/vacío → null (limpia el campo). */
 function cleanText(value: string | null | undefined, field: string, max: number): string | null {
@@ -449,7 +456,8 @@ export async function createEncounter(
   input: CreateEncounterInput,
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
-  const selectedTeeth = input.teeth === undefined ? [] : dedupeTeeth(input.teeth)
+  const site = await siteOf(tx, orgId)
+  const selectedTeeth = input.teeth === undefined ? [] : dedupeTeeth(site, input.teeth)
   // La cita que motiva la atención fija la sede; su estado debe admitir que se
   // atienda (no cancelada, sin inasistencia ni ya atendida).
   let fromAppointment: AttendableAppointment | null = null
@@ -561,7 +569,7 @@ export async function createEncounter(
   if (planItemIds.length > 52) throw validation("planItemIds admite como máximo 52 tratamientos")
   const acceptedPlans =
     planItemIds.length > 0 ? await assertLinkablePlans(tx, orgId, patientId, planItemIds) : []
-  const teeth = dedupeTeeth([
+  const teeth = dedupeTeeth(site, [
     ...selectedTeeth,
     ...acceptedPlans.flatMap((plan) => (plan.toothNumber == null ? [] : [plan.toothNumber])),
   ])
@@ -583,7 +591,7 @@ export async function createEncounter(
       await tx
         .insert(encounterSite)
         .values(
-          teeth.map((toothNumber) => ({ organizationId: orgId, encounterId: row.id, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })),
+          encounterSites(site, orgId, row.id, teeth),
         )
     }
     if (acceptedPlans.length > 0) {
@@ -626,7 +634,8 @@ export async function createEncounter(
   }
 }
 
-type LinkablePlan = Pick<EncounterPlannedItemRow, "id" | "toothNumber">
+/** El tratamiento que se trae a la atención, con su sitio suelto si tiene (odentIA: su pieza). */
+type LinkablePlan = { id: string; toothNumber: number | null }
 
 /**
  * Valida que cada tratamiento sea del mismo paciente/org, esté pendiente o
@@ -677,6 +686,7 @@ async function assertLinkablePlans(
   patientId: string,
   planItemIds: string[],
 ): Promise<LinkablePlan[]> {
+  const site = await siteOf(tx, orgId)
   const rows = await tx
     .select()
     .from(treatmentPlanItem)
@@ -751,7 +761,7 @@ async function assertLinkablePlans(
         "El presupuesto del tratamiento no tiene una aceptación vigente",
       )
     }
-    accepted.push({ id: plan.id, toothNumber: toothOfRow(plan) })
+    accepted.push({ id: plan.id, toothNumber: plan.siteSystem === site.system ? site.value(plan.siteCode) : null })
   }
   return accepted
 }
@@ -763,6 +773,7 @@ export async function getEncounterDetail(
   encounterId: string,
 ): Promise<EncounterDetail> {
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
+  const site = await siteOf(tx, orgId)
   const childOf = and(
     eq(clinicalNote.encounterId, encounterId),
     eq(clinicalNote.organizationId, orgId),
@@ -840,16 +851,16 @@ export async function getEncounterDetail(
   ])
   return {
     encounter: row,
-    teeth: teethRows.map(toothOfRow).filter((tooth): tooth is number => tooth != null),
-    procedures: procedures.map(withDentalSite),
-    diagnoses: diagnoses.map(withDentalSite),
-    notes: notes.map(withDentalSite),
+    teeth: teethRows.map((r) => site.value(r.siteCode)).filter((tooth): tooth is number => tooth != null),
+    procedures: procedures.map((row) => withSite(site, row)),
+    diagnoses: diagnoses.map((row) => withSite(site, row)),
+    notes: notes.map((row) => withSite(site, row)),
     // Lo del producto (odentIA: los hallazgos del odontograma de la atención).
     ...(await (await productHooks(tx, orgId)).encounterDetailParts(tx, { orgId, patientId, encounterId })),
     documents,
-    addenda: addenda.map(withDentalSite),
-    plannedItems: plannedItems.map((link) => withDentalSite(link.item)),
-    indicatedItems: indicatedItems.map(withDentalSite),
+    addenda: addenda.map((row) => withSite(site, row)),
+    plannedItems: plannedItems.map((link) => withSite(site, link.item)),
+    indicatedItems: indicatedItems.map((row) => withSite(site, row)),
   }
 }
 
@@ -1011,7 +1022,8 @@ export async function updateEncounterDraft(
     set.evolution = cleanText(patch.evolution, "evolution", TEXT_LIMITS.evolution)
   if (patch.indications !== undefined)
     set.indications = cleanText(patch.indications, "indications", TEXT_LIMITS.indications)
-  const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(patch.teeth)
+  const site = await siteOf(tx, orgId)
+  const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(site, patch.teeth)
   if (patch.examination !== undefined)
     set.examination = patch.examination === null ? null : assertExamination(patch.examination)
   for (const key of ["presentIllness", "illnessDuration", "prognosis"] as const) {
@@ -1033,7 +1045,7 @@ export async function updateEncounterDraft(
     if (teeth.length > 0) {
       await tx
         .insert(encounterSite)
-        .values(teeth.map((toothNumber) => ({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })))
+        .values(encounterSites(site, orgId, encounterId, teeth))
     }
   }
   await audit(tx, orgId, actorUserId, "encounter.updated", "encounter", encounterId, {
@@ -1109,10 +1121,9 @@ export async function addEncounterProcedure(
   let planServiceId: string | null = null
   let planTitle = ""
   let planScope: string | null = null
-  let planTooth: number | null = null
-  let planSurfaces: string[] = []
-  let planQuadrant: number | null = null
-  let planArch: string | null = null
+  const site = await siteOf(tx, orgId)
+  const noSite: SiteColumns = { siteSystem: null, siteCode: null, siteQualifiers: [] }
+  let planSite: SiteColumns = noSite
   let planDiagnosis: string | null = null
   let planDiagnosisSystem: string | null = null
   let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
@@ -1141,30 +1152,14 @@ export async function addEncounterProcedure(
     // Histórico ambiguo heredado: nunca se factura como múltiples actos ni se
     // elige un principal; se pide una nueva indicación exacta.
     assertExecutableCodings(plan.codings)
-    const norm = (list: string[] | null | undefined): string[] => [...(list ?? [])].sort()
-    if (input.toothNumber !== undefined && (input.toothNumber ?? null) !== plan.toothNumber) {
-      throw validation("El procedimiento conserva la pieza del tratamiento indicado, sin cambios")
+    // Lo que llega del sitio se compara con el del tratamiento: no cambia.
+    planSite = { siteSystem: plan.siteSystem, siteCode: plan.siteCode, siteQualifiers: plan.siteQualifiers }
+    const given = siteInputOf(site, input)
+    if (Object.keys(given).length > 0) {
+      const asked = site.columns({ ...site.fields(planSite), ...given })
+      if (!sameSite(asked, planSite))
+        throw validation("El procedimiento conserva el sitio del tratamiento indicado, sin cambios")
     }
-    if (
-      input.surfaces !== undefined &&
-      JSON.stringify(norm(input.surfaces)) !== JSON.stringify(norm(plan.surfaces))
-    ) {
-      throw validation(
-        "El procedimiento conserva las superficies del tratamiento indicado, sin cambios",
-      )
-    }
-    if (input.quadrant !== undefined && (input.quadrant ?? null) !== plan.quadrant) {
-      throw validation(
-        "El procedimiento conserva el cuadrante del tratamiento indicado, sin cambios",
-      )
-    }
-    if (input.arch !== undefined && (input.arch ?? null) !== plan.arch) {
-      throw validation("El procedimiento conserva la arcada del tratamiento indicado, sin cambios")
-    }
-    planTooth = plan.toothNumber
-    planSurfaces = plan.surfaces
-    planQuadrant = plan.quadrant
-    planArch = plan.arch
     planScope = plan.scope
     planDiagnosis = plan.diagnosisCode
     planDiagnosisSystem = plan.diagnosisSystem
@@ -1178,10 +1173,7 @@ export async function addEncounterProcedure(
   let serviceId: string | null = null
   let description = ""
   let scope: string | null = planScope
-  let toothNumber: number | null = planTooth
-  let surfaces: string[] = [...planSurfaces]
-  let quadrant: number | null = planQuadrant
-  let arch: string | null = planArch
+  let procedureSite: SiteColumns = planSite
   let codings = [...planCodings]
   // El costo nace con el acto: snapshot del tarifario o de la indicación; el
   // acto libre no tiene precio y nunca genera cargo.
@@ -1190,28 +1182,10 @@ export async function addEncounterProcedure(
   if (serviceIdParam) {
     const service = await requireServiceForIndication(tx, orgId, serviceIdParam)
     if (!service.scope) throw validation("La prestación no tiene un ámbito válido")
-    const limits = service.scope === "surfaces" ? await surfaceLimits(tx, service) : undefined
-    try {
-      assertTreatmentSite(
-        service.scope as "general" | "tooth" | "surfaces" | "quadrant" | "arch",
-        {
-          toothNumber: input.toothNumber,
-          surfaces: input.surfaces,
-          quadrant: input.quadrant,
-          arch: input.arch,
-        },
-        limits,
-      )
-    } catch (e) {
-      throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
-    }
+    procedureSite = site.columns(siteInputOf(site, input), { scope: service.scope, surfaces: await surfaceLimits(tx, orgId, service) })
     serviceId = service.id
     description = service.name
     scope = service.scope
-    toothNumber = input.toothNumber ?? null
-    surfaces = input.surfaces ? [...input.surfaces] : []
-    quadrant = input.quadrant ?? null
-    arch = input.arch ?? null
     // Oferta oficial: un único snapshot exacto con su versión; propia: [].
     codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
     // El costo viaja con el acto desde el tarifario vigente.
@@ -1223,10 +1197,7 @@ export async function addEncounterProcedure(
   } else {
     // Acto libre: solo descripción; sin servicio no hay tarifa ni cargo.
     description = freeDescription ?? ""
-    toothNumber = input.toothNumber ?? null
-    surfaces = input.surfaces ? [...input.surfaces] : []
-    quadrant = input.quadrant ?? null
-    arch = input.arch ?? null
+    procedureSite = site.columns(siteInputOf(site, input))
     priceCents = null
     currency = null
   }
@@ -1242,7 +1213,6 @@ export async function addEncounterProcedure(
   if (description.length > TEXT_LIMITS.procedureDescription) {
     throw validation(`description supera ${TEXT_LIMITS.procedureDescription} caracteres`)
   }
-  if (!serviceIdParam && !planItemIdParam && toothNumber !== null) assertFdi(toothNumber)
   // Tratamiento directo (un solo gesto): ejecutar un servicio sin indicación
   // previa crea la indicación implícita en el plan vigente, ya realizada y
   // aceptada en la misma atención.
@@ -1253,10 +1223,7 @@ export async function addEncounterProcedure(
       serviceId: serviceIdParam,
       planId,
       sourceEncounterId: encounterId,
-      toothNumber,
-      surfaces,
-      quadrant,
-      arch,
+      ...site.fields(procedureSite),
       diagnosisCode: input.diagnosisCode ?? null,
       diagnosisSystem: input.diagnosisSystem ?? null,
       odontogramEntryId: input.odontogramEntryId ?? null,
@@ -1282,7 +1249,7 @@ export async function addEncounterProcedure(
       encounterId,
       serviceId,
       scope,
-      ...siteColumns({ toothNumber, surfaces, quadrant, arch }),
+      ...procedureSite,
       description,
       quantity,
       ...diagnosis,
@@ -1293,12 +1260,12 @@ export async function addEncounterProcedure(
       createdBy: actorUserId,
     })
     .returning()
-  if (toothNumber !== null) {
-    // La pieza tratada entra al set de la atención para que el filtro por
-    // pieza del timeline la incluya aunque no estuviera al crear el borrador.
+  if (procedureSite.siteSystem && procedureSite.siteCode && site.value(procedureSite.siteCode) !== null) {
+    // El sitio suelto tratado (odentIA: la pieza) entra al set de la atención
+    // para que el filtro de la historia lo incluya aunque no estuviera al abrirla.
     await tx
       .insert(encounterSite)
-      .values({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(toothNumber) })
+      .values({ organizationId: orgId, encounterId, siteSystem: procedureSite.siteSystem, siteCode: procedureSite.siteCode })
       .onConflictDoNothing({ target: [encounterSite.encounterId, encounterSite.siteSystem, encounterSite.siteCode] })
   }
   if (input.planItemId) {
@@ -1377,7 +1344,7 @@ export async function addEncounterProcedure(
     encounterId,
     planItemId: input.planItemId ?? null,
   })
-  return withDentalSite(row)
+  return withSite(await siteOf(tx, orgId), row)
 }
 
 /** Cargo omitido al cerrar: queda registrado para mostrarlo en el resumen. */
@@ -1912,7 +1879,7 @@ export async function addEncounterAddendum(
     patientId,
     encounterId,
   })
-  return withDentalSite(row)
+  return withSite(await siteOf(tx, orgId), row)
 }
 
 function cleanReason(reason: string | null | undefined): string {
@@ -2057,7 +2024,7 @@ async function voidProcedureRow(
       reason,
     },
   )
-  return withDentalSite(voided)
+  return withSite(await siteOf(tx, orgId), voided)
 }
 
 export async function voidEncounterProcedure(

@@ -13,7 +13,8 @@ export interface PlanItemFinding {
   odontogramEntryId: string | null
 }
 
-async function findingsOf(
+/** El hallazgo de origen de cada tratamiento, por su id. */
+export async function findingsOf(
   tx: Db,
   orgId: string,
   itemIds: readonly string[],

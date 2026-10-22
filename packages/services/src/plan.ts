@@ -1,12 +1,3 @@
-import type { DentalSite } from "@odentia/dental"
-import {
-  assertTreatmentSite,
-  phaseForKind,
-  TREATMENT_PHASES,
-  TREATMENT_SCOPES,
-  type TreatmentPhase,
-  type TreatmentScope,
-} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   encounter,
@@ -20,7 +11,6 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
-import { odontogramEntry } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
@@ -32,9 +22,15 @@ import { serviceKindOf } from "./specialties.js"
 import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
-import { siteColumns, withDentalSite } from "./dental/site.js"
-import { linkPlanItemFinding, type PlanItemFinding, withPlanDental, withPlanItemDental } from "./dental/plan-finding.js"
-import { templateDentalColumns } from "./dental/service-finding.js"
+import {
+  type ProductHooks,
+  type ProductParts,
+  type ProductSite,
+  type SiteColumns,
+  type SiteFields,
+  siteInputOf,
+  withSite,
+} from "./product-hooks.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -74,10 +70,13 @@ export const PLAN_ITEM_DECISIONS = [
 ] as const
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
-/** El ítem con su sitio dental a la vista (ADR 0079: la tabla guarda el sitio común). */
-export type PlanItemRow = typeof treatmentPlanItem.$inferSelect & DentalSite & PlanItemFinding
+/**
+ * El ítem con su sitio como lo dice el producto y lo que este le agrega
+ * (odentIA: pieza y caras, y el hallazgo que lo motivó como `odontogramEntryId`).
+ */
+export type PlanItemRow = typeof treatmentPlanItem.$inferSelect & SiteFields & ProductParts
 export type TreatmentPlanRow = typeof treatmentPlan.$inferSelect
-type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & DentalSite
+type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect & SiteFields
 
 /** Cabecera de presupuesto (lectura acotada a org+paciente). */
 export type BudgetHeaderRow = typeof treatmentBudget.$inferSelect
@@ -178,49 +177,43 @@ function assertTitle(title: string): string {
   return value
 }
 
-function assertScopeValue(scope: string | null | undefined): TreatmentScope {
-  if (!scope || !(TREATMENT_SCOPES as readonly string[]).includes(scope)) {
-    throw validation("La oferta no tiene un ámbito válido para indicar")
-  }
-  return scope as TreatmentScope
+/** Lo que hace el producto de la clínica en el plan (su sitio, sus fases y lo que anota con cada ítem). */
+const hooksOf = (tx: Db, orgId: string): Promise<ProductHooks> => productHooks(tx, orgId)
+
+function assertScopeValue(site: ProductSite, scope: string | null | undefined): string {
+  if (!scope || !site.scopes.includes(scope)) throw validation("La oferta no tiene un ámbito válido para indicar")
+  return scope
 }
 
-function assertSite(
-  scope: TreatmentScope,
-  site: TreatmentSiteInput,
-  limits?: { min: number | null; max: number | null },
-): {
-  toothNumber: number | null
-  surfaces: string[]
-  quadrant: number | null
-  arch: string | null
-} {
-  try {
-    assertTreatmentSite(scope, site, limits)
-  } catch (e) {
-    throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
-  }
-  return {
-    toothNumber: site.toothNumber ?? null,
-    surfaces: site.surfaces ? [...site.surfaces] : [],
-    quadrant: site.quadrant ?? null,
-    arch: site.arch ?? null,
-  }
+/** Ítems del plan como los dice la API: su sitio y lo que el producto les agrega. */
+async function withPlanParts<T extends SiteColumns & { id: string }>(
+  tx: Db,
+  orgId: string,
+  rows: readonly T[],
+): Promise<Array<T & SiteFields & ProductParts>> {
+  const hooks = await hooksOf(tx, orgId)
+  const parts = await hooks.planItemParts(tx, orgId, rows.map((row) => row.id))
+  return rows.map((row) => ({ ...withSite(hooks.site, row), ...(parts.get(row.id) ?? {}) }))
+}
+
+/** Un ítem del plan como lo dice la API (su sitio y lo que el producto le agrega). */
+export async function withPlanItemParts<T extends SiteColumns & { id: string }>(
+  tx: Db,
+  orgId: string,
+  row: T,
+): Promise<T & SiteFields & ProductParts> {
+  const [item] = await withPlanParts(tx, orgId, [row])
+  return item!
 }
 
 /** Límites de superficies: de la plantilla, o 1–5 para ofertas propias. */
 export async function surfaceLimits(
   tx: Db,
+  orgId: string,
   service: { templateId: string | null },
 ): Promise<{ min: number | null; max: number | null }> {
   if (!service.templateId) return { min: 1, max: 5 }
-  const [tpl] = await tx
-    .select(templateDentalColumns)
-    .from(treatmentTemplate)
-    .where(eq(treatmentTemplate.id, service.templateId))
-    .limit(1)
-  if (!tpl) return { min: 1, max: 5 }
-  return { min: tpl.surfaceCountMin, max: tpl.surfaceCountMax }
+  return (await (await hooksOf(tx, orgId)).templateSurfaceLimits(tx, service.templateId)) ?? { min: 1, max: 5 }
 }
 
 /** Lock de la atención borrador (contexto de mutación clínica). */
@@ -290,7 +283,7 @@ async function lockItemRow(
     .limit(1)
     .for("update")
   if (!item) throw notFound("Ítem del plan")
-  return withPlanItemDental(tx, orgId, item)
+  return withPlanItemParts(tx, orgId, item)
 }
 
 /** Lookup del presupuesto acotado a org + paciente (anti-traversal). */
@@ -361,7 +354,7 @@ async function currentLine(
       asc(treatmentBudgetOption.position),
     )
     .limit(1)
-  return row?.line ? withDentalSite(row.line) : null
+  return row?.line ? withSite((await hooksOf(tx, orgId)).site, row.line) : null
 }
 
 export async function itemDecision(
@@ -382,7 +375,7 @@ async function withDecisions(
   orgId: string,
   rows: Array<typeof treatmentPlanItem.$inferSelect>,
 ): Promise<PlanItemWithProgress[]> {
-  const items = await withPlanDental(tx, orgId, rows)
+  const items = await withPlanParts(tx, orgId, rows)
   const ids = items.map((item) => item.id)
   const done = ids.length
     ? await tx
@@ -414,11 +407,10 @@ async function nextSortOrder(tx: Db, orgId: string, planId: string): Promise<num
   return (row?.max ?? 0) + 1
 }
 
-function assertPhase(value: string | null | undefined): TreatmentPhase | null {
+function assertPhase(hooks: ProductHooks, value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null
-  if (!(TREATMENT_PHASES as readonly string[]).includes(value))
-    throw validation(`Fase inválida: ${TREATMENT_PHASES.join(", ")}`)
-  return value as TreatmentPhase
+  if (!hooks.planPhases.includes(value)) throw validation(`Fase inválida: ${hooks.planPhases.join(", ")}`)
+  return value
 }
 
 function assertPlannedSessions(value: number | null | undefined): number | null {
@@ -681,39 +673,16 @@ export async function addPlanItem(
   await lockDraftEncounter(tx, orgId, patientId, encounterId)
   // No se elige plan al indicar: va al abierto, que nace solo si no hay.
   const plan = await planForIndication(tx, orgId, actorUserId, patientId, encounterId, input.planId)
-  if (input.odontogramEntryId) {
-    // Trazabilidad clínica: la indicación responde a un hallazgo real del paciente.
-    const [entry] = await tx
-      .select({ id: odontogramEntry.id })
-      .from(odontogramEntry)
-      .where(
-        and(
-          eq(odontogramEntry.id, input.odontogramEntryId),
-          eq(odontogramEntry.organizationId, orgId),
-          eq(odontogramEntry.patientId, patientId),
-          isNull(odontogramEntry.voidedAt),
-        ),
-      )
-    if (!entry) throw notFound("Hallazgo del odontograma")
-  }
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
-  const scope = assertScopeValue(service.scope)
-  const site = assertSite(
-    scope,
-    {
-      toothNumber: input.toothNumber,
-      surfaces: input.surfaces,
-      quadrant: input.quadrant,
-      arch: input.arch,
-    },
-    await surfaceLimits(tx, service),
-  )
+  const hooks = await hooksOf(tx, orgId)
+  const scope = assertScopeValue(hooks.site, service.scope)
+  const itemSite = hooks.site.columns(siteInputOf(hooks.site, input), { scope, surfaces: await surfaceLimits(tx, orgId, service) })
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
-    assertPhase(input.phase) ?? phaseForKind(await serviceKindOf(tx, orgId, service))
+    assertPhase(hooks, input.phase) ?? hooks.phaseFor(await serviceKindOf(tx, orgId, service))
   const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
   const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
@@ -728,7 +697,7 @@ export async function addPlanItem(
       plannedSessions,
       sortOrder,
       scope,
-      ...siteColumns(site),
+      ...itemSite,
       title: service.name,
       detail,
       ...diagnosis,
@@ -741,7 +710,8 @@ export async function addPlanItem(
     })
     .returning()
   if (!row) throw new Error("No se pudo crear el ítem del plan")
-  await linkPlanItemFinding(tx, row, input.odontogramEntryId)
+  // Lo que el producto anota con el ítem (odentIA: el hallazgo que lo motivó).
+  await hooks.planItemCreated(tx, { orgId, patientId, item: row, input: { ...input } })
   await audit(tx, orgId, actorUserId, "plan.item_added", "treatment_plan_item", row.id, {
     patientId,
     planId: row.planId,
@@ -752,7 +722,7 @@ export async function addPlanItem(
     priceCents: service.priceCents,
     currency: service.currency,
   })
-  return { ...(await withPlanItemDental(tx, orgId, row)), decision: "pendiente" }
+  return { ...(await withPlanItemParts(tx, orgId, row)), decision: "pendiente" }
 }
 
 export interface AddPlanItemsBatchInput {
@@ -794,21 +764,20 @@ export async function addPlanItemsBatch(
   await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
   const plan = await planForIndication(tx, orgId, actorUserId, patientId, input.sourceEncounterId.trim(), input.planId)
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
-  const scope = assertScopeValue(service.scope)
-  if (scope !== "tooth")
-    throw validation("El lote multi-pieza solo admite prestaciones de ámbito tooth")
-  for (const tooth of teeth) {
-    assertSite("tooth", { toothNumber: tooth })
-  }
+  const hooks = await hooksOf(tx, orgId)
+  const scope = assertScopeValue(hooks.site, service.scope)
+  if (!hooks.site.looseScope || scope !== hooks.site.looseScope)
+    throw validation("El lote de varios sitios solo admite prestaciones de un sitio suelto (odentIA: por pieza)")
+  const sites = teeth.map((tooth) => hooks.site.columns({ toothNumber: tooth }, { scope }))
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   if (service.priceCents === null)
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   const rows: PlanItemRow[] = []
-  const phase = phaseForKind(await serviceKindOf(tx, orgId, service))
+  const phase = hooks.phaseFor(await serviceKindOf(tx, orgId, service))
   let sortOrder = await nextSortOrder(tx, orgId, plan.id)
-  for (const tooth of teeth) {
+  for (const itemSite of sites) {
     const [row] = await tx
       .insert(treatmentPlanItem)
       .values({
@@ -820,7 +789,7 @@ export async function addPlanItemsBatch(
         phase,
         sortOrder: sortOrder++,
         scope,
-        ...siteColumns({ toothNumber: tooth }),
+        ...itemSite,
         title: service.name,
         detail,
         ...diagnosis,
@@ -833,7 +802,7 @@ export async function addPlanItemsBatch(
       })
       .returning()
     if (!row) throw new Error("No se pudo crear el ítem del plan")
-    rows.push({ ...withDentalSite(row), odontogramEntryId: null })
+    rows.push(await withPlanItemParts(tx, orgId, row))
   }
   await audit(
     tx,
@@ -893,30 +862,19 @@ export async function updatePlanItem(
   }
   const set: Partial<typeof treatmentPlanItem.$inferInsert> = {}
   const fields: string[] = []
-  let site = {
-    toothNumber: current.toothNumber,
-    surfaces: current.surfaces,
-    quadrant: current.quadrant,
-    arch: current.arch,
-  }
-  let scope = assertScopeValue(current.scope)
+  const hooks = await hooksOf(tx, orgId)
+  let itemSite: SiteColumns = { siteSystem: current.siteSystem, siteCode: current.siteCode, siteQualifiers: current.siteQualifiers }
+  let scope = assertScopeValue(hooks.site, current.scope)
+  // El sitio pedido: lo que llegó sobre lo que ya tenía.
+  const askedSite = () => ({ ...hooks.site.fields(current), ...siteInputOf(hooks.site, patch) })
   if (patch.serviceId !== undefined) {
     if (!patch.serviceId?.trim())
       throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
     // El mismo serviceId no recalcula precio; un cambio real sí re-congela.
     if (patch.serviceId.trim() !== current.serviceId) {
       const service = await requireServiceForIndication(tx, orgId, patch.serviceId.trim())
-      scope = assertScopeValue(service.scope)
-      site = assertSite(
-        scope,
-        {
-          toothNumber: patch.toothNumber !== undefined ? patch.toothNumber : current.toothNumber,
-          surfaces: patch.surfaces !== undefined ? patch.surfaces : current.surfaces,
-          quadrant: patch.quadrant !== undefined ? patch.quadrant : current.quadrant,
-          arch: patch.arch !== undefined ? patch.arch : current.arch,
-        },
-        await surfaceLimits(tx, service),
-      )
+      scope = assertScopeValue(hooks.site, service.scope)
+      itemSite = hooks.site.columns(askedSite(), { scope, surfaces: await surfaceLimits(tx, orgId, service) })
       if (service.priceCents === null) {
         throw new ServiceError(
           "SERVICE_UNPRICED",
@@ -943,11 +901,7 @@ export async function updatePlanItem(
       fields.push("serviceId")
     }
   }
-  const siteTouched =
-    patch.toothNumber !== undefined ||
-    patch.surfaces !== undefined ||
-    patch.quadrant !== undefined ||
-    patch.arch !== undefined
+  const siteTouched = Object.keys(siteInputOf(hooks.site, patch)).length > 0
   if (siteTouched && !fields.includes("serviceId")) {
     let limits: { min: number | null; max: number | null } | undefined
     if (current.serviceId) {
@@ -958,22 +912,13 @@ export async function updatePlanItem(
           and(eq(serviceCatalog.id, current.serviceId), eq(serviceCatalog.organizationId, orgId)),
         )
         .limit(1)
-      limits = offer ? await surfaceLimits(tx, offer) : { min: 1, max: 5 }
+      limits = offer ? await surfaceLimits(tx, orgId, offer) : { min: 1, max: 5 }
     }
-    site = assertSite(
-      scope,
-      {
-        toothNumber: patch.toothNumber !== undefined ? patch.toothNumber : current.toothNumber,
-        surfaces: patch.surfaces !== undefined ? patch.surfaces : current.surfaces,
-        quadrant: patch.quadrant !== undefined ? patch.quadrant : current.quadrant,
-        arch: patch.arch !== undefined ? patch.arch : current.arch,
-      },
-      limits,
-    )
+    itemSite = hooks.site.columns(askedSite(), { scope, surfaces: limits })
     fields.push("site")
   }
   if (fields.includes("serviceId") || fields.includes("site")) {
-    Object.assign(set, siteColumns(site))
+    Object.assign(set, itemSite)
     if (fields.includes("site") && !fields.includes("serviceId")) {
       // El sitio se valida contra el scope vigente del ítem.
     }
@@ -1043,7 +988,7 @@ export async function updatePlanItem(
     patientId,
     fields,
   })
-  const item = await withPlanItemDental(tx, orgId, updated)
+  const item = await withPlanItemParts(tx, orgId, updated)
   return { ...item, decision: await itemDecision(tx, orgId, item) }
 }
 
@@ -1147,7 +1092,7 @@ export async function setPlanItemStatus(
       encounterId: input.encounterId,
       planItemId: updated.id,
     })
-  return { ...(await withPlanItemDental(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
+  return { ...(await withPlanItemParts(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
 }
 
 export async function revisePlanItem(
@@ -1197,7 +1142,7 @@ export async function revisePlanItem(
     reason,
     supersededBy: revised.id,
   })
-  return { ...(await withPlanItemDental(tx, orgId, revised)), decision: revised.decisionStatus as PlanItemDecision }
+  return { ...(await withPlanItemParts(tx, orgId, revised)), decision: revised.decisionStatus as PlanItemDecision }
 }
 
 export interface PlanItemPlanningInput {
@@ -1240,7 +1185,7 @@ export async function updatePlanItemPlanning(
   if (!item) throw notFound("Tratamiento")
   if (CLOSED_STATUSES.includes(item.status))
     throw new ServiceError("ITEM_CLOSED", 409, "Un tratamiento cerrado ya no se planifica")
-  const phase = assertPhase(input.phase)
+  const phase = assertPhase(await hooksOf(tx, orgId), input.phase)
   const plannedSessions = assertPlannedSessions(input.plannedSessions)
   if (plannedSessions !== null) {
     const [done] = await withDecisions(tx, orgId, [item])

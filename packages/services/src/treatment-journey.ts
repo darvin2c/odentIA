@@ -10,10 +10,11 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { listPatientDocuments } from "./clinical.js"
-import { withPlanItemDental } from "./dental/plan-finding.js"
+import { withPlanItemParts } from "./plan.js"
+import type { ProductParts } from "./product-hooks.js"
+import { productHooks } from "./products.js"
 import { notFound } from "./errors.js"
 import { getPatientAccount } from "./payments.js"
 import { requirePatient } from "./patients.js"
@@ -194,8 +195,8 @@ export async function getTreatmentJourney(
     .from(treatmentPlanItem)
     .where(and(scope, eq(treatmentPlanItem.id, itemId)))
   if (!row) throw notFound("Tratamiento")
-  // Con su hallazgo de origen, que vive en lo dental (ADR 0079).
-  const item = await withPlanItemDental(tx, orgId, row)
+  // Con lo que le agrega el producto (odentIA: su hallazgo de origen).
+  const item = await withPlanItemParts(tx, orgId, row)
   const [plan] = await tx
     .select()
     .from(treatmentPlan)
@@ -218,18 +219,7 @@ export async function getTreatmentJourney(
           ),
         )
     : []
-  const [originFinding] = item.odontogramEntryId
-    ? await tx
-        .select()
-        .from(odontogramEntry)
-        .where(
-          and(
-            eq(odontogramEntry.id, item.odontogramEntryId),
-            eq(odontogramEntry.organizationId, orgId),
-            eq(odontogramEntry.patientId, patientId),
-          ),
-        )
-    : []
+  const product = await (await productHooks(tx, orgId)).journeyParts(tx, { orgId, patientId, planItemId: item.id })
   const [supersedes] = item.supersedesItemId
     ? await tx
         .select()
@@ -349,11 +339,10 @@ export async function getTreatmentJourney(
     budgetStatus: currentBudget?.status ?? null,
     openSession: procedures.some((p) => p.encounter.status === "borrador"),
   })
-  return {
+  const journey = {
     item,
     plan,
     originEncounter: originEncounter ?? null,
-    originFinding: originFinding ?? null,
     replacedBy,
     supersedes: supersedes ?? null,
     budgetHistory,
@@ -364,6 +353,8 @@ export async function getTreatmentJourney(
     finance,
     nextAction,
   }
+  // Lo del producto (odentIA: `originFinding`, el hallazgo que lo motivó).
+  return { ...journey, ...product } as typeof journey & ProductParts
 }
 
 export type TreatmentFinance = NonNullable<

@@ -1302,7 +1302,8 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
       optionId: line.optionId,
       title: line.title,
       scope: line.scope,
-      toothNumber: line.toothNumber,
+      // La pieza que dice el producto (odentIA); sin ella, nada.
+      toothNumber: typeof line.toothNumber === "number" ? line.toothNumber : null,
       priceCents: line.priceCents,
       tariffCents: line.tariffPriceCents ?? line.priceCents,
       billingMode: line.billingMode,

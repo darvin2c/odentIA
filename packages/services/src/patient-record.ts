@@ -56,8 +56,7 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
-import { toothAndSurfaces } from "./clinical.js"
-import type { RecordSection } from "./product-hooks.js"
+import type { RecordSection, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -75,7 +74,8 @@ import { MUTED, when } from "./pdf-writer.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 
 /** La pieza y las caras de un diagnóstico o procedimiento, sacadas de su sitio. */
-type RecordSite = { toothNumber: number | null; surfaces: string[] }
+/** El sitio dicho por el producto: en palabras para el PDF y como `bodySite` para FHIR. */
+type RecordSite = { siteWords: string | null; bodySite: { text: string } | null }
 
 export interface PatientRecord {
   generatedAt: Date
@@ -105,7 +105,7 @@ export interface PatientRecord {
   }>
   /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente). */
   productSections: RecordSection[]
-  planItems: Array<{ title: string; status: string; toothNumber: number | null }>
+  planItems: Array<{ title: string; status: string; siteWords: string | null }>
   prescriptions: Array<{ row: typeof prescription.$inferSelect; items: Array<typeof prescriptionItem.$inferSelect> }>
   consents: Array<typeof consentDocument.$inferSelect>
   documents: Array<typeof patientDocument.$inferSelect>
@@ -181,6 +181,8 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
   const appointments = await tx.select().from(appointment).where(byPatient(appointment)).orderBy(asc(appointment.startsAt))
   const productSections = await (await productHooks(tx, orgId)).recordSections(tx, { orgId, patientId })
   const planItems = await listPlanItems(tx, orgId, patientId)
+  const site = (await productHooks(tx, orgId)).site
+  const recordSite = (row: SiteColumns): RecordSite => ({ siteWords: site.words(row), bodySite: site.bodySite(row) })
   return {
     generatedAt: new Date(),
     establishment: establishmentRow ?? null,
@@ -214,11 +216,11 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
       row,
       diagnoses: diagnoses
         .filter((d) => d.encounterId === row.id)
-        .map((d) => ({ ...d, ...toothAndSurfaces(d), title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
-      procedures: procedures.filter((p) => p.encounterId === row.id).map((p) => ({ ...p, ...toothAndSurfaces(p) })),
+        .map((d) => ({ ...d, ...recordSite(d), title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
+      procedures: procedures.filter((p) => p.encounterId === row.id).map((p) => ({ ...p, ...recordSite(p) })),
     })),
     productSections,
-    planItems: planItems.map((item) => ({ title: item.title, status: item.status, toothNumber: item.toothNumber })),
+    planItems: planItems.map((item) => ({ title: item.title, status: item.status, siteWords: site.words(item, "short") })),
     prescriptions: prescriptions.map((row) => ({ row, items: items.filter((i) => i.prescriptionId === row.id) })),
     consents,
     documents,
@@ -237,15 +239,8 @@ function diagnosisText(d: { diagnosisSystem: string; diagnosisCode: string; titl
   return `${short} ${d.diagnosisCode}${d.title ? ` ${d.title}` : ""}`
 }
 
-function surfacesText(surfaces: string | string[] | null | undefined): string {
-  const list = Array.isArray(surfaces) ? surfaces : surfaces ? [surfaces] : []
-  return list.join(", ")
-}
-
-function siteText(p: { toothNumber: number | null; surfaces?: string | string[] | null }): string {
-  if (!p.toothNumber) return ""
-  const surfaces = surfacesText(p.surfaces)
-  return ` · pieza ${p.toothNumber}${surfaces ? ` (${surfaces})` : ""}`
+function siteText(p: RecordSite): string {
+  return p.siteWords ? ` · ${p.siteWords}` : ""
 }
 
 const ENCOUNTER_WORDS: Record<string, string> = { borrador: "en curso", finalizada: "cerrada", anulada: "anulada" }
@@ -354,7 +349,7 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
   if (!record.planItems.length) w.text("Sin tratamientos en el plan.")
   else
     w.list(
-      record.planItems.map((i) => `${i.title}${i.toothNumber ? ` · pieza ${i.toothNumber}` : ""} · ${planStatusWords(i.status)}`),
+      record.planItems.map((i) => `${i.title}${i.siteWords ? ` · ${i.siteWords}` : ""} · ${planStatusWords(i.status)}`),
     )
 
   w.heading("Recetas")
@@ -530,7 +525,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           : {}),
         category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }] }],
         code: diagnosisCodeable(d.diagnosisSystem, d.diagnosisCode, d.title),
-        ...(d.toothNumber ? { bodySite: [{ text: `Pieza ${d.toothNumber} (FDI)${surfacesText(d.surfaces) ? ` · ${surfacesText(d.surfaces)}` : ""}` }] } : {}),
+        ...(d.bodySite ? { bodySite: [d.bodySite] } : {}),
       })
     for (const pr of procedures)
       resources.push({
@@ -540,7 +535,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         subject: patientRef,
         encounter: encounterRef,
         code: { text: pr.description },
-        ...(pr.toothNumber ? { bodySite: [{ text: `Pieza ${pr.toothNumber} (FDI)${surfacesText(pr.surfaces) ? ` · ${surfacesText(pr.surfaces)}` : ""}` }] } : {}),
+        ...(pr.bodySite ? { bodySite: [pr.bodySite] } : {}),
         performedDateTime: pr.createdAt.toISOString(),
       })
     const vitals = (row.vitals ?? {}) as Record<string, unknown>

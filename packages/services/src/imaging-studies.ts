@@ -1,6 +1,5 @@
-import { isValidTooth } from "@odentia/dental"
-import { siteColumns, toothNumberSql, toothOfRow } from "./dental/site.js"
 import type { Db } from "@odentia/db"
+import { productHooks } from "./products.js"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -532,6 +531,7 @@ export async function listImagingMeasurements(
   documentId: string,
 ): Promise<ImagingMeasurementRow[]> {
   await requireStudy(tx, orgId, patientId, documentId)
+  const site = (await productHooks(tx, orgId)).site
   const rows = await tx
     .select({
       id: imagingMeasurement.id,
@@ -539,7 +539,8 @@ export async function listImagingMeasurements(
       view: imagingMeasurement.view,
       points: imagingMeasurement.points,
       value: imagingMeasurement.value,
-      toothNumber: toothNumberSql(imagingMeasurement),
+      siteSystem: imagingMeasurement.siteSystem,
+      siteCode: imagingMeasurement.siteCode,
       createdAt: imagingMeasurement.createdAt,
       createdBy: imagingMeasurement.createdBy,
       createdByName: user.name,
@@ -554,7 +555,11 @@ export async function listImagingMeasurements(
       ),
     )
     .orderBy(asc(imagingMeasurement.createdAt))
-  return rows
+  // La pieza de la medida la dice el producto (odentIA: su número FDI).
+  return rows.map(({ siteSystem, siteCode, ...row }) => ({
+    ...row,
+    toothNumber: siteSystem === site.system ? site.value(siteCode) : null,
+  }))
 }
 
 /** Guarda una medida sin tocar el archivo. Solo en una tomografía completa y vigente. */
@@ -581,10 +586,12 @@ export async function addImagingMeasurement(
     throw validation(`La medida necesita ${needed} puntos`)
   const max = input.kind === "angulo" ? 180 : 500
   if (!Number.isFinite(input.value) || input.value < 0 || input.value > max) throw validation("El valor de la medida no es válido")
+  // Lo que el producto acepta como sitio suelto (odentIA: cualquier pieza FDI,
+  // también los dientes de leche, 51–85).
+  const site = (await productHooks(tx, orgId)).site
   const tooth = input.toothNumber ?? null
-  // Cualquier pieza FDI, también los dientes de leche (51–85).
-  if (tooth !== null && !(Number.isInteger(tooth) && tooth > 0 && isValidTooth(tooth)))
-    throw validation("La pieza no es válida")
+  const code = tooth === null ? null : site.code(tooth)
+  if (tooth !== null && code === null) throw validation(site.invalid(tooth))
   const [row] = await tx
     .insert(imagingMeasurement)
     .values({
@@ -595,7 +602,9 @@ export async function addImagingMeasurement(
       view: input.view,
       points: input.points.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
       value: input.value,
-      ...siteColumns({ toothNumber: tooth }),
+      siteSystem: code === null ? null : site.system,
+      siteCode: code,
+      siteQualifiers: [],
       createdBy: actorUserId,
     })
     .returning()
@@ -612,7 +621,7 @@ export async function addImagingMeasurement(
     view: row.view,
     points: row.points,
     value: row.value,
-    toothNumber: toothOfRow(row),
+    toothNumber: site.value(row.siteCode),
     createdAt: row.createdAt,
     createdBy: row.createdBy,
     createdByName: named?.name ?? null,

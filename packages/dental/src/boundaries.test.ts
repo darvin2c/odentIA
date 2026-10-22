@@ -21,8 +21,9 @@ const IMPORTS_DENTAL =
  * entrega 4 sumó el recorrido del tratamiento y las pruebas que escriben en
  * las tablas del esquema dental: salen cuando el cierre y la historia
  * pregunten al producto (entrega 5). La 5a sumó dos pruebas que usan el
- * odontograma, ya en `services/src/dental/odontogram.ts`; lo demás sale con el
- * sitio por el producto (5b).
+ * odontograma, ya en `services/src/dental/odontogram.ts`. La 5b sacó lo que
+ * dependía del sitio, del hallazgo de origen y de las fases: lo dice el
+ * producto (`ProductSite`, `products.ts`).
  */
 const STILL_COUPLED = [
   "apps/api/src/routes/patients.ts",
@@ -31,30 +32,19 @@ const STILL_COUPLED = [
   "packages/db/src/procedure-seeds.test.ts",
   "packages/services/src/agent-clinic-info.ts",
   "packages/services/src/agent-search-index.ts",
-  "packages/services/src/budgets.ts",
   "packages/services/src/clinica-otro-pais.test.ts",
-  "packages/services/src/clinical-forms.ts",
-  "packages/services/src/clinical.ts",
   "packages/services/src/composite-keys.test.ts",
   "packages/services/src/diagnosis-codes.test.ts",
-  "packages/services/src/diagnosis-codes.ts",
-  "packages/services/src/encounter-diagnoses.ts",
   "packages/services/src/encounter-dictation.ts",
   "packages/services/src/encounter-lifecycle.test.ts",
-  "packages/services/src/encounters.ts",
-  "packages/services/src/global-search.ts",
-  "packages/services/src/imaging-studies.ts",
   "packages/services/src/index.ts",
   "packages/services/src/patient-history.test.ts",
-  "packages/services/src/patient-history.ts",
   "packages/services/src/patients.test.ts",
-  "packages/services/src/plan.ts",
   "packages/services/src/procedure-codings.test.ts",
   "packages/services/src/seed-dev.ts",
   "packages/services/src/service-catalog.ts",
   "packages/services/src/specialties.ts",
   "packages/services/src/treatment-journey.test.ts",
-  "packages/services/src/treatment-journey.ts",
 ]
 
 /** Carpetas comunes: ninguno de sus archivos importa lo dental salvo la lista. */

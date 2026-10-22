@@ -1,6 +1,20 @@
-import { bodySiteOf, type DentalSite, dentalSiteOf, ISO_3950, toothNumbersOfCodes, toothSiteCode } from "@odentia/dental"
+import {
+  assertTreatmentSite,
+  bodySiteOf,
+  type DentalSite,
+  dentalSiteOf,
+  ISO_3950,
+  isValidTooth,
+  surfacesForTooth,
+  toothNumbersOfCodes,
+  toothSiteCode,
+  TREATMENT_SCOPES,
+  type TreatmentScope,
+} from "@odentia/dental"
 import { and, eq, type SQL, sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
+import { validation } from "../errors.js"
+import type { ProductSite } from "../product-hooks.js"
 
 /**
  * El borde entre el sitio común que guardan las tablas (ADR 0079: sistema,
@@ -56,4 +70,76 @@ export function teethOfCodes(row: { siteSystem: string | null; siteCodes: string
 /** Piezas → columnas del contexto de un documento. */
 export function siteCodesColumns(teeth: readonly number[]): { siteSystem: string | null; siteCodes: string[] } {
   return teeth.length > 0 ? { siteSystem: ISO_3950, siteCodes: teeth.map(toothSiteCode) } : { siteSystem: null, siteCodes: [] }
+}
+
+/** Qué superficies quedan de una lista, sin repetir y ordenadas; exige una pieza que las tenga. */
+function cleanSurfaces(surfaces: unknown, toothNumber: number | null): string[] {
+  const list = [...new Set((Array.isArray(surfaces) ? surfaces : []).map((s) => String(s).trim()).filter(Boolean))]
+  if (list.length === 0) return []
+  if (toothNumber === null) throw validation("Las superficies exigen una pieza")
+  const allowed = new Set<string>(surfacesForTooth(toothNumber))
+  for (const surface of list) if (!allowed.has(surface)) throw validation(`Superficie inválida para la pieza ${toothNumber}`)
+  return list.sort()
+}
+
+const isTreatmentScope = (scope: string): scope is TreatmentScope => (TREATMENT_SCOPES as readonly string[]).includes(scope)
+
+const asNumber = (value: unknown): number | null => (value == null || value === "" ? null : Number(value))
+
+/**
+ * El «dónde» de odentIA (ADR 0079): la API dice pieza, caras, cuadrante y
+ * arcada; la base guarda ISO 3950 con las caras como calificadores.
+ */
+export const dentalProductSite: ProductSite = {
+  system: ISO_3950,
+  inputs: ["toothNumber", "surfaces", "quadrant", "arch"],
+  looseScope: "tooth",
+  scopes: TREATMENT_SCOPES,
+  fields: (row) => ({ ...dentalSiteOfRow(row) }),
+  columns(input, rules) {
+    const toothNumber = asNumber(input.toothNumber)
+    const quadrant = asNumber(input.quadrant)
+    const arch = input.arch == null || input.arch === "" ? null : String(input.arch)
+    if (rules) {
+      if (!isTreatmentScope(rules.scope)) throw validation("Ámbito de prestación inválido")
+      const site = { toothNumber, surfaces: Array.isArray(input.surfaces) ? input.surfaces.map(String) : null, quadrant, arch }
+      try {
+        assertTreatmentSite(rules.scope, site, rules.surfaces)
+      } catch (e) {
+        throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
+      }
+      return siteColumns({ toothNumber, surfaces: site.surfaces ?? [], quadrant, arch })
+    }
+    if (toothNumber !== null && !isValidTooth(toothNumber)) throw validation(`Pieza FDI inválida: ${input.toothNumber}`)
+    if (quadrant !== null && !(Number.isInteger(quadrant) && quadrant >= 1 && quadrant <= 8)) throw validation("Cuadrante inválido")
+    if (arch !== null && arch !== "upper" && arch !== "lower") throw validation("Arcada inválida")
+    return siteColumns({ toothNumber, surfaces: cleanSurfaces(input.surfaces, toothNumber), quadrant, arch })
+  },
+  code(value) {
+    const tooth = asNumber(value)
+    return tooth !== null && Number.isInteger(tooth) && tooth > 0 && isValidTooth(tooth) ? toothSiteCode(tooth) : null
+  },
+  value(code) {
+    return code && /^[1-8][1-8]$/.test(code) ? Number(code) : null
+  },
+  words(row, form = "long") {
+    const site = dentalSiteOfRow(row)
+    if (form === "full") {
+      if (site.toothNumber !== null)
+        return `Pieza ${site.toothNumber}${site.surfaces.length ? ` (${site.surfaces.join(", ")})` : ""}`
+      if (site.quadrant !== null) return `Cuadrante ${site.quadrant}`
+      if (site.arch === "upper") return "Arcada superior"
+      if (site.arch === "lower") return "Arcada inferior"
+      return null
+    }
+    if (site.toothNumber === null) return null
+    if (form === "short" || !site.surfaces.length) return `pieza ${site.toothNumber}`
+    return `pieza ${site.toothNumber} (${site.surfaces.join(", ")})`
+  },
+  bodySite(row) {
+    const site = dentalSiteOfRow(row)
+    if (site.toothNumber === null) return null
+    return { text: `Pieza ${site.toothNumber} (FDI)${site.surfaces.length ? ` · ${site.surfaces.join(", ")}` : ""}` }
+  },
+  invalid: (value) => `Pieza FDI inválida: ${value}`,
 }

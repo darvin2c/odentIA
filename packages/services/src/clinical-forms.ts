@@ -1,4 +1,3 @@
-import { toothNumberSql } from "./dental/site.js"
 import type { Db } from "@odentia/db"
 import {
   CONSENT_DECLARATION,
@@ -8,9 +7,6 @@ import {
   parseConsentSections,
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
-import {
-  isValidTooth,
-} from "@odentia/dental"
 import {
   diagnosisCatalog,
   encounter,
@@ -47,6 +43,11 @@ import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } fr
 import { createTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import type { ProductSite, SiteColumns } from "./product-hooks.js"
+import { productHooks } from "./products.js"
+
+/** El «dónde» del producto de la clínica (odentIA: piezas). */
+const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
 
 /**
  * Especialidades dinámicas, formularios clínicos versionados, consentimientos
@@ -720,7 +721,7 @@ function isEmptyAnswer(value: unknown): boolean {
 export function assertAnswers(
   schema: FormSchemaDef,
   answers: unknown,
-  options: { requireAll?: boolean } = {},
+  options: { requireAll?: boolean; site?: ProductSite } = {},
 ): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
     throw validation("Las respuestas deben ser un objeto por campo")
@@ -823,9 +824,10 @@ export function assertAnswers(
           break
         }
         case "pieza": {
+          // Un sitio suelto del producto (odentIA: una pieza FDI).
           const tooth = typeof value === "number" ? value : Number(value)
-          if (!Number.isInteger(tooth) || !isValidTooth(tooth))
-            throw validation(`"${field.label}" debe ser una pieza FDI válida`)
+          if (!options.site || options.site.code(tooth) === null)
+            throw validation(`"${field.label}": ${options.site?.invalid(value) ?? "esta clínica no registra dónde"}`)
           out[field.id] = tooth
           break
         }
@@ -1188,7 +1190,7 @@ export async function createFormResponse(
     // Desde la atención, el responsable por defecto es quien atiende.
     professionalUserId = attendingUserId
   }
-  const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false })
+  const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
   const [row] = await tx
     .insert(clinicalFormResponse)
@@ -1237,7 +1239,7 @@ export async function updateFormResponseDraft(
     )
   }
   const schema = assertFormSchema(current.templateSnapshot)
-  const answers = assertAnswers(schema, input.answers, { requireAll: false })
+  const answers = assertAnswers(schema, input.answers, { requireAll: false, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   let professionalUserId = current.professionalUserId
   if (input.professionalUserId !== undefined) {
@@ -1282,7 +1284,7 @@ export async function finalizeFormResponse(
     )
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
-  const answers = assertAnswers(schema, current.answers, { requireAll: true })
+  const answers = assertAnswers(schema, current.answers, { requireAll: true, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   const [row] = await tx
     .update(clinicalFormResponse)
@@ -2654,7 +2656,10 @@ interface NeedSource {
   serviceId: string
   serviceName: string
   label: string
+  /** El sitio suelto (odentIA: la pieza), para unir el diagnóstico de esa misma pieza. */
   toothNumber: number | null
+  /** El sitio en palabras («pieza 16»). */
+  where: string | null
   planItemId: string | null
   diagnosis: { code: string; system: string | null } | null
 }
@@ -2680,12 +2685,16 @@ export async function getEncounterConsentNeeds(
   encounterId: string,
 ): Promise<ConsentNeed[]> {
   await requireVisibleEncounter(tx, orgId, patientId, encounterId)
+  const site = await siteOf(tx, orgId)
+  const loose = (row: SiteColumns) => (row.siteSystem === site.system ? site.value(row.siteCode) : null)
   const procedures = await tx
     .select({
       serviceId: encounterProcedure.serviceId,
       serviceName: serviceCatalog.name,
       description: encounterProcedure.description,
-      toothNumber: toothNumberSql(encounterProcedure),
+      siteSystem: encounterProcedure.siteSystem,
+      siteCode: encounterProcedure.siteCode,
+      siteQualifiers: encounterProcedure.siteQualifiers,
       planItemId: encounterProcedure.planItemId,
       diagnosisCode: encounterProcedure.diagnosisCode,
       diagnosisSystem: encounterProcedure.diagnosisSystem,
@@ -2706,7 +2715,9 @@ export async function getEncounterConsentNeeds(
       serviceId: treatmentPlanItem.serviceId,
       serviceName: serviceCatalog.name,
       title: treatmentPlanItem.title,
-      toothNumber: toothNumberSql(treatmentPlanItem),
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
+      siteQualifiers: treatmentPlanItem.siteQualifiers,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
       diagnosisSystem: treatmentPlanItem.diagnosisSystem,
     })
@@ -2728,7 +2739,8 @@ export async function getEncounterConsentNeeds(
       serviceId: proc.serviceId,
       serviceName: proc.serviceName,
       label: proc.description,
-      toothNumber: proc.toothNumber,
+      toothNumber: loose(proc),
+      where: site.words(proc, "short"),
       planItemId: proc.planItemId,
       diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
     })
@@ -2741,7 +2753,8 @@ export async function getEncounterConsentNeeds(
       serviceId: item.serviceId,
       serviceName: item.serviceName,
       label: item.title,
-      toothNumber: item.toothNumber,
+      toothNumber: loose(item),
+      where: site.words(item, "short"),
       planItemId: item.id,
       diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
     })
@@ -2804,7 +2817,9 @@ export async function getEncounterConsentNeeds(
     .select({
       code: encounterDiagnosis.diagnosisCode,
       system: encounterDiagnosis.diagnosisSystem,
-      toothNumber: toothNumberSql(encounterDiagnosis),
+      siteSystem: encounterDiagnosis.siteSystem,
+      siteCode: encounterDiagnosis.siteCode,
+      siteQualifiers: encounterDiagnosis.siteQualifiers,
     })
     .from(encounterDiagnosis)
     .where(
@@ -2817,7 +2832,7 @@ export async function getEncounterConsentNeeds(
     .orderBy(asc(encounterDiagnosis.createdAt))
   const diagnosisFor = (source: NeedSource | undefined): { code: string; system: string | null } | null =>
     source?.diagnosis ??
-    diagnoses.find((dx) => source?.toothNumber != null && dx.toothNumber === source.toothNumber) ??
+    diagnoses.find((dx) => source?.toothNumber != null && loose(dx) === source.toothNumber) ??
     diagnoses[0] ??
     null
 
@@ -2848,7 +2863,7 @@ export async function getEncounterConsentNeeds(
     const procedureRef =
       doc?.procedureRef ??
       (mine
-        .map((source) => `${source.label}${source.toothNumber != null ? ` · pieza ${source.toothNumber}` : ""}`)
+        .map((source) => `${source.label}${source.where ? ` · ${source.where}` : ""}`)
         .filter((label, index, all) => all.indexOf(label) === index)
         .join(", ")
         .slice(0, 500) ||

@@ -18,10 +18,10 @@
  *   respuestas: quien llama decide si la frase puede ir al proveedor.
  * - Buscar nunca identifica: un teléfono compartido trae a las dos personas.
  */
-import { ISO_3950 } from "@odentia/dental"
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, sql } from "drizzle-orm"
+import { productHooks } from "./products.js"
 import { isProfessional, ownBudgetOf } from "./budgets.js"
 import type { ClinicalAccessResource } from "./clinical-access.js"
 import { purchaseOrderLabel } from "./finance.js"
@@ -199,6 +199,8 @@ const personColumns = sql`c.id, c.display_name, c.doc_type, c.doc_number, c.phon
     where pc.organization_id = c.organization_id and pc.contact_id = c.id and pc.relationship <> 'self'
     order by pp.display_name limit 2) spoken) as speaks_for`
 
+const capitalized = (text: string | null): string | null => (text ? text[0]!.toUpperCase() + text.slice(1) : null)
+
 export async function searchEverything(
   tx: Db,
   orgId: string,
@@ -335,7 +337,7 @@ export async function searchEverything(
     for (const row of notes) clinical(row, "nota", excerpt(String(row.note ?? ""), q), "notas")
     const diagnoses = await rows(sql`
       select d.id, d.diagnosis_code, dc.title,
-        case when d.site_system = ${ISO_3950} and d.site_code ~ '^[1-8][1-8]$' then d.site_code::int end as tooth_number,
+        d.site_system, d.site_code, d.site_qualifiers,
         null as at, p.id as patient_id, p.person_id
       from encounter_diagnosis d
       join patient p on p.organization_id = d.organization_id and p.id = d.patient_id
@@ -343,6 +345,8 @@ export async function searchEverything(
       where d.organization_id = ${orgId} and d.voided_at is null
         and ${foldedWordsMatch([sql`dc.title`, sql`d.diagnosis_code`, sql`d.note`], q)}
       limit ${PER_TYPE}`)
+    // El sitio lo dice el producto (odentIA: «Pieza 16»).
+    const site = (await productHooks(tx, orgId)).site
     for (const row of diagnoses)
       clinical(
         row,
@@ -350,7 +354,16 @@ export async function searchEverything(
         [str(row.diagnosis_code), str(row.title)].filter(Boolean).join(" · "),
         "diagnosticos",
         {
-          detail: row.tooth_number == null ? null : `Pieza ${row.tooth_number}`,
+          detail: capitalized(
+            site.words(
+              {
+                siteSystem: (row.site_system as string | null) ?? null,
+                siteCode: (row.site_code as string | null) ?? null,
+                siteQualifiers: (row.site_qualifiers as string[] | null) ?? [],
+              },
+              "short",
+            ),
+          ),
         },
       )
     const prescriptions = await rows(sql`
