@@ -24,17 +24,18 @@ describe("la lista de Documentos (issue 149)", () => {
   it("cada papel sale una vez: lo que vive en un consentimiento o es el informe de una orden", () => {
     const files = [
       { id: "pdf", category: "consentimiento" },
+      { id: "revocacion", category: "consentimiento" },
       { id: "hoja", category: "consentimiento" },
       { id: "informe", category: "informe" },
       { id: "panoramica", category: "radiografia" },
       { id: "suelta", category: "radiografia" },
     ]
     const hidden = filesShownElsewhere(
-      [{ pdfDocumentId: "pdf", paperDocumentId: "hoja" }],
+      [{ pdfDocumentId: "pdf", revokePdfDocumentId: "revocacion", paperDocumentId: "hoja" }],
       [{ resultDocumentId: "informe" }, { resultDocumentId: "panoramica" }, { resultDocumentId: null }],
       files,
     )
-    expect([...hidden].sort()).toEqual(["hoja", "informe", "pdf"])
+    expect([...hidden].sort()).toEqual(["hoja", "informe", "pdf", "revocacion"])
     // La radiografía que llegó como resultado sigue en Imágenes: se compara con las demás.
     expect(hidden.has("panoramica")).toBe(false)
   })

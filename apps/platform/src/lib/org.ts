@@ -136,20 +136,15 @@ export async function saveDiagnosisSystem(diagnosisSystem: string): Promise<{ di
 export interface RegionDefaults {
   /** `null`: no se conoce la moneda de ese país y se elige a mano. */
   currency: string | null
+  /** Siempre el español del país (`es-PE`): odentIA está en español (#48). */
   locale: string
-  /** Formatos que se ofrecen para ese país (BCP 47), el propuesto primero. */
-  locales: string[]
   /** `null`: el país tiene varias zonas horarias. */
   timezone: string | null
   sheetSize: "A4" | "Letter"
 }
 
-export async function fetchRegionDefaults(
-  countryCode: string,
-  language?: string,
-): Promise<RegionDefaults> {
+export async function fetchRegionDefaults(countryCode: string): Promise<RegionDefaults> {
   const params = new URLSearchParams({ countryCode })
-  if (language) params.set("language", language)
   const result = await apiFetch<{ data: RegionDefaults }>(
     `/api/org-profile/region-defaults?${params}`,
   )
@@ -157,8 +152,8 @@ export async function fetchRegionDefaults(
 }
 
 /** Clave de la propuesta de un país: la comparten la consulta y quien la pide al cambiar de país. */
-export function regionDefaultsKey(countryCode: string, language: string | undefined) {
-  return ["region-defaults", countryCode, language ?? ""] as const
+export function regionDefaultsKey(countryCode: string) {
+  return ["region-defaults", countryCode] as const
 }
 
 /** Datos de referencia de un país: no cambian durante la sesión. */

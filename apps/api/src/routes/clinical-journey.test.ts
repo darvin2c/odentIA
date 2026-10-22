@@ -1175,9 +1175,19 @@ it("consentimiento estructurado: firma con profesional, PDF con huella, menor y 
     signatureData: strokes,
   })
   expect(revoked.status).toBe(200)
-  expect((await json<{ data: { status: string; revokerName: string } }>(revoked)).data.status).toBe(
-    "revocado",
+  const revokedBody = await json<{
+    data: { status: string; pdfSha256: string; revokePdfDocumentId: string | null; revokePdfSha256: string | null }
+  }>(revoked)
+  expect(revokedBody.data.status).toBe("revocado")
+  // La revocación tiene su propio PDF; el firmado queda como estaba (#47).
+  expect(revokedBody.data.pdfSha256).toBe(signedBody.data.pdfSha256)
+  expect(revokedBody.data.revokePdfDocumentId).toBeTruthy()
+  const afterRevoke = await json<{ data: Array<{ id: string; storageKey: string }> }>(
+    await app.request(`/patients/${childId}/documents`),
   )
+  const revokeBytes = storedBytes.get(afterRevoke.data.find((d) => d.id === revokedBody.data.revokePdfDocumentId)!.storageKey)!
+  expect(createHash("sha256").update(revokeBytes).digest("hex")).toBe(revokedBody.data.revokePdfSha256)
+  expect(revokedBody.data.revokePdfSha256).not.toBe(signedBody.data.pdfSha256)
 })
 
 it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el campo", async () => {

@@ -202,15 +202,15 @@ it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía s
     (await request("reception", "PUT", "/org-profile", { legalName: "Otra", ...region })).status,
   ).toBe(403)
 
-  // Al elegir país se ofrecen sus formatos, el propuesto primero.
-  const defaults = await request("owner", "GET", "/org-profile/region-defaults?countryCode=CL")
-  expect(
-    await data<{ locale: string; locales: string[]; currency: string }>(defaults),
-  ).toMatchObject({
-    currency: "CLP",
-    locale: "es-CL",
-    locales: expect.arrayContaining(["es-CL", "en-CL"]),
+  // Al elegir país se propone lo suyo; el formato es siempre el español del país (#48).
+  const defaults = await request("owner", "GET", "/org-profile/region-defaults?countryCode=BR")
+  expect(await data<{ locale: string; currency: string }>(defaults)).toMatchObject({
+    currency: "BRL",
+    locale: "es-BR",
   })
+  expect(
+    (await request("owner", "PUT", "/org-profile", { legalName: "Clínica", ...region, locale: "en-US" })).status,
+  ).toBe(400)
 })
 
 it("impresión: se guarda aparte de los datos de la clínica y solo la cambia quien configura", async () => {

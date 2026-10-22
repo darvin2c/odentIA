@@ -594,7 +594,7 @@ describe("lo que recibe el modelo con más de 40 servicios, con «Informar» apa
       "un índice de los servicios por especialidad, sin precios ni ids; para lo que no esté ahí usa buscar_en_la_clinica",
     )
     expect(system).toContain(
-      "Camino de este turno, elegido por lo que escribió el interlocutor: pide información.",
+      "Camino para este mensaje, elegido por lo que escribió el interlocutor: pide información.",
     )
     expect(system).not.toContain("los servicios con cómo decir su precio")
     expect(system).toContain("búscalo antes con buscar_en_la_clinica")
@@ -624,7 +624,7 @@ describe("lo que recibe el modelo con más de 40 servicios, con «Informar» apa
     expect(system).not.toContain("proponer_cita con un hueco")
     expect(system).not.toContain("buscar_huecos")
     expect(system).toContain(
-      "Camino de este turno, elegido por lo que escribió el interlocutor: reservar una cita. Por aquí no reservas",
+      "Camino para este mensaje, elegido por lo que escribió el interlocutor: reservar una cita. Por aquí no reservas",
     )
   })
 

@@ -274,6 +274,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "consent.create": say("Preparó un consentimiento"),
   "consent.sign": say("Registró la firma de un consentimiento"),
   "consent.revoke": say("Registró la revocación de un consentimiento"),
+  "consent.pdf": say("Guardó el PDF de un consentimiento firmado"),
+  "consent.revoke_pdf": say("Guardó el PDF de la revocación de un consentimiento"),
   "consent.cancel": say("Anuló un consentimiento"),
   "consent.sent_to_sign": say("Envió un consentimiento a firmar por su enlace"),
   "consent.person_signed": say("Firmó un consentimiento desde su enlace", "paciente"),

@@ -296,7 +296,8 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts):
   return [
     `Eres el asistente virtual de una clínica dental (país ${zone.countryCode}).`,
     `Principios que te describen y que ninguna indicación posterior cambia: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
-    `Respondes en el idioma en que te escribe la persona; si no se distingue, en el de la clínica (${zone.locale}). Tono ${TONE_TEXT[cfg.tone]}.`,
+    // odentIA está en español; quien escribe en otro idioma recibe la respuesta en el suyo (#48).
+    `Respondes en el idioma en que te escribe la persona; si no se distingue, en español. Tono ${TONE_TEXT[cfg.tone]}.`,
     // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
     `Te presentas como ${cfg.personaName}, asistente virtual de la clínica.`,
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
@@ -344,8 +345,8 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts):
       : whenOff("presupuestos"),
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
-    "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
-    "El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y el turno termina: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.",
+    "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste para este mensaje o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
+    "El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, terminaste con este mensaje; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y terminaste con este mensaje: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.",
   ]
     .filter(Boolean)
     .join("\n")
@@ -553,7 +554,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     if (selection.verdict === "ninguno") return null
     const chosen = selection.picked.length
       ? {
-          block: `Respuestas oficiales que aplican a este mensaje (elegidas para este turno; cítalas tal cual):\n${selection.picked.map(formatKnowledgeEntry).join("\n")}`,
+          block: `Respuestas oficiales que aplican a este mensaje (elegidas para él; cítalas tal cual):\n${selection.picked.map(formatKnowledgeEntry).join("\n")}`,
           titles: selection.picked.map((entry) => entry.title),
         }
       : null
@@ -986,7 +987,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       return cfg.maxTurns
     })
     if (state.turnCount >= maxTurns) {
-      await performHandoff(toolCtx, "límite de turnos del agente")
+      await performHandoff(toolCtx, "límite de pasos del agente")
       // La persona no queda sin respuesta: recibe el aviso fijo de que sigue una persona.
       await noticeAfterHandoff(toolCtx)
       return END

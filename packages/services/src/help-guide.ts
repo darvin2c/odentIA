@@ -206,7 +206,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["caja", "cobros", "pagos", "ingresos", "gastos", "arqueo", "cierre de caja", "deudas", "cobranza", "comisiones", "a favor", "saldo", "aplicar lo que tiene a favor", "anular ticket", "devolver", "devolución", "reembolso"],
     writePermission: "finance.write",
     faqs: [
-      { q: "¿Por qué el saldo es menor que lo que debe?", a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: S/ 100 · A favor: S/ 100 · Saldo: S/ 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. En su cuenta, «Aplicar lo que tiene a favor» cancela la deuda con un clic y deja el movimiento registrado; si no alcanza, te dice lo que falta." },
+      { q: "¿Por qué el saldo es menor que lo que debe?", a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. En su cuenta, «Aplicar lo que tiene a favor» cancela la deuda con un clic y deja el movimiento registrado; si no alcanza, te dice lo que falta." },
       { q: "¿Anulo el ticket o hago una devolución?", a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket." },
     ],
   },

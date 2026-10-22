@@ -188,7 +188,7 @@ const NOT_IN_PATH: Partial<Record<RoutePath, string>> = {
   cambio_cita: "reservar una cita nueva; consultar el conocimiento; reenviar su presupuesto o anotar su respuesta a uno; registrar una oportunidad, una tarea o un seguimiento",
 }
 export function widenDescription(path: RoutePath): string {
-  return `Este turno trae solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
+  return `Para este mensaje tienes solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
 }
 
 /**
@@ -299,7 +299,7 @@ export interface RouteFacts {
  * herramienta que no tiene.
  */
 export function routeInstruction(path: RoutePath, prefetched?: string | null, facts: RouteFacts = {}): string | null {
-  const head = "Camino de este turno, elegido por lo que escribió el interlocutor:"
+  const head = "Camino para este mensaje, elegido por lo que escribió el interlocutor:"
   const has = (name: string) => (facts.tools ? facts.tools.has(name) : true)
   const informs = facts.informs !== false
   const services = facts.services ?? "lista"

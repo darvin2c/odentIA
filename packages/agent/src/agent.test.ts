@@ -1572,7 +1572,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
-  expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: un saludo")
+  expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino para este mensaje, elegido por lo que escribió el interlocutor: un saludo")
   expect(turnTwo.offered[0]).toContain("confirmar_propuesta")
   expect(turnTwo.offered[0]).not.toContain("ampliar_herramientas")
   // El segundo turno recibió lo que dejó el primero: la nota, la consulta de
@@ -2307,7 +2307,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
   try {
     // Información: el que escribe recibe el camino y resuelve en una sola llamada.
     const info = await turn("tg:camino-info", "evt-camino-info", "¿Cuánto cuesta una limpieza?")
-    expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
+    expect(info.system).toContain("Camino para este mensaje, elegido por lo que escribió el interlocutor: pide información.")
     expect(info.system).toContain("Si con eso basta, responde ahora con send_reply, en este mismo paso.")
     expect(info.decisions).toEqual([
       expect.objectContaining({ point: "route.v4", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
@@ -2334,7 +2334,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(widening.offered[1]).not.toContain("ampliar_herramientas")
     expect(await ledgerRows(wide.conversationId)).toEqual([{ status: "ok", llmCalls: 2, toolsUsed: ["ampliar_herramientas", "send_reply"] }])
     // El camino va al final, con lo del turno: lo estable de la organización queda delante y sigue igual.
-    expect(info.system.indexOf("Camino de este turno")).toBeGreaterThan(info.system.indexOf("Política de autonomía"))
+    expect(info.system.indexOf("Camino para este mensaje")).toBeGreaterThan(info.system.indexOf("Política de autonomía"))
 
     // Seguro de que hace falta una persona: el caso pasa al equipo con su clase, su prioridad y lo que la
     // persona escribió, y el que escribe solo deja el aviso (no crea otra derivación ni puede hacer nada más).
@@ -2399,7 +2399,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
 
     // Si no reconoce la intención, el turno es el de siempre: sin indicación de camino.
     const open = await turn("tg:camino-abierto", "evt-camino-abierto", "Les escribo por lo del otro día")
-    expect(open.system).not.toContain("Camino de este turno")
+    expect(open.system).not.toContain("Camino para este mensaje")
     expect(open.decisions[0]?.outcome).toMatchObject({ path: "abierto" })
     expect(open.offered[0]).toContain("proponer_cita")
     expect(open.offered[0]).not.toContain("ampliar_herramientas")
@@ -2411,14 +2411,14 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(await processAgentRun(appDb, { ...runtime, createModel: async () => writer, createDecisionModel: () => broken }, {
       msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: failing.conversationId, messageId: failing.messageId },
     })).toBe("done")
-    expect(systemTextOf(writer.seen[0] ?? [])).not.toContain("Camino de este turno")
+    expect(systemTextOf(writer.seen[0] ?? [])).not.toContain("Camino para este mensaje")
     expect(await ledgerRows(failing.conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
 
     // Apagado: no elige camino ni deriva; su opinión queda en sombra, como antes.
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionRoutingEnabled: false }))
     const shadow = await turn("tg:camino-apagado", "evt-camino-apagado", "Tengo una queja y quiero hablar con una persona")
     expect(shadow.calls).toBe(1)
-    expect(shadow.system).not.toContain("Camino de este turno")
+    expect(shadow.system).not.toContain("Camino para este mensaje")
     expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v4", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
@@ -2438,7 +2438,7 @@ it("al cambiar una cita, el código trae antes las citas del paciente y quedan e
       { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId } },
     )).toBe("done")
     const system = systemTextOf(model.seen[0] ?? [])
-    expect(system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: cambiar o cancelar una cita.")
+    expect(system).toContain("Camino para este mensaje, elegido por lo que escribió el interlocutor: cambiar o cancelar una cita.")
     expect(system).toContain("Esto se consultó ahora mismo y no hace falta volver a pedirlo:")
     expect(system).toContain("Paciente: Paciente camino (vínculo")
     expect(fx.patientId).toBeTruthy()

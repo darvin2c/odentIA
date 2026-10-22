@@ -491,7 +491,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const outsideWindow = async (): Promise<string> => {
     if (ctx.dryRun) {
       ctx.replySettled = true
-      return "[SIMULACIÓN] Pasaron 24 horas: el sistema enviaría «Retomar la conversación» y el turno terminaría."
+      return "[SIMULACIÓN] Pasaron 24 horas: el sistema enviaría «Retomar la conversación» y aquí terminaría la respuesta."
     }
     const outcome = await inOrg((tx) => resumeConversationBySystem(tx, ctx.orgId, ctx.secretsKey, ctx.conversationId))
     if (outcome.sent) {
@@ -808,7 +808,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
+        "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -1708,7 +1708,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "anotar_caso",
       description:
-        "Guarda una nota breve del caso para tus próximos turnos: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
+        "Guarda una nota breve del caso para los próximos mensajes: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
       schema: z.object({ nota: z.string().min(3).max(300) }),
     },
   )
@@ -1967,12 +1967,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
         if (ctx.replySettled) await annotate(true)
       }
-      return `Tema pasado al equipo (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes más mensajes en este turno; en los siguientes sigues atendiendo todo lo demás.`
+      return `Tema pasado al equipo (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`
     },
     {
       name: "request_human_handoff",
       description:
-        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Cierra este turno: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
+        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
       schema: operationAgentSchema("derivacion.crear"),
     },
   )

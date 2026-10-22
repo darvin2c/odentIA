@@ -141,7 +141,7 @@ export function AnswerTraceDrawer({
         <DetailSection title="Datos que usó">
           {data.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No consultó ninguna fuente en este turno: respondió con lo que ya había en la conversación.
+              No consultó ninguna fuente para esta respuesta: respondió con lo que ya había en la conversación.
             </p>
           ) : (
             <ul className="flex flex-col gap-2">

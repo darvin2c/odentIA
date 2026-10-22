@@ -2,28 +2,36 @@ import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
+  clinicalProfileFor,
+  consentSignatureNote,
 } from "@odentia/clinical"
 import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import {
   attachConsentPdf,
+  attachConsentRevokePdf,
   CONSENT_SIGNATURE_WORDS,
   type ConsentDocumentRow,
   getConsentPrint,
 } from "./clinical-forms.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { registerPatientDocument } from "./clinical.js"
+import { ServiceError } from "./errors.js"
 import { MUTED, safe, strokesOf, when, Writer, type Zone } from "./pdf-writer.js"
 import type { Storage } from "./storage.js"
 
 type ConsentPrint = Awaited<ReturnType<typeof getConsentPrint>>
 /**
- * PDF del consentimiento firmado: establecimiento, paciente, secciones,
- * declaración, firmas manuscritas (persona, profesional y testigo) y, si
- * corresponde, la revocación. La huella SHA-256 se calcula sobre estos bytes.
+ * PDF del consentimiento: establecimiento, paciente, secciones, declaración
+ * aceptada, firmas manuscritas (persona, profesional y testigo) y, con
+ * `revocation`, la revocación. El firmado se guarda sin ella; la revocación es
+ * otro PDF. La huella SHA-256 se calcula sobre estos bytes.
  */
-export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> {
+export async function renderConsentPdf(
+  data: ConsentPrint,
+  { revocation = data.document.status === "revocado" }: { revocation?: boolean } = {},
+): Promise<Uint8Array> {
   const { document: doc, patient, establishment } = data
   const zone: Zone = {
     locale: establishment?.locale || NEUTRAL_LOCALE,
@@ -87,7 +95,8 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     w.text(doc.bodySnapshot)
   }
   w.heading("Declaración")
-  w.text(CONSENT_DECLARATION)
+  // La que aceptó al firmar; lo firmado antes de copiarla, la de siempre.
+  w.text(doc.declarationSnapshot ?? CONSENT_DECLARATION)
   if (doc.comprehensionConfirmed)
     w.text("Comprensión confirmada por la persona firmante.", { size: 8, color: MUTED })
   w.gap(10)
@@ -101,6 +110,16 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     w.text(`${signerCaption} · firmó la hoja en papel; su foto queda en Documentos`, { size: 8, color: MUTED })
   } else {
     w.signature(signerLabel, strokesOf(doc.signatureData), signerCaption)
+  }
+  if (method === "enlace" && doc.personSignedAt) {
+    // La evidencia de una firma a distancia: cuándo y desde dónde.
+    const from = [doc.personSignedIp && `IP ${doc.personSignedIp}`, doc.personSignedUserAgent]
+      .filter(Boolean)
+      .join(" · ")
+    w.text(`Firmó en su enlace ${when(doc.personSignedAt, zone)}${from ? ` · ${from}` : ""}`, {
+      size: 7,
+      color: MUTED,
+    })
   }
   w.gap(6)
   const informerCaption = `${doc.informerName ?? "-"}${doc.informerTitle ? ` · ${doc.informerTitle}` : ""}${doc.informerRegistration ? ` · ${doc.informerRegistration}` : ""} · informó ${when(doc.informedAt, zone)}`
@@ -119,7 +138,7 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     w.gap(6)
     w.text(`Testigo: ${doc.witnessName}${doc.witnessDoc ? ` · ${doc.witnessDoc}` : ""}`)
   }
-  if (doc.status === "revocado") {
+  if (revocation && doc.status === "revocado") {
     w.gap(10)
     w.text("REVOCADO", { size: 11, bold: true })
     w.text(
@@ -128,18 +147,16 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     w.signature("Firma de quien revoca", strokesOf(doc.revokeSignature), doc.revokerName ?? "")
   }
   w.gap(14)
-  w.text(
-    "Firmas manuscritas capturadas electrónicamente como evidencia; no constituyen firma digital certificada (Ley 27269).",
-    { size: 7, color: MUTED },
-  )
+  w.text(consentSignatureNote(clinicalProfileFor(establishment?.country).signatureLaw), { size: 7, color: MUTED })
   return pdf.save({ useObjectStreams: false })
 }
 
 /**
- * Genera el PDF del consentimiento firmado, lo guarda como documento clínico
- * del paciente y fija su huella SHA-256, una sola vez. `run` ejecuta cada paso
- * en el contexto de la organización (RLS); el archivo se sube entre ambos y se
- * borra si el registro falla. Lo usan la API y la semilla.
+ * Guarda los PDF que le faltan a un consentimiento, cada uno una sola vez
+ * como documento clínico del paciente y con su huella SHA-256: el firmado y,
+ * si se revocó, el de la revocación. `run` ejecuta cada paso en el contexto
+ * de la organización (RLS); el archivo se sube entre ambos y se borra si el
+ * registro falla. Lo usan la API y la semilla.
  */
 export async function generateConsentPdf(input: {
   run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
@@ -148,30 +165,51 @@ export async function generateConsentPdf(input: {
   userId: string
   consentId: string
 }): Promise<ConsentDocumentRow> {
+  const { run, orgId, consentId } = input
+  let data = await run((tx) => getConsentPrint(tx, orgId, consentId))
+  let row = data.document
+  if (row.status !== "firmado" && row.status !== "revocado")
+    throw new ServiceError("CONSENT_STATUS", 409, "Solo un consentimiento firmado genera PDF")
+  if (!row.pdfDocumentId) {
+    row = await storeConsentPdf(input, data, "firmado")
+    if (row.status === "revocado") data = { ...data, document: row }
+  }
+  if (row.status === "revocado" && !row.revokePdfDocumentId) row = await storeConsentPdf(input, data, "revocado")
+  return row
+}
+
+async function storeConsentPdf(
+  input: Parameters<typeof generateConsentPdf>[0],
+  data: ConsentPrint,
+  kind: "firmado" | "revocado",
+): Promise<ConsentDocumentRow> {
   const { run, storage, orgId, userId, consentId } = input
-  const data = await run((tx) => getConsentPrint(tx, orgId, consentId))
-  if (data.document.pdfDocumentId) return data.document
-  const bytes = await renderConsentPdf(data)
+  const doc = data.document
+  const bytes = await renderConsentPdf(data, { revocation: kind === "revocado" })
   const sha256 = createHash("sha256").update(bytes).digest("hex")
   const ref = await storage.putPatientDocument({
     orgId,
-    patientId: data.document.patientId,
+    patientId: doc.patientId,
     bytes,
     contentType: "application/pdf",
     ext: "pdf",
   })
   try {
     return await run(async (tx) => {
-      const stored = await registerPatientDocument(tx, orgId, userId, data.document.patientId, {
+      const label = kind === "firmado" ? "Consentimiento firmado" : "Revocación del consentimiento"
+      const stored = await registerPatientDocument(tx, orgId, userId, doc.patientId, {
         category: "consentimiento",
-        label: `Consentimiento firmado: ${data.document.titleSnapshot}`.slice(0, 200),
+        label: `${label}: ${doc.titleSnapshot}`.slice(0, 200),
         storageKey: ref.objectKey,
         contentType: "application/pdf",
         sizeBytes: bytes.byteLength,
-        planItemId: data.document.planItemId,
+        planItemId: doc.planItemId,
         tags: ["consentimiento"],
       })
-      return attachConsentPdf(tx, orgId, userId, consentId, { pdfDocumentId: stored.id, sha256 })
+      const pdf = { pdfDocumentId: stored.id, sha256 }
+      return kind === "firmado"
+        ? attachConsentPdf(tx, orgId, userId, consentId, pdf)
+        : attachConsentRevokePdf(tx, orgId, userId, consentId, pdf)
     })
   } catch (e) {
     await storage.deleteAttachment(ref.objectKey).catch(() => {})

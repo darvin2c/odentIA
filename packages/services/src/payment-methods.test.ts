@@ -84,7 +84,7 @@ it("el alta sirve para cualquier país: propone lo que se deduce y pide solo lo 
       applyCountryPreset: true,
     }),
   )
-  expect(withZone).toMatchObject({ currency: "BRL", locale: "pt-BR", timezone: "America/Sao_Paulo" })
+  expect(withZone).toMatchObject({ currency: "BRL", locale: "es-BR", timezone: "America/Sao_Paulo" })
 
   // Un país del que no se conoce la moneda: se pide, y con ella el alta pasa.
   const other = randomUUID()
@@ -196,13 +196,14 @@ it("la impresión se guarda sin tocar la región, y cada país ofrece sus format
     withOrgContext(appDb, orgId, (tx) => updateOrgRegion(tx, orgId, "config-test", { ticketFooter: "   " })),
   ).rejects.toMatchObject({ status: 400 })
 
-  expect(regionPresetForCountry("pe")).toMatchObject({
-    locale: "es-PE",
-    locales: ["es-PE", "en-PE", "pt-PE", "fr-PE", "de-PE", "it-PE", "nl-PE"],
-  })
-  // El propuesto va primero y no se repite.
-  expect(regionPresetForCountry("BR").locales.slice(0, 3)).toEqual(["pt-BR", "es-BR", "en-BR"])
-  // Sin idioma conocido para el país vale el indicado, aunque no sea de la lista.
-  expect(regionPresetForCountry("KZ", "ru").locales[0]).toBe("ru-KZ")
-  for (const tag of regionPresetForCountry("US").locales) expect(Intl.getCanonicalLocales(tag)).toEqual([tag])
+  // El formato es siempre el español del país: odentIA está en español (#48).
+  expect(regionPresetForCountry("pe")).toMatchObject({ locale: "es-PE", currency: "PEN" })
+  for (const country of ["BR", "US", "KZ"]) {
+    const { locale } = regionPresetForCountry(country)
+    expect(locale).toBe(`es-${country}`)
+    expect(Intl.getCanonicalLocales(locale)).toEqual([locale])
+  }
+  await expect(
+    withOrgContext(appDb, orgId, (tx) => updateOrgRegion(tx, orgId, "config-test", { locale: "pt-BR" })),
+  ).rejects.toMatchObject({ status: 400 })
 })

@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
 import { z } from "zod"
 import {
+  generateConsentPdf,
   getDocumentSendOptions,
   getFinancialDocumentPdf,
   getHealthDocumentSendOptions,
@@ -233,8 +234,18 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const parsed = healthSendInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const patientId = c.req.param("id")
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 201, async () => {
+      // Un consentimiento sale con su PDF guardado: si al firmar no se pudo
+      // guardar, se guarda ahora (una sola vez) en vez de pedirlo.
+      if (parsed.data.documentType === "consent")
+        await generateConsentPdf({
+          run: (fn) => withOrgContext(deps.db, orgId, fn),
+          storage: deps.storage,
+          orgId,
+          userId,
+          consentId: parsed.data.documentId,
+        })
+      return withOrgContext(deps.db, orgId, (tx) =>
         sendHealthDocument(
           tx,
           orgId,
@@ -250,8 +261,8 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
           },
           { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
-      ),
-    )
+      )
+    })
   })
 
   // «Agregar correo»: lo guarda en los datos de quien recibe. Mismo permiso que enviar.

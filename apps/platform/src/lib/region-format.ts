@@ -44,33 +44,6 @@ export function currencyOptions(language: string, saved?: string): NamedOption[]
     .sort((a, b) => collator.compare(a.label, b.label))
 }
 
-/** «Español (Perú)»: el idioma con su región, como lo escribe la interfaz. */
-export function localeLabel(tag: string, language: string): string {
-  try {
-    const name = new Intl.DisplayNames([language], {
-      type: "language",
-      languageDisplay: "standard",
-      fallback: "none",
-    }).of(tag)
-    return name ? capitalize(name, language) : tag
-  } catch {
-    return tag
-  }
-}
-
-/**
- * Los formatos que el servidor ofrece para el país, en su orden (el propuesto
- * primero). El guardado va siempre, aunque no sea de ese país.
- */
-export function localeOptions(
-  offered: readonly string[],
-  saved: string,
-  language: string,
-): NamedOption[] {
-  const tags = [...new Set([...offered, ...(saved ? [saved] : [])])]
-  return tags.map((tag) => ({ value: tag, label: localeLabel(tag, language) }))
-}
-
 /** Una fecha, una hora y un importe escritos con lo elegido en el formulario. */
 export interface RegionPreview {
   date: string

@@ -1,6 +1,12 @@
-import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS, diagnosisCodeLabel } from "@odentia/clinical"
+import {
+  CONSENT_DECLARATION,
+  CONSENT_SECTION_LABELS,
+  consentSignatureNote,
+  diagnosisCodeLabel,
+} from "@odentia/clinical"
 import { type ConsentDocument, consentSignatureWords } from "../../lib/clinical-forms"
 import { activeOrgLocale } from "../../lib/locale"
+import { useClinicalProfile } from "../../lib/org"
 import { FirmaView } from "./firma-pad"
 
 function when(value: string | null | undefined): string {
@@ -28,6 +34,7 @@ export function ConsentSheet({
   paper?: boolean
 }): React.JSX.Element {
   const sections = document.sectionsSnapshot
+  const { signatureLaw } = useClinicalProfile()
   const pending = document.status === "pendiente"
   // Nivel real de la firma, siempre a la vista.
   const signatureWords = consentSignatureWords(document)
@@ -79,7 +86,7 @@ export function ConsentSheet({
         <p className="whitespace-pre-wrap">{document.bodySnapshot}</p>
       )}
       <Block title="Declaración">
-        <p>{CONSENT_DECLARATION}</p>
+        <p>{document.declarationSnapshot ?? CONSENT_DECLARATION}</p>
       </Block>
       <section className="grid gap-4 border-t pt-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
@@ -153,8 +160,8 @@ export function ConsentSheet({
         </p>
       ) : null}
       {signatureWords ? <p className="text-xs font-medium">{signatureWords}</p> : null}
-      <p className="text-[11px] text-neutral-600">
-        Firmas manuscritas capturadas como evidencia; no constituyen firma digital certificada.
+      <p className="text-[11px] text-neutral-600 [overflow-wrap:anywhere]">
+        {consentSignatureNote(signatureLaw)}
         {document.pdfSha256 ? ` Huella SHA-256 del PDF: ${document.pdfSha256}` : ""}
       </p>
     </article>

@@ -5,7 +5,7 @@
  * bloquear, lo que falta publicar en «Te espera», las órdenes y los papeles de
  * salud que solo van a la persona o a su representante legal.
  */
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
 import { encounter, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
@@ -27,8 +27,10 @@ import {
   setConsentTemplateServices,
   setProfessionalSpecialties,
   createSpecialty,
+  revokeConsentDocument,
   signConsentDocument,
 } from "./clinical-forms.js"
+import { generateConsentPdf } from "./consent-pdf.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -39,7 +41,12 @@ import {
   getEncounterClosing,
   updateEncounterDraft,
 } from "./encounters.js"
-import { getHealthDocumentSendOptions, listHealthDocumentRecipients, sendHealthDocument } from "./health-documents.js"
+import {
+  getHealthDocumentSendOptions,
+  listHealthDocumentRecipients,
+  renderHealthDocumentPdf,
+  sendHealthDocument,
+} from "./health-documents.js"
 import { createPatient, getPatient } from "./patients.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -224,6 +231,69 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
   // Firmados los dos, el cierre ya no pide nada.
   const closing = await v.run((tx) => getEncounterClosing(tx, "org_a", v.actor, v.lucia.id, v.draft.id))
   expect(closing.consents).toEqual([])
+})
+
+it("el consentimiento sale con el PDF guardado al firmar, y la revocación tiene el suyo (#47)", async () => {
+  const v = await visit()
+  const exodoncia = await v.template("Exodoncia simple o quirúrgica")
+  await v.run((tx) => setConsentTemplateServices(tx, "org_a", v.actor, exodoncia.id, [v.extraction.id]))
+  await v.run((tx) =>
+    addEncounterProcedure(tx, "org_a", v.actor, v.lucia.id, v.draft.id, { serviceId: v.extraction.id, toothNumber: 38 }),
+  )
+  const { created } = await v.run((tx) => prepareEncounterConsents(tx, "org_a", v.actor, v.lucia.id, v.draft.id))
+  const signer = await v.self()
+  const consent = created[0]!
+  const signed = await v.run((tx) =>
+    signConsentDocument(tx, "org_a", v.actor, consent.id, {
+      signerKind: "paciente",
+      signerContactId: signer,
+      signatureData: { strokes: [[[1, 1], [2, 2]]] },
+      comprehensionConfirmed: true,
+    }),
+  )
+  // La declaración que aceptó queda en el documento.
+  expect(signed.declarationSnapshot).toMatch(/He leído y comprendido/)
+  const files = new Map<string, Uint8Array>()
+  const storage = {
+    putPatientDocument: async ({ bytes }: { bytes: Uint8Array }) => {
+      const objectKey = `org_a/${randomUUID()}.pdf`
+      files.set(objectKey, bytes)
+      return { objectKey, mimeType: "application/pdf", filename: "x.pdf", size: bytes.byteLength }
+    },
+    deleteAttachment: async (key: string) => void files.delete(key),
+    getAttachment: async (key: string) => files.get(key)!,
+  }
+  const pdf = (id: string) =>
+    generateConsentPdf({ run: v.run, storage, orgId: "org_a", userId: v.actor, consentId: id })
+  const withPdf = await pdf(consent.id)
+  const [file] = await ownerDb.select().from(patientDocument).where(eq(patientDocument.id, withPdf.pdfDocumentId!))
+  const stored = files.get(file!.storageKey)!
+
+  // Lo que se envía son los bytes guardados, los de la huella; no uno nuevo.
+  const sent = await v.run((tx) => renderHealthDocumentPdf(tx, "org_a", v.lucia.id, "consent", consent.id, storage))
+  expect(sent.bytes).toEqual(stored)
+  expect(createHash("sha256").update(sent.bytes).digest("hex")).toBe(withPdf.pdfSha256)
+  // Si el archivo guardado cambió, no se envía.
+  files.set(file!.storageKey, new Uint8Array([...stored, 32]))
+  await expect(
+    v.run((tx) => renderHealthDocumentPdf(tx, "org_a", v.lucia.id, "consent", consent.id, storage)),
+  ).rejects.toMatchObject({ code: "CONSENT_PDF_ALTERED" })
+  files.set(file!.storageKey, stored)
+
+  // Revocar guarda otro PDF; el firmado queda como estaba.
+  await v.run((tx) =>
+    revokeConsentDocument(tx, "org_a", v.actor, consent.id, {
+      reason: "Prefiere esperar",
+      revokerContactId: signer,
+      signatureData: { strokes: [[[3, 3], [4, 4]]] },
+    }),
+  )
+  const revoked = await pdf(consent.id)
+  expect(revoked).toMatchObject({ status: "revocado", pdfDocumentId: withPdf.pdfDocumentId, pdfSha256: withPdf.pdfSha256 })
+  expect(revoked.revokePdfDocumentId).toBeTruthy()
+  expect(revoked.revokePdfSha256).not.toBe(withPdf.pdfSha256)
+  // Una segunda vez no guarda otro.
+  expect((await pdf(consent.id)).revokePdfDocumentId).toBe(revoked.revokePdfDocumentId)
 })
 
 it("sin plantilla publicada se firma en papel y quien configura lo ve hasta publicarla", async () => {
