@@ -103,7 +103,8 @@ export const ENCARGO: LegalDoc = {
       id: "derechos",
       title: "Asistencia con los derechos de los titulares",
       blocks: [
-        "La plataforma permite a la Clínica consultar, corregir, exportar y eliminar los datos de sus pacientes para atender los derechos de acceso, rectificación, cancelación, oposición y demás derechos reconocidos por la ley.",
+        "Para atender los derechos de acceso, rectificación, cancelación, oposición y demás derechos reconocidos por la ley, la plataforma permite a la Clínica consultar y corregir los datos de sus pacientes (la historia clínica se corrige con adendas, sin reescribir lo registrado), descargar o imprimir sus documentos, retirar el consentimiento para el tratamiento de datos y dar de baja a una persona de los mensajes que no quiere recibir.",
+        "La plataforma aún no entrega por sí sola una copia completa de los datos de una persona ni suprime o anonimiza sus datos. Cuando la Clínica lo necesite para responder a un titular, lo pide a odentIA desde Soporte y odentIA lo hace por ella dentro de los plazos legales. La historia clínica no se suprime mientras la normativa sanitaria exija conservarla.",
         "Si un titular dirige su solicitud a odentIA, odentIA la trasladará a la Clínica sin demora y no la responderá directamente salvo instrucción de la Clínica. odentIA asistirá a la Clínica en lo razonable para que pueda responder dentro de los plazos legales.",
       ],
     },
@@ -127,7 +128,7 @@ export const ENCARGO: LegalDoc = {
       id: "devolucion",
       title: "Devolución y eliminación al terminar",
       blocks: [
-        "Al terminar el contrato, la Clínica dispone de [Por completar: plazo de conservación tras la cancelación] días para exportar sus datos en formatos de uso común. Vencido ese plazo, odentIA elimina los datos de sus sistemas, incluidas las copias de seguridad en cuanto se renueven [Por completar: plazo de eliminación de copias de seguridad], salvo que una ley obligue a conservarlos.",
+        "Al terminar el contrato, la Clínica dispone de [Por completar: plazo de conservación tras la cancelación] días para pedir a odentIA una copia de sus datos en formatos de uso común, que odentIA le entrega. Vencido ese plazo, odentIA elimina los datos de sus sistemas, incluidas las copias de seguridad en cuanto se renueven [Por completar: plazo de eliminación de copias de seguridad], salvo que una ley obligue a conservarlos.",
         "La Clínica es responsable de conservar la historia clínica de sus pacientes durante el plazo que exija la normativa sanitaria aplicable; en Perú, según la Ley 30024 y la norma técnica de salud de historia clínica vigente.",
       ],
     },

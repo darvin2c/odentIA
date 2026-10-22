@@ -158,6 +158,12 @@ export interface ClinicalCountryProfile {
   services: ServiceListProfile | null
   /** Las especialidades con que nace la clínica, y de qué norma salen. */
   specialties: SpecialtiesProfile
+  /**
+   * La ley de firmas del país, para decir en el documento firmado que una
+   * firma manuscrita capturada no es la firma digital que esa ley reconoce;
+   * null: se dice sin nombrar ley (#47).
+   */
+  signatureLaw: string | null
 }
 
 export interface ServiceListProfile {
@@ -280,6 +286,7 @@ const CORE: Omit<ClinicalCountryProfile, "country"> = {
   diagnosis: CORE_DIAGNOSIS,
   services: null,
   specialties: CORE_SPECIALTIES,
+  signatureLaw: null,
 }
 
 /**
@@ -414,6 +421,8 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
     norm: "RM 550-2023-MINSA",
   },
   specialties: PERU_SPECIALTIES,
+  // Ley de Firmas y Certificados Digitales.
+  signatureLaw: "Ley 27269",
 }
 
 const PROFILES: Record<string, Omit<ClinicalCountryProfile, "country">> = { PE: PERU }

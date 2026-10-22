@@ -292,12 +292,22 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     f.run((tx) => signPersonalLinkConsent(tx, ORG, link.token, consent.id, { docNumber: "99999999", comprehensionConfirmed: true, signatureData: strokes })),
   ).rejects.toMatchObject({ code: "VALIDATION" })
   await f.run((tx) =>
-    signPersonalLinkConsent(tx, ORG, link.token, consent.id, { docNumber: "40.000.004", comprehensionConfirmed: true, signatureData: strokes }),
+    signPersonalLinkConsent(
+      tx,
+      ORG,
+      link.token,
+      consent.id,
+      { docNumber: "40.000.004", comprehensionConfirmed: true, signatureData: strokes },
+      { ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Android)" },
+    ),
   )
   const [signed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))
   // Firmó la persona, pero sigue pendiente hasta que el profesional la informe y confirme.
   expect(signed).toMatchObject({ status: "pendiente", signatureMethod: "enlace", signerKind: "paciente", signerContactId: personId })
   expect(signed?.personSignedAt).toBeInstanceOf(Date)
+  // Firmó a distancia: queda desde dónde y la declaración que aceptó (#47).
+  expect(signed).toMatchObject({ personSignedIp: "203.0.113.7", personSignedUserAgent: "Mozilla/5.0 (Android)" })
+  expect(signed?.declarationSnapshot).toMatch(/He leído y comprendido/)
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id))
   const [confirmed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))

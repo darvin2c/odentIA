@@ -358,6 +358,14 @@ export const consentDocument = pgTable(
     pdfDocumentId: uuid("pdf_document_id"),
     pdfSha256: text("pdf_sha256"),
     /**
+     * PDF de la revocación (el documento con quien revoca, el motivo y su
+     * firma) y su huella: el firmado no se toca; nulos mientras no se revoque.
+     */
+    revokePdfDocumentId: uuid("revoke_pdf_document_id"),
+    revokePdfSha256: text("revoke_pdf_sha256"),
+    /** Declaración que aceptó quien firma, copiada al firmar: el PDF no depende del texto de hoy. */
+    declarationSnapshot: text("declaration_snapshot"),
+    /**
      * Cómo se firmó (`CONSENT_SIGNATURE_METHODS`) y con qué nivel; nulos en un
      * pendiente y en lo firmado antes de existir (se lee como «en la clínica»).
      */
@@ -372,6 +380,13 @@ export const consentDocument = pgTable(
      * confirme en la cita que la informó (`signature_method` = `enlace`).
      */
     personSignedAt: timestamp("person_signed_at", { withTimezone: true }),
+    /**
+     * Desde dónde firmó en su enlace (dirección IP y navegador): la única
+     * evidencia de una firma a distancia, que el PDF muestra. En la clínica no
+     * se guarda: firma delante del profesional, que queda registrado.
+     */
+    personSignedIp: text("person_signed_ip"),
+    personSignedUserAgent: text("person_signed_user_agent"),
     ...timestamps,
   },
   (table) => [

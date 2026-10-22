@@ -47,19 +47,24 @@ export function fileFilter(category: string): DocumentFilter {
 }
 
 /**
- * Archivos que ya están dentro de otro papel y no salen sueltos: el PDF
- * firmado y la hoja en papel de un consentimiento, y el informe que es el
+ * Archivos que ya están dentro de otro papel y no salen sueltos: los PDF
+ * (firmado y de la revocación) y la hoja en papel de un consentimiento, y el informe que es el
  * resultado de una orden. La radiografía que llegó como resultado sí sale,
  * porque se compara con las demás.
  */
 export function filesShownElsewhere(
-  consents: ReadonlyArray<{ pdfDocumentId: string | null; paperDocumentId: string | null }>,
+  consents: ReadonlyArray<{
+    pdfDocumentId: string | null
+    revokePdfDocumentId?: string | null
+    paperDocumentId: string | null
+  }>,
   orders: ReadonlyArray<{ resultDocumentId: string | null }>,
   files: ReadonlyArray<{ id: string; category: string }>,
 ): Set<string> {
   const hidden = new Set<string>()
   for (const consent of consents) {
     if (consent.pdfDocumentId) hidden.add(consent.pdfDocumentId)
+    if (consent.revokePdfDocumentId) hidden.add(consent.revokePdfDocumentId)
     if (consent.paperDocumentId) hidden.add(consent.paperDocumentId)
   }
   const categoryOf = new Map(files.map((file) => [file.id, file.category]))

@@ -412,12 +412,12 @@ export function createApp(deps: AppDeps) {
   // la clínica exista, por eso solo exige sesión.
   userScoped.get("/org-profile/region-defaults", (c) => {
     const parsed = z
-      .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/), language: z.string().max(8).optional() })
+      .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/) })
       .safeParse(c.req.query())
     if (!parsed.success) {
       return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
     }
-    return c.json({ data: regionPresetForCountry(parsed.data.countryCode, parsed.data.language) })
+    return c.json({ data: regionPresetForCountry(parsed.data.countryCode) })
   })
 
   // Webhooks de proveedor ANTES que los routers con guards: el use("*") de

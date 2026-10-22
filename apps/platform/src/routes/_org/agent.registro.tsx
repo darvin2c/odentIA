@@ -358,8 +358,8 @@ function AgentSupervisionPage() {
       <section aria-label="Decisiones del modelo de decisión" className="elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Decisiones del modelo de decisión</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Lo que decidió sobre cada mensaje entrante y con qué confianza. Elegir el camino o el conocimiento sí cambia el
-          turno; «en sombra» solo se registra. Ninguna acredita acierto por sí sola.
+          Lo que decidió sobre cada mensaje entrante y con qué confianza. Elegir el camino o el conocimiento sí cambia la
+          respuesta; «en sombra» solo se registra. Ninguna acredita acierto por sí sola.
         </p>
         {decisionsQuery.isPending ? <LoadingState /> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
           <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Integraciones › Modelo del agente; cada mensaje entrante dejará aquí lo que decidió." />
@@ -389,7 +389,7 @@ function AgentSupervisionPage() {
         <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
           <div className="font-heading text-base font-medium">Simular instrucciones</div>
           <p className="text-sm text-muted-foreground">
-            Simula un solo turno con el mismo modelo efectivo que la atención de esta organización, sin enviar mensajes
+            Simula la respuesta a un solo mensaje con el mismo modelo efectivo que la atención de esta organización, sin enviar mensajes
             ni cambiar citas, oportunidades, tareas o derivaciones. No reproduce activaciones ni derivaciones previas ni la
             memoria de la atención real: el resultado es orientativo, no una equivalencia total. El resultado muestra el modelo usado.
           </p>

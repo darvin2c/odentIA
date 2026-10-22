@@ -934,11 +934,19 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     const parsed = consentRevoke.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 200, async () => {
+      const revoked = await withOrgContext(deps.db, orgId, (tx) =>
         revokeConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
+      )
+      // Como al firmar: el PDF de la revocación se genera después y se
+      // reintenta con POST …/pdf si falla (no se repite la revocación).
+      try {
+        return await generateConsentPdf(orgId, userId, revoked.id)
+      } catch (e) {
+        console.error("consent revoke pdf", e)
+        return revoked
+      }
+    })
   })
 
   app.get("/consents/:id/history", async (c) => {
