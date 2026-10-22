@@ -277,7 +277,9 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: qué pide, lo que ya se sabe y lo que falta.
   await call(page, "POST", `/api/contacts/${conversation.contact.id}/agent-memory`, org.slug, { text: "Prefiere citas por la tarde" }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   const brief = surface(page, { name: "Resumen del caso" })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
@@ -289,12 +291,14 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(brief).toContainText("Prefiere citas por la tarde")
   await expect(brief).toContainText("Le dijo: «Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.»")
   await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(brief.getByRole("button", { name: "Tomar", exact: true })).toBeVisible()
+  await expect(brief.getByRole("button", { name: "Tomar este tema", exact: true })).toBeVisible()
   await expect(brief.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  await page.getByRole("button", { name: "Resumen del caso" }).click()
+  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
   await expect(page.getByRole("dialog", { name: "Resumen del caso" })).toContainText("Lo que ya se sabe")
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
@@ -323,7 +327,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(fromRow.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(fromRow).toBeHidden()
-  // «Tomar» toma la conversación del caso: queda a su nombre y el caso, con responsable.
+  // «Tomar este tema» toma el tema, no la conversación: el caso queda con responsable.
   await takeButton.click()
   await expect(caseRow.getByRole("button", { name: /^Tomar/ })).toHaveCount(0)
 
@@ -339,7 +343,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
 test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras; cerrar pide el motivo de la lista", async ({
   owner,
   nextEventId,
-}) => {
+}, info) => {
   const { page, org } = owner
   const tg = await createTelegramConnection(page, org.slug)
   const tgUser = nextEventId()
@@ -431,13 +435,18 @@ test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras;
   await closing.getByRole("radio", { name: "Precio" }).check()
   await closing.getByRole("button", { name: "Marcar perdida" }).click()
   await expect(closing).toBeHidden()
-  const decided = page.getByRole("region", { name: "Paso Decidió", exact: true })
-  await expect(decided.getByRole("article", { name: `${person} · Control preventivo` })).toContainText("Perdida: «Precio»")
+  // «Decidió» se divide en Ganadas y Perdidas: la pérdida cae en su columna con su motivo.
+  const lost = page.getByRole("region", { name: "Paso Perdidas", exact: true })
+  await expect(lost.getByRole("article", { name: `${person} · Control preventivo` })).toContainText("Perdida: «Precio»")
 
   const closed = await call<{ id: string }>(page, "POST", "/api/opportunities", org.slug, {
     contactId, title: "Tratamiento cerrado",
   }, 201)
   await call(page, "POST", `/api/opportunities/${closed.id}/close`, org.slug, { outcome: "won", reason: "acepto" })
+  await gotoHydrated(page, tenant(org.slug, "/pipeline"))
+  const won = page.getByRole("region", { name: "Paso Ganadas", exact: true })
+  await expect(won.getByRole("button", { name: `${person} · Tratamiento cerrado`, exact: true })).toBeVisible()
+  await info.attach("tablero-ganadas-y-perdidas", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
   const closedCard = page.getByRole("button", { name: `${person} · Tratamiento cerrado`, exact: true })
@@ -449,6 +458,57 @@ test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras;
   await gotoHydrated(page, tenant(org.slug, `/opportunities/${closed.id}`))
   await expect(page).toHaveURL(tenantPattern(org.slug, `/pipeline?oportunidad=${closed.id}`))
   await expect(surface(page, { name: `${person} · «Tratamiento cerrado»`, exact: true })).toContainText("Ganada")
+})
+
+test("crm ventas: Ganadas y Perdidas son las dos mitades de «Decidió»; ambas se ven a la vez", async ({
+  owner,
+  nextEventId,
+}, info) => {
+  const { page, org } = owner
+  const tg = await createTelegramConnection(page, org.slug)
+  const tgUser = nextEventId()
+  expect(
+    await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
+      fromId: tgUser,
+      chatId: tgUser,
+      text: "Hola",
+      updateId: nextEventId(),
+    }),
+  ).toBe(200)
+  const conversation = await waitForConversation(page, org.slug, tg.id)
+  const contactId = conversation.contact.id
+  const person = conversation.contact.displayName
+  await call(page, "POST", "/api/opportunities", org.slug, { contactId, title: "Para perder" }, 201)
+  await call(page, "POST", "/api/opportunities", org.slug, { contactId, title: "Para ganar" }, 201)
+  await gotoHydrated(page, tenant(org.slug, "/pipeline"))
+  // Cada mitad de «Decidió» está lista cuando ya cargó sus datos.
+  await expect(page.getByRole("region", { name: "Paso Ganadas", exact: true }).getByText("Nada decidido en los últimos 30 días")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("region", { name: "Paso Perdidas", exact: true }).getByText("Nada decidido en los últimos 30 días")).toBeVisible({ timeout: 30_000 })
+
+  // «Acciones» → «Perdida» pide el motivo antes de cerrar.
+  await page.getByRole("button", { name: "Acciones de Para perder", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Perdida", exact: true }).click()
+  const losing = page.getByRole("alertdialog", { name: "Perdida: Para perder" })
+  await losing.getByRole("radio", { name: "Precio" }).check()
+  await losing.getByRole("button", { name: "Marcar perdida" }).click()
+  await expect(losing).toBeHidden()
+
+  await page.getByRole("button", { name: "Acciones de Para ganar", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Ganada", exact: true }).click()
+  const winning = page.getByRole("alertdialog", { name: "Ganada: Para ganar" })
+  await winning.getByRole("button", { name: "Marcar ganada", exact: true }).click()
+  await expect(winning).toBeHidden()
+
+  await gotoHydrated(page, tenant(org.slug, "/pipeline"))
+  const won = page.getByRole("region", { name: "Paso Ganadas", exact: true })
+  const lost = page.getByRole("region", { name: "Paso Perdidas", exact: true })
+  await expect(won.getByRole("article", { name: `${person} · Para ganar` })).toContainText("Ganada", { timeout: 30_000 })
+  await expect(lost.getByRole("article", { name: `${person} · Para perder` })).toContainText("Perdida: «Precio»")
+  // Las dos mitades están en la misma columna: se ven juntas, una arriba y otra abajo.
+  await won.scrollIntoViewIfNeeded()
+  await expect(won).toBeInViewport()
+  await expect(lost).toBeInViewport()
+  await info.attach("tablero-ganadas-y-perdidas-en-una-columna", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
 
 test("crm whatsapp: firma válida crea conversación y firma inválida da 401", async ({

@@ -24,6 +24,7 @@ import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
 import {
+  applyContactActive,
   claimWhatsAppNumber,
   findChannelIdentity,
   isDirectThread,
@@ -34,7 +35,7 @@ import {
 import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql } from "./conversation-state.js"
+import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql, personKeySql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
@@ -44,7 +45,7 @@ import type { AttachmentRef, Storage } from "./storage.js"
 
 
 /** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
-function conversationCursor(value: string): { ts: string; id: string } {
+export function conversationCursor(value: string): { ts: string; id: string } {
   const decoded = decodeCursor(value)
   if (!decoded ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.id) ||
@@ -111,6 +112,8 @@ export type TranscribeFn = (input: {
 
 export interface MessageItem {
   id: string
+  /** Su conversación: el hilo de la Bandeja junta los canales de la persona (fase 4). */
+  conversationId: string
   direction: string
   senderKind: string
   senderUserId: string | null
@@ -133,6 +136,18 @@ export interface MessageItem {
   automatic: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado (ADR 0050). */
   replyToMessageId: string | null
+  /**
+   * Respuesta del equipo que quedó por entregar pasadas las 24 horas (R1):
+   * mientras `status` es «held» dice «Por entregar»; después, «Entregada» con
+   * su hora (`sentAt`).
+   */
+  held: boolean
+  /** Lo reenvió la persona: no lo escribió ella. */
+  forwarded: boolean
+  /** La reacción de la persona a este mensaje (👍…); nula si no reaccionó. No confirma nada. */
+  contactReaction: string | null
+  /** Ubicación que mandó la persona (`contentType` «location»). */
+  location: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró su texto y sus adjuntos: era spam y pasaron 90 días (ADR 0054). */
   redactedAt: string | null
   createdAt: string
@@ -141,6 +156,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
   return {
     automatic,
     id: row.id,
+    conversationId: row.conversationId,
     direction: row.direction,
     senderKind: row.senderKind,
     senderUserId: row.senderUserId,
@@ -160,6 +176,10 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
         ? row.templateParams
         : null,
     replyToMessageId: row.replyToMessageId ?? null,
+    held: row.held,
+    forwarded: row.forwarded,
+    contactReaction: row.contactReaction,
+    location: row.location ?? null,
     redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
   }
@@ -194,7 +214,13 @@ export async function ingestInbound(
   job: InboundMessageJob,
   adapter: ChannelAdapter,
   deps: IngestDeps,
-): Promise<{ conversationId: string; messageId: string; created: boolean }> {
+): Promise<{
+  conversationId: string
+  messageId: string
+  created: boolean
+  /** Fue una reacción (👍…) pegada a un mensaje existente: no hay mensaje nuevo (decisión 7). */
+  reaction?: { emoji: string | null }
+}> {
   const orgId = job.orgId
   const event = job.event
   const [connection] = await tx
@@ -205,11 +231,14 @@ export async function ingestInbound(
     )
     .limit(1)
   if (!connection) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada")
-  if (connection.status !== "active") {
+  // La prueba del chat web funciona aunque el chat esté desactivado (fase 6 del pulido).
+  if (connection.status !== "active" && !(event.test && connection.provider === "web_chat")) {
     throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada")
   }
 
   const channel = connection.channel
+  if (event.content.type === "reaction")
+    return applyReaction(tx, orgId, connection.id, event.externalThreadId, event.content)
   // Serializar creación/resolución/traslado de identidad bajo el mismo
   // advisory lock que usa la transferencia (sin capturar unique violations
   // en transacciones abortadas: se inserta con ON CONFLICT).
@@ -218,8 +247,17 @@ export async function ingestInbound(
   let contactId: string
   if (identity) {
     // El archivado no bloquea la recepción entrante ni crea un contacto
-    // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
+    // nuevo: se reutiliza el contacto, y escribir lo saca del archivo
+    // (decisión 2 del pulido de la Bandeja): archivar ordena la lista; para
+    // no responderle a alguien está «Bloquear».
     contactId = identity.contactId
+    const [person] = await tx
+      .select({ isActive: contact.isActive })
+      .from(contact)
+      .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+      .limit(1)
+    if (person && !person.isActive)
+      await applyContactActive(tx, orgId, contactId, true, { userId: null })
     // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
     if (identity.noWhatsappAt) {
       await tx
@@ -308,6 +346,8 @@ export async function ingestInbound(
           : null,
         channelConnectionId: connection.id,
         externalThreadId: event.externalThreadId,
+        // La prueba del chat web desde Configuración nace marcada (fase 6 del pulido).
+        ...(event.test ? { isTest: true } : {}),
       })
       .onConflictDoNothing({
         target: [conversation.channelConnectionId, conversation.externalThreadId],
@@ -340,7 +380,19 @@ export async function ingestInbound(
   const isMedia = content.type === "media"
   let contentType: string
   let body: string | null
-  if (!isMedia) {
+  let location: { latitude: number; longitude: number; name?: string; address?: string } | null =
+    null
+  if (content.type === "location") {
+    // El texto la dice en palabras: así la leen la Bandeja, la búsqueda y el agente.
+    contentType = "location"
+    location = {
+      latitude: content.latitude,
+      longitude: content.longitude,
+      ...(content.name ? { name: content.name } : {}),
+      ...(content.address ? { address: content.address } : {}),
+    }
+    body = locationWords(location)
+  } else if (!isMedia) {
     contentType = "text"
     body = content.text
   } else {
@@ -431,6 +483,8 @@ export async function ingestInbound(
       status: "received",
       error: mediaError,
       replyToMessageId,
+      forwarded: event.forwarded === true,
+      location,
     })
     .onConflictDoNothing()
     .returning({ id: message.id })
@@ -485,6 +539,73 @@ export async function ingestInbound(
     at: now.toISOString(),
   })
   return { conversationId, messageId, created: true }
+}
+
+/** Una ubicación en palabras: su nombre, su dirección o, si no trae ninguno, sus coordenadas. */
+export function locationWords(location: {
+  latitude: number
+  longitude: number
+  name?: string
+  address?: string
+}): string {
+  const named = [location.name, location.address]
+    .filter((part): part is string => !!part && part.trim() !== "")
+    .join(", ")
+  return `Ubicación: ${named || `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`}`
+}
+
+/**
+ * Una reacción de la persona (👍, ❤️…) se pega al mensaje que la recibió; sin
+ * emoji es que la quitó. No es un mensaje: no crea hilo, no reabre, no cuenta
+ * como sin leer ni despierta al agente, y nunca confirma nada (decisión 7 de la
+ * Bandeja). Si el hilo o el mensaje no existen, no deja nada.
+ */
+async function applyReaction(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  externalThreadId: string,
+  content: { targetExternalMessageId: string; emoji: string | null },
+): Promise<{
+  conversationId: string
+  messageId: string
+  created: boolean
+  reaction?: { emoji: string | null }
+}> {
+  const [target] = await tx
+    .select({ id: message.id, conversationId: message.conversationId })
+    .from(message)
+    .innerJoin(
+      conversation,
+      and(eq(conversation.id, message.conversationId), eq(conversation.organizationId, orgId)),
+    )
+    .where(
+      and(
+        eq(conversation.channelConnectionId, connectionId),
+        eq(conversation.externalThreadId, externalThreadId),
+        eq(message.externalId, content.targetExternalMessageId),
+      ),
+    )
+    .limit(1)
+  if (!target) return { conversationId: "", messageId: "", created: false }
+  const now = new Date()
+  await tx
+    .update(message)
+    .set({ contactReaction: content.emoji, contactReactionAt: content.emoji ? now : null })
+    .where(and(eq(message.id, target.id), eq(message.organizationId, orgId)))
+  await notify(tx, {
+    orgId,
+    kind: "message.updated",
+    conversationId: target.conversationId,
+    messageId: target.id,
+    at: now.toISOString(),
+  })
+  return {
+    conversationId: target.conversationId,
+    messageId: target.id,
+    created: false,
+    reaction: { emoji: content.emoji },
+  }
 }
 
 /**
@@ -691,6 +812,12 @@ export async function sendOutbound(
     content: OutboundContent
     /** Responde citando este mensaje de la misma conversación (ADR 0050). */
     replyToMessageId?: string | null
+    /**
+     * Responde un tema (R1 del pulido de la Bandeja): si WhatsApp ya no deja
+     * escribirle, queda «Por entregar» en vez de fallar y sale cuando la
+     * persona toca «Ver respuesta» o vuelve a escribir.
+     */
+    holdIfClosed?: boolean
   },
 ): Promise<MessageItem> {
   const row = await requireWritableConversation(tx, orgId, input.conversationId, { userId: input.senderUserId ?? null })
@@ -702,8 +829,13 @@ export async function sendOutbound(
       .limit(1)
     if (!quoted) throw validation("El mensaje citado no es de esta conversación")
   }
+  const hold =
+    input.holdIfClosed === true &&
+    row.connection.provider === "whatsapp_cloud_api" &&
+    input.content.type !== "template" &&
+    !windowOpen(row.conversation.lastInboundAt)
   if (row.connection.provider === "whatsapp_cloud_api") {
-    assertWindowAllows(row, input.content)
+    if (!hold) assertWindowAllows(row, input.content)
   } else if (META_OUTBOUND_PROVIDERS.includes(row.connection.provider)) {
     assertMetaWindowAllows(row)
   }
@@ -752,11 +884,16 @@ export async function sendOutbound(
       listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       replyToMessageId: input.replyToMessageId ?? null,
-      status: "queued",
+      status: hold ? "held" : "queued",
+      held: hold,
+      // La hora en que se escribe, no la de la transacción: dos mensajes en la
+      // misma (la respuesta por entregar y su «Ver respuesta») conservan su orden.
+      createdAt: sql`clock_timestamp()`,
     })
     .returning()
   if (!created) throw new Error("No se pudo crear el mensaje")
-  await sendOutboundMessage(tx, { orgId, messageId: created.id })
+  // Por entregar: el worker no lo ve hasta que se pueda escribirle (`deliverHeldReplies`).
+  if (!hold) await sendOutboundMessage(tx, { orgId, messageId: created.id })
   await audit(tx, orgId, {
     actorUserId: input.senderUserId ?? null,
     action: "message.created",
@@ -772,6 +909,26 @@ export async function sendOutbound(
     at: now.toISOString(),
   })
   return toMessageItem(created)
+}
+
+/**
+ * Entrega las respuestas del equipo que quedaron por entregar (R1): la persona
+ * tocó «Ver respuesta» o volvió a escribir, y WhatsApp deja escribirle otra
+ * vez. Salen en el orden en que se escribieron, cada una citando su pregunta.
+ */
+export async function deliverHeldReplies(tx: Db, orgId: string, conversationId: string): Promise<number> {
+  const released = await tx
+    .update(message)
+    .set({ status: "queued" })
+    .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), eq(message.status, "held")))
+    .returning({ id: message.id, createdAt: message.createdAt })
+  released.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  const at = new Date().toISOString()
+  for (const row of released) {
+    await sendOutboundMessage(tx, { orgId, messageId: row.id })
+    await notify(tx, { orgId, kind: "message.updated", conversationId, messageId: row.id, at })
+  }
+  return released.length
 }
 
 /**
@@ -846,8 +1003,22 @@ export interface ConversationListItem {
   lastMessageAt: string | null
   /** `screen`: en Spam o bloqueada, con su motivo (ADR 0054); nulo si no. */
   contact: { id: string; displayName: string; isActive: boolean; screen: ContactScreen | null; screenReason: string | null }
+  /** Prueba del chat web desde Configuración: «Prueba» en la Bandeja, no se cobra ni cuenta. */
+  isTest: boolean
   connection: { id: string; channel: string; provider: string; displayName: string }
-  preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
+  /**
+   * El último mensaje: su texto y, si no tiene, qué era (`contentType`, el tipo
+   * del primer adjunto y el nombre del mensaje aprobado) para decirlo en palabras.
+   */
+  preview: {
+    body: string | null
+    direction: string
+    senderKind: string
+    contentType: string
+    attachmentMime: string | null
+    templateName: string | null
+    createdAt: string
+  } | null
 }
 /** Estados de una conversación: abierta o cerrada (con su motivo, ADR 0024). */
 export const CONVERSATION_STATUSES = ["open", "closed"] as const
@@ -862,7 +1033,7 @@ export interface ConversationFilters {
 }
 
 /** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
-function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
+export function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
   const conditions: SQL[] = [eq(conversation.organizationId, orgId)]
   if (input.status) {
     if (!(CONVERSATION_STATUSES as readonly string[]).includes(input.status)) {
@@ -982,11 +1153,29 @@ export async function listConversations(
     .orderBy(desc(activityAt), desc(conversation.id))
     .limit(limit + 1)
   const page = rows.slice(0, limit)
+  const items = await toListItems(tx, page)
+  const last = page[page.length - 1]
+  const nextCursor =
+    rows.length > limit && last
+      ? encodeCursor(last.cursorAt, last.conversation.id)
+      : null
+  return { items, nextCursor }
+}
+
+type ListRow = {
+  conversation: typeof conversation.$inferSelect
+  contact: typeof contact.$inferSelect
+  connection: typeof channelConnection.$inferSelect
+}
+
+/** Las filas de la lista con el último mensaje de cada una, en el orden dado. */
+async function toListItems(tx: Db, page: ListRow[]): Promise<ConversationListItem[]> {
   const previews = new Map<string, ConversationListItem["preview"]>()
   if (page.length > 0) {
     const ids = page.map((r) => r.conversation.id)
     const previewRows = (await tx.execute(sql`
-      select distinct on ("conversation_id") "conversation_id", "body", "direction", "sender_kind", "created_at"
+      select distinct on ("conversation_id") "conversation_id", "body", "direction", "sender_kind", "content_type",
+        "attachments"->0->>'mimeType' as "attachment_mime", "template_name", "created_at"
       from "message"
       where "conversation_id" in (${sql.join(
         ids.map((id) => sql`${id}::uuid`),
@@ -997,6 +1186,9 @@ export async function listConversations(
       body: string | null
       direction: string
       sender_kind: string
+      content_type: string
+      attachment_mime: string | null
+      template_name: string | null
       created_at: Date
     }[]
     for (const p of previewRows) {
@@ -1004,17 +1196,21 @@ export async function listConversations(
         body: p.body,
         direction: p.direction,
         senderKind: p.sender_kind,
+        contentType: p.content_type,
+        attachmentMime: p.attachment_mime,
+        templateName: p.template_name,
         createdAt: p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at),
       })
     }
   }
-  const items: ConversationListItem[] = page.map((r) => ({
+  return page.map((r) => ({
     id: r.conversation.id,
     status: r.conversation.status,
     agentStatus: r.conversation.agentStatus,
     unreadCount: r.conversation.unreadCount,
     assignedUserId: r.conversation.assignedUserId,
     lastMessageAt: r.conversation.lastMessageAt ? r.conversation.lastMessageAt.toISOString() : null,
+    isTest: r.conversation.isTest,
     contact: {
       id: r.contact.id,
       displayName: r.contact.displayName,
@@ -1030,12 +1226,22 @@ export async function listConversations(
     },
     preview: previews.get(r.conversation.id) ?? null,
   }))
-  const last = page[page.length - 1]
-  const nextCursor =
-    rows.length > limit && last
-      ? encodeCursor(last.cursorAt, last.conversation.id)
-      : null
-  return { items, nextCursor }
+}
+
+/**
+ * Las filas de la lista de unas conversaciones, en el orden de `ids`: la
+ * Bandeja elige primero qué conversación muestra cada persona (fase 4).
+ */
+export async function conversationListItems(tx: Db, orgId: string, ids: string[]): Promise<ConversationListItem[]> {
+  if (ids.length === 0) return []
+  const rows = await tx
+    .select({ conversation, contact, connection: channelConnection })
+    .from(conversation)
+    .innerJoin(contact, eq(conversation.contactId, contact.id))
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(eq(conversation.organizationId, orgId), inArray(conversation.id, ids)))
+  const byId = new Map(rows.map((row) => [row.conversation.id, row]))
+  return toListItems(tx, ids.map((id) => byId.get(id)).filter((row): row is ListRow => row !== undefined))
 }
 
 export async function listMessages(
@@ -1050,8 +1256,50 @@ export async function listMessages(
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
+  return listMessagesIn(tx, orgId, [conversationId], input)
+}
+
+/**
+ * Las conversaciones de la persona de una conversación, con lo que tienen sin
+ * leer: todos sus canales, o solo ese hilo si es un grupo (fase 4 del pulido,
+ * `personKeySql`). Nunca por coincidencia de teléfono: es su `contact_id`.
+ */
+export async function personConversations(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+): Promise<{ id: string; unreadCount: number }[]> {
+  const rows = await tx.execute<{ id: string; unread_count: number }>(sql`
+    select c2.id, c2.unread_count
+    from conversation c1
+    join conversation c2 on c2.organization_id = c1.organization_id and ${personKeySql(sql.raw("c2"))} = ${personKeySql(sql.raw("c1"))}
+    where c1.id = ${conversationId}::uuid and c1.organization_id = ${orgId}`)
+  if (rows.length === 0) throw notFound("Conversación")
+  return rows.map((row) => ({ id: row.id, unreadCount: Number(row.unread_count) }))
+}
+
+/**
+ * El hilo de la Bandeja: los mensajes de todos los canales de la persona, en
+ * una sola línea de tiempo y con su conversación (fase 4 del pulido).
+ */
+export async function listPersonMessages(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  input: { before?: string; limit?: number },
+): Promise<{ items: MessageItem[]; nextCursor: string | null }> {
+  const ids = (await personConversations(tx, orgId, conversationId)).map((row) => row.id)
+  return listMessagesIn(tx, orgId, ids, input)
+}
+
+async function listMessagesIn(
+  tx: Db,
+  orgId: string,
+  conversationIds: string[],
+  input: { before?: string; limit?: number },
+): Promise<{ items: MessageItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
-  const conditions = [eq(message.conversationId, conversationId)]
+  const conditions = [eq(message.organizationId, orgId), inArray(message.conversationId, conversationIds)]
   if (input.before) {
     const decoded = conversationCursor(input.before)
     const ts = new Date(decoded.ts)
@@ -1238,6 +1486,8 @@ export interface ConversationDetail {
     unreadCount: number
     assignedUserId: string | null
     lastMessageAt: string | null
+    /** Prueba del chat web desde Configuración (fase 6 del pulido). */
+    isTest: boolean
   }
   /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
   contact: { id: string; displayName: string; isActive: boolean; isPatient: boolean }
@@ -1286,6 +1536,8 @@ export async function getConversationDetail(
   tx: Db,
   orgId: string,
   id: string,
+  /** `person`: los mensajes de todos los canales de la persona (el hilo de la Bandeja, fase 4). */
+  timeline: "conversation" | "person" = "conversation",
 ): Promise<ConversationDetail> {
   const [row] = await tx
     .select({ conversation, contact, connection: channelConnection })
@@ -1296,7 +1548,8 @@ export async function getConversationDetail(
     .limit(1)
   if (!row) throw notFound("Conversación")
   const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
-  const { items, nextCursor } = await listMessages(tx, orgId, id, {})
+  const { items, nextCursor } =
+    timeline === "person" ? await listPersonMessages(tx, orgId, id, {}) : await listMessages(tx, orgId, id, {})
   const patientId = await selfPatientOf(tx, orgId, row.contact.id)
   const missing = patientId ? await getPatientMissingData(tx, orgId, patientId) : []
   return {
@@ -1309,6 +1562,7 @@ export async function getConversationDetail(
       lastMessageAt: row.conversation.lastMessageAt
         ? row.conversation.lastMessageAt.toISOString()
         : null,
+      isTest: row.conversation.isTest,
     },
     contact: {
       id: row.contact.id,
@@ -1408,8 +1662,13 @@ export async function setAgentStatus(
   )
 }
 
+/** Abrir a la persona la deja leída en todos sus canales (fase 4 del pulido). */
 export async function markRead(tx: Db, orgId: string, id: string): Promise<void> {
-  await mutateConversation(tx, orgId, id, { unreadCount: 0 }, { op: "read" })
+  for (const row of await personConversations(tx, orgId, id)) {
+    if (row.id === id || row.unreadCount > 0) {
+      await mutateConversation(tx, orgId, row.id, { unreadCount: 0 }, { op: "read" })
+    }
+  }
 }
 
 /** Resuelve un adjunto a URL firmada (15 min), verificando la cadena RLS. */

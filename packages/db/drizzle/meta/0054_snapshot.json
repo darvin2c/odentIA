@@ -1,6 +1,6 @@
 {
-  "id": "2db5ccbc-419a-498f-95e5-dc878fa1f8ec",
-  "prevId": "69c11fdf-85c0-4da5-b0d9-5b26aace389b",
+  "id": "939001c2-d3f8-4adf-b57e-4a2ea6a11348",
+  "prevId": "0fa906fb-1fec-4b08-ab63-5aa8687f69fd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3512,6 +3512,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'otro'"
+        },
+        "urgent_at": {
+          "name": "urgent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3621,6 +3634,10 @@
         "agent_handoff_priority_check": {
           "name": "agent_handoff_priority_check",
           "value": "\"agent_handoff\".\"priority\" in ('alta','media','baja')"
+        },
+        "agent_handoff_kind_check": {
+          "name": "agent_handoff_kind_check",
+          "value": "\"agent_handoff\".\"kind\" in ('cita','precio','clinico','pago','otro')"
         }
       },
       "isRLSEnabled": false
@@ -24679,6 +24696,31 @@
           "primaryKey": false,
           "notNull": false
         },
+        "forwarded": {
+          "name": "forwarded",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "contact_reaction": {
+          "name": "contact_reaction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_reaction_at": {
+          "name": "contact_reaction_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location": {
+          "name": "location",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "redacted_at": {
           "name": "redacted_at",
           "type": "timestamp with time zone",
@@ -37161,7 +37203,7 @@
           "name": "figure",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "group_by": {
           "name": "group_by",
@@ -37176,12 +37218,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
-        },
-        "argos": {
-          "name": "argos",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -37227,71 +37263,44 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
-        },
-        "report_pin_argos_uidx": {
-          "name": "report_pin_argos_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "md5(\"argos\" ->> 'sql')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"report_pin\".\"argos\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "report_pin_organization_id_organization_id_fk": {
           "name": "report_pin_organization_id_organization_id_fk",
           "tableFrom": "report_pin",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "report_pin_created_by_user_id_fk": {
           "name": "report_pin_created_by_user_id_fk",
           "tableFrom": "report_pin",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "created_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "report_pin_kind_check": {
-          "name": "report_pin_kind_check",
-          "value": "(\"report_pin\".\"figure\" IS NULL) <> (\"report_pin\".\"argos\" IS NULL)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.report_question": {
@@ -37335,18 +37344,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "query": {
-          "name": "query",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "plan": {
-          "name": "plan",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "used_model": {
           "name": "used_model",
           "type": "boolean",
@@ -37380,38 +37377,38 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "report_question_organization_id_organization_id_fk": {
           "name": "report_question_organization_id_organization_id_fk",
           "tableFrom": "report_question",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "report_question_user_id_user_id_fk": {
           "name": "report_question_user_id_user_id_fk",
           "tableFrom": "report_question",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "user_id"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -37420,7 +37417,7 @@
       "checkConstraints": {
         "report_question_outcome_check": {
           "name": "report_question_outcome_check",
-          "value": "\"report_question\".\"outcome\" in ('respondida','parcial','pregunta','no_sabe','clinico','accion','ayuda','otro','no_pudo')"
+          "value": "\"report_question\".\"outcome\" in ('respondida','pregunta','no_sabe','clinico','accion','otro','no_pudo')"
         }
       },
       "isRLSEnabled": false

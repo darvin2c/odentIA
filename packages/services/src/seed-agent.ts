@@ -205,6 +205,8 @@ export async function seedAgent(
         notice: "Claro. Dejé tu pedido a recepción y una persona te va a llamar hoy.",
         priority: "media",
         createdBy: "agent",
+        // «Ahora» a las dos horas (decisión 1 del pulido de la Bandeja); aquí, de reloj.
+        urgentAt: new Date(Date.now() + 2 * 3_600_000),
       })
       .onConflictDoNothing({ target: agentHandoff.id })
     // Corridas de los últimos 30 días con mezcla ok/handoff/error/sin_respuesta.

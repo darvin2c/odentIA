@@ -1,10 +1,11 @@
 import { serve } from "@hono/node-server"
+import type { Context } from "hono"
 import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, secretsKeyFromEnv } from "@odentia/services"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, secretsKeyFromEnv } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -68,6 +69,11 @@ const app = createApp({
   complaintsEmail: env.COMPLAINTS_EMAIL || undefined,
   foundersEmail: env.FOUNDERS_EMAIL || undefined,
   listenUrl: env.APP_DATABASE_URL,
+  // La dirección real de quien llama a las rutas públicas (el chat web, el
+  // registro): detrás del túnel, la conexión es siempre la del túnel.
+  ...(env.CLIENT_IP_HEADER
+    ? { registrationRemoteAddress: (c: Context) => c.req.header(env.CLIENT_IP_HEADER as string)?.split(",")[0]?.trim() || undefined }
+    : {}),
   llm: platformLlmFromEnv(env),
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
@@ -75,6 +81,12 @@ const app = createApp({
   },
   metaSignup: metaSignupFromEnv(env),
   embedder: embedderFromEnv(env),
+  // `fake`: el proveedor de demostración de dev y e2e (sin red); el entorno lo impide con canales reales.
+  addressProviders: {
+    sede: env.GOOGLE_MAPS_API_KEY === "fake" ? fakeAddressProvider("google") : env.GOOGLE_MAPS_API_KEY ? googlePlacesProvider(env.GOOGLE_MAPS_API_KEY) : null,
+    paciente: env.GEOAPIFY_API_KEY === "fake" ? fakeAddressProvider("geoapify") : env.GEOAPIFY_API_KEY ? geoapifyProvider(env.GEOAPIFY_API_KEY) : null,
+  },
+  geoapifyDailyLimit: env.GEOAPIFY_DAILY_LIMIT,
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
     microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },

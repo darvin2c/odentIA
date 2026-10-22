@@ -73,6 +73,8 @@ const AFTER_WORDS: Record<SaleMoment, string | null> = {
  */
 export type MoveCause =
   | "cita_agendada"
+  | "cita_enlace"
+  | "cita_recepcion"
   | "evaluacion_cancelada"
   | "presupuesto_presentado"
   | "presupuesto_aceptado"
@@ -138,6 +140,8 @@ export interface OpportunityListItem {
    * «Pasó sola: agendó su evaluación para el jue 17», «Perdida: «Precio»».
    */
   why: string | null
+  /** Quién hizo el último movimiento: el agente y lo automático se destacan en el tablero. */
+  lastOrigin: OpportunityEventOrigin | null
   nextTask: OpportunityTask | null
   createdAt: string
   updatedAt: string
@@ -185,6 +189,8 @@ export interface OpportunityFilters {
   assignedUserId?: string
   /** Solo las que tienen su tarea vencida. */
   taskDue?: boolean
+  /** Solo las que el agente creó o movió alguna vez. */
+  byAgent?: boolean
   /** El tablero: lo abierto y lo cerrado de los últimos 30 días. */
   recent?: boolean
   cursor?: string
@@ -219,6 +225,10 @@ export interface UpdateOpportunityInput {
 
 function iso(date: Date | null): string | null {
   return date ? date.toISOString() : null
+}
+
+function asOrigin(value: string): OpportunityEventOrigin | null {
+  return value === "persona" || value === "agente" || value === "automatico" ? value : null
 }
 
 function asStatus(value: string): OpportunityStatus {
@@ -289,10 +299,22 @@ interface LastEvent {
   channel: string | null
 }
 
+/** Las causas que son una cita agendada: la evaluación que la llevó a «Evaluación agendada». */
+const APPOINTMENT_CAUSES: ReadonlyArray<string> = ["cita_agendada", "cita_enlace", "cita_recepcion"]
+
+/** Lo que hizo el agente, con las mismas palabras en la tarjeta y en el historial. */
+function agentWords(cause: string | null, causeAt: Date | null, at: Date, now: Date, zone: Zone): string {
+  if (cause === "cita_agendada" && causeAt) return `Sofi le agendó la evaluación para ${dayWords(causeAt, now, zone)}`
+  if (cause === "presupuesto_presentado") return `Sofi le presentó el presupuesto ${dayWords(at, now, zone)}`
+  return `La movió Sofi ${dayWords(at, now, zone)}`
+}
+
 function causeWords(cause: string | null, causeAt: Date | null, at: Date, now: Date, zone: Zone): string | null {
+  if (cause === "cita_enlace") return causeAt ? `la agendó desde su enlace para ${dayWords(causeAt, now, zone)}` : "la agendó desde su enlace"
+  if (cause === "cita_recepcion") return causeAt ? `el equipo le agendó la evaluación para ${dayWords(causeAt, now, zone)}` : "el equipo le agendó la evaluación"
   if (cause === "cita_agendada") return causeAt ? `agendó su evaluación para ${dayWords(causeAt, now, zone)}` : "agendó su evaluación"
   if (cause === "evaluacion_cancelada") return causeAt ? `canceló su evaluación del ${shortDay(causeAt, zone)}` : "canceló su evaluación"
-  if (cause === "presupuesto_presentado") return `presupuesto presentado ${dayWords(at, now, zone)}`
+  if (cause === "presupuesto_presentado") return `el equipo presentó el presupuesto ${dayWords(at, now, zone)}`
   if (cause === "presupuesto_aceptado") return "aceptó el presupuesto"
   if (cause === "presupuesto_rechazado") return "rechazó el presupuesto"
   return null
@@ -315,7 +337,7 @@ function whyOf(
       const verb = last.cause === "evaluacion_cancelada" ? "Volvió sola" : "Pasó sola"
       return words ? `${verb}: ${words}` : `${verb} ${when}`
     }
-    if (last.origin === "agente") return `La movió Sofi ${when}`
+    if (last.origin === "agente") return agentWords(last.cause, last.causeAt, last.createdAt, now, zone)
     return `La movió ${last.actorName ?? "el equipo"} ${when}`
   }
   if (last.action === "opportunity.reopened") return `La reabrió ${last.actorName ?? "el equipo"} ${when}`
@@ -345,8 +367,12 @@ function historyWhat(
   zone: Zone,
 ): string {
   if (event.action === "opportunity.moved") {
-    const words = event.origin === "automatico" ? causeWords(event.cause, event.causeAt, event.createdAt, now, zone) : null
     const target = toStageName ? ` a «${toStageName}»` : ""
+    if (event.origin === "agente") {
+      const phrase = agentWords(event.cause, event.causeAt, event.createdAt, now, zone)
+      return toStageName ? `${phrase}: pasó a «${toStageName}»` : phrase
+    }
+    const words = event.origin === "automatico" ? causeWords(event.cause, event.causeAt, event.createdAt, now, zone) : null
     const verb = event.cause === "evaluacion_cancelada" ? "Volvió sola" : "Pasó sola"
     return words ? `${verb}${target}: ${words}` : `La movió${target}`
   }
@@ -653,6 +679,9 @@ function filterConditions(orgId: string, input: Omit<OpportunityFilters, "cursor
     conditions.push(sql`exists (select 1 from task t where t.organization_id = ${orgId} and t.opportunity_id = ${opportunity.id}
       and t.status = 'open' and t.due_at is not null and t.due_at <= now())`)
   }
+  if (input.byAgent) {
+    conditions.push(sql`exists (select 1 from opportunity_event e where e.organization_id = ${orgId} and e.opportunity_id = ${opportunity.id} and e.origin = 'agente')`)
+  }
   if (input.recent) {
     conditions.push(
       or(
@@ -732,6 +761,7 @@ type ListRow = {
 }
 
 function toListItem(r: ListRow, now: Date, zone: Zone): OpportunityListItem {
+  const last = parseLastEvent(r.lastEvent)
   return {
     id: r.opp.id,
     title: r.opp.title,
@@ -755,7 +785,8 @@ function toListItem(r: ListRow, now: Date, zone: Zone): OpportunityListItem {
     closedAt: iso(r.opp.closedAt),
     closeReason: asCloseReason(r.opp.closeReason),
     closeNote: r.opp.closeNote,
-    why: whyOf(r.opp, parseLastEvent(r.lastEvent), now, zone),
+    why: whyOf(r.opp, last, now, zone),
+    lastOrigin: last ? asOrigin(last.origin) : null,
     nextTask: parseNextTask(r.nextTask),
     createdAt: r.opp.createdAt.toISOString(),
     updatedAt: r.opp.updatedAt.toISOString(),
@@ -813,12 +844,19 @@ export interface OpportunitySummaryStage {
   count: number
   /** Valor de lo abierto en ese paso (lo cerrado no suma). */
   amounts: Array<{ currency: string; amountCents: string }>
+  /** Cuántas se ganaron y cuántas se perdieron en ese paso (con los mismos filtros). */
+  won: number
+  lost: number
+  /** Valor de lo ganado en ese paso: la columna «Ganadas» lo muestra. */
+  wonAmounts: Array<{ currency: string; amountCents: string }>
 }
 
 export interface OpportunitySummary {
   total: number
   /** Cuántas siguen abiertas: el subtítulo habla de ellas. */
   open: number
+  won: number
+  lost: number
   /** Valor de lo abierto, por moneda: el total del tablero solo suma lo abierto. */
   openAmounts: Array<{ currency: string; amountCents: string }>
   stages: OpportunitySummaryStage[]
@@ -840,6 +878,10 @@ export async function getOpportunitySummary(
       open: sql<number>`(count(*) filter (where ${opportunity.status} = 'open'))::int`,
       openCents: sql<string>`coalesce(sum(${opportunity.amountCents}) filter (where ${opportunity.status} = 'open'), 0)::text`,
       openWithAmount: sql<number>`(count(${opportunity.amountCents}) filter (where ${opportunity.status} = 'open'))::int`,
+      won: sql<number>`(count(*) filter (where ${opportunity.status} = 'won'))::int`,
+      lost: sql<number>`(count(*) filter (where ${opportunity.status} = 'lost'))::int`,
+      wonCents: sql<string>`coalesce(sum(${opportunity.amountCents}) filter (where ${opportunity.status} = 'won'), 0)::text`,
+      wonWithAmount: sql<number>`(count(${opportunity.amountCents}) filter (where ${opportunity.status} = 'won'))::int`,
     })
     .from(opportunity)
     .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
@@ -849,11 +891,18 @@ export async function getOpportunitySummary(
   const openAmounts = new Map<string, bigint>()
   let total = 0
   let open = 0
+  let won = 0
+  let lost = 0
   for (const row of grouped) {
     total += row.count
     open += row.open
-    const entry = byStage.get(row.stageId) ?? { stageId: row.stageId, count: 0, amounts: [], position: row.position }
+    won += row.won
+    lost += row.lost
+    const entry = byStage.get(row.stageId) ?? { stageId: row.stageId, count: 0, amounts: [], won: 0, lost: 0, wonAmounts: [], position: row.position }
     entry.count += row.count
+    entry.won += row.won
+    entry.lost += row.lost
+    if (row.wonWithAmount > 0) entry.wonAmounts.push({ currency: row.currency, amountCents: row.wonCents })
     if (row.openWithAmount > 0) {
       entry.amounts.push({ currency: row.currency, amountCents: row.openCents })
       openAmounts.set(row.currency, (openAmounts.get(row.currency) ?? 0n) + BigInt(row.openCents))
@@ -865,10 +914,13 @@ export async function getOpportunitySummary(
     .map(({ position: _position, ...stage }) => ({
       ...stage,
       amounts: stage.amounts.sort((a, b) => (a.currency < b.currency ? -1 : 1)),
+      wonAmounts: stage.wonAmounts.sort((a, b) => (a.currency < b.currency ? -1 : 1)),
     }))
   return {
     total,
     open,
+    won,
+    lost,
     openAmounts: [...openAmounts.entries()]
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([currency, cents]) => ({ currency, amountCents: cents.toString() })),
@@ -1116,7 +1168,7 @@ export async function createOpportunity(
   return getOpportunity(tx, orgId, created.id)
 }
 
-export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado"
+export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado" | "prueba"
 
 /**
  * La persona preguntó por un servicio concreto y muestra interés (decisión 15
@@ -1133,6 +1185,15 @@ export async function noteServiceInterest(
   input: { contactId: string; conversationId: string | null; serviceId: string; said: string },
 ): Promise<{ outcome: ServiceInterestOutcome; opportunityId: string | null }> {
   await requireContact(tx, orgId, input.contactId)
+  // Una prueba del chat web no crea oportunidades (fase 6 del pulido de la Bandeja).
+  if (input.conversationId) {
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest })
+      .from(conversation)
+      .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (thread?.isTest) return { outcome: "prueba", opportunityId: null }
+  }
   const [service] = await tx
     .select({ id: serviceCatalog.id, name: serviceCatalog.name })
     .from(serviceCatalog)
@@ -1598,7 +1659,7 @@ async function pickOpportunity(
 export async function advanceForAppointment(
   tx: Db,
   orgId: string,
-  input: { patientId: string; serviceId: string | null; startsAt: Date },
+  input: { patientId: string; serviceId: string | null; startsAt: Date; source?: string },
 ): Promise<string | null> {
   const picked = await pickOpportunity(tx, orgId, {
     patientId: input.patientId,
@@ -1609,8 +1670,9 @@ export async function advanceForAppointment(
   const target = await stageOfMoment(tx, orgId, picked.opp.pipelineId, "evaluacion_agendada")
   await moveOpportunity(tx, orgId, picked.opp.id, target.id, {
     userId: null,
-    origin: "automatico",
-    cause: "cita_agendada",
+    // Quién agendó la cita: el agente (su movimiento), la persona desde su enlace o el equipo.
+    origin: input.source === "agente" ? "agente" : "automatico",
+    cause: input.source === "agente" ? "cita_agendada" : input.source === "enlace" ? "cita_enlace" : "cita_recepcion",
     causeAt: input.startsAt,
   })
   return picked.opp.id
@@ -1671,7 +1733,7 @@ export async function returnForCancelledAppointment(
       )
       .orderBy(desc(opportunityEvent.createdAt), desc(opportunityEvent.id))
       .limit(1)
-    if (!arrival || arrival.origin !== "automatico" || arrival.cause !== "cita_agendada") continue
+    if (!arrival || (arrival.origin !== "automatico" && arrival.origin !== "agente") || !APPOINTMENT_CAUSES.includes(arrival.cause ?? "")) continue
     // Si la evaluación ya se atendió, cancelar otra cita no la devuelve.
     const [attended] = await tx
       .select({ id: appointment.id })
@@ -1711,6 +1773,8 @@ export async function linkPresentedBudget(
     patientId: string
     budgetId: string
     serviceIds: string[]
+    /** Quién lo presentó: el agente o el equipo. Sin indicar, el equipo. */
+    by?: "agente" | "persona"
     /** Total del presupuesto presentado, en su moneda: pasa a ser el valor de la oportunidad. */
     total?: { cents: number | null; currency: string }
   },
@@ -1725,7 +1789,11 @@ export async function linkPresentedBudget(
     .where(and(eq(opportunity.id, picked.opp.id), eq(opportunity.organizationId, orgId)))
   if (momentRank(picked.moment) < momentRank("presupuesto_enviado")) {
     const target = await stageOfMoment(tx, orgId, picked.opp.pipelineId, "presupuesto_enviado")
-    await moveOpportunity(tx, orgId, picked.opp.id, target.id, { userId: null, origin: "automatico", cause: "presupuesto_presentado" })
+    await moveOpportunity(tx, orgId, picked.opp.id, target.id, {
+      userId: null,
+      origin: input.by === "agente" ? "agente" : "automatico",
+      cause: "presupuesto_presentado",
+    })
   } else {
     await notifyOpp(tx, orgId)
   }

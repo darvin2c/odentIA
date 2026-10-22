@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import {
   contact,
@@ -5,14 +6,15 @@ import {
   conversation,
   message,
 } from "@odentia/db/schema/crm"
+import { webchatSite } from "@odentia/db/schema/webchat"
 import { and, eq } from "drizzle-orm"
-import { createWebchatConnection, listWebchatConnections, WEBCHAT_CHANNEL } from "./webchat.js"
+import { getClinicWebchat, updateClinicWebchat, WEBCHAT_CHANNEL } from "./webchat.js"
 
 /**
- * Seed del chat web embebible: conexión local segura (orígenes de dev,
- * cifrada con SECRETS_KEY igual que el resto) y un visitante de demostración
- * con un único mensaje entrante. Sin mensajes salientes: nada sale a red
- * externa. Idempotente (re-ejecutable).
+ * Seed del chat web de la clínica (fase 6 del pulido de la Bandeja): el chat,
+ * instalado en un sitio (el primero, registrado solo) y aparecido en otro que
+ * espera el sí de la clínica; un visitante de demostración con un mensaje y una
+ * prueba de Configuración. Nada sale a red externa. Idempotente.
  *
  * El padre la conecta a seed-dev con `{ secretsKey, fetch }`; no se exporta
  * en el barrel de servicios.
@@ -26,26 +28,14 @@ export async function seedWebchat(
   if (!deps) throw new Error("seedWebchat requiere { secretsKey, fetch } (cifrado de la conexión)")
   const now = new Date()
 
-  const existing = await listWebchatConnections(tx, orgId, deps.secretsKey)
-  let connectionId = existing[0]?.id
-  if (!connectionId) {
-    const created = await createWebchatConnection(
-      tx,
-      orgId,
-      deps.secretsKey,
-      ownerUserId,
-      {
-        displayName: "Chat web",
-        config: {
-          allowedOrigins: ["https://*.odentia.localhost", "http://localhost:3000"],
-          widgetTitle: "Chat web",
-          widgetColor: "#0f766e",
-          greeting: "Hola, ¿en qué podemos ayudarte?",
-        },
-      },
-      { fetch: deps.fetch },
-    )
-    connectionId = created.id
+  const chat = await getClinicWebchat(tx, orgId, deps.secretsKey, ownerUserId)
+  await updateClinicWebchat(tx, orgId, deps.secretsKey, ownerUserId, { color: "#0f766e", greeting: "Hola, ¿en qué podemos ayudarte?" })
+  const connectionId = chat.id
+  if (chat.sites.length === 0) {
+    await tx.insert(webchatSite).values([
+      { organizationId: orgId, connectionId, origin: "https://sonrisa.pe", status: "permitido", firstSeenAt: new Date(now.getTime() - 3 * 86_400_000) },
+      { organizationId: orgId, connectionId, origin: "https://promo-dental.net", status: "pendiente", firstSeenAt: new Date(now.getTime() - 2 * 3_600_000) },
+    ])
   }
 
   // Visitante demo: solo contacto + identidad de canal. Nunca se vincula un
@@ -159,4 +149,42 @@ export async function seedWebchat(
       status: "received",
     })
     .onConflictDoNothing()
+
+  // Una prueba de Configuración: lleva «Prueba» en la Bandeja y se borra a los 7 días.
+  const testThread = `webchat:prueba:${randomUUID()}`
+  const [testPerson] = await tx
+    .insert(contact)
+    .values({ organizationId: orgId, displayName: "Prueba del chat web", lastInteractionAt: now })
+    .returning({ id: contact.id })
+  if (!testPerson) throw new Error("No se pudo sembrar la prueba del chat web")
+  const [testIdentity] = await tx
+    .insert(contactIdentity)
+    .values({ organizationId: orgId, contactId: testPerson.id, channel: WEBCHAT_CHANNEL, externalUserId: testThread, displayName: "Prueba del chat web", isPrimary: true })
+    .returning({ id: contactIdentity.id })
+  const [testConversation] = await tx
+    .insert(conversation)
+    .values({
+      organizationId: orgId,
+      contactId: testPerson.id,
+      contactIdentityId: testIdentity?.id ?? null,
+      channelConnectionId: connectionId,
+      externalThreadId: testThread,
+      isTest: true,
+      lastInboundAt: new Date(now.getTime() - 20 * 60_000),
+      lastMessageAt: new Date(now.getTime() - 19 * 60_000),
+    })
+    .returning({ id: conversation.id })
+  if (!testConversation) throw new Error("No se pudo sembrar la conversación de prueba")
+  await tx.insert(message).values([
+    {
+      organizationId: orgId, conversationId: testConversation.id, direction: "in", senderKind: "contact", contentType: "text",
+      body: "¿Hacen ortodoncia invisible? ¿Cuánto cuesta?", externalId: `webchat:prueba-${randomUUID()}:c1`, status: "received",
+      createdAt: new Date(now.getTime() - 20 * 60_000),
+    },
+    {
+      organizationId: orgId, conversationId: testConversation.id, direction: "out", senderKind: "agent", contentType: "text",
+      body: "Sí, la hacemos. El precio lo confirma la doctora en la evaluación.", externalId: `webchat:local:${randomUUID()}`, status: "delivered",
+      createdAt: new Date(now.getTime() - 19 * 60_000),
+    },
+  ])
 }

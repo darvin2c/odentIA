@@ -94,9 +94,10 @@ function IntegrationsPage() {
     enabled: canRead,
     retry: 1,
   })
+  // Solo lo mira: el chat se crea al abrir su pantalla, no al pasar por la lista.
   const webchatQuery = useQuery({
-    queryKey: ["webchat-connections", org.slug],
-    queryFn: () => apiFetch<{ data: WebchatSummary[] }>("/api/channels/webchat"),
+    queryKey: ["clinic-webchat", org.slug, "peek"],
+    queryFn: () => apiFetch<{ data: WebchatSummary | null }>("/api/channels/webchat?peek=1"),
     enabled: canRead,
     retry: 1,
   })
@@ -203,11 +204,12 @@ function IntegrationsPage() {
   }
 
   function webchatActions(row: WebchatRow): IntegrationAction[] {
-    if (!row.connection && !canWrite) return []
+    const installed = !!row.connection?.installedOn
+    if (!installed && !canWrite) return []
     return [
       {
-        label: !row.connection ? "Conectar" : canWrite ? "Administrar" : "Ver",
-        emphasis: row.connection ? "secondary" : "primary",
+        label: !installed ? "Instalar" : canWrite ? "Administrar" : "Ver",
+        emphasis: installed ? "secondary" : "primary",
         to: "/settings/integrations/webchat",
       },
     ]

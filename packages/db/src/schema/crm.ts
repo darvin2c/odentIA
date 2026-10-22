@@ -461,6 +461,13 @@ export const conversation = pgTable(
     attentionStartedAt: timestamp("attention_started_at", { withTimezone: true }).notNull().defaultNow(),
     /** El agente ya insistió una vez en esta atención; se limpia con cada entrante y al reabrir. */
     nudgedAt: timestamp("nudged_at", { withTimezone: true }),
+    /**
+     * Prueba del chat web desde Configuración (fase 6 del pulido de la
+     * Bandeja): Sofi responde de verdad, pero no se cobra, no crea a nadie en
+     * Pacientes ni una oportunidad, no avisa al sitio, no cuenta en Reportes y
+     * se borra a los 7 días.
+     */
+    isTest: boolean("is_test").notNull().default(false),
     ...timestamps,
   },
   (table) => [
@@ -526,6 +533,32 @@ export const message = pgTable(
     // adaptador al recibir una respuesta citada. Nulo si no cita nada.
     replyToMessageId: uuid("reply_to_message_id"),
     /**
+     * Respuesta del equipo a un tema pasadas las 24 horas de WhatsApp (R1 del
+     * pulido de la Bandeja): queda «Por entregar» (`status` 'held') y sale
+     * cuando la persona toca «Ver respuesta» o vuelve a escribir. Sigue en true
+     * después, para decir «Entregada» con su hora.
+     */
+    held: boolean("held").notNull().default(false),
+    /**
+     * La persona lo reenvió: no lo escribió ella (WhatsApp `context.forwarded`,
+     * Telegram `forward_origin`). El agente no lo toma como dicho por ella.
+     */
+    forwarded: boolean("forwarded").notNull().default(false),
+    /**
+     * La reacción de la persona a este mensaje (👍, ❤️…), la última que puso; nula
+     * si no reaccionó o la quitó. Una reacción no es un mensaje ni confirma nada
+     * (decisión 7 de la Bandeja).
+     */
+    contactReaction: text("contact_reaction"),
+    contactReactionAt: timestamp("contact_reaction_at", { withTimezone: true }),
+    /** Ubicación que mandó la persona (`content_type` 'location'); el texto la dice en palabras. */
+    location: jsonb("location").$type<{
+      latitude: number
+      longitude: number
+      name?: string
+      address?: string
+    }>(),
+    /**
      * Se borró su texto y sus adjuntos: era spam y pasaron 90 días (decisión 16
      * del issue 77). La fila queda para que el hilo y el libro sigan enteros.
      */
@@ -545,6 +578,8 @@ export const message = pgTable(
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
     // Los mensajes de una clínica en un tramo (Reportes): sin él, cada consulta recorre los de todas.
     index("message_org_created_idx").on(table.organizationId, table.createdAt),
+    // Las respuestas por entregar (R1): el ciclo las busca cada minuto y casi nunca hay.
+    index("message_held_idx").on(table.organizationId, table.conversationId).where(sql`"status" = 'held'`),
   ],
 )
 

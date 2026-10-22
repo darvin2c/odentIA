@@ -75,9 +75,7 @@ export const saasPlan = adminSchema.table(
     /** Precio del período en la unidad menor de `currency`. */
     priceCents: integer("price_cents").notNull(),
     billingPeriod: text("billing_period").notNull().default("mensual"),
-    /** null = sin tope; nunca recorta históricos, solo altas nuevas. */
-    maxBranches: integer("max_branches"),
-    maxSeats: integer("max_seats"),
+    // Sin topes de sedes ni de personas (ADR 0031): el tamaño de la clínica se refleja en el uso.
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     /**
@@ -130,10 +128,6 @@ export const saasPlan = adminSchema.table(
     check("saas_plan_price_check", sql`${table.priceCents} >= 0`),
     check("saas_plan_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("saas_plan_code_check", sql`length(trim(${table.code})) BETWEEN 1 AND 80`),
-    check(
-      "saas_plan_limits_check",
-      sql`(${table.maxBranches} IS NULL OR ${table.maxBranches} > 0) AND (${table.maxSeats} IS NULL OR ${table.maxSeats} > 0)`,
-    ),
   ],
 )
 

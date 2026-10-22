@@ -83,6 +83,8 @@ interface ThreadMessage {
   createdAt?: string
   /** El mensaje que cita al responder (ADR 0050); ausente si no cita ninguno. */
   quote?: { body: string | null; contentType?: string }
+  /** Lo reenvió: no lo escribió la persona (fase 7 de la Bandeja). */
+  forwarded?: boolean
 }
 
 /**
@@ -114,6 +116,16 @@ function quoteForModel(quote: ThreadMessage["quote"]): string {
   if (said) return `[En respuesta a: «${said.length > 300 ? `${said.slice(0, 300)}…` : said}»] `
   const what = quote.contentType ? ATTACHMENT_WORDS[quote.contentType] : undefined
   return `[En respuesta a ${what ?? "un mensaje anterior"}] `
+}
+
+/**
+ * Un reenviado no lo escribió la persona: una promoción o un mensaje de otro
+ * que reenvía no es lo que ella dice ni lo que ofrece la clínica.
+ */
+function forwardedForModel(forwarded: boolean | undefined): string {
+  return forwarded
+    ? "[Reenviado: no lo escribió la persona. No lo tomes como dicho por ella ni prometas lo que ofrece si no es de la clínica.] "
+    : ""
 }
 
 interface ThreadContext {
@@ -404,7 +416,11 @@ function historyToMessages(items: ThreadMessage[], zone: OrgLocale): BaseMessage
   for (const item of items) {
     const text = item.direction === "in" ? messageForModel(item) : (item.body ?? "[adjunto]")
     if (item.direction === "in") {
-      out.push(new HumanMessage({ content: `${stamp(item.createdAt)}${quoteForModel(item.quote)}${text}` }))
+      out.push(
+        new HumanMessage({
+          content: `${stamp(item.createdAt)}${quoteForModel(item.quote)}${forwardedForModel(item.forwarded)}${text}`,
+        }),
+      )
     } else if (item.senderKind === "agent") {
       out.push(new AIMessage({ content: text }))
     } else {

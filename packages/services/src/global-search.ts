@@ -18,6 +18,7 @@
  *   respuestas: quien llama decide si la frase puede ir al proveedor.
  * - Buscar nunca identifica: un teléfono compartido trae a las dos personas.
  */
+import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
 import { type SQL, sql } from "drizzle-orm"
 import { isDentist, ownBudgetOf } from "./budgets.js"
@@ -242,7 +243,7 @@ export async function searchEverything(
       select ${personColumns}
       from contact c
       left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
-      where c.organization_id = ${orgId} and c.is_active and c.screen is null
+      where c.organization_id = ${orgId} and c.is_active and c.screen is null and not ${testOnlyPersonSql(sql.raw("c"))}
         ${seesNonPatients ? sql`` : sql`and p.id is not null`}
         and (${personSearchCondition(q, { displayName: sql`c.display_name`, phone: sql`c.phone`, email: sql`c.email`, docNumber: sql`c.doc_number` })}
           ${record == null ? sql`` : sql`or p.patient_number = ${record}`})
@@ -275,7 +276,7 @@ export async function searchEverything(
       join conversation conv on conv.organization_id = m.organization_id and conv.id = m.conversation_id
       join contact c on c.organization_id = conv.organization_id and c.id = conv.contact_id
       left join channel_connection ch on ch.organization_id = conv.organization_id and ch.id = conv.channel_connection_id
-      where m.organization_id = ${orgId} and m.redacted_at is null and c.screen is null
+      where m.organization_id = ${orgId} and m.redacted_at is null and c.screen is null and not conv.is_test
         and ${foldedWordsMatch([sql`m.body`], q, { minWord: LONG_TEXT_WORD })}
       order by m.created_at desc limit ${PER_TYPE}`)
     for (const row of found)
@@ -636,8 +637,8 @@ export async function searchEverything(
       order by u.name limit ${PER_TYPE}`)
     for (const row of team) addOwner(professionalOwner(row, true, []))
     const branches = await rows(sql`
-      select b.id, b.name, b.district, b.province from branch b
-      where b.organization_id = ${orgId} and b.is_active and ${foldedWordsMatch([sql`b.name`, sql`b.district`, sql`b.province`], q)}
+      select b.id, b.name, b.address_line1, b.city from branch b
+      where b.organization_id = ${orgId} and b.is_active and ${foldedWordsMatch([sql`b.name`, sql`b.city`, sql`b.address_line1`], q)}
       order by b.name limit ${PER_TYPE}`)
     for (const row of branches)
       addOwner({
@@ -647,7 +648,7 @@ export async function searchEverything(
         id: String(row.id),
         title: String(row.name),
         badge: "Sede",
-        detail: [str(row.district), str(row.province)].filter(Boolean).join(", ") || null,
+        detail: [str(row.address_line1), str(row.city)].filter(Boolean).join(" · ") || null,
         matched: true,
         target: { screen: "agenda", branchId: String(row.id) },
         items: [],

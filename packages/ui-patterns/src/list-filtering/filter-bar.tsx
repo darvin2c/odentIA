@@ -131,12 +131,13 @@ export function FilterBar({
 
   return (
     <div className={cn("flex p-3 bg-card rounded-md", className)}>
-      {/* scroll-nativo: `useFittedInlineCount` mide este desborde para pasar a «Más filtros» lo que no cabe; casi nunca llega a desplazarse. */}
+      {/* scroll-nativo: `useFittedInlineCount` mide este desborde para pasar a «Más filtros» lo que no cabe; casi nunca llega a desplazarse.
+          Sin barra visible: el desborde de 1 o 2 px que deja el anillo de foco no debe dibujar una barra bajo los filtros. */}
       <div
         ref={containerRef}
         data-filter-row="desktop"
         className={cn(
-          "hidden w-full min-w-0 items-center gap-2 overflow-x-auto p-1 -m-1",
+          "hidden w-full min-w-0 items-center gap-2 overflow-x-auto p-1 -m-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
           inlineFrom === "lg" ? "lg:flex justify-end" : "md:flex",
         )}
       >

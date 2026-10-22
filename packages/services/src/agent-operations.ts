@@ -1,3 +1,4 @@
+import { canAccess } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
@@ -30,6 +31,7 @@ import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/sch
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
+import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
 import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
 import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
@@ -68,7 +70,13 @@ import { getAccountSummary } from "./payments.js"
 import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
-import { formatOrgMoney, formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
+import {
+  formatOrgMoney,
+  formatZoned,
+  formatZonedShort,
+  getOrgLocale,
+  type OrgLocale,
+} from "./locale.js"
 
 export { CONFIRM_TTL_HOURS }
 /** Ventana en ms derivada del plazo (una sola fuente de verdad). */
@@ -1239,6 +1247,27 @@ function payloadDate(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale"
   return formatZoned(date, zone)
 }
 
+/** El día y la hora de una cita como se dicen («lun 19 oct, 3:00 p. m.»). */
+function payloadWhen(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
+  const date =
+    value instanceof Date ? value : typeof value === "string" && value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) return null
+  return formatZonedShort(date, zone)
+}
+
+/** Cómo se dice el estado de una oportunidad o de una cita, sin su código. */
+const STATUS_WORDS: Record<string, string> = {
+  open: "abierta",
+  won: "ganada",
+  lost: "perdida",
+  programada: "programada",
+  confirmada: "confirmada",
+  atendida: "atendida",
+  no_asistio: "no vino",
+  cancelada: "cancelada",
+}
+const statusWords = (status: string): string => STATUS_WORDS[status] ?? status.replace(/_/g, " ")
+
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value)
 }
@@ -1323,10 +1352,9 @@ async function summarizeAfter(
     const answer = await readBudgetAnswer(tx, orgId, payload)
     return answer ? budgetAnswerSummary(answer, zone) : label
   }
-  const startsAt = payloadDate(payload.startsAt, zone)
-  const appointmentId = typeof payload.appointmentId === "string" ? payload.appointmentId.slice(0, 8) : null
-  const line = [startsAt, appointmentId ? `cita ${appointmentId}…` : null].filter(Boolean).join(" · ")
-  return line || label
+  // La cita se dice con su día y su hora, nunca con su identificador.
+  const startsAt = payloadWhen(payload.startsAt, zone)
+  return startsAt ? `Cita: ${startsAt}` : label
 }
 
 /**
@@ -1433,7 +1461,7 @@ async function captureExpectedState(
     if (!opp || opp.contactId !== contactId) return null
     // Sin 'Abierta' fija en la evidencia: el estado ya cerrado se rechaza al
     // crear en vez de congelar un antes falso.
-    if (opp.status !== "open") throw validation(`La oportunidad ya está ${opp.status}`)
+    if (opp.status !== "open") throw validation(`La oportunidad ya está ${statusWords(opp.status)}`)
     return {
       opportunityId: opp.id,
       stageId: opp.stageId,
@@ -1505,8 +1533,10 @@ function oppCurrentSummary(
     const line = [payloadText(live.nextActionNote), payloadDate(live.nextActionAt, zone)].filter(Boolean).join(" · ")
     return line ? `Tarea actual: ${line}` : "Sin tarea"
   }
-  const stage = stageName ?? `etapa ${live.stageId.slice(0, 8)}…`
-  return live.status === "open" ? `Etapa actual: ${stage}` : `Cerrada (${live.status}): ${stage}`
+  const stage = stageName ?? "una etapa que ya no existe"
+  return live.status === "open"
+    ? `Etapa actual: ${stage}`
+    : `${statusWords(live.status).charAt(0).toUpperCase()}${statusWords(live.status).slice(1)}: ${stage}`
 }
 
 function oppFreshness(
@@ -1519,7 +1549,12 @@ function oppFreshness(
   const currentSummary = oppCurrentSummary(action, live, stageName, zone)
   if (!expected?.opportunityId) return { isStale: false, currentSummary, reason: "" }
   if (!live) return { isStale: true, currentSummary, reason: "la oportunidad ya no existe" }
-  if (live.status !== "open") return { isStale: true, currentSummary, reason: `la oportunidad ya está ${live.status}` }
+  if (live.status !== "open")
+    return {
+      isStale: true,
+      currentSummary,
+      reason: `la oportunidad ya está ${statusWords(live.status)}`,
+    }
   if (
     (action === "mover_oportunidad" || action === "cerrar_oportunidad") &&
     expected.stageId != null &&
@@ -1545,15 +1580,26 @@ function apptFreshness(
   if (!live) {
     return { isStale: true, currentSummary: "La cita ya no está disponible", reason: "la cita ya no existe" }
   }
-  const currentSummary = `Cita actual: ${payloadDate(live.startsAt, zone) ?? live.startsAt.toISOString()} (${live.status})`
+  const currentSummary = apptSummary(live, zone)
   const version = expected?.appointmentVersion ?? payloadExpectedVersion
   if (version != null && live.version !== version) {
     return { isStale: true, currentSummary, reason: "la cita cambió desde la propuesta" }
   }
   if (live.status !== "programada" && live.status !== "confirmada") {
-    return { isStale: true, currentSummary, reason: `la cita ya está ${live.status}` }
+    return { isStale: true, currentSummary, reason: `la cita ya está ${statusWords(live.status)}` }
   }
   return { isStale: false, currentSummary, reason: "" }
+}
+
+/** La cita como está hoy: «Cita actual: lun 19 oct, 3:00 p. m.» y, si ya no está en pie, cómo quedó. */
+function apptSummary(
+  live: { startsAt: Date; status: string },
+  zone: Pick<OrgLocale, "timezone" | "locale">,
+): string {
+  const when = payloadWhen(live.startsAt, zone) ?? live.startsAt.toISOString()
+  return live.status === "programada" || live.status === "confirmada"
+    ? `Cita actual: ${when}`
+    : `Cita actual: ${when} · ${statusWords(live.status)}`
 }
 
 /**
@@ -1565,8 +1611,13 @@ function budgetFreshness(
   live: { status: string; updatedAt: Date } | null,
   number: number | null,
 ): { isStale: boolean; currentSummary: string | null; reason: string } {
-  if (!live) return { isStale: true, currentSummary: "El presupuesto ya no está disponible", reason: "el presupuesto ya no existe" }
-  const currentSummary = `Presupuesto ${number === null ? "" : `${budgetNumberText(number)} `}(${live.status})`
+  if (!live)
+    return {
+      isStale: true,
+      currentSummary: "El presupuesto ya no está disponible",
+      reason: "el presupuesto ya no existe",
+    }
+  const currentSummary = `Presupuesto ${number === null ? "" : `${budgetNumberText(number)} `}· ${statusWords(live.status)}`
   if (!expected?.budgetId) return { isStale: false, currentSummary, reason: "" }
   if (live.status !== expected.budgetStatus || live.updatedAt.toISOString() !== expected.budgetUpdatedAt) {
     return { isStale: true, currentSummary, reason: "el presupuesto cambió desde la propuesta" }
@@ -2559,6 +2610,22 @@ export async function executeProposal(
   if (locked.status !== "aprobada") {
     throw new ServiceError("PROPOSAL_NOT_APPROVED", 409, "La propuesta no está aprobada")
   }
+  // En una prueba del chat web Sofi responde de verdad (`enviar_mensaje`), pero
+  // no reserva, cambia ni anota nada en la clínica (fase 6 del pulido de la Bandeja).
+  if (locked.conversationId && locked.action !== "enviar_mensaje") {
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest })
+      .from(conversation)
+      .where(and(eq(conversation.id, locked.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (thread?.isTest) {
+      throw new ServiceError(
+        "TEST_CONVERSATION",
+        409,
+        "Es una prueba del chat web: no se reserva, cambia ni anota nada de verdad. Díselo así: en la prueba no queda nada hecho.",
+      )
+    }
+  }
   const action = locked.action as ProposalAction
   const payload = locked.payload
   const expected = expectedOf(locked)
@@ -2615,7 +2682,7 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          apptSummary(liveAppt, zone),
         )
       }
       const fresh = apptFreshness(
@@ -2653,7 +2720,7 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          apptSummary(liveAppt, zone),
         )
       }
       const fresh = apptFreshness(expected, null, {
@@ -2930,6 +2997,16 @@ export interface HandoffItem {
   status: HandoffStatus
   createdBy: string
   createdAt: string
+  /** De qué trata: dice a quién le llega (R3 de la Bandeja). */
+  kind: TopicKind
+  /** El mensaje de la persona que originó el tema; nulo si no hay uno. */
+  sourceMessageId: string | null
+  /**
+   * «Ahora»: prioridad alta o ya pasaron dos horas de clínica abierta
+   * esperando al equipo (`urgent_at`; decisión 1 del pulido). La misma regla
+   * en la Bandeja, Inicio y el panel.
+   */
+  urgent: boolean
 }
 
 export type HandoffStatus = "abierta" | "tomada" | "resuelta"
@@ -3001,6 +3078,9 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
             : "abierta",
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),
+      kind: topicKindOf(row.kind),
+      sourceMessageId: row.sourceMessageId,
+      urgent: topicIsUrgent(row),
     }
   })
 }
@@ -3331,8 +3411,10 @@ export async function createHandoff(
     pending?: string | null
     /** El mensaje de la persona que se responde; por defecto, su último entrante. */
     sourceMessageId?: string | null
-    /** Duda clínica: sin responsable, va al profesional que atiende al paciente. */
+    /** Duda clínica: sin responsable, va al profesional que atiende al paciente. Es lo mismo que `kind: "clinico"`. */
     clinical?: boolean
+    /** De qué trata (R3): decide a quién le llega si no se dice el responsable. */
+    kind?: TopicKind | null
   },
 ): Promise<HandoffItem> {
   const conv = await requireConversationInOrg(tx, orgId, input.conversationId)
@@ -3357,7 +3439,10 @@ export async function createHandoff(
     }
     assigneeUserId ??= task.assigneeUserId
   }
-  if (!assigneeUserId && input.clinical && conv.contactId) {
+  const kind: TopicKind = input.clinical ? "clinico" : topicKindOf(input.kind)
+  // Una duda clínica va al odontólogo que atiende a la persona; si no tiene o
+  // está ausente, queda para recepción (R3 de la Bandeja).
+  if (!assigneeUserId && kind === "clinico" && conv.contactId) {
     assigneeUserId = await treatingProfessional(tx, orgId, conv.contactId)
   }
   if (assigneeUserId) {
@@ -3371,12 +3456,17 @@ export async function createHandoff(
   const createdBy = input.createdBy === "user" ? "user" : "agent"
   task ??= await createTask(tx, orgId, {
     // Un solo nombre en toda la aplicación (decisión 1): la prioridad la dice la fila, no el título.
-    title: (createdBy === "user" ? `Tema pendiente: ${reason}` : `Te lo pasó el agente: ${reason}`).slice(0, 200),
+    // «Sofi» se dice con el nombre que le puso la clínica al mostrarlo (`withReceptionName`).
+    title: (createdBy === "user"
+      ? `Tema pendiente: ${reason}`
+      : `Te lo pasó Sofi: ${reason}`
+    ).slice(0, 200),
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
-    // Sin área, nadie de recepción la vería en «Mías y de mi área» (M5): el caso es de Recepción.
-    area: "recepcion",
+    // Sin área nadie la vería en «Mías y de mi área» (M5): un pago es de caja,
+    // una duda clínica del equipo clínico y lo demás de recepción (R3).
+    area: kind === "pago" ? "caja" : kind === "clinico" ? "clinico" : "recepcion",
     dueAt: new Date(Date.now() + HANDOFF_DUE_HOURS[priority] * 3_600_000).toISOString(),
     createdBy,
     actorUserId,
@@ -3396,6 +3486,9 @@ export async function createHandoff(
       taskId: task.id,
       createdBy,
       sourceMessageId,
+      kind,
+      // Pasa a «Ahora» a las dos horas de clínica abierta (decisión 1 del pulido).
+      urgentAt: await topicUrgentAt(tx, orgId, new Date()),
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar la derivación")
@@ -3436,18 +3529,32 @@ async function topicSourceMessage(tx: Db, orgId: string, conversationId: string,
 }
 
 /**
- * El profesional que atiende al paciente de esta persona: el de su cita no
- * cancelada más cercana a hoy (la última que tuvo o la próxima). Nulo si no
- * es paciente o nunca tuvo cita: el tema queda para recepción.
+ * El odontólogo que atiende a esta persona (R3 de la Bandeja): el que la
+ * atendió por última vez; si nunca la atendieron, el de su próxima cita. Si
+ * ese profesional está ausente hoy (Horarios y ausencias) o ya no es del
+ * equipo, nulo: el tema queda para recepción.
  */
 async function treatingProfessional(tx: Db, orgId: string, contactId: string): Promise<string | null> {
   const rows = await tx.execute<{ dentist_user_id: string }>(sql`
-    select a.dentist_user_id from appointment a
-    join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
-    join member mb on mb.organization_id = a.organization_id and mb.user_id = a.dentist_user_id
-    where a.organization_id = ${orgId} and p.person_id = ${contactId}
-      and a.status <> 'cancelada'
-    order by abs(extract(epoch from (a.starts_at - now()))) asc
+    select who.dentist_user_id from (
+      (select a.dentist_user_id, 0 as rank, a.starts_at as at from appointment a
+        join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+        where a.organization_id = ${orgId} and p.person_id = ${contactId}
+          and a.status = 'atendida' and a.starts_at <= now()
+        order by a.starts_at desc limit 1)
+      union all
+      (select a.dentist_user_id, 1 as rank, a.starts_at as at from appointment a
+        join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+        where a.organization_id = ${orgId} and p.person_id = ${contactId}
+          and a.status in ('programada', 'confirmada') and a.starts_at > now()
+        order by a.starts_at asc limit 1)
+    ) who
+    join member mb on mb.organization_id = ${orgId} and mb.user_id = who.dentist_user_id
+    where not exists (
+      select 1 from schedule_block b
+      where b.organization_id = ${orgId} and b.dentist_user_id = who.dentist_user_id
+        and b.starts_at <= now() and b.ends_at > now())
+    order by who.rank
     limit 1`)
   return rows[0]?.dentist_user_id ?? null
 }
@@ -3490,10 +3597,25 @@ export async function annotateHandoff(
 export async function listHandoffs(
   tx: Db,
   orgId: string,
-  input: { conversationId?: string; limit?: number; open?: boolean; order?: "reciente" | "urgencia"; visibleTo?: string } = {},
+  input: {
+    conversationId?: string
+    limit?: number
+    open?: boolean
+    order?: "reciente" | "urgencia"
+    visibleTo?: string
+    /** Solo los de esta persona o de estos tipos (Inicio de caja y del odontólogo), antes del límite. */
+    only?: { assignee?: string; kinds?: string[] }
+  } = {},
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
+  if (input.only) {
+    const either = [
+      ...(input.only.assignee ? [eq(agentHandoff.assigneeUserId, input.only.assignee)] : []),
+      ...(input.only.kinds?.length ? [inArray(agentHandoff.kind, input.only.kinds)] : []),
+    ]
+    if (either.length > 0) conditions.push(or(...either)!)
+  }
   if (input.open) conditions.push(handoffStillOpen())
   if (input.visibleTo) {
     conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, input.visibleTo))!)
@@ -3502,7 +3624,7 @@ export async function listHandoffs(
   const order =
     input.order === "urgencia"
       ? [
-          sql`case ${agentHandoff.priority} when 'alta' then 0 when 'media' then 1 else 2 end`,
+          sql`case when ${agentHandoff.priority} = 'alta' or ${agentHandoff.urgentAt} <= now() then 0 when ${agentHandoff.priority} = 'media' then 1 else 2 end`,
           asc(agentHandoff.createdAt),
           asc(agentHandoff.id),
         ]
@@ -3544,16 +3666,24 @@ export async function claimHandoff(
 ): Promise<HandoffItem> {
   const target = opts.toUserId ?? userId
   const [membership] = await tx
-    .select({ userId: member.userId })
+    .select({ userId: member.userId, role: member.role })
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, target)))
     .limit(1)
   if (!membership) throw validation("Solo un miembro de la organización puede tener el tema")
   const [before] = await tx
-    .select({ assigneeUserId: agentHandoff.assigneeUserId })
+    .select({ assigneeUserId: agentHandoff.assigneeUserId, kind: agentHandoff.kind })
     .from(agentHandoff)
     .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
     .limit(1)
+  // Un tema se contesta en la conversación: lo recibe quien escribe en ella, o
+  // caja si es un pago (lo responde desde Inicio; decisión 3 del pulido).
+  const allowed =
+    canAccess(membership.role, "conversations.write") ||
+    (before?.kind === "pago" && canAccess(membership.role, "conversations.topics"))
+  if (!allowed) {
+    throw validation("Esa persona no atiende conversaciones: elige a alguien de recepción o del equipo clínico")
+  }
   const passing = opts.toUserId !== undefined && opts.toUserId !== userId
   const [claimed] = await tx
     .update(agentHandoff)
@@ -3736,7 +3866,11 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
     error: input.error?.slice(0, 500) ?? null,
   })
   if (input.usage?.length) {
-    await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
+    // Lo que gasta Sofi en una prueba del chat web cuenta como probar, con su tope (fase 6 del pulido).
+    const [thread] = input.conversationId
+      ? await tx.select({ isTest: conversation.isTest }).from(conversation).where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId))).limit(1)
+      : []
+    await recordAiUsage(tx, orgId, { origin: thread?.isTest ? "probar" : "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
   }
   // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0031).
   if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {

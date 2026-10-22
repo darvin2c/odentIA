@@ -131,16 +131,16 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(page.locator("h1", { hasText: "Inicio" })).toHaveCount(1)
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toHaveCount(0)
 
-  // Abre en «Casos del agente»: «Tomar» (la conversación del caso) lo deja con responsable sin sacarlo de la lista.
+  // Abre en «Casos del agente»: «Tomar este tema» lo deja con responsable sin sacarlo de la lista ni tomar la conversación.
   const item = panel.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
   await expect(item).toContainText("Nadie lo ha tomado")
   await info.attach("panel-derivadas", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   })
-  await item.getByRole("button", { name: "Tomar", exact: true }).click()
+  await item.getByRole("button", { name: "Tomar este tema", exact: true }).click()
   await expect(item).toContainText("Ya lo tomaron")
-  await expect(item.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
+  await expect(item.getByRole("button", { name: "Tomar este tema", exact: true })).toHaveCount(0)
   const persisted = await call<Array<{ id: string; status: string }>>(
     page,
     "GET",

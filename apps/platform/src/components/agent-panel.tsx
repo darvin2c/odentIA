@@ -714,14 +714,13 @@ function AwaitingTab({ when }: { when: WhenFormatter }) {
 }
 
 /**
- * «Tomar» un caso derivado es tomar su conversación, la misma acción que en la
- * Bandeja (`POST /api/conversations/:id/take`): queda a nombre de quien la toma,
- * el agente deja de responder en el hilo y el caso queda tomado. Un caso sin
- * conversación se toma como caso.
+ * «Tomar este tema» (pulido de la Bandeja, tablero 4d): se toma el tema, no la
+ * conversación, como en la Bandeja. El agente sigue con lo demás y el cierre
+ * de la conversación no se detiene. Un caso sin conversación se toma como caso.
  */
 export function takeCase(handoff: Pick<AgentHandoff, "id" | "conversationId">): Promise<unknown> {
   return handoff.conversationId
-    ? apiFetch(`/api/conversations/${handoff.conversationId}/take`, { method: "POST" })
+    ? apiFetch(`/api/workspace/topics/${handoff.id}/take`, { method: "POST" })
     : apiFetch(`/api/agent/handoffs/${handoff.id}/claim`, { method: "POST" })
 }
 
@@ -794,7 +793,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
                     pending={claim.isPending}
                     onClick={() => claim.mutate(handoff)}
                   >
-                    Tomar
+                    {handoff.conversationId ? "Tomar este tema" : "Tomar"}
                   </SubmitButton>
                 ) : null}
                 {handoff.conversationId ? (

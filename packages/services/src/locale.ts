@@ -68,6 +68,34 @@ export function formatZoned(date: Date, zone: Pick<OrgLocale, "timezone" | "loca
 
 
 /**
+ * Un día y una hora como se dicen en la conversación: «lun 19 oct, 3:00 p. m.»
+ * (el año solo si no es el en curso). Para avisos y resúmenes que lee una persona.
+ */
+export function formatZonedShort(
+  date: Date,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
+  now: Date = new Date(),
+): string {
+  const year = (value: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric" }).format(value)
+  const day = date
+    .toLocaleDateString(zone.locale, {
+      timeZone: zone.timezone,
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      ...(year(date) !== year(now) ? { year: "numeric" as const } : {}),
+    })
+    .replace(/\./g, "")
+  const time = date.toLocaleTimeString(zone.locale, {
+    timeZone: zone.timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  })
+  return `${day}, ${time}`
+}
+
+/**
  * Moneda de la clínica para un importe nuevo que no indica la suya. Sin perfil
  * no se asume ninguna (`ORG_PROFILE_REQUIRED`).
  */

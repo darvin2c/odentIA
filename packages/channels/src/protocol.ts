@@ -28,9 +28,16 @@ export interface ReplyButton {
 }
 
 export type InboundContent =
-  // `replyId` viene cuando el texto es el botón que tocó la persona.
+  // `replyId` viene cuando el texto es el botón que tocó la persona (o lo que eligió de una lista).
   | { type: "text"; text: string; replyId?: string }
   | { type: "media"; mediaExternalId: string; mimeType: string; caption?: string }
+  // Una ubicación que mandó la persona; nombre y dirección si el proveedor los trae.
+  | { type: "location"; latitude: number; longitude: number; name?: string; address?: string }
+  /**
+   * La persona reaccionó a un mensaje (👍, ❤️…). No es un mensaje: se pega al
+   * reaccionado (`targetExternalMessageId`) y `emoji` nulo es que la quitó.
+   */
+  | { type: "reaction"; targetExternalMessageId: string; emoji: string | null }
 
 export interface NormalizedInbound {
   externalEventId: string
@@ -48,6 +55,13 @@ export interface NormalizedInbound {
   automated?: boolean
   /** La persona respondió citando este mensaje (el id del proveedor). */
   replyToExternalId?: string
+  /** Lo reenvió: no lo escribió la persona (WhatsApp `context.forwarded`, Telegram `forward_origin`). */
+  forwarded?: boolean
+  /**
+   * Prueba del chat web desde Configuración: la conversación nace marcada como
+   * prueba (no se cobra, no crea a nadie en Pacientes, se borra a los 7 días).
+   */
+  test?: boolean
 }
 
 /** Remitentes que por convención no leen respuestas. */
@@ -201,6 +215,8 @@ export interface OutboundMessage {
 
 export interface ChannelAdapterDeps {
   fetch: typeof fetch
+  /** Clave de la conexión para firmar lo que se envía a un tercero (el aviso al sitio del chat web). */
+  webhookSecret?: string
 }
 
 /** La cuenta que el proveedor reconoce con unas credenciales. */

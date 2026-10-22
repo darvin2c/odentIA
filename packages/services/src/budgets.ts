@@ -30,6 +30,7 @@ import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
+import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -142,6 +143,8 @@ export type BudgetWithTotals = BudgetRow & {
 /** Quién actúa en la ruta: el servidor limita al odontólogo a lo que indicó. */
 export interface BudgetActorOpts {
   memberRole?: string
+  /** Quién entrega el presupuesto: el agente o el equipo (la oportunidad lo dice). */
+  by?: "agente" | "persona"
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1404,6 +1407,7 @@ export async function deliverBudget(
     patientId,
     budgetId,
     serviceIds: [...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id))],
+    by: opts.by,
     total: { cents: full.totalCents, currency: updated.currency },
   })
   await notifyBudget(tx, orgId)
@@ -2124,7 +2128,7 @@ export async function getBudgetPrintPayload(
   // El presupuesto no pertenece a una sede. Si la clínica tiene una sola, la
   // hoja lleva su nombre, dirección y teléfono; con varias, los de la clínica.
   const branches = await tx
-    .select({ name: branch.name, addressLine1: branch.addressLine1, phone: branch.phone })
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .limit(2)
@@ -2167,7 +2171,7 @@ export async function getBudgetPrintPayload(
     clinic: {
       name: profile.tradeName || profile.legalName || "",
       branchName: onlyBranch?.name ?? null,
-      address: onlyBranch?.addressLine1 ?? profile.fiscalAddress ?? null,
+      address: (onlyBranch ? (await branchAddressWriter(tx, orgId))(onlyBranch.address) : null) ?? profile.fiscalAddress ?? null,
       phone: onlyBranch?.phone ?? null,
     },
     patient: patientRow,

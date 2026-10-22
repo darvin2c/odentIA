@@ -4,7 +4,7 @@ import { call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
-/** Los trece apartados: el nombre de la lista es el título de su página. */
+/** Los catorce apartados de quien es dueña: el nombre de la lista es el título de su página. */
 const SECTIONS: Array<[string, string]> = [
   ["Datos de la clínica", "/settings"],
   ["Sedes", "/settings/branches"],
@@ -17,6 +17,8 @@ const SECTIONS: Array<[string, string]> = [
   ["Medios de pago y ticket", "/settings/payment-methods"],
   ["Etapas de venta", "/settings/pipelines"],
   ["Campos de contacto", "/settings/fields"],
+  // Solo para quien ve Facturación (ADR 0065); la dueña la ve.
+  ["Plan y pagos", "/settings/plan"],
   ["Integraciones", "/settings/integrations"],
   ["Actividad del equipo", "/settings/audit"],
 ]

@@ -7,7 +7,8 @@ import { saasAction, saasNegotiation, saasNotice, saasPlan, saasSeller, saasSubs
 import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { getOrgLocale } from "./locale.js"
+import { formatMoney } from "@odentia/clinical"
+import { findOrgLocale } from "./locale.js"
 import { currentSaasTerms, saasTermsAt } from "./saas-commercial-terms.js"
 import { activeDiscountBps, currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
 
@@ -117,7 +118,7 @@ export async function setSaasTrialTerms(
   if (!Number.isInteger(input.trialDays) || input.trialDays < 1) throw validation("La prueba debe durar al menos un día")
   const { sub, plan } = await subscriptionAndPlan(tx, orgId)
   if (input.trialCreditCents > plan.trialMaxCreditCents || input.trialDays > plan.trialMaxDays) {
-    throw validation(`La prueba puede llegar como mucho a ${plan.trialMaxCreditCents / 100} ${plan.currency} y ${plan.trialMaxDays} días`)
+    throw validation(`La prueba puede llegar como mucho a ${formatMoney(plan.trialMaxCreditCents, plan.currency, "es")} y ${plan.trialMaxDays} días`)
   }
   const aboveDefault = input.trialCreditCents > plan.trialCreditCents || input.trialDays > plan.trialDays
   if (aboveDefault && actor.role !== "admin") {
@@ -306,16 +307,15 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
   const [sub] = await tx.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId)).limit(1)
   if (!sub || sub.isDemo) return []
   const consumption = await getSaasConsumption(tx, orgId, now)
-  const locale = await getOrgLocale(tx, orgId).catch(() => null)
-  const fmtDay = (date: Date) =>
-    new Intl.DateTimeFormat(locale?.locale ?? "es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: locale?.timezone ?? "UTC" }).format(date)
+  // El formato de la clínica (issue 36); sin perfil, el neutro, nunca el de un país.
+  const { locale: lang, timezone } = await findOrgLocale(tx, orgId)
+  const fmtDay = (date: Date) => new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long", timeZone: timezone }).format(date)
   // «vie 30 oct»: lo que cabe en una línea del teléfono.
   const fmtShort = (date: Date) =>
-    new Intl.DateTimeFormat(locale?.locale ?? "es-PE", { weekday: "short", day: "numeric", month: "short", timeZone: locale?.timezone ?? "UTC" })
+    new Intl.DateTimeFormat(lang, { weekday: "short", day: "numeric", month: "short", timeZone: timezone })
       .format(date)
       .replace(/\./g, "")
-  const money = (cents: number) =>
-    new Intl.NumberFormat(locale?.locale ?? "es-PE", { style: "currency", currency: consumption.currency ?? "USD" }).format(cents / 100)
+  const money = (cents: number) => formatMoney(Math.round(cents), consumption.currency ?? "USD", lang)
   const periodKey = consumption.period.start.toISOString().slice(0, 10)
   const levels = await currentSaasTerms(tx, now)
   const alerts: SaasAlert[] = []

@@ -14,7 +14,6 @@ import {
   getClinicNotices,
   archiveSaasPlan,
   assertSaasAllowed,
-  assertSaasSeatAvailable,
   chooseSaasPlan,
   claimFounderInvitation,
   completeFounderInvitation,
@@ -62,6 +61,7 @@ import {
   listSaasOverview,
   listSaasPaymentMethods,
   listSaasPayments,
+  listClinicPlans,
   listSaasPlans,
   listSaasSellers,
   listSaasSettlements,
@@ -133,8 +133,6 @@ const planInput = z
     currency,
     priceCents: cents,
     billingPeriod: z.string().max(40).nullish(),
-    maxBranches: z.number().int().positive().max(100000).nullish(),
-    maxSeats: z.number().int().positive().max(1000000).nullish(),
     sortOrder: z.number().int().min(0).max(100000).optional(),
     creditCents: cents.optional(),
     conversationMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
@@ -1001,11 +999,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountOwnerOrAdmin(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve los planes"), 403)
-    const parsed = z.object({ currency: currency.optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listSaasPlans(tx, { currency: parsed.data.currency, excludeInvitationOnly: true })),
-    )
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listClinicPlans(tx, orgId)))
   })
   // C2: lo que hicieron los agentes en el tramo que corre, con sus precios (ADR 0031).
   app.get("/consumption", async (c) => {
@@ -1341,9 +1335,8 @@ export async function readSaasSubscription(db: Db, orgId: string) {
  *   recuperar el control), `update` (renombrar no es operar) y `delete`
  *   (darse de baja no se bloquea por deuda). La pausa/bloqueo de SEGURIDAD
  *   se gestiona por identidad: aquí nunca se levanta al pagar.
- * - `invite-member` y `accept-invitation` (suman asientos) exigen estar al
- *   día comercial y cupo en el plan (`SAAS_RESTRICTED` / `SAAS_SEAT_LIMIT`).
- *   Refuerzo contra races en DB (`saas_seat_cap_*`, `0001_base_reglas.sql`).
+ * - `invite-member` y `accept-invitation` exigen estar al día comercial
+ *   (`SAAS_RESTRICTED`). El plan no limita personas (ADR 0031).
  * - Tras un `create` 2xx, `startSaasTrial` rellena plan/datos en la fila que
  *   ya dejó el trigger `saas_trial_on_org_create` en la misma transacción
  *   (garantía real; databaseHooks no cubre el modelo organization).
@@ -1374,9 +1367,8 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
       const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
       if (!session) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
       if (target && (await preAuthCallerAllowed(deps, session.user, tail, target))) {
-        // SAAS_RESTRICTED/SAAS_SEAT_LIMIT suben al onError central del padre.
-        // Se excluye el correo que se suma: aceptar al límite exacto pasa.
-        await decidePreAuthInvite(deps.ownerDb, target.organizationId, target.email)
+        // SAAS_RESTRICTED sube al onError central del padre.
+        await decidePreAuthInvite(deps.ownerDb, target.organizationId)
       }
       return next()
     }
@@ -1444,13 +1436,8 @@ async function resolvePreAuthTarget(
   if (!row) return null
   return { organizationId: row.organizationId, email: row.email }
 }
-async function decidePreAuthInvite(
-  ownerDb: Db,
-  organizationId: string,
-  email: string | null,
-): Promise<void> {
+async function decidePreAuthInvite(ownerDb: Db, organizationId: string): Promise<void> {
   await assertSaasAllowed(ownerDb, organizationId, "operar")
-  await assertSaasSeatAvailable(ownerDb, organizationId, email ?? undefined)
 }
 /**
  * ¿Se corre el chequeo comercial? Evita el side channel: invitar exige ser

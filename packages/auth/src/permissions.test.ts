@@ -53,6 +53,15 @@ describe("permiso operativo agent.decide", () => {
     expect(ALL_PERMISSIONS).toContain("clinical.alerts")
   })
 
+  it("caja responde los temas de pagos que le pasan sin ver la Bandeja (decisión 3 del pulido)", () => {
+    expect(canAccess("cashier", "conversations.topics")).toBe(true)
+    expect(canAccess("cashier", "conversations.read")).toBe(false)
+    expect(canAccess("reception", "conversations.topics")).toBe(true)
+    expect(canAccess("dentist", "conversations.topics")).toBe(true)
+    expect(canAccess("member", "conversations.topics")).toBe(false)
+    expect(ALL_PERMISSIONS).toContain("conversations.topics")
+  })
+
   it("recepción ve el inventario sin precios y recibe lo que llega (ADR 0067)", () => {
     expect(canAccess("reception", "inventory.stock")).toBe(true)
     expect(canAccess("reception", "inventory.receive")).toBe(true)

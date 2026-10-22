@@ -252,7 +252,7 @@ describe("la configuración de plataforma es opcional", () => {
 })
 
 describe("conectar con Facebook", () => {
-  it("canjea el código, guarda la conexión, suscribe la app, registra el número y pide los diez mensajes", async () => {
+  it("canjea el código, guarda la conexión, suscribe la app, registra el número y pide los once mensajes", async () => {
     const meta = fakeMeta()
     const { status, data } = await connect("org_a", meta, { code: "codigo-a", wabaId: "7001", phoneNumberId: "9001" })
     expect(status).toBe(201)
@@ -264,7 +264,8 @@ describe("conectar con Facebook", () => {
       "POST /9001/register",
       "GET /9001",
       "GET /7001/message_templates",
-      ...Array<string>(10).fill("POST /7001/message_templates"),
+      // Los nueve del agente, «Retomar la conversación» y «Ver respuesta» (R1 del pulido de la Bandeja).
+      ...Array<string>(11).fill("POST /7001/message_templates"),
     ])
     // Todo lo que sigue al canje viaja con la clave de la clínica, no con la de la app.
     expect(new Set(meta.calls.slice(1).map((call) => call.auth))).toEqual(new Set(["Bearer clave-de-codigo-a"]))
@@ -273,7 +274,7 @@ describe("conectar con Facebook", () => {
       externalId: "9001",
       status: "active",
       account: { name: "Clínica Sonríe", number: "+51 9001" },
-      templates: { canManage: true, requested: 10, error: null },
+      templates: { canManage: true, requested: 11, error: null },
       health: { quality: "alta", dailyLimit: 250, number: "+51 9001" },
       signup: { pending: [] },
     })
@@ -377,7 +378,7 @@ describe("conectar con Facebook", () => {
       ],
     })
     // Lo demás siguió: la salud y los mensajes no dependen del registro.
-    expect(data).toMatchObject({ templates: { requested: 10 }, health: { quality: "alta" } })
+    expect(data).toMatchObject({ templates: { requested: 11 }, health: { quality: "alta" } })
     const pin = decryptConfig(KEY, (await rowOf(data!.id)).configEncrypted)["registrationPin"]
 
     // «Reintentar»: solo el paso que falta, con el permiso y el PIN guardados.

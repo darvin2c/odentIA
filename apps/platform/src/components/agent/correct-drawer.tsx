@@ -137,7 +137,7 @@ export function CorrectDrawer({
         <>
           {isMobile ? (
             <section aria-label="La respuesta" className="flex flex-col gap-0.5 rounded-2xl rounded-bl-md bg-primary-soft px-3 py-2.5 text-sm">
-              <h3 className="text-xs font-bold text-primary-soft-foreground">{who ?? "El agente"} respondió</h3>
+              <h3 className="text-xs font-bold text-primary-soft-foreground">{who ?? receptionName} respondió</h3>
               <p className="whitespace-pre-wrap">{target.reply}</p>
             </section>
           ) : (

@@ -28,6 +28,7 @@ import {
   getLesson,
   lessonImpact,
   ServiceError,
+  assertAgentTestBudget,
   isSaasSendBlocked,
   getOrgLocale,
   nextAgentOpening,
@@ -270,9 +271,21 @@ export async function processAgentRun(
   msg: QueueMessage<AgentRunJob>,
 ): Promise<"done" | "retry"> {
   const { orgId, conversationId } = msg.message
+  // Una prueba del chat web (fase 6 del pulido) gasta como «probar», con su
+  // tope de 30 días: pasado el tope, Sofi no responde la prueba.
+  const test = await withOrgContext(db, orgId, async (tx) => {
+    const [thread] = await tx.select({ isTest: conversation.isTest }).from(conversation).where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId))).limit(1)
+    if (!thread?.isTest) return false
+    await assertAgentTestBudget(tx, orgId)
+    return true
+  }).catch((error: unknown) => {
+    if (error instanceof ServiceError && error.code === "AGENT_TEST_LIMIT") return null
+    throw error
+  })
+  if (test === null) return "done"
   // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0031),
   // también si falla o se reintenta.
-  return meterAiUse(db, orgId, "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+  return meterAiUse(db, orgId, test ? "probar" : "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
 }
 
 async function attendAgentRun(

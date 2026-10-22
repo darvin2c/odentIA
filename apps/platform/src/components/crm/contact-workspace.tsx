@@ -51,6 +51,11 @@ export interface ContactWorkspaceProps {
   onClose?: () => void
   /** Informa a la bandeja si hay borrador sin guardar (para guardar el cierre del panel). */
   onDraftChange?: (dirty: boolean) => void
+  /**
+   * Dentro del cajón estándar (Bandeja en el celular): sin su propia tarjeta ni
+   * su botón de cerrar, que los pone el cajón.
+   */
+  bare?: boolean
 }
 
 
@@ -100,6 +105,7 @@ export function ContactWorkspace({
   onRefresh,
   onClose,
   onDraftChange,
+  bare = false,
 }: ContactWorkspaceProps) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
@@ -329,6 +335,11 @@ export function ContactWorkspace({
     onSuccess: (result) => {
       setRegLink(result.data)
       setCopied(false)
+      // Se copia al tiro; si el navegador no deja, queda el enlace a la vista con «Copiar».
+      void navigator.clipboard?.writeText(result.data.url).then(
+        () => setCopied(true),
+        () => undefined,
+      )
     },
   })
 
@@ -350,10 +361,17 @@ export function ContactWorkspace({
             ? (contextQuery.error.shape.message ?? "No se pudo cargar el contexto")
             : "No se pudo cargar el contexto del contacto."}
         </p>
-        <Button variant="outline" size="sm" className="w-fit" onClick={() => void contextQuery.refetch()}>
-          <RefreshCw className="size-3.5" />
-          Reintentar
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="w-fit" onClick={() => void contextQuery.refetch()}>
+            <RefreshCw className="size-3.5" />
+            Reintentar
+          </Button>
+          {onClose ? (
+            <Button variant="ghost" size="sm" className="w-fit" onClick={onClose}>
+              Volver a la conversación
+            </Button>
+          ) : null}
+        </div>
       </div>
     )
   }
@@ -402,7 +420,7 @@ export function ContactWorkspace({
 
   return (
     // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
-    <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
+    <ScrollArea className={bare ? "min-h-0 flex-1" : "elevated min-h-0 flex-1 rounded-xl border bg-card"}>
     <section aria-label="Contexto del contacto" className="flex flex-col gap-3 p-4">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
@@ -529,8 +547,23 @@ export function ContactWorkspace({
               <Bot className="size-4 text-muted-foreground" aria-hidden />
               <Badge variant="secondary">{agentStateLabel(agent.state, receptionName)}</Badge>
               {pendingIds.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {pendingIds.length === 1 ? "1 cita espera el sí del paciente" : `${pendingIds.length} citas esperan el sí del paciente`}
+                <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  {pendingIds.length === 1 ? "1 cita espera su sí" : `${pendingIds.length} citas esperan su sí`}
+                  {conversationId ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto min-h-11 p-0 text-xs sm:min-h-0"
+                      onClick={() => {
+                        const band = document.getElementById("cita-espera")
+                        band?.scrollIntoView({ block: "center", behavior: "smooth" })
+                        band?.focus()
+                      }}
+                    >
+                      Ver en la conversación
+                    </Button>
+                  ) : null}
                 </span>
               )}
             </div>
@@ -554,7 +587,7 @@ export function ContactWorkspace({
               <div className="flex flex-col gap-2 border-t pt-2">
                 {!canDecide ? (
                   <p className="text-xs text-muted-foreground">
-                    Hay una propuesta que espera la confirmación del interlocutor.
+                    Una cita espera el sí de {contact.displayName.split(/\s+/)[0]}.
                   </p>
                 ) : proposalsQuery.isLoading && proposals.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Cargando propuestas…</p>
@@ -609,10 +642,8 @@ export function ContactWorkspace({
                             Al proponer: {ctx.beforeSummary}
                           </p>
                         )}
-                        <p className="text-xs">
-                          Estado del caso: {ctx.currentSummary ?? "No disponible"}
-                        </p>
-                        <p className="text-xs">Cambio previsto: {ctx.afterSummary}</p>
+                        {ctx.currentSummary ? <p className="text-xs">Hoy: {ctx.currentSummary}</p> : null}
+                        <p className="text-xs font-medium">{ctx.afterSummary}</p>
                         {ctx.isStale === true && p.status === "propuesta" && (
                           <p className="text-xs text-warning" role="status">
                             La situación cambió desde la propuesta: revisa el estado del caso antes de decidir.
@@ -633,34 +664,11 @@ export function ContactWorkspace({
                             Se ejecuta sin intervención del equipo.
                           </p>
                         )}
+                        {/* Registrar el sí que ya dio va solo en la franja de la conversación, donde se ve lo que dijo. */}
                         {p.mode === "confirmar_usuario" && (
                           <p className="text-xs text-muted-foreground">
-                            Requiere confirmación del interlocutor en el hilo; el equipo no la aprueba.
+                            Espera el sí de {contact.displayName.split(/\s+/)[0]} en esta conversación; el equipo no la aprueba.
                           </p>
-                        )}
-                        {p.mode === "confirmar_usuario" && p.status === "propuesta" && !cardError && (
-                          allowed ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-fit"
-                              disabled={confirmMutation.isPending}
-                              onClick={() => confirmMutation.mutate(p.id)}
-                            >
-                              {confirmMutation.isPending ? (
-                                <>
-                                  <Spinner className="size-6" aria-hidden />
-                                  Registrar confirmación
-                                </>
-                              ) : (
-                                "Registrar confirmación"
-                              )}
-                            </Button>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">
-                              Tu rol no puede registrar esta confirmación. Consulta con un administrador.
-                            </p>
-                          )
                         )}
                       </div>
                     )
@@ -714,16 +722,6 @@ export function ContactWorkspace({
                       </span>
                     </span>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      {/* La propia persona se reserva arriba; aquí, quien ella lleva. */}
-                      {canWriteAppointments && link.relationship !== "self" && (
-                        <Link
-                          to="/agenda"
-                          search={{ patientId: link.id, contactId, conversationId }}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          Reservar cita
-                        </Link>
-                      )}
                       <PersonLink patientId={link.id} className="text-xs text-primary hover:underline">
                         Abrir su página
                       </PersonLink>
@@ -740,21 +738,22 @@ export function ContactWorkspace({
                   size="sm"
                   className="w-fit"
                   disabled={!conversationId || registrationMutation.isPending}
-                  onClick={() => registrationMutation.mutate(ownRecord)}
+                  // El enlace ya preparado se vuelve a copiar: tocar dos veces no crea otro.
+                  onClick={() =>
+                    regLink
+                      ? void navigator.clipboard?.writeText(regLink.url).then(() => setCopied(true), () => undefined)
+                      : registrationMutation.mutate(ownRecord)
+                  }
                   title={
                     !conversationId
                       ? "Abre el contexto desde una conversación para generar el enlace"
                       : ownRecord
-                        ? "Genera un enlace para que registre a su hijo o a un familiar"
-                        : "Genera su enlace: elige su cita y deja sus datos"
+                        ? "Copia un enlace para que registre a su hijo o a un familiar"
+                        : "Copia su enlace: elige su cita y deja sus datos"
                   }
                 >
                   <UserPlus className="size-3.5" />
-                  {registrationMutation.isPending
-                    ? "Generando…"
-                    : ownRecord
-                      ? "Preparar registro de un familiar"
-                      : "Preparar su enlace"}
+                  {registrationMutation.isPending ? "Preparando…" : ownRecord ? "Copiar enlace de registro" : "Copiar su enlace"}
                 </Button>
                 {regLink && (
                   <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs">

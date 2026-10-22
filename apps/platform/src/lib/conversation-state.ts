@@ -1,4 +1,5 @@
 import { agentCaseRow, urgencyWord } from "./agent"
+import { channelLabel } from "./channels"
 import type { ConversationAttention, ConversationClosure, InboxTopic, ResolvePreview } from "./crm"
 import { timeAgo } from "./crm"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -140,6 +141,77 @@ export function messageTimeWords(iso: string, now: Date = new Date()): string {
   return words.startsWith("hoy ") ? words.slice("hoy ".length) : words
 }
 
+/** Solo la hora, en la zona de la clínica: el día lo dice el separador del hilo. */
+export function clockWords(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString(activeOrgLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
+/** El día de un mensaje en la zona de la clínica (AAAA-MM-DD), para separar el hilo por días. */
+export function messageDayKey(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? "" : dayKey(date, activeOrgTimeZone())
+}
+
+/**
+ * El separador de un día del hilo: «Hoy», «Ayer», «Martes 13 de octubre» y,
+ * si fue otro año, con el año.
+ */
+export function dayWords(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const timeZone = activeOrgTimeZone()
+  const day = dayKey(date, timeZone)
+  if (day === dayKey(now, timeZone)) return "Hoy"
+  if (day === dayKey(new Date(now.getTime() - 86_400_000), timeZone)) return "Ayer"
+  const otherYear = day.slice(0, 4) !== dayKey(now, timeZone).slice(0, 4)
+  const words = date.toLocaleDateString(activeOrgLocale(), {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    ...(otherYear ? { year: "numeric" as const } : {}),
+    timeZone,
+  })
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * La hora de una fila de la Bandeja: «10:42» si fue hoy, «ayer», el día de la
+ * semana si fue esta semana («mié»), y si no, el día y el mes («8 oct»; con el
+ * año si fue otro). Sin fecha no se escribe nada en su lugar.
+ */
+export function listTimeWords(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return ""
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const timeZone = activeOrgTimeZone()
+  const locale = activeOrgLocale()
+  const day = dayKey(date, timeZone)
+  const today = dayKey(now, timeZone)
+  if (day === today)
+    return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", timeZone })
+  if (day === dayKey(new Date(now.getTime() - 86_400_000), timeZone)) return "ayer"
+  const days = Math.round(
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000,
+  )
+  if (days > 0 && days < 7)
+    return date.toLocaleDateString(locale, { weekday: "short", timeZone }).replace(/\.$/, "")
+  const otherYear = day.slice(0, 4) !== today.slice(0, 4)
+  return date
+    .toLocaleDateString(locale, {
+      day: "numeric",
+      month: "short",
+      ...(otherYear ? { year: "numeric" as const } : {}),
+      timeZone,
+    })
+    .replace(/\./g, "")
+}
+
 /** Fecha y hora completas en la zona de la clínica, para el título de un mensaje. */
 export function fullWhenWords(iso: string): string {
   const date = new Date(iso)
@@ -165,8 +237,11 @@ export function resolveWords(
 ): { description: string; also: string[] } {
   const description = preview.farewell
     ? `Se cerrará la conversación con ${name}, se le enviará la despedida de la clínica y ${receptionName} volverá a atenderla si escribe de nuevo.`
-    : `Se cerrará la conversación con ${name}, pero no se le puede escribir: pasaron más de 23 horas desde su último mensaje. Se cerrará sin enviarle nada.`
-  return { description, also: pendingWords(preview.handoffs, preview.pendingContact, "resolver", receptionName) }
+    : `Se cerrará la conversación con ${name} sin enviarle nada: ya no se le puede escribir, porque su último mensaje fue hace casi 24 horas o más.`
+  return {
+    description,
+    also: pendingWords(preview.handoffs, preview.pendingContact, "resolver", receptionName),
+  }
 }
 
 /** Lo que pasa con lo pendiente del hilo al resolver o al cerrar sin resolver. */
@@ -208,4 +283,23 @@ export function closeAfterHoursIssue(value: string): string | null {
   const text = value.trim()
   const hours = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN
   return hours >= CLOSE_AFTER_HOURS_MIN && hours <= CLOSE_AFTER_HOURS_MAX ? null : "Escribe un número de horas entre 6 y 23."
+}
+
+/**
+ * Los canales de una persona en palabras, sin repetir: «WhatsApp»,
+ * «WhatsApp y Telegram», «WhatsApp, Telegram y Correo» (fase 4 del pulido).
+ */
+export function channelsWords(channels: string[]): string {
+  const names = [...new Set(channels.map(channelLabel))]
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`
+}
+
+/**
+ * Si se le puede escribir por ese canal (decisión 6 del pulido): WhatsApp,
+ * Instagram y Messenger se cierran 24 horas después de lo último de la
+ * persona; los demás siempre están abiertos.
+ */
+export function replyWindowWords(replyWindow: "open" | "closed" | null): string {
+  return replyWindow === "closed" ? "pasaron 24 horas" : "abierto"
 }

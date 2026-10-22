@@ -25,6 +25,7 @@ export * from "./consent.js"
 export * from "./money.js"
 export * from "./budget-words.js"
 export * from "./patient-registration.js"
+export * from "./postal-address.js"
 export * from "./periodontal.js"
 export * from "./inventory-units.js"
 export type {

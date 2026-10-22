@@ -13,17 +13,19 @@
  *   el agente el último año, tras un mensaje del Administrador que no fue un
  *   recordatorio (el mismo caso de `recoveredSql`).
  * - Algunas conversaciones que atendió el agente pasaron al equipo, que
- *   respondió después.
+ *   respondió después: cada tema queda resuelto con su tarea hecha (sin
+ *   tarea, un tema sigue abierto para siempre y llena «Te espera»).
  *
  * Determinista: cada decisión sale de una huella de datos que la historia ya
  * fija (fechas y personas), no del orden ni de identificadores al azar. No
  * envía nada ni enciende nada.
  */
+import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { agentHandoff } from "@odentia/db/schema/agent"
-import { message } from "@odentia/db/schema/crm"
+import { crmTask, message } from "@odentia/db/schema/crm"
 import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
@@ -147,6 +149,7 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   const lastOf = new Map<string, number>()
   const conversations: Array<typeof saasAction.$inferInsert> = []
   const handoffs: Array<typeof agentHandoff.$inferInsert> = []
+  const tasks: Array<typeof crmTask.$inferInsert> = []
   const teamReplies: Array<typeof message.$inferInsert> = []
   for (const reply of replies) {
     const at = asDate(reply.created_at)
@@ -170,7 +173,31 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
       const topic = HANDOFF_REASONS[Math.floor((roll / HANDOFF_SHARE) * HANDOFF_REASONS.length)] ?? HANDOFF_REASONS[0]
       const passedAt = new Date(at.getTime() + 2 * 60_000)
       const answeredAt = new Date(at.getTime() + (12 + Math.floor(mark(`equipo:${reply.external_thread_id}`) * 34)) * 60_000)
-      handoffs.push({ organizationId: orgId, conversationId: reply.conversation_id, contactId: reply.contact_id, reason: topic.reason, summary: topic.summary, createdBy: "agent", createdAt: passedAt })
+      const taskId = randomUUID()
+      tasks.push({
+        id: taskId,
+        organizationId: orgId,
+        contactId: reply.contact_id,
+        conversationId: reply.conversation_id,
+        title: `Te lo pasó Sofi: ${topic.reason}`,
+        status: "done",
+        createdBy: "agent",
+        area: "recepcion",
+        createdAt: passedAt,
+        updatedAt: answeredAt,
+      })
+      handoffs.push({
+        organizationId: orgId,
+        conversationId: reply.conversation_id,
+        contactId: reply.contact_id,
+        reason: topic.reason,
+        summary: topic.summary,
+        createdBy: "agent",
+        createdAt: passedAt,
+        taskId,
+        // La misma regla de «Ahora» (decisión 1 del pulido de la Bandeja): aquí, dos horas de reloj.
+        urgentAt: new Date(passedAt.getTime() + 2 * 3_600_000),
+      })
       teamReplies.push({
         organizationId: orgId,
         conversationId: reply.conversation_id,
@@ -185,6 +212,7 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
     }
   }
   for (const batch of chunks(conversations)) await tx.insert(saasAction).values(batch).onConflictDoNothing()
+  for (const batch of chunks(tasks)) await tx.insert(crmTask).values(batch)
   for (const batch of chunks(handoffs)) await tx.insert(agentHandoff).values(batch)
   for (const batch of chunks(teamReplies)) await tx.insert(message).values(batch).onConflictDoNothing()
   // La conversación termina con la respuesta del equipo: la Bandeja ordena por ella.

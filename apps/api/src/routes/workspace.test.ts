@@ -141,3 +141,16 @@ it("recepción abre a quién no pudo escribirle el agente con el mismo permiso c
   // Quien no ve la fila tampoco abre el detalle.
   expect((await buildApp("dentist", DENTIST).request("/agent/admin/unreached")).status).toBe(403)
 })
+
+it("responder o tomar un tema desde Inicio es de quien escribe en conversaciones o responde sus temas (caja), no de cualquiera", async () => {
+  const topic = "00000000-0000-4000-8000-000000000001"
+  const reply = (app: Hono) =>
+    app.request(`/workspace/topics/${topic}/reply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Ya nos llegó" }) })
+  expect((await reply(buildApp("member", OWNER))).status).toBe(403)
+  expect((await buildApp("member", OWNER).request(`/workspace/topics/${topic}/take`, { method: "POST" })).status).toBe(403)
+  // Caja pasa el permiso: el tema no existe y lo dice.
+  expect((await reply(buildApp("cashier", OWNER))).status).toBe(404)
+  // Sin texto no se envía nada.
+  const empty = await buildApp("cashier", OWNER).request(`/workspace/topics/${topic}/reply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "  " }) })
+  expect(empty.status).toBe(400)
+})

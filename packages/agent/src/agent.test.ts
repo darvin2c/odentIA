@@ -240,7 +240,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .where(eq(crmTask.conversationId, conversationId)),
   )
   // Un solo nombre para lo que el agente pasa al equipo, sin la prioridad en código.
-  expect(tasks.some((t) => t.title.startsWith("Te lo pasó el agente: "))).toBe(true)
+  expect(tasks.some((t) => t.title.startsWith("Te lo pasó Sofi: "))).toBe(true)
   const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({
@@ -2945,6 +2945,38 @@ it("quien responde citando uno de dos avisos de cita llega al modelo con el avis
   const said = model.seen[0]!.map((m) => String(m.content)).join("\n")
   expect(said).toContain("[En respuesta a: «Tu control de ortodoncia es el jueves 22 a las 15:00»] esta no puedo")
   expect(said).not.toContain("Tu cita de limpieza es el martes 20")
+})
+
+it("un mensaje reenviado llega al modelo marcado: no lo escribió la persona (fase 7 de la Bandeja)", async () => {
+  const { conversationId } = await ingestText("tg:reenvio", "evt-reenvio-0", "Hola")
+  const { messageId } = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: tgConnId,
+        event: {
+          externalEventId: "evt-reenvio-1",
+          externalMessageId: "evt-reenvio-1",
+          externalThreadId: "tg:reenvio",
+          senderExternalId: "tg:reenvio",
+          senderDisplayName: "Rosa",
+          content: { type: "text", text: "Promo 2x1 en blanqueamiento hasta el viernes" },
+          forwarded: true,
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const model = new ScriptedModel(() =>
+    toolCall("send_reply", { text: "Esa promoción no es nuestra." }, "call-1"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  const said = model.seen[0]!.map((m) => String(m.content)).join("\n")
+  expect(said).toContain("[Reenviado: no lo escribió la persona.")
+  expect(said).toContain("Promo 2x1 en blanqueamiento hasta el viernes")
 })
 
 /** El estado de Spam de la persona de una conversación. */

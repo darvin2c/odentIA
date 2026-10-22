@@ -43,7 +43,7 @@ export function PhoneMatchPrompt({ conversationId }: { conversationId: string })
   return (
     <div role="status" className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
       <p>
-        Este número es el teléfono de <span className="font-medium">{found.personName}</span>. ¿Es ella?
+        Este número es el teléfono de <span className="font-medium">{found.personName}</span>. ¿Es la misma persona?
       </p>
       <p className="text-xs text-muted-foreground">
         No se une sola: un mismo teléfono puede ser de otra persona. Si es ella, su conversación pasa a su página y el

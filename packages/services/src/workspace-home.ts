@@ -46,8 +46,19 @@ export interface WaitingRegistrationDone {
 
 export interface WaitingCase {
   id: string
-  /** `alta` es «Ahora», `media` «Hoy» y `baja` «Sin apuro». */
+  /** `media` es «Hoy» y `baja` «Sin apuro»; «Ahora» lo dice `urgent`. */
   priority: string
+  /** «Ahora»: alta, o ya pasaron dos horas de clínica abierta esperando (decisión 1 del pulido). */
+  urgent: boolean
+  /** De qué trata (R3): un pago le llega a caja, una duda clínica al odontólogo. */
+  topicKind: string
+  /**
+   * Quien mira lo responde desde Inicio, sin entrar a la Bandeja: es suyo, o es
+   * un pago sin tomar y quien mira es caja (decisión 3 del pulido).
+   */
+  canReply: boolean
+  /** Lo que preguntó, para responderlo ahí mismo; solo si `canReply`. */
+  quote: string | null
   reason: string
   contactName: string | null
   channel: string | null
@@ -297,7 +308,7 @@ export interface WaitingParts {
 
 export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const rows: WaitingRow[] = []
-  const urgent = parts.cases.filter((item) => item.priority === "alta")
+  const urgent = parts.cases.filter((item) => item.urgent)
   const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
   for (const item of urgentShown) rows.push({ kind: "case", ...item })
 
@@ -335,7 +346,7 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
 
   // «Hoy» antes que «Sin apuro»; lo que no encaja en ninguna se trata como «Hoy».
   const rank = (priority: string) => (priority === "baja" ? 1 : 0)
-  const others = parts.cases.filter((item) => item.priority !== "alta").sort((a, b) => rank(a.priority) - rank(b.priority))
+  const others = parts.cases.filter((item) => !item.urgent).sort((a, b) => rank(a.priority) - rank(b.priority))
   const othersShown = others.slice(0, WAITING_LIMITS.otherCases)
   for (const item of othersShown) rows.push({ kind: "case", ...item })
   const casesLeft = Math.max(parts.casesTotal ?? parts.cases.length, parts.cases.length) - urgentShown.length - othersShown.length

@@ -140,8 +140,8 @@ export async function processOutbound(
       if (row?.message.status !== "queued") return
       // Una conversación cerrada sí entrega lo que ya estaba en cola: la
       // despedida sale y enseguida se cierra (ADR 0024). Solo una conexión
-      // desactivada lo impide.
-      if (row.connection.status !== "active") {
+      // desactivada lo impide, salvo en la prueba del chat web (fase 6 del pulido).
+      if (row.connection.status !== "active" && !row.conversation.isTest) {
         await tx
           .update(message)
           .set({ status: "failed", error: "connection-disabled" })
@@ -169,7 +169,7 @@ export async function processOutbound(
         const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
         if (!adapter) throw new Error(`Proveedor desconocido: ${row.connection.provider}`)
         providerAttempted = true
-        externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch })).externalId
+        externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch, webhookSecret: row.connection.webhookSecret })).externalId
       }
       await tx
         .update(message)

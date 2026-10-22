@@ -78,6 +78,11 @@ export interface InsuranceScheme {
 export interface RegionOption {
   code: string
   label: string
+  /**
+   * Otros nombres con que la nombran los mapas, cuando el nombre solo no basta
+   * para reconocerla (`regionFromMap`): «Provincia de Lima» es Lima Metropolitana.
+   */
+  aliases?: readonly string[]
 }
 
 export interface AddressProfile {
@@ -333,8 +338,8 @@ const PERU_REGIONS: readonly RegionOption[] = [
   { code: "PE-JUN", label: "Junín" },
   { code: "PE-LAL", label: "La Libertad" },
   { code: "PE-LAM", label: "Lambayeque" },
-  { code: "PE-LMA", label: "Lima Metropolitana" },
-  { code: "PE-LIM", label: "Lima Provincias" },
+  { code: "PE-LMA", label: "Lima Metropolitana", aliases: ["Provincia de Lima", "Municipalidad Metropolitana de Lima"] },
+  { code: "PE-LIM", label: "Lima Provincias", aliases: ["Lima", "Región Lima", "Departamento de Lima"] },
   { code: "PE-LOR", label: "Loreto" },
   { code: "PE-MDD", label: "Madre de Dios" },
   { code: "PE-MOQ", label: "Moquegua" },

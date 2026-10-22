@@ -389,6 +389,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.proposal_failed": say("No pudo ejecutar una acción propuesta"),
   "agent.handoff_created": say("Pasó una conversación a una persona", "agente"),
   "agent.handoff_claimed": say("Tomó una conversación que Sofi derivó"),
+  "agent.handoff_retaken": say("Retomó un tema que el equipo no alcanzó a responder", "agente"),
   "agent.person_fact_added": say("Guardó un dato sobre una persona", "agente"),
   "agent.person_fact_removed": say("Quitó un dato guardado sobre una persona"),
   "agent.lesson_proposed": say("Propuso una lección para Sofi"),

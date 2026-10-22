@@ -149,6 +149,9 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     PASSWORD_BREACH_CHECK: "false",
     CHANNEL_SENDER_MODE: "mock",
     LLM_MODEL: "fake",
+    // Direcciones de demostración, sin red: la sede (Google) y el paciente (Geoapify).
+    GOOGLE_MAPS_API_KEY: "fake",
+    GEOAPIFY_API_KEY: "fake",
     // Ventana mínima: ejercita la cola con retardo sin alargar los recorridos.
     AGENT_BURST_WINDOW_SECONDS: "1",
     VITE_API_URL: api,

@@ -247,7 +247,32 @@ export function offTopicReply(treatment: "tu" | "usted" | null, persona: string,
     : `${who}. Solo puedo ayudarte con temas de la clínica: ${topics}. ¿En qué te ayudo?`
 }
 
-export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string {
+/**
+ * El aviso fijo al pasar un tema. En el chat web no se promete «por aquí»: si
+ * cierra la pestaña no le llega; el chat le pide dónde avisarle (R4 del pulido).
+ */
+export function handoffFallbackNotice(
+  treatment: "tu" | "usted" | null,
+  channel: string | null = null,
+  /** En el chat web: si el chat le pide dónde avisarle, si ya lo dejó o si se le responde ahí mismo. */
+  where: "preguntar" | "ya_dejo" | "aqui" = "preguntar",
+): string {
+  if (channel === "webchat") {
+    const usted = treatment === "usted"
+    if (where === "ya_dejo") {
+      return usted
+        ? "Recibimos su mensaje. Una persona del equipo le va a responder y le avisamos por donde nos dejó."
+        : "Recibimos tu mensaje. Una persona del equipo te va a responder y te avisamos por donde nos dejaste."
+    }
+    if (where === "aqui") {
+      return usted
+        ? "Recibimos su mensaje. Una persona del equipo le va a responder en este chat."
+        : "Recibimos tu mensaje. Una persona del equipo te va a responder en este chat."
+    }
+    return usted
+      ? "Recibimos su mensaje. Una persona del equipo le va a responder: déjenos aquí abajo dónde avisarle."
+      : "Recibimos tu mensaje. Una persona del equipo te va a responder: déjanos aquí abajo dónde avisarte."
+  }
   return treatment === "usted"
     ? "Recibimos su mensaje. Una persona del equipo le va a responder por aquí."
     : "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."

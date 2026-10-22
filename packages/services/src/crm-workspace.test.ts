@@ -544,7 +544,8 @@ it("contexto: workspace con estado del agente verdadero y capacidades", async ()
   const withCase = await withOrgContext(appDb, "org_a", (tx) =>
     getContactWorkspace(tx, "org_a", contactId, { capabilities: FULL }),
   )
-  expect(withCase.agent).toMatchObject({ state: "handoff", awaitingContact: true })
+  // El motivo del tema, una sola vez (la insignia ya dice «Te lo pasó Sofi»).
+  expect(withCase.agent).toMatchObject({ state: "handoff", awaitingContact: true, reason: "Reembolso." })
   expect(withCase.agent.pendingProposalIds).toHaveLength(1)
 
   // Conversación ajena y cerrada: validación y estado real.

@@ -23,6 +23,7 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
+// El chat web no se crea aquí: hay uno por clínica y nace solo (`getClinicWebchat`).
 const createInput = z.object({
   channel: z.string().min(1),
   provider: z.enum([
@@ -32,7 +33,6 @@ const createInput = z.object({
     "instagram",
     "gmail",
     "microsoft365",
-    "web_chat",
   ]),
   // Si falta, la conexión toma el nombre con el que el proveedor conoce la cuenta.
   displayName: z.string().max(120).optional(),
