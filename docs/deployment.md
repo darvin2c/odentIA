@@ -147,7 +147,9 @@ Sin CORS, la subida se detiene con un aviso y la tomografía queda a medias. En 
 ]
 ```
 
-MinIO de desarrollo y e2e acepta cualquier origen por defecto. `S3_ENDPOINT`
+En desarrollo, `infra/dev/storage-init.sh` pone esta misma regla al bucket de
+adjuntos de RustFS, con `https://*.localhost`, y e2e la pone con el dominio de
+cada ejecución (`e2e/stack.ts`): RustFS no da CORS por defecto. `S3_ENDPOINT`
 debe ser una dirección que el navegador alcance, la misma que ya usan las
 imágenes de la galería.
 

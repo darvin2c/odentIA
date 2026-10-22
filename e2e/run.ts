@@ -716,7 +716,7 @@ interface ReadinessTargets {
   mailpitUrl: string
   smtpHost: string
   smtpPort: number
-  minioUrl: string
+  storageUrl: string
 }
 
 /** Todas las sondas funcionales en paralelo; si alguna falla se recogen sus diagnósticos. */
@@ -790,8 +790,8 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
     })(),
     probeSmtp(targets.smtpHost, targets.smtpPort),
     (async () => {
-      const res = await fetchVia(targets.minioUrl, undefined, "MinIO /minio/health/ready")
-      if (res.status !== 200) throw new Error(`MinIO devolvió ${res.status}`)
+      const res = await fetchVia(targets.storageUrl, undefined, "RustFS /health")
+      if (res.status !== 200) throw new Error(`RustFS devolvió ${res.status}`)
     })(),
   ])
   const failures: string[] = []
@@ -1236,10 +1236,10 @@ export async function main(args: string[]): Promise<number> {
     if (!apiOrigin || !panelOrigin || !adminOrigin) {
       throw new Error("Faltan BETTER_AUTH_URL/WEB_URL/ADMIN_URL en el entorno generado.")
     }
-    const minio = runtime.minio
+    const storage = runtime.storage
     const mailpit = runtime.mailpit
-    if (!minio || !mailpit) {
-      throw new Error("La infraestructura no devolvió endpoints de MinIO/Mailpit.")
+    if (!storage || !mailpit) {
+      throw new Error("La infraestructura no devolvió endpoints de RustFS/Mailpit.")
     }
     const readinessSlug = await waitForWorker(state, childEnv)
     await waitForApps(state, {
@@ -1251,7 +1251,7 @@ export async function main(args: string[]): Promise<number> {
       mailpitUrl: `http://${mailpit.host}:${mailpit.httpPort}/api/v1/messages`,
       smtpHost: mailpit.host,
       smtpPort: mailpit.smtpPort,
-      minioUrl: `http://${minio.host}:${minio.port}/minio/health/ready`,
+      storageUrl: `http://${storage.host}:${storage.port}/health`,
     })
     mark("Readiness funcional", tReady)
 
