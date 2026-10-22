@@ -5,11 +5,11 @@ import {
   DATA_REQUEST_KINDS,
   DATA_REQUEST_VERIFICATIONS,
   denyDataRequest,
-  documentFileName,
-  listDataRequests,
+  getDataRequestsView,
   loadPatientRecord,
   patientRecordFhirBundle,
   patientRecordFileName,
+  patientRecordFiles,
   recordSendOptions,
   renderPatientRecordPdf,
   respondDataRequest,
@@ -51,7 +51,7 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
   app.get("/:id/data-requests", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listDataRequests(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) => getDataRequestsView(tx, orgId, c.req.param("id"))),
     )
   })
 
@@ -128,10 +128,10 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     let pdf: Uint8Array
     let fhir: string
     let fileName: string
-    let documents: Array<{ id: string; label: string; storageKey: string }>
+    let files: Array<{ name: string; storageKey: string }>
     let generatedAt: Date
     try {
-      ;({ pdf, fhir, fileName, documents, generatedAt } = await withOrgContext(deps.db, orgId, async (tx) => {
+      ;({ pdf, fhir, fileName, files, generatedAt } = await withOrgContext(deps.db, orgId, async (tx) => {
         const record = await loadPatientRecord(tx, orgId, patientId)
         // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora).
         await tx.insert(auditEvent).values({
@@ -146,7 +146,7 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
           pdf: await renderPatientRecordPdf(record),
           fhir: JSON.stringify(patientRecordFhirBundle(record), null, 2),
           fileName: patientRecordFileName(record, "zip"),
-          documents: record.documents,
+          files: await patientRecordFiles(tx, orgId, record),
           generatedAt: record.generatedAt,
         }
       }))
@@ -166,7 +166,7 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
         [
           { name: `${base}.pdf`, open: bytes(pdf) },
           { name: `${base}.fhir.json`, open: bytes(new TextEncoder().encode(fhir)) },
-          ...documents.map((d) => ({ name: `documentos/${documentFileName(d)}`, open: () => stream(d.storageKey) })),
+          ...files.map((f) => ({ name: f.name, open: () => stream(f.storageKey) })),
         ],
         generatedAt,
       ),

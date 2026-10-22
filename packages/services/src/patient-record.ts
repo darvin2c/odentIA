@@ -44,6 +44,8 @@ import {
   encounter,
   encounterDiagnosis,
   encounterProcedure,
+  imagingStudy,
+  imagingStudyFile,
   patientAllergy,
   patientCondition,
   patientDocument,
@@ -251,6 +253,17 @@ const APPOINTMENT_WORDS: Record<string, string> = {
   no_asistio: "no vino",
   cancelada: "cancelada",
 }
+const RELATION_WORDS: Record<string, string> = {
+  guardian: "representante",
+  family: "familiar",
+  other: "otra persona",
+}
+
+/** «en_curso» → «en curso»: el estado del tratamiento en palabras. */
+function planStatusWords(status: string): string {
+  return status.replaceAll("_", " ")
+}
+
 const CONSENT_WORDS: Record<string, string> = {
   pendiente: "pendiente",
   firmado: "firmado",
@@ -283,7 +296,12 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
       .join(" · ") || "Sin datos de contacto registrados.",
   )
   if (record.contacts.length)
-    w.list(record.contacts.map((c) => `${c.displayName}${c.detail ? ` · ${c.detail}` : ""}${c.phone ? ` · ${c.phone}` : ""}`))
+    w.list(
+      record.contacts.map(
+        (c) =>
+          `${c.displayName} · ${c.detail ?? RELATION_WORDS[c.relationship] ?? c.relationship}${c.phone ? ` · ${c.phone}` : ""}`,
+      ),
+    )
 
   w.heading("Alergias, antecedentes y medicamentos")
   if (!record.allergies.length && !record.conditions.length && !record.medications.length) w.text("Sin registros.")
@@ -334,7 +352,10 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
 
   w.heading("Plan de tratamiento")
   if (!record.planItems.length) w.text("Sin tratamientos en el plan.")
-  else w.list(record.planItems.map((i) => `${i.title}${i.toothNumber ? ` · pieza ${i.toothNumber}` : ""} · ${i.status}`))
+  else
+    w.list(
+      record.planItems.map((i) => `${i.title}${i.toothNumber ? ` · pieza ${i.toothNumber}` : ""} · ${planStatusWords(i.status)}`),
+    )
 
   w.heading("Recetas")
   if (!record.prescriptions.length) w.text("Sin recetas.")
@@ -357,7 +378,13 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
     w.list(
       record.consents.map(
         (c) =>
-          `${c.titleSnapshot} · ${CONSENT_WORDS[c.status] ?? c.status}${c.signedAt ? ` el ${when(c.signedAt, zone)}` : ""}${c.pdfSha256 ? ` · huella ${c.pdfSha256.slice(0, 16)}…` : ""}`,
+          `${c.titleSnapshot} · ${CONSENT_WORDS[c.status] ?? c.status}${
+            c.status === "revocado" && c.revokedAt
+              ? ` el ${when(c.revokedAt, zone)}`
+              : c.signedAt
+                ? ` el ${when(c.signedAt, zone)}`
+                : ""
+          }${c.pdfSha256 ? ` · huella ${c.pdfSha256.slice(0, 16)}…` : ""}`,
       ),
     )
 
@@ -602,9 +629,13 @@ function diagnosisCodeable(system: string | null, code: string | null, text: str
 
 /** El nombre de un documento dentro del ZIP: su id y su extensión, para que no choquen. */
 export function documentFileName(d: { id: string; label: string; storageKey: string }): string {
-  const ext = d.storageKey.includes(".") ? d.storageKey.slice(d.storageKey.lastIndexOf(".") + 1) : "bin"
-  const label = d.label.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)
-  return `${label} (${d.id.slice(0, 8)}).${ext}`
+  // «Consentimiento firmado: Exodoncia» → «Consentimiento firmado - Exodoncia».
+  const label = d.label.replace(/\s*[\\/:*?"<>|]+\s*/g, " - ").trim().slice(0, 80)
+  const name = `${label} (${d.id.slice(0, 8)})`
+  // Una tomografía es una carpeta con sus cortes: su nombre va sin extensión.
+  if (d.storageKey.endsWith("/")) return name
+  const last = d.storageKey.slice(d.storageKey.lastIndexOf("/") + 1)
+  return last.includes(".") ? `${name}.${last.slice(last.lastIndexOf(".") + 1)}` : name
 }
 
 // --- Enviar la copia a la persona ----------------------------------------------
@@ -703,4 +734,42 @@ export async function sendPatientRecordCopy(
     resolution: `Se le envió por ${CHANNEL_WORDS[conn.channel] ?? conn.channel} el PDF de su historia.`,
   })
   return { request: responded, conversationId, channel: conn.channel }
+}
+
+/**
+ * Los archivos de la persona para el ZIP, con su nombre dentro de él. Una
+ * tomografía no es un archivo sino sus cortes DICOM: van todos, en su carpeta,
+ * y solo si ya terminó de subirse.
+ */
+export async function patientRecordFiles(
+  tx: Db,
+  orgId: string,
+  record: PatientRecord,
+): Promise<Array<{ name: string; storageKey: string }>> {
+  const ids = record.documents.map((d) => d.id)
+  const studies = ids.length
+    ? await tx
+        .select({ documentId: imagingStudy.documentId, completedAt: imagingStudy.completedAt })
+        .from(imagingStudy)
+        .where(and(eq(imagingStudy.organizationId, orgId), inArray(imagingStudy.documentId, ids)))
+    : []
+  const studyOf = new Map(studies.map((s) => [s.documentId, s]))
+  const files: Array<{ name: string; storageKey: string }> = []
+  for (const d of record.documents) {
+    const study = studyOf.get(d.id)
+    if (!study) {
+      files.push({ name: `documentos/${documentFileName(d)}`, storageKey: d.storageKey })
+      continue
+    }
+    if (!study.completedAt) continue
+    const slices = await tx
+      .select({ index: imagingStudyFile.fileIndex, storageKey: imagingStudyFile.storageKey })
+      .from(imagingStudyFile)
+      .where(and(eq(imagingStudyFile.organizationId, orgId), eq(imagingStudyFile.documentId, d.id)))
+      .orderBy(asc(imagingStudyFile.fileIndex))
+    const folder = documentFileName({ ...d, storageKey: "/" })
+    for (const slice of slices)
+      files.push({ name: `documentos/${folder}/DICOM/${String(slice.index + 1).padStart(5, "0")}.dcm`, storageKey: slice.storageKey })
+  }
+  return files
 }

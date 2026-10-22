@@ -38,6 +38,14 @@ const storageStub = {
   },
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
   deleteAttachment: async () => {},
+  // La descarga de la historia lee cada archivo como flujo.
+  streamAttachment: async () =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("archivo"))
+        controller.close()
+      },
+    }),
   putPatientDocument: async () => {
     throw new Error("no usado")
   },
@@ -928,4 +936,33 @@ it("las alergias se agregan y se quitan una por una, solo quien escribe en la hi
   const health = await buildApp("clinician").request(`/patients/${fresh.id}/health`, { method: "GET" })
   const data = ((await health.json()) as { data: { allergyReviewDue: boolean; allergiesReviewedBy: string } }).data
   expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
+})
+
+it("pedidos sobre sus datos: Recepción los registra y envía; la historia completa solo la descarga quien lee la clínica (ADR 0080)", async () => {
+  const detail = (await (await buildApp("reception").request(`/patients/${patientId}`)).json()) as {
+    data: { contacts: Array<{ contactId: string; relationship: string }> }
+  }
+  const self = detail.data.contacts.find((c) => c.relationship === "self")!.contactId
+  const create = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/data-requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "copia", requesterContactId: self, channel: "clinica" }),
+    })
+  const created = await create("reception")
+  expect(created.status).toBe(201)
+  expect(((await created.json()) as { data: { status: string } }).data.status).toBe("pendiente")
+  expect((await create("cashier")).status).toBe(403)
+  expect((await create("clinician")).status).toBe(403)
+  const view = (await (await buildApp("reception").request(`/patients/${patientId}/data-requests`)).json()) as {
+    data: { requests: unknown[]; requesters: Array<{ contactId: string }> }
+  }
+  expect(view.data.requesters.map((r) => r.contactId)).toContain(self)
+  // La historia completa es clínica: Recepción no la descarga; quien atiende, sí.
+  expect((await buildApp("reception").request(`/patients/${patientId}/record`)).status).toBe(403)
+  const zip = await buildApp("clinician").request(`/patients/${patientId}/record`)
+  expect(zip.status).toBe(200)
+  expect(zip.headers.get("content-type")).toBe("application/zip")
+  const bytes = new Uint8Array(await zip.arrayBuffer())
+  expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
 })

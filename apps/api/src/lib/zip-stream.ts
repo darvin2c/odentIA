@@ -1,6 +1,10 @@
 import { Zip, ZipPassThrough } from "fflate"
 
-/** ZIP sin compresión que se arma mientras se envía: un archivo tras otro. */
+/**
+ * ZIP sin compresión que se arma mientras se envía: un archivo tras otro. Un
+ * archivo que no se puede leer queda vacío (o a medias) y el resto sigue: un
+ * error a mitad de una respuesta ya enviada no debe tumbar el servidor.
+ */
 export async function* zipStream(
   entries: readonly { name: string; open: () => Promise<ReadableStream<Uint8Array>> }[],
   mtime: Date,
@@ -19,12 +23,16 @@ export async function* zipStream(
     const file = new ZipPassThrough(entry.name)
     file.mtime = mtime
     zip.add(file)
-    const reader = (await entry.open()).getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      file.push(value)
-      yield* drain()
+    try {
+      const reader = (await entry.open()).getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        file.push(value)
+        yield* drain()
+      }
+    } catch (error) {
+      console.error(`zip: no se pudo leer ${entry.name}: ${error instanceof Error ? error.name : "error"}`)
     }
     file.push(new Uint8Array(0), true)
     yield* drain()

@@ -383,3 +383,21 @@ export async function dueDataRequests(tx: Db, orgId: string, today: string): Pro
     verified: r.verifiedAt !== null,
   }))
 }
+
+/** Lo que pinta la sección: los pedidos, quién puede pedir hoy y el día de la clínica. */
+export interface DataRequestsView {
+  requests: DataRequestItem[]
+  /** La propia persona si es mayor de edad y su representante legal vigente. */
+  requesters: Array<{ contactId: string; displayName: string; relation: "paciente" | "representante_legal" }>
+  today: string
+}
+
+export async function getDataRequestsView(tx: Db, orgId: string, patientId: string): Promise<DataRequestsView> {
+  const requests = await listDataRequests(tx, orgId, patientId)
+  const requesters = (await listDecisionRecipients(tx, orgId, patientId)).map(({ contactId, displayName, relation }) => ({
+    contactId,
+    displayName,
+    relation,
+  }))
+  return { requests, requesters, today: await clinicToday(tx, orgId) }
+}
