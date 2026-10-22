@@ -160,7 +160,7 @@ export function ConsentSheet({
         </p>
       ) : null}
       {signatureWords ? <p className="text-xs font-medium">{signatureWords}</p> : null}
-      <p className="text-[11px] text-neutral-600">
+      <p className="text-[11px] text-neutral-600 [overflow-wrap:anywhere]">
         {consentSignatureNote(signatureLaw)}
         {document.pdfSha256 ? ` Huella SHA-256 del PDF: ${document.pdfSha256}` : ""}
       </p>
