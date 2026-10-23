@@ -9,6 +9,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { ServiceError, notFound, validation } from "./errors.js"
 import { ensureDefaultPaymentMethods } from "./payment-methods.js"
+import { type OrgTaxInput, taxColumnsFor } from "./clinic-taxes.js"
 
 type OrgProfileRow = typeof orgProfile.$inferSelect
 
@@ -159,6 +160,8 @@ export interface UpdateOrgRegionInput {
   ticketFooter?: string | null
   /** Al cambiar de país se proponen moneda/formato/papel; todo se puede cambiar. */
   applyCountryPreset?: boolean
+  /** Impuestos de lo cobrado (ADR 0083): null en una cifra es volver a lo del país. */
+  taxes?: OrgTaxInput | null
 }
 /** Perfil regional completo con el que nace `org_profile`. */
 export interface InitialOrgRegion {
@@ -299,6 +302,15 @@ export async function updateOrgRegion(
   if (input.ticketFooter !== undefined && input.ticketFooter !== null) {
     set.ticketFooter = assertTicketFooter(input.ticketFooter)
     fields.push("ticketFooter")
+  }
+  if (input.taxes !== undefined && input.taxes !== null) {
+    // Solo queda lo que difiere de lo del país (ADR 0083).
+    Object.assign(set, taxColumnsFor(countryCode, input.taxes))
+    fields.push("taxes")
+  } else if (countryCode !== current.countryCode) {
+    // Otro país, otro impuesto: vale lo que propone el nuevo.
+    Object.assign(set, taxColumnsFor(countryCode, {}))
+    fields.push("taxes")
   }
   if (fields.length === 0) {
     await ensureDefaultPaymentMethods(tx, orgId, actorUserId, current.countryCode)

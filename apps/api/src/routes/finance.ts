@@ -241,6 +241,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
         fromCash: z.boolean().optional(),
+        // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
+        salesTax: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

@@ -290,13 +290,14 @@ describe("cuadre con Reportes", () => {
     expect(cobrado.vistas).toBe(20_000)
     const comisiones = await inMonth("comisiones", (from, to) => `select sum(comision) * 100 as v from comisiones where ${range("momento", from, to)}`)
     expect(comisiones.vistas).toBe(comisiones.pantalla)
-    const gastos = await inMonth("gastos", (from, to) => `select sum(monto) * 100 as v from gastos where tipo <> 'pago_de_comisiones' and ${range("momento", from, to)}`)
+    const gastos = await inMonth("gastos", (from, to) => `select sum(monto) * 100 as v from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado') and ${range("momento", from, to)}`)
     expect(gastos.vistas).toBe(gastos.pantalla)
     const queda = await inMonth(
       "lo_que_deja",
-      (from, to) => `select ((select coalesce(sum(importe), 0) from cobros where ${range("momento", from, to)})
+      // Lo cobrado sin su impuesto (ADR 0083) y sin volver a restar el pago de ese impuesto.
+      (from, to) => `select ((select coalesce(sum(importe - impuesto), 0) from cobros where ${range("momento", from, to)})
         - (select coalesce(sum(comision), 0) from comisiones where ${range("momento", from, to)})
-        - (select coalesce(sum(monto), 0) from gastos where tipo <> 'pago_de_comisiones' and ${range("momento", from, to)})) * 100 as v`,
+        - (select coalesce(sum(monto), 0) from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado') and ${range("momento", from, to)})) * 100 as v`,
     )
     expect(queda.vistas).toBe(queda.pantalla)
     const deben = await inMonth("te_deben", () => "select sum(saldo) * 100 as v from deudas")

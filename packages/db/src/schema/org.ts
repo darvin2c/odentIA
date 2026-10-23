@@ -57,9 +57,27 @@ export const orgProfile = pgTable("org_profile", {
   // Teléfono para urgencias de la clínica (fuera de horario también): lo da el
   // agente ante una urgencia. Nulo: el agente remite a emergencias.
   emergencyPhone: text("emergency_phone"),
+  // Impuestos de lo que cobra la clínica (ADR 0083): vale lo que propone su
+  // país (`resolveOrgTaxes` de @odentia/clinical); aquí solo queda lo que la
+  // clínica cambió, con la categoría de UN/CEFACT 5305 y la tasa en puntos
+  // básicos. Nulo es «lo del país». La forma de la clínica solo la pregunta un
+  // país donde el impuesto de la atención depende de ella (México).
+  taxLegalForm: text("tax_legal_form"),
+  servicesTaxCategory: text("services_tax_category"),
+  servicesTaxBps: integer("services_tax_bps"),
+  productsTaxCategory: text("products_tax_category"),
+  productsTaxBps: integer("products_tax_bps"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  check(
+    "org_profile_services_tax_check",
+    sql`(${table.servicesTaxCategory} IS NULL) = (${table.servicesTaxBps} IS NULL) AND (${table.servicesTaxCategory} IS NULL OR (${table.servicesTaxCategory} = 'S' AND ${table.servicesTaxBps} BETWEEN 1 AND 5000) OR (${table.servicesTaxCategory} IN ('E','O','Z') AND ${table.servicesTaxBps} = 0))`,
+  ),
+  check(
+    "org_profile_products_tax_check",
+    sql`(${table.productsTaxCategory} IS NULL) = (${table.productsTaxBps} IS NULL) AND (${table.productsTaxCategory} IS NULL OR (${table.productsTaxCategory} = 'S' AND ${table.productsTaxBps} BETWEEN 1 AND 5000) OR (${table.productsTaxCategory} IN ('E','O','Z') AND ${table.productsTaxBps} = 0))`,
+  ),
   check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
   check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),

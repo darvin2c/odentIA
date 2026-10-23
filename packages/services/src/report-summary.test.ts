@@ -51,9 +51,9 @@ it("lo cobrado neto de varios tramos: la anulación y la devolución corrigen el
 
   const [sep, aug] = await c.run((tx) => collectedNetMany(tx, c.orgId, [SEPTEMBER, AUGUST]))
   // 50 000 − 5 000 de devolución − 30 000 del cobro de agosto anulado.
-  expect(sep).toEqual([{ currency: "PEN", cents: 15_000 }])
+  expect(sep).toEqual([{ currency: "PEN", cents: 15_000, taxCents: 0 }])
   // Agosto queda como se cerró: el cobro anulado después sigue contando ahí.
-  expect(aug).toEqual([{ currency: "PEN", cents: 40_000 }])
+  expect(aug).toEqual([{ currency: "PEN", cents: 40_000, taxCents: 0 }])
 })
 
 it("te deben hace más de 30 días: lo que se debía en cada momento, descontado lo que tenía a favor", async () => {

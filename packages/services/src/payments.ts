@@ -42,6 +42,15 @@ import { clinicToday, consumeFefo, defaultWarehouse, returnSold, stockBySede } f
 import { quantityWords } from "@odentia/clinical"
 import { findOrgLocale } from "./locale.js"
 import { foldedWordsMatch } from "./search-text.js"
+import {
+  chargeTaxOf,
+  orgTaxes,
+  refundTaxCents,
+  splitTaxAcrossPayments,
+  type TaxableLine,
+  type TicketTaxes,
+  ticketTaxesOf,
+} from "./clinic-taxes.js"
 
 /** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -403,6 +412,8 @@ export async function createCharge(
     throw validation("La descripción debe tener 1–2000 caracteres")
   if (amountCents === undefined || !unit)
     throw validation("El importe y la moneda son obligatorios")
+  // El impuesto que vale hoy queda en el concepto (ADR 0083): cambiarlo después no lo toca.
+  const tax = chargeTaxOf(await orgTaxes(tx, orgId), Boolean(sale))
   const [row] = await tx
     .insert(patientCharge)
     .values({
@@ -422,6 +433,8 @@ export async function createCharge(
       productId: sale?.productId ?? null,
       productQuantity: sale?.quantity ?? null,
       requestKey: sale ? (input.requestKey?.trim() ?? null) : null,
+      taxCategory: tax?.taxCategory ?? null,
+      taxBps: tax?.taxBps ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -849,6 +862,17 @@ export interface TicketFrozen {
   notice: string
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
+  /**
+   * Lo que falta pagar de cada concepto de este cobro (ADR 0083): «Le falta
+   * pagar», aparte del pago, con lo pagado de lo que cuesta. Solo los que aún
+   * deben algo.
+   */
+  pending?: Array<{ chargeId: string; description: string; amountCents: number; remainingCents: number }>
+  /**
+   * El impuesto de lo que entró hoy, separado como en una boleta: subtotal sin
+   * impuesto y una línea por tasa (ADR 0083). Nulo si nada lleva impuesto.
+   */
+  taxes?: TicketTaxes | null
 }
 
 export interface CollectMethodInput {
@@ -1221,6 +1245,23 @@ export async function collectCharge(
       appliedCents: 0,
       promotion: null,
     })
+  // El impuesto de lo que entra hoy (ADR 0083): cada concepto con el que guardó
+  // al crearse; lo que queda a favor, con el de las atenciones. Lo pagado con
+  // saldo a favor ya lo llevó cuando entró ese dinero.
+  const taxes = await orgTaxes(tx, orgId)
+  const taxable: TaxableLine[] = targets
+    .filter((t) => (newAppliedByCharge[t.charge.id] ?? 0) > 0)
+    .map((t) => ({
+      amountCents: newAppliedByCharge[t.charge.id] ?? 0,
+      taxCategory: t.charge.taxCategory,
+      taxBps: t.charge.taxBps,
+      scope: t.charge.productId ? ("productos" as const) : ("servicios" as const),
+    }))
+  const toCredit = totalNew - sum(taxable)
+  if (toCredit > 0 && taxes)
+    taxable.push({ amountCents: toCredit, taxCategory: taxes.servicios.category, taxBps: taxes.servicios.rateBps, scope: "servicios" })
+  const ticketTaxes = ticketTaxesOf(taxes, taxable, profile.locale)
+  const paymentTaxes = splitTaxAcrossPayments(ticketTaxes?.taxCents ?? 0, methods.map((m) => m.amountCents))
   const [ticket] = await tx
     .insert(paymentTicket)
     .values({
@@ -1267,13 +1308,22 @@ export async function collectCharge(
         notice: profile.ticketFooter,
         // Lo que quedó por cobrar de estos conceptos: el reintento lo repite igual.
         remainingCents: sum(targets.map((t) => ({ amountCents: t.outstanding }))),
-      },
+        pending: targets
+          .filter((t) => t.outstanding > 0)
+          .map((t) => ({
+            chargeId: t.charge.id,
+            description: t.charge.description,
+            amountCents: t.charge.amountCents,
+            remainingCents: t.outstanding,
+          })),
+        taxes: ticketTaxes,
+      } satisfies TicketFrozen,
       createdBy: actorUserId,
     })
     .returning()
   if (!ticket) throw new ServiceError("INTERNAL", 500, "No se pudo registrar el cobro")
   const payments = []
-  for (const item of methods) {
+  for (const [index, item] of methods.entries()) {
     const [payment] = await tx
       .insert(patientPayment)
       .values({
@@ -1286,6 +1336,7 @@ export async function collectCharge(
         methodTypeCode: item.typeCode,
         payerContactId: input.payerContactId ?? null,
         amountCents: item.amountCents,
+        taxCents: paymentTaxes[index] ?? 0,
         currency: unit,
         paidAt,
         reference: item.reference,
@@ -1612,6 +1663,8 @@ export async function refundCredit(
           patientId,
           paymentId: payment.id,
           amountCents: take,
+          // Con el dinero sale su parte del impuesto (ADR 0083).
+          taxCents: refundTaxCents(payment, take),
           refundedAt: at,
           reason: reason(input.reason),
           createdBy: actorUserId,
@@ -2161,6 +2214,9 @@ export async function returnFromTicket(
           productQuantity: keptQuantity,
           originalChargeId: original,
           returnedCents: charge.returnedCents + item.amountCents,
+          // Lo que queda conserva el impuesto con que se vendió.
+          taxCategory: charge.taxCategory,
+          taxBps: charge.taxBps,
           createdBy: actorUserId,
         })
         .returning()
@@ -2208,7 +2264,14 @@ export async function returnFromTicket(
   }
   if (method) {
     // Se le paga en el mismo paso: lo liberado de cada pago sale por el medio elegido.
+    const freedPayments = freed.size
+      ? await tx
+          .select({ id: patientPayment.id, amountCents: patientPayment.amountCents, taxCents: patientPayment.taxCents })
+          .from(patientPayment)
+          .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, [...freed.keys()])))
+      : []
     for (const [paymentId, amountCents] of freed) {
+      const paid = freedPayments.find((item) => item.id === paymentId)
       const [refund] = await tx
         .insert(patientPaymentRefund)
         .values({
@@ -2216,6 +2279,8 @@ export async function returnFromTicket(
           patientId,
           paymentId,
           amountCents,
+          // Con el dinero sale su parte del impuesto (ADR 0083).
+          taxCents: paid ? refundTaxCents(paid, amountCents) : 0,
           refundedAt: now,
           reason: `${label}: ${reasonText}`,
           returnId: row.id,

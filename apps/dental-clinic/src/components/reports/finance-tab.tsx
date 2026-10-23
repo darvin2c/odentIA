@@ -218,7 +218,11 @@ function FinanceCards({ data }: { data: ReportFinance }) {
         value={money(current.cobradoCents)}
         change={current.cobradoCents === 0 && previous.cobradoCents === 0 ? undefined : relativeChange(current.cobradoCents, previous.cobradoCents, phrase, locale)}
         better="up"
-        detail="Ya descontadas las devoluciones"
+        detail={
+          current.taxCents > 0 && data.taxName
+            ? `Ya descontadas las devoluciones · incluye ${money(current.taxCents)} de ${data.taxName}`
+            : "Ya descontadas las devoluciones"
+        }
       />
       <FinanceCard
         title={data.period.from.year === data.period.to.year && data.period.from.month === data.period.to.month && !data.period.days ? "Lo que deja el mes" : "Lo que deja el periodo"}
@@ -226,7 +230,13 @@ function FinanceCards({ data }: { data: ReportFinance }) {
         tone="highlight"
         change={current.leavesCents === 0 && previous.leavesCents === 0 ? undefined : moneyChange(current.leavesCents, previous.leavesCents, money, phrase)}
         better="up"
-        detail={current.cobradoCents > 0 ? `${percentOf(current.leavesCents, current.cobradoCents)} de lo cobrado` : undefined}
+        detail={
+          current.cobradoCents - current.taxCents > 0
+            ? current.taxCents > 0 && data.taxName
+              ? `${percentOf(current.leavesCents, current.cobradoCents - current.taxCents)} de lo cobrado sin ${data.taxName}`
+              : `${percentOf(current.leavesCents, current.cobradoCents)} de lo cobrado`
+            : undefined
+        }
       />
       <FinanceCard
         title="Comisiones"
@@ -281,7 +291,7 @@ const CATEGORY_NOTE: Record<string, string> = {
   Laboratorio: "Trabajos de laboratorio registrados en Finanzas › Gastos.",
   Alquiler: "El alquiler de las sedes.",
   Servicios: "Luz, agua, internet y teléfono.",
-  Impuestos: "Impuestos registrados como gasto.",
+  Impuestos: "Impuestos registrados como gasto (renta, municipales). El pago del impuesto de lo cobrado no está aquí: ya se restó arriba.",
   Otros: "Gastos registrados como «Otros».",
 }
 
@@ -290,6 +300,7 @@ function Cascade({ data }: { data: ReportFinance }) {
   const canFinance = usePermission("finance.read")
   const money: Money = (cents) => formatMoney(cents, currency, locale)
   const { cascade } = data
+  const taxName = data.taxName ?? "Impuesto"
   const current = data.totals.current
   const gastosSearch = { tab: "gastos" as const, ...(data.branch ? { branch: data.branch.id } : {}) }
   const steps: Array<WaterfallStep & { note: string; link?: ReactNode }> = [
@@ -305,6 +316,18 @@ function Cascade({ data }: { data: ReportFinance }) {
         </Link>
       ) : null,
     },
+    ...(cascade.taxCents !== 0
+      ? [
+          {
+            key: "impuesto",
+            label: taxName,
+            value: cascade.taxCents,
+            kind: "less" as const,
+            tone: "muted" as const,
+            note: `El ${taxName} de los cobros del periodo, según el que guardó cada cobro. No es de la clínica: se le paga a la autoridad tributaria el mes siguiente; por eso también está en «Lo que debes».`,
+          },
+        ]
+      : []),
     {
       key: "comisiones",
       label: "Comisiones",
@@ -336,27 +359,33 @@ function Cascade({ data }: { data: ReportFinance }) {
       label: "Lo que deja",
       value: cascade.leavesCents,
       kind: "result",
-      note: "Lo cobrado menos las comisiones generadas y los demás gastos del periodo.",
+      note:
+        cascade.taxCents !== 0
+          ? `Lo cobrado menos su ${taxName}, las comisiones generadas y los demás gastos del periodo.`
+          : "Lo cobrado menos las comisiones generadas y los demás gastos del periodo.",
     },
   ]
-  const otherShare = rateOf(current.otherExpensesCents, current.cobradoCents)
-  const commissionShare = rateOf(current.commissionCents, current.cobradoCents)
-  const leavesShare = rateOf(current.leavesCents, current.cobradoCents)
+  // Con impuesto, las partes son de lo cobrado sin él: el impuesto no es de la clínica.
+  const base = current.cobradoCents - current.taxCents
+  const otherShare = rateOf(current.otherExpensesCents, base)
+  const commissionShare = rateOf(current.commissionCents, base)
+  const leavesShare = rateOf(current.leavesCents, base)
   const period = spanLabel(data.period, locale)
-  const owed = data.payables.commissions.cents + data.payables.purchases.cents
+  const owed = data.payables.commissions.cents + data.payables.purchases.cents + data.payables.salesTax.cents
+  const taxLead = current.taxCents > 0 ? `De lo cobrado en ${period}, ${money(current.taxCents)} son ${taxName} y no son de la clínica. De lo que queda, el` : null
   return (
     <ReportCard title="De lo cobrado a lo que deja el periodo">
       <div className="-mt-2 flex min-w-0 flex-wrap items-start justify-between gap-3">
         <p className="max-w-3xl text-sm text-muted-foreground">
           {current.cobradoCents > 0 && commissionShare !== null && otherShare !== null && leavesShare !== null
             ? leavesShare >= 0
-              ? `De lo cobrado en ${period}, el ${commissionShare} % fueron comisiones, el ${otherShare} % otros gastos y quedó el ${leavesShare} %.`
+              ? `${taxLead ?? `De lo cobrado en ${period}, el`} ${commissionShare} % fueron comisiones, el ${otherShare} % otros gastos y quedó el ${leavesShare} %.`
               : `En ${period} las comisiones (${commissionShare} %) y los otros gastos (${otherShare} %) pasaron lo cobrado: faltaron ${money(-current.leavesCents)}.`
             : `En ${period} no se cobró nada.`}
         </p>
         <span className="rounded-full bg-secondary px-2.5 py-1 text-[13px] font-semibold text-foreground/80">
           En caja quedó {money(current.cashLeftCents)}
-          {owed > 0 ? ` · debes ${money(owed)} (comisiones y compras)` : ""}
+          {owed > 0 ? ` · debes ${money(owed)} (${data.payables.salesTax.cents > 0 ? `comisiones, compras e ${taxName}` : "comisiones y compras"})` : ""}
         </span>
       </div>
       {data.missing.slice(0, 3).map((gap) => (
@@ -391,6 +420,7 @@ function Cascade({ data }: { data: ReportFinance }) {
       )}
       <p className="text-[13px] text-muted-foreground">
         Las comisiones cuentan cuando se generan (al cobrar), aunque todavía no se hayan pagado. Los gastos son los que el equipo registra en Finanzas › Gastos, por tipo; solo aparecen los tipos con algo en el periodo.
+        {cascade.taxCents !== 0 ? ` El pago del ${taxName} no es un gasto: ya se restó de lo cobrado.` : ""}
       </p>
     </ReportCard>
   )
@@ -467,6 +497,8 @@ function MonthlyChart({ data }: { data: ReportFinance }) {
   const money: Money = (cents) => formatMoney(cents, currency, locale)
   if (data.chart.length < 2) return null
   if (data.chart.every((bucket) => bucket.cobradoCents === 0 && bucket.commissionCents === 0 && bucket.otherExpensesCents === 0)) return null
+  const hasTax = data.chart.some((bucket) => bucket.taxCents !== 0)
+  const taxName = data.taxName ?? "Impuesto"
   const complete = data.chart.filter((bucket) => !bucket.partial)
   const first = complete[0]
   const last = complete[complete.length - 1]
@@ -478,12 +510,13 @@ function MonthlyChart({ data }: { data: ReportFinance }) {
     <ReportCard title={`En qué se fue lo cobrado, ${GRAIN_WORD[grain]}`} note={currency}>
       {insight ? <p className="-mt-2 text-sm text-muted-foreground">{insight}</p> : null}
       <ColumnChart
-        title={`Cobrado ${GRAIN_WORD[grain]}, repartido en otros gastos, comisiones y lo que deja`}
+        title={`Cobrado ${GRAIN_WORD[grain]}, repartido en ${hasTax ? `${taxName}, ` : ""}otros gastos, comisiones y lo que deja`}
         stacked
         total={{ label: "Cobrado", values: data.chart.map((bucket) => bucket.cobradoCents) }}
         tableHeading={grain === "month" ? "Mes" : grain === "week" ? "Semana" : "Día"}
         categories={data.chart.map((bucket) => ({ key: bucket.key, label: bucketLabel(bucket, grain, locale), short: bucketShort(bucket, grain, locale), partial: bucket.partial }))}
         bars={[
+          ...(hasTax ? [{ key: "impuesto", label: taxName, tone: "muted" as const, values: data.chart.map((bucket) => bucket.taxCents) }] : []),
           { key: "otros", label: "Otros gastos", tone: "series-3", values: data.chart.map((bucket) => bucket.otherExpensesCents) },
           { key: "comisiones", label: "Comisiones", tone: "series-2", values: data.chart.map((bucket) => bucket.commissionCents) },
           // Un mes con pérdida deja menos de cero: la tabla lo escribe así y el dibujo no lo apila.
@@ -501,6 +534,7 @@ function MonthlyChart({ data }: { data: ReportFinance }) {
                 {bucket.partial ? ", hasta hoy" : ""}
               </strong>
               <span>Cobrado: {money(bucket.cobradoCents)}</span>
+              {hasTax ? <span>{taxName}: {money(bucket.taxCents)}</span> : null}
               <span>Comisiones: {money(bucket.commissionCents)}</span>
               <span>Otros gastos: {money(bucket.otherExpensesCents)}</span>
               <span className="font-bold">{bucket.leavesCents >= 0 ? `Deja: ${money(bucket.leavesCents)}` : `Faltaron: ${money(-bucket.leavesCents)}`}</span>
@@ -792,8 +826,9 @@ function PayablesCard({ data }: { data: ReportFinance }) {
   // «Pagar comisiones» se ofrece a quien puede pagarlas, no solo verlas.
   const canPay = usePermission("commissions.write")
   const canInventory = usePermission("inventory.read")
-  const { commissions, purchases } = data.payables
-  const total = commissions.cents + purchases.cents
+  const { commissions, purchases, salesTax } = data.payables
+  const taxName = data.taxName ?? "Impuesto"
+  const total = commissions.cents + purchases.cents + salesTax.cents
   const daysSince = purchases.oldestReceivedAt ? Math.max(0, Math.floor((new Date(data.period.end).getTime() - new Date(purchases.oldestReceivedAt).getTime()) / 86_400_000)) : null
   return (
     <ReportCard title="Lo que debes">
@@ -801,11 +836,12 @@ function PayablesCard({ data }: { data: ReportFinance }) {
       <span className="text-[28px] leading-9 font-extrabold tracking-tight tabular-nums">{money(total)}</span>
       {total > 0 ? (
         <ShareBar
-          title="Lo que debes: comisiones por pagar y compras sin pagar"
+          title={`Lo que debes: comisiones por pagar, compras sin pagar${salesTax.cents > 0 ? ` y ${taxName} por pagar` : ""}`}
           format={money}
           parts={[
             { key: "comisiones", label: "Comisiones", value: commissions.cents, tone: "series-2" },
             { key: "compras", label: "Compras", value: purchases.cents, tone: "series-3" },
+            ...(salesTax.cents > 0 ? [{ key: "impuesto", label: taxName, value: salesTax.cents, tone: "muted" as const }] : []),
           ]}
         />
       ) : null}
@@ -846,6 +882,17 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             ) : null}
           </span>
         </li>
+        {salesTax.cents > 0 ? (
+          <li className="flex min-w-0 flex-col">
+            <span className="flex justify-between gap-2">
+              <strong>{taxName} por pagar</strong>
+              <strong className="tabular-nums">{money(salesTax.cents)}</strong>
+            </span>
+            <span className="text-[13px] text-muted-foreground">
+              El de tus cobros del periodo, que se paga el mes siguiente. Tu contador le resta el {taxName} de tus compras.
+            </span>
+          </li>
+        ) : null}
       </ul>
       <p className="text-[13px] text-muted-foreground">Un adelanto de una compra que aún no llega no está aquí: ya se pagó, y se descuenta cuando llegue.</p>
     </ReportCard>

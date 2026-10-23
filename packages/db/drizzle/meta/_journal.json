@@ -624,6 +624,20 @@
       "when": 1792764233491,
       "tag": "0088_dictado_receta",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792768144938,
+      "tag": "0089_impuestos_de_lo_cobrado",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792768149644,
+      "tag": "0090_impuestos_de_lo_cobrado_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@
  * (ADR 0068).
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
-import { documentText, formatMoney } from "@odentia/clinical"
+import { documentText, formatMoney, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
 import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -221,6 +221,7 @@ export function TicketView({
     0,
   )
   const stillOwed = snapshot.remainingCents ?? remainingCents
+  const untaxedNote = snapshot.taxes ? ticketUntaxedNote(snapshot.taxes) : null
   // Lo que deshace anular: los productos vuelven a la sede, los servicios quedan por cobrar.
   const productLines = returnLines.filter((line) => line.kind === "producto" && line.paidCents === line.amountCents)
   const serviceCents = returnLines
@@ -391,7 +392,7 @@ export function TicketView({
                 <Row label={line.description} value={plain(paid)} />
                 {paid < line.amountCents ? (
                   <span className="text-xs text-muted-foreground">
-                    A cuenta de {plain(line.amountCents)}
+                    Paga una parte: cuesta {plain(line.amountCents)}
                   </span>
                 ) : null}
                 {line.promotion ? (
@@ -406,6 +407,18 @@ export function TicketView({
             </li>
           ) : null}
         </ul>
+        {snapshot.taxes ? (
+          // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa (ADR 0083).
+          <div className="flex flex-col gap-1">
+            <Row label="Subtotal" value={plain(snapshot.taxes.subtotalCents)} />
+            {snapshot.taxes.groups
+              .filter((group) => group.taxCents > 0)
+              .map((group) => (
+                <Row key={`${group.category}-${group.rateBps}`} label={group.label} value={plain(group.taxCents)} />
+              ))}
+            {untaxedNote ? <span className="text-xs text-muted-foreground">{untaxedNote}</span> : null}
+          </div>
+        ) : null}
         <Row label="TOTAL" value={money(ticket.totalCents)} strong />
         <div className="flex flex-col gap-1">
           {methods.map((method, index) => (
@@ -425,7 +438,6 @@ export function TicketView({
           {ticket.changeCents != null && ticket.changeCents > 0 ? (
             <Row label="Vuelto" value={plain(ticket.changeCents)} />
           ) : null}
-          {conceptLines.length > 0 ? <Row label="Saldo por cobrar" value={plain(stillOwed)} /> : null}
           {returnsMade.map((item) => (
             <div key={item.id} className="flex items-baseline justify-between gap-3">
               <button
@@ -448,11 +460,22 @@ export function TicketView({
             </div>
           ))}
         </div>
-        {snapshot.notice || ticketFooter ? (
-          <p className="text-center text-xs text-muted-foreground">
-            {snapshot.notice || ticketFooter}
-          </p>
+        {conceptLines.length > 0 && stillOwed > 0 ? (
+          // Lo que falta del tratamiento, aparte del pago y solo si falta algo.
+          <div className="flex flex-col gap-0.5 rounded-md border bg-muted/40 px-3 py-2">
+            <Row label="Le falta pagar" value={money(stillOwed)} strong />
+            {(snapshot.pending ?? []).map((item) => (
+              <span key={item.chargeId} className="text-xs text-muted-foreground">
+                {item.description}: pagó {plain(item.amountCents - item.remainingCents)} de {plain(item.amountCents)}
+              </span>
+            ))}
+          </div>
         ) : null}
+        <div className="flex flex-col gap-0.5 text-center text-xs text-muted-foreground">
+          {ticketFooterLines(snapshot.notice || ticketFooter).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
       </article>
 
       <div className="flex flex-col gap-2">

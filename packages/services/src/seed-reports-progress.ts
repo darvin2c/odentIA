@@ -26,6 +26,8 @@ import { product, purchaseOrder, serviceMaterial, supplier } from "@odentia/db/s
 import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { createPurchaseOrder, receivePurchaseOrder } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { includedTaxCents } from "@odentia/clinical"
+import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
 import { discountEncounterMaterials, setServiceMaterials } from "./service-materials.js"
 import { chunks, generator } from "./seed-reports.js"
 
@@ -290,6 +292,8 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
   if (professionals.length === 0 || patients.length < TODAY_VISITS.length) return 0
   const span = Math.max(Date.now() - dayStart, 60_000)
   let count = 0
+  // Como en Cobrar (ADR 0083): la atención con el impuesto de su país.
+  const tax = chargeTaxOf(await orgTaxes(tx, orgId), false)
   for (const [index, visit] of TODAY_VISITS.entries()) {
     const service = services.find((row) => row.code === visit.code)
     const patientId = patients[index]?.id
@@ -338,6 +342,7 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
       description: service.name,
       amountCents: service.priceCents,
       currency,
+      ...(tax ?? {}),
       createdBy: professional.userId,
       createdAt: endedAt,
     })
@@ -351,6 +356,7 @@ async function seedTodaySales(tx: Db, input: ReportsProgressSeedInput): Promise<
         patientId,
         branchId,
         amountCents: service.priceCents,
+        taxCents: tax?.taxCategory === "S" ? includedTaxCents(service.priceCents, tax.taxBps) : 0,
         currency,
         paidAt,
         methodName: method?.name ?? "Efectivo",

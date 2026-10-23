@@ -228,6 +228,20 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, created_by, created_at, updated_at)
       values (${orgId}, ${input.branches[0]?.id}::uuid, 'Impuesto a la renta (pago a cuenta)', 'Impuestos', ${1_900_00 + Math.round(random() * 4) * 50_00}, ${currency},
         ${spentAt.toISOString()}::timestamptz, 'Formulario', ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
+    // Y el impuesto de lo cobrado el mes anterior (ADR 0083): un gasto de Impuestos que no resta de lo que deja.
+    const before = addMonths(month, -1)
+    const [owed] = await tx.execute<{ cents: string | null }>(sql`
+      select sum(tax_cents)::text as cents from patient_payment
+      where organization_id = ${orgId} and voided_at is null and currency = ${currency}
+        and paid_at >= ${monthStart(timezone, before.year, before.month).toISOString()}::timestamptz
+        and paid_at < ${monthStart(timezone, month.year, month.month).toISOString()}::timestamptz`)
+    const taxCents = Number(owed?.cents ?? 0)
+    if (taxCents > 0) {
+      await tx.execute(sql`
+        insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at, receipt_kind, sales_tax, created_by, created_at, updated_at)
+        values (${orgId}, ${input.branches[0]?.id}::uuid, 'Impuesto de lo cobrado del mes anterior', 'Impuestos', ${taxCents}, ${currency},
+          ${spentAt.toISOString()}::timestamptz, 'Formulario', true, ${ownerUserId}, ${spentAt.toISOString()}::timestamptz, ${spentAt.toISOString()}::timestamptz)`)
+    }
   }
 
   // --- Compras de Inventario en cada estado de pago ---------------------------------------

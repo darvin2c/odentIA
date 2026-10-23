@@ -33,6 +33,13 @@ import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { capitalize } from "../../components/official-code-field"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
+import {
+  emptyTaxValues,
+  otherTaxError,
+  TaxesCard,
+  taxesInputFrom,
+  taxValuesFromProfile,
+} from "../../components/settings/taxes-card"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -101,6 +108,17 @@ const profileSchema = z.object({
   timezone: z.string().min(1, "Elige la zona horaria"),
   // Siempre el español del país (#48): sale del país, no se elige aparte.
   locale: z.string().min(2, "Elige el país"),
+  // Impuestos (ADR 0083): "" es lo del país; «otra» lleva su porcentaje.
+  taxLegalForm: z.string(),
+  servicesTax: z.string(),
+  servicesOther: z.string(),
+  productsTax: z.string(),
+  productsOther: z.string(),
+}).superRefine((values, ctx) => {
+  const services = otherTaxError(values.servicesTax, values.servicesOther)
+  if (services) ctx.addIssue({ code: "custom", path: ["servicesOther"], message: services })
+  const products = otherTaxError(values.productsTax, values.productsOther)
+  if (products) ctx.addIssue({ code: "custom", path: ["productsOther"], message: products })
 })
 
 type ProfileValues = z.infer<typeof profileSchema>
@@ -120,6 +138,7 @@ const emptyValues: ProfileValues = {
   currency: "",
   timezone: "",
   locale: "",
+  ...emptyTaxValues,
 }
 
 function toValues(profile: OrgProfile): ProfileValues {
@@ -135,6 +154,7 @@ function toValues(profile: OrgProfile): ProfileValues {
     currency: profile.currency,
     timezone: profile.timezone,
     locale: profile.locale,
+    ...taxValuesFromProfile(profile),
   }
 }
 
@@ -174,6 +194,7 @@ function toInput(values: ProfileValues): OrgProfileInput {
     currency: values.currency,
     timezone: values.timezone,
     locale: values.locale,
+    taxes: taxesInputFrom(values.countryCode, values),
   }
 }
 
@@ -324,6 +345,8 @@ function ProfileForm({
   const proposeRegion = async (nextCountry: string) => {
     // Fechas y números en el español del país, aunque la propuesta no llegue (#48).
     form.setFieldValue("locale", `es-${nextCountry}`)
+    // Otro país, otro impuesto: se propone el suyo (ADR 0083).
+    for (const [key, value] of Object.entries(emptyTaxValues)) form.setFieldValue(key as keyof typeof emptyTaxValues, value)
     try {
       const proposal = await queryClient.fetchQuery({
         queryKey: regionDefaultsKey(nextCountry),
@@ -559,6 +582,18 @@ function ProfileForm({
         <RegionExample preview={preview} />
         <CountryRules country={country} language={language} />
       </section>
+
+      <TaxesCard
+        country={country}
+        countryLabel={country.length === 2 ? countryName(country, language) : ""}
+        currency={currency}
+        locale={locale}
+        values={currentValues}
+        onChange={(next) => {
+          for (const [key, value] of Object.entries(next)) form.setFieldValue(key as keyof typeof emptyTaxValues, value ?? "")
+        }}
+        cardClassName={CARD}
+      />
 
       <div className="flex justify-end gap-3">
         <Button

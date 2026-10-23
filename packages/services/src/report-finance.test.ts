@@ -108,7 +108,11 @@ it("comisiones: las del reporte son las de Finanzas › Comisiones y su pago no 
   expect(finance.totals.current.commissionCents).toBe(byMonth?.reduce((total, row) => total + row.commissionCents, 0))
   expect(finance.cascade.commissionPaidCents).toBe(12_000)
   expect(finance.cascade.categories.find((row) => row.category === "Personal")).toBeUndefined()
-  expect(finance.totals.current.leavesCents).toBe(finance.totals.current.cobradoCents - finance.totals.current.commissionCents - finance.totals.current.otherExpensesCents)
+  // Lo que deja no cuenta el IGV de lo cobrado (ADR 0083).
+  expect(finance.totals.current.taxCents).toBeGreaterThan(0)
+  expect(finance.totals.current.leavesCents).toBe(
+    finance.totals.current.cobradoCents - finance.totals.current.taxCents - finance.totals.current.commissionCents - finance.totals.current.otherExpensesCents,
+  )
   // «En caja quedó» sí descuenta el pago de la comisión.
   expect(finance.totals.current.cashLeftCents).toBe(finance.totals.current.cobradoCents - 12_000)
 })

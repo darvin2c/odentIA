@@ -532,6 +532,8 @@ export function createExpenseApi(body: {
   amountCents: number
   category: ExpenseCategory
   fromCash: boolean
+  /** El pago del impuesto de lo cobrado (solo con «Impuestos», ADR 0083). */
+  salesTax?: boolean
   receiptKind?: string
   receiptNumber?: string
   spentAt?: string

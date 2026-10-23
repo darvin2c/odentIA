@@ -2087,6 +2087,14 @@ export const patientCharge = pgTable(
      * que ya se cobró.
      */
     returnedCents: integer("returned_cents").notNull().default(0),
+    /**
+     * El impuesto del concepto (ADR 0083), congelado al crearlo con la cifra de
+     * la clínica que vale ese día (la de productos si es una venta; si no, la de
+     * atenciones): cambiar la tasa nunca toca lo ya cobrado. Categoría UN/CEFACT
+     * 5305 y tasa en puntos básicos; nulo, sin impuesto que separar.
+     */
+    taxCategory: text("tax_category"),
+    taxBps: integer("tax_bps"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -2106,6 +2114,10 @@ export const patientCharge = pgTable(
     index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
     index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
     check("patient_charge_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "patient_charge_tax_check",
+      sql`(${table.taxCategory} IS NULL) = (${table.taxBps} IS NULL) AND (${table.taxCategory} IS NULL OR (${table.taxCategory} = 'S' AND ${table.taxBps} BETWEEN 1 AND 5000) OR (${table.taxCategory} IN ('E','O','Z') AND ${table.taxBps} = 0))`,
+    ),
     check(
       "patient_charge_product_check",
       sql`(${table.productId} IS NULL) = (${table.productQuantity} IS NULL) AND (${table.productQuantity} IS NULL OR ${table.productQuantity} BETWEEN 1 AND 9999)`,
@@ -2132,6 +2144,12 @@ export const patientPayment = pgTable(
     methodTypeCode: text("method_type_code"),
     payerContactId: uuid("payer_contact_id").references(() => contact.id),
     amountCents: integer("amount_cents").notNull(),
+    /**
+     * El impuesto que ya va dentro de este pago (ADR 0083), congelado al cobrar
+     * con la tasa de cada concepto que pagó (un adelanto, con la de las
+     * atenciones). Reportes lo separa de lo cobrado con la misma regla.
+     */
+    taxCents: integer("tax_cents").notNull().default(0),
     currency: char("currency", { length: 3 }).notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
     reference: text("reference"),
@@ -2145,6 +2163,7 @@ export const patientPayment = pgTable(
   (table) => [
     index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
     check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
+    check("patient_payment_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
     // El tipo congelado es de la lista UN/CEFACT 4461, igual que el del medio.
     check(
       "patient_payment_method_type_check",
@@ -2204,6 +2223,8 @@ export const patientPaymentRefund = pgTable(
       .notNull()
       .references(() => patientPayment.id),
     amountCents: integer("amount_cents").notNull(),
+    /** La parte del impuesto del pago que se devuelve, en proporción (ADR 0083). */
+    taxCents: integer("tax_cents").notNull().default(0),
     refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
     reason: text("reason").notNull(),
     /** La devolución de un cobro que pagó este dinero (nulo: «Devolver dinero» del saldo a favor). */
@@ -2215,6 +2236,7 @@ export const patientPaymentRefund = pgTable(
     index("payment_refund_org_patient_idx").on(table.organizationId, table.patientId),
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
+    check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
   ],
 )
 

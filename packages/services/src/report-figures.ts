@@ -261,7 +261,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "dinero",
     name: "Lo que deja",
     describes: "Cuánto queda después de pagar gastos y comisiones, «cuánto me queda»: la utilidad o ganancia neta del periodo.",
-    how: "Lo cobrado menos las comisiones generadas y menos los demás gastos del periodo (el pago de comisiones ya está contado en ellas).",
+    how: "Lo cobrado menos su impuesto (el IGV o IVA, que no es de la clínica), las comisiones generadas y los demás gastos del periodo (el pago de comisiones ya está contado en ellas y el pago de ese impuesto no vuelve a restar).",
     unit: "money",
     tab: "finanzas",
     better: "up",
@@ -275,7 +275,9 @@ export const REPORT_FIGURES: ReportFigure[] = [
       return spans.map((_, index) => {
         const spent = expenses[index]?.find((item) => item.currency === currency)
         const generated = (commissions[index] ?? []).reduce((total, item) => total + item.commissionCents, 0)
-        return money(centsIn(collected[index], currency) - generated - ((spent?.totalCents ?? 0) - (spent?.commissionPaidCents ?? 0)))
+        const tax = collected[index]?.find((item) => item.currency === currency)?.taxCents ?? 0
+        const others = (spent?.totalCents ?? 0) - (spent?.commissionPaidCents ?? 0) - (spent?.salesTaxPaidCents ?? 0)
+        return money(centsIn(collected[index], currency) - tax - generated - others)
       })
     },
   },
@@ -284,7 +286,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "dinero",
     name: "Lo gastado",
     describes: "Cuánto se gastó: los gastos o egresos registrados (alquiler, laboratorio, materiales, sueldos…).",
-    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones.",
+    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones, y el pago del impuesto de lo cobrado (IGV o IVA) no es un gasto: ya salió de lo cobrado.",
     unit: "money",
     tab: "finanzas",
     better: "down",
@@ -292,7 +294,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     values: async (ctx, spans, branchId) =>
       (await expensesMany(ctx.tx, ctx.orgId, spans, { branchId })).map((list) => {
         const spent = list.find((item) => item.currency === ctx.scope.currency)
-        return money((spent?.totalCents ?? 0) - (spent?.commissionPaidCents ?? 0))
+        return money((spent?.totalCents ?? 0) - (spent?.commissionPaidCents ?? 0) - (spent?.salesTaxPaidCents ?? 0))
       }),
     breakdown: async (ctx, _group, branchId) => {
       const [list] = await expensesMany(ctx.tx, ctx.orgId, [ctx.scope.window], { branchId })
@@ -324,8 +326,8 @@ export const REPORT_FIGURES: ReportFigure[] = [
     key: "lo_que_debes",
     area: "dinero",
     name: "Lo que debes",
-    describes: "Cuánto debe pagar la clínica: comisiones por pagar a los profesionales y compras a proveedores sin pagar.",
-    how: "Comisiones por pagar más compras de Inventario recibidas y sin pagar, al cierre del periodo.",
+    describes: "Cuánto debe pagar la clínica: comisiones por pagar a los profesionales, compras a proveedores sin pagar y el impuesto de lo cobrado (IGV o IVA) por pagar.",
+    how: "Comisiones por pagar más compras de Inventario recibidas y sin pagar, al cierre del periodo, más el impuesto de lo cobrado en el periodo, que se paga el mes siguiente (antes de restarle el de las compras).",
     unit: "money",
     tab: "finanzas",
     better: "down",
@@ -335,7 +337,12 @@ export const REPORT_FIGURES: ReportFigure[] = [
       const moments = spans.map((span) => span.end)
       const owed = await commissionsOwedMany(ctx.tx, ctx.orgId, moments, { currency: ctx.scope.currency, branchId })
       const purchases = await unpaidPurchasesMany(ctx.tx, ctx.orgId, moments, { branchId })
-      return moments.map((_, index) => money((owed[index]?.cents ?? 0) + centsIn(purchases[index], ctx.scope.currency)))
+      // El impuesto de lo cobrado en el tramo, como «Lo que debes» de Finanzas (ADR 0083).
+      const collected = await collectedNetMany(ctx.tx, ctx.orgId, spans, { branchId })
+      return moments.map((_, index) => {
+        const tax = Math.max(0, collected[index]?.find((item) => item.currency === ctx.scope.currency)?.taxCents ?? 0)
+        return money((owed[index]?.cents ?? 0) + centsIn(purchases[index], ctx.scope.currency) + tax)
+      })
     },
   },
   {

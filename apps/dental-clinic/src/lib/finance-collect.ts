@@ -186,6 +186,25 @@ export interface CollectSnapshot {
   notice: string
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
+  /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
+  pending?: Array<{ chargeId: string; description: string; amountCents: number; remainingCents: number }>
+  /** El impuesto de lo cobrado hoy (`TicketFrozen.taxes`, ADR 0083); nulo si nada lo lleva. */
+  taxes?: CollectSnapshotTaxes | null
+}
+
+/** Subtotal sin impuesto y una línea por tasa, como el PDF. */
+export interface CollectSnapshotTaxes {
+  name: string
+  subtotalCents: number
+  taxCents: number
+  groups: Array<{
+    category: string
+    rateBps: number
+    label: string
+    amountCents: number
+    taxCents: number
+    scopes: Array<"servicios" | "productos">
+  }>
 }
 
 /** Fila real de `payment_ticket` con su snapshot inmutable. */
