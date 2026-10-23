@@ -5,7 +5,6 @@ import {
   buttonVariants,
   Spinner,
   Tabs,
-  TabsList,
   TabsTrigger,
 } from "@odentia/ui"
 import {
@@ -19,6 +18,7 @@ import {
   PageHeader,
   PageShell,
   PersonAvatar,
+  ScrollingTabsList,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -352,10 +352,7 @@ function PeoplePage() {
             })
           }
         >
-          <TabsList
-            aria-label="Qué personas ver"
-            className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
+          <ScrollingTabsList aria-label="Qué personas ver">
             {views.map((item) => (
               <TabsTrigger key={item.id} value={item.id} className="shrink-0 min-h-11 sm:min-h-9">
                 {item.label}
@@ -364,7 +361,7 @@ function PeoplePage() {
                   : ""}
               </TabsTrigger>
             ))}
-          </TabsList>
+          </ScrollingTabsList>
         </Tabs>
         <FilterBar
           filters={shortcutFilters}

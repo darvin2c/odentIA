@@ -29,8 +29,11 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-/** Tableta: entre el umbral del cajón móvil (768) y el de la página con menú fijo (1024). */
-const TABLET_QUERY = "(min-width: 768px) and (max-width: 1023px)"
+/**
+ * Pantalla mediana: entre el umbral del cajón móvil (768) y 1280. Ahí el menú
+ * queda en íconos para dar ancho al contenido y, al abrirlo, flota encima.
+ */
+const TABLET_QUERY = "(min-width: 768px) and (max-width: 1279px)"
 
 function isTabletWidth(): boolean {
   return typeof window !== "undefined" && window.matchMedia(TABLET_QUERY).matches

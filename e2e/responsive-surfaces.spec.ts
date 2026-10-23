@@ -142,7 +142,12 @@ test("móvil: Configuración muestra sus apartados por grupos, legibles y navega
     await expect(integrations).toHaveAttribute("aria-current", "page")
     // En el riel, una línea separa las entradas sueltas de los grupos.
     await expect(nav.getByRole("separator")).toBeVisible()
-    // A 1024 px la cabecera de la página no cabe junto al riel y al menú lateral:
-    // queda así por ahora (issue 220), así que aquí no se mide el desborde.
+    // Bajo 1280 px el menú lateral queda en íconos: la cabecera cabe junto al riel (issue 220).
+    await expect(page.locator("[data-slot=sidebar][data-state]").first()).toHaveAttribute("data-state", "collapsed")
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0)
   })
 })

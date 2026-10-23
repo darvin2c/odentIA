@@ -16,7 +16,6 @@ import {
   ScrollArea,
   Spinner,
   Tabs,
-  TabsList,
   TabsTrigger,
   toast,
 } from "@odentia/ui"
@@ -65,6 +64,7 @@ import {
   PageShell,
   personInitials,
   RowActions,
+  ScrollingTabsList,
   SideDockScopeProvider,
   SpeechInput,
   SubmitButton,
@@ -558,7 +558,7 @@ function InboxPage() {
             onValueChange={(next) => listSearch.setParam("view", String(next) === DEFAULT_VIEW ? undefined : String(next), { replace: true })}
             className="min-w-0 max-sm:w-full"
           >
-            <TabsList aria-label="Vista de la bandeja" className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <ScrollingTabsList aria-label="Vista de la bandeja">
               {VIEW_CHIPS.map((chip) => (
                 <TabsTrigger key={chip.value} value={chip.value} className="shrink-0 min-h-11 sm:min-h-9">
                   {chipLabel(chip, receptionName)}
@@ -582,7 +582,7 @@ function InboxPage() {
                 <Ban className="size-4" aria-hidden />
                 <span className="sr-only sm:not-sr-only">Bloqueados</span>
               </TabsTrigger>
-            </TabsList>
+            </ScrollingTabsList>
           </Tabs>
           {/* Los filtros tienen su propia fila, bajo las pestañas: acotan la lista y no compiten con las vistas. */}
           <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">

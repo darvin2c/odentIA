@@ -5,6 +5,7 @@ import {
   DrawerContent,
   DrawerDescription,
   DrawerTitle,
+  DropdownMenuItem,
   ScrollArea,
   Tabs,
   TabsContent,
@@ -366,7 +367,7 @@ export function AgentPanelButton() {
       ref={buttonRef}
       type="button"
       variant={open ? "default" : "outline"}
-      className="elevated relative h-9 gap-2 rounded-full px-2 md:pr-3 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0"
+      className="elevated relative h-9 gap-2 rounded-full px-2 max-md:hidden md:pr-3"
       onClick={() => setOpen(!open)}
       aria-label="Agente"
       aria-expanded={open}
@@ -379,6 +380,23 @@ export function AgentPanelButton() {
       </span>
       <span className="hidden md:inline">Agente</span>
     </Button>
+  )
+}
+
+/**
+ * «Agente» en el menú ⋯, solo en el teléfono: ahí el botón no cabe en la fila.
+ * Abre al cuadro siguiente, cuando el menú ya devolvió el foco a ⋯: así, al
+ * cerrar el panel, el foco vuelve a ese botón y no se pierde.
+ */
+export function AgentPanelMenuItem() {
+  const canSee = useCanSeePanel()
+  const { setOpen } = useContext(AgentPanelContext)
+  if (!canSee) return null
+  return (
+    <DropdownMenuItem className="md:hidden" onClick={() => requestAnimationFrame(() => setOpen(true))}>
+      <Bot aria-hidden />
+      Agente
+    </DropdownMenuItem>
   )
 }
 

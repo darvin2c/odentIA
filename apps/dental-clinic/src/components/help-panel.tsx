@@ -1,5 +1,5 @@
 import { Button, buttonVariants, cn, Field, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, Textarea } from "@odentia/ui"
-import { DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { DetailDrawer, SubmitButton, useHeaderCompact } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { ArrowRight, CircleHelp } from "lucide-react"
@@ -160,6 +160,7 @@ export const OPEN_HELP_EVENT = "odentia:abrir-ayuda"
 
 export function HelpButton({ className }: { className?: string } = {}) {
   const receptionName = useReceptionName()
+  const compact = useHeaderCompact()
   const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const searchStr = useRouterState({ select: (state) => state.location.searchStr })
@@ -274,13 +275,13 @@ export function HelpButton({ className }: { className?: string } = {}) {
       <Button
         type="button"
         variant={open ? "default" : "outline"}
-        className={cn("elevated relative h-9 gap-2 rounded-full px-3", className)}
+        className={cn("elevated relative h-9 gap-2 rounded-full px-3", compact && "hidden", className)}
         onClick={() => setOpen(!open)}
         aria-label={`Ayuda${unseen.length > 0 ? `, ${unseen.length} ${unseen.length === 1 ? "respuesta nueva" : "respuestas nuevas"}` : ""}`}
         aria-expanded={open}
       >
         <CircleHelp className="size-4" aria-hidden />
-        <span className="hidden lg:inline">Ayuda</span>
+        <span className="hidden md:inline">Ayuda</span>
         {unseen.length > 0 ? (
           <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-xs font-bold text-primary-foreground">
             {unseen.length}

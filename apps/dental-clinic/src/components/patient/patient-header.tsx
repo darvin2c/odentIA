@@ -15,9 +15,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   SidebarTrigger,
+  useIsMobile,
   useSidebarOptional,
 } from "@odentia/ui"
-import { ConfirmDialog, PageHeaderMenu, PersonAvatar, useHeaderUtilities } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  HeaderCompactProvider,
+  MOBILE_NAV_TRIGGER_CLASS,
+  PageHeaderMenu,
+  PersonAvatar,
+  useHeaderUtilities,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle, MoreHorizontal } from "lucide-react"
@@ -152,6 +160,7 @@ export function PersonHeader({
   const utilities = useHeaderUtilities()
   // El disparador del menú lateral en el teléfono, como en el encabezado de página.
   const sidebar = useSidebarOptional()
+  const isMobile = useIsMobile()
   const queryClient = useQueryClient()
   const canRead = usePermission("patients.read")
   const canEditPatient = usePermission("patients.write")
@@ -240,7 +249,7 @@ export function PersonHeader({
   return (
     <header className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        {sidebar ? <SidebarTrigger className="-ml-2 size-11 shrink-0 md:hidden" /> : null}
+        {sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -252,10 +261,13 @@ export function PersonHeader({
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {utilities?.utilities}
-          <PageHeaderMenu />
-        </div>
+        {/* La miga de pan salta de línea en vez de recortarse: solo el teléfono compacta la fila. */}
+        <HeaderCompactProvider value={isMobile}>
+          <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
+            {utilities?.utilities}
+            <PageHeaderMenu />
+          </div>
+        </HeaderCompactProvider>
       </div>
       <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">

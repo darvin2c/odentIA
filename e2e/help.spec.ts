@@ -122,9 +122,10 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await gotoHydrated(page, tenant(org.slug, "/agenda"))
   // En el teléfono, «Ayuda» va en el menú ⋯ de la cabecera.
   const mobileButton = page.getByRole("button", { name: "Más opciones", exact: true })
-  // Los botones de la cabecera del teléfono miden 36 px por ahora (issue 220).
-  expect((await mobileButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(36)
+  expect((await mobileButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await mobileButton.click()
+  // «Agente» tampoco cabe en la fila del teléfono: va en el mismo menú.
+  await expect(page.getByRole("menuitem", { name: "Agente", exact: true })).toBeVisible()
   await page.getByRole("menuitem", { name: "Ayuda", exact: true }).click()
   const sheet = page.getByRole("dialog", { name: "Ayuda" })
   await sheet.getByRole("button", { name: "¿Cómo bloqueo un horario?" }).click()
