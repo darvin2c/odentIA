@@ -5,13 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schema/*": "./src/schema/*.ts"
+    "./schema/*": "./src/schema/*.ts",
+    "./dental": "./src/dental/index.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "tsx --env-file-if-exists=../../infra/dev/.env src/migrate.ts",
     "seed:diagnoses": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-diagnoses.ts",
-    "seed:procedures": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-procedure-codes.ts",
+    "seed:procedures": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/seed-catalog.ts",
     "import:procedures": "tsx --env-file-if-exists=../../infra/dev/.env src/import-procedures.ts",
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",

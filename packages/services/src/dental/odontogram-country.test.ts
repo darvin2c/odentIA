@@ -29,7 +29,8 @@ import { librarySpecialtyIds } from "../specialties.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
-import { seedProcedureCodes, withOrgContext } from "@odentia/db"
+import { withOrgContext } from "@odentia/db"
+import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { insertTestPatients } from "../test-patient.js"
 
 setupTestDb()
@@ -221,7 +222,7 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   const f = await attending("org_a")
   const draft = await f.open()
   // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
-  await seedProcedureCodes(ownerDb)
+  await seedOdentiaCatalog(ownerDb)
   const resin = await f.run(async (tx) =>
     createService(tx, f.orgId, f.actor, {
       name: "Resina compuesta",

@@ -3,7 +3,8 @@
  * sistema (decisión 15) y «Cómo dice el precio» se elige una vez para todo lo
  * que se agrega o se cambia para varios a la vez (decisión 5).
  */
-import { seedProcedureCodes, withOrgContext } from "@odentia/db"
+import { withOrgContext } from "@odentia/db"
+import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
@@ -178,7 +179,7 @@ it("lo que se agrega de una vez dice el precio como se eligió al agregarlo", as
   const f = await clinicalFixture()
   const run = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
   // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
-  await seedProcedureCodes(ownerDb)
+  await seedOdentiaCatalog(ownerDb)
   const added = await run(async (tx) =>
     quickAddServices(
       tx,

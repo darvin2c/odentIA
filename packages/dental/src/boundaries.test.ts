@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest"
 const ROOT = join(import.meta.dirname, "..", "..", "..")
 // Las tablas del esquema dental (ADR 0079) y lo dental de los servicios y del agente también son lo dental.
 const IMPORTS_DENTAL =
-  /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/(db\/schema|services|agent)\/dental"|from "\.\/dental\.js"/
+  /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/(db\/schema|db|services|agent)\/dental"|from "\.\/dental\.js"/
 
 /**
  * Lo común que aún importa lo dental; cada entrega quita lo que separa. La
@@ -29,10 +29,12 @@ const IMPORTS_DENTAL =
  */
 const STILL_COUPLED = [
   "packages/agent/src/agent.test.ts",
+  "packages/agent/src/consumo.eval.ts",
   "packages/agent/src/product-prompts.test.ts",
+  "apps/api/src/routes/services.test.ts",
   "apps/api/src/routes/timeline.test.ts",
-  "packages/db/src/procedure-codes.ts",
   "packages/db/src/procedure-seeds.test.ts",
+  "packages/services/src/agenda-especialidades.test.ts",
   "packages/services/src/clinica-otro-pais.test.ts",
   "packages/services/src/composite-keys.test.ts",
   "packages/services/src/diagnosis-codes.test.ts",
@@ -42,6 +44,7 @@ const STILL_COUPLED = [
   "packages/services/src/procedure-codings.test.ts",
   "packages/services/src/saas-actions.test.ts",
   "packages/services/src/seed-dev.ts",
+  "packages/services/src/service-interest.test.ts",
   "packages/services/src/treatment-journey.test.ts",
 ]
 
@@ -68,6 +71,7 @@ const COMMON = [
 const DENTAL_INSIDE = [
   "packages/services/src/dental/",
   "packages/agent/src/dental/",
+  "packages/db/src/dental/",
   "apps/api/src/routes/dental/",
   "apps/api/src/routes/products.ts",
   "packages/services/src/products.ts",

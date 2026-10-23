@@ -25,12 +25,11 @@
  * `seed:procedures`. Rol owner (bypasea RLS; el rol app solo lee). Los tests
  * lo invocan directo para no divergir del catálogo real.
  */
-import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"
 import { fileURLToPath } from "node:url"
-import { inArray, notInArray, sql } from "drizzle-orm"
+import { notInArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -57,7 +56,7 @@ function chunks<T>(rows: T[]): T[][] {
   return out
 }
 
-function strictLines(file: string, header: string): string[] {
+export function strictLines(file: string, header: string): string[] {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(
     readFileSync(join(here, "..", "seeds", file)),
   )
@@ -71,7 +70,7 @@ function strictLines(file: string, header: string): string[] {
   return lines
 }
 
-function splitHead(line: string, n: number): string[] {
+export function splitHead(line: string, n: number): string[] {
   // Divide en n campos por las primeras n-1 comas; el resto es el último campo
   // (la denominación oficial puede contener comas y va siempre al final).
   const parts: string[] = []
@@ -86,8 +85,11 @@ function splitHead(line: string, n: number): string[] {
   return parts
 }
 
-/** Carga y valida los CSV; fail closed antes de tocar la base. */
-function loadLibrary() {
+/** Las listas oficiales leídas de sus CSV, para sembrarlas y para que una biblioteca valide sus códigos. */
+export type ProcedureLists = ReturnType<typeof loadProcedureLists>
+
+/** Carga y valida los CSV de las listas; fail closed antes de tocar la base. */
+export function loadProcedureLists() {
   // --- Sistemas ---
   const systems = strictLines(
     "procedure_code_systems.csv",
@@ -155,82 +157,7 @@ function loadLibrary() {
     }),
   )
 
-  // --- Biblioteca (name al final: puede contener comas) ---
-  const SCOPES: ReadonlySet<string> = new Set(TREATMENT_SCOPES)
-  const KINDS: ReadonlySet<string> = new Set(TREATMENT_KIND_KEYS)
-  const templates = strictLines(
-    "biblioteca.csv",
-    "key,kind,scope,surface_count_min,surface_count_max,leaves_condition,leaves_variant,common,coded_only,name",
-  ).map((line) => {
-    const [key, kind, scope, minRaw, maxRaw, condition, variant, common, codedOnly, name] = splitHead(line, 10)
-    const min = minRaw === "" ? null : Number(minRaw)
-    const max = maxRaw === "" ? null : Number(maxRaw)
-    if (
-      !key ||
-      !/^[a-z0-9-]+$/.test(key) ||
-      !KINDS.has(kind!) ||
-      !SCOPES.has(scope!) ||
-      !name ||
-      (common !== "true" && common !== "false") ||
-      (codedOnly !== "true" && codedOnly !== "false") ||
-      (minRaw !== "" && !Number.isInteger(min)) ||
-      (maxRaw !== "" && !Number.isInteger(max))
-    ) {
-      throw new Error(`Línea inválida en biblioteca.csv: ${line}`)
-    }
-    if (scope === "surfaces" && (min === null || max === null || min < 1 || min > max)) {
-      throw new Error(`Scope surfaces sin conteo válido: ${line}`)
-    }
-    if (scope !== "surfaces" && (min !== null || max !== null)) {
-      throw new Error(`Conteo fuera de scope surfaces: ${line}`)
-    }
-    if (!condition && variant) throw new Error(`Variante sin hallazgo: ${line}`)
-    const leaves = condition ? (variant ? { condition, variant } : { condition }) : null
-    // Lo que deja en la pieza encaja con el ámbito; la variante, si va, existe.
-    if (leaves && validateLeavesFinding(leaves, { scope, strictVariants: false }).length > 0) {
-      throw new Error(`Lo que deja en la pieza no encaja: ${line}`)
-    }
-    return { key, kind: kind!, scope: scope!, min, max, leaves, common: common === "true", codedOnly: codedOnly === "true", name }
-  })
-
-  // --- Código de cada tratamiento en cada lista ---
-  const mappings = strictLines("biblioteca_codigos.csv", "template_key,system_key,code,version").map(
-    (line) => {
-      const [templateKey, systemKey, code, version] = splitHead(line, 4)
-      if (!templateKey || !systemKey || !code || !version) {
-        throw new Error(`Línea inválida en biblioteca_codigos.csv: ${line}`)
-      }
-      return { templateKey, systemKey, code, version }
-    },
-  )
-
-  // --- Validación cruzada de la biblioteca (antes de tocar la DB) ---
-  if (new Set(templates.map((t) => t.key)).size !== templates.length) {
-    throw new Error("Tratamientos duplicados en biblioteca.csv")
-  }
-  if (new Set(templates.map((t) => t.name.toLowerCase())).size !== templates.length) {
-    throw new Error("Nombres repetidos en biblioteca.csv")
-  }
-  const coded = new Set(mappings.map((m) => m.templateKey))
-  for (const t of templates) {
-    if (t.codedOnly && !coded.has(t.key)) throw new Error(`Variante sin código en ninguna lista: ${t.key}`)
-  }
-  const releaseOf = new Map(releases.map((r) => [r.systemKey, r]))
   const codeSets = new Map([...codesBySystem].map(([system, codes]) => [system, new Set(codes.map((c) => c.code))]))
-  const templateKeys = new Set(templates.map((t) => t.key))
-  const perList = new Set<string>()
-  for (const m of mappings) {
-    if (!templateKeys.has(m.templateKey)) throw new Error(`Código de un tratamiento que no está: ${m.templateKey}`)
-    if (releaseOf.get(m.systemKey)?.version !== m.version) {
-      throw new Error(`Código fuera de la edición vigente: ${m.templateKey} ${m.systemKey} ${m.version}`)
-    }
-    if (!codeSets.get(m.systemKey)!.has(m.code)) {
-      throw new Error(`Código inexistente en la lista: ${m.systemKey} ${m.code} ${m.version}`)
-    }
-    const list = `${m.templateKey}:${m.systemKey}`
-    if (perList.has(list)) throw new Error(`Dos códigos de la misma lista para ${m.templateKey}`)
-    perList.add(list)
-  }
 
   // --- Los códigos de cada producto: de una lista cargada y vigentes en ella ---
   const products = strictLines("procedure_code_products.csv", "system_key,product,code").map((line) => {
@@ -247,13 +174,35 @@ function loadLibrary() {
     throw new Error("Códigos repetidos en procedure_code_products.csv")
   }
 
-  return { systems, releases, codesBySystem, templates, mappings, products }
+  return { systems, releases, codesBySystem, codeSets, products }
 }
 
-/** Siembra idempotente del catálogo oficial sobre una conexión owner. */
-export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResult> {
-  const { systems, releases, codesBySystem, templates, mappings, products } = loadLibrary()
-  const scopeKeys = templates.map((t) => t.key)
+/**
+ * La biblioteca de un producto, que se siembra con las listas en la misma
+ * transacción (odentIA: `dental/library.ts`, ADR 0069 y 0079).
+ */
+export interface CatalogLibrary {
+  /** Lee y valida sus CSV contra las listas; fail closed antes de tocar la base. */
+  prepare(lists: ProcedureLists): PreparedLibrary
+}
+
+export interface PreparedLibrary {
+  templates: number
+  /** Cuántos tratamientos lleva ligados la edición vigente de una lista. */
+  mappings(systemKey: string): number
+  /** Siembra sus tratamientos y sus códigos y concilia sus tratamientos. */
+  seed(tx: Db): Promise<void>
+}
+
+/**
+ * Siembra idempotente de las listas oficiales sobre una conexión owner y, si
+ * se da, de la biblioteca de un producto con sus códigos.
+ */
+export async function seedProcedureCodes(db: Db, library?: CatalogLibrary): Promise<ProcedureCodesSeedResult> {
+  const lists = loadProcedureLists()
+  const { systems, releases, codesBySystem, products } = lists
+  const prepared = library?.prepare(lists) ?? null
+  const mappingsOf = (system: string) => prepared?.mappings(system) ?? null
 
   await db.transaction(async (tx) => {
     // Lock por lista, en orden fijo: dos seeds concurrentes se serializan.
@@ -350,65 +299,8 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
       )
     }
 
-    for (const t of templates) {
-      // Lo dental del tratamiento (caras y lo que deja en la pieza) va en
-      // `dental_template_rule` (ADR 0079); cambiarlo también sube la versión.
-      const rule = sql`row(${t.min}::int, ${t.max}::int, ${t.leaves?.condition ?? null}::text, ${t.leaves?.variant ?? null}::text)::text`
-      const storedRule = sql`coalesce((select row(r."surface_count_min", r."surface_count_max", r."leaves_condition", r."leaves_variant")::text
-        from "dental_template_rule" r where r."template_id" = "treatment_template"."id"), row(null::int, null::int, null::text, null::text)::text)`
-      await tx.execute(
-        sql`insert into "treatment_template"
-        ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "is_active", "version")
-        values (${t.key}, ${t.name}, ${t.kind}, ${t.scope}, 'dental', ${t.common}, ${t.codedOnly}, true, 1)
-        on conflict ("key") do update set
-          "name" = excluded."name",
-          "specialty" = excluded."specialty",
-          "scope" = excluded."scope",
-          "product" = excluded."product",
-          "is_common" = excluded."is_common",
-          "coded_only" = excluded."coded_only",
-          "is_active" = true,
-          "version" = "treatment_template"."version" + (
-            ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope", ${storedRule})
-            IS DISTINCT FROM
-            (excluded."name", excluded."specialty", excluded."scope", ${rule})
-          )::int`,
-      )
-      if (t.min === null && t.max === null && !t.leaves) {
-        await tx.execute(
-          sql`delete from "dental_template_rule" where "template_id" = (select "id" from "treatment_template" where "key" = ${t.key})`,
-        )
-      } else {
-        await tx.execute(
-          sql`insert into "dental_template_rule" ("template_id", "surface_count_min", "surface_count_max", "leaves_condition", "leaves_variant")
-          select "id", ${t.min}, ${t.max}, ${t.leaves?.condition ?? null}, ${t.leaves?.variant ?? null} from "treatment_template" where "key" = ${t.key}
-          on conflict ("template_id") do update set
-            "surface_count_min" = excluded."surface_count_min",
-            "surface_count_max" = excluded."surface_count_max",
-            "leaves_condition" = excluded."leaves_condition",
-            "leaves_variant" = excluded."leaves_variant"`,
-        )
-      }
-    }
-    // Lo que ya no está en la biblioteca (las plantillas `cpms:` de antes)
-    // queda inactivo; las filas se conservan para los servicios que las usan.
-    await tx.execute(
-      sql`update "treatment_template" set "is_active" = false where ${notInArray(sql`"key"`, scopeKeys)}`,
-    )
-    // El código de cada tratamiento en cada edición se reemplaza entero: un
-    // cambio de código en el CSV no deja el viejo. Otras ediciones no se tocan.
-    for (const release of releases) {
-      await tx.execute(
-        sql`delete from "treatment_template_code"
-          where "system_key" = ${release.systemKey} and "version" = ${release.version}`,
-      )
-    }
-    for (const m of mappings) {
-      await tx.execute(
-        sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")
-          select "id", ${m.systemKey}, ${m.code}, ${m.version} from "treatment_template" where "key" = ${m.templateKey}`,
-      )
-    }
+    // La biblioteca del producto, si la hay, con su código en cada lista.
+    if (prepared) await prepared.seed(tx)
 
     // Los códigos de cada producto se reemplazan enteros, lista por lista.
     for (const release of releases) {
@@ -425,12 +317,6 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
     }
 
     // Conciliación dentro de la transacción: cobertura exacta o rollback.
-    const [active] = (await tx.execute(
-      sql`select count(*)::int as count from "treatment_template" where ${inArray(sql`"key"`, scopeKeys)} and "is_active"`,
-    )) as unknown as { count: number }[]
-    if (active?.count !== templates.length) {
-      throw new Error(`Conciliación falló (templates): ${active?.count} frente a ${templates.length}`)
-    }
     for (const release of releases) {
       const [row] = (await tx.execute(sql`
         select
@@ -441,7 +327,8 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
         codes: number
         mappings: number
       }[]
-      const expectedMappings = mappings.filter((m) => m.systemKey === release.systemKey).length
+      // Sin biblioteca no se toca lo ligado: solo se concilian los códigos.
+      const expectedMappings = mappingsOf(release.systemKey) ?? row?.mappings
       if (row?.codes !== release.expectedCount || row?.mappings !== expectedMappings) {
         throw new Error(
           `Conciliación falló (${release.systemKey}): ${row?.codes} códigos frente a ${release.expectedCount}, ` +
@@ -454,12 +341,12 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
   return {
     systems: systems.length,
     codes: [...codesBySystem.values()].reduce((sum, codes) => sum + codes.length, 0),
-    templates: templates.length,
+    templates: prepared?.templates ?? 0,
     releases: releases.map((release) => ({
       systemKey: release.systemKey,
       version: release.version,
       codes: codesBySystem.get(release.systemKey)!.length,
-      mappings: mappings.filter((m) => m.systemKey === release.systemKey).length,
+      mappings: mappingsOf(release.systemKey) ?? 0,
     })),
   }
 }
