@@ -60,6 +60,7 @@ import {
   createPublicPatientRegistrationRoute,
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
+import { createCalendarFeedRoute, createPublicCalendarRoute } from "./routes/calendar-feeds.js"
 import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
 import { createPublicFoundersRoute } from "./routes/public-founders.js"
@@ -340,6 +341,7 @@ export function createApp(deps: AppDeps) {
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
   app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
+  app.route("/api/public/calendar", createPublicCalendarRoute({ db, ownerDb: deps.ownerDb }))
   app.route(
     "/api/public/booking",
     createPublicBookingRoute({
@@ -740,6 +742,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))
   guarded.route("/agent", createAgentRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
+  guarded.route("/agenda/calendar", createCalendarFeedRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))
   guarded.route("/search", createSearchRoute({ ...crmDeps, embedder: deps.embedder }))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))

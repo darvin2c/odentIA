@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   SidebarTrigger,
+  useIsMobile,
   useSidebarOptional,
 } from "@odentia/ui"
 import { MoreHorizontal } from "lucide-react"
@@ -100,15 +101,25 @@ export interface PageHeaderProps {
   subtitle?: React.ReactNode
   /** La acción principal de la página, con su icono. */
   primary?: PageHeaderPrimary
+  /**
+   * Una segunda acción a la vista, junto a la principal y con borde. En el
+   * teléfono no cabe: pasa al menú ⋯.
+   */
+  secondary?: { label: string; icon: React.ReactNode; onClick: () => void }
   /** Lo demás que la página ofrece: va en el menú ⋯. */
   menu?: PageHeaderMenuItem[]
   className?: string
 }
 
-export function PageHeader({ title, subtitle, primary, menu, className }: PageHeaderProps): React.JSX.Element {
+export function PageHeader({ title, subtitle, primary, secondary, menu, className }: PageHeaderProps): React.JSX.Element {
   const sidebar = useSidebarOptional()
   const utilities = useHeaderUtilities()
   const navTrigger = sidebar ? <SidebarTrigger className="-ml-2 size-11 shrink-0 md:hidden" /> : null
+  const isMobile = useIsMobile()
+  const menuItems =
+    secondary && isMobile
+      ? [{ label: secondary.label, icon: secondary.icon, onSelect: secondary.onClick }, ...(menu ?? [])]
+      : menu
 
   const primaryContent = primary ? (
     <>
@@ -119,11 +130,23 @@ export function PageHeader({ title, subtitle, primary, menu, className }: PageHe
 
   return (
     <>
-      <header className={cn("flex min-w-0 flex-nowrap items-center gap-2", className)}>
+      <header className={cn("@container/page-header flex min-w-0 flex-nowrap items-center gap-2", className)}>
         {navTrigger}
         <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-foreground md:text-2xl">{title}</h1>
         <div className="flex shrink-0 items-center gap-1 md:gap-2">
           {utilities?.utilities}
+          {secondary && !isMobile ? (
+            <Button
+              type="button"
+              variant="outline"
+              title={secondary.label}
+              className="shrink-0 gap-2 @max-4xl/page-header:size-9 @max-4xl/page-header:rounded-full @max-4xl/page-header:px-0"
+              onClick={secondary.onClick}
+            >
+              {secondary.icon}
+              <span className="@max-4xl/page-header:sr-only">{secondary.label}</span>
+            </Button>
+          ) : null}
           {primary ? (
             primary.render ? (
               React.cloneElement(
@@ -137,7 +160,7 @@ export function PageHeader({ title, subtitle, primary, menu, className }: PageHe
               </Button>
             )
           ) : null}
-          <PageHeaderMenu items={menu} />
+          <PageHeaderMenu items={menuItems} />
         </div>
       </header>
       {subtitle ? (
