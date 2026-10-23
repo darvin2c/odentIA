@@ -11,7 +11,8 @@ import {
   rotateMyCalendarFeed,
   serveCalendarFeed,
 } from "@odentia/services"
-import { Hono } from "hono"
+import { getConnInfo } from "@hono/node-server/conninfo"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -90,18 +91,54 @@ export function createCalendarFeedRoute(deps: CrmDeps) {
 }
 
 const WINDOW_MS = 10 * 60_000
-const MAX_PER_WINDOW = 60
+/** Pedidos de un mismo enlace válido en la ventana. */
+const MAX_PER_FEED = 60
+/** Pedidos de una misma dirección en la ventana: frena a quien prueba tokens al azar. */
+const MAX_PER_ADDRESS = 120
 const MAX_BUCKETS = 10_000
+
+type Buckets = Map<string, { expiresAt: number; count: number }>
+
+/**
+ * Suma un pedido y dice si se pasó del límite. Con la tabla llena no se
+ * cuenta (deja pasar): llenarla con tokens o direcciones inventadas no puede
+ * dejar sin calendario a los enlaces de verdad.
+ */
+function over(buckets: Buckets, key: string, max: number, now: number): number | null {
+  for (const [bucketKey, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(bucketKey)
+  let bucket = buckets.get(key)
+  if (!bucket) {
+    if (buckets.size >= MAX_BUCKETS) return null
+    bucket = { expiresAt: now + WINDOW_MS, count: 0 }
+    buckets.set(key, bucket)
+  }
+  return ++bucket.count > max ? Math.ceil((bucket.expiresAt - now) / 1000) : null
+}
 
 /**
  * La dirección que pide el calendario (`/api/public/calendar/<token>.ics`),
  * sin sesión: el token resuelve la clínica. Un enlace apagado responde como
- * si no existiera, sin decir de qué clínica era. El límite es por enlace, no
- * por dirección: Google pide desde muchos servidores.
+ * si no existiera, sin decir de qué clínica era. Dos límites: por dirección
+ * (quien prueba tokens) y, solo para enlaces que existen, por enlace (Google
+ * pide desde muchos servidores, así que su límite no puede ser por dirección).
  */
-export function createPublicCalendarRoute(deps: { db: CrmDeps["db"]; ownerDb: CrmDeps["db"] }) {
+export function createPublicCalendarRoute(deps: {
+  db: CrmDeps["db"]
+  ownerDb: CrmDeps["db"]
+  remoteAddress?: (c: Context) => string | undefined
+}) {
   const app = new Hono()
-  const buckets = new Map<string, { expiresAt: number; count: number }>()
+  const byFeed: Buckets = new Map()
+  const byAddress: Buckets = new Map()
+  const addressOf =
+    deps.remoteAddress ??
+    ((c: Context) => {
+      try {
+        return getConnInfo(c).remote.address
+      } catch {
+        return undefined
+      }
+    })
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store")
     c.header("Referrer-Policy", "no-referrer")
@@ -118,19 +155,19 @@ export function createPublicCalendarRoute(deps: { db: CrmDeps["db"]; ownerDb: Cr
     if (!match) return c.text("No disponible", 404)
     const token = match[1]!
     const now = Date.now()
-    for (const [key, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(key)
-    let bucket = buckets.get(token)
-    if (!bucket) {
-      if (buckets.size >= MAX_BUCKETS) return c.text("Intenta más tarde", 429)
-      bucket = { expiresAt: now + WINDOW_MS, count: 0 }
-      buckets.set(token, bucket)
-    }
-    if (++bucket.count > MAX_PER_WINDOW) {
-      c.header("Retry-After", String(Math.ceil((bucket.expiresAt - now) / 1000)))
+    const address = addressOf(c)
+    const waitAddress = address ? over(byAddress, address, MAX_PER_ADDRESS, now) : null
+    if (waitAddress !== null) {
+      c.header("Retry-After", String(waitAddress))
       return c.text("Intenta más tarde", 429)
     }
     const orgId = await findCalendarFeedOrg(deps.ownerDb, token)
     if (!orgId) return c.text("No disponible", 404)
+    const waitFeed = over(byFeed, token, MAX_PER_FEED, now)
+    if (waitFeed !== null) {
+      c.header("Retry-After", String(waitFeed))
+      return c.text("Intenta más tarde", 429)
+    }
     const file = await withOrgContext(deps.db, orgId, (tx) => serveCalendarFeed(tx, orgId, token, c.req.header("user-agent")))
     if (!file) return c.text("No disponible", 404)
     return new Response(file, {

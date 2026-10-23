@@ -197,20 +197,54 @@ describe("Mi calendario", () => {
     await run(c, (tx) => acknowledgeCalendarClient(tx, c.orgId, c.anaId, "navegador"))
     mine = await run(c, (tx) => getMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))
     expect(mine.feed?.alert).toBeNull()
+    // «Fui yo» también retira el aviso de la campana.
+    const [notice] = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.organizationId, c.orgId))
+    expect(notice?.resolvedAt).not.toBeNull()
     // Una fila por día y programa, con cuántas veces.
     const uses = await ownerDb.select().from(calendarFeedUse).where(and(eq(calendarFeedUse.organizationId, c.orgId), eq(calendarFeedUse.client, "navegador")))
     expect(uses).toHaveLength(1)
     expect(uses[0]?.hits).toBe(2)
   })
 
-  it("lo de más de 90 días se borra al anotar", async () => {
+  it("dos calendarios a la vez el primer día y un doble clic en crear no se pisan", async () => {
     const c = await clinic()
-    const token = tokenOf((await run(c, (tx) => createMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))).feed?.url)
+    const [first, second] = await Promise.all([
+      run(c, (tx) => createMyCalendarFeed(tx, c.orgId, c.anaId, DEPS)),
+      run(c, (tx) => createMyCalendarFeed(tx, c.orgId, c.anaId, DEPS)),
+    ])
+    expect(first.feed?.url ?? second.feed?.url).toBeTruthy()
+    const feeds = await ownerDb.select().from(calendarFeed).where(eq(calendarFeed.organizationId, c.orgId))
+    expect(feeds).toHaveLength(1)
+    const token = tokenOf((await run(c, (tx) => getMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))).feed?.url)
+    // El primer pedido de cada uno queda anotado como conocido, aunque lleguen juntos.
+    await run(c, (tx) => serveCalendarFeed(tx, c.orgId, token, GOOGLE))
+    await Promise.all([
+      run(c, (tx) => serveCalendarFeed(tx, c.orgId, token, IPHONE)),
+      run(c, (tx) => serveCalendarFeed(tx, c.orgId, token, BROWSER)),
+    ])
+    const [feed] = await ownerDb.select().from(calendarFeed).where(eq(calendarFeed.organizationId, c.orgId))
+    expect([...(feed?.knownClients ?? [])].sort()).toEqual(["google", "iphone", "navegador"])
+  })
+
+  it("al dejar de compartir también se borra lo de más de 90 días", async () => {
+    const c = await clinic()
+    await run(c, (tx) => createMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))
     const [feed] = await ownerDb.select().from(calendarFeed).where(eq(calendarFeed.organizationId, c.orgId))
     await ownerDb.insert(calendarFeedUse).values({ organizationId: c.orgId, feedId: feed!.id, day: "2020-01-01", client: "google" })
+    await run(c, (tx) => revokeMyCalendarFeed(tx, c.orgId, c.anaId))
+    expect(await ownerDb.select().from(calendarFeedUse).where(eq(calendarFeedUse.organizationId, c.orgId))).toEqual([])
+  })
+
+  it("lo de más de 90 días se borra al anotar, también lo de un enlace ya cambiado", async () => {
+    const c = await clinic()
+    await run(c, (tx) => createMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))
+    const [old] = await ownerDb.select().from(calendarFeed).where(eq(calendarFeed.organizationId, c.orgId))
+    await ownerDb.insert(calendarFeedUse).values({ organizationId: c.orgId, feedId: old!.id, day: "2020-01-01", client: "google" })
+    const token = tokenOf((await run(c, (tx) => rotateMyCalendarFeed(tx, c.orgId, c.anaId, DEPS))).feed?.url)
     await run(c, (tx) => serveCalendarFeed(tx, c.orgId, token, GOOGLE))
-    const days = await ownerDb.select({ day: calendarFeedUse.day }).from(calendarFeedUse).where(eq(calendarFeedUse.feedId, feed!.id))
+    const days = await ownerDb.select({ day: calendarFeedUse.day }).from(calendarFeedUse).where(eq(calendarFeedUse.organizationId, c.orgId))
     expect(days.map((row) => String(row.day))).not.toContain("2020-01-01")
+    expect(days).toHaveLength(1)
   })
 
   it("se apaga solo si ya no atiende; la Administración lo apaga desde Equipo", async () => {

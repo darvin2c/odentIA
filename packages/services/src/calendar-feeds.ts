@@ -21,7 +21,8 @@ import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odent
 import { member, organization } from "@odentia/db/schema/auth"
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
+import { and, asc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm"
 import { zonedTimeToUtc } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { clinicDisplayName } from "./clinic-identity.js"
@@ -220,8 +221,14 @@ export async function createMyCalendarFeed(tx: Db, orgId: string, userId: string
 async function insertFeed(tx: Db, orgId: string, userId: string, deps: CalendarFeedDeps, action: string) {
   // El id se elige antes para guardar la huella del token en la misma fila.
   const id = crypto.randomUUID()
-  await tx.insert(calendarFeed).values({ id, organizationId: orgId, userId, tokenHash: tokenHashOf(calendarFeedToken(deps.secretsKey, id)) })
-  await audit(tx, orgId, userId, action, id)
+  // Un doble clic llega dos veces: el índice de un activo por persona deja pasar
+  // uno y el otro no hace nada (devuelve el que quedó).
+  const [created] = await tx
+    .insert(calendarFeed)
+    .values({ id, organizationId: orgId, userId, tokenHash: tokenHashOf(calendarFeedToken(deps.secretsKey, id)) })
+    .onConflictDoNothing()
+    .returning({ id: calendarFeed.id })
+  if (created) await audit(tx, orgId, userId, action, id)
 }
 
 async function revoke(tx: Db, orgId: string, feedId: string, by: string | null, reason: "cambiado" | "apagado" | "administracion" | "sin_acceso") {
@@ -230,6 +237,28 @@ async function revoke(tx: Db, orgId: string, feedId: string, by: string | null, 
     .update(calendarFeed)
     .set({ status: "revocado", revokedAt: now, revokedBy: by, revokeReason: reason, updatedAt: now })
     .where(and(eq(calendarFeed.organizationId, orgId), eq(calendarFeed.id, feedId), eq(calendarFeed.status, "activo")))
+  await purgeOldUses(tx, orgId, todayIn((await findOrgLocale(tx, orgId)).timezone, now))
+}
+
+/** Lo de más de 90 días se va en toda la clínica, también lo de enlaces ya cambiados o apagados. */
+async function purgeOldUses(tx: Db, orgId: string, today: string): Promise<void> {
+  await tx
+    .delete(calendarFeedUse)
+    .where(and(eq(calendarFeedUse.organizationId, orgId), lt(calendarFeedUse.day, daysBefore(today, CALENDAR_USE_KEEP_DAYS))))
+}
+
+/**
+ * Suma un programa a los que la persona reconoce, en la misma sentencia: dos
+ * pedidos a la vez (Google y el iPhone el primer día, o «Fui yo» mientras el
+ * calendario consulta) no se pisan. Devuelve si lo sumó.
+ */
+async function rememberClient(tx: Db, orgId: string, feedId: string, client: CalendarClient): Promise<boolean> {
+  const updated = await tx
+    .update(calendarFeed)
+    .set({ knownClients: sql`array_append(${calendarFeed.knownClients}, ${client}::text)`, updatedAt: new Date() })
+    .where(and(eq(calendarFeed.organizationId, orgId), eq(calendarFeed.id, feedId), sql`not (${client}::text = any(${calendarFeed.knownClients}))`))
+    .returning({ id: calendarFeed.id })
+  return updated.length > 0
 }
 
 /** «Cambiar enlace»: el anterior deja de servir al momento y el nuevo empieza sin historial. */
@@ -253,12 +282,20 @@ export async function revokeMyCalendarFeed(tx: Db, orgId: string, userId: string
 /** «Fui yo»: ese programa queda como conocido y deja de avisar. */
 export async function acknowledgeCalendarClient(tx: Db, orgId: string, userId: string, client: CalendarClient): Promise<void> {
   const feed = await activeFeed(tx, orgId, userId)
-  if (!feed || feed.knownClients.includes(client)) return
+  if (!feed) return
+  if (await rememberClient(tx, orgId, feed.id, client)) await audit(tx, orgId, userId, "calendar_feed.client_known", feed.id, { client })
+  // El aviso de la campana de ese programa ya no hace falta.
   await tx
-    .update(calendarFeed)
-    .set({ knownClients: [...feed.knownClients, client], updatedAt: new Date() })
-    .where(and(eq(calendarFeed.organizationId, orgId), eq(calendarFeed.id, feed.id)))
-  await audit(tx, orgId, userId, "calendar_feed.client_known", feed.id, { client })
+    .update(workspaceNotification)
+    .set({ resolvedAt: sql`now()`, readAt: sql`coalesce(${workspaceNotification.readAt}, now())` })
+    .where(
+      and(
+        eq(workspaceNotification.organizationId, orgId),
+        eq(workspaceNotification.userId, userId),
+        eq(workspaceNotification.dedupeKey, `calendario:${feed.id}:${client}`),
+        isNull(workspaceNotification.resolvedAt),
+      ),
+    )
 }
 
 export interface TeamCalendarFeed {
@@ -381,16 +418,11 @@ async function recordUse(
       target: [calendarFeedUse.organizationId, calendarFeedUse.feedId, calendarFeedUse.day, calendarFeedUse.client],
       set: { hits: sql`${calendarFeedUse.hits} + 1`, lastAt: now },
     })
-  await tx
-    .delete(calendarFeedUse)
-    .where(and(eq(calendarFeedUse.organizationId, orgId), eq(calendarFeedUse.feedId, feed.id), lt(calendarFeedUse.day, daysBefore(day, CALENDAR_USE_KEEP_DAYS))))
+  await purgeOldUses(tx, orgId, day)
   if (feed.knownClients.includes(client)) return
   // El primer programa, y los del primer día, son de quien lo creó: no avisan.
   if (!seen || now.getTime() - feed.createdAt.getTime() < SETUP_MS) {
-    await tx
-      .update(calendarFeed)
-      .set({ knownClients: [...feed.knownClients, client], updatedAt: now })
-      .where(and(eq(calendarFeed.organizationId, orgId), eq(calendarFeed.id, feed.id)))
+    await rememberClient(tx, orgId, feed.id, client)
     return
   }
   const time = new Intl.DateTimeFormat("es", { timeZone: (await findOrgLocale(tx, orgId)).timezone, hour: "2-digit", minute: "2-digit" }).format(now)

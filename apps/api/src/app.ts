@@ -341,7 +341,11 @@ export function createApp(deps: AppDeps) {
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
   app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
-  app.route("/api/public/calendar", createPublicCalendarRoute({ db, ownerDb: deps.ownerDb }))
+  app.route("/api/public/calendar", createPublicCalendarRoute({
+      db,
+      ownerDb: deps.ownerDb,
+      ...(deps.registrationRemoteAddress ? { remoteAddress: deps.registrationRemoteAddress } : {}),
+    }))
   app.route(
     "/api/public/booking",
     createPublicBookingRoute({
