@@ -84,7 +84,10 @@ export { SpeechInput, type SpeechInputProps } from "./speech-input.js"
 export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
 export * from "./form/index.js"
 export {
+  HeaderCompactProvider,
   HeaderUtilitiesProvider,
+  useHeaderCompact,
+  useHeaderFit,
   useHeaderUtilities,
 } from "./header-utilities.js"
 export { KpiCard, type KpiCardProps } from "./kpi-card.js"
@@ -107,12 +110,14 @@ export {
 } from "./master-detail.js"
 export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
 export {
+  MOBILE_NAV_TRIGGER_CLASS,
   PageHeader,
   PageHeaderMenu,
   type PageHeaderMenuItem,
   type PageHeaderPrimary,
   type PageHeaderProps,
 } from "./page-header.js"
+export { ScrollingTabsList } from "./scrolling-tabs-list.js"
 export { type ViewTabOption, type ViewTabsProps, ViewTabs } from "./view-tabs.js"
 export { PersonAvatar, type PersonAvatarProps, personInitials } from "./person-avatar.js"
 export {

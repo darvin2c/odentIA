@@ -20,7 +20,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@odentia/ui/components/command"
-import { AgentMark, DataRefreshMarker } from "@odentia/ui-patterns"
+import { AgentMark, DataRefreshMarker, useHeaderCompact } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -162,13 +162,14 @@ export function GlobalSearchProvider({
 /** «Buscar en todo · Ctrl K» entre las utilidades de la cabecera; en el teléfono, la lupa. */
 export function GlobalSearchButton() {
   const { open, setOpen } = useGlobalSearch()
+  const compact = useHeaderCompact()
   const [mac, setMac] = useState(false)
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), [])
   return (
     <Button
       type="button"
       variant="outline"
-      className="elevated relative h-9 gap-2 rounded-full px-3 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0"
+      className={cn("elevated relative h-9 gap-2 rounded-full px-3 max-md:size-11", compact && "w-9 gap-0 px-0")}
       onClick={() => setOpen(!open)}
       aria-expanded={open}
       aria-haspopup="dialog"
@@ -176,11 +177,15 @@ export function GlobalSearchButton() {
       aria-keyshortcuts="Control+K Meta+K"
     >
       <Search className="size-4" aria-hidden="true" />
-      <span className="hidden md:inline">Buscar</span>
-      <KbdGroup className="hidden lg:inline-flex">
-        <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
-        <Kbd>K</Kbd>
-      </KbdGroup>
+      {compact ? null : (
+        <>
+          <span className="hidden md:inline">Buscar</span>
+          <KbdGroup className="hidden lg:inline-flex">
+            <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
+            <Kbd>K</Kbd>
+          </KbdGroup>
+        </>
+      )}
     </Button>
   )
 }

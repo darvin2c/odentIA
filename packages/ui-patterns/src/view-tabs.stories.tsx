@@ -50,3 +50,28 @@ export const ConConteoYDeshabilitada: Story = {
     ],
   },
 }
+
+/**
+ * Las seis vistas de la Bandeja en un teléfono: el borde se desvanece y la
+ * flecha «›» anuncia que hay más; tocarla avanza la franja.
+ */
+export const NoCaben: Story = {
+  args: {
+    label: "Vista de la bandeja",
+    value: "atender",
+    onValueChange: () => {},
+    options: [
+      { value: "atender", label: "Por atender", count: 5 },
+      { value: "sofi", label: "Las atiende Sofi", count: 1 },
+      { value: "esperan", label: "Esperan al paciente", count: 2 },
+      { value: "todas", label: "Todas" },
+      { value: "spam", label: "Spam", count: 3 },
+      { value: "bloqueados", label: "Bloqueados" },
+    ],
+  },
+  render: (args) => (
+    <div className="max-w-[343px]">
+      <Live {...args} />
+    </div>
+  ),
+}

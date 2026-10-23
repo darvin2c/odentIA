@@ -5,6 +5,7 @@ import {
   DrawerContent,
   DrawerDescription,
   DrawerTitle,
+  DropdownMenuItem,
   ScrollArea,
   Tabs,
   TabsContent,
@@ -19,6 +20,7 @@ import {
   SideColumn,
   SideDockSlot,
   SubmitButton,
+  useHeaderCompact,
   useSideColumnWidth,
   useSideDock,
   useSidebarWidth,
@@ -359,6 +361,7 @@ function useCanSeePanel(): boolean {
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
   const { open: columnOpen, surface, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const compact = useHeaderCompact()
   const open = columnOpen && surface === "agente"
   if (!canSee) return null
   return (
@@ -366,7 +369,7 @@ export function AgentPanelButton() {
       ref={buttonRef}
       type="button"
       variant={open ? "default" : "outline"}
-      className="elevated relative h-9 gap-2 rounded-full px-2 md:pr-3 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0"
+      className={`elevated relative h-9 gap-2 rounded-full px-2 max-md:hidden ${compact ? "w-9 justify-center gap-0 px-0" : "md:pr-3"}`}
       onClick={() => setOpen(!open)}
       aria-label="Agente"
       aria-expanded={open}
@@ -377,8 +380,34 @@ export function AgentPanelButton() {
       >
         <Bot className="size-4" aria-hidden />
       </span>
-      <span className="hidden md:inline">Agente</span>
+      {compact ? null : <span className="hidden md:inline">Agente</span>}
     </Button>
+  )
+}
+
+/**
+ * «Agente» en el menú ⋯, solo en el teléfono: ahí el botón no cabe en la fila.
+ * El panel recuerda como origen el botón ⋯ (no la opción, que desaparece): así,
+ * al cerrarlo, el foco vuelve a ⋯ y no se pierde.
+ */
+export function AgentPanelMenuItem() {
+  const canSee = useCanSeePanel()
+  const { setOpen } = useContext(AgentPanelContext)
+  if (!canSee) return null
+  return (
+    <DropdownMenuItem
+      className="md:hidden"
+      onClick={() => {
+        const trigger = document.querySelector<HTMLElement>('[data-slot="dropdown-menu-trigger"][aria-expanded="true"]')
+        requestAnimationFrame(() => {
+          trigger?.focus()
+          setOpen(true)
+        })
+      }}
+    >
+      <Bot aria-hidden />
+      Agente
+    </DropdownMenuItem>
   )
 }
 

@@ -13,19 +13,21 @@ import {
 } from "@odentia/ui"
 import { MoreHorizontal } from "lucide-react"
 import * as React from "react"
-import { useHeaderUtilities } from "./header-utilities.js"
+import { HeaderCompactProvider, useHeaderCompact, useHeaderFit, useHeaderUtilities } from "./header-utilities.js"
 
 /**
  * Encabezado por página (ADR de la opción 1): una sola línea en todos los
  * anchos. Orden fijo: título (se recorta con puntos suspensivos), utilidades
  * globales, una acción principal y el menú ⋯ con lo demás.
  *
- * - Teléfono (<768 px): utilidades y acción principal solo con icono.
- * - Tableta (768–1023 px) y web: con icono y texto; «Ayuda» pasa a ⋯ en tableta.
+ * - Teléfono (<768 px): botones de 44 px solo con icono; «Agente» y «Ayuda» en ⋯.
+ * - Desde 768 px: con icono y texto. Si la fila no cabe (panel lateral abierto,
+ *   zoom), queda compacta: utilidades solo en íconos y «Ayuda» en ⋯.
  * - El contexto de la página (sede, fecha, recuento) no va en el encabezado: es
  *   una fila propia bajo él, en el contenido.
  *
- * El disparador del sidebar vive aquí solo en móvil (`md:hidden`).
+ * El disparador del sidebar vive aquí solo en móvil (`md:hidden`), pegado al
+ * título para no perder ancho.
  */
 
 export interface PageHeaderPrimary {
@@ -45,11 +47,14 @@ export interface PageHeaderMenuItem {
   disabled?: boolean
 }
 
-const PRIMARY_CLASS = "shrink-0 gap-2 max-md:size-9 max-md:rounded-full max-md:px-0"
+const PRIMARY_CLASS = "shrink-0 gap-2 max-md:size-11 max-md:rounded-full max-md:px-0"
+
+/** Disparador del menú lateral en el teléfono: icono grande y pegado al título. */
+export const MOBILE_NAV_TRIGGER_CLASS = "-ml-2.5 -mr-1.5 size-11 shrink-0 md:hidden [&_svg]:size-[26px]!"
 
 /**
- * El menú ⋯ del encabezado. Sin opciones de la página, solo aparece bajo web
- * (ahí está «Ayuda» en la fila); en web sin nada que ofrecer no se dibuja.
+ * El menú ⋯ del encabezado. Sin opciones de la página, solo aparece cuando la
+ * fila está compacta (ahí recibe «Ayuda» y, en el teléfono, «Agente»).
  */
 export function PageHeaderMenu({
   items = [],
@@ -60,8 +65,9 @@ export function PageHeaderMenu({
 }) {
   const utilities = useHeaderUtilities()
   const extra = utilities?.menuItems
+  const compact = useHeaderCompact()
   const hasItems = items.length > 0
-  if (!hasItems && !extra) return null
+  if (!hasItems && !(extra && compact)) return null
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -71,7 +77,7 @@ export function PageHeaderMenu({
             variant="outline"
             size="icon"
             aria-label="Más opciones"
-            className={cn("size-9 shrink-0 rounded-full", !hasItems && "lg:hidden", className)}
+            className={cn("size-9 shrink-0 rounded-full max-md:size-11", className)}
           />
         }
       >
@@ -114,8 +120,11 @@ export interface PageHeaderProps {
 export function PageHeader({ title, subtitle, primary, secondary, menu, className }: PageHeaderProps): React.JSX.Element {
   const sidebar = useSidebarOptional()
   const utilities = useHeaderUtilities()
-  const navTrigger = sidebar ? <SidebarTrigger className="-ml-2 size-11 shrink-0 md:hidden" /> : null
+  const navTrigger = sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null
   const isMobile = useIsMobile()
+  const fit = useHeaderFit<HTMLHeadingElement, HTMLDivElement>(
+    `${title}|${Boolean(primary)}|${Boolean(secondary)}`,
+  )
   const menuItems =
     secondary && isMobile
       ? [{ label: secondary.label, icon: secondary.icon, onSelect: secondary.onClick }, ...(menu ?? [])]
@@ -129,11 +138,13 @@ export function PageHeader({ title, subtitle, primary, secondary, menu, classNam
   ) : null
 
   return (
-    <>
+    <HeaderCompactProvider value={isMobile || fit.compact}>
       <header className={cn("@container/page-header flex min-w-0 flex-nowrap items-center gap-2", className)}>
         {navTrigger}
-        <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-foreground md:text-2xl">{title}</h1>
-        <div className="flex shrink-0 items-center gap-1 md:gap-2">
+        <h1 ref={fit.titleRef} className="min-w-0 flex-1 truncate text-[17px] font-bold tracking-tight text-foreground md:text-2xl">
+          {title}
+        </h1>
+        <div ref={fit.actionsRef} className="flex shrink-0 items-center gap-1 md:gap-2">
           {utilities?.utilities}
           {secondary && !isMobile ? (
             <Button
@@ -168,6 +179,6 @@ export function PageHeader({ title, subtitle, primary, secondary, menu, classNam
           {typeof subtitle === "string" ? <p className="min-w-0">{subtitle}</p> : subtitle}
         </div>
       ) : null}
-    </>
+    </HeaderCompactProvider>
   )
 }

@@ -256,7 +256,11 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   // Móvil: el mismo cajón que los formularios (hoja inferior a casi toda la pantalla).
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await agentButton(page).click()
+  // En el teléfono «Agente» no cabe en la fila: va en el menú ⋯ (issue 220).
+  await expect(agentButton(page)).toBeHidden()
+  const moreButton = page.locator("header").getByRole("button", { name: "Más opciones", exact: true })
+  await moreButton.click()
+  await page.getByRole("menuitem", { name: "Agente", exact: true }).click()
   const mobilePanel = page.getByRole("dialog", { name: "Agente" })
   await expect(mobilePanel).toBeVisible()
   const box = await mobilePanel.boundingBox()
@@ -272,7 +276,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   })
   await mobilePanel.getByRole("button", { name: "Cerrar el panel del agente" }).click()
   await expect(mobilePanel).toBeHidden()
-  await expect(agentButton(page)).toBeFocused()
+  await expect(moreButton).toBeFocused()
 })
 
 test("panel del agente: recepción lo ve, otros roles no lo ven y el servidor lo niega", async ({

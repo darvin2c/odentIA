@@ -29,8 +29,11 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-/** Tableta: entre el umbral del cajón móvil (768) y el de la página con menú fijo (1024). */
-const TABLET_QUERY = "(min-width: 768px) and (max-width: 1023px)"
+/**
+ * Pantalla mediana: entre el umbral del cajón móvil (768) y 1280. Ahí el menú
+ * queda en íconos para dar ancho al contenido y, al abrirlo, flota encima.
+ */
+const TABLET_QUERY = "(min-width: 768px) and (max-width: 1279px)"
 
 function isTabletWidth(): boolean {
   return typeof window !== "undefined" && window.matchMedia(TABLET_QUERY).matches
@@ -116,10 +119,11 @@ function SidebarProvider({
   // En tableta el menú empieza colapsado en su riel; al abrirlo flota (`overlay`).
   const isTablet = useIsTablet()
   const [_open, _setOpen] = React.useState(defaultOpen)
-  // Se decide al montar y no al pintar: así el primer render coincide con el HTML del servidor.
+  // Al entrar al rango (al montar o al achicar la ventana) se pliega: abierto taparía el contenido.
+  // Se decide en un efecto y no al pintar: así el primer render coincide con el HTML del servidor.
   React.useEffect(() => {
-    if (isTabletWidth()) _setOpen(false)
-  }, [])
+    if (isTablet) _setOpen(false)
+  }, [isTablet])
   const open = openProp ?? _open
   const overlay = isTablet && open
   const setOpen = React.useCallback(

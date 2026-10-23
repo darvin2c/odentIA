@@ -1,5 +1,6 @@
-import { cn, ScrollArea, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { cn, Tabs, TabsTrigger } from "@odentia/ui"
 import type * as React from "react"
+import { ScrollingTabsList } from "./scrolling-tabs-list.js"
 
 /**
  * Una sola vista a la vez de la misma lista («Mías y de mi área», «Vencidas»,
@@ -36,23 +37,21 @@ export function ViewTabs<T extends string>({
 }: ViewTabsProps<T>): React.JSX.Element {
   return (
     <Tabs className={cn("min-w-0 max-w-full", className)} value={value} onValueChange={(next) => onValueChange(next as T)}>
-      <ScrollArea horizontal className="min-w-0 max-w-full">
-        <TabsList aria-label={label} className="justify-start">
-          {options.map((option) => (
-            <TabsTrigger
-              key={option.value}
-              value={option.value}
-              disabled={option.disabled}
-              className={cn("shrink-0 min-h-11 sm:min-h-9", option.icon && "max-md:px-3")}
-            >
-              {option.icon}
-              {/* Con icono, el nombre se ve desde tableta; en el teléfono queda solo el icono, con su nombre accesible. */}
-              {option.icon ? <span className="max-md:sr-only">{option.label}</span> : option.label}
-              {option.count !== undefined ? <span className="tabular-nums"> · {option.count}</span> : null}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </ScrollArea>
+      <ScrollingTabsList aria-label={label}>
+        {options.map((option) => (
+          <TabsTrigger
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+            className={cn("shrink-0 min-h-11 sm:min-h-9", option.icon && "max-md:px-3")}
+          >
+            {option.icon}
+            {/* Con icono, el nombre se ve desde tableta; en el teléfono queda solo el icono, con su nombre accesible. */}
+            {option.icon ? <span className="max-md:sr-only">{option.label}</span> : option.label}
+            {option.count !== undefined ? <span className="tabular-nums"> · {option.count}</span> : null}
+          </TabsTrigger>
+        ))}
+      </ScrollingTabsList>
     </Tabs>
   )
 }

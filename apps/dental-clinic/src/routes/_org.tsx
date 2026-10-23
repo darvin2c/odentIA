@@ -55,6 +55,7 @@ import { useEffect } from "react"
 import {
   AGENT_PANEL_EVENTS,
   AgentPanelButton,
+  AgentPanelMenuItem,
   AgentPanelProvider,
   invalidateAgentPanelQueries,
   useAgentPanelSummary,
@@ -371,12 +372,17 @@ function OrgLayout() {
               utilities: (
                 <>
                   <GlobalSearchButton />
-                  <HelpButton className="max-lg:hidden" />
+                  <HelpButton />
                   <WorkspaceNotifications />
                   <AgentPanelButton />
                 </>
               ),
-              menuItems: <HeaderHelpMenuItem />,
+              menuItems: (
+                <>
+                  <HeaderHelpMenuItem />
+                  <AgentPanelMenuItem />
+                </>
+              ),
             }}
           >
             <Outlet />

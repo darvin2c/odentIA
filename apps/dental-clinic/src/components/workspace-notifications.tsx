@@ -1,5 +1,5 @@
 import { Button, DrawerDescription, DrawerTitle, ScrollArea } from "@odentia/ui"
-import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, LoadingState, useHeaderCompact } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Bell } from "lucide-react"
@@ -39,17 +39,18 @@ function useNotices() {
 export function WorkspaceNotifications() {
   const { open, setOpen } = useNoticesPanel()
   const unread = useNotices().data?.data.unread ?? 0
+  const compact = useHeaderCompact()
   return (
     <Button
       type="button"
       variant="ghost"
-      className={`elevated relative h-9 gap-2 rounded-full border border-border px-3 hover:bg-accent/50 max-md:h-9 max-md:w-9 max-md:px-0 max-md:gap-0 ${open ? "bg-accent" : "bg-card"}`}
+      className={`elevated relative h-9 gap-2 rounded-full border border-border px-3 hover:bg-accent/50 max-md:size-11 ${compact ? "w-9 gap-0 px-0" : ""} ${open ? "bg-accent" : "bg-card"}`}
       onClick={() => setOpen(!open)}
       aria-label={`Avisos${unread ? `: ${unread} sin leer` : ""}`}
       aria-expanded={open}
     >
       <Bell className="size-4" />
-      <span className="hidden md:inline">Avisos</span>
+      {compact ? null : <span className="hidden md:inline">Avisos</span>}
       {unread > 0 && (
         <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold text-background ring-2 ring-canvas">
           {unread > 99 ? "99+" : unread}
