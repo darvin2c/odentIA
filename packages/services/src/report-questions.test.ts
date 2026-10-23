@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest"
 import type { AdminAnswer, AdminDecider } from "./admin-request.js"
+import { agentTextsFor } from "./products.js"
 import { FIGURE_AREAS, groupsOf, REPORT_FIGURES, visibleFigures } from "./report-figures.js"
 import {
   interpretReportQuestion,
@@ -18,7 +19,8 @@ import {
 const LIMA = "America/Lima"
 /** Lunes 19 de octubre de 2026, 10:00 en Lima. */
 const NOW = new Date("2026-10-19T15:00:00Z")
-const CONTEXT = { timezone: LIMA, now: NOW, branches: [{ id: "b1", name: "Sede Centro" }, { id: "b2", name: "Sede Norte" }], billing: true }
+const DENTAL = agentTextsFor("dental")
+const CONTEXT = { timezone: LIMA, now: NOW, branches: [{ id: "b1", name: "Sede Centro" }, { id: "b2", name: "Sede Norte" }], billing: true, texts: DENTAL }
 
 /** Un decisor que responde lo que se le dice, con su distribución. */
 function scripted(answers: Record<string, Record<string, number>>): AdminDecider {
@@ -39,7 +41,7 @@ function scripted(answers: Record<string, Record<string, number>>): AdminDecider
 
 describe("las preguntas al modelo", () => {
   it("cada cifra va una sola vez, en la lista de su área, y ninguna lista es larga", () => {
-    const questions = reportQuestions()
+    const questions = reportQuestions(DENTAL)
     for (const area of FIGURE_AREAS) {
       const question = questions.find((item) => item.id === `cifra_${area}`)
       expect(question?.kind).toBe("choice")
@@ -53,7 +55,7 @@ describe("las preguntas al modelo", () => {
   })
 
   it("lo pagado a odentIA no se le ofrece a quien no ve Facturación", () => {
-    const keys = reportQuestions(visibleFigures(false)).flatMap((item) => (item.kind === "choice" ? item.options.map((option) => option.value) : []))
+    const keys = reportQuestions(DENTAL, visibleFigures(false)).flatMap((item) => (item.kind === "choice" ? item.options.map((option) => option.value) : []))
     expect(keys).not.toContain("agente_pagado")
   })
 

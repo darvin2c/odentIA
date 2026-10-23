@@ -77,6 +77,8 @@ import {
   ServiceError,
   updateContact,
   webchatHandoffWhere,
+  agentTextsFor,
+  type ProductAgentTexts,
 } from "@odentia/services"
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
@@ -209,6 +211,8 @@ export interface LessonOverrides {
 export interface AgentToolCtx {
   db: Db
   orgId: string
+  /** Las palabras del producto de la clínica (`productAgentTexts`); sin ellas, las de odentIA. */
+  texts?: ProductAgentTexts
   conversationId: string
   contactId: string
   /** Evento durable que disparó el turno (mensaje o coordinación). */
@@ -473,7 +477,20 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
  * del contexto RLS de la org (invariante). En simulación (dryRun) las
  * mutaciones devuelven vista previa sin escribir.
  */
+/**
+ * Las palabras del producto de la corrida. Sin ellas, las de odentIA: las
+ * clínicas de hoy son dentales (`orgProduct`).
+ */
+export function agentTexts(ctx: Pick<AgentToolCtx, "texts">): ProductAgentTexts {
+  return ctx.texts ?? agentTextsFor("dental")
+}
+
+/** El recurso que se reserva con la sede y el profesional (odentIA: «unidad dental»). */
+export const roomWord = (texts: ProductAgentTexts): string => texts.room || "sala"
+
 export function makeAgentTools(ctx: AgentToolCtx) {
+  const texts = agentTexts(ctx)
+  const room = roomWord(texts)
   const inOrg = <T>(fn: (tx: Db) => Promise<T>): Promise<T> => withOrgContext(ctx.db, ctx.orgId, fn)
 
   // Configuración regional de la org, resuelta una vez por corrida: toda
@@ -870,7 +887,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
     {
       name: "add_tags",
-      description: "Agrega etiquetas al contacto (p.ej. interesado-ortodoncia).",
+      description: `Agrega etiquetas al contacto${texts.tagExample ? ` (p.ej. ${texts.tagExample})` : ""}.`,
       schema: z.object({ tags: z.array(z.string().min(1).max(40)).min(1).max(10) }),
     },
   )
@@ -1012,7 +1029,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "buscar_en_la_clinica",
       description:
-        "Busca en lo que ofrece la clínica: servicios (con cómo decir su precio), promociones vigentes (precio, condiciones y fecha de fin) y profesionales por nombre o especialidad. Escribe lo que pide la persona con sus palabras («dientes amarillos», «frenillos», «ortodoncista»). Devuelve solo lo que coincide, leído en este momento.",
+        `Busca en lo que ofrece la clínica: servicios (con cómo decir su precio), promociones vigentes (precio, condiciones y fecha de fin) y profesionales por nombre o especialidad. Escribe lo que pide la persona con sus palabras${texts.searchExamples ? ` (${texts.searchExamples})` : ""}. Devuelve solo lo que coincide, leído en este momento.`,
       schema: z.object({ texto: z.string().trim().min(2).max(200) }),
     },
   )
@@ -1177,13 +1194,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ...gaps.map((g) => {
           const start = new Date(g.startsAt)
           const end = new Date(g.endsAt)
-          const room = g.roomId ?? "sin unidad dental asignada: filtra por una unidad dental real o deriva"
+          const roomId = g.roomId ?? `sin ${room} asignada: filtra por una ${room} real o deriva`
           return (
             `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.professionalName ? ` con ${g.professionalName}` : ""}` +
-            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${room} · profesional ${g.professionalRef}]`
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · ${room} ${roomId} · profesional ${g.professionalRef}]`
           )
         }),
-        "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, unidad dental y profesional): nunca inventes IDs ni horas.",
+        `Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, ${room} y profesional): nunca inventes IDs ni horas.`,
       ]
       if (truncated) lines.push("Hay más huecos que no van aquí: acota el rango por días o pide los de un profesional.")
       return lines.join("\n")
@@ -1191,7 +1208,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, unidad dental, profesional, inicio, fin, zona y duración para proponer_cita.",
+        `Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, ${room}, profesional, inicio, fin, zona y duración para proponer_cita.`,
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -1309,7 +1326,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, unidad dental, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
+        `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).`,
       schema: operationAgentSchema("cita.reservar"),
     },
   )
@@ -1489,7 +1506,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "ver_presupuesto",
       description:
-        "Los presupuestos que la clínica ya entregó a la persona (o a quien ella lleva), como los recibe ella: cada tratamiento con su pieza y su precio, las opciones y lo que ya respondió, con los ids para reenviar_presupuesto y anotar_respuesta_presupuesto. Nunca trae diagnósticos ni la historia clínica. Úsala antes de hablar de un presupuesto o de anotar lo que responde.",
+        `Los presupuestos que la clínica ya entregó a la persona (o a quien ella lleva), como los recibe ella: cada tratamiento con su ${texts.site ? `${texts.site} y su ` : ""}precio, las opciones y lo que ya respondió, con los ids para reenviar_presupuesto y anotar_respuesta_presupuesto. Nunca trae diagnósticos ni la historia clínica. Úsala antes de hablar de un presupuesto o de anotar lo que responde.`,
       schema: z.object({ patientId: z.string().uuid().describe("El paciente, de ver_contexto_paciente.") }),
     },
   )

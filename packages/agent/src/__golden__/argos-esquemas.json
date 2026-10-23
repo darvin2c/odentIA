@@ -1,0 +1,448 @@
+[
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "clave": {
+        "type": "string",
+        "description": "La clave de una cifra oficial de la lista."
+      },
+      "por": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."
+      },
+      "filtros": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "corte": {
+              "type": "string"
+            },
+            "valores": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "corte",
+            "valores"
+          ],
+          "additionalProperties": false
+        },
+        "description": "Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«Ortodoncia y Ortopedia Maxilar»]}]."
+      },
+      "parte_del_total": {
+        "type": "boolean",
+        "description": "Con cortes: la parte de cada fila en el total (parte_pct)."
+      },
+      "limite": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Solo si la pregunta pide un número de filas («los 5 que más…»)."
+      },
+      "orden": {
+        "type": "string",
+        "enum": [
+          "tiempo",
+          "mayor",
+          "menor"
+        ],
+        "description": "tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."
+      }
+    },
+    "required": [
+      "clave",
+      "por",
+      "filtros",
+      "parte_del_total",
+      "limite",
+      "orden"
+    ],
+    "additionalProperties": false
+  },
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Un nombre corto para el cálculo («c1»): con él lo eliges al responder."
+      },
+      "cifra": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "clave": {
+                "type": "string",
+                "description": "La clave de una cifra oficial de la lista."
+              },
+              "por": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."
+              },
+              "filtros": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "corte": {
+                      "type": "string"
+                    },
+                    "valores": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "corte",
+                    "valores"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«Ortodoncia y Ortopedia Maxilar»]}]."
+              },
+              "parte_del_total": {
+                "type": "boolean",
+                "description": "Con cortes: la parte de cada fila en el total (parte_pct)."
+              },
+              "limite": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Solo si la pregunta pide un número de filas («los 5 que más…»)."
+              },
+              "orden": {
+                "type": "string",
+                "enum": [
+                  "tiempo",
+                  "mayor",
+                  "menor"
+                ],
+                "description": "tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."
+              }
+            },
+            "required": [
+              "clave",
+              "por",
+              "filtros",
+              "parte_del_total",
+              "limite",
+              "orden"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "La cifra oficial que lo responde; null si ninguna sirve."
+      },
+      "sql": {
+        "type": "string",
+        "description": "Solo si ninguna cifra oficial sirve: tu consulta, con las reglas de «La consulta». Vacía con cifra."
+      },
+      "periodo": {
+        "type": "string",
+        "description": "El periodo (ver «El periodo»): este_mes, mes_pasado, ultimos_N_meses, este_ano, AAAA-MM, hoy, ayer, AAAA-MM-DD, esta_semana, semana_pasada, ultimos_N_dias, AAAA-MM-DD..AAAA-MM-DD, a_hoy o, para lo que viene, hoy_entero, manana, semana_entera, proxima_semana, mes_entero, resto_del_mes o proximo_mes."
+      },
+      "compara": {
+        "type": "string",
+        "enum": [
+          "no",
+          "anterior",
+          "año_anterior",
+          "otro"
+        ],
+        "description": "no, anterior, año_anterior u otro (la pregunta nombra dos periodos)."
+      },
+      "otro_periodo": {
+        "type": "string",
+        "description": "Con compara otro: el segundo periodo. Vacío si no."
+      },
+      "sede": {
+        "type": "string",
+        "description": "La sede que nombra la pregunta, tal cual. Vacío si no nombra ninguna."
+      }
+    },
+    "required": [
+      "id",
+      "cifra",
+      "sql",
+      "periodo",
+      "compara",
+      "otro_periodo",
+      "sede"
+    ],
+    "additionalProperties": false
+  },
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "textos": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lo que la pregunta nombra y no está tal cual en los nombres de la clínica: «ortodoncia», «Surco», «Rosa Quispe»."
+      }
+    },
+    "required": [
+      "textos"
+    ],
+    "additionalProperties": false
+  },
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "enum": [
+          "consulta",
+          "parcial",
+          "no_existe"
+        ],
+        "description": "consulta: se responde con las vistas. parcial: solo una parte. no_existe: las vistas no tienen ese dato."
+      },
+      "calculo": {
+        "default": "",
+        "description": "El id del cálculo que responde la pregunta; para juntar varios del mismo periodo, sus ids separados por coma («c1, c2»): el primero puede tener varias filas, los demás una. Vacío en no_existe.",
+        "type": "string"
+      },
+      "sql": {
+        "default": "",
+        "description": "Vacía: la consulta es la del cálculo.",
+        "type": "string"
+      },
+      "frase": {
+        "type": "string",
+        "description": "La respuesta, breve, con huecos {columna}, {lista} o {filas}. Nunca escribas una cifra del resultado. En no_existe, qué falta dicho en palabras simples y sin huecos."
+      },
+      "frase_vacia": {
+        "type": "string",
+        "description": "La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."
+      },
+      "como": {
+        "type": "string",
+        "description": "«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."
+      },
+      "falta": {
+        "type": "string",
+        "description": "En parcial o no_existe: lo que odentIA no registra. Vacío si nada falta."
+      },
+      "calculo_cercano": {
+        "default": "",
+        "description": "En no_existe: el id de un cálculo con lo más cercano que sí existe. Vacío si no hay.",
+        "type": "string"
+      },
+      "sql_cercana": {
+        "default": "",
+        "description": "Vacía: lo cercano va en calculo_cercano.",
+        "type": "string"
+      },
+      "frase_cercana": {
+        "type": "string",
+        "description": "La frase de sql_cercana, con sus huecos. Vacía si no hay."
+      },
+      "titulo": {
+        "type": "string",
+        "description": "Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."
+      },
+      "pantalla": {
+        "type": "string",
+        "description": "La pantalla de odentIA donde se ve esto, para el botón «Abrir…»: finanzas, pacientes, agenda, presupuestos, inventario, servicios, reportes, ninguna."
+      },
+      "seguir": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "etiqueta": {
+              "type": "string",
+              "description": "El botón, de 1 a 4 palabras: «Por monto», «Por sede», «Solo productos». Nunca otra fecha."
+            },
+            "cifra": {
+              "description": "Si la respuesta es una cifra oficial: la misma con otro corte, filtro u orden.",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "clave": {
+                      "type": "string",
+                      "description": "La clave de una cifra oficial de la lista."
+                    },
+                    "por": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Hasta dos cortes que la cifra admite (mes, sede, profesional…); vacío: una sola cifra."
+                    },
+                    "filtros": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "corte": {
+                            "type": "string"
+                          },
+                          "valores": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "corte",
+                          "valores"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Solo esos valores de un corte, con el nombre de la clínica: [{corte: «especialidad», valores: [«Ortodoncia y Ortopedia Maxilar»]}]."
+                    },
+                    "parte_del_total": {
+                      "type": "boolean",
+                      "description": "Con cortes: la parte de cada fila en el total (parte_pct)."
+                    },
+                    "limite": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Solo si la pregunta pide un número de filas («los 5 que más…»)."
+                    },
+                    "orden": {
+                      "type": "string",
+                      "enum": [
+                        "tiempo",
+                        "mayor",
+                        "menor"
+                      ],
+                      "description": "tiempo: en su orden (por mes, por día de la semana); mayor: de mayor a menor («qué día cobramos más», los que más); menor: al revés («los que menos»)."
+                    }
+                  },
+                  "required": [
+                    "clave",
+                    "por",
+                    "filtros",
+                    "parte_del_total",
+                    "limite",
+                    "orden"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sql": {
+              "default": "",
+              "description": "Si no: la consulta completa de esa variante. Vacía con cifra.",
+              "type": "string"
+            },
+            "frase": {
+              "type": "string",
+              "description": "Su frase con huecos."
+            },
+            "frase_vacia": {
+              "type": "string",
+              "description": "Su frase si no trae filas."
+            },
+            "como": {
+              "type": "string",
+              "description": "Su «Así lo calculé»."
+            }
+          },
+          "required": [
+            "etiqueta",
+            "sql",
+            "frase",
+            "frase_vacia",
+            "como"
+          ],
+          "additionalProperties": false
+        },
+        "description": "Hasta 3 variantes que la persona querría ver después; vacío en no_existe. Más de 3 no se usan."
+      },
+      "periodo": {
+        "default": "a_hoy",
+        "description": "Sin cálculo: el periodo de la pregunta. Con cálculo no se usa: va el del cálculo.",
+        "type": "string"
+      },
+      "compara": {
+        "default": "no",
+        "type": "string",
+        "enum": [
+          "no",
+          "anterior",
+          "año_anterior",
+          "otro"
+        ]
+      },
+      "otro_periodo": {
+        "default": "",
+        "type": "string"
+      },
+      "sede": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tipo",
+      "calculo",
+      "sql",
+      "frase",
+      "frase_vacia",
+      "como",
+      "falta",
+      "calculo_cercano",
+      "sql_cercana",
+      "frase_cercana",
+      "titulo",
+      "pantalla",
+      "seguir",
+      "periodo",
+      "compara",
+      "otro_periodo",
+      "sede"
+    ],
+    "additionalProperties": false
+  }
+]

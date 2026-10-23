@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { interpretReportQuestion, type ReportInterpretationResult } from "@odentia/services"
+import { agentTextsFor, interpretReportQuestion, type ReportInterpretationResult } from "@odentia/services"
 import { asAdminDecider } from "../admin.js"
 import { AI_PRICES } from "../ai-usage.js"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
@@ -60,7 +60,7 @@ const off = bank.preguntas.length - inList - unknown
 for (const example of bank.preguntas) {
   let got: ReportInterpretationResult
   try {
-    got = await interpretReportQuestion(example.text, decider, { timezone: "America/Lima", now: new Date(), branches: [], billing: true })
+    got = await interpretReportQuestion(example.text, decider, { timezone: "America/Lima", now: new Date(), branches: [], billing: true, texts: agentTextsFor("dental") })
   } catch (error) {
     counts.failed += 1
     misses.push(`«${example.text}» → el modelo no respondió (${error instanceof Error ? error.message : "error"})`)

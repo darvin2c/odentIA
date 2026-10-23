@@ -142,6 +142,8 @@ export interface TimelineQuery {
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
+  /** Si Clío dicta en sus clínicas (odentIA sí; la app médica, cuando tenga su dictado). */
+  dictates: boolean
   /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
@@ -223,6 +225,7 @@ export interface ProductHooks {
 /** Un producto que no agrega nada en ningún momento. */
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
+  dictates: false,
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),
   encounterFinalized: async () => ({}),

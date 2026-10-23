@@ -55,6 +55,7 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import type { Storage } from "./storage.js"
 import { setWritingHours } from "./writing-hours.js"
 import { insertTestPatients } from "./test-patient.js"
+import { agentTextsFor } from "./products.js"
 
 /**
  * Automatizaciones de punta a punta contra la base: qué se programa al prender,
@@ -243,7 +244,7 @@ async function cancelledAppointment(c: Clinic, patientId: string, cancelledAt: D
 
 /** Lo que se le pide al Administrador, entendido por el doble determinista del modelo. */
 const ask = async (c: Clinic, text: string, decider: AdminDecider = keywordAdminDecider()) => {
-  const understood = await interpretAdminRequest(text, decider)
+  const understood = await interpretAdminRequest(text, decider, agentTextsFor("dental"))
   return run(c, (tx) => saveAdminDraft(tx, c.orgId, c.ownerId, text, understood))
 }
 const rulesOf = (c: Clinic) => ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))
@@ -1033,12 +1034,12 @@ describe("pedírselo con palabras", () => {
         usage: { inputTokens: 300, outputTokens: 4 },
       }),
     }
-    expect(await interpretAdminRequest("haz algo con la plata", unsure)).toMatchObject({ understood: false, key: null, changes: {}, usage: { inputTokens: 300, outputTokens: 4 } })
+    expect(await interpretAdminRequest("haz algo con la plata", unsure, agentTextsFor("dental"))).toMatchObject({ understood: false, key: null, changes: {}, usage: { inputTokens: 300, outputTokens: 4 } })
     // Una línea que no existe en el catálogo nunca se arma, aunque el modelo la nombre.
     const invents: AdminDecider = {
       decide: async () => ({ answers: [{ id: "linea", kind: "choice", choice: "felicitar_cumpleanos", confidence: 1 }, { id: "intencion", kind: "choice", choice: "prender", confidence: 1 }], model: "prueba", usage: null }),
     }
-    expect((await interpretAdminRequest("felicita a quien cumple años", invents)).understood).toBe(false)
+    expect((await interpretAdminRequest("felicita a quien cumple años", invents, agentTextsFor("dental"))).understood).toBe(false)
     // «Sin tareas» apaga una parte: aunque el modelo lo lea como apagar, la línea no se apaga.
     const confused: AdminDecider = {
       decide: async () => ({
@@ -1051,7 +1052,7 @@ describe("pedírselo con palabras", () => {
         usage: null,
       }),
     }
-    expect(await interpretAdminRequest("en las inasistencias no crees tareas", confused)).toMatchObject({ intent: "cambiar", changes: { teamPart: false } })
+    expect(await interpretAdminRequest("en las inasistencias no crees tareas", confused, agentTextsFor("dental"))).toMatchObject({ intent: "cambiar", changes: { teamPart: false } })
     const c = await clinic()
     expect(await ask(c, "felicita a quien cumple años", invents)).toMatchObject({ understood: false, draft: false, message: expect.stringContaining("No reconocí una línea") })
     expect(await rulesOf(c)).toEqual([])

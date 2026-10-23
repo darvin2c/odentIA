@@ -9,6 +9,7 @@ import {
   discardAdminDraft,
   type AdminInterpretation,
   interpretAdminRequest,
+  productAgentTexts,
   keywordAdminDecider,
   saveAdminDraft,
   setAdminDraftNote,
@@ -180,7 +181,9 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
         understood = await meterAiUse(deps.db, orgId, "administrador", async () => {
           const model = await createAdminDecisionModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions }, orgId)
           // Con el modelo de demostración responde el doble determinista de los servicios.
-          return interpretAdminRequest(parsed.data.text, model ? asAdminDecider(model) : keywordAdminDecider())
+          // Con las palabras del producto de la clínica (odentIA: «clínica dental»).
+          const texts = await withOrgContext(deps.db, orgId, (tx) => productAgentTexts(tx, orgId))
+          return interpretAdminRequest(parsed.data.text, model ? asAdminDecider(model) : keywordAdminDecider(), texts)
         })
       } catch {
         return { understood: false, key: null, draft: false, message: ADMIN_MODEL_DOWN, confirmDelete: false, model: null, usage: null, unavailable: true }

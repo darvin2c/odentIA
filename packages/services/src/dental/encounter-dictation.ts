@@ -18,16 +18,17 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
-import { getAgentConfig } from "./agentConfig.js"
-import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
-import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "./encounters.js"
-import { notFound, ServiceError, validation } from "./errors.js"
-import { createFollowUp } from "./follow-ups.js"
-import { normalizeForSearch } from "./knowledge.js"
-import { findOrgLocale, formatOrgMoney, type OrgLocale } from "./locale.js"
-import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
-import { addPlanItem } from "./plan.js"
+import { getAgentConfig } from "../agentConfig.js"
+import { findDiagnosisCode, orgDiagnosisSystem } from "../diagnosis-codes.js"
+import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
+import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "../encounters.js"
+import { notFound, ServiceError, validation } from "../errors.js"
+import { createFollowUp } from "../follow-ups.js"
+import { normalizeForSearch } from "../knowledge.js"
+import { findOrgLocale, formatOrgMoney, type OrgLocale } from "../locale.js"
+import { OPERATIONS, operationAgentSchema } from "../operation-fields.js"
+import { addPlanItem } from "../plan.js"
+import { productHooks } from "../products.js"
 
 /* ---------- Asistente clínico: lo dictado se vuelve sugerencias que el odontólogo confirma ---------- */
 
@@ -102,8 +103,18 @@ function withMeta(data: Record<string, unknown>, meta: SuggestionMeta): Record<s
   return Object.keys(kept).length ? { ...data, [META]: kept } : data
 }
 
+/**
+ * Clío dicta con el prompt, el formato y el extractor de su producto (ADR
+ * 0079): hoy solo el de odentIA. En una clínica de otro producto no dicta.
+ */
+export async function requireDictatingProduct(tx: Db, orgId: string): Promise<void> {
+  if (!(await productHooks(tx, orgId)).dictates)
+    throw new ServiceError("CLINICAL_ASSISTANT_UNAVAILABLE", 409, "Clío aún no dicta en esta clínica")
+}
+
 /** ¿El asistente clínico está encendido en esta clínica? */
 export async function requireClinicalAssistant(tx: Db, orgId: string): Promise<void> {
+  await requireDictatingProduct(tx, orgId)
   const cfg = await getAgentConfig(tx, orgId)
   if (!cfg.clinicalAssistantEnabled) {
     throw new ServiceError("CLINICAL_ASSISTANT_OFF", 409, "Clío está apagada en esta clínica")

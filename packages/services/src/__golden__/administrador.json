@@ -1,0 +1,116 @@
+[
+  {
+    "id": "linea",
+    "kind": "choice",
+    "instructions": "La persona que administra una clínica dental le pide algo a su asistente. ¿De cuál de estas tareas automáticas está hablando? Elige «ninguna» si no habla de ninguna de ellas.",
+    "options": [
+      {
+        "value": "recordatorio_cita",
+        "description": "Recordar la cita: Una persona tiene una cita. El agente le recuerda un día antes y 3 horas antes."
+      },
+      {
+        "value": "recordatorio_control",
+        "description": "Avisar un control: Un control se acerca. El agente le avisa para agendarlo."
+      },
+      {
+        "value": "seguimiento_presupuesto",
+        "description": "Retomar un presupuesto: Un presupuesto lleva 2 días sin respuesta. El agente le escribe para retomarlo."
+      },
+      {
+        "value": "seguimiento_comercial",
+        "description": "Retomar una oportunidad: La tarea de una oportunidad vence. El agente le escribe para retomar la conversación y da la tarea por hecha."
+      },
+      {
+        "value": "seguimiento_no_asistencia",
+        "description": "Reprogramar tras una inasistencia: Una persona falta a su cita. El agente le escribe al día siguiente para reprogramar."
+      },
+      {
+        "value": "invitar_a_volver",
+        "description": "Invitar a volver: Seis meses sin venir, sin cita ni pendientes. El agente le escribe para volver a verla."
+      },
+      {
+        "value": "presupuestos_sin_cita",
+        "description": "Presupuesto aceptado sin cita: Un presupuesto aceptado pasa 7 días sin cita. Queda una tarea de llamada para el equipo de recepción."
+      },
+      {
+        "value": "atenciones_sin_firmar",
+        "description": "Atención sin firmar: Una atención lleva 2 días sin firmar. Queda una tarea para el equipo clínico: quien la llevaba ya no atiende."
+      },
+      {
+        "value": "cobranza_vencida",
+        "description": "Saldo vencido: Un saldo pasa 30 días vencido. Queda una tarea para el equipo de caja."
+      },
+      {
+        "value": "cita_cancelada",
+        "description": "Ofrecer otra fecha tras una cancelación: Una persona cancela su cita. El agente le escribe una hora después para ofrecerle otra fecha."
+      },
+      {
+        "value": "ninguna",
+        "description": "No habla de ninguna de estas tareas."
+      }
+    ]
+  },
+  {
+    "id": "intencion",
+    "kind": "choice",
+    "instructions": "¿Qué quiere hacer con esa tarea automática?",
+    "options": [
+      {
+        "value": "prender",
+        "description": "Quiere que empiece a hacerse, crearla o activarla."
+      },
+      {
+        "value": "apagar",
+        "description": "Quiere que deje de hacerse, pausarla o desactivarla."
+      },
+      {
+        "value": "cambiar",
+        "description": "Ya existe y quiere ajustar cómo se hace: cuándo, quién lo hace o qué pasa si no se puede."
+      },
+      {
+        "value": "eliminar",
+        "description": "Quiere borrarla del todo."
+      },
+      {
+        "value": "otra",
+        "description": "Pide otra cosa."
+      }
+    ]
+  },
+  {
+    "id": "persona",
+    "kind": "yesno",
+    "instructions": "¿Pide que lo haga una persona del equipo EN LUGAR del agente (que el agente no escriba)?",
+    "criteria": {
+      "yes": "Dice que llame o lo haga una persona, y no el agente.",
+      "no": "No pide quitar al agente."
+    }
+  },
+  {
+    "id": "respaldo",
+    "kind": "yesno",
+    "instructions": "¿Pide que, ADEMÁS, quede una tarea o una llamada para una persona cuando el agente no pueda escribir?",
+    "criteria": {
+      "yes": "Pide una tarea o llamada de respaldo.",
+      "no": "No habla de una tarea de respaldo."
+    }
+  },
+  {
+    "id": "sin_respaldo",
+    "kind": "yesno",
+    "instructions": "¿Pide que NO se creen tareas para el equipo cuando el agente no pueda escribir?",
+    "criteria": {
+      "yes": "Pide quitar las tareas de respaldo.",
+      "no": "No pide quitarlas."
+    }
+  },
+  {
+    "id": "fuera",
+    "kind": "yesno",
+    "instructions": "¿Pide algo que va más allá de activar, pausar, cambiar cuándo se hace o quién lo hace? Por ejemplo: cambiar el texto del mensaje, ofrecer descuentos o promociones, escribir por otro canal, o escribirle a un grupo distinto de personas.",
+    "criteria": {
+      "yes": "Pide cambiar el contenido, ofrecer algo o un destinatario distinto.",
+      "no": "Solo pide activar, pausar, o cambiar cuándo o quién."
+    }
+  }
+]

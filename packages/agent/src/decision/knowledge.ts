@@ -1,4 +1,4 @@
-import { type KnowledgeEntryItem, scoreKnowledgeMatch } from "@odentia/services"
+import { clinicWord, type KnowledgeEntryItem, type ProductAgentTexts, scoreKnowledgeMatch } from "@odentia/services"
 import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
 
 /**
@@ -36,12 +36,12 @@ export function knowledgeCandidates(entries: KnowledgeEntryItem[], latest: strin
     .map((item) => item.entry)
 }
 
-export function knowledgeQuestion(candidates: KnowledgeEntryItem[]): DecisionQuestion {
+export function knowledgeQuestion(candidates: KnowledgeEntryItem[], texts: ProductAgentTexts): DecisionQuestion {
   return {
     id: KNOWLEDGE_SELECT_QUESTION,
     kind: "choice",
     instructions:
-      "Which official answer of the dental clinic, if any, answers the latest message from the contact? Choose `none` when no listed answer applies or the message is not a question about the clinic.",
+      `Which official answer of the ${clinicWord(texts, "en")}, if any, answers the latest message from the contact? Choose \`none\` when no listed answer applies or the message is not a question about the clinic.`,
     options: [
       ...candidates.map((entry, index) => ({
         value: optionValue(index),

@@ -14,6 +14,7 @@
 import type { AdminAnswer, AdminDecider, AdminQuestion } from "./admin-request.js"
 import { FIGURE_AREAS, type FigureArea, type FigureGroup, groupsOf, type ReportFigure, reportFigureOf, visibleFigures } from "./report-figures.js"
 import { addDays, currentMonthIn, REPORT_PERIOD_PATTERN, reportDayOf } from "./report-periods.js"
+import { clinicWord, type ProductAgentTexts } from "./product-agent.js"
 
 /** De qué trata la pregunta: solo `cifra` se responde. */
 export const REPORT_QUESTION_TOPICS = ["cifra", "clinico", "accion", "otro"] as const
@@ -48,13 +49,16 @@ const AREA_WORDS: Record<FigureArea, string> = {
   agente: "Los agentes de odentIA: lo que hizo y trajo el agente, las conversaciones que atendió, las citas que agendó o recuperó, lo que cuesta, cuánto se tarda en responder, y las consultas dictadas con Clío.",
 }
 
-const GROUP_OPTIONS: Array<{ value: FigureGroup; description: string }> = [
+const groupOptions = (texts: ProductAgentTexts): Array<{ value: FigureGroup; description: string }> => [
   { value: "total", description: "Una sola cifra, sin separarla: «¿cuánto…?», «¿cuántos…?»." },
-  { value: "profesional", description: "Por profesional, doctor u odontólogo: «¿quién…?», «¿qué doctor…?», «de cada dentista»." },
+  {
+    value: "profesional",
+    description: `Por profesional${texts.reports.professional ? `, ${texts.reports.professional}` : ""}: «¿quién…?», «¿qué doctor…?»${texts.reports.eachProfessional ? `, «${texts.reports.eachProfessional}»` : ""}.`,
+  },
   { value: "sede", description: "Por sede o local: comparar las sedes, «en cada sede»." },
   { value: "mes", description: "Por mes, cómo cambió con el tiempo, la tendencia, mes a mes." },
   { value: "canal", description: "Por canal: WhatsApp, Instagram, Messenger, chat web, correo." },
-  { value: "tratamiento", description: "Por tratamiento o servicio: ortodoncia, limpieza, blanqueamiento." },
+  { value: "tratamiento", description: `Por tratamiento o servicio${texts.reports.treatments ? `: ${texts.reports.treatments}` : ""}.` },
   { value: "medio", description: "Por medio de pago: efectivo, tarjeta, transferencia, Yape." },
   { value: "categoria", description: "Por tipo de gasto: alquiler, laboratorio, materiales, personal." },
   { value: "como_nos_conocio", description: "Por cómo nos conocieron: recomendación, redes sociales, Google." },
@@ -62,15 +66,18 @@ const GROUP_OPTIONS: Array<{ value: FigureGroup; description: string }> = [
 ]
 
 /** Las preguntas que se le hacen al modelo, todas cerradas. Solo las cifras que puede ver quien pregunta. */
-export function reportQuestions(figures: ReportFigure[] = visibleFigures(true)): AdminQuestion[] {
+export function reportQuestions(texts: ProductAgentTexts, figures: ReportFigure[] = visibleFigures(true)): AdminQuestion[] {
   return [
     {
       id: "tema",
       kind: "choice",
-      instructions: "Quien dirige una clínica dental le pregunta algo a su asistente de reportes. ¿De qué trata la pregunta?",
+      instructions: `Quien dirige una ${clinicWord(texts)} le pregunta algo a su asistente de reportes. ¿De qué trata la pregunta?`,
       options: [
         { value: "cifra", description: "Pide una cifra o un dato de cómo va la clínica: dinero, pacientes, citas, el agente. «¿Cuánto…?», «¿cuántos…?», «¿quién…?», «compara…»." },
-        { value: "clinico", description: "Pregunta por la salud o la historia clínica de los pacientes: enfermedades, diagnósticos, alergias, piezas dentales, tratamientos de una persona." },
+        {
+          value: "clinico",
+          description: `Pregunta por la salud o la historia clínica de los pacientes: enfermedades, diagnósticos, alergias, ${texts.reports.clinicalRecord ? `${texts.reports.clinicalRecord}, ` : ""}tratamientos de una persona.`,
+        },
         { value: "accion", description: "Pide hacer algo, no saber algo: escribirles, enviar, llamar, recordar, prender o cambiar algo, agendar." },
         { value: "otro", description: "Saluda o pregunta algo que no es de la clínica." },
       ],
@@ -96,7 +103,7 @@ export function reportQuestions(figures: ReportFigure[] = visibleFigures(true)):
       id: "agrupar",
       kind: "choice",
       instructions: "¿Cómo quiere ver esa cifra?",
-      options: GROUP_OPTIONS,
+      options: groupOptions(texts),
     },
     {
       id: "fuera",
@@ -269,13 +276,20 @@ function distribution(choice: { value: string; probabilities: Record<string, num
 export async function interpretReportQuestion(
   text: string,
   decider: AdminDecider,
-  context: { timezone: string; now: Date; branches: Array<{ id: string; name: string }>; billing: boolean },
+  context: {
+    timezone: string
+    now: Date
+    branches: Array<{ id: string; name: string }>
+    billing: boolean
+    /** Las palabras del producto de la clínica (`productAgentTexts`). */
+    texts: ProductAgentTexts
+  },
 ): Promise<ReportInterpretationResult> {
   const question = text.trim().slice(0, 500)
   // Lo clínico se reconoce antes de llamar a nadie: no viaja al proveedor ni cuenta para el tope.
   if (CLINICAL_RE.test(plain(question))) return { interpretation: { kind: "clinico" }, model: null, usage: null }
   const figures = visibleFigures(context.billing)
-  const result = await decider.decide(question, reportQuestions(figures))
+  const result = await decider.decide(question, reportQuestions(context.texts, figures))
   const base = { model: result.model, usage: result.usage }
   const topic = choiceOf(result.answers, "tema")
   const topics = topic ? distribution(topic) : { cifra: 1 }
