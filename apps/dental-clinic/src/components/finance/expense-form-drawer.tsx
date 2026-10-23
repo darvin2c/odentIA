@@ -29,6 +29,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { usePermission } from "../../lib/crm"
+import { orgTaxesOf, useOrgProfile } from "../../lib/org"
+import { ChoiceButtons } from "../choice-buttons"
 import {
   cashErrorMessage,
   createExpenseApi,
@@ -90,6 +92,10 @@ export function ExpenseFormDrawer({
   const [concept, setConcept] = useState("")
   const [amount, setAmount] = useState("")
   const [category, setCategory] = useState<ExpenseCategory | "">("")
+  // El pago del impuesto de lo cobrado (ADR 0083): se pregunta solo en «Impuestos» y en un país que lo separa.
+  const salesTaxName = orgTaxesOf(useOrgProfile().data)?.name ?? null
+  const [salesTax, setSalesTax] = useState<"cobros" | "otro" | null>(null)
+  const asksSalesTax = category === "Impuestos" && salesTaxName !== null
   const [purchase, setPurchase] = useState<string>(OTHER)
   // Lo que se vio de la compra al elegirla: si cambia mientras tanto, el servidor lo dice.
   const [seen, setSeen] = useState<{ due: number; paid: number } | null>(null)
@@ -117,6 +123,7 @@ export function ExpenseFormDrawer({
     setConcept(initial?.concept ?? "")
     setAmount(initial ? formatMoneyInput(initial.amountCents, place.currency, locale) : "")
     setCategory(initial?.category ?? "")
+    setSalesTax(null)
     setPurchase(OTHER)
     setSeen(null)
     setFromCash(!initial)
@@ -208,6 +215,10 @@ export function ExpenseFormDrawer({
           setError("Elige el tipo de gasto.")
           return
         }
+        if (asksSalesTax && salesTax === null) {
+          setError("Elige qué impuesto pagas.")
+          return
+        }
         if (after !== null && after < 0 && state) {
           setError(`En la caja solo hay ${money(state.cashOnHandCents)}: no alcanza para pagar este gasto con el efectivo.`)
           return
@@ -238,11 +249,41 @@ export function ExpenseFormDrawer({
           })
           return
         }
-        createMutation.mutate({ branchId, concept: concept.trim(), amountCents: cents, category, fromCash, ...receipt, ...spentAt })
+        createMutation.mutate({
+          branchId,
+          concept: concept.trim(),
+          amountCents: cents,
+          category,
+          fromCash,
+          ...(asksSalesTax ? { salesTax: salesTax === "cobros" } : {}),
+          ...receipt,
+          ...spentAt,
+        })
       }}
     >
       <div className="flex flex-col gap-5">
         <ChoiceChips label="Tipo" value={category} options={CATEGORY_OPTIONS} onChange={setCategory} />
+        {asksSalesTax ? (
+          <Field>
+            <FieldLabel>¿Qué impuesto pagas?</FieldLabel>
+            <ChoiceButtons
+              label="¿Qué impuesto pagas?"
+              tone="primary"
+              columns={2}
+              value={salesTax}
+              options={[
+                { value: "cobros", label: `${salesTaxName} de tus cobros` },
+                { value: "otro", label: "Otro (renta, municipal…)" },
+              ]}
+              onChange={setSalesTax}
+            />
+            <FieldDescription>
+              {salesTax === "otro"
+                ? "Resta de lo que deja, como cualquier gasto."
+                : `El ${salesTaxName} ya se restó de lo cobrado, así que no vuelve a restar de lo que deja. Si pagas ${salesTaxName} y renta juntos, regístralos por separado.`}
+            </FieldDescription>
+          </Field>
+        ) : null}
         {asksPurchase ? (
           <fieldset className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3.5">
             <legend id={questionId} className="px-1 font-bold">

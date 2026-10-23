@@ -18,6 +18,7 @@ import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
+import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { overdueDebtSql } from "./report-debts.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
@@ -206,6 +207,12 @@ export interface ExpenseTotals {
   commissionPaidCents: number
   /** Pagos de compras de Inventario (dentro de Materiales). */
   purchasePaidCents: number
+  /**
+   * Pagos del impuesto de lo cobrado (el IGV, ADR 0083): salen de la caja pero
+   * no restan de lo que deja, porque ese impuesto ya salió de lo cobrado. Van
+   * aparte de su tipo, como el pago de comisiones.
+   */
+  salesTaxPaidCents: number
 }
 
 /**
@@ -218,6 +225,7 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
   const kind = sql`case
       when exists (select 1 from commission_settlement s where s.organization_id = e.organization_id and s.expense_id = e.id) then 'comision'
       when e.purchase_order_id is not null then 'compra'
+      when e.sales_tax then 'impuesto_de_lo_cobrado'
       else 'gasto' end`
   const rows = await tx.execute<{ idx: number; currency: string; category: string; kind: string; cents: string }>(sql`
     select b.idx, x.currency, x.category, x.kind, sum(x.cents)::text as cents
@@ -238,12 +246,13 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
     (list, row) => {
       let entry = list.find((item) => item.currency === row.currency)
       if (!entry) {
-        entry = { currency: row.currency, totalCents: 0, byCategory: [], commissionPaidCents: 0, purchasePaidCents: 0 }
+        entry = { currency: row.currency, totalCents: 0, byCategory: [], commissionPaidCents: 0, purchasePaidCents: 0, salesTaxPaidCents: 0 }
         list.push(entry)
       }
       const cents = safeCents(row.cents)
       entry.totalCents += cents
       if (row.kind === "comision") entry.commissionPaidCents += cents
+      else if (row.kind === "impuesto_de_lo_cobrado") entry.salesTaxPaidCents += cents
       else {
         if (row.kind === "compra") entry.purchasePaidCents += cents
         const slot = entry.byCategory.find((item) => item.category === row.category)
@@ -548,17 +557,23 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const [owedCommissions] = await commissionsOwedMany(tx, orgId, [window.end], { currency, branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
+  const taxName = (await orgTaxes(tx, orgId))?.name ?? null
 
   const cobrado = (index: number): number => inCurrency(collected[index], currency)?.cents ?? 0
+  /** La parte de lo cobrado que es impuesto (ADR 0083): no es de la clínica. */
+  const taxOf = (index: number): number => inCurrency(collected[index], currency)?.taxCents ?? 0
   const spent = (index: number): ExpenseTotals =>
-    inCurrency(expenses[index], currency) ?? { currency, totalCents: 0, byCategory: [], commissionPaidCents: 0, purchasePaidCents: 0 }
+    inCurrency(expenses[index], currency) ?? { currency, totalCents: 0, byCategory: [], commissionPaidCents: 0, purchasePaidCents: 0, salesTaxPaidCents: 0 }
   const generated = (index: number): number => sumOf(commissions[index], (item) => item.commissionCents)
-  /** Lo que deja: lo cobrado menos las comisiones generadas y los demás gastos (sin el pago de comisiones). */
-  const leaves = (index: number): number => cobrado(index) - generated(index) - (spent(index).totalCents - spent(index).commissionPaidCents)
+  /** Los demás gastos: sin el pago de comisiones ni el del impuesto de lo cobrado. */
+  const otherExpenses = (index: number): number => spent(index).totalCents - spent(index).commissionPaidCents - spent(index).salesTaxPaidCents
+  /** Lo que deja: lo cobrado menos su impuesto, las comisiones generadas y los demás gastos. */
+  const leaves = (index: number): number => cobrado(index) - taxOf(index) - generated(index) - otherExpenses(index)
   const tramo = (index: number) => ({
     cobradoCents: cobrado(index),
+    taxCents: taxOf(index),
     commissionCents: generated(index),
-    otherExpensesCents: spent(index).totalCents - spent(index).commissionPaidCents,
+    otherExpensesCents: otherExpenses(index),
     leavesCents: leaves(index),
     /** En caja quedó: lo cobrado menos todo lo gastado, también el pago de comisiones. */
     cashLeftCents: cobrado(index) - spent(index).totalCents,
@@ -572,6 +587,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
 
   return {
     ...reportHead(scope),
+    /** «IGV», «IVA»: el nombre del impuesto de la clínica, o null si su país no tiene uno que separar. */
+    taxName: taxName ?? (taxOf(0) > 0 ? "Impuesto" : null),
     months: months.map(serializeBucket),
     /** El periodo y el anterior (`previous` de la cabecera es su tramo). */
     totals: { current: tramo(0), previous: tramo(1) },
@@ -589,12 +606,15 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     /** La cascada: lo cobrado, las comisiones generadas y cada tipo de gasto que tuvo algo (sin el pago de comisiones). */
     cascade: {
       cobradoCents: cobrado(0),
+      taxCents: taxOf(0),
       commissionCents: generated(0),
       categories: EXPENSE_CATEGORIES.map((category): { category: string; cents: number } => ({ category, cents: period.byCategory.find((item) => item.category === category)?.cents ?? 0 }))
         .concat(period.byCategory.filter((item) => !(EXPENSE_CATEGORIES as readonly string[]).includes(item.category)))
         .filter((item) => item.cents !== 0),
       purchasePaidCents: period.purchasePaidCents,
       commissionPaidCents: period.commissionPaidCents,
+      /** El pago del impuesto de lo cobrado: sale de la caja, no resta de lo que deja. */
+      salesTaxPaidCents: period.salesTaxPaidCents,
       leavesCents: leaves(0),
     },
     /** Cobrado, comisiones y otros gastos por tramo del periodo. */
@@ -604,9 +624,14 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
       previousOverdueCents: owedOverdue(1),
       overdueCents: owedOverdue(0),
     },
-    /** Lo que debes al cerrar el periodo: comisiones por pagar y compras recibidas sin pagar. */
+    /**
+     * Lo que debes al cerrar el periodo: comisiones por pagar, compras recibidas
+     * sin pagar y el impuesto de lo cobrado en el periodo, que se paga el mes
+     * siguiente (antes de descontarle el de las compras; no se acumula).
+     */
     payables: {
       commissions: owedCommissions ?? { cents: 0, professionals: 0 },
+      salesTax: { cents: Math.max(0, taxOf(0)) },
       purchases: purchasesDue
         ? { cents: purchasesDue.cents, orders: purchasesDue.orders, oldestReceivedAt: purchasesDue.oldestReceivedAt?.toISOString() ?? null }
         : { cents: 0, orders: 0, oldestReceivedAt: null },

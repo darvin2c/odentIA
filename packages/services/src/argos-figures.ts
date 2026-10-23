@@ -324,8 +324,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "lo_que_deja",
     name: "Lo que deja",
-    describes: "Lo que gana la clínica: lo cobrado menos comisiones y gastos registrados.",
-    how: "Lo cobrado menos las comisiones generadas y los demás gastos del periodo (el pago de comisiones ya está contado en ellas).",
+    describes: "Lo que gana la clínica: lo cobrado sin su impuesto (IGV o IVA) menos comisiones y gastos registrados.",
+    how: "Lo cobrado menos su impuesto, las comisiones generadas y los demás gastos del periodo (el pago de comisiones ya está contado en ellas y el pago de ese impuesto no vuelve a restar).",
     unit: "dinero",
     column: "lo_que_deja_dinero",
     time: "instante",
@@ -335,7 +335,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["cobros", "comisiones", "gastos"],
-        rows: "select momento as t, dia, sede, importe as v from cobros union all select momento, dia, sede, -comision from comisiones union all select momento, dia, sede, -monto from gastos where tipo <> 'pago_de_comisiones'",
+        rows: "select momento as t, dia, sede, importe - impuesto as v from cobros union all select momento, dia, sede, -comision from comisiones union all select momento, dia, sede, -monto from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado')",
         cuts: [...WHEN, "sede"],
       },
     ],
@@ -343,8 +343,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "margen",
     name: "Margen",
-    describes: "Qué parte de lo cobrado le queda a la clínica: lo que deja ÷ lo cobrado, en %.",
-    how: "Lo que deja (lo cobrado menos las comisiones y los gastos registrados) entre lo cobrado del periodo.",
+    describes: "Qué parte de lo cobrado le queda a la clínica: lo que deja ÷ lo cobrado sin su impuesto, en %.",
+    how: "Lo que deja (lo cobrado sin su impuesto menos las comisiones y los gastos registrados) entre lo cobrado sin su impuesto del periodo.",
     unit: "pct",
     column: "margen_pct",
     time: "instante",
@@ -353,7 +353,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["cobros", "comisiones", "gastos"],
-        rows: "select momento as t, dia, sede, importe as v, importe as c from cobros union all select momento, dia, sede, -comision, 0 from comisiones union all select momento, dia, sede, -monto, 0 from gastos where tipo <> 'pago_de_comisiones'",
+        rows: "select momento as t, dia, sede, importe - impuesto as v, importe - impuesto as c from cobros union all select momento, dia, sede, -comision, 0 from comisiones union all select momento, dia, sede, -monto, 0 from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado')",
         cuts: [...WHEN, "sede"],
       },
     ],
@@ -362,7 +362,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "gasto_sobre_cobrado",
     name: "Gastos sobre lo cobrado",
     describes: "Qué parte de lo cobrado se va en gastos y comisiones, en %.",
-    how: "Las comisiones y los gastos registrados del periodo entre lo cobrado del periodo.",
+    how: "Las comisiones y los gastos registrados del periodo entre lo cobrado sin su impuesto del periodo.",
     unit: "pct",
     column: "gastos_pct",
     time: "instante",
@@ -371,7 +371,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["cobros", "comisiones", "gastos"],
-        rows: "select momento as t, dia, sede, 0 as g, importe as c from cobros union all select momento, dia, sede, comision, 0 from comisiones union all select momento, dia, sede, monto, 0 from gastos where tipo <> 'pago_de_comisiones'",
+        rows: "select momento as t, dia, sede, 0 as g, importe - impuesto as c from cobros union all select momento, dia, sede, comision, 0 from comisiones union all select momento, dia, sede, monto, 0 from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado')",
         cuts: [...WHEN, "sede"],
       },
     ],
@@ -381,7 +381,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo gastado",
     describes:
       "Los gastos registrados en Finanzas, por tipo de gasto (alquiler, materiales, personal…). Sin el pago de comisiones.",
-    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones.",
+    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones, y el pago del impuesto de lo cobrado no es un gasto.",
     unit: "dinero",
     column: "gastos_dinero",
     time: "instante",
@@ -391,7 +391,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["gastos"],
-        rows: "select momento as t, dia, sede, categoria, monto as v from gastos where tipo <> 'pago_de_comisiones'",
+        rows: "select momento as t, dia, sede, categoria, monto as v from gastos where tipo not in ('pago_de_comisiones', 'pago_del_impuesto_de_lo_cobrado')",
         cuts: [...WHEN, "sede", "categoria"],
       },
     ],

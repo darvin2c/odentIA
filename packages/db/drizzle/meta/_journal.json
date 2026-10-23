@@ -610,6 +610,20 @@
       "when": 1792728325001,
       "tag": "0086_listas_oficiales_completas_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792766219303,
+      "tag": "0087_impuestos_de_lo_cobrado",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1792766236794,
+      "tag": "0088_impuestos_de_lo_cobrado_reglas",
+      "breakpoints": true
     }
   ]
 }

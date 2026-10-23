@@ -155,6 +155,11 @@ interface Profile {
   receiptWidth: string
   sheetSize: string
   ticketFooter: string
+  taxLegalForm?: string | null
+  servicesTaxCategory?: string | null
+  servicesTaxBps?: number | null
+  productsTaxCategory?: string | null
+  productsTaxBps?: number | null
 }
 
 it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía se conserva y el nombre comercial es el de la cuenta", async () => {
@@ -211,6 +216,48 @@ it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía s
   expect(
     (await request("owner", "PUT", "/org-profile", { legalName: "Clínica", ...region, locale: "en-US" })).status,
   ).toBe(400)
+})
+
+it("impuestos: viene lo del país, solo se guarda lo que cambia y otro país vuelve a lo suyo (ADR 0083)", async () => {
+  const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  const body = { legalName: "Clínica Ajustes S.A.C.", ...region }
+  expect((await request("owner", "PUT", "/org-profile", body)).status).toBe(200)
+  // Elegir lo del país no guarda nada; otra tasa sí.
+  const same = await request("owner", "PUT", "/org-profile", { ...body, taxes: { servicios: { category: "S", rateBps: 1800 } } })
+  expect(await data<Profile>(same)).toMatchObject({ servicesTaxCategory: null, servicesTaxBps: null })
+  const other = await request("owner", "PUT", "/org-profile", {
+    ...body,
+    taxes: { servicios: { category: "S", rateBps: 1000 }, productos: { category: "O", rateBps: 0 } },
+  })
+  expect(await data<Profile>(other)).toMatchObject({
+    servicesTaxCategory: "S",
+    servicesTaxBps: 1000,
+    productsTaxCategory: "O",
+    productsTaxBps: 0,
+  })
+  // Lo que no tiene sentido no se guarda: una tasa fuera de rango o una forma que el país no tiene.
+  expect(
+    (await request("owner", "PUT", "/org-profile", { ...body, taxes: { servicios: { category: "S", rateBps: 9000 } } })).status,
+  ).toBe(400)
+  expect((await request("owner", "PUT", "/org-profile", { ...body, taxes: { legalForm: "sociedad_mercantil" } })).status).toBe(400)
+  // Recepción no cambia los impuestos.
+  expect((await request("reception", "PUT", "/org-profile", { ...body, taxes: {} })).status).toBe(403)
+  // Otro país, otro impuesto: lo cambiado vuelve a lo que propone el nuevo.
+  const mexico = await request("owner", "PUT", "/org-profile", {
+    legalName: "Clínica Ajustes S.A.C.",
+    countryCode: "MX",
+    currency: "MXN",
+    timezone: "America/Mexico_City",
+    locale: "es-MX",
+  })
+  expect(await data<Profile>(mexico)).toMatchObject({ servicesTaxCategory: null, productsTaxCategory: null, taxLegalForm: null })
+  const form = await request("owner", "PUT", "/org-profile", {
+    legalName: "Clínica Ajustes S.A.C.",
+    taxes: { legalForm: "sociedad_mercantil" },
+  })
+  expect(await data<Profile>(form)).toMatchObject({ taxLegalForm: "sociedad_mercantil" })
+  // Vuelve al Perú para lo que sigue.
+  expect((await request("owner", "PUT", "/org-profile", body)).status).toBe(200)
 })
 
 it("impresión: se guarda aparte de los datos de la clínica y solo la cambia quien configura", async () => {

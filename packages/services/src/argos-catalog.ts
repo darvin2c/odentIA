@@ -33,8 +33,8 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "cobros",
     about:
-      "Cada movimiento de lo cobrado. Sumar «importe» en un periodo da LO COBRADO de la clínica: pagos menos anulaciones y devoluciones de ese periodo.",
-    columns: "momento (timestamptz), dia, tipo ('pago'|'anulacion'|'devolucion'), importe (negativo en anulación y devolución), medio (Efectivo, Yape, Tarjeta…), sede, paciente, paciente_id",
+      "Cada movimiento de lo cobrado. Sumar «importe» en un periodo da LO COBRADO de la clínica: pagos menos anulaciones y devoluciones de ese periodo. «impuesto» es la parte de ese importe que es IGV o IVA: no es de la clínica (lo cobrado sin impuesto es importe − impuesto).",
+    columns: "momento (timestamptz), dia, tipo ('pago'|'anulacion'|'devolucion'), importe (negativo en anulación y devolución), medio (Efectivo, Yape, Tarjeta…), sede, paciente, paciente_id, impuesto (la parte del importe que es impuesto, con su mismo signo)",
     keys: ["gestion", "caja"],
   },
   {
@@ -61,7 +61,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Gastos registrados, como movimientos: el gasto en su fecha y su anulación (negativa) en la suya. Solo lo registrado en Finanzas: no hay costos fijos ni laboratorio por tratamiento. Lo pagado a proveedores (pago_de_compra) está en la categoría Materiales.",
     columns:
-      "momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»), monto, sede",
+      "momento (timestamptz), dia, categoria (Alquiler, Materiales, Personal, Laboratorio, Servicios, Impuestos…), tipo ('gasto'|'pago_de_compra': pago a un proveedor de materiales|'pago_de_comisiones': el pago de comisiones ya contadas en «comisiones»|'pago_del_impuesto_de_lo_cobrado': el pago del IGV o IVA de lo cobrado, que no es un gasto porque ya salió de lo cobrado), monto, sede",
     keys: ["gestion", "caja"],
   },
   {

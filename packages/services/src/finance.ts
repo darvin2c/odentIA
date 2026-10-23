@@ -53,6 +53,8 @@ import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
+/** El tipo del pago del impuesto de lo cobrado (ADR 0083): solo un gasto de «Impuestos» puede serlo. */
+export const SALES_TAX_EXPENSE_CATEGORY = "Impuestos"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -887,6 +889,11 @@ export interface CreateExpenseInput {
   notes?: string | null
   /** Con salida del efectivo de la caja (descuenta del contado al cerrar). */
   fromCash?: boolean
+  /**
+   * Un gasto de «Impuestos» que es el pago del impuesto de lo cobrado (el IGV,
+   * ADR 0083): no resta de lo que deja, porque ese impuesto ya salió de lo cobrado.
+   */
+  salesTax?: boolean
 }
 
 /**
@@ -909,6 +916,9 @@ export async function createExpense(
     throw validation("Tipo de gasto inválido")
   if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
     throw validation("El pago de una compra es un gasto de Materiales")
+  const salesTax = input.salesTax === true
+  if (salesTax && category !== SALES_TAX_EXPENSE_CATEGORY)
+    throw validation("El pago del impuesto de lo cobrado es un gasto de Impuestos")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
   const shift = input.fromCash
@@ -929,6 +939,7 @@ export async function createExpense(
       receiptNumber: input.receiptNumber?.trim() || null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
+      salesTax,
       createdBy: actorUserId,
     })
     .returning()
@@ -2364,28 +2375,29 @@ export async function collectedByProfessional(
  * Lo cobrado neto de varios tramos en una sola consulta, por moneda: los
  * cobros del tramo que siguen en pie al cerrarlo, menos las anulaciones del
  * tramo de cobros anteriores y las devoluciones del tramo. Así el Resumen y
- * Finanzas dibujan sus 12 meses sin 12 idas.
+ * Finanzas dibujan sus 12 meses sin 12 idas. `taxCents` es la parte de eso
+ * que es impuesto (ADR 0083), con la misma regla: lo que «lo que deja» resta.
  */
 export async function collectedNetMany(
   tx: Db,
   orgId: string,
   spans: Span[],
   options: { branchId?: string } = {},
-): Promise<Array<Array<{ currency: string; cents: number }>>> {
+): Promise<Array<Array<{ currency: string; cents: number; taxCents: number }>>> {
   const branchOf = (column: SQL): SQL => (options.branchId ? sql`and ${column} = ${options.branchId}` : sql``)
-  const rows = await tx.execute<{ idx: number; currency: string; cents: string }>(sql`
-    select b.idx, x.currency, sum(x.cents)::text as cents
+  const rows = await tx.execute<{ idx: number; currency: string; cents: string; tax: string }>(sql`
+    select b.idx, x.currency, sum(x.cents)::text as cents, sum(x.tax)::text as tax
     from ${spansSql(spans)}
     join lateral (
-      select p.currency, p.amount_cents::bigint as cents from patient_payment p
+      select p.currency, p.amount_cents::bigint as cents, p.tax_cents::bigint as tax from patient_payment p
       where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
         and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
       union all
-      select p.currency, -p.amount_cents::bigint from patient_payment p
+      select p.currency, -p.amount_cents::bigint, -p.tax_cents::bigint from patient_payment p
       where p.organization_id = ${orgId} and p.paid_at < b.start_at
         and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
       union all
-      select p.currency, -r.amount_cents::bigint from patient_payment_refund r
+      select p.currency, -r.amount_cents::bigint, -r.tax_cents::bigint from patient_payment_refund r
       join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
       where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
     ) x on true
@@ -2393,8 +2405,8 @@ export async function collectedNetMany(
   return bySpan(
     spans,
     [...rows],
-    (): Array<{ currency: string; cents: number }> => [],
-    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents) }],
+    (): Array<{ currency: string; cents: number; taxCents: number }> => [],
+    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents), taxCents: safeCents(row.tax) }],
   )
 }
 

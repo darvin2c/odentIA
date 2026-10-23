@@ -4,6 +4,10 @@ import {
   DIAGNOSIS_SYSTEM_INFO,
   type DiagnosisSystemInfo,
   isDiagnosisSystem,
+  type OrgTaxes,
+  resolveOrgTaxes,
+  type TaxCategory,
+  type TaxRate,
 } from "@odentia/clinical"
 import { type DentalCountryProfile, dentalProfileFor } from "@odentia/dental"
 import { useQuery } from "@tanstack/react-query"
@@ -43,6 +47,38 @@ export interface OrgProfile {
   emergencyPhone?: string | null
   /** El nombre del agente de recepción en esta clínica (Sofi si no eligió otro). */
   receptionName?: string
+  /**
+   * Impuestos de lo cobrado (ADR 0083): solo lo que la clínica cambió; nulo es
+   * «lo del país». Lo que vale lo dice `orgTaxesOf`.
+   */
+  taxLegalForm?: string | null
+  servicesTaxCategory?: string | null
+  servicesTaxBps?: number | null
+  productsTaxCategory?: string | null
+  productsTaxBps?: number | null
+}
+
+/** Las dos cifras de impuesto que valen hoy para la clínica (o null si su país no tiene impuesto que separar). */
+export function orgTaxesOf(profile: OrgProfile | null | undefined): OrgTaxes | null {
+  if (!profile) return null
+  const rate = (category: string | null | undefined, bps: number | null | undefined): TaxRate | null =>
+    category && bps != null ? { category: category as TaxCategory, rateBps: bps } : null
+  return resolveOrgTaxes(
+    profile.countryCode,
+    {
+      legalForm: profile.taxLegalForm ?? null,
+      servicios: rate(profile.servicesTaxCategory, profile.servicesTaxBps),
+      productos: rate(profile.productsTaxCategory, profile.productsTaxBps),
+    },
+    profile.locale,
+  )
+}
+
+/** Lo que se guarda de los impuestos: null en una cifra es volver a lo del país. */
+export interface OrgTaxesInput {
+  legalForm: string | null
+  servicios: TaxRate | null
+  productos: TaxRate | null
 }
 
 /**
@@ -60,6 +96,8 @@ export interface OrgProfileInput {
   currency: string
   timezone: string
   locale: string
+  /** Solo si la tarjeta «Impuestos» se tocó; al cambiar de país el servidor vuelve a lo del nuevo. */
+  taxes?: OrgTaxesInput
 }
 
 export async function fetchOrgProfile(): Promise<OrgProfile | null> {

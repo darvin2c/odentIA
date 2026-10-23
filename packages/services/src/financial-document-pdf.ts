@@ -13,7 +13,7 @@
  *   previa nunca lo presenta como entregado. Entregar es un cambio explícito
  *   (`deliverBudget`, propiedad PresupuestosPromociones).
  */
-import { clinicalProfileFor, formatMoney, postalAddressText } from "@odentia/clinical"
+import { clinicalProfileFor, formatMoney, postalAddressText, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
 import fontkit from "@pdf-lib/fontkit"
 import type { Font } from "@pdf-lib/fontkit"
 import { readFileSync } from "node:fs"
@@ -27,6 +27,7 @@ import { branchPostal } from "./branches.js"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { getPaymentReturn, getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
+import type { TicketTaxes } from "./clinic-taxes.js"
 
 const INK = rgb(0.07, 0.09, 0.15)
 const MUTED = rgb(0.4, 0.42, 0.47)
@@ -360,6 +361,10 @@ export interface TicketSnapshot {
   totalCents: number
   /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
   remainingCents: number | null
+  /** Lo que falta pagar de cada concepto (ADR 0083); null en tickets de antes. */
+  pending: Array<{ description: string; amountCents: number; remainingCents: number }> | null
+  /** El impuesto de lo cobrado, congelado al cobrar (ADR 0083). */
+  taxes: TicketTaxes | null
   org: DocOrg
 }
 
@@ -445,6 +450,8 @@ export async function buildTicketSnapshot(
     changeCents: ticket.changeCents,
     totalCents: ticket.totalCents,
     remainingCents: frozen.remainingCents ?? null,
+    pending: frozen.pending ?? null,
+    taxes: frozen.taxes ?? null,
     org,
   }
 }
@@ -475,7 +482,7 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
       w.rule()
       for (const line of snap.lines) {
         w.row(line.description, money(line.amountCents), { size: 10 })
-        if (line.ofCents != null) w.text(`A cuenta de ${money(line.ofCents)}`, { size: 9, color: MUTED })
+        if (line.ofCents != null) w.text(`Paga una parte: cuesta ${money(line.ofCents)}`, { size: 9, color: MUTED })
         if (line.promotion) w.text(`Promoción: ${line.promotion}`, { size: 9, color: MUTED })
       }
       if (snap.advanceCents != null) {
@@ -483,6 +490,14 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
       }
       w.gap(4)
       w.rule()
+      if (snap.taxes) {
+        // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa.
+        w.row("Subtotal", money(snap.taxes.subtotalCents), { size: 10 })
+        for (const group of snap.taxes.groups.filter((item) => item.taxCents > 0))
+          w.row(group.label, money(group.taxCents), { size: 10 })
+        const note = ticketUntaxedNote(snap.taxes)
+        if (note) w.text(note, { size: 9, color: MUTED })
+      }
       w.row("TOTAL", money(snap.totalCents), { size: 12, bold: true })
       for (const method of snap.methods) {
         w.row(method.label, money(method.amountCents), { size: 10 })
@@ -491,11 +506,15 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
       if (snap.creditAppliedCents > 0) w.row("Saldo a favor usado", money(snap.creditAppliedCents), { size: 10 })
       if (snap.cashReceivedCents != null) w.row("Recibido", money(snap.cashReceivedCents), { size: 10 })
       if (snap.changeCents != null && snap.changeCents > 0) w.row("Vuelto", money(snap.changeCents), { size: 10 })
-      if (snap.remainingCents != null && snap.lines.length > 0) {
-        w.row("Saldo por cobrar", money(snap.remainingCents), { size: 10 })
+      // Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo.
+      if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
+        w.gap(4)
+        w.row("Le falta pagar", money(snap.remainingCents), { size: 10, bold: true })
+        for (const item of snap.pending ?? [])
+          w.text(`${item.description}: pagó ${money(item.amountCents - item.remainingCents)} de ${money(item.amountCents)}`, { size: 9, color: MUTED })
       }
       w.gap(6)
-      w.text(org.ticketFooter, { size: 8, color: MUTED })
+      for (const line of ticketFooterLines(org.ticketFooter)) w.text(line, { size: 8, color: MUTED })
     },
     org,
     ticketFormat(org, paper),
@@ -802,7 +821,7 @@ export async function renderReturnPdf(
       w.text(`Motivo: ${frozen.reason}`, { size: 10 })
       if (frozen.payout.kind === "pagado") w.signature("Recibí conforme")
       w.gap(6)
-      if (org.ticketFooter) w.text(org.ticketFooter, { size: 8, color: MUTED })
+      for (const line of ticketFooterLines(org.ticketFooter)) w.text(line, { size: 8, color: MUTED })
     },
     org,
     ticketFormat(org, paper),

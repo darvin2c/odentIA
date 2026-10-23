@@ -31,6 +31,8 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import { expense } from "@odentia/db/schema/finance"
 import { and, eq, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
+import { includedTaxCents } from "@odentia/clinical"
+import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
 import { addMonths, currentMonthIn, monthStart, type YearMonth } from "./report-periods.js"
 
 export interface ReportsSeedProfessional {
@@ -472,6 +474,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   const charges: Array<typeof patientCharge.$inferInsert> = []
   const payments: Array<typeof patientPayment.$inferInsert & { id: string; paidAt: Date; branchId: string }> = []
   const applications: Array<typeof patientPaymentApplication.$inferInsert> = []
+  // Como en Cobrar (ADR 0083): cada atención con el impuesto de su país y cada pago con el suyo.
+  const tax = chargeTaxOf(await orgTaxes(tx, input.orgId), false)
   const pay = (visit: PlannedVisit, chargeId: string, cents: number, paidAt: Date): void => {
     if (paidAt.getTime() > historyEnd || cents <= 0) return
     const method = random.weighted(PAYMENT_METHODS)
@@ -482,6 +486,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       patientId: patientOf(visit.patientIndex),
       branchId: visit.branchId,
       amountCents: cents,
+      taxCents: tax?.taxCategory === "S" ? includedTaxCents(cents, tax.taxBps) : 0,
       currency,
       paidAt,
       methodName: method.name,
@@ -503,6 +508,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       description: visit.service.name,
       amountCents: cents,
       currency,
+      ...(tax ?? {}),
       createdBy: visit.professional.userId,
       createdAt: item.endedAt,
     })

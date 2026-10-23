@@ -560,6 +560,8 @@ export interface ReportAgent extends ReportHead {
 /** Un tramo de Finanzas: lo cobrado, la comisión que generó, los demás gastos y lo que deja. */
 export interface FinanceSpan {
   cobradoCents: number
+  /** La parte de lo cobrado que es impuesto (IGV o IVA, ADR 0083): no es de la clínica. */
+  taxCents: number
   commissionCents: number
   otherExpensesCents: number
   leavesCents: number
@@ -570,6 +572,8 @@ export interface FinanceSpan {
 export type DebtAgeKey = "0_30" | "31_60" | "61_90" | "90_plus"
 
 export interface ReportFinance extends ReportHead {
+  /** «IGV», «IVA»; null si el país de la clínica no tiene impuesto que separar. */
+  taxName: string | null
   months: ReportBucket[]
   totals: { current: FinanceSpan; previous: FinanceSpan }
   trend: FinanceSpan[]
@@ -577,10 +581,13 @@ export interface ReportFinance extends ReportHead {
   commissions: { generatedCents: number; paidCents: number; pendingCents: number; professionals: number }
   cascade: {
     cobradoCents: number
+    taxCents: number
     commissionCents: number
     categories: Array<{ category: string; cents: number }>
     purchasePaidCents: number
     commissionPaidCents: number
+    /** El pago del impuesto de lo cobrado: sale de la caja, no resta de lo que deja. */
+    salesTaxPaidCents: number
     leavesCents: number
   }
   chart: Array<ReportBucket & FinanceSpan>
@@ -591,6 +598,8 @@ export interface ReportFinance extends ReportHead {
   }
   payables: {
     commissions: { cents: number; professionals: number }
+    /** El impuesto de lo cobrado en el periodo, que se paga el mes siguiente. */
+    salesTax: { cents: number }
     purchases: { cents: number; orders: number; oldestReceivedAt: string | null }
   }
   missing: Array<{

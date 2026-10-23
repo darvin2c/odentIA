@@ -1,5 +1,6 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
+import { TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
@@ -135,6 +136,8 @@ const branchInput = z.object({
 
 const branchPatch = branchInput.partial()
 
+const taxRateInput = z.object({ category: z.enum(TAX_CATEGORIES), rateBps: z.number().int().min(0).max(10_000) }).strict()
+
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
   // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
@@ -152,6 +155,15 @@ const orgProfileInput = z.object({
   sheetSize: z.enum(["A4", "Letter"]).optional(),
   ticketFooter: z.string().trim().min(1).max(280).optional(),
   applyCountryPreset: z.boolean().optional(),
+  // Impuestos de lo cobrado (ADR 0083): lo valida el servicio con las reglas del país.
+  taxes: z
+    .object({
+      legalForm: z.string().max(40).nullish(),
+      servicios: taxRateInput.nullish(),
+      productos: taxRateInput.nullish(),
+    })
+    .strict()
+    .optional(),
 })
 
 /** Lo que se imprime: se edita en «Medios de pago y ticket», aparte de los datos de la clínica. */
@@ -534,7 +546,7 @@ export function createApp(deps: AppDeps) {
         .from(orgProfile)
         .where(eq(orgProfile.organizationId, orgId))
         .for("update")
-      const { countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, applyCountryPreset, ...identity } = input
+      const { countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, applyCountryPreset, taxes, ...identity } = input
       if (current) {
         await tx
           .update(orgProfile)
@@ -551,7 +563,7 @@ export function createApp(deps: AppDeps) {
           })
       }
       const updated = await updateOrgRegion(tx, orgId, userId, {
-        countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter,
+        countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, taxes,
         applyCountryPreset: applyCountryPreset ?? !current,
       })
       // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).

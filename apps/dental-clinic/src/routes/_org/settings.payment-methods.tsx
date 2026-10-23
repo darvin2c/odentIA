@@ -9,6 +9,7 @@ import {
   Skeleton,
   toast,
 } from "@odentia/ui"
+import { FISCAL_DISCLAIMER } from "@odentia/clinical"
 import { Switch } from "@odentia/ui/components/switch"
 import { common, EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -609,7 +610,7 @@ function TicketForm({
             onChange={(event) => setTicketFooter(event.target.value)}
           />
           <FieldDescription id="ticket-footer-help">
-            Los tickets ya emitidos conservan la frase con la que salieron.
+            Va antes de «{FISCAL_DISCLAIMER}», que todo ticket lleva siempre. Los tickets ya emitidos conservan la frase con la que salieron.
           </FieldDescription>
         </Field>
       </div>

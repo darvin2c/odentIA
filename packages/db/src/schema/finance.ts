@@ -15,6 +15,7 @@
  */
 import { sql } from "drizzle-orm"
 import {
+  boolean,
   char,
   check,
   foreignKey,
@@ -160,6 +161,12 @@ export const expense = pgTable(
      * vigentes; no hay otro registro del pago (ADR 0061).
      */
     purchaseOrderId: uuid("purchase_order_id"),
+    /**
+     * El pago del impuesto de lo cobrado (el IGV que la clínica entrega a la
+     * autoridad, ADR 0083): un gasto de «Impuestos» que no resta de lo que deja,
+     * porque ese impuesto ya salió de lo cobrado.
+     */
+    salesTax: boolean("sales_tax").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -184,6 +191,7 @@ export const expense = pgTable(
       "expense_purchase_category_check",
       sql`${table.purchaseOrderId} IS NULL OR ${table.category} = 'Materiales'`,
     ),
+    check("expense_sales_tax_check", sql`NOT ${table.salesTax} OR ${table.category} = 'Impuestos'`),
   ],
 )
 
