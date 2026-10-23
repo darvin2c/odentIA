@@ -18,7 +18,8 @@ const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" 
 const EXAMPLES: Array<{ block: string; say: string }> = [
   { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
   { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
-  { block: "Plan", say: "«Resina en la 36»" },
+  { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
+  { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
   { block: "Control", say: "«Control en un mes»" },
   { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
 ]
@@ -38,8 +39,16 @@ function DictationExamples() {
 
 /** «5 listas y 1 por revisar · 1 quitada por voz», con lo que haya. */
 function readiness(session: DictationSession): string {
-  const review = session.pending - session.ready
-  const counts = [session.ready > 0 ? plural(session.ready, "lista", "listas") : "", review > 0 ? `${review} por revisar` : ""].filter(Boolean).join(" y ")
+  // La receta no se confirma con las demás: tiene su «Emitir receta».
+  const prescription = session.suggestions.some((item) => item.kind === "receta")
+  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.status !== "lista").length
+  const counts = [
+    session.ready > 0 ? plural(session.ready, "lista", "listas") : "",
+    review > 0 ? `${review} por revisar` : "",
+    prescription ? "1 receta por emitir" : "",
+  ]
+    .filter(Boolean)
+    .join(" y ")
   const removed = session.removedByVoice.length
   return [counts, removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : ""].filter(Boolean).join(" · ")
 }
@@ -387,7 +396,7 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
           «No, es la veintiséis» cambia la última sugerencia y «Quita la endodoncia» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
           editarla a mano.
         </p>
-        <p className="text-muted-foreground">Más adelante: recetas, consentimientos, presupuesto con opciones y preguntas sobre la historia.</p>
+        <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>
       </div>
     </div>
   )

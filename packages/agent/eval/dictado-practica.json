@@ -25,11 +25,22 @@
       "texto": "Viene por dolor en la muela de abajo a la izquierda hace tres días. La treinta y seis tiene caries oclusal, la cuarenta y seis está ausente y la once tiene corona. Le ponemos una resina en la treinta y seis, o si no una incrustación. Control en un mes.",
       "espera": {
         "hallazgos": [
-          { "pieza": 36, "hallazgo": "caries" },
-          { "pieza": 46, "hallazgo": "missing_tooth" },
-          { "pieza": 11, "hallazgo": "crown" }
+          {
+            "pieza": 36,
+            "hallazgo": "caries"
+          },
+          {
+            "pieza": 46,
+            "hallazgo": "missing_tooth"
+          },
+          {
+            "pieza": 11,
+            "hallazgo": "crown"
+          }
         ],
-        "planes": [36],
+        "planes": [
+          36
+        ],
         "controles": 1,
         "nota": true
       }
@@ -39,12 +50,37 @@
       "texto": "Odontograma inicial. Dieciocho ausente, diecisiete con restauración de amalgama en buen estado, dieciséis caries mesial en esmalte. Veintiséis con corona metalcerámica en mal estado. Treinta y seis y cuarenta y seis con sellantes en buen estado.",
       "espera": {
         "hallazgos": [
-          { "pieza": 18, "hallazgo": "missing_tooth" },
-          { "pieza": 17, "hallazgo": "definitive_restoration", "variante": "amalgam", "estado": "good" },
-          { "pieza": 16, "hallazgo": "caries", "variante": "enamel" },
-          { "pieza": 26, "hallazgo": "crown", "variante": "metal_ceramic", "estado": "poor" },
-          { "pieza": 36, "hallazgo": "sealant", "estado": "good" },
-          { "pieza": 46, "hallazgo": "sealant", "estado": "good" }
+          {
+            "pieza": 18,
+            "hallazgo": "missing_tooth"
+          },
+          {
+            "pieza": 17,
+            "hallazgo": "definitive_restoration",
+            "variante": "amalgam",
+            "estado": "good"
+          },
+          {
+            "pieza": 16,
+            "hallazgo": "caries",
+            "variante": "enamel"
+          },
+          {
+            "pieza": 26,
+            "hallazgo": "crown",
+            "variante": "metal_ceramic",
+            "estado": "poor"
+          },
+          {
+            "pieza": 36,
+            "hallazgo": "sealant",
+            "estado": "good"
+          },
+          {
+            "pieza": 46,
+            "hallazgo": "sealant",
+            "estado": "good"
+          }
         ]
       }
     },
@@ -52,8 +88,16 @@
       "id": "caries-dentina-y-plan",
       "texto": "En la veinticinco hay caries en dentina por distal. Le hacemos una resina por distal en la veinticinco.",
       "espera": {
-        "hallazgos": [{ "pieza": 25, "hallazgo": "caries", "variante": "dentin" }],
-        "planes": [25]
+        "hallazgos": [
+          {
+            "pieza": 25,
+            "hallazgo": "caries",
+            "variante": "dentin"
+          }
+        ],
+        "planes": [
+          25
+        ]
       }
     },
     {
@@ -61,8 +105,16 @@
       "texto": "La cuarenta y siete se la sacaron por caries hace años. La treinta y siete también está ausente, la perdió por una fractura.",
       "espera": {
         "hallazgos": [
-          { "pieza": 47, "hallazgo": "missing_tooth", "variante": "caries_extraction" },
-          { "pieza": 37, "hallazgo": "missing_tooth", "variante": "other_absence" }
+          {
+            "pieza": 47,
+            "hallazgo": "missing_tooth",
+            "variante": "caries_extraction"
+          },
+          {
+            "pieza": 37,
+            "hallazgo": "missing_tooth",
+            "variante": "other_absence"
+          }
         ]
       }
     },
@@ -70,8 +122,15 @@
       "id": "fractura-y-endodoncia",
       "texto": "Paciente que se cayó ayer, fractura de la once. Vamos a hacer endodoncia unirradicular de la once y después corona.",
       "espera": {
-        "hallazgos": [{ "pieza": 11, "hallazgo": "fracture" }],
-        "planes": [11],
+        "hallazgos": [
+          {
+            "pieza": 11,
+            "hallazgo": "fracture"
+          }
+        ],
+        "planes": [
+          11
+        ],
         "nota": true
       }
     },
@@ -79,7 +138,9 @@
       "id": "gingivitis-sin-pieza",
       "texto": "Encías inflamadas en general, sangran al sondaje. Gingivitis asociada a placa. Profilaxis y destartraje hoy, control en tres meses.",
       "espera": {
-        "diagnosticos": ["K05.1"],
+        "diagnosticos": [
+          "K05.1"
+        ],
         "controles": 1
       }
     },
@@ -87,8 +148,15 @@
       "id": "remanente-radicular",
       "texto": "En la treinta y cinco solo queda el remanente radicular. Exodoncia simple de la treinta y cinco.",
       "espera": {
-        "hallazgos": [{ "pieza": 35, "hallazgo": "root_remnant" }],
-        "planes": [35]
+        "hallazgos": [
+          {
+            "pieza": 35,
+            "hallazgo": "root_remnant"
+          }
+        ],
+        "planes": [
+          35
+        ]
       }
     },
     {
@@ -96,8 +164,16 @@
       "texto": "La catorce tiene una restauración temporal por oclusal que hay que cambiar, y la quince tiene una resina en buen estado por mesial.",
       "espera": {
         "hallazgos": [
-          { "pieza": 14, "hallazgo": "temporary_restoration" },
-          { "pieza": 15, "hallazgo": "definitive_restoration", "variante": "resin", "estado": "good" }
+          {
+            "pieza": 14,
+            "hallazgo": "temporary_restoration"
+          },
+          {
+            "pieza": 15,
+            "hallazgo": "definitive_restoration",
+            "variante": "resin",
+            "estado": "good"
+          }
         ]
       }
     },
@@ -105,8 +181,16 @@
       "id": "nino-pulpotomia",
       "texto": "Niño de seis años. La setenta y cuatro con caries profunda que llega a la pulpa. Pulpotomía de la setenta y cuatro.",
       "espera": {
-        "hallazgos": [{ "pieza": 74, "hallazgo": "caries", "variante": "pulpal_involvement" }],
-        "planes": [74]
+        "hallazgos": [
+          {
+            "pieza": 74,
+            "hallazgo": "caries",
+            "variante": "pulpal_involvement"
+          }
+        ],
+        "planes": [
+          74
+        ]
       }
     },
     {
@@ -114,8 +198,14 @@
       "texto": "Desgaste en los bordes incisales de la once y la veintiuno, refiere que aprieta los dientes de noche.",
       "espera": {
         "hallazgos": [
-          { "pieza": 11, "hallazgo": "tooth_wear" },
-          { "pieza": 21, "hallazgo": "tooth_wear" }
+          {
+            "pieza": 11,
+            "hallazgo": "tooth_wear"
+          },
+          {
+            "pieza": 21,
+            "hallazgo": "tooth_wear"
+          }
         ],
         "nota": true
       }
@@ -124,8 +214,15 @@
       "id": "corona-temporal",
       "texto": "La veintiuno tiene corona temporal desde la semana pasada. Corona de zirconio para la veintiuno.",
       "espera": {
-        "hallazgos": [{ "pieza": 21, "hallazgo": "temporary_crown" }],
-        "planes": [21]
+        "hallazgos": [
+          {
+            "pieza": 21,
+            "hallazgo": "temporary_crown"
+          }
+        ],
+        "planes": [
+          21
+        ]
       }
     },
     {
@@ -133,8 +230,14 @@
       "texto": "Las cuarenta y ocho y treinta y ocho están erupcionando, sin molestias. Control en seis meses.",
       "espera": {
         "hallazgos": [
-          { "pieza": 48, "hallazgo": "erupting_tooth" },
-          { "pieza": 38, "hallazgo": "erupting_tooth" }
+          {
+            "pieza": 48,
+            "hallazgo": "erupting_tooth"
+          },
+          {
+            "pieza": 38,
+            "hallazgo": "erupting_tooth"
+          }
         ],
         "controles": 1
       }
@@ -144,18 +247,31 @@
       "texto": "Dieciséis y veintiséis con fosas y fisuras profundas. Sellantes en las dos.",
       "espera": {
         "hallazgos": [
-          { "pieza": 16, "hallazgo": "deep_pits_fissures" },
-          { "pieza": 26, "hallazgo": "deep_pits_fissures" }
+          {
+            "pieza": 16,
+            "hallazgo": "deep_pits_fissures"
+          },
+          {
+            "pieza": 26,
+            "hallazgo": "deep_pits_fissures"
+          }
         ],
-        "planes": [16, 26]
+        "planes": [
+          16,
+          26
+        ]
       }
     },
     {
       "id": "pulpitis-no-es-hallazgo",
       "texto": "Dolor espontáneo en la treinta y seis que no calma con analgésicos. Pulpitis irreversible de la treinta y seis. Endodoncia multirradicular.",
       "espera": {
-        "diagnosticos": ["K04.0"],
-        "planes": [36],
+        "diagnosticos": [
+          "K04.0"
+        ],
+        "planes": [
+          36
+        ],
         "nota": true
       }
     },
@@ -166,25 +282,41 @@
     },
     {
       "id": "corregir-pieza-hallazgo",
-      "pendientes": ["Odontograma: caries, Pieza 25"],
+      "pendientes": [
+        "Odontograma: caries, Pieza 25"
+      ],
       "texto": "No, la caries es en la veintiséis, no en la veinticinco.",
-      "espera": { "correcciones": 1 }
+      "espera": {
+        "correcciones": 1
+      }
     },
     {
       "id": "completar-corona",
-      "pendientes": ["Odontograma: crown, Pieza 11", "Plan de tratamiento: Profilaxis"],
+      "pendientes": [
+        "Odontograma: crown, Pieza 11",
+        "Plan de tratamiento: Profilaxis"
+      ],
       "texto": "La corona de la once es libre de metal y está en buen estado.",
-      "espera": { "correcciones": 1 }
+      "espera": {
+        "correcciones": 1
+      }
     },
     {
       "id": "quitar-por-voz",
-      "pendientes": ["Odontograma: missing_tooth, Pieza 46", "Plan de tratamiento: Exodoncia simple, Pieza 46"],
+      "pendientes": [
+        "Odontograma: missing_tooth, Pieza 46",
+        "Plan de tratamiento: Exodoncia simple, Pieza 46"
+      ],
       "texto": "Quita la exodoncia, ya no hace falta.",
-      "espera": { "quitar": 1 }
+      "espera": {
+        "quitar": 1
+      }
     },
     {
       "id": "numero-que-no-existe",
-      "pendientes": ["Odontograma: caries, Pieza 36"],
+      "pendientes": [
+        "Odontograma: caries, Pieza 36"
+      ],
       "texto": "No, la tercera es la veintiséis.",
       "espera": {}
     },
@@ -193,12 +325,228 @@
       "texto": "Control de rutina. Refiere sensibilidad al frío en el lado izquierdo. Veinticuatro con caries vestibular en esmalte, veintitrés con desgaste. La cuarenta y uno tiene movilidad. Profilaxis hoy, resina en la veinticuatro por vestibular, control en seis meses.",
       "espera": {
         "hallazgos": [
-          { "pieza": 24, "hallazgo": "caries", "variante": "enamel" },
-          { "pieza": 23, "hallazgo": "tooth_wear" }
+          {
+            "pieza": 24,
+            "hallazgo": "caries",
+            "variante": "enamel"
+          },
+          {
+            "pieza": 23,
+            "hallazgo": "tooth_wear"
+          }
         ],
-        "planes": [24],
+        "planes": [
+          24
+        ],
         "controles": 1,
         "nota": true
+      }
+    },
+    {
+      "id": "receta-amoxicilina",
+      "texto": "Le receto amoxicilina de quinientos, una cápsula cada ocho horas por siete días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "amoxicilina",
+            "concentracion": "500",
+            "duracion": "7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "receta-dos-medicamentos",
+      "texto": "Amoxicilina quinientos miligramos cada ocho horas por siete días, e ibuprofeno de cuatrocientos cada ocho horas si hay dolor.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "amoxicilina",
+            "concentracion": "500",
+            "duracion": "7"
+          },
+          {
+            "dci": "ibuprofeno",
+            "concentracion": "400",
+            "duracion": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "receta-marca",
+      "texto": "Para el dolor le doy Apronax de quinientos cincuenta, una tableta cada doce horas por tres días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "naproxeno",
+            "concentracion": "550",
+            "duracion": "3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "receta-clindamicina",
+      "texto": "Es alérgico a la penicilina, así que clindamicina de trescientos, una cápsula cada ocho horas por siete días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "clindamicina",
+            "concentracion": "300",
+            "duracion": "7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "receta-enjuague",
+      "texto": "Clorhexidina al cero doce por ciento, enjuague de quince mililitros dos veces al día por diez días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "clorhexidina",
+            "concentracion": "0.12",
+            "duracion": "10"
+          }
+        ]
+      }
+    },
+    {
+      "id": "receta-paracetamol-nino",
+      "texto": "Paracetamol jarabe de ciento veinte miligramos por cinco mililitros, cinco mililitros cada seis horas si hay fiebre, por tres días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "paracetamol",
+            "concentracion": "120",
+            "duracion": "3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "caminos-resina-corona",
+      "texto": "En la cuarenta y seis le hacemos una resina, o si no una corona de zirconio.",
+      "espera": {
+        "caminos": [
+          {
+            "pieza": 46,
+            "principal": "resina",
+            "otros": [
+              "corona"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "caminos-recomienda-segunda",
+      "texto": "Para la treinta y seis puede ser endodoncia multirradicular o la exodoncia, yo recomiendo la endodoncia.",
+      "espera": {
+        "caminos": [
+          {
+            "pieza": 36,
+            "principal": "endodoncia",
+            "otros": [
+              "exodoncia"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "caminos-tres",
+      "texto": "La once puede ir con carilla de resina directa, incrustación de cerámica o una corona metalcerámica.",
+      "espera": {
+        "caminos": [
+          {
+            "pieza": 11,
+            "principal": "carilla",
+            "otros": [
+              "incrustacion",
+              "corona"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ya-eligio",
+      "texto": "Le expliqué resina o corona en la cuarenta y seis y eligió la corona de zirconio.",
+      "espera": {
+        "planes": [
+          46
+        ],
+        "sinCaminos": true
+      }
+    },
+    {
+      "id": "caminos-y-receta",
+      "texto": "La veinticinco con caries en dentina por distal. Resina en la veinticinco, o si no una incrustación de cerámica. Ibuprofeno de cuatrocientos cada ocho horas por tres días.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 25,
+            "hallazgo": "caries",
+            "variante": "dentin"
+          }
+        ],
+        "caminos": [
+          {
+            "pieza": 25,
+            "principal": "resina",
+            "otros": [
+              "incrustacion"
+            ]
+          }
+        ],
+        "recetas": [
+          {
+            "dci": "ibuprofeno",
+            "concentracion": "400",
+            "duracion": "3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "corregir-receta-duracion",
+      "pendientes": [
+        "Receta: ibuprofeno 400 mg"
+      ],
+      "texto": "El ibuprofeno por tres días.",
+      "espera": {
+        "correcciones": 1,
+        "nuevos": 0
+      }
+    },
+    {
+      "id": "cambiar-medicamento",
+      "pendientes": [
+        "Receta: amoxicilina 500 mg, 1 cápsula cada 8 horas, 7 días",
+        "Receta: ibuprofeno 400 mg, 1 tableta cada 8 horas si hay dolor"
+      ],
+      "texto": "Mejor clindamicina de trescientos, una cápsula cada ocho horas por siete días, en lugar de la amoxicilina. Y el ibuprofeno por tres días.",
+      "espera": {
+        "correcciones": 2,
+        "corrige": "clindamicina",
+        "nuevos": 0
+      }
+    },
+    {
+      "id": "receta-nueva-tras-confirmar",
+      "contexto": "Le receto amoxicilina de 500, una cápsula cada 8 horas por 7 días, e ibuprofeno de 400 cada 8 horas si hay dolor, por tres días.",
+      "texto": "Amoxicilina de 875, una tableta cada 12 horas por 5 días.",
+      "espera": {
+        "recetas": [
+          {
+            "dci": "amoxicilina",
+            "concentracion": "875",
+            "duracion": "5"
+          }
+        ],
+        "correcciones": 0
       }
     }
   ]

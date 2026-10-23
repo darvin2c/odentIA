@@ -139,6 +139,8 @@ const SECTION_DICTATION: Partial<Record<SectionKey, { kinds: DictationKind[]; on
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
   plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
+  // La receta dictada se emite desde su bloque, con «Emitir receta» (issue 109, fase 2).
+  documentos: { kinds: ["receta"], onlySuggested: "Sin documentos" },
 }
 
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */

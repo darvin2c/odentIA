@@ -756,6 +756,9 @@ export function RecetasPanel({
   onCreateOpenChange,
   defaultDiagnosisCode,
   defaultDiagnosisSystem,
+  initialMedications,
+  startOverriding = false,
+  onIssued,
 }: {
   patientId: string
   itemId?: string
@@ -776,6 +779,12 @@ export function RecetasPanel({
   defaultDiagnosisCode?: string
   /** Lista del código propuesto (el de la atención conserva la suya). */
   defaultDiagnosisSystem?: string
+  /** La receta dictada, ya puesta, para completarla o resolver su aviso (issue 109, fase 2). */
+  initialMedications?: Array<Partial<Omit<MedicationDraft, "key">>>
+  /** Se abre con «Recetar igual, con motivo» ya elegido. */
+  startOverriding?: boolean
+  /** La receta quedó emitida. */
+  onIssued?: (prescriptionId: string) => void
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -795,7 +804,7 @@ export function RecetasPanel({
   const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [validUntil, setValidUntil] = useState("")
   // Recetar igual pese al aviso pide un motivo escrito, que queda en la receta (decisión 10).
-  const [overriding, setOverriding] = useState(false)
+  const [overriding, setOverriding] = useState(startOverriding)
   const [overrideReason, setOverrideReason] = useState("")
   const [createOpenState, setCreateOpenState] = useState(false)
   const createOpen = createOpenProp ?? createOpenState
@@ -803,7 +812,9 @@ export function RecetasPanel({
     setCreateOpenState(open)
     onCreateOpenChange?.(open)
   }
-  const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
+  const [medications, setMedications] = useState<MedicationDraft[]>(() =>
+    initialMedications?.length ? initialMedications.map((medication) => ({ ...emptyMedication(), ...medication })) : [emptyMedication()],
+  )
   // Alergias activas, también las declaradas sin confirmar: el aviso aparece al
   // escribir la DCI, antes de emitir, con la misma regla que el servidor.
   const healthQuery = useQuery({
@@ -844,7 +855,8 @@ export function RecetasPanel({
           instructions: medication.instructions.trim() || null,
         })),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      onIssued?.(result.data.id)
       setMedications([emptyMedication()])
       setNotes("")
       setDiagnosisCode("")

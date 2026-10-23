@@ -617,6 +617,13 @@
       "when": 1792762549327,
       "tag": "0087_dictado_odontograma",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1792764233491,
+      "tag": "0088_dictado_receta",
+      "breakpoints": true
     }
   ]
 }
