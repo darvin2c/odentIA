@@ -68,7 +68,7 @@
       },
       {
         "value": "lo_que_debes",
-        "description": "Lo que debes: Cuánto debe pagar la clínica: comisiones por pagar a los profesionales y compras a proveedores sin pagar."
+        "description": "Lo que debes: Cuánto debe pagar la clínica: comisiones por pagar a los profesionales, compras a proveedores sin pagar y el impuesto de lo cobrado (IGV o IVA) por pagar."
       },
       {
         "value": "deuda_vencida",
