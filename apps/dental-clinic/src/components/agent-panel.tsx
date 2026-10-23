@@ -20,6 +20,7 @@ import {
   SideColumn,
   SideDockSlot,
   SubmitButton,
+  useHeaderCompact,
   useSideColumnWidth,
   useSideDock,
   useSidebarWidth,
@@ -360,6 +361,7 @@ function useCanSeePanel(): boolean {
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
   const { open: columnOpen, surface, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const compact = useHeaderCompact()
   const open = columnOpen && surface === "agente"
   if (!canSee) return null
   return (
@@ -367,7 +369,7 @@ export function AgentPanelButton() {
       ref={buttonRef}
       type="button"
       variant={open ? "default" : "outline"}
-      className="elevated relative h-9 gap-2 rounded-full px-2 max-md:hidden md:pr-3"
+      className={`elevated relative h-9 gap-2 rounded-full px-2 max-md:hidden ${compact ? "w-9 justify-center gap-0 px-0" : "md:pr-3"}`}
       onClick={() => setOpen(!open)}
       aria-label="Agente"
       aria-expanded={open}
@@ -378,22 +380,31 @@ export function AgentPanelButton() {
       >
         <Bot className="size-4" aria-hidden />
       </span>
-      <span className="hidden md:inline">Agente</span>
+      {compact ? null : <span className="hidden md:inline">Agente</span>}
     </Button>
   )
 }
 
 /**
  * «Agente» en el menú ⋯, solo en el teléfono: ahí el botón no cabe en la fila.
- * Abre al cuadro siguiente, cuando el menú ya devolvió el foco a ⋯: así, al
- * cerrar el panel, el foco vuelve a ese botón y no se pierde.
+ * El panel recuerda como origen el botón ⋯ (no la opción, que desaparece): así,
+ * al cerrarlo, el foco vuelve a ⋯ y no se pierde.
  */
 export function AgentPanelMenuItem() {
   const canSee = useCanSeePanel()
   const { setOpen } = useContext(AgentPanelContext)
   if (!canSee) return null
   return (
-    <DropdownMenuItem className="md:hidden" onClick={() => requestAnimationFrame(() => setOpen(true))}>
+    <DropdownMenuItem
+      className="md:hidden"
+      onClick={() => {
+        const trigger = document.querySelector<HTMLElement>('[data-slot="dropdown-menu-trigger"][aria-expanded="true"]')
+        requestAnimationFrame(() => {
+          trigger?.focus()
+          setOpen(true)
+        })
+      }}
+    >
       <Bot aria-hidden />
       Agente
     </DropdownMenuItem>

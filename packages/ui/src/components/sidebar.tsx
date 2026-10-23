@@ -119,10 +119,11 @@ function SidebarProvider({
   // En tableta el menú empieza colapsado en su riel; al abrirlo flota (`overlay`).
   const isTablet = useIsTablet()
   const [_open, _setOpen] = React.useState(defaultOpen)
-  // Se decide al montar y no al pintar: así el primer render coincide con el HTML del servidor.
+  // Al entrar al rango (al montar o al achicar la ventana) se pliega: abierto taparía el contenido.
+  // Se decide en un efecto y no al pintar: así el primer render coincide con el HTML del servidor.
   React.useEffect(() => {
-    if (isTabletWidth()) _setOpen(false)
-  }, [])
+    if (isTablet) _setOpen(false)
+  }, [isTablet])
   const open = openProp ?? _open
   const overlay = isTablet && open
   const setOpen = React.useCallback(
