@@ -1,9 +1,11 @@
 /**
- * Lo común no depende de lo dental (ADR 0079). Lo dental vive en este paquete,
- * en `services/src/dental/` y en `api/src/routes/dental/`; lo demás solo lo
- * importa si está en la lista de abajo, que se vacía entrega a entrega. Un
- * archivo nuevo que lo necesite es una señal de que falta un punto de
- * extensión del producto, no de agregarlo aquí.
+ * Lo común no depende de lo dental (ADR 0079). Lo dental vive en este paquete
+ * y en las carpetas `dental/` de los servicios, el agente, la base y la API;
+ * cada producto se conecta con lo común solo por `products.ts` (servicios y
+ * API). Ningún código de lo común importa lo dental: solo las pruebas de la
+ * lista de abajo, que prueban lo común con odentIA como ejemplo. Un archivo
+ * nuevo que lo necesite es una señal de que falta un punto de extensión del
+ * producto, no de agregarlo aquí.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -15,17 +17,9 @@ const IMPORTS_DENTAL =
   /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/(db\/schema|db|services|agent)\/dental"|from "\.\/dental\.js"/
 
 /**
- * Lo común que aún importa lo dental; cada entrega quita lo que separa. La
- * entrega 3 sumó budgets, global-search e imaging-studies: guardan el sitio
- * común pero la API sigue diciendo pieza y caras (salen en la entrega 5). La
- * entrega 4 sumó el recorrido del tratamiento y las pruebas que escriben en
- * las tablas del esquema dental: salen cuando el cierre y la historia
- * pregunten al producto (entrega 5). La 5a sumó dos pruebas que usan el
- * odontograma, ya en `services/src/dental/odontogram.ts`. La 5b sacó lo que
- * dependía del sitio, del hallazgo de origen y de las fases: lo dice el
- * producto (`ProductSite`, `products.ts`). La 6 llevó a Clío entero a lo dental
- * (`services/src/dental/encounter-dictation.ts`, `agent/src/dental/dictation.ts`):
- * el índice del agente lo exporta y algunas pruebas lo usan.
+ * Las pruebas y mediciones de lo común que usan lo dental como ejemplo (el
+ * odontograma en el cierre de la atención, la biblioteca de odentIA al
+ * sembrar, Clío): solo pruebas, nunca código que corre (entrega 8).
  */
 const STILL_COUPLED = [
   "packages/agent/src/agent.test.ts",
@@ -43,7 +37,6 @@ const STILL_COUPLED = [
   "packages/services/src/patients.test.ts",
   "packages/services/src/procedure-codings.test.ts",
   "packages/services/src/saas-actions.test.ts",
-  "packages/services/src/seed-dev.ts",
   "packages/services/src/service-interest.test.ts",
   "packages/services/src/treatment-journey.test.ts",
 ]
@@ -101,6 +94,10 @@ describe("límites entre lo común y lo dental (ADR 0079)", () => {
   it("lo común solo importa lo dental donde aún falta separarlo", () => {
     const fresh = coupled.filter((file) => !STILL_COUPLED.includes(file))
     expect(fresh, "archivos comunes nuevos que importan lo dental").toEqual([])
+  })
+
+  it("en la lista solo hay pruebas y mediciones, nunca código que corre", () => {
+    expect(STILL_COUPLED.filter((file) => !/.(test|eval).ts$/.test(file))).toEqual([])
   })
 
   it("la lista se achica: lo que ya no importa lo dental sale de ella", () => {

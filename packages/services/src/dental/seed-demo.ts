@@ -1,5 +1,7 @@
 /**
- * Seed de dev determinista para prueba manual del panel.
+ * La demo de odentIA (ADR 0079): la semilla de desarrollo determinista para
+ * probar a mano la clínica dental «Dental Smile». Lo que sirve a cualquier
+ * producto va en `../seed-common.ts` y en los `seed-*.ts` comunes.
  *
  * Solo manual (`pnpm db:seed`); NUNCA en CI ni importado por tests
  * (cada test crea sus fixtures mínimas). Idempotente: borra solo las
@@ -86,13 +88,13 @@ import {
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
-import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
-import { ANSWER_READY_MESSAGE, replyId } from "./automation-messages.js"
-import { upsertAgentConfig } from "./agentConfig.js"
-import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
-import { createAppointment, createRoom, setAppointmentArrival } from "./appointments.js"
-import { createMyCalendarFeed } from "./calendar-feeds.js"
-import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
+import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
+import { ANSWER_READY_MESSAGE, replyId } from "../automation-messages.js"
+import { upsertAgentConfig } from "../agentConfig.js"
+import { addPatientAllergy, removePatientAllergy } from "../allergies.js"
+import { createAppointment, createRoom, setAppointmentArrival } from "../appointments.js"
+import { createMyCalendarFeed } from "../calendar-feeds.js"
+import { createScheduleBlock, setProfessionalSchedule } from "../availability.js"
 import {
   addBudgetItems,
   adjustBudgetLines,
@@ -102,7 +104,7 @@ import {
   duplicateBudgetOption,
   removeBudgetItems,
   reviseBudget,
-} from "./budgets.js"
+} from "../budgets.js"
 import {
   addClinicalNote,
   addDeclaredAllergies,
@@ -110,24 +112,24 @@ import {
   registerPatientDocument,
   retirePatientDocument,
   savePatientHealth,
-} from "./clinical.js"
-import { addOdontogramEntries, createOdontogramAssessment, voidOdontogramEntry } from "./dental/odontogram.js"
-import { createConnection } from "./connections.js"
-import { createContact, updateContact } from "./contacts.js"
-import { blockContact, markSpam } from "./contact-screen.js"
-import { decideActionReview, requestActionReview } from "./saas-action-review.js"
+} from "../clinical.js"
+import { addOdontogramEntries, createOdontogramAssessment, voidOdontogramEntry } from "./odontogram.js"
+import { createConnection } from "../connections.js"
+import { createContact, updateContact } from "../contacts.js"
+import { blockContact, markSpam } from "../contact-screen.js"
+import { decideActionReview, requestActionReview } from "../saas-action-review.js"
 import {
   markImagingFilesUploaded,
   pendingImagingFiles,
   setImagingThumbnail,
   startImagingStudyUpload,
-} from "./imaging-studies.js"
-import { createContactNote } from "./crm-workspace.js"
-import { grantDataConsent } from "./data-consents.js"
-import { eraseForDataRequest } from "./data-erasure.js"
-import { addCalendarDays, createDataRequest, respondDataRequest, verifyDataRequest } from "./data-requests.js"
-import { clinicToday } from "./inventory-stock.js"
-import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
+} from "../imaging-studies.js"
+import { createContactNote } from "../crm-workspace.js"
+import { grantDataConsent } from "../data-consents.js"
+import { eraseForDataRequest } from "../data-erasure.js"
+import { addCalendarDays, createDataRequest, respondDataRequest, verifyDataRequest } from "../data-requests.js"
+import { clinicToday } from "../inventory-stock.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import {
   addEncounterAddendum,
   addEncounterProcedure,
@@ -135,100 +137,90 @@ import {
   finalizeEncounter,
   updateEncounterDraft,
   voidEncounter,
-} from "./encounters.js"
-import { createFieldDef } from "./fields.js"
-import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
-import { setCommissionRate } from "./finance.js"
-import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "./opportunities.js"
+} from "../encounters.js"
+import { createFieldDef } from "../fields.js"
+import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "../follow-ups.js"
+import { setCommissionRate } from "../finance.js"
+import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "../opportunities.js"
 import {
   createPatientRegistrationLink,
   leaveRegistrationHold,
   registerPatient,
   savePatientRegistrationConfig,
-} from "./patient-registration.js"
-import { createPatient, patientPersonId, RegistrationHeld, updatePatient } from "./patients.js"
-import { collectCharge, createCharge, refundCredit } from "./payments.js"
-import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
-import { ensureDefaultPipeline } from "./pipelines.js"
-import { setConsent, setMessageChoice } from "./automation.js"
-import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
-import { cancelPrescription, createPrescription } from "./prescriptions.js"
-import { setProfessionalProfile } from "./professional-profiles.js"
-import { createPromotion } from "./promotions.js"
-import { grantResponsibility } from "./responsibilities.js"
-import { secretsKeyFromEnv } from "./secrets.js"
-import { seedAgent } from "./seed-agent.js"
-import { seedAutomation, seedChannelTemplates } from "./seed-automation.js"
-import { seedAvailability } from "./seed-availability.js"
-import { seedChannels } from "./seed-channels.js"
-import { seedPeriodontalCase } from "./dental/seed-periodontal.js"
-import { generateConsentPdf } from "./consent-pdf.js"
-import { makeImageThumbnail } from "./thumbnails.js"
-import { registerToothFinding } from "./dental/tooth-panel.js"
-import { issuePersonalLink } from "./booking-links.js"
+} from "../patient-registration.js"
+import { createPatient, patientPersonId, RegistrationHeld, updatePatient } from "../patients.js"
+import { collectCharge, createCharge, refundCredit } from "../payments.js"
+import { ensureDefaultPaymentMethods, listPaymentMethods } from "../payment-methods.js"
+import { ensureDefaultPipeline } from "../pipelines.js"
+import { setConsent, setMessageChoice } from "../automation.js"
+import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "../plan.js"
+import { cancelPrescription, createPrescription } from "../prescriptions.js"
+import { setProfessionalProfile } from "../professional-profiles.js"
+import { createPromotion } from "../promotions.js"
+import { grantResponsibility } from "../responsibilities.js"
+import { secretsKeyFromEnv } from "../secrets.js"
+import { seedAgent } from "../seed-agent.js"
+import { seedAutomation, seedChannelTemplates } from "../seed-automation.js"
+import { seedAvailability } from "../seed-availability.js"
+import { seedChannels } from "../seed-channels.js"
+import { seedPeriodontalCase } from "./seed-periodontal.js"
+import { generateConsentPdf } from "../consent-pdf.js"
+import { makeImageThumbnail } from "../thumbnails.js"
+import { registerToothFinding } from "./tooth-panel.js"
+import { issuePersonalLink } from "../booking-links.js"
 import {
   createClinicalOrder,
   markConsentSentByLink,
   setProfessionalSpecialties,
   signConsentDocument,
-} from "./clinical-forms.js"
-import { seedClinicalForms } from "./seed-clinical-forms.js"
-import { seedCrmActivity } from "./seed-crm-activity.js"
-import { seedFinance } from "./seed-finance.js"
-import { seedInventory } from "./seed-inventory.js"
-import { seedMaterialsAndSales } from "./seed-materials.js"
-import { seedMailbox } from "./seed-mailbox.js"
-import { seedOpportunities } from "./seed-opportunities.js"
-import { seedPortal } from "./seed-portal.js"
-import { seedReports } from "./seed-reports.js"
-import { seedReportsAgent } from "./seed-reports-agent.js"
-import { seedReportsArgos } from "./seed-reports-argos.js"
-import { seedReportsFinance } from "./seed-reports-finance.js"
-import { seedReportsPatients } from "./seed-reports-patients.js"
-import { seedReportsProgress } from "./seed-reports-progress.js"
-import { seedRoles } from "./seed-roles.js"
-import { seedWebchat } from "./seed-webchat.js"
-import { seedWorkspace } from "./seed-workspace.js"
-import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
-import { seedAdminOrganizations } from "./seed-admin-organizations.js"
-import { seedAdminSupport } from "./seed-admin-support.js"
-import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
-import { seedClinicNoticesDemo, seedSaasBillingDemo } from "./seed-saas-billing.js"
-import { createService, quickAddServices, updateService } from "./service-catalog.js"
-import { librarySpecialtyIds } from "./specialties.js"
-import type { DentalFinalizeParts } from "./dental/hooks.js"
-import { createStorage } from "./storage.js"
-import { completeTask, createTask, settleTask, updateTask } from "./tasks.js"
+} from "../clinical-forms.js"
+import { seedClinicalForms } from "../seed-clinical-forms.js"
+import { seedCrmActivity } from "../seed-crm-activity.js"
+import { seedFinance } from "../seed-finance.js"
+import { seedInventory } from "../seed-inventory.js"
+import { seedMaterialsAndSales } from "../seed-materials.js"
+import { seedMailbox } from "../seed-mailbox.js"
+import { seedOpportunities } from "../seed-opportunities.js"
+import { seedPortal } from "../seed-portal.js"
+import { seedReports } from "../seed-reports.js"
+import { seedReportsAgent } from "../seed-reports-agent.js"
+import { seedReportsArgos } from "../seed-reports-argos.js"
+import { seedReportsFinance } from "../seed-reports-finance.js"
+import { seedReportsPatients } from "../seed-reports-patients.js"
+import { seedReportsProgress } from "../seed-reports-progress.js"
+import { seedRoles } from "../seed-roles.js"
+import { seedWebchat } from "../seed-webchat.js"
+import { seedWorkspace } from "../seed-workspace.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
+import { seedAdminOrganizations } from "../seed-admin-organizations.js"
+import { seedAdminSupport } from "../seed-admin-support.js"
+import { respondConsumerComplaint, submitConsumerComplaint } from "../consumer-complaints.js"
+import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing.js"
+import { createService, quickAddServices, updateService } from "../service-catalog.js"
+import { librarySpecialtyIds } from "../specialties.js"
+import type { DentalFinalizeParts } from "./hooks.js"
+import { createStorage } from "../storage.js"
+import {
+  countWhereIn,
+  daysAgo,
+  demoVoiceNoteWav,
+  demoXRayPng,
+  hoursAgo,
+  type SeedConversationArgs,
+  type SeedMessageArgs,
+  seedConversationIn,
+  seedMessageIn,
+  storageEnvFromProcess,
+} from "../seed-common.js"
+import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
-// Storage real (MinIO local / R2 prod): los documentos demo se suben de verdad,
-// nunca con rutas S3 inventadas. Requiere las mismas variables que la API.
-function storageEnvFromProcess(): {
-  endpoint: string
-  region: string
-  accessKeyId: string
-  secretAccessKey: string
-  avatarsBucket: string
-  publicBaseUrl: string
-  attachmentsBucket: string
-} {
-  const missing = ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ATTACHMENTS_BUCKET"].filter(
-    (k) => !process.env[k],
-  )
-  if (missing.length) throw new Error(`Storage demo sin configurar (faltan ${missing.join(", ")})`)
-  const endpoint = process.env.S3_ENDPOINT!
-  return {
-    endpoint,
-    region: process.env.S3_REGION ?? "auto",
-    accessKeyId: process.env.S3_ACCESS_KEY!,
-    secretAccessKey: process.env.S3_SECRET_KEY!,
-    avatarsBucket: process.env.S3_BUCKET ?? "avatars",
-    publicBaseUrl: process.env.S3_PUBLIC_URL ?? endpoint,
-    attachmentsBucket: process.env.S3_ATTACHMENTS_BUCKET!,
-  }
-}
 const storage = createStorage(storageEnvFromProcess())
+// La base de la demo, para los ayudantes comunes de la semilla.
+const seedConversation = (args: SeedConversationArgs) => seedConversationIn(db, args)
+const seedMessage = (args: SeedMessageArgs) => seedMessageIn(db, args)
+const countWhere = (table: string, orgId: string) => countWhereIn(db, table, orgId)
 /**
  * Imagen clínica de demostración (no es de un paciente real): radiografía o
  * foto esquemática dibujada con SVG para que la galería, el visor y la
@@ -275,85 +267,7 @@ async function putDemoImage(patientId: string, kind: "rx" | "foto", variant = 0)
   return { ...ref, thumbnailKey: thumbRef?.objectKey ?? null }
 }
 
-// Nota de voz demo: WAV PCM mono 8 kHz de un beep corto. Se sintetiza (no hay
-// encoder de audio disponible) y Chrome lo reproduce sin códec adicional.
-function demoVoiceNoteWav(): Buffer {
-  const rate = 8000
-  const samples = Math.round(rate * 0.6)
-  const pcm = Buffer.alloc(samples * 2)
-  for (let i = 0; i < samples; i++) {
-    const envelope = 1 - i / samples
-    pcm.writeInt16LE(Math.round(12000 * envelope * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2)
-  }
-  const header = Buffer.alloc(44)
-  header.write("RIFF", 0)
-  header.writeUInt32LE(36 + pcm.length, 4)
-  header.write("WAVE", 8)
-  header.write("fmt ", 12)
-  header.writeUInt32LE(16, 16)
-  header.writeUInt16LE(1, 20)
-  header.writeUInt16LE(1, 22)
-  header.writeUInt32LE(rate, 24)
-  header.writeUInt32LE(rate * 2, 28)
-  header.writeUInt16LE(2, 32)
-  header.writeUInt16LE(16, 34)
-  header.write("data", 36)
-  header.writeUInt32LE(pcm.length, 40)
-  return Buffer.concat([header, pcm])
-}
 const DEMO_VOICE_WAV = demoVoiceNoteWav()
-// Radiografía demo visible (96×64, RGBA) para el adjunto de la bandeja: con un
-// PNG 1×1 no se distingue una imagen cargada de una rota al verificar el render.
-function demoXRayPng(): Buffer {
-  const width = 96
-  const height = 64
-  const raw = Buffer.alloc((width * 4 + 1) * height)
-  for (let y = 0; y < height; y++) {
-    const rowStart = y * (width * 4 + 1)
-    raw[rowStart] = 0
-    for (let x = 0; x < width; x++) {
-      const i = rowStart + 1 + x * 4
-      const dx = (x - width / 2) / (width / 2)
-      const dy = (y - height / 2) / (height / 2)
-      const r = Math.hypot(dx, dy)
-      // Anillo claro (diente) sobre fondo oscuro + marca diagonal (lesión).
-      const ring = r > 0.45 && r < 0.85
-      const mark = Math.abs((y - height / 2) * 1.4 - (x - width / 2)) < 3
-      const value = mark ? 235 : ring ? 205 : 45
-      raw[i] = value
-      raw[i + 1] = Math.min(255, value + (mark ? 10 : 25))
-      raw[i + 2] = Math.min(255, value + (mark ? 20 : 40))
-      raw[i + 3] = 255
-    }
-  }
-  const chunk = (type: string, body: Buffer): Buffer => {
-    const length = Buffer.alloc(4)
-    length.writeUInt32BE(body.length, 0)
-    const payload = Buffer.concat([Buffer.from(type, "ascii"), body])
-    const crc = Buffer.alloc(4)
-    crc.writeUInt32BE(crc32(payload), 0)
-    return Buffer.concat([length, payload, crc])
-  }
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(width, 0)
-  ihdr.writeUInt32BE(height, 4)
-  ihdr[8] = 8 // bits por canal
-  ihdr[9] = 6 // RGBA
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ])
-}
-function crc32(input: Buffer): number {
-  let crc = 0xffffffff
-  for (const byte of input) {
-    crc ^= byte
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1
-  }
-  return (crc ^ 0xffffffff) >>> 0
-}
 const DEMO_XRAY_PNG = demoXRayPng()
 const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY)
 
@@ -379,8 +293,6 @@ const PASSWORD = "Demo1234"
 // identidad whatsapp; Jorge lo referencia en sus notas.
 const SHARED_PHONE = "+51987654999"
 
-const hoursAgo = (h: number): Date => new Date(Date.now() - h * 3_600_000)
-const daysAgo = (d: number): Date => new Date(Date.now() - d * 86_400_000)
 const tomorrowIso = (): string => new Date(Date.now() + 86_400_000).toISOString()
 async function wipeSeed(): Promise<void> {
   const previousDocuments = await db
@@ -663,119 +575,6 @@ async function wipeSeed(): Promise<void> {
       }
     }
   }
-}
-
-async function seedConversation(args: {
-  orgId: string
-  contactId: string
-  connectionId: string
-  thread: string
-  status?: string
-  agentStatus?: string
-  assignedUserId?: string | null
-  unreadCount?: number
-  lastInboundAt?: Date | null
-  lastOutboundAt?: Date | null
-  lastMessageAt?: Date | null
-  /** Cerrada: con su motivo y quién (nulo = el agente), como la deja `closeConversationWith`. */
-  closed?: { reason: "resuelta" | "sin_respuesta" | "equipo" | "manual"; at: Date; byUserId: string | null }
-}): Promise<{ id: string }> {
-  const [connection] = await db
-    .select({ channel: channelConnection.channel })
-    .from(channelConnection)
-    .where(eq(channelConnection.id, args.connectionId))
-  const identities = await db
-    .select({ id: contactIdentity.id, externalUserId: contactIdentity.externalUserId })
-    .from(contactIdentity)
-    .where(
-      and(
-        eq(contactIdentity.organizationId, args.orgId),
-        eq(contactIdentity.contactId, args.contactId),
-        eq(contactIdentity.channel, connection!.channel),
-      ),
-    )
-  const identity = identities.length === 1 ? identities[0] : undefined
-  const [row] = await db
-    .insert(conversation)
-    .values({
-      organizationId: args.orgId,
-      contactId: args.contactId,
-      contactIdentityId: identity?.id ?? null,
-      channelConnectionId: args.connectionId,
-      externalThreadId:
-        connection?.channel === "whatsapp" && identity ? identity.externalUserId : args.thread,
-      status: args.closed ? "closed" : (args.status ?? "open"),
-      closedAt: args.closed?.at ?? null,
-      closeReason: args.closed?.reason ?? null,
-      closedByUserId: args.closed?.byUserId ?? null,
-      assignedUserId: args.assignedUserId ?? null,
-      agentStatus: args.agentStatus ?? "on",
-      unreadCount: args.unreadCount ?? 0,
-      lastInboundAt: args.lastInboundAt ?? null,
-      lastOutboundAt: args.lastOutboundAt ?? null,
-      lastMessageAt: args.lastMessageAt ?? null,
-    })
-    .returning({ id: conversation.id })
-  if (!row) throw new Error(`No se pudo crear la conversación ${args.thread}`)
-  return row
-}
-
-async function seedMessage(args: {
-  orgId: string
-  conversationId: string
-  direction: string
-  senderKind: string
-  senderUserId?: string | null
-  body?: string | null
-  contentType?: string
-  attachments?: unknown[]
-  externalId: string
-  status: string
-  createdAt: Date
-  /** Fase 7 de la Bandeja: reenviado, la reacción de la persona y una ubicación. */
-  forwarded?: boolean
-  contactReaction?: string | null
-  location?: { latitude: number; longitude: number; name?: string; address?: string } | null
-  /** Fase 3 de la Bandeja: la pregunta que cita, la respuesta por entregar y «Ver respuesta». */
-  replyToMessageId?: string | null
-  held?: boolean
-  templateName?: string | null
-  replyButtons?: { id: string; title: string }[] | null
-}): Promise<{ id: string }> {
-  const [row] = await db
-    .insert(message)
-    .values({
-      organizationId: args.orgId,
-      conversationId: args.conversationId,
-      direction: args.direction,
-      senderKind: args.senderKind,
-      senderUserId: args.senderUserId ?? null,
-      contentType: args.contentType ?? "text",
-      body: args.body ?? null,
-      attachments: args.attachments ?? [],
-      externalId: args.externalId,
-      status: args.status,
-      forwarded: args.forwarded ?? false,
-      contactReaction: args.contactReaction ?? null,
-      contactReactionAt: args.contactReaction ? args.createdAt : null,
-      location: args.location ?? null,
-      replyToMessageId: args.replyToMessageId ?? null,
-      held: args.held ?? false,
-      templateName: args.templateName ?? null,
-      templateLanguage: args.templateName ? "es" : null,
-      replyButtons: args.replyButtons ?? null,
-      createdAt: args.createdAt,
-    })
-    .returning({ id: message.id })
-  if (!row) throw new Error(`No se pudo crear el mensaje ${args.externalId}`)
-  return row
-}
-
-async function countWhere(table: string, orgId: string): Promise<number> {
-  const rows = (await db.execute(
-    sql.raw(`select count(*)::int as n from "${table}" where "organization_id" = '${orgId}'`),
-  )) as unknown as Array<{ n: number }>
-  return rows[0]?.n ?? 0
 }
 
 await wipeSeed()
