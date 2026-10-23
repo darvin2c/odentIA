@@ -4,7 +4,7 @@
  * «Empieza por estos 5» muestra el resto), la atención firmada de Rosa con sus
  * «Materiales usados» descontados, un cepillo vendido en Caja, otros dos
  * cobrados de los que devolvió uno (ADR 0068) y un enjuague cobrado. Determinista e idempotente: la
- * purga de `seed-dev.ts` borra lo anterior.
+ * purga de la demo (`dental/seed-demo.ts`) borra lo anterior.
  */
 import type { Db } from "@odentia/db"
 import { encounter, encounterProcedure, serviceCatalog } from "@odentia/db/schema/clinical"
