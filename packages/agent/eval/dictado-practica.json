@@ -1,0 +1,205 @@
+{
+  "_nota": "Dictados de práctica escritos como habla un odontólogo (ninguno de un paciente real), con lo que debería salir de cada uno. Los usa eval:dictado (issue 109). «pendientes» son las sugerencias que ya estaban, para probar corregir y quitar por voz.",
+  "servicios": [
+    "Obturación con resina",
+    "Carilla de resina directa",
+    "Incrustación de cerámica",
+    "Endodoncia unirradicular",
+    "Endodoncia multirradicular",
+    "Exodoncia simple",
+    "Exodoncia de tercera molar",
+    "Corona metalcerámica",
+    "Corona de zirconio",
+    "Profilaxis",
+    "Destartraje supragingival",
+    "Sellante de fosas y fisuras",
+    "Pulpotomía",
+    "Implante dental",
+    "Blanqueamiento",
+    "Radiografía periapical",
+    "Consulta de evaluación"
+  ],
+  "dictados": [
+    {
+      "id": "prueba-real-2026-10-23",
+      "texto": "Viene por dolor en la muela de abajo a la izquierda hace tres días. La treinta y seis tiene caries oclusal, la cuarenta y seis está ausente y la once tiene corona. Le ponemos una resina en la treinta y seis, o si no una incrustación. Control en un mes.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 36, "hallazgo": "caries" },
+          { "pieza": 46, "hallazgo": "missing_tooth" },
+          { "pieza": 11, "hallazgo": "crown" }
+        ],
+        "planes": [36],
+        "controles": 1,
+        "nota": true
+      }
+    },
+    {
+      "id": "odontograma-inicial",
+      "texto": "Odontograma inicial. Dieciocho ausente, diecisiete con restauración de amalgama en buen estado, dieciséis caries mesial en esmalte. Veintiséis con corona metalcerámica en mal estado. Treinta y seis y cuarenta y seis con sellantes en buen estado.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 18, "hallazgo": "missing_tooth" },
+          { "pieza": 17, "hallazgo": "definitive_restoration", "variante": "amalgam", "estado": "good" },
+          { "pieza": 16, "hallazgo": "caries", "variante": "enamel" },
+          { "pieza": 26, "hallazgo": "crown", "variante": "metal_ceramic", "estado": "poor" },
+          { "pieza": 36, "hallazgo": "sealant", "estado": "good" },
+          { "pieza": 46, "hallazgo": "sealant", "estado": "good" }
+        ]
+      }
+    },
+    {
+      "id": "caries-dentina-y-plan",
+      "texto": "En la veinticinco hay caries en dentina por distal. Le hacemos una resina por distal en la veinticinco.",
+      "espera": {
+        "hallazgos": [{ "pieza": 25, "hallazgo": "caries", "variante": "dentin" }],
+        "planes": [25]
+      }
+    },
+    {
+      "id": "ausencia-por-caries",
+      "texto": "La cuarenta y siete se la sacaron por caries hace años. La treinta y siete también está ausente, la perdió por una fractura.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 47, "hallazgo": "missing_tooth", "variante": "caries_extraction" },
+          { "pieza": 37, "hallazgo": "missing_tooth", "variante": "other_absence" }
+        ]
+      }
+    },
+    {
+      "id": "fractura-y-endodoncia",
+      "texto": "Paciente que se cayó ayer, fractura de la once. Vamos a hacer endodoncia unirradicular de la once y después corona.",
+      "espera": {
+        "hallazgos": [{ "pieza": 11, "hallazgo": "fracture" }],
+        "planes": [11],
+        "nota": true
+      }
+    },
+    {
+      "id": "gingivitis-sin-pieza",
+      "texto": "Encías inflamadas en general, sangran al sondaje. Gingivitis asociada a placa. Profilaxis y destartraje hoy, control en tres meses.",
+      "espera": {
+        "diagnosticos": ["K05.1"],
+        "controles": 1
+      }
+    },
+    {
+      "id": "remanente-radicular",
+      "texto": "En la treinta y cinco solo queda el remanente radicular. Exodoncia simple de la treinta y cinco.",
+      "espera": {
+        "hallazgos": [{ "pieza": 35, "hallazgo": "root_remnant" }],
+        "planes": [35]
+      }
+    },
+    {
+      "id": "restauracion-temporal",
+      "texto": "La catorce tiene una restauración temporal por oclusal que hay que cambiar, y la quince tiene una resina en buen estado por mesial.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 14, "hallazgo": "temporary_restoration" },
+          { "pieza": 15, "hallazgo": "definitive_restoration", "variante": "resin", "estado": "good" }
+        ]
+      }
+    },
+    {
+      "id": "nino-pulpotomia",
+      "texto": "Niño de seis años. La setenta y cuatro con caries profunda que llega a la pulpa. Pulpotomía de la setenta y cuatro.",
+      "espera": {
+        "hallazgos": [{ "pieza": 74, "hallazgo": "caries", "variante": "pulpal_involvement" }],
+        "planes": [74]
+      }
+    },
+    {
+      "id": "desgaste-y-bruxismo",
+      "texto": "Desgaste en los bordes incisales de la once y la veintiuno, refiere que aprieta los dientes de noche.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 11, "hallazgo": "tooth_wear" },
+          { "pieza": 21, "hallazgo": "tooth_wear" }
+        ],
+        "nota": true
+      }
+    },
+    {
+      "id": "corona-temporal",
+      "texto": "La veintiuno tiene corona temporal desde la semana pasada. Corona de zirconio para la veintiuno.",
+      "espera": {
+        "hallazgos": [{ "pieza": 21, "hallazgo": "temporary_crown" }],
+        "planes": [21]
+      }
+    },
+    {
+      "id": "en-erupcion",
+      "texto": "Las cuarenta y ocho y treinta y ocho están erupcionando, sin molestias. Control en seis meses.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 48, "hallazgo": "erupting_tooth" },
+          { "pieza": 38, "hallazgo": "erupting_tooth" }
+        ],
+        "controles": 1
+      }
+    },
+    {
+      "id": "fosas-profundas",
+      "texto": "Dieciséis y veintiséis con fosas y fisuras profundas. Sellantes en las dos.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 16, "hallazgo": "deep_pits_fissures" },
+          { "pieza": 26, "hallazgo": "deep_pits_fissures" }
+        ],
+        "planes": [16, 26]
+      }
+    },
+    {
+      "id": "pulpitis-no-es-hallazgo",
+      "texto": "Dolor espontáneo en la treinta y seis que no calma con analgésicos. Pulpitis irreversible de la treinta y seis. Endodoncia multirradicular.",
+      "espera": {
+        "diagnosticos": ["K04.0"],
+        "planes": [36],
+        "nota": true
+      }
+    },
+    {
+      "id": "charla-sin-registros",
+      "texto": "Abre un poquito más. Muy bien, ahora muerde. ¿Te duele aquí? Tranquila, ya casi terminamos.",
+      "espera": {}
+    },
+    {
+      "id": "corregir-pieza-hallazgo",
+      "pendientes": ["Odontograma: caries, Pieza 25"],
+      "texto": "No, la caries es en la veintiséis, no en la veinticinco.",
+      "espera": { "correcciones": 1 }
+    },
+    {
+      "id": "completar-corona",
+      "pendientes": ["Odontograma: crown, Pieza 11", "Plan de tratamiento: Profilaxis"],
+      "texto": "La corona de la once es libre de metal y está en buen estado.",
+      "espera": { "correcciones": 1 }
+    },
+    {
+      "id": "quitar-por-voz",
+      "pendientes": ["Odontograma: missing_tooth, Pieza 46", "Plan de tratamiento: Exodoncia simple, Pieza 46"],
+      "texto": "Quita la exodoncia, ya no hace falta.",
+      "espera": { "quitar": 1 }
+    },
+    {
+      "id": "numero-que-no-existe",
+      "pendientes": ["Odontograma: caries, Pieza 36"],
+      "texto": "No, la tercera es la veintiséis.",
+      "espera": {}
+    },
+    {
+      "id": "mixto-largo",
+      "texto": "Control de rutina. Refiere sensibilidad al frío en el lado izquierdo. Veinticuatro con caries vestibular en esmalte, veintitrés con desgaste. La cuarenta y uno tiene movilidad. Profilaxis hoy, resina en la veinticuatro por vestibular, control en seis meses.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 24, "hallazgo": "caries", "variante": "enamel" },
+          { "pieza": 23, "hallazgo": "tooth_wear" }
+        ],
+        "planes": [24],
+        "controles": 1,
+        "nota": true
+      }
+    }
+  ]
+}

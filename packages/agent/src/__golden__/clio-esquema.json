@@ -50,9 +50,80 @@
       },
       "additionalProperties": false
     },
+    "odontograma": {
+      "default": [],
+      "description": "Un elemento por cada hallazgo de una pieza que nombró el odontólogo, de la lista de hallazgos.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "toothNumber": {
+            "type": "integer",
+            "minimum": 11,
+            "maximum": 85,
+            "description": "La pieza en numeración FDI (cuarenta y seis = 46)."
+          },
+          "condition": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "El código del hallazgo, de la lista de hallazgos que se te da (por ejemplo, caries o missing_tooth)."
+          },
+          "surfaces": {
+            "description": "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20
+            }
+          },
+          "variant": {
+            "description": "El valor de la variante del hallazgo, de su lista (la profundidad de una caries, el tipo de corona…), solo si el odontólogo la dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 40
+          },
+          "quality": {
+            "description": "good si dijo que está en buen estado; poor si dijo que está en mal estado. Solo si lo dijo.",
+            "type": "string",
+            "enum": [
+              "good",
+              "poor"
+            ]
+          },
+          "diagnosisType": {
+            "description": "confirmed solo si el odontólogo da el diagnóstico por seguro; si no lo dice, no lo indiques.",
+            "type": "string",
+            "enum": [
+              "provisional",
+              "confirmed"
+            ]
+          },
+          "note": {
+            "description": "Una precisión que dijo el odontólogo sobre el hallazgo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "toothNumber",
+          "condition"
+        ],
+        "additionalProperties": false
+      }
+    },
     "diagnosticos": {
       "default": [],
-      "description": "Un elemento por cada diagnóstico que nombró el odontólogo.",
+      "description": "Un elemento por cada diagnóstico que nombró el odontólogo y no es un hallazgo del odontograma.",
       "maxItems": 40,
       "type": "array",
       "items": {
@@ -257,6 +328,7 @@
     }
   },
   "required": [
+    "odontograma",
     "diagnosticos",
     "indicaciones",
     "controles",

@@ -1,8 +1,9 @@
 import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
 import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
-import { Mic, Pause, Play, Square } from "lucide-react"
+import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
 import { useState } from "react"
-import { dictationClock, dictationErrorText, type DictationSession, highlightTranscript } from "./dictation-session"
+import { activeOrgLocale } from "../../lib/locale"
+import { dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
@@ -10,10 +11,37 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
 
-/** «5 listas y 1 por revisar», con lo que haya. */
+/**
+ * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109). Solo lo
+ * que de verdad hace: lo que llega después va en «Más adelante».
+ */
+const EXAMPLES: Array<{ block: string; say: string }> = [
+  { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
+  { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
+  { block: "Plan", say: "«Resina en la 36»" },
+  { block: "Control", say: "«Control en un mes»" },
+  { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
+]
+
+function DictationExamples() {
+  return (
+    <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+      {EXAMPLES.map((example) => (
+        <div key={example.block} className="contents">
+          <dt className="font-semibold text-muted-foreground">{example.block}</dt>
+          <dd className="m-0 [overflow-wrap:anywhere]">{example.say}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/** «5 listas y 1 por revisar · 1 quitada por voz», con lo que haya. */
 function readiness(session: DictationSession): string {
   const review = session.pending - session.ready
-  return [session.ready > 0 ? plural(session.ready, "lista", "listas") : "", review > 0 ? `${review} por revisar` : ""].filter(Boolean).join(" y ")
+  const counts = [session.ready > 0 ? plural(session.ready, "lista", "listas") : "", review > 0 ? `${review} por revisar` : ""].filter(Boolean).join(" y ")
+  const removed = session.removedByVoice.length
+  return [counts, removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : ""].filter(Boolean).join(" · ")
 }
 
 /**
@@ -54,14 +82,10 @@ export function DictationPanel({
           {session.micError}
         </p>
       ) : null}
-      {session.organizeError ? (
-        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
-          <p className="min-w-0 flex-1 basis-48">{session.organizeError}</p>
-          <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => void session.retryOrganize()}>
-            Reintentar
-          </Button>
-        </div>
-      ) : null}
+      <UnusedNotice session={session} />
+      {session.failed.map((segment) => (
+        <FailedSegmentCard key={segment.id} session={session} segment={segment} />
+      ))}
       {session.confirmReady.isError ? (
         <p role="alert" className="text-sm text-destructive">
           {dictationErrorText(session.confirmReady.error, "Alguna no se pudo confirmar. Revisa las que siguen en su bloque.")}
@@ -155,7 +179,7 @@ export function DictationPanel({
                 {readiness(session)}. Todavía no hay nada en la historia.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : (
-              "Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
+              "Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
             )}
           </p>
         </div>
@@ -192,6 +216,13 @@ export function DictationPanel({
         </div>
       </div>
 
+      {/* Antes de la primera sugerencia, qué se puede decir; después está en «Lo dictado». */}
+      {pending === 0 && session.removedByVoice.length === 0 && !session.transcript ? (
+        <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
+          <p className="text-sm font-semibold">Por ejemplo</p>
+          <DictationExamples />
+        </div>
+      ) : null}
       {typing ? (
         <div className="flex flex-col gap-2">
           <Field>
@@ -240,24 +271,93 @@ export function DictationPanel({
   )
 }
 
+/** Cuántas frases no usadas se muestran en el aviso; el resto sigue marcado en «Lo dictado». */
+const UNUSED_SHOWN = 3
+
+/**
+ * «No pude usar esto»: lo que el asistente no pudo ordenar de lo dictado, con
+ * la frase tal cual (issue 135). Se queda hasta «Entendido»; lo de las pausas
+ * siguientes se suma.
+ */
+function UnusedNotice({ session }: { session: DictationSession }) {
+  const { phrases, unnamed } = session.unused
+  if (phrases.length === 0 && !unnamed) return null
+  const rest = phrases.length - UNUSED_SHOWN
+  return (
+    <div role="status" className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-soft p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="font-semibold text-warning">
+            {phrases.length ? "No pude usar esto de lo que dictaste" : "No pude usar una parte de lo que dictaste"}
+          </p>
+          {phrases.slice(0, UNUSED_SHOWN).map((phrase) => (
+            <p key={phrase} className="[overflow-wrap:anywhere]">
+              «{phrase}»
+            </p>
+          ))}
+          {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
+          <p className="text-warning">Dilo de nuevo o regístralo a mano. {phrases.length ? "Sigue marcado en «Lo dictado»." : "Sigue en «Lo dictado»."}</p>
+        </div>
+      </div>
+      <Button type="button" variant="secondary" size="sm" className="min-h-11 self-start sm:ml-6 sm:min-h-8" onClick={session.dismissUnused}>
+        Entendido
+      </Button>
+    </div>
+  )
+}
+
+/** Una parte que no se pudo ordenar ni al reintentar: queda aparte y lo demás sigue (issue 135). */
+function FailedSegmentCard({ session, segment }: { session: DictationSession; segment: FailedSegment }) {
+  const hour = segment.at.toLocaleTimeString(activeOrgLocale() ?? "es", { hour: "2-digit", minute: "2-digit" })
+  const words = segment.text.length > 90 ? `${segment.text.slice(0, 90).trimEnd()}…` : segment.text
+  return (
+    <div role="alert" className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-background p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="font-semibold text-warning">No pude ordenar una parte ({hour})</p>
+          <p className="[overflow-wrap:anywhere]">«{words}»</p>
+          <p className="text-muted-foreground">{segment.message} Lo que dictes después se sigue ordenando. Esta parte sigue en «Lo dictado».</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 sm:ml-6">
+        <Button type="button" size="sm" className="min-h-11 sm:min-h-8" onClick={() => session.retryFailed(segment.id)}>
+          Reintentar
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={() => session.discardFailed(segment.id)}>
+          Descartar esta parte
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * «Lo dictado»: el respaldo del odontólogo mientras dicta. Vive solo en esta
  * pantalla (el servidor no guarda el dictado); lo resaltado dio lugar a una
- * sugerencia.
+ * sugerencia y lo subrayado no se pudo usar.
  */
 export function DictationTranscript({ session }: { session: DictationSession }) {
-  const parts = highlightTranscript(session.transcript, session.highlights)
-  const marked = parts.some((part) => part.marked)
+  const parts = highlightTranscript(session.transcript, session.highlights, session.unused.phrases)
+  const marked = parts.some((part) => part.mark === "used")
+  const unusedShown = parts.some((part) => part.mark === "unused")
   return (
     <div className="flex flex-col gap-4 text-sm">
       {session.transcript ? (
         <p className="whitespace-pre-wrap leading-relaxed">
           {parts.map((part, index) =>
-            part.marked ? (
+            part.mark === "used" ? (
               // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
               <mark key={index} className="rounded bg-primary-soft px-0.5 text-primary-soft-foreground">
                 {part.text}
               </mark>
+            ) : part.mark === "unused" ? (
+              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
+              <span key={index}>
+                <span className="underline decoration-warning decoration-wavy underline-offset-4">{part.text}</span>{" "}
+                <span className="whitespace-nowrap rounded-full bg-warning-soft px-2 text-xs font-semibold text-warning">No lo usé</span>
+              </span>
             ) : (
               // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
               <span key={index}>{part.text}</span>
@@ -267,6 +367,11 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
       ) : (
         <p className="text-muted-foreground">Todavía no hay nada dictado.</p>
       )}
+      {unusedShown ? (
+        <p className="text-xs text-muted-foreground">
+          Lo resaltado dio una sugerencia; lo subrayado con «No lo usé» no se pudo usar: dilo de nuevo o regístralo a mano.
+        </p>
+      ) : null}
       {session.transcript && !marked && session.pending > 0 ? (
         <p className="text-xs text-muted-foreground">No pude ubicar en el texto qué frase originó cada sugerencia; ábrela para ver lo que dijiste.</p>
       ) : null}
@@ -275,11 +380,14 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
           Escuchando…{session.interim ? ` «${session.interim}»` : ""}
         </p>
       ) : null}
-      <div className="flex flex-col gap-1 rounded-xl border bg-muted/40 p-3">
-        <p className="font-semibold">Para corregir, dilo</p>
-        <p>«No, es la veintiséis» cambia la última sugerencia.</p>
-        <p>«Quita la endodoncia» la descarta.</p>
-        <p className="text-muted-foreground">También puedes tocar cualquier sugerencia y editarla a mano.</p>
+      <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
+        <p className="font-semibold">Qué puedo decir</p>
+        <DictationExamples />
+        <p className="text-muted-foreground">
+          «No, es la veintiséis» cambia la última sugerencia y «Quita la endodoncia» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
+          editarla a mano.
+        </p>
+        <p className="text-muted-foreground">Más adelante: recetas, consentimientos, presupuesto con opciones y preguntas sobre la historia.</p>
       </div>
     </div>
   )

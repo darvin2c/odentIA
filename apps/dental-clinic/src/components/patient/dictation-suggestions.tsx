@@ -1,8 +1,8 @@
 import { formatMoney } from "@odentia/clinical"
-import { isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/dental"
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { findingDefinition, isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/dental"
+import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
-import { Check, CircleAlert, X } from "lucide-react"
+import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
@@ -45,7 +45,8 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  */
 export function DictationBlockSuggestions({ session, kind }: { session: DictationSession; kind: DictationKind }) {
   const items = session.suggestions.filter((item) => item.kind === kind)
-  if (!session.enabled || items.length === 0) return null
+  const removed = session.removedByVoice.filter((item) => item.kind === kind)
+  if (!session.enabled || items.length + removed.length === 0) return null
   const acting = (item: DictationSuggestion) => session.act.isPending && session.act.variables?.item.id === item.id
   return (
     <div className="flex basis-full flex-col gap-2">
@@ -123,14 +124,75 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                   </Button>
                 </fieldset>
               ) : null}
+              {!ready && item.kind === "odontograma" ? <FindingChoices session={session} item={item} busy={busy} /> : null}
+            </li>
+          )
+        })}
+        {removed.map((item) => {
+          const { title } = suggestionText(item)
+          return (
+            // Quitada por voz (issue 135): a la vista, tachada, hasta firmar; no cuenta como pendiente.
+            <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <Mic className="size-4 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="font-medium line-through">{title}</p>
+                <p>Quitada por voz: dijiste «{item.removal?.said}»</p>
+              </div>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="min-h-11 px-1 sm:min-h-8"
+                disabled={session.act.isPending}
+                onClick={() => session.act.mutate({ item, action: "undo-voice" }, { onSuccess: () => toast.success(`Volvió a tus sugerencias: ${title}`) })}
+              >
+                Deshacer
+              </Button>
             </li>
           )
         })}
       </ul>
-      {session.act.isError && items.some((item) => item.id === session.act.variables?.item.id) ? (
+      {session.act.isError && [...items, ...removed].some((item) => item.id === session.act.variables?.item.id) ? (
         <p role="alert" className="text-sm text-destructive">
           {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
         </p>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Lo que la norma del país pide de un hallazgo dictado y no se dijo (la
+ * profundidad de una caries, el estado de una corona): se elige con un toque,
+ * con los nombres del odontograma. También se puede completar diciéndolo.
+ */
+function FindingChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
+  const condition = String(item.payload["condition"] ?? "")
+  const finding = findingDefinition(condition)
+  const missing = Array.isArray(item.payload["missing"]) ? (item.payload["missing"] as string[]) : []
+  if (!finding || missing.length === 0) return null
+  const choose = (patch: Record<string, string>) => session.save.mutate({ item, patch, confirm: false })
+  const choice = "h-auto min-h-11 whitespace-normal sm:min-h-8"
+  return (
+    <div className="flex flex-col gap-2 sm:pl-8">
+      {missing.includes("variant") && finding.variants ? (
+        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={finding.variantName ?? "Variante"}>
+          {finding.variants.map((variant) => (
+            <Button key={variant.value} type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ variant: variant.value })}>
+              {variant.label}
+            </Button>
+          ))}
+        </fieldset>
+      ) : null}
+      {missing.includes("quality") ? (
+        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Estado">
+          <Button type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ quality: "good" })}>
+            Buen estado
+          </Button>
+          <Button type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ quality: "poor" })}>
+            Mal estado
+          </Button>
+        </fieldset>
       ) : null}
     </div>
   )
@@ -154,6 +216,11 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; labe
   control: [
     { key: "title", label: "Control" },
     { key: "instructions", label: "Indicaciones", long: true },
+  ],
+  // El hallazgo, su variante y su estado se eligen en la tarjeta; aquí, la pieza y una nota.
+  odontograma: [
+    { key: "toothNumber", label: "Pieza", number: true },
+    { key: "note", label: "Nota", long: true },
   ],
 }
 

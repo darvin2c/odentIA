@@ -2,12 +2,19 @@ import {
   DIAGNOSIS_SYSTEM_INFO,
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
+  findingDiagnosisCode,
   isDiagnosisVerification,
 } from "@odentia/clinical"
 import {
+  conditionLabel,
+  FINDINGS,
+  type FindingDefinition,
+  type FindingDetails,
   isValidTooth,
   surfaceLabel,
   surfacesForTooth,
+  validateFinding,
+  variantLabel,
 } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
@@ -29,6 +36,8 @@ import { findOrgLocale, formatOrgMoney, type OrgLocale } from "../locale.js"
 import { OPERATIONS, operationAgentSchema } from "../operation-fields.js"
 import { addPlanItem } from "../plan.js"
 import { productHooks } from "../products.js"
+import { orgStrictVariants } from "./odontogram.js"
+import { registerToothFinding } from "./tooth-panel.js"
 
 /* ---------- Asistente clínico: lo dictado se vuelve sugerencias que el odontólogo confirma ---------- */
 
@@ -49,6 +58,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   diagnostico: "Diagnóstico",
   plan: "Plan de tratamiento",
   control: "Controles",
+  odontograma: "Odontograma",
 }
 
 /** Operación de la atención que ejecuta cada clase de sugerencia al confirmarse. */
@@ -57,7 +67,33 @@ export const DICTATION_OPERATION = {
   diagnostico: "atencion.diagnostico",
   plan: "plan.indicacion",
   control: "control.crear",
+  odontograma: "odontograma.hallazgo",
 } as const satisfies Record<DictationKind, keyof typeof OPERATIONS>
+
+/**
+ * Hallazgos que se pueden dictar (issue 109, fase 1): los de una pieza, con o
+ * sin caras. Quedan fuera los que piden marcar que se observó clínicamente
+ * (implante, endodoncia, espigo, impactación) y los que necesitan un dato que
+ * la voz no da bien (grado de movilidad, sentido del giro, posiciones): esos
+ * se registran tocando la pieza, como siempre.
+ */
+const NOT_BY_VOICE = new Set(["pathological_mobility", "rotation", "abnormal_position", "clinical_observation"])
+export const DICTATION_FINDINGS: readonly FindingDefinition[] = FINDINGS.filter(
+  (finding) => (finding.scope === "tooth" || finding.scope === "surface") && !finding.requiresEvidence && !NOT_BY_VOICE.has(finding.code),
+)
+
+/**
+ * Los hallazgos como se le dan al asistente: código, nombre, variantes y si
+ * lleva estado. No depende de la clínica, así que va en la parte fija del
+ * prompt, la que el proveedor guarda en caché.
+ */
+export function dictationFindingsText(): string {
+  return DICTATION_FINDINGS.map((finding) => {
+    const variants = finding.variants ? `; ${(finding.variantName ?? "variante").toLowerCase()}: ${finding.variants.map((item) => `${item.value} = ${item.label}`).join(", ")}` : ""
+    const quality = finding.color === "quality" ? "; estado: good o poor" : ""
+    return `${finding.code} (${finding.label}${variants}${quality})`
+  }).join("\n")
+}
 
 export interface DictationDraft {
   kind: DictationKind
@@ -78,18 +114,22 @@ export interface DictationSuggestion {
   summary: string
   /** Corregida por voz al seguir dictando: qué decía antes, para poder deshacerlo. */
   voice: { before: string } | null
+  /** Quitada por voz («quita la endodoncia»): lo que dijo, para poder deshacerlo. */
+  removal: { said: string } | null
   createdAt: string
 }
 
 /**
  * Datos de la sugerencia que no son de su operación: de qué tramo del dictado
- * salió (para no ordenarlo dos veces) y cómo estaba antes de una corrección por
- * voz. Van dentro de `payload` bajo `_meta` y nunca salen de este módulo ni
- * llegan a la operación al confirmar.
+ * salió (para no ordenarlo dos veces), cómo estaba antes de una corrección por
+ * voz y cómo estaba antes de que se pidiera quitarla. Van dentro de `payload`
+ * bajo `_meta` y nunca salen de este módulo ni llegan a la operación al
+ * confirmar.
  */
 interface SuggestionMeta {
   segments?: string[]
   voice?: { payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null; before: string } | undefined
+  removal?: { status: "lista" | "por_revisar"; said: string } | undefined
 }
 const META = "_meta"
 
@@ -139,15 +179,16 @@ async function activeServices(tx: Db, orgId: string): Promise<ServiceOption[]> {
     .limit(500)
 }
 
-/** Lo que el asistente necesita saber de la clínica para entender un dictado: sus prestaciones. */
+/** Lo que el asistente necesita saber de la clínica para entender un dictado: sus prestaciones y los hallazgos que se dictan. */
 export async function getDictationCatalog(
   tx: Db,
   orgId: string,
-): Promise<{ services: Array<{ name: string }>; diagnosisSystem: { key: DiagnosisSystemKey; title: string } }> {
+): Promise<{ services: Array<{ name: string }>; diagnosisSystem: { key: DiagnosisSystemKey; title: string }; findings: string }> {
   const system = await orgDiagnosisSystem(tx, orgId)
   return {
     services: (await activeServices(tx, orgId)).map((service) => ({ name: service.name })),
     diagnosisSystem: { key: system, title: DIAGNOSIS_SYSTEM_INFO[system].title },
+    findings: dictationFindingsText(),
   }
 }
 
@@ -248,6 +289,7 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
       .filter(Boolean)
       .join("\n")
   }
+  if (kind === "odontograma") return findingSummary(payload)
   if (kind === "plan") {
     // La tarifa lleva la moneda del tarifario; sin moneda no se inventa una: no se escribe el importe.
     const price =
@@ -258,6 +300,21 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
   }
   const due = typeof payload["dueAt"] === "string" ? new Date(payload["dueAt"]).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric" }) : ""
   return [String(payload["title"] ?? "Control"), due ? `Alrededor del ${due}` : "", payload["instructions"]].filter(Boolean).join("\n")
+}
+
+/** «Pieza 36 · Lesión de caries a nivel de la dentina · cara oclusal», el estado y el diagnóstico que deja. */
+function findingSummary(payload: Record<string, unknown>): string {
+  const condition = String(payload["condition"] ?? "")
+  const variant = typeof payload["variant"] === "string" ? payload["variant"] : null
+  const name = (variant ? variantLabel(condition, variant) : undefined) ?? conditionLabel(condition)
+  const quality = payload["quality"] === "good" ? "Buen estado" : payload["quality"] === "poor" ? "Mal estado" : ""
+  const tooth = typeof payload["toothNumber"] === "number" ? `Pieza ${payload["toothNumber"]}` : ""
+  const faces = site({ surfaces: payload["surfaces"] })
+  const diagnosis =
+    typeof payload["diagnosisCode"] === "string"
+      ? `Con el diagnóstico ${payload["diagnosisType"] === "confirmed" ? "definitivo" : "presuntivo"} ${payload["diagnosisCode"]}${payload["diagnosisDescription"] ? ` ${payload["diagnosisDescription"]}` : ""}`
+      : ""
+  return [[tooth, name, faces].filter(Boolean).join(" · "), quality, diagnosis].filter(Boolean).join("\n")
 }
 
 function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zone): DictationSuggestion {
@@ -271,6 +328,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zon
     note: row.note,
     summary: summarize(row.kind, data, zone),
     voice: meta.voice ? { before: meta.voice.before } : null,
+    removal: row.status === "descartada" && meta.removal ? { said: meta.removal.said } : null,
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -289,7 +347,9 @@ export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "pa
         ? [`${payload["diagnosisCode"] ?? ""}${payload["description"] ? ` ${payload["description"]}` : ""}`, site(payload)].filter(Boolean).join(", ")
         : item.kind === "plan"
           ? [String(payload["serviceName"] ?? payload["service"] ?? ""), site(payload)].filter(Boolean).join(", ")
-          : String(payload["title"] ?? "Control")
+          : item.kind === "odontograma"
+            ? [String(payload["condition"] ?? ""), payload["variant"] ? String(payload["variant"]) : "", site(payload)].filter(Boolean).join(", ")
+            : String(payload["title"] ?? "Control")
   return `${DICTATION_KIND_LABEL[item.kind]}: ${what}`
 }
 
@@ -303,6 +363,7 @@ async function prepare(
   draft: DictationDraft,
   services: ServiceOption[],
   diagnosisSystem: DiagnosisSystemKey,
+  strictVariants: boolean,
 ): Promise<{ payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null } | null> {
   if (!(DICTATION_KINDS as readonly string[]).includes(draft.kind)) return null
   const parsed = operationAgentSchema(DICTATION_OPERATION[draft.kind]).safeParse(draft.payload)
@@ -316,6 +377,7 @@ async function prepare(
       .filter(([, value]) => value !== undefined && value !== null && value !== ""),
   )
   if (draft.kind === "nota") return Object.keys(payload).length ? { payload, status: "lista", note: null } : null
+  if (draft.kind === "odontograma") return prepareFinding(tx, payload, diagnosisSystem, strictVariants)
   if (draft.kind === "diagnostico" || draft.kind === "plan") {
     const site = normalizeSite(payload)
     if (site.invalid) return { payload: site.payload, status: "por_revisar", note: `La pieza ${String(payload["toothNumber"])} no existe en la numeración FDI. Corrígela.` }
@@ -344,6 +406,81 @@ async function prepare(
     }
   }
   return { payload, status: "lista", note: null }
+}
+
+const findingDefinitionOf = (code: string) => DICTATION_FINDINGS.find((finding) => finding.code === code)
+
+/** El hallazgo dictado: por su código o, si el asistente escribió el nombre, por su nombre. */
+function dictatedFinding(spoken: string): FindingDefinition | undefined {
+  const wanted = normalizeForSearch(spoken)
+  return DICTATION_FINDINGS.find((finding) => finding.code === spoken.trim() || normalizeForSearch(finding.label) === wanted)
+}
+
+/** La variante dicha: por su valor o por una palabra de su nombre («dentina», «metalcerámica»). */
+function dictatedVariant(finding: FindingDefinition, spoken: unknown): string | undefined {
+  if (typeof spoken !== "string" || !finding.variants) return undefined
+  const exact = finding.variants.find((item) => item.value === spoken.trim())
+  if (exact) return exact.value
+  const wanted = normalizeForSearch(spoken)
+  if (wanted.length < 4) return undefined
+  // «dentina» está en «…de la dentina» y en «…de la dentina / compromiso de la pulpa»: vale el más justo, el más corto.
+  const named = finding.variants.filter((item) => normalizeForSearch(item.label).includes(wanted)).sort((a, b) => a.label.length - b.label.length)
+  return named[0]?.value
+}
+
+/**
+ * Un hallazgo dictado, con la misma regla que al tocar la pieza
+ * (`validateFinding` con la norma del país). Lo que el país exige y no se
+ * dijo (la profundidad de una caries en Perú, el estado de una corona) queda
+ * en `missing` y la sugerencia por revisar: la pantalla lo pide con botones o
+ * se completa diciéndolo. Si el hallazgo tiene diagnóstico en la lista de la
+ * clínica, lo lleva consigo, como lo propone el odontograma al tocar la pieza.
+ */
+async function prepareFinding(
+  tx: Db,
+  payload: Record<string, unknown>,
+  diagnosisSystem: DiagnosisSystemKey,
+  strictVariants: boolean,
+): Promise<Prepared> {
+  const spoken = String(payload["condition"] ?? "")
+  const finding = dictatedFinding(spoken)
+  if (!finding) {
+    return { payload, status: "por_revisar", note: `No reconozco «${spoken}» como un hallazgo que se pueda dictar. Regístralo tocando la pieza en el odontograma.` }
+  }
+  const tooth = payload["toothNumber"]
+  if (typeof tooth !== "number" || !isValidTooth(tooth)) {
+    return { payload: { ...payload, condition: finding.code }, status: "por_revisar", note: `La pieza ${String(tooth ?? "")} no existe en la numeración FDI. Corrígela.` }
+  }
+  const { variant: _variant, quality: _quality, surfaces: _surfaces, ...rest } = payload
+  const variant = dictatedVariant(finding, payload["variant"])
+  const quality = finding.color === "quality" && (payload["quality"] === "good" || payload["quality"] === "poor") ? payload["quality"] : undefined
+  const surfaces = finding.scope === "surface" ? normalizeSurfaces(tooth, payload["surfaces"]) : []
+  const missing = [
+    ...(finding.variants && !variant && strictVariants ? ["variant"] : []),
+    ...(finding.color === "quality" && !quality ? ["quality"] : []),
+  ]
+  const code = findingDiagnosisCode(diagnosisSystem, finding.code, variant ?? null)
+  const known = code ? await findDiagnosisCode(tx, diagnosisSystem, code) : null
+  const ready: Record<string, unknown> = {
+    ...rest,
+    condition: finding.code,
+    ...(variant ? { variant } : {}),
+    ...(quality ? { quality } : {}),
+    ...(surfaces.length ? { surfaces } : {}),
+    ...(known && !known.isCategory ? { diagnosisCode: known.code, diagnosisSystem, diagnosisDescription: known.description } : {}),
+  }
+  if (!known || known.isCategory) for (const key of ["diagnosisCode", "diagnosisSystem", "diagnosisDescription"]) delete ready[key]
+  if (missing.length) {
+    const asks = [
+      missing.includes("variant") ? `Elige ${(finding.variantName ?? "la variante").toLowerCase()}: la norma de tu país lo pide.` : "",
+      missing.includes("quality") ? "¿En buen o mal estado?" : "",
+    ].filter(Boolean)
+    return { payload: { ...ready, missing }, status: "por_revisar", note: asks.join(" ") }
+  }
+  const details: FindingDetails = { ...(variant ? { variant } : {}), ...(quality ? { quality: quality as "good" | "poor" } : {}) }
+  const errors = validateFinding({ toothNumber: tooth, condition: finding.code, surfaces, details }, { strictVariants })
+  if (errors.length) return { payload: ready, status: "por_revisar", note: errors.join(" ") }
+  return { payload: ready, status: "lista", note: null }
 }
 
 /**
@@ -388,6 +525,7 @@ async function revise(
   patch: Record<string, unknown>,
   services: ServiceOption[],
   diagnosisSystem: DiagnosisSystemKey,
+  strictVariants: boolean,
 ): Promise<Prepared | null> {
   // Un campo que llega vacío se quita de la sugerencia: el odontólogo lo borró.
   let payload: Record<string, unknown> = Object.fromEntries(
@@ -410,7 +548,7 @@ async function revise(
       ? { payload: fitted.payload, status: "por_revisar", note: `La pieza ${String(payload["toothNumber"])} no existe en la numeración FDI. Corrígela.` }
       : fitToScope(fitted.payload, chosenService.scope)
   }
-  return prepare(tx, { kind, payload }, services, diagnosisSystem)
+  return prepare(tx, { kind, payload }, services, diagnosisSystem, strictVariants)
 }
 
 const FIELD_LABEL = Object.fromEntries(
@@ -431,6 +569,12 @@ function describeBefore(kind: DictationKind, before: Record<string, unknown>, af
     else if (key === "service") parts.push(String(before["serviceName"] ?? old ?? "otra prestación"))
     else if (key === "diagnosisCode" || key === "title") parts.push(String(old ?? "sin dato"))
     else if (key === "diagnosisType") parts.push(isDiagnosisVerification(old) ? DIAGNOSIS_VERIFICATION_LABELS[old].toLowerCase() : "sin tipo")
+    else if (key === "variant") {
+      const condition = String(before["condition"] ?? "")
+      const name = (findingDefinitionOf(condition)?.variantName ?? "variante").toLowerCase()
+      parts.push(typeof old === "string" ? (variantLabel(condition, old) ?? old) : `sin ${name}`)
+    } else if (key === "quality") parts.push(old === "good" ? "buen estado" : old === "poor" ? "mal estado" : "sin estado")
+    else if (key === "condition") parts.push(conditionLabel(String(old ?? "")))
     else parts.push(`otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
   }
   return parts.length ? parts.join(", ") : null
@@ -446,8 +590,8 @@ export interface DictationVoiceCorrection {
 export interface DictationSegment {
   drafts: DictationDraft[]
   corrections?: DictationVoiceCorrection[]
-  /** Sugerencias que el odontólogo pidió quitar en voz alta. */
-  removals?: string[]
+  /** Sugerencias que el odontólogo pidió quitar en voz alta, con lo que dijo para pedirlo. */
+  removals?: Array<{ suggestionId: string; said: string }>
   /** Identidad del tramo: el mismo tramo no se guarda dos veces. */
   segmentId?: string | undefined
 }
@@ -502,6 +646,7 @@ export async function saveDictationSegment(
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   const services = await activeServices(tx, orgId)
   const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
+  const strictVariants = await orgStrictVariants(tx, orgId)
   const pendingRow = async (id: string) => {
     const [row] = await tx
       .select()
@@ -528,7 +673,7 @@ export async function saveDictationSegment(
     const schema = operationAgentSchema(DICTATION_OPERATION[row.kind])
     const patch = Object.fromEntries(Object.entries(correction.changes).filter(([key, value]) => key in schema.shape && value !== undefined && value !== null))
     if (Object.keys(patch).length === 0 || !schema.safeParse({ ...data, ...patch }).success) continue
-    const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem)
+    const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem, strictVariants)
     if (!ready) continue
     const before = describeBefore(row.kind, data, ready.payload, Object.keys(patch))
     if (!before) continue
@@ -542,21 +687,35 @@ export async function saveDictationSegment(
   }
 
   const removed: string[] = []
-  for (const id of (segment.removals ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const row = await pendingRow(id)
+  for (const removal of (segment.removals ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
+    const row = await pendingRow(removal.suggestionId)
     if (!row) continue
     const { data, meta } = splitMeta(row.payload)
+    // Si se entendió mal, «Deshacer» la devuelve como estaba (issue 135, opción B).
+    const undo = { status: row.status as "lista" | "por_revisar", said: removal.said.slice(0, DICTATION_SOURCE_CHARS) }
     await tx
       .update(encounterDictationSuggestion)
-      .set({ payload: withMeta(data, stamp(meta)), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+      .set({ payload: withMeta(data, stamp({ ...meta, removal: undo })), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(encounterDictationSuggestion.id, row.id))
     removed.push(row.id)
   }
 
+  // Un hallazgo que ya está pendiente (la misma pieza, el mismo hallazgo y las mismas caras) no se
+  // repite: el asistente a veces corrige una sugerencia y además la vuelve a registrar.
+  const findingKey = (payload: Record<string, unknown>) =>
+    JSON.stringify([payload["toothNumber"], payload["condition"], [...((payload["surfaces"] as string[] | undefined) ?? [])].sort()])
+  const pendingFindings = new Set(
+    (await listDictationSuggestions(tx, orgId, patientId, encounterId)).filter((item) => item.kind === "odontograma").map((item) => findingKey(item.payload)),
+  )
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const ready = await prepare(tx, draft, services, diagnosisSystem)
+    const ready = await prepare(tx, draft, services, diagnosisSystem, strictVariants)
     if (!ready) continue
+    if (draft.kind === "odontograma") {
+      const key = findingKey(ready.payload)
+      if (pendingFindings.has(key)) continue
+      pendingFindings.add(key)
+    }
     rows.push({
       organizationId: orgId,
       patientId,
@@ -634,6 +793,28 @@ export async function listDictationSuggestions(tx: Db, orgId: string, patientId:
   return rows.map((row) => toItem(row, zone))
 }
 
+/**
+ * Las que el odontólogo pidió quitar en voz alta y aún se pueden devolver: la
+ * pantalla las muestra tachadas en su bloque, con «Deshacer», hasta firmar.
+ */
+export async function listVoiceRemovedDictation(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<DictationSuggestion[]> {
+  const rows = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.status, "descartada"),
+        sql`jsonb_exists(${encounterDictationSuggestion.payload} -> ${META}, 'removal')`,
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt), asc(encounterDictationSuggestion.id))
+  const zone = await findOrgLocale(tx, orgId)
+  return rows.map((row) => toItem(row, zone))
+}
+
 async function lockSuggestion(tx: Db, orgId: string, patientId: string, encounterId: string, id: string) {
   const [row] = await tx
     .select()
@@ -671,7 +852,7 @@ export async function updateDictationSuggestion(
   const services = await activeServices(tx, orgId)
   const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   const { data, meta } = splitMeta(row.payload)
-  const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem)
+  const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem, await orgStrictVariants(tx, orgId))
   if (!ready) throw validation("La sugerencia quedó vacía; descártala si no aplica")
   // Editada a mano, ya no es «corregida por voz»: no queda nada que deshacer.
   const [updated] = await tx
@@ -683,7 +864,10 @@ export async function updateDictationSuggestion(
   return toItem(updated, await findOrgLocale(tx, orgId))
 }
 
-/** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba antes de ella. */
+/**
+ * Deshace lo que se hizo por voz: una corrección (la sugerencia vuelve a como
+ * estaba antes de ella) o un «quita» (vuelve a estar pendiente, como estaba).
+ */
 export async function undoDictationVoiceCorrection(
   tx: Db,
   orgId: string,
@@ -693,6 +877,36 @@ export async function undoDictationVoiceCorrection(
   id: string,
 ): Promise<DictationSuggestion> {
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const [removed] = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.status, "descartada"),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  const removal = removed ? splitMeta(removed.payload) : null
+  if (removed && removal?.meta.removal) {
+    const [restored] = await tx
+      .update(encounterDictationSuggestion)
+      .set({
+        payload: withMeta(removal.data, { ...removal.meta, removal: undefined }),
+        status: removal.meta.removal.status,
+        decidedBy: null,
+        decidedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(encounterDictationSuggestion.id, id))
+      .returning()
+    if (!restored) throw new Error("No se pudo deshacer el «quita»")
+    return toItem(restored, await findOrgLocale(tx, orgId))
+  }
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   const { meta } = splitMeta(row.payload)
   if (!meta.voice) throw conflict("NO_VOICE_CORRECTION", "Esta sugerencia no tiene una corrección por voz que deshacer")
@@ -742,6 +956,27 @@ export async function confirmDictationSuggestion(
       note: (payload["note"] as string | undefined) ?? null,
     })
     entityId = created.id
+  } else if (row.kind === "odontograma") {
+    // La misma operación que el panel de la pieza: el hallazgo y, si lo lleva, su diagnóstico de la atención.
+    const variant = typeof payload["variant"] === "string" ? payload["variant"] : undefined
+    const quality = payload["quality"] === "good" || payload["quality"] === "poor" ? payload["quality"] : undefined
+    const created = await registerToothFinding(tx, orgId, actorUserId, patientId, {
+      encounterId,
+      toothNumbers: [Number(payload["toothNumber"])],
+      condition: String(payload["condition"]),
+      surfaces: (payload["surfaces"] as string[] | undefined) ?? [],
+      details: { ...(variant ? { variant } : {}), ...(quality ? { quality } : {}) },
+      note: (payload["note"] as string | undefined) ?? null,
+      diagnosis:
+        typeof payload["diagnosisCode"] === "string"
+          ? {
+              diagnosisCode: payload["diagnosisCode"],
+              diagnosisSystem: typeof payload["diagnosisSystem"] === "string" ? payload["diagnosisSystem"] : null,
+              diagnosisType: payload["diagnosisType"] === "confirmed" ? "confirmed" : "provisional",
+            }
+          : null,
+    })
+    entityId = created.entries[0]?.id ?? null
   } else if (row.kind === "plan") {
     const created = await addPlanItem(tx, orgId, actorUserId, patientId, {
       serviceId: String(payload["serviceId"]),
@@ -810,13 +1045,14 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  * Lo mismo que `saveDictationSuggestions`, sin guardar nada: para el dictado
  * de práctica. Valida contra los servicios y el catálogo reales de la clínica.
  */
-export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">>> {
+export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal">>> {
   const services = await activeServices(tx, orgId)
   const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   const zone = await findOrgLocale(tx, orgId)
-  const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">> = []
+  const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal">> = []
+  const strictVariants = await orgStrictVariants(tx, orgId)
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const ready = await prepare(tx, draft, services, diagnosisSystem)
+    const ready = await prepare(tx, draft, services, diagnosisSystem, strictVariants)
     if (!ready) continue
     out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload, zone) })
   }

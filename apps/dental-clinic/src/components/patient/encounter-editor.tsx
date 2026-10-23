@@ -134,6 +134,8 @@ type SectionKey =
  */
 const SECTION_DICTATION: Partial<Record<SectionKey, { kinds: DictationKind[]; onlySuggested?: string }>> = {
   consulta: { kinds: ["nota"] },
+  // Lo dictado de una pieza se revisa en su bloque y entra como al tocarla (issue 109).
+  odontograma: { kinds: ["odontograma"], onlySuggested: "Sin hallazgos en esta atención" },
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
   plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
@@ -735,6 +737,11 @@ export function EncounterEditor({
     const kinds = SECTION_DICTATION[key]?.kinds ?? []
     return dictation.enabled ? dictation.suggestions.filter((item) => kinds.includes(item.kind)).length : 0
   }
+  /** ¿Tiene el bloque algo quitado por voz que aún se puede deshacer? Entonces se muestra. */
+  const dictationRemoved = (key: SectionKey): boolean => {
+    const kinds = SECTION_DICTATION[key]?.kinds ?? []
+    return dictation.enabled && dictation.removedByVoice.some((item) => kinds.includes(item.kind))
+  }
 
   /** Control de página: guarda el borrador (flush + refresh) sin formulario. */
   const handleSaveDraft = async () => {
@@ -1069,7 +1076,8 @@ export function EncounterEditor({
       section.key === "consulta" ||
       !section.empty ||
       addedSections.has(section.key) ||
-      dictationCount(section.key) > 0,
+      dictationCount(section.key) > 0 ||
+      dictationRemoved(section.key),
   )
   const availableSections = sections.filter((section) => !includedSections.includes(section))
   const openMeta = sections.find((section) => section.key === openSection) ?? null

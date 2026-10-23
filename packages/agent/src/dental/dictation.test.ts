@@ -1,4 +1,4 @@
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS } from "@odentia/services"
+import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, dictationFindingsText } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { type DictationAsk, demoExtraction, demoSegment, dictationMessages, groundSource, readDictation } from "./dictation.js"
 
@@ -19,6 +19,10 @@ describe("dictado en modo de demostración", () => {
       payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 },
       sourceText: "En la dieciséis hay caries en dentina.",
     })
+    // Una pieza ausente va al odontograma.
+    expect(demoExtraction("La cuarenta y seis está ausente.", SERVICES, NOW)).toEqual([
+      { kind: "odontograma", payload: { toothNumber: 46, condition: "missing_tooth" }, sourceText: "La cuarenta y seis está ausente." },
+    ])
     expect(drafts[2]?.payload).toEqual({ service: "Resina compuesta", toothNumber: 16, surfaces: ["oclusal"] })
     expect(drafts[3]?.payload).toEqual({ service: "Endodoncia multirradicular", toothNumber: 26 })
     expect(drafts[4]?.payload).toMatchObject({ title: "Control en 6 meses" })
@@ -43,14 +47,15 @@ describe("dictado en modo de demostración", () => {
       corrections: [{ index: 1, changes: { toothNumber: 26 }, sourceText: "No, es la veintiséis." }],
       removals: [],
       omitted: 0,
+      unused: [],
     })
-    expect(demoSegment("Quita la endodoncia.", SERVICES, NOW, pending)).toEqual({ drafts: [], corrections: [], removals: [{ index: 1, sourceText: "Quita la endodoncia." }], omitted: 0 })
+    expect(demoSegment("Quita la endodoncia.", SERVICES, NOW, pending)).toEqual({ drafts: [], corrections: [], removals: [{ index: 1, sourceText: "Quita la endodoncia." }], omitted: 0, unused: [] })
     // La corrección sigue a algo dicho en el mismo tramo: cambia eso, no lo pendiente.
     const same = demoSegment("En la veinticinco hacemos endodoncia. No, es la veintiséis.", SERVICES, NOW, pending)
     expect(same.corrections).toEqual([])
     expect(same.drafts[0]?.payload).toEqual({ service: "Endodoncia multirradicular", toothNumber: 26 })
     // Sin nada pendiente ni dicho, no hay qué corregir ni quitar.
-    expect(demoSegment("No, es la veintiséis. Quita la corona.", SERVICES, NOW, [])).toEqual({ drafts: [], corrections: [], removals: [], omitted: 0 })
+    expect(demoSegment("No, es la veintiséis. Quita la corona.", SERVICES, NOW, [])).toEqual({ drafts: [], corrections: [], removals: [], omitted: 0, unused: [] })
   })
 
   it("solo conserva como «lo que dijiste» lo que de verdad está en lo dictado", () => {
@@ -121,6 +126,8 @@ describe("lo que responde el modelo, parte por parte", () => {
     const read = readDictation({ quitar }, "Quita todo lo de la arcada superior.", 12)
     expect(read?.removals).toEqual([])
     expect(read?.omitted).toBe(12)
+    // La frase se muestra una vez, no doce.
+    expect(read?.unused).toEqual(["quita todo lo de la arcada superior"])
     // Igual con más de 10 correcciones: lo pendiente se queda como estaba.
     const correcciones = Array.from({ length: 12 }, (_, index) => ({ sugerencia: index + 1, cambios: { toothNumber: 16 } }))
     expect(readDictation({ correcciones }, "En la dieciséis.", 12)).toMatchObject({ corrections: [], omitted: 12 })
@@ -140,6 +147,8 @@ describe("lo que responde el modelo, parte por parte", () => {
     // El número entre comillas es el mismo número; el 0 y el 13 no son de ninguna pendiente.
     expect(read?.corrections).toEqual([{ index: 2, changes: { toothNumber: 26 }, sourceText: "" }])
     expect(read?.omitted).toBe(4)
+    // Para avisar se muestra lo que de verdad se dijo; lo que no está en lo dictado no se cita.
+    expect(read?.unused).toEqual(["Quita la endodoncia."])
   })
 
   it("un dato que no encaja llega igual, solo con los campos de su operación, para que el servicio lo deje por revisar", () => {
@@ -174,7 +183,7 @@ describe("lo que responde el modelo, parte por parte", () => {
 
   it("solo una respuesta que no es un objeto no se puede leer", () => {
     for (const args of [null, undefined, "No entendí.", [], 3]) expect(readDictation(args, "Hola.", 0)).toBeNull()
-    expect(readDictation({}, "Abre un poquito más.", 0)).toEqual({ drafts: [], corrections: [], removals: [], omitted: 0 })
+    expect(readDictation({}, "Abre un poquito más.", 0)).toEqual({ drafts: [], corrections: [], removals: [], omitted: 0, unused: [] })
   })
 })
 
@@ -184,6 +193,7 @@ describe("lo que recibe el modelo en cada pausa", () => {
       provider,
       services: SERVICES,
       diagnosisList: "CIE-10 (OMS)",
+      findings: dictationFindingsText(),
       zone: { locale: "es-PE", timezone: "America/Lima" },
       now,
       transcript,

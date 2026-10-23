@@ -10,6 +10,7 @@ import {
   discardPendingDictation,
   getAgentConfig,
   listDictationSuggestions,
+  listVoiceRemovedDictation,
   requireClinicalAssistant,
   saveDictationSegment,
   undoDictationVoiceCorrection,
@@ -61,6 +62,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       withOrgContext(deps.db, orgId, async (tx) => ({
         enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled,
         suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
+        // Las quitadas por voz, que se pueden devolver hasta firmar.
+        removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
         // Para decir, antes de firmar, cuántas ya entraron a la atención.
         confirmed: await countConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId),
       })),
@@ -89,7 +92,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
           return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
-        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, repeated: true, model: null }
+        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertAgentsNotPaused(tx, orgId))
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
@@ -108,14 +111,17 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
               const suggestionId = target(item.index)
               return suggestionId ? [{ suggestionId, changes: item.changes }] : []
             }),
-            removals: extracted.removals.flatMap((item) => target(item.index) ?? []),
+            removals: extracted.removals.flatMap((item) => {
+              const suggestionId = target(item.index)
+              return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
+            }),
             segmentId,
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
-        // Lo que el asistente no pudo usar de este tramo, para avisarle al odontólogo en vez de perderlo en silencio.
-        return { ...saved, sources, omitted: extracted.omitted, model: extracted.model }
+        // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
+        return { ...saved, sources, omitted: extracted.omitted, unused: extracted.unused, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
@@ -147,7 +153,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     )
   })
 
-  /** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba. */
+  /** Deshace lo hecho en voz alta, una corrección o un «quita»: la sugerencia vuelve a como estaba. */
   app.post(`${base}/:suggestionId/undo-voice`, async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const at = suggestionParams.safeParse(c.req.param())

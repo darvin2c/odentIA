@@ -14,6 +14,7 @@ import {
   dictationModelLabel,
   dictationSegmentSeen,
   listDictationSuggestions,
+  listVoiceRemovedDictation,
   previewDictationSuggestions,
   saveDictationSegment,
   saveDictationSuggestions,
@@ -22,6 +23,8 @@ import {
 } from "./encounter-dictation.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { withOrgContext } from "@odentia/db"
+import { odontogramEntry } from "@odentia/db/schema/dental"
+import { orgStrictVariants } from "./odontogram.js"
 
 /** Asistente clínico: lo dictado queda como sugerencia y solo entra a la historia cuando el odontólogo confirma. */
 setupTestDb()
@@ -41,6 +44,54 @@ async function openSession(serviceName: string, scope = "tooth") {
   await ownerDb.update(serviceCatalog).set({ name: serviceName, scope }).where(eq(serviceCatalog.id, fx.service.id))
   return fx
 }
+
+describe("odontograma por voz (issue 109)", () => {
+  it("un hallazgo dictado pide lo que exige la norma, se completa y entra como al tocar la pieza, con su diagnóstico", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de prueba")
+    const strict = await fx.run((tx) => orgStrictVariants(tx, ORG))
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const saved = await segment({
+      drafts: [
+        { kind: "odontograma", payload: { toothNumber: 36, condition: "caries", variant: "dentina", surfaces: ["oclusal"] }, sourceText: "La 36 con caries oclusal en dentina." },
+        { kind: "odontograma", payload: { toothNumber: 11, condition: "crown" }, sourceText: "La 11 tiene corona." },
+        // Lo que no se dicta (pide marcar que se observó) o no existe no se adivina: queda por revisar, a la vista.
+        { kind: "odontograma", payload: { toothNumber: 46, condition: "implant" } },
+        { kind: "odontograma", payload: { toothNumber: 19, condition: "missing_tooth" } },
+      ],
+    })
+    const [caries, crown, implant, nineteen] = saved.suggestions
+    // «dentina» es la variante por su nombre; la caries lleva su diagnóstico de la lista de la clínica.
+    expect(caries).toMatchObject({
+      status: "lista",
+      payload: { condition: "caries", variant: "dentin", surfaces: ["occlusal"], diagnosisCode: "K02.1" },
+      summary: "Pieza 36 · Lesión de caries a nivel de la dentina · cara oclusal\nCon el diagnóstico presuntivo K02.1 Caries de la dentina",
+    })
+    // La corona siempre pide su estado; en Perú, además, el material.
+    expect(crown).toMatchObject({ status: "por_revisar", payload: { missing: strict ? ["variant", "quality"] : ["quality"] } })
+    expect(implant).toMatchObject({ status: "por_revisar" })
+    expect(nineteen?.note).toContain("no existe")
+
+    // Elegir con un toque lo que falta la deja lista.
+    await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, crown!.id, { quality: "good", variant: "metal_ceramic" }))
+    expect((await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === crown!.id)).toMatchObject({
+      status: "lista",
+      payload: { variant: "metal_ceramic", quality: "good" },
+    })
+
+    // El asistente a veces corrige y además vuelve a registrar: el mismo hallazgo pendiente no se repite.
+    expect((await segment({ drafts: [{ kind: "odontograma", payload: { toothNumber: 36, condition: "caries", surfaces: ["oclusal"] } }] })).suggestions).toEqual([])
+
+    // Confirmar usa la operación del panel de la pieza: el hallazgo y el diagnóstico de la atención.
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, caries!.id))
+    const entries = await ownerDb.select().from(odontogramEntry).where(eq(odontogramEntry.encounterId, fx.encounter.id))
+    expect(entries).toEqual([expect.objectContaining({ toothNumber: 36, condition: "caries", surface: "occlusal", details: { variant: "dentin" }, diagnosisCode: "K02.1" })])
+    expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([
+      expect.objectContaining({ diagnosisCode: "K02.1", diagnosisType: "provisional" }),
+    ])
+    await enable(false)
+  })
+})
 
 describe("dictado en la atención", () => {
   it("apagado no acepta dictados; encendido, solo de quien lleva la atención", async () => {
@@ -238,9 +289,22 @@ describe("dictado en la atención", () => {
     expect(edited).toMatchObject({ payload: { toothNumber: 26, detail: "Con aislamiento" }, voice: null })
 
     // «Quita el diagnóstico»: sale de la lista sin entrar a la historia.
-    expect(await segment({ drafts: [], removals: [diagnosis!.id, randomUUID()] })).toMatchObject({ removed: [diagnosis!.id] })
+    const quita = { suggestionId: diagnosis!.id, said: "Quita el diagnóstico." }
+    expect(await segment({ drafts: [], removals: [quita, { suggestionId: randomUUID(), said: "Quita lo otro." }] })).toMatchObject({ removed: [diagnosis!.id] })
     expect((await list()).map((item) => item.id)).toEqual([plan!.id])
     expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([])
+    // Queda a la vista, con lo que dijo, y «Deshacer» la devuelve como estaba (issue 135).
+    const removedList = () => fx.run((tx) => listVoiceRemovedDictation(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(await removedList()).toEqual([expect.objectContaining({ id: diagnosis!.id, status: "descartada", removal: { said: "Quita el diagnóstico." } })])
+    const back = await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, diagnosis!.id))
+    expect(back).toMatchObject({ status: "lista", removal: null, payload: { toothNumber: 16 } })
+    expect(back.payload).not.toHaveProperty("_meta")
+    expect(await removedList()).toEqual([])
+    expect((await list()).map((item) => item.id).sort()).toEqual([plan!.id, diagnosis!.id].sort())
+    // Descartada a mano no se ofrece deshacer: no fue la voz.
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, diagnosis!.id))
+    expect(await removedList()).toEqual([])
+    await expect(fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, diagnosis!.id))).rejects.toMatchObject({ code: "SUGGESTION_DECIDED" })
 
     // Confirmar lleva a la operación los campos de la sugerencia, sin sus metadatos.
     expect(await fx.run((tx) => countConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toBe(0)
