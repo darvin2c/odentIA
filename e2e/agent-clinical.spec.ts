@@ -160,9 +160,10 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(live).toContainText("Escuchando")
   await expect(signButton).toBeDisabled()
   await expect(closing).toContainText("Termina el dictado y revisa las sugerencias para poder firmar.")
-  // El respaldo queda al lado, con la ayuda para corregir hablando.
+  // El respaldo queda al lado, con qué se puede decir y cómo corregir hablando (issue 109).
   const backup = page.getByRole("region", { name: "Lo dictado" })
-  await expect(backup).toContainText("Para corregir, dilo")
+  await expect(backup).toContainText("Qué puedo decir")
+  await expect(backup).toContainText("«La 36 con caries oclusal en dentina, la 46 ausente»")
   await say("y hacemos endodoncia", false)
   await expect(live).toContainText("Lo último que oí«…y hacemos endodoncia»")
   await info.attach("dictado-oyendo", { body: await live.screenshot(), contentType: "image/png" })
@@ -189,10 +190,31 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await suggested("Plan de tratamiento").getByRole("button", { name: "Deshacer" }).click()
   await expect(suggested("Plan de tratamiento")).toContainText("Pieza 25")
   await expect(suggested("Plan de tratamiento")).not.toContainText("corregido por voz")
-  // «Quita…» la descarta sin tocarla.
+  // «Quita…» la saca de lo pendiente, a la vista y tachada, con «Deshacer» (issue 135).
   await write("Quita la endodoncia.", review)
   await expect(idle).toBeVisible()
   expect((await dictation()).suggestions).toEqual([])
+  const removedRow = suggested("Plan de tratamiento").getByRole("listitem").filter({ hasText: "Quitada por voz" })
+  await expect(removedRow).toContainText("dijiste «Quita la endodoncia.»")
+  await removedRow.getByRole("button", { name: "Deshacer" }).click()
+  await expect(suggested("Plan de tratamiento")).toContainText("Pieza 25")
+  await expect(suggested("Plan de tratamiento")).not.toContainText("Quitada por voz")
+  // Descartarla a mano ya no se deshace: no fue la voz.
+  await suggested("Plan de tratamiento").getByRole("button", { name: /^Descartar:/ }).click()
+  await expect(idle).toBeVisible()
+  expect((await dictation()).suggestions).toEqual([])
+
+  // Odontograma por voz (issue 109): el hallazgo va a su bloque y, en Perú, pide la causa de la ausencia con un toque.
+  await write("La cuarenta y seis está ausente.")
+  const finding = suggested("Odontograma").getByRole("listitem")
+  await expect(finding).toContainText("Pieza 46 · Pieza dentaria ausente")
+  await expect(finding).toContainText("Por revisar")
+  await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
+  await expect(finding).not.toContainText("Por revisar")
+  await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(block("Odontograma")).toContainText("1 hallazgo(s) de esta atención")
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // Una prestación a la que le falta algo queda «Por revisar»: se completa en la superficie lateral.
   await write("Hacemos endodoncia.")
@@ -255,7 +277,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await signButton.click()
   const sign = page.getByRole("alertdialog", { name: "Queda 1 sugerencia sin revisar" })
   await expect(sign.getByRole("list", { name: "Sugerencias sin revisar" })).toContainText("Diagnóstico · falta confirmarla")
-  await expect(sign).toContainText("Las otras 5 ya están confirmadas y se firman con la atención.")
+  await expect(sign).toContainText("Las otras 6 ya están confirmadas y se firman con la atención.")
   await info.attach("firmar-con-sugerencias", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // «Revisar ahora» vuelve a la atención sin firmar.
   await sign.getByRole("button", { name: "Revisar ahora" }).click()
