@@ -1,11 +1,12 @@
-import type { ProcedureCodingSnapshot, ServiceListProfile } from "@odentia/clinical"
+import type { ClinicalProduct, ProcedureCodingSnapshot, ServiceListProfile } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   procedureCatalogRelease,
   procedureCode,
+  procedureCodeProduct,
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
 /**
@@ -90,11 +91,29 @@ export async function templateCodingIn(
   return coding ?? null
 }
 
-/** Un código de la edición vigente de una lista, o null si no existe o se retiró. */
+/**
+ * Que el código sea de los que usa el producto (ADR 0079): las listas se
+ * cargan completas y cada producto dice los suyos (odentIA, los odontológicos).
+ */
+export function usedByProduct(tx: Db, system: string, product: ClinicalProduct) {
+  return inArray(
+    procedureCode.code,
+    tx
+      .select({ code: procedureCodeProduct.code })
+      .from(procedureCodeProduct)
+      .where(and(eq(procedureCodeProduct.systemKey, system), eq(procedureCodeProduct.product, product))),
+  )
+}
+
+/**
+ * Un código de la edición vigente de una lista, o null si no existe o se
+ * retiró. Con `product`, además, solo si ese producto lo usa.
+ */
 export async function currentProcedureCode(
   tx: Db,
   system: string,
   code: string,
+  product?: ClinicalProduct,
 ): Promise<ProcedureCodingSnapshot | null> {
   const [row] = await tx
     .select({
@@ -117,6 +136,7 @@ export async function currentProcedureCode(
         eq(procedureCode.code, code),
         eq(procedureCode.isActive, true),
         eq(procedureCatalogRelease.isCurrent, true),
+        product ? usedByProduct(tx, system, product) : undefined,
       ),
     )
     .limit(1)

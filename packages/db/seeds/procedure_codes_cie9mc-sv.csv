@@ -1,124 +1,124 @@
-system_key,code,version,display
-CIE9MC-SV,22.71,MINSAL-2024,Cierre de fístula de seno nasal
-CIE9MC-SV,22.91,MINSAL-2024,Elevación de piso de seno maxilar transalveolar
-CIE9MC-SV,22.92,MINSAL-2024,Elevación de piso de seno maxilar abierta
-CIE9MC-SV,23.01,MINSAL-2024,Exodoncia de diente deciduo
-CIE9MC-SV,23.02,MINSAL-2024,Exodoncia de diente permanente
-CIE9MC-SV,23.03,MINSAL-2024,Exodoncia de diente neonatal
-CIE9MC-SV,23.04,MINSAL-2024,Exodoncia de diente natal
-CIE9MC-SV,23.05,MINSAL-2024,Exodoncia de diente supernumerario
-CIE9MC-SV,23.10,MINSAL-2024,Coronectomía
-CIE9MC-SV,23.11,MINSAL-2024,Exodoncia resto radicular
-CIE9MC-SV,23.19,MINSAL-2024,Exodoncia de diente retenido o impactado o incluido, ectópicos y supernumerarios
-CIE9MC-SV,23.21,MINSAL-2024,Obturaciones pieza temporal con resina composita y base cemento
-CIE9MC-SV,23.22,MINSAL-2024,Obturación pieza temporal con resina composita sin base cemento
-CIE9MC-SV,23.23,MINSAL-2024,Obturación pieza permanente con resina composita y base cemento
-CIE9MC-SV,23.24,MINSAL-2024,Obturación pieza permanente con resina composita sin base cemento
-CIE9MC-SV,23.25,MINSAL-2024,Obturación PRAT pieza decidua (temporal)
-CIE9MC-SV,23.26,MINSAL-2024,Obturación PRAT pieza permanente
-CIE9MC-SV,23.27,MINSAL-2024,Obturación provisional
-CIE9MC-SV,23.3,MINSAL-2024,Restauración de diente mediante incrustación
-CIE9MC-SV,23.41,MINSAL-2024,Guarda oclusal (incluye JIGG, pivote, MORA, topes en relación céntrica)
-CIE9MC-SV,23.42,MINSAL-2024,Ajuste de guarda oclusal (23.41)
-CIE9MC-SV,23.43,MINSAL-2024,Fabricación de obturador de acrílico
-CIE9MC-SV,23.44,MINSAL-2024,Ajuste de obturador de acrílico
-CIE9MC-SV,23.51,MINSAL-2024,Autotransplante dental
-CIE9MC-SV,23.52,MINSAL-2024,Reimplante dental
-CIE9MC-SV,23.61,MINSAL-2024,Implante dental
-CIE9MC-SV,23.62,MINSAL-2024,Implante cigomático
-CIE9MC-SV,23.63,MINSAL-2024,Implantes aloplásticos
-CIE9MC-SV,23.69,MINSAL-2024,Otros Implantes endoóseos
-CIE9MC-SV,23.70,MINSAL-2024,Tratamiento de conducto radicular (Endodoncia)
-CIE9MC-SV,23.71,MINSAL-2024,Pulpotomía
-CIE9MC-SV,23.72,MINSAL-2024,Pulpectomía
-CIE9MC-SV,23.73,MINSAL-2024,Apicectomía con obturación retrograda y exéresis de lesión periapical
-CIE9MC-SV,23.74,MINSAL-2024,Apicectomía sin obturación retrograda y exéresis de lesión periapical
-CIE9MC-SV,23.75,MINSAL-2024,Apexificación
-CIE9MC-SV,24.00,MINSAL-2024,Sutura facial
-CIE9MC-SV,24.01,MINSAL-2024,Suturas Intraoral
-CIE9MC-SV,24.02,MINSAL-2024,Control Postquirúrgico odontológico y maxilofacial
-CIE9MC-SV,24.03,MINSAL-2024,Control de hemostasia
-CIE9MC-SV,24.11,MINSAL-2024,Biopsia de encía
-CIE9MC-SV,24.12,MINSAL-2024,Biopsia de alvéolo
-CIE9MC-SV,24.13,MINSAL-2024,Biopsia de mucosa bucal
-CIE9MC-SV,24.19,MINSAL-2024,Otros procedimientos diagnósticos sobre dientes, encías y alvéolos
-CIE9MC-SV,24.21,MINSAL-2024,Gingivoplastia con o sin injerto de hueso o de tejido blando/ Cierre de fistulasnasoalveolares con o sin injerto óseo
-CIE9MC-SV,24.22,MINSAL-2024,Alargamiento de corona con o sin ostectomía
-CIE9MC-SV,24.23,MINSAL-2024,Raspado y alisado radicular a campo abierto
-CIE9MC-SV,24.31,MINSAL-2024,Excisión de lesión o de tejido de encía
-CIE9MC-SV,24.32,MINSAL-2024,Detartraje
-CIE9MC-SV,24.33,MINSAL-2024,Curetaje y alisado radicular
-CIE9MC-SV,24.39,MINSAL-2024,Otra operación sobre encía no clasificable bajo otro concepto (NOC)
-CIE9MC-SV,24.4,MINSAL-2024,Excisión de lesión de maxilar, de origen dentario
-CIE9MC-SV,24.5,MINSAL-2024,Alveoloplastía
-CIE9MC-SV,24.6,MINSAL-2024,Rescate quirúrgico ortodóncico de pieza dental retenido
-CIE9MC-SV,24.70,MINSAL-2024,Colocación de separadores
-CIE9MC-SV,24.71,MINSAL-2024,Colocación de aparatología extraoral
-CIE9MC-SV,24.72,MINSAL-2024,Colocación de aparato intraoral removible
-CIE9MC-SV,24.73,MINSAL-2024,Colocación y/o cambio de arcos
-CIE9MC-SV,24.74,MINSAL-2024,Colocación y/o cambio de módulos
-CIE9MC-SV,24.75,MINSAL-2024,Colocación de aditamentos accesorios de mecánica de Ortodoncia
-CIE9MC-SV,24.76,MINSAL-2024,Colocación de ortoimplantes
-CIE9MC-SV,24.77,MINSAL-2024,Recolocación de aparatos fijos o removibles
-CIE9MC-SV,24.78,MINSAL-2024,Cementado de aparato fijo intraoral
-CIE9MC-SV,24.79,MINSAL-2024,Cementado de Brackets
-CIE9MC-SV,24.81,MINSAL-2024,Desgastes selectivos
-CIE9MC-SV,24.82,MINSAL-2024,Pulido de superficie dentaria posterior a retiro de Brackets y bandas
-CIE9MC-SV,24.83,MINSAL-2024,Retiro de aparatos fijos intraorales
-CIE9MC-SV,24.84,MINSAL-2024,Retiro de Brackets
-CIE9MC-SV,24.85,MINSAL-2024,Monitoreo de distracción osteogénica
-CIE9MC-SV,24.86,MINSAL-2024,Control ortopédico de moldeo prequirúrgico en neonatos y lactantes fisurados
-CIE9MC-SV,24.87,MINSAL-2024,Control de aparato intraoral y/o extraoral
-CIE9MC-SV,24.91,MINSAL-2024,Extensión o profundización de vestíbulo
-CIE9MC-SV,24.99,MINSAL-2024,Otra operación gingival no clasificable bajo otro concepto (NCO)
-CIE9MC-SV,25.91,MINSAL-2024,Frenectomía lingual
-CIE9MC-SV,27.23,MINSAL-2024,Biopsia de labio
-CIE9MC-SV,27.24,MINSAL-2024,Biopsia de boca, estructura no especificada
-CIE9MC-SV,27.29,MINSAL-2024,Otros procedimientos diagnósticos sobre cavidad oral
-CIE9MC-SV,27.31,MINSAL-2024,Exéresis local o destrucción de lesión o de tejido del paladar óseo
-CIE9MC-SV,27.41,MINSAL-2024,Frenectomía labial
-CIE9MC-SV,27.43,MINSAL-2024,Resección o cauterización de papilomas en cavidad oral
-CIE9MC-SV,27.49,MINSAL-2024,Otra exéresis de boca
-CIE9MC-SV,27.51,MINSAL-2024,Sutura de laceración de labio
-CIE9MC-SV,27.52,MINSAL-2024,Sutura de laceración de otra parte de la boca
-CIE9MC-SV,27.53,MINSAL-2024,Cierre de fístula de boca
-CIE9MC-SV,27.91,MINSAL-2024,Frenotomía labial
-CIE9MC-SV,87.10,MINSAL-2024,Toma de registros fotográficos intra y/o extraorales
-CIE9MC-SV,87.12,MINSAL-2024,Otra radiografía dental
-CIE9MC-SV,87.18,MINSAL-2024,Toma de radiografía cráneo, cara
-CIE9MC-SV,87.19,MINSAL-2024,Toma de radiografía Dental
-CIE9MC-SV,87.1A,MINSAL-2024,Trazado y análisis cefalométrico de Ortodoncia
-CIE9MC-SV,89.0A,MINSAL-2024,Preparación prequirúrgica
-CIE9MC-SV,89.0B,MINSAL-2024,Evaluación ortopédica prequirúrgica neonatal craneofacial
-CIE9MC-SV,89.0C,MINSAL-2024,Evaluación de alteraciones del habla de pacientes fisurados
-CIE9MC-SV,89.0D,MINSAL-2024,Evaluación clínica de ortodoncia
-CIE9MC-SV,89.0E,MINSAL-2024,Montaje en articuladores modelosdento maxilares
-CIE9MC-SV,89.0F,MINSAL-2024,Confección de guía quirúrgica
-CIE9MC-SV,89.0G,MINSAL-2024,Planificación virtual craneofacial (cirugía ortognática, reconstructiva e implantes dentales)
-CIE9MC-SV,89.31,MINSAL-2024,Examen bucodental estructuras duras y blandas
-CIE9MC-SV,89.74,MINSAL-2024,Ajuste o modificación de aparato intraoral y/o extraoral
-CIE9MC-SV,93.3F,MINSAL-2024,Laserterapia Maxilofacial
-CIE9MC-SV,93.5B,MINSAL-2024,Ferulización dental
-CIE9MC-SV,93.80,MINSAL-2024,Terapía miofuncional (craneofacial) de Ortodoncia
-CIE9MC-SV,95.50,MINSAL-2024,Prueba y/o cementado de bandas
-CIE9MC-SV,95.51,MINSAL-2024,Toma de impresiones dentales
-CIE9MC-SV,95.52,MINSAL-2024,Toma de registro de mordida en cera
-CIE9MC-SV,95.60,MINSAL-2024,Eliminación de manchas exógenas
-CIE9MC-SV,95.61,MINSAL-2024,Sellante de fosas y fisuras
-CIE9MC-SV,95.62,MINSAL-2024,Sellante de fosas y fisuras Prat en pieza decidua (temporal)
-CIE9MC-SV,95.63,MINSAL-2024,Sellante de fosas y fisuras Prat en pieza permanente
-CIE9MC-SV,95.64,MINSAL-2024,Aplicación tópica de flúor
-CIE9MC-SV,95.65,MINSAL-2024,Colocación y/o cementación de corona en diente deciduo
-CIE9MC-SV,95.66,MINSAL-2024,Colocación y/o cementación de puente fijo
-CIE9MC-SV,95.67,MINSAL-2024,Colocación de prótesis removible
-CIE9MC-SV,95.68,MINSAL-2024,Colocación de prótesis completa
-CIE9MC-SV,95.69,MINSAL-2024,Colocación y/o cementación de corona en diente permanente
-CIE9MC-SV,95.6A,MINSAL-2024,Drenaje de absceso dentario
-CIE9MC-SV,95.6B,MINSAL-2024,Evaluación diagnóstica y terapéutica de Ortodoncia
-CIE9MC-SV,95.6C,MINSAL-2024,Examen bucodental estructuras duras y blandas
-CIE9MC-SV,95.6D,MINSAL-2024,Ajuste o modificación de aparato intraoral y/o extraoral
-CIE9MC-SV,96.54,MINSAL-2024,Profilaxis dental
-CIE9MC-SV,97.22,MINSAL-2024,Sustitución de tapón dental
-CIE9MC-SV,97.33,MINSAL-2024,Retiro de férulas dentales o guardas oclusales
-CIE9MC-SV,97.35,MINSAL-2024,Retiro de prótesis dental
-CIE9MC-SV,99.97,MINSAL-2024,Colocación de dentadura postiza
+system_key,code,version,section,display
+CIE9MC-SV,22.71,MINSAL-2024,22,Cierre de fístula de seno nasal
+CIE9MC-SV,22.91,MINSAL-2024,22,Elevación de piso de seno maxilar transalveolar
+CIE9MC-SV,22.92,MINSAL-2024,22,Elevación de piso de seno maxilar abierta
+CIE9MC-SV,23.01,MINSAL-2024,23,Exodoncia de diente deciduo
+CIE9MC-SV,23.02,MINSAL-2024,23,Exodoncia de diente permanente
+CIE9MC-SV,23.03,MINSAL-2024,23,Exodoncia de diente neonatal
+CIE9MC-SV,23.04,MINSAL-2024,23,Exodoncia de diente natal
+CIE9MC-SV,23.05,MINSAL-2024,23,Exodoncia de diente supernumerario
+CIE9MC-SV,23.10,MINSAL-2024,23,Coronectomía
+CIE9MC-SV,23.11,MINSAL-2024,23,Exodoncia resto radicular
+CIE9MC-SV,23.19,MINSAL-2024,23,Exodoncia de diente retenido o impactado o incluido, ectópicos y supernumerarios
+CIE9MC-SV,23.21,MINSAL-2024,23,Obturaciones pieza temporal con resina composita y base cemento
+CIE9MC-SV,23.22,MINSAL-2024,23,Obturación pieza temporal con resina composita sin base cemento
+CIE9MC-SV,23.23,MINSAL-2024,23,Obturación pieza permanente con resina composita y base cemento
+CIE9MC-SV,23.24,MINSAL-2024,23,Obturación pieza permanente con resina composita sin base cemento
+CIE9MC-SV,23.25,MINSAL-2024,23,Obturación PRAT pieza decidua (temporal)
+CIE9MC-SV,23.26,MINSAL-2024,23,Obturación PRAT pieza permanente
+CIE9MC-SV,23.27,MINSAL-2024,23,Obturación provisional
+CIE9MC-SV,23.3,MINSAL-2024,23,Restauración de diente mediante incrustación
+CIE9MC-SV,23.41,MINSAL-2024,23,Guarda oclusal (incluye JIGG, pivote, MORA, topes en relación céntrica)
+CIE9MC-SV,23.42,MINSAL-2024,23,Ajuste de guarda oclusal (23.41)
+CIE9MC-SV,23.43,MINSAL-2024,23,Fabricación de obturador de acrílico
+CIE9MC-SV,23.44,MINSAL-2024,23,Ajuste de obturador de acrílico
+CIE9MC-SV,23.51,MINSAL-2024,23,Autotransplante dental
+CIE9MC-SV,23.52,MINSAL-2024,23,Reimplante dental
+CIE9MC-SV,23.61,MINSAL-2024,23,Implante dental
+CIE9MC-SV,23.62,MINSAL-2024,23,Implante cigomático
+CIE9MC-SV,23.63,MINSAL-2024,23,Implantes aloplásticos
+CIE9MC-SV,23.69,MINSAL-2024,23,Otros Implantes endoóseos
+CIE9MC-SV,23.70,MINSAL-2024,23,Tratamiento de conducto radicular (Endodoncia)
+CIE9MC-SV,23.71,MINSAL-2024,23,Pulpotomía
+CIE9MC-SV,23.72,MINSAL-2024,23,Pulpectomía
+CIE9MC-SV,23.73,MINSAL-2024,23,Apicectomía con obturación retrograda y exéresis de lesión periapical
+CIE9MC-SV,23.74,MINSAL-2024,23,Apicectomía sin obturación retrograda y exéresis de lesión periapical
+CIE9MC-SV,23.75,MINSAL-2024,23,Apexificación
+CIE9MC-SV,24.00,MINSAL-2024,24,Sutura facial
+CIE9MC-SV,24.01,MINSAL-2024,24,Suturas Intraoral
+CIE9MC-SV,24.02,MINSAL-2024,24,Control Postquirúrgico odontológico y maxilofacial
+CIE9MC-SV,24.03,MINSAL-2024,24,Control de hemostasia
+CIE9MC-SV,24.11,MINSAL-2024,24,Biopsia de encía
+CIE9MC-SV,24.12,MINSAL-2024,24,Biopsia de alvéolo
+CIE9MC-SV,24.13,MINSAL-2024,24,Biopsia de mucosa bucal
+CIE9MC-SV,24.19,MINSAL-2024,24,Otros procedimientos diagnósticos sobre dientes, encías y alvéolos
+CIE9MC-SV,24.21,MINSAL-2024,24,Gingivoplastia con o sin injerto de hueso o de tejido blando/ Cierre de fistulasnasoalveolares con o sin injerto óseo
+CIE9MC-SV,24.22,MINSAL-2024,24,Alargamiento de corona con o sin ostectomía
+CIE9MC-SV,24.23,MINSAL-2024,24,Raspado y alisado radicular a campo abierto
+CIE9MC-SV,24.31,MINSAL-2024,24,Excisión de lesión o de tejido de encía
+CIE9MC-SV,24.32,MINSAL-2024,24,Detartraje
+CIE9MC-SV,24.33,MINSAL-2024,24,Curetaje y alisado radicular
+CIE9MC-SV,24.39,MINSAL-2024,24,Otra operación sobre encía no clasificable bajo otro concepto (NOC)
+CIE9MC-SV,24.4,MINSAL-2024,24,Excisión de lesión de maxilar, de origen dentario
+CIE9MC-SV,24.5,MINSAL-2024,24,Alveoloplastía
+CIE9MC-SV,24.6,MINSAL-2024,24,Rescate quirúrgico ortodóncico de pieza dental retenido
+CIE9MC-SV,24.70,MINSAL-2024,24,Colocación de separadores
+CIE9MC-SV,24.71,MINSAL-2024,24,Colocación de aparatología extraoral
+CIE9MC-SV,24.72,MINSAL-2024,24,Colocación de aparato intraoral removible
+CIE9MC-SV,24.73,MINSAL-2024,24,Colocación y/o cambio de arcos
+CIE9MC-SV,24.74,MINSAL-2024,24,Colocación y/o cambio de módulos
+CIE9MC-SV,24.75,MINSAL-2024,24,Colocación de aditamentos accesorios de mecánica de Ortodoncia
+CIE9MC-SV,24.76,MINSAL-2024,24,Colocación de ortoimplantes
+CIE9MC-SV,24.77,MINSAL-2024,24,Recolocación de aparatos fijos o removibles
+CIE9MC-SV,24.78,MINSAL-2024,24,Cementado de aparato fijo intraoral
+CIE9MC-SV,24.79,MINSAL-2024,24,Cementado de Brackets
+CIE9MC-SV,24.81,MINSAL-2024,24,Desgastes selectivos
+CIE9MC-SV,24.82,MINSAL-2024,24,Pulido de superficie dentaria posterior a retiro de Brackets y bandas
+CIE9MC-SV,24.83,MINSAL-2024,24,Retiro de aparatos fijos intraorales
+CIE9MC-SV,24.84,MINSAL-2024,24,Retiro de Brackets
+CIE9MC-SV,24.85,MINSAL-2024,24,Monitoreo de distracción osteogénica
+CIE9MC-SV,24.86,MINSAL-2024,24,Control ortopédico de moldeo prequirúrgico en neonatos y lactantes fisurados
+CIE9MC-SV,24.87,MINSAL-2024,24,Control de aparato intraoral y/o extraoral
+CIE9MC-SV,24.91,MINSAL-2024,24,Extensión o profundización de vestíbulo
+CIE9MC-SV,24.99,MINSAL-2024,24,Otra operación gingival no clasificable bajo otro concepto (NCO)
+CIE9MC-SV,25.91,MINSAL-2024,25,Frenectomía lingual
+CIE9MC-SV,27.23,MINSAL-2024,27,Biopsia de labio
+CIE9MC-SV,27.24,MINSAL-2024,27,Biopsia de boca, estructura no especificada
+CIE9MC-SV,27.29,MINSAL-2024,27,Otros procedimientos diagnósticos sobre cavidad oral
+CIE9MC-SV,27.31,MINSAL-2024,27,Exéresis local o destrucción de lesión o de tejido del paladar óseo
+CIE9MC-SV,27.41,MINSAL-2024,27,Frenectomía labial
+CIE9MC-SV,27.43,MINSAL-2024,27,Resección o cauterización de papilomas en cavidad oral
+CIE9MC-SV,27.49,MINSAL-2024,27,Otra exéresis de boca
+CIE9MC-SV,27.51,MINSAL-2024,27,Sutura de laceración de labio
+CIE9MC-SV,27.52,MINSAL-2024,27,Sutura de laceración de otra parte de la boca
+CIE9MC-SV,27.53,MINSAL-2024,27,Cierre de fístula de boca
+CIE9MC-SV,27.91,MINSAL-2024,27,Frenotomía labial
+CIE9MC-SV,87.10,MINSAL-2024,87,Toma de registros fotográficos intra y/o extraorales
+CIE9MC-SV,87.12,MINSAL-2024,87,Otra radiografía dental
+CIE9MC-SV,87.18,MINSAL-2024,87,Toma de radiografía cráneo, cara
+CIE9MC-SV,87.19,MINSAL-2024,87,Toma de radiografía Dental
+CIE9MC-SV,87.1A,MINSAL-2024,87,Trazado y análisis cefalométrico de Ortodoncia
+CIE9MC-SV,89.0A,MINSAL-2024,89,Preparación prequirúrgica
+CIE9MC-SV,89.0B,MINSAL-2024,89,Evaluación ortopédica prequirúrgica neonatal craneofacial
+CIE9MC-SV,89.0C,MINSAL-2024,89,Evaluación de alteraciones del habla de pacientes fisurados
+CIE9MC-SV,89.0D,MINSAL-2024,89,Evaluación clínica de ortodoncia
+CIE9MC-SV,89.0E,MINSAL-2024,89,Montaje en articuladores modelosdento maxilares
+CIE9MC-SV,89.0F,MINSAL-2024,89,Confección de guía quirúrgica
+CIE9MC-SV,89.0G,MINSAL-2024,89,Planificación virtual craneofacial (cirugía ortognática, reconstructiva e implantes dentales)
+CIE9MC-SV,89.31,MINSAL-2024,89,Examen bucodental estructuras duras y blandas
+CIE9MC-SV,89.74,MINSAL-2024,89,Ajuste o modificación de aparato intraoral y/o extraoral
+CIE9MC-SV,93.3F,MINSAL-2024,93,Laserterapia Maxilofacial
+CIE9MC-SV,93.5B,MINSAL-2024,93,Ferulización dental
+CIE9MC-SV,93.80,MINSAL-2024,93,Terapía miofuncional (craneofacial) de Ortodoncia
+CIE9MC-SV,95.50,MINSAL-2024,95,Prueba y/o cementado de bandas
+CIE9MC-SV,95.51,MINSAL-2024,95,Toma de impresiones dentales
+CIE9MC-SV,95.52,MINSAL-2024,95,Toma de registro de mordida en cera
+CIE9MC-SV,95.60,MINSAL-2024,95,Eliminación de manchas exógenas
+CIE9MC-SV,95.61,MINSAL-2024,95,Sellante de fosas y fisuras
+CIE9MC-SV,95.62,MINSAL-2024,95,Sellante de fosas y fisuras Prat en pieza decidua (temporal)
+CIE9MC-SV,95.63,MINSAL-2024,95,Sellante de fosas y fisuras Prat en pieza permanente
+CIE9MC-SV,95.64,MINSAL-2024,95,Aplicación tópica de flúor
+CIE9MC-SV,95.65,MINSAL-2024,95,Colocación y/o cementación de corona en diente deciduo
+CIE9MC-SV,95.66,MINSAL-2024,95,Colocación y/o cementación de puente fijo
+CIE9MC-SV,95.67,MINSAL-2024,95,Colocación de prótesis removible
+CIE9MC-SV,95.68,MINSAL-2024,95,Colocación de prótesis completa
+CIE9MC-SV,95.69,MINSAL-2024,95,Colocación y/o cementación de corona en diente permanente
+CIE9MC-SV,95.6A,MINSAL-2024,95,Drenaje de absceso dentario
+CIE9MC-SV,95.6B,MINSAL-2024,95,Evaluación diagnóstica y terapéutica de Ortodoncia
+CIE9MC-SV,95.6C,MINSAL-2024,95,Examen bucodental estructuras duras y blandas
+CIE9MC-SV,95.6D,MINSAL-2024,95,Ajuste o modificación de aparato intraoral y/o extraoral
+CIE9MC-SV,96.54,MINSAL-2024,96,Profilaxis dental
+CIE9MC-SV,97.22,MINSAL-2024,97,Sustitución de tapón dental
+CIE9MC-SV,97.33,MINSAL-2024,97,Retiro de férulas dentales o guardas oclusales
+CIE9MC-SV,97.35,MINSAL-2024,97,Retiro de prótesis dental
+CIE9MC-SV,99.97,MINSAL-2024,99,Colocación de dentadura postiza
