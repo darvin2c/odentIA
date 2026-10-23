@@ -1,8 +1,11 @@
 import type { Db } from "@odentia/db"
 import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { dentalTemplateRule, serviceFinding } from "@odentia/db/schema/dental"
-import type { LeavesFinding } from "@odentia/dental"
+import { type LeavesFinding, validateLeavesFinding } from "@odentia/dental"
 import { and, eq, sql } from "drizzle-orm"
+import { validation } from "../errors.js"
+import { orgProduct } from "../locale.js"
+import { orgDentalProfile } from "./profile.js"
 
 /**
  * Lo que deja un servicio en la pieza (ADR 0079): vive en
@@ -76,3 +79,41 @@ export async function saveServiceFinding(
     })
 }
 
+
+/** Lo que deja un servicio, como lo dice la API (`leavesFinding`). */
+export type ServiceLeaves = LeavesFinding
+
+/**
+ * Lo que deja el servicio en la pieza al completarse (lo tratado queda
+ * dibujado): `null` = nada. Se valida con el ámbito del servicio y la regla
+ * del país de la clínica (en Perú, con su variante). Una clínica de otro
+ * producto no registra nada de esto.
+ */
+export async function checkServiceFinding(
+  tx: Db,
+  orgId: string,
+  leaves: unknown,
+  scope: string | null | undefined,
+): Promise<LeavesFinding | null> {
+  if (leaves === null || leaves === undefined) return null
+  if ((await orgProduct(tx, orgId)) !== "dental") throw validation("Esta clínica no registra lo que deja un servicio")
+  const strictVariants = (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
+  const errors = validateLeavesFinding(leaves, { scope, strictVariants })
+  if (errors.length) throw validation(errors.join(" "))
+  const { condition, variant } = leaves as LeavesFinding
+  return variant ? { condition, variant } : { condition }
+}
+
+/**
+ * Lo que deja un servicio de la biblioteca: lo que odentIA puso en su
+ * tratamiento (`dental_template_rule`, ADR 0069 y 0079); null si no
+ * deja nada claro o no encaja con el ámbito.
+ */
+export function libraryServiceFinding(template: { leavesFinding: LeavesFinding | null; scope: string }): LeavesFinding | null {
+  const leaves = template.leavesFinding
+  if (!leaves) return null
+  // La variante se exige al configurar a mano; aquí basta con que encaje en la pieza.
+  return validateLeavesFinding(leaves, { scope: template.scope, strictVariants: false }).length === 0
+    ? { ...leaves }
+    : null
+}

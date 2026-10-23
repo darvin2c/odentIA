@@ -2,11 +2,11 @@ import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { requireDictatingProduct } from "./dental/encounter-dictation.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { finalizeEncounter, getEncounterClosing, getEncounterDetail } from "./encounters.js"
 import { getPatientSummary } from "./patient-history.js"
 import { loadPatientRecord } from "./patient-record.js"
+import { requireDictatingProduct } from "./products.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()

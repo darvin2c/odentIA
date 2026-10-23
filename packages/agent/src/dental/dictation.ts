@@ -3,18 +3,20 @@ import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
-  DICTATION_CHARS,
-  DICTATION_MAX_SUGGESTIONS,
-  DICTATION_OPERATION,
-  DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
-  type DictationDraft,
   findingDiagnosisCode,
-  getDictationCatalog,
   getOrgLocale,
   operationAgentSchema,
   ServiceError,
 } from "@odentia/services"
+import {
+  DICTATION_CHARS,
+  DICTATION_MAX_SUGGESTIONS,
+  DICTATION_OPERATION,
+  DICTATION_SOURCE_CHARS,
+  type DictationDraft,
+  getDictationCatalog,
+} from "@odentia/services/dental"
 import { z } from "zod"
 import { reportReplyUse } from "../ai-usage.js"
 import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "../llm.js"

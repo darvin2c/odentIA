@@ -33,7 +33,7 @@ Copiar el núcleo duplicaría cada arreglo. Mezclar los dos productos haría que
 
 ## Consecuencias
 
-- Hay que mantener la lista de lo que es de un producto. Una prueba falla si lo común importa `packages/dental` o si una tabla común recibe una columna de producto.
+- Hay que mantener la lista de lo que es de un producto. Una prueba falla si lo común importa `packages/dental` o si una tabla común recibe una columna de producto. Desde la entrega 8, ningún código común lo importa: lo de un producto vive en las carpetas `dental/` y se conecta solo por `products.ts` (servicios y API); solo pueden importarlo las pruebas que prueban lo común con odentIA como ejemplo. La demo de desarrollo es la de odentIA (`services/src/dental/seed-demo.ts`), y lo que sirve a cualquier producto va en `seed-common.ts`.
 - El SQL a mano sigue nombrando tablas sin esquema. Una función que fija su `search_path` tiene que incluir `dental`.
 - Revisar si aparece un tercer producto, o si una tabla de un producto empieza a servir a otro: entonces pasa a `public`.
 

@@ -31,7 +31,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
   const url = `postgres://dentalagent:dentalagent@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`
   const db = createOwnerDb(url)
   const seed = () =>
-    exec(process.execPath, ["--import", "tsx", "src/seed-procedure-codes.ts"], {
+    exec(process.execPath, ["--import", "tsx", "src/dental/seed-catalog.ts"], {
       env: { ...process.env, DATABASE_URL: url },
     })
   const snapshot = async () =>

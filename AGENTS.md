@@ -57,7 +57,7 @@ Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este
 ## Trabajo y evidencia
 
 - Consultar definiciones, referencias y tipos mediante LSP; código y contratos son la fuente de estructura, no inventarios manuales. LSP no sustituye ejecución ni autorización.
-- Reutilizar patrones existentes. Nueva pantalla o entidad → extender `packages/services/src/seed-dev.ts` en el mismo cambio; nunca importar esa semilla manual en tests o CI.
+- Reutilizar patrones existentes. Nueva pantalla o entidad → extender la demo de odentIA (`packages/services/src/dental/seed-demo.ts`, `pnpm --filter @odentia/services seed:dev`) en el mismo cambio; lo que sirve a cualquier producto va en `seed-common.ts` o en un `seed-*.ts` común. Nunca importar esa semilla manual en tests o CI.
 - Verificar el recorrido afectado en runtime; para UI, observar la superficie real y sus estados. Informar exactamente lo ejecutado y sus límites.
 - Comandos raíz: `pnpm dev`, `pnpm build`, `pnpm test`, `pnpm typecheck`; por paquete: `pnpm --filter @odentia/<paquete> test|typecheck`.
 - Mantener contexto breve y sin duplicación: objetivos/reglas en AGENTS, procedimientos especializados en skills, motivos duraderos en ADR, ejemplos en código/stories. No crear `design.md`.

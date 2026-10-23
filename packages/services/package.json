@@ -5,13 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./test-patient": "./src/test-patient.ts"
+    "./test-patient": "./src/test-patient.ts",
+    "./dental": "./src/dental/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "seed:dev": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-dev.ts",
+    "seed:dev": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/seed-demo.ts",
     "mail:preview": "tsx --env-file-if-exists=../../infra/dev/.env src/mail-preview.ts",
     "bench:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/bench-reports.ts"
   },

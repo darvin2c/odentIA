@@ -1,27 +1,30 @@
-import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { extractDictation } from "@odentia/agent/dental"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentsNotPaused,
+  getAgentConfig,
+} from "@odentia/services"
+import {
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationModelLabel,
   dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
-  getAgentConfig,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   requireClinicalAssistant,
   saveDictationSegment,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
-} from "@odentia/services"
+} from "@odentia/services/dental"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
-import { modelProblemResponse } from "../lib/agent-model.js"
-import { errorBody } from "../lib/error.js"
-import { type CrmDeps, runService, validationError } from "./helpers.js"
+import { orgContextOf } from "../../lib/context.js"
+import { modelProblemResponse } from "../../lib/agent-model.js"
+import { errorBody } from "../../lib/error.js"
+import { type CrmDeps, runService, validationError } from "../helpers.js"
 
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
