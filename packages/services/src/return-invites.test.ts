@@ -5,7 +5,7 @@ import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { lapsedToInvite, markInvitedToReturn, INVITED_TO_RETURN_ACTION } from "./return-invites.js"
+import { inviteStepText, lapsedToInvite, markInvitedToReturn, INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import { listPeople } from "./people.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
@@ -120,4 +120,34 @@ it("el atajo «Por invitar a volver» de Pacientes muestra a quien toca, con su 
   await expect(
     c.run((tx) => listPeople(tx, c.orgId, { view: "todos", atajo: "deben" }, everything)),
   ).rejects.toThrow()
+})
+
+it("ya invitada, la fila dice cuándo y cuándo le vuelve a tocar; «Ya la invité» lleva el nombre de quien la anotó", async () => {
+  const c = await clinic()
+  const lucia = await c.person("Lucía Fernández")
+  await c.visit(lucia.patientId, "2025-04-14T15:00:00Z")
+  await c.run((tx) => markInvitedToReturn(tx, c.orgId, c.actor, lucia.personId, "telefono"))
+  const page = await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes" }, everything))
+  const row = page.items.find((item) => item.displayName === "Lucía Fernández")
+  // Sale del atajo y su fila ya no dice «Toca invitarla a volver».
+  expect(page.shortcuts?.por_invitar_a_volver).toBe(0)
+  expect(row?.nextStep?.text).toMatch(/^Invitada por Dra\. Ana el \d{1,2} \S+ · la próxima, en \S+$/)
+  // La invitó una persona del equipo: no «nadie lo lleva».
+  expect(row?.attention).toBe("persona")
+})
+
+it("«Qué sigue» de quien ya fue invitada: el agente, quien no quiere, y cuándo deja de decirlo", () => {
+  const zone = { locale: "es-PE", timezone: LIMA }
+  const away = { lastVisitAt: "2025-04-14T15:00:00Z", nextAppointmentAt: null }
+  const byAgent = { invitedAt: new Date("2026-10-03T15:00:00Z"), invitedBy: null, declined: false }
+  expect(inviteStepText(byAgent, away, zone, NOW)).toEqual({ text: "Invitada el 3 oct · la próxima, en abril", by: "agente" })
+  // Volvió después de la invitación, o ya tiene cita: no hay nada que decir de ella.
+  expect(inviteStepText(byAgent, { lastVisitAt: "2026-10-08T15:00:00Z", nextAppointmentAt: null }, zone, NOW)).toBeNull()
+  expect(inviteStepText(byAgent, { ...away, nextAppointmentAt: "2026-10-20T15:00:00Z" }, zone, NOW)).toBeNull()
+  // Pasados seis meses de la invitación le vuelve a tocar: la fila ya no dice «Invitada».
+  expect(inviteStepText(byAgent, away, zone, new Date("2027-04-15T15:00:00Z"))).toBeNull()
+  // Pidió no recibir seguimiento: se respeta y lo dice.
+  expect(inviteStepText({ invitedAt: null, invitedBy: null, declined: true }, away, zone, NOW)).toEqual({ text: "No quiere invitaciones", by: null })
+  // Quien vino hace poco no es «no quiere invitaciones»: no le tocaría ninguna.
+  expect(inviteStepText({ invitedAt: null, invitedBy: null, declined: true }, { lastVisitAt: "2026-09-10T15:00:00Z", nextAppointmentAt: null }, zone, NOW)).toBeNull()
 })

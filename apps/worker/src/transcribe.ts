@@ -36,7 +36,12 @@ export function createTranscriber(env: Env): TranscribeFn | null {
     const form = new FormData()
     form.set("model", model)
     form.set("file", new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }), filename)
-    form.set("language", "es")
+    // gpt-transcribe recibe los idiomas esperados en `languages` y rechaza que
+    // lleguen junto con `language`, la pista única de los Whisper y los
+    // gpt-4o-*-transcribe (guía «Migrating from Whisper to gpt-transcribe» de
+    // OpenAI, leída el 2026-10-23). En multipart una lista va como `campo[]`.
+    if (model.startsWith("gpt-transcribe")) form.append("languages[]", "es")
+    else form.set("language", "es")
     // Los Whisper (whisper-1 de OpenAI y whisper-large-v3[-turbo] de Groq) solo
     // dicen cuánto duró el audio, que es lo que cobran, en verbose_json; los
     // gpt-4o-*-transcribe lo informan en `usage` con json.

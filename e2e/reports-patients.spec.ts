@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patient, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
 import type { Locator, Page, TestInfo } from "@playwright/test"
 import { sql } from "drizzle-orm"
 import { PANEL, tenant } from "./env"
@@ -242,4 +243,68 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
   }
   // Lo escrito con «Otro» no viaja cuando al final eligió otra opción.
   expect(await referralOf(fixtureDb, owner.org.id, "Olga Referida")).toEqual({ kind: "recomendacion", said: null })
+})
+
+/**
+ * Invitar a volver (#139): Lucía no viene hace ocho meses y nadie la invitó;
+ * a Carmen la invitó el agente el mes pasado y vino después. Ningún envío externo.
+ */
+async function invitedToReturn(db: Db, owner: OwnerFixture) {
+  const organizationId = owner.org.id
+  const roomId = randomUUID()
+  await db.insert(scheduleRoom).values({ id: roomId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
+  const attended = async (displayName: string, patientNumber: number, visits: Date[]) => {
+    const [person] = await db.insert(contact).values({ organizationId, displayName, createdAt: visits[0] }).returning({ id: contact.id })
+    const patientId = randomUUID()
+    await db.insert(patient).values({ id: patientId, organizationId, personId: person!.id, patientNumber, createdAt: visits[0] })
+    for (const startsAt of visits) {
+      await db.insert(appointment).values({
+        organizationId, branchId: owner.branchId, patientId, roomId, professionalUserId: owner.user.id, serviceName: "Limpieza",
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "atendida", createdAt: startsAt,
+      })
+    }
+    return patientId
+  }
+  const monthsAgo = (months: number) => new Date(Date.now() - months * 30 * 86_400_000)
+  await attended("Lucía Fernández", 1, [monthsAgo(8)])
+  const carmen = await attended("Carmen Huamán", 2, [monthsAgo(10), lastMonth(20)])
+  await db.insert(auditEvent).values({
+    organizationId, action: "paciente.invitada_a_volver", entity: "patient", entityId: carmen, metadata: { via: "agente" }, createdAt: lastMonth(5),
+  })
+}
+
+test("invitar a volver: el atajo, «Ya la invité», lo que dice la fila y quién volvió en Reportes", async ({ owner, fixtureDb }, info) => {
+  await invitedToReturn(fixtureDb, owner)
+  const page = owner.page
+  const slug = owner.org.slug
+
+  // El atajo muestra solo a quien le toca, con lo que sigue y quién se encarga.
+  await gotoHydrated(page, tenant(slug, "/people?atajo=por_invitar_a_volver"))
+  const lucia = page.getByRole("row", { name: /Lucía Fernández/ })
+  await expect(lucia).toContainText("Toca invitarla a volver")
+  await expect(lucia).toContainText("Lo lleva una persona del equipo")
+  await expect(page.getByRole("row", { name: /Carmen Huamán/ })).toHaveCount(0)
+  await observe(page, info, "por-invitar")
+
+  // «Ya la invité»: sale del atajo y su fila dice cuándo y quién, y cuándo le vuelve a tocar.
+  await lucia.getByRole("button", { name: "Ya la invité" }).click()
+  await expect(page.getByRole("row", { name: /Lucía Fernández/ })).toHaveCount(0)
+  await gotoHydrated(page, tenant(slug, "/people"))
+  const invited = page.getByRole("row", { name: /Lucía Fernández/ })
+  await expect(invited).toContainText(new RegExp(`Invitada por ${owner.user.name} el \\d{1,2} \\S+ · la próxima, en \\S+`))
+  await expect(invited).toContainText("Lo lleva una persona del equipo")
+  await observe(page, info, "ya-invitada")
+
+  // Reportes cuenta a quien volvió tras la invitación del mes pasado; la de hoy es de este mes.
+  await gotoHydrated(page, tenant(slug, "/reports?period=mes_pasado&tab=pacientes"))
+  const returns = page.getByRole("region", { name: "Si vuelven" })
+  const figure = returns.getByText("Volvieron tras la invitación", { exact: true }).locator("..")
+  await expect(figure).toContainText("1 de 1 invitada")
+  await observe(page, info, "volvieron-tras-la-invitacion")
+  await figure.getByRole("button", { name: "Ver quiénes" }).click()
+  await expect(page).toHaveURL(/lista=invited_returned/)
+  const list = surface(page, { name: "Volvieron tras la invitación" }).first()
+  await expect(list.getByRole("link", { name: "Carmen Huamán" })).toBeVisible()
+  await expect(list.getByRole("link", { name: "Lucía Fernández" })).toHaveCount(0)
+  await expect(list.getByText("Cómo se calcula")).toBeVisible()
 })

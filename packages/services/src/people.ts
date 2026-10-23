@@ -38,6 +38,7 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { personSearchCondition } from "./person-search.js"
 import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
+import { inviteStatusOf, inviteStepText } from "./return-invites.js"
 import {
   PEOPLE_SHORTCUTS,
   type PeopleShortcut,
@@ -631,8 +632,9 @@ export async function listPeople(
   if (input.atajo && view !== "pacientes") throw validation("Los atajos son de la vista Pacientes")
   const atajo = (input.atajo || null) as PeopleShortcut | null
   const fingerprint = JSON.stringify({ view, q, atajo })
-  const { timezone } = await findOrgLocale(tx, orgId)
-  const members = view === "pacientes" ? await peopleShortcutMembers(tx, orgId, can, timezone, new Date()) : null
+  const { timezone, locale } = await findOrgLocale(tx, orgId)
+  const now = new Date()
+  const members = view === "pacientes" ? await peopleShortcutMembers(tx, orgId, can, timezone, now) : null
   const lines = view === "pacientes" ? await enabledLineKinds(tx, orgId) : new Set<string>()
   const missing = new Set(members?.faltan_datos ?? [])
   const toInvite = new Set(members?.por_invitar_a_volver ?? [])
@@ -709,6 +711,11 @@ export async function listPeople(
         page.map((r) => r.id),
       )
     : new Map<string, ContactExtra>()
+  // Quien ya fue invitada a volver, o no quiere invitaciones, lo dice en «Qué sigue».
+  const invites =
+    plan && agenda
+      ? await inviteStatusOf(tx, orgId, page.flatMap((r) => (r.patient_id && !toInvite.has(r.patient_id) ? [r.patient_id] : [])))
+      : new Map()
   const items: PersonListItem[] = []
   for (const r of page) {
     const isPatient = r.patient_id !== null
@@ -751,11 +758,23 @@ export async function listPeople(
       const item = items[items.length - 1]!
       // Sin nada en el plan y sin volver desde hace 6 meses: lo que sigue es invitarla (decisión 15).
       const invite = toInvite.has(r.patient_id) && step.kind === "ninguno"
+      const invited =
+        step.kind === "ninguno"
+          ? inviteStepText(invites.get(r.patient_id), { lastVisitAt: r.last_visit_at, nextAppointmentAt: r.next_appointment_at }, { locale, timezone }, now)
+          : null
       item.nextStep = invite
         ? { text: "Toca invitarla a volver", actionLabel: null }
-        : { text: step.text, actionLabel: step.action?.label ?? null }
-      // Quien tiene que volver a verla lo lleva la línea de invitar, si está prendida.
-      item.attention = toInvite.has(r.patient_id) ? (lines.has("invitar_a_volver") ? "agente" : "persona") : attentionOf(step.kind, lines)
+        : invited
+          ? { text: invited.text, actionLabel: null }
+          : { text: step.text, actionLabel: step.action?.label ?? null }
+      // Quien tiene que volver a verla lo lleva la línea de invitar, si está prendida; ya invitada, quien la invitó.
+      item.attention = toInvite.has(r.patient_id)
+        ? lines.has("invitar_a_volver")
+          ? "agente"
+          : "persona"
+        : invited
+          ? invited.by
+          : attentionOf(step.kind, lines)
     }
   }
   const last = page[page.length - 1]

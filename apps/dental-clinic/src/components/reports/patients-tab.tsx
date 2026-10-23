@@ -33,7 +33,7 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
-import { EmptyLine, Figure, ReportCard, unlessEmpty, WHOLE_CLINIC } from "./report-parts"
+import { during, EmptyLine, Figure, ReportCard, unlessEmpty, WHOLE_CLINIC } from "./report-parts"
 
 // --- El embudo, para la pestaña y para el Resumen ---------------------------------------
 
@@ -498,7 +498,7 @@ function Referral({ data }: { data: ReportPatients }) {
   )
 }
 
-/** Si vuelven: sus controles, si volvieron en el año y quiénes no vienen hace más de 6 meses. */
+/** Si vuelven: sus controles, si volvieron en el año, quiénes no vienen hace más de 6 meses y si volvieron tras invitarlos. */
 function Returns({ data, onOpenList }: { data: ReportPatients; onOpenList: (list: ReportListKey) => void }) {
   const { locale } = data
   const period = spanLabel(data.period, locale)
@@ -508,6 +508,7 @@ function Returns({ data, onOpenList }: { data: ReportPatients; onOpenList: (list
   const cameRate = rateOf(controls.came, controls.due)
   const previousCameRate = rateOf(data.controls.previous.came, data.controls.previous.due)
   const missed = controls.due - controls.came
+  const invites = data.invites
   const returned = rateOf(data.returned.current.returned, data.returned.current.cohort)
   const previousReturned = rateOf(data.returned.previous.returned, data.returned.previous.cohort)
   const returnedMonths = data.returned.months.map((month) => rateOf(month.returned, month.cohort))
@@ -522,7 +523,7 @@ function Returns({ data, onOpenList }: { data: ReportPatients; onOpenList: (list
       <h3 id={id} className="font-semibold">
         Si vuelven
       </h3>
-      <div className="grid min-w-0 gap-3.5 md:grid-cols-3">
+      <div className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
         <Figure
           title="Vinieron a su control"
           value={cameRate === null ? "Sin datos" : `${cameRate} %`}
@@ -563,6 +564,19 @@ function Returns({ data, onOpenList }: { data: ReportPatients; onOpenList: (list
           note={data.lapsed.count === 0 ? "Todos tienen algo pendiente o vinieron hace poco" : "A hoy: sin cita, presupuesto que espere respuesta ni control pendiente"}
         >
           {data.lapsed.count > 0 ? <FooterButton onClick={() => onOpenList("lapsed")}>Ver quiénes</FooterButton> : null}
+        </Figure>
+        <Figure
+          title="Volvieron tras la invitación"
+          value={invites.returned}
+          detail={invites.invited === 0 ? undefined : `de ${invites.invited} ${invites.invited === 1 ? "invitada" : "invitadas"}`}
+          note={[
+            invites.invited === 0 ? `Nadie recibió una invitación a volver ${during(period)}` : `Personas invitadas ${during(period)} que vinieron después, a hoy`,
+            data.wholeClinic.includes("invites") ? WHOLE_CLINIC : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        >
+          {invites.returned > 0 ? <FooterButton onClick={() => onOpenList("invited_returned")}>Ver quiénes</FooterButton> : null}
         </Figure>
       </div>
     </section>

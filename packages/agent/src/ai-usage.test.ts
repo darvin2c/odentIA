@@ -47,6 +47,13 @@ describe("costo de una llamada", () => {
     expect(costMicrosOf({ model: "whisper-1", audioSeconds: 4 })).toBe(400)
   })
 
+  it("gpt-transcribe, el de producción, se cobra por minuto y no queda en blanco (#158)", () => {
+    // Una nota de voz de 35 s a USD 0,0045 el minuto: 2 625 millonésimas.
+    expect(costMicrosOf({ model: "gpt-transcribe", audioSeconds: 35 })).toBe(2_625)
+    // No tiene precio por tokens publicado: si los informara, null antes que un estimado.
+    expect(costMicrosOf({ model: "gpt-transcribe", inputTokens: 200, outputTokens: 70 })).toBeNull()
+  })
+
   it("Jev cobra solo la entrada: un mensaje típico de Recepción cuesta 57 millonésimas", () => {
     // Camino, conocimiento e interés: ~1 360 tokens a 0,042 USD por millón; la salida no se cobra.
     expect(costMicrosOf({ model: "jev-1.13.0", inputTokens: 1_360, outputTokens: 12 })).toBe(57)

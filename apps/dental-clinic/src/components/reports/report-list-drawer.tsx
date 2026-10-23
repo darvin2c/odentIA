@@ -200,6 +200,14 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     showNext: false,
     asOfToday: true,
   },
+  invited_returned: {
+    title: "Volvieron tras la invitación",
+    noun: { one: "persona", many: "personas" },
+    how: (period) =>
+      `Personas invitadas a volver ${during(period)}, por ${ADMIN_NAME} o con «Ya la invité», que después vinieron a una cita atendida, hasta hoy. La fecha es la de la cita en que volvieron.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    showNext: false,
+  },
   debts_overdue: {
     title: "Te deben hace más de 30 días",
     noun: { one: "persona", many: "personas" },

@@ -84,6 +84,75 @@ export async function lapsedToInvite(
   }))
 }
 
+/** Su última invitación y si pidió no recibir seguimiento, de cada paciente pedido. */
+export interface InviteStatus {
+  invitedAt: Date | null
+  /** Quien la anotó con «Ya la invité»; nulo si fue el agente. */
+  invitedBy: string | null
+  declined: boolean
+}
+
+export async function inviteStatusOf(tx: Db, orgId: string, patientIds: string[]): Promise<Map<string, InviteStatus>> {
+  if (patientIds.length === 0) return new Map()
+  const rows = await tx.execute<{ patient_id: string; invited_at: Date | string | null; invited_by: string | null; declined: boolean }>(sql`
+    select p.id as patient_id, last.created_at as invited_at, u.name as invited_by,
+      exists (select 1 from automation_consent ac where ac.organization_id = ${orgId} and ac.contact_id = p.person_id
+        and ac.purpose = 'seguimiento' and ac.status = 'revoked') as declined
+    from patient p
+    left join lateral (
+      select ae.created_at, ae.actor_user_id from audit_event ae
+      where ae.organization_id = ${orgId} and ae.action = ${INVITED_TO_RETURN_ACTION}
+        and ae.entity = 'patient' and ae.entity_id = p.id::text
+      order by ae.created_at desc limit 1
+    ) last on true
+    left join "user" u on u.id = last.actor_user_id
+    where p.organization_id = ${orgId} and p.id in (${sql.join(patientIds.map((id) => sql`${id}::uuid`), sql`, `)})`)
+  return new Map(
+    rows.map((row) => [
+      row.patient_id,
+      { invitedAt: row.invited_at ? new Date(row.invited_at) : null, invitedBy: row.invited_by, declined: row.declined },
+    ]),
+  )
+}
+
+/**
+ * Lo que dice «Qué sigue» de quien no tiene nada pendiente y ya no toca
+ * invitar (decisión 15): «Invitada por Ana Torres el 3 oct · la próxima, en abril»
+ * mientras corre su ciclo, o «No quiere invitaciones» si no viene y pidió no
+ * recibir seguimiento. Nulo si no aplica: vino después de la invitación o
+ * tiene una cita por venir. `by` es quién la invitó, para «Lo lleva…»; nadie
+ * la lleva si no quiere invitaciones.
+ */
+export function inviteStepText(
+  status: InviteStatus | undefined,
+  person: { lastVisitAt: string | null; nextAppointmentAt: string | null },
+  zone: { locale: string; timezone: string },
+  now: Date,
+): { text: string; by: "agente" | "persona" | null } | null {
+  if (!status || person.nextAppointmentAt) return null
+  const lastVisit = person.lastVisitAt ? new Date(person.lastVisitAt) : null
+  const cycleStart = monthsAgo(now, INVITE_CYCLE_MONTHS)
+  const { invitedAt } = status
+  if (invitedAt && invitedAt > cycleStart && (!lastVisit || invitedAt > lastVisit)) {
+    const day = new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "short", timeZone: zone.timezone }).format(invitedAt).replace(".", "")
+    // El mes solo, en minúscula: algunos idiomas lo escriben con mayúscula cuando va suelto.
+    const next = new Intl.DateTimeFormat(zone.locale, { month: "long", timeZone: zone.timezone })
+      .format(monthsAgo(invitedAt, -INVITE_CYCLE_MONTHS))
+      .toLocaleLowerCase(zone.locale)
+    const by = status.invitedBy ? ` por ${status.invitedBy.trim()}` : ""
+    return { text: `Invitada${by} el ${day} · la próxima, en ${next}`, by: status.invitedBy ? "persona" : "agente" }
+  }
+  if (status.declined && (!lastVisit || lastVisit < cycleStart)) return { text: "No quiere invitaciones", by: null }
+  return null
+}
+
+/** La misma fecha, `months` meses antes (negativo: después). */
+function monthsAgo(date: Date, months: number): Date {
+  const result = new Date(date)
+  result.setUTCMonth(result.getUTCMonth() - months)
+  return result
+}
+
 /** Anota una invitación hecha: a mano («Ya la invité») o la que dejó el agente. */
 export async function recordInvitation(
   tx: Db,

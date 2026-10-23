@@ -247,6 +247,7 @@ export const REPORT_LISTS = [
   "funnel_stopped",
   "controls_missed",
   "lapsed",
+  "invited_returned",
   "debts_overdue",
   "agent_booked",
   "agent_handoffs",
@@ -448,6 +449,8 @@ export interface ReportPatients extends ReportHead {
     months: Array<{ cohort: number; returned: number }>
   }
   lapsed: { count: number; months: number }
+  /** Invitados a volver en el periodo y cuántos ya vinieron, a hoy. */
+  invites: { invited: number; returned: number }
   wholeClinic: string[]
 }
 
