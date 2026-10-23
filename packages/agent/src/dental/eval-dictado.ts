@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services"
+import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/dental"
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { askDictationModel } from "./dictation.js"
