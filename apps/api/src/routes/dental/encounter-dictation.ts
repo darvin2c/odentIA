@@ -12,10 +12,12 @@ import {
   dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
+  issueDictationPrescription,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   requireClinicalAssistant,
   saveDictationSegment,
+  settleDictationPrescription,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "@odentia/services/dental"
@@ -178,6 +180,28 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       )
       return { ok: true }
     })
+  })
+
+  /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos (issue 109, fase 2). */
+  app.post(`${base}/prescription`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => issueDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId)),
+    )
+  })
+
+  /** La receta dictada se terminó en el formulario de siempre: sus sugerencias quedan con esa receta. */
+  app.post(`${base}/prescription/settle`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = z.object({ prescriptionId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => settleDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId, parsed.data.prescriptionId)),
+    )
   })
 
   /** Antes de firmar: lo que no se confirmó no entra a la historia. */

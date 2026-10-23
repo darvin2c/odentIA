@@ -1,6 +1,18 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
-import { clinicalFollowUp, encounter, encounterDiagnosis, encounterDictationSuggestion, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import {
+  clinicalFollowUp,
+  encounter,
+  encounterDiagnosis,
+  encounterDictationSuggestion,
+  patientAllergy,
+  prescriptionItem,
+  serviceCatalog,
+  treatmentBudgetItem,
+  treatmentBudgetOption,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
+import { findDraftBudget } from "../budgets.js"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -13,6 +25,7 @@ import {
   countConfirmedDictation,
   dictationModelLabel,
   dictationSegmentSeen,
+  issueDictationPrescription,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   previewDictationSuggestions,
@@ -89,6 +102,84 @@ describe("odontograma por voz (issue 109)", () => {
     expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([
       expect.objectContaining({ diagnosisCode: "K02.1", diagnosisType: "provisional" }),
     ])
+    await enable(false)
+  })
+})
+
+describe("receta y caminos por voz (issue 109, fase 2)", () => {
+  it("la receta dictada calcula la cantidad, pide lo que falta, avisa la alergia y se emite con su propio botón", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de receta")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const saved = await segment({
+      drafts: [
+        { kind: "receta", payload: { genericName: "Amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada ocho horas", duration: "7 días" } },
+        { kind: "receta", payload: { genericName: "ibuprofeno", strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", frequency: "cada 8 horas si hay dolor" } },
+      ],
+    })
+    const [amoxicilina, ibuprofeno] = saved.suggestions
+    // La vía oral no se dicta con una cápsula, y 1 cada 8 horas por 7 días son 21 (decisiones 5 y 6).
+    expect(amoxicilina).toMatchObject({ status: "lista", payload: { genericName: "amoxicilina", route: "oral", routeImplied: true, quantity: 21, quantityCalculated: true } })
+    expect(ibuprofeno).toMatchObject({ status: "por_revisar", note: "Falta la duración de ibuprofeno. Dila o complétala." })
+    // No se emite con «Confirmar»: es firmar con la colegiatura.
+    await expect(fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, amoxicilina!.id))).rejects.toMatchObject({ code: "PRESCRIPTION_NEEDS_ISSUE" })
+    await expect(fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))).rejects.toMatchObject({ code: "SUGGESTION_NEEDS_REVIEW" })
+
+    // Dicho después: «el ibuprofeno por tres días». Si además llega registrado otra vez, no se receta dos veces.
+    await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "Ibuprofeno", duration: "3 días" } }],
+      corrections: [{ suggestionId: ibuprofeno!.id, changes: { duration: "tres días" } }],
+    })
+    const completed = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === ibuprofeno!.id)
+    expect(completed).toMatchObject({ status: "lista", payload: { quantity: 9 }, voice: { before: "sin duración" } })
+
+    const { prescriptionId } = await fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))
+    const items = await ownerDb.select().from(prescriptionItem).where(eq(prescriptionItem.prescriptionId, prescriptionId))
+    expect(items.map((item) => [item.genericName, item.route, item.quantity]).sort()).toEqual([["amoxicilina", "oral", 21], ["ibuprofeno", "oral", 9]])
+    expect(await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).toEqual([])
+
+    // Con alergia a las penicilinas, la amoxicilina queda con el aviso de siempre y no se emite sola.
+    await ownerDb.insert(patientAllergy).values({ organizationId: ORG, patientId: fx.patient.id, substance: "Penicilinas", severity: "severa" })
+    const [warned] = (await segment({ drafts: [{ kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada 8 horas", duration: "7 días" } }] })).suggestions
+    expect(warned).toMatchObject({ status: "por_revisar", payload: { allergyWarnings: [expect.stringContaining("Penicilinas")] } })
+    await expect(fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))).rejects.toMatchObject({ code: "SUGGESTION_NEEDS_REVIEW" })
+    await enable(false)
+  })
+
+  it("«onlay, o si no una carilla» deja el presupuesto en borrador con dos opciones, y no se mezcla con otra elección", async () => {
+    await enable(true)
+    const fx = await openSession("Onlay cerámico", "tooth")
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: "Carilla feldespática", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const saved = await segment({
+      drafts: [
+        { kind: "plan", payload: { service: "onlay cerámico", toothNumber: 46, alternatives: ["carilla feldespática"] }, sourceText: "Un onlay, o si no una carilla." },
+        // Una segunda elección en el mismo dictado espera: el presupuesto lleva una sola (decisión 3).
+        { kind: "plan", payload: { service: "onlay cerámico", toothNumber: 36, alternatives: ["carilla feldespática"] } },
+      ],
+    })
+    const [choice, second] = saved.suggestions
+    expect(choice).toMatchObject({ status: "lista", summary: expect.stringContaining("Dos caminos para la 46 · elige uno"), payload: { serviceName: "Onlay cerámico", options: [expect.objectContaining({ serviceName: "Carilla feldespática" })] } })
+    expect(second).toMatchObject({ status: "por_revisar", note: expect.stringContaining("Ya hay otra elección") })
+
+    // «Recomendar» la corona la hace la opción A; volver a recomendar la resina deja todo como estaba.
+    const swapped = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id, { recommend: 1 }))
+    expect(swapped.payload).toMatchObject({ serviceName: "Carilla feldespática", options: [expect.objectContaining({ serviceName: "Onlay cerámico" })] })
+    await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id, { recommend: 1 }))
+
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, second!.id))
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id))
+    const budget = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+    const options = await ownerDb.select().from(treatmentBudgetOption).where(eq(treatmentBudgetOption.budgetId, budget!.id))
+    expect(options).toHaveLength(2)
+    const lines = await ownerDb.select().from(treatmentBudgetItem).where(eq(treatmentBudgetItem.budgetId, budget!.id))
+    const byOption = (position: number) => lines.filter((line) => line.optionId === options.find((option) => option.position === position)!.id).map((line) => line.title)
+    expect([byOption(1), byOption(2)]).toEqual([["Onlay cerámico"], ["Carilla feldespática"]])
+    expect(options.find((option) => option.position === 1)?.isRecommended).toBe(true)
+
+    // Otra elección después ya no cabe en ese borrador: se arma a mano en el presupuesto.
+    const [later] = (await segment({ drafts: [{ kind: "plan", payload: { service: "onlay cerámico", toothNumber: 36, alternatives: ["carilla feldespática"] } }] })).suggestions
+    expect(later).toMatchObject({ status: "por_revisar", note: expect.stringContaining("ya tiene opciones") })
     await enable(false)
   })
 })

@@ -214,6 +214,16 @@
             "minLength": 0,
             "maxLength": 2000
           },
+          "alternatives": {
+            "description": "Otras prestaciones que dijo como alternativa para lo mismo («o si no una corona»), con sus palabras y en el orden en que las dijo. Vacío si no dijo alternativas.",
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
           "dicho": {
             "description": "El fragmento del dictado, tal cual, del que sale este registro.",
             "type": "string",
@@ -222,6 +232,80 @@
         },
         "required": [
           "service"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "recetas": {
+      "default": [],
+      "description": "Un elemento por cada medicamento que recetó.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "genericName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "El medicamento por su Denominación Común Internacional, en minúsculas (amoxicilina, ibuprofeno), aunque lo nombre por su marca."
+          },
+          "strength": {
+            "description": "La concentración con su unidad, como la dijo («de quinientos» = 500 mg).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 60
+          },
+          "dosageForm": {
+            "description": "cápsula, tableta, jarabe, suspensión, gel, enjuague… solo si la dijo o se deduce de la dosis («una cápsula»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 60
+          },
+          "dose": {
+            "description": "Cuánto en cada toma («1 cápsula», «10 mL»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "route": {
+            "description": "La vía, solo si la dijo (oral, sublingual, tópica…).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "frequency": {
+            "description": "Cada cuánto, como la dijo («cada 8 horas», «cada 8 horas si hay dolor»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "duration": {
+            "description": "Por cuánto tiempo («7 días»). Vacío si no lo dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "quantity": {
+            "description": "Cuántas unidades en total, solo si la dijo; si no, la calcula el sistema.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9999
+          },
+          "instructions": {
+            "description": "Una indicación que dijo para ese medicamento («después de las comidas»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "genericName"
         ],
         "additionalProperties": false
       }
@@ -331,6 +415,7 @@
     "odontograma",
     "diagnosticos",
     "indicaciones",
+    "recetas",
     "controles",
     "correcciones",
     "quitar"

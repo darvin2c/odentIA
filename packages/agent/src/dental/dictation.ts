@@ -64,6 +64,11 @@ export const extraction = z.object({
     .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
     .describe("Un elemento por cada tratamiento que indicó para el plan."),
+  recetas: z
+    .array(operationAgentSchema("receta.medicamento").extend({ dicho: said }))
+    .max(DICTATION_MAX_SUGGESTIONS)
+    .default([])
+    .describe("Un elemento por cada medicamento que recetó."),
   controles: z
     .array(operationAgentSchema("control.crear").extend({ dicho: said }))
     .max(DICTATION_MAX_SUGGESTIONS)
@@ -97,7 +102,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     "Registra solo lo que el odontólogo dijo. No añadas diagnósticos, piezas, superficies ni tratamientos que no nombró, ni completes lo que falta con lo que sería habitual.",
     "En `dicho` va solo la frase de la que sale ese registro, no todo lo dictado: con ella el odontólogo ve qué se usó y qué no.",
     "Si se corrige («en la veinticinco… no, es la veintiséis»), vale lo último que dijo. Si pide quitar algo («quita la endodoncia»), no lo registres.",
-    "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo.",
+    "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo. Pero ya no está pendiente (se confirmó o se descartó): si lo nuevo lo cambia o lo vuelve a indicar con otros datos, es un registro nuevo, no una corrección.",
     "Si el odontólogo nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
     "Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.",
@@ -106,6 +111,8 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     `Lista de hallazgos (código, nombre, variantes):\n${input.findings}`,
     `En \`diagnosticos\` van los diagnósticos que no son un hallazgo de la lista (por ejemplo, gingivitis o pulpitis), con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra.`,
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
+    "Si dice dos o tres tratamientos para lo mismo, para que el paciente elija («una resina, o si no una corona»), es una sola indicación: en `service` la que recomienda (si no lo dice, la primera que nombró) y las demás en `alternatives`, en el orden en que las dijo. Si ya eligió una, es una indicación sin alternativas.",
+    "En `recetas` va cada medicamento que receta, con lo que dijo: la DCI, la concentración con su unidad, la forma, la dosis, la frecuencia y la duración. No completes lo que no dijo: el sistema lo pregunta y calcula la cantidad. Lo recetado no se repite en el texto de la consulta. Cambiar un medicamento pendiente («mejor paracetamol en vez del ibuprofeno») o completarlo («el naproxeno por cinco días») es una corrección de ese medicamento, con la DCI y lo que cambie, no uno nuevo.",
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
@@ -194,6 +201,7 @@ const DRAFT_PARTS = [
   { key: "odontograma", kind: "odontograma" },
   { key: "diagnosticos", kind: "diagnostico" },
   { key: "indicaciones", kind: "plan" },
+  { key: "recetas", kind: "receta" },
   { key: "controles", kind: "control" },
 ] as const
 

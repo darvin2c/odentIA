@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta"
 
 export interface DictationSuggestion {
   id: string
@@ -25,6 +25,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   plan: "Plan de tratamiento",
   control: "Controles",
   odontograma: "Odontograma",
+  receta: "Receta",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -33,6 +34,12 @@ const SILENCE_MS = 2500
 const MIN_SEGMENT_CHARS = 12
 /** Lo último ya ordenado que acompaña a cada tramo, para que se entienda a qué se refiere. */
 const CONTEXT_CHARS = 600
+/**
+ * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
+ * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
+ */
+export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta"
+
 /** Espera antes del único reintento automático de un tramo que no se pudo ordenar. */
 const RETRY_MS = 3000
 
@@ -393,7 +400,7 @@ export function useDictationSession({
     mutationFn: async () => {
       const done: DictationSuggestion[] = []
       try {
-        for (const item of suggestions.filter((entry) => entry.status === "lista")) {
+        for (const item of suggestions.filter(confirmable)) {
           await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
           done.push(item)
         }
@@ -406,7 +413,24 @@ export function useDictationSession({
     onSettled: () => void refresh(),
   })
 
-  const ready = suggestions.filter((item) => item.status === "lista").length
+  /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos. */
+  const issuePrescription = useMutation({
+    retry: false,
+    mutationFn: () => apiFetch<{ data: { prescriptionId: string } }>(`${base}/prescription`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
+      onApplied({ id: "", kind: "receta", payload: {}, sourceText: "", status: "confirmada", note: null, summary: "", voice: null, removal: null })
+    },
+    onSettled: () => void refresh(),
+  })
+  /** La receta dictada se terminó en el formulario de siempre: sus sugerencias quedan con esa receta. */
+  const settlePrescription = useMutation({
+    retry: false,
+    mutationFn: (prescriptionId: string) => apiFetch(`${base}/prescription/settle`, { method: "POST", body: JSON.stringify({ prescriptionId }) }),
+    onSettled: () => void refresh(),
+  })
+
+  const ready = suggestions.filter(confirmable).length
   const dictating = mode !== "off"
   return {
     enabled,
@@ -445,6 +469,10 @@ export function useDictationSession({
     act,
     save,
     confirmReady,
+    issuePrescription,
+    settlePrescription,
+    patientId,
+    encounterId,
     editing: suggestions.find((item) => item.id === editingId) ?? null,
     openEdit: (item: DictationSuggestion) => {
       save.reset()
@@ -462,6 +490,7 @@ export function suggestionText(item: DictationSuggestion): { title: string; deta
 
 /** Qué le falta a una sugerencia para poder entrar a la historia, en pocas palabras. */
 export function suggestionMissing(item: DictationSuggestion): string {
+  if (item.kind === "receta") return item.status === "lista" ? "falta emitirla" : "falta completarla"
   if (item.status === "lista") return "falta confirmarla"
   if (item.kind === "plan" && typeof item.payload["serviceId"] !== "string") return "falta elegir la prestación"
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"

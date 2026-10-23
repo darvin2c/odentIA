@@ -29,6 +29,8 @@ interface PracticeDictation {
   id: string
   texto: string
   pendientes?: string[]
+  /** Lo ya ordenado antes en el mismo dictado, que llega como contexto. */
+  contexto?: string
   espera: {
     hallazgos?: ExpectedFinding[]
     diagnosticos?: string[]
@@ -37,6 +39,16 @@ interface PracticeDictation {
     nota?: boolean
     correcciones?: number
     quitar?: number
+    /** Lo que la corrección pone, por una palabra («clindamicina»). */
+    corrige?: string
+    /** Registros nuevos: una corrección no vuelve a registrar lo que corrige. */
+    nuevos?: number
+    /** Medicamentos recetados: DCI, cifras de la concentración y días (null: no dijo la duración). */
+    recetas?: Array<{ dci: string; concentracion: string; duracion: string | null }>
+    /** Elecciones del paciente: la principal y los otros caminos, por una palabra de cada uno. */
+    caminos?: Array<{ pieza?: number; principal: string; otros: string[] }>
+    /** El paciente ya eligió: ninguna indicación lleva otros caminos. */
+    sinCaminos?: boolean
   }
 }
 
@@ -73,7 +85,7 @@ for (const dictation of bank.dictados) {
     zone: { locale: "es-PE", timezone: "America/Lima" },
     now,
     transcript: dictation.texto,
-    context: "",
+    context: dictation.contexto ?? "",
     pending,
   })
   const meta = (reply.usage_metadata ?? {}) as { input_tokens?: number; output_tokens?: number; input_token_details?: { cache_read?: number; cache_creation?: number } }
@@ -133,8 +145,36 @@ for (const dictation of bank.dictados) {
   for (const tooth of dictation.espera.planes ?? []) other(`indicación en la ${tooth}`, plans.includes(tooth))
   if (dictation.espera.controles) other("control", read.drafts.filter((draft) => draft.kind === "control").length === dictation.espera.controles)
   if (dictation.espera.nota) other("nota", read.drafts.some((draft) => draft.kind === "nota"))
+  const recipes = read.drafts.filter((draft) => draft.kind === "receta").map((draft) => draft.payload)
+  for (const expected of dictation.espera.recetas ?? []) {
+    const found = recipes.find((payload) => plain(String(payload["genericName"] ?? "")).includes(plain(expected.dci)))
+    // Las cifras dichas en palabras («siete días») valen igual: el servicio las lee.
+    const WORDS: Record<string, string> = { uno: "1", una: "1", dos: "2", tres: "3", cinco: "5", siete: "7", diez: "10", catorce: "14" }
+    const digits = (value: unknown) => plain(String(value ?? "")).replace(/[a-z]+/g, (word) => WORDS[word] ?? " ").replace(/[^\d.]/g, "")
+    other(`receta ${expected.dci}`, Boolean(found))
+    if (!found) continue
+    other(`${expected.dci}: concentración ${expected.concentracion}`, digits(found["strength"]).startsWith(expected.concentracion.replace(/[^\d.]/g, "")))
+    other(
+      `${expected.dci}: duración ${expected.duracion ?? "sin decir"}`,
+      expected.duracion === null ? !found["duration"] : digits(found["duration"]) === expected.duracion,
+    )
+  }
+  if (dictation.espera.recetas) other("ningún medicamento de más", recipes.length === dictation.espera.recetas.length)
+  const plansWithChoice = read.drafts.filter((draft) => draft.kind === "plan").map((draft) => draft.payload)
+  for (const expected of dictation.espera.caminos ?? []) {
+    const found = plansWithChoice.find((payload) => Array.isArray(payload["alternatives"]) && payload["alternatives"].length > 0 && (!expected.pieza || payload["toothNumber"] === expected.pieza))
+    other(`caminos para la ${expected.pieza ?? "boca"}`, Boolean(found))
+    if (!found) continue
+    other(`recomendada: ${expected.principal}`, plain(String(found["service"] ?? "")).includes(expected.principal))
+    const others = (found["alternatives"] as string[]).map((value) => plain(value))
+    other(`otros: ${expected.otros.join(", ")}`, others.length === expected.otros.length && expected.otros.every((word) => others.some((value) => value.includes(word))))
+  }
+  if (dictation.espera.sinCaminos) other("sin caminos: ya eligió", plansWithChoice.every((payload) => !Array.isArray(payload["alternatives"]) || payload["alternatives"].length === 0))
   if (dictation.espera.correcciones !== undefined) other("corrección", read.corrections.length === dictation.espera.correcciones)
   if (dictation.espera.quitar !== undefined) other("quitar", read.removals.length === dictation.espera.quitar)
+  const corrige = dictation.espera.corrige
+  if (corrige) other(`corrige a ${corrige}`, read.corrections.some((item) => plain(JSON.stringify(item.changes)).includes(plain(corrige))))
+  if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {
     other("no tocar lo pendiente", read.corrections.length === 0 && read.removals.length === 0)
