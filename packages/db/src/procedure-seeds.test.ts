@@ -31,6 +31,12 @@ function linesOf(file: string, header: string): string[] {
 }
 
 const RELEASE_HEADER = "system_key,version,scope,source_url,source_sha256,expected_count,is_current"
+const CODES_HEADER = "system_key,code,version,section,display"
+
+/** Los códigos de una lista: [lista, código, edición, sección, denominación]. */
+function codesOf(file: string): string[][] {
+  return linesOf(file, CODES_HEADER).map((l) => head(l, 5))
+}
 
 /** Las ediciones vigentes, una por lista, leídas sin pasar por expect (para nombrar las pruebas). */
 const RELEASES = strictRead("procedure_catalog_release.csv")
@@ -47,7 +53,7 @@ const FILES = [
   "biblioteca.csv",
   "biblioteca_codigos.csv",
   "procedure_catalog_release.csv",
-  "cpms_scope_provenance.csv",
+  "procedure_code_products.csv",
   ...RELEASES.map((release) => release.file),
 ]
 
@@ -88,37 +94,45 @@ it("una edición vigente por lista, con sha válido y expected_count que concili
     const expected = Number(expectedRaw)
     expect(Number.isInteger(expected) && expected > 0).toBe(true)
     expect(current).toBe("true")
-    const codes = linesOf(`procedure_codes_${system!.toLowerCase()}.csv`, "system_key,code,version,display").map((l) =>
-      head(l, 4),
-    )
+    const codes = codesOf(`procedure_codes_${system!.toLowerCase()}.csv`)
     expect(codes.length, system).toBe(expected)
     expect(new Set(codes.map((c) => c[1])).size, `${system} sin duplicados`).toBe(codes.length)
-    for (const [codeSystem, code, codeVersion, display] of codes) {
+    for (const [codeSystem, code, codeVersion, section, display] of codes) {
       expect(codeSystem).toBe(system)
       expect(codeVersion).toBe(version)
       expect(code).not.toBe("")
+      expect(section).not.toBe("")
       expect(display).not.toBe("")
     }
   }
-  // La CPMS del Perú, con su procedencia.
+  // La CPMS del Perú, completa (entrega 7 del ADR 0079).
   const cpms = rows.find((row) => row[0] === "CPMS")!
-  expect(cpms.slice(0, 3)).toEqual(["CPMS", "RM-550-2023-MINSA", "secciones 1.3 Odontología y 2.7 Salud Bucal"])
+  expect(cpms.slice(0, 3)).toEqual(["CPMS", "RM-550-2023-MINSA", "completa: Anexo N.° 1 (Parte 1)"])
   expect(cpms[3]).toContain("gob.pe")
-  expect(
-    linesOf(
-      "cpms_scope_provenance.csv",
-      "code,n_oficial,grupo,seccion,subseccion,nombre_subseccion,denominacion",
-    ).length,
-  ).toBe(Number(cpms[5]))
+  expect(Number(cpms[5])).toBe(12002)
+})
+
+it("los códigos de cada producto existen en su lista y odentIA usa los odontológicos", () => {
+  const codes = new Map(RELEASES.map((release) => [release.systemKey, new Map(codesOf(release.file).map((c) => [c[1]!, c]))]))
+  const rows = linesOf("procedure_code_products.csv", "system_key,product,code").map((l) => head(l, 3))
+  expect(new Set(rows.map((row) => row.join(":"))).size).toBe(rows.length)
+  for (const [system, product, code] of rows) {
+    expect(product).toMatch(/^[a-z]+$/)
+    expect(codes.get(system!)?.has(code!), `código de un producto que no está: ${system} ${code}`).toBe(true)
+  }
+  // Cada lista tiene su parte dental.
+  const dental = (system: string) => rows.filter(([s, product]) => s === system && product === "dental").map((row) => row[2]!)
+  for (const release of RELEASES) expect(dental(release.systemKey).length, release.systemKey).toBeGreaterThan(0)
+  // En la CPMS, lo dental son exactamente las secciones 1.3 Odontología y 2.7 Salud Bucal.
+  const bySection = [...codes.get("CPMS")!.values()].filter((c) => c[3] === "1.3" || c[3] === "2.7").map((c) => c[1]!)
+  expect(dental("CPMS").sort()).toEqual(bySection.sort())
+  expect(bySection).toHaveLength(505)
 })
 
 it("cada código de la biblioteca existe en su lista, en su edición vigente, y uno por lista", () => {
   const versions = new Map(RELEASES.map((release) => [release.systemKey, release.version]))
   const codes = new Map(
-    RELEASES.map((release) => [
-      release.systemKey,
-      new Set(linesOf(release.file, "system_key,code,version,display").map((l) => head(l, 4)[1])),
-    ]),
+    RELEASES.map((release) => [release.systemKey, new Set(codesOf(release.file).map((c) => c[1]))]),
   )
   const keys = new Set(linesOf("biblioteca.csv", LIBRARY_HEADER).map((l) => head(l, 10)[0]))
   const seen = new Set<string>()
@@ -174,8 +188,7 @@ it("la biblioteca es de consultorio: claves y nombres únicos, ámbito y lo que 
 
 it("cada tratamiento de la biblioteca tiene su código CPMS, que existe en la edición vigente", () => {
   const codes = new Set(
-    linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map((l) => {
-      const [system, code, version, display] = head(l, 4)
+    codesOf("procedure_codes_cpms.csv").map(([system, code, version, , display]) => {
       expect(system).toBe("CPMS")
       expect(version).toBe("RM-550-2023-MINSA")
       expect(display).not.toBe("")
@@ -199,45 +212,24 @@ it("cada tratamiento de la biblioteca tiene su código CPMS, que existe en la ed
   expect([...mapped].sort()).toEqual([...keys].sort())
 })
 
-it("procedencia cubre cada código con su denominación oficial", () => {
-  const displays = new Map(
-    linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map((l) => {
-      const [, code, , display] = head(l, 4)
-      return [code, display] as const
-    }),
-  )
-  for (const l of linesOf(
-    "cpms_scope_provenance.csv",
-    "code,n_oficial,grupo,seccion,subseccion,nombre_subseccion,denominacion",
-  )) {
-    const [code, n, group, section, subsection, subsectionName, display] = head(l, 7)
-    expect(["1.3", "2.7"]).toContain(section)
-    expect(n).not.toBe("")
-    expect(group).not.toBe("")
-    expect(subsection).not.toBe("")
-    expect(subsectionName).not.toBe("")
-    expect(displays.get(code), `procedencia sin código: ${code}`).toBe(display)
-  }
-})
-
-it("ámbito conciliado: incluye A/C oficiales y excluye el fuera de ámbito", () => {
-  const codes = new Set(
-    linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map(
-      (l) => head(l, 4)[1],
-    ),
+it("lo dental de la CPMS: incluye los A/C de sus secciones y deja fuera lo de otras", () => {
+  const dental = new Set(
+    linesOf("procedure_code_products.csv", "system_key,product,code")
+      .map((l) => head(l, 3))
+      .filter(([system, product]) => system === "CPMS" && product === "dental")
+      .map((row) => row[2]),
   )
   for (const required of ["A0141", "A0142", "A7903", "C3201", "A1331"]) {
-    expect(codes.has(required), `código oficial del ámbito faltante: ${required}`).toBe(true)
+    expect(dental.has(required), `código odontológico faltante: ${required}`).toBe(true)
   }
-  expect(codes.has("15849"), "15849 es §1.2.1, fuera del ámbito odontológico").toBe(false)
+  // 15849 «Retiro de puntos sin anestesia» está en la lista completa (§1.2.1), pero no es de odentIA.
+  expect(codesOf("procedure_codes_cpms.csv").find((c) => c[1] === "15849")?.[3]).toBe("1.2")
+  expect(dental.has("15849")).toBe(false)
 })
 
 it("la lista oficial conserva sus denominaciones y la biblioteca tiene nombres propios", () => {
   const byCode = new Map(
-    linesOf("procedure_codes_cpms.csv", "system_key,code,version,display").map((l) => {
-      const [, code, , display] = head(l, 4)
-      return [code, display] as const
-    }),
+    codesOf("procedure_codes_cpms.csv").map(([, code, , , display]) => [code, display] as const),
   )
   expect(byCode.get("D0170")).toContain("centrada en el problema")
   expect(byCode.get("D2335")).toContain("ángulo incisal")

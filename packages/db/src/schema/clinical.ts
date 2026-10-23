@@ -988,6 +988,12 @@ export const procedureCode = catalogSchema.table(
     code: text("code").notNull(),
     version: text("version").notNull(),
     display: text("display").notNull(),
+    /**
+     * La sección oficial donde la lista pone el código, tal como la numera el
+     * publicador (sección «1.3» del CPMS, capítulo «23» de la CUPS y de la
+     * CIE-9-MC, grupo «25» de FONASA). Nula donde la lista no tiene secciones.
+     */
+    section: text("section"),
     isActive: boolean("is_active").notNull().default(true),
     replacedBy: text("replaced_by"),
   },
@@ -995,6 +1001,26 @@ export const procedureCode = catalogSchema.table(
     primaryKey({ columns: [table.systemKey, table.code, table.version] }),
     index("procedure_code_system_code_idx").on(table.systemKey, table.code),
   ],
+)
+
+/**
+ * Los códigos de cada lista que usa un producto (ADR 0079): las listas
+ * oficiales se cargan completas y cada producto dice los suyos (odentIA, los
+ * odontológicos). El buscador del código de un servicio propio ofrece solo
+ * estos. Va por código, sin versión: una edición nueva conserva la elección y
+ * la semilla rechaza un código que ya no exista en la edición vigente. Global,
+ * sin RLS y de solo lectura para el rol app.
+ */
+export const procedureCodeProduct = catalogSchema.table(
+  "procedure_code_product",
+  {
+    systemKey: text("system_key")
+      .notNull()
+      .references(() => procedureCodeSystem.key),
+    code: text("code").notNull(),
+    product: text("product").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.systemKey, table.product, table.code] })],
 )
 /**
  * Ediciones importadas del catálogo oficial (una fila por sistema y versión).

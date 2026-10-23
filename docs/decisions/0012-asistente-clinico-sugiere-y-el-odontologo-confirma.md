@@ -53,4 +53,4 @@ Una prueba con ChatGPT 6 en la pantalla real perdió, sin aviso, «la 36 con car
 
 ## Referencias
 
-- `packages/services/src/dental/encounter-dictation.ts`, `packages/agent/src/dental/dictation.ts` y `eval-dictado.ts`, `apps/api/src/routes/encounter-dictation.ts`, `apps/dental-clinic/src/components/patient/dictation-*.ts(x)`, operaciones `atencion.nota`, `atencion.diagnostico`, `plan.indicacion`, `control.crear` y `odontograma.hallazgo`, migraciones `0054` y `0085`.
+- `packages/services/src/dental/encounter-dictation.ts`, `packages/agent/src/dental/dictation.ts` y `eval-dictado.ts`, `apps/api/src/routes/encounter-dictation.ts`, `apps/dental-clinic/src/components/patient/dictation-*.ts(x)`, operaciones `atencion.nota`, `atencion.diagnostico`, `plan.indicacion`, `control.crear` y `odontograma.hallazgo`, migraciones `0054` y `0087`.

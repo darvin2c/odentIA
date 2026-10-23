@@ -16,10 +16,17 @@ import { gotoHydrated } from "./hydration"
  */
 
 async function observe(page: Page, info: TestInfo, name: string) {
-  // Lo que se sale del ancho, con su nombre, para saber qué arreglar.
+  // Lo que se sale del ancho, con su nombre, para saber qué arreglar. Lo que
+  // queda dentro de una franja que se desliza (las pestañas) no empuja la página.
   const wide = await page.evaluate(() =>
     [...document.querySelectorAll("body *")]
       .filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+      .filter((el) => {
+        for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+          if (["auto", "scroll", "hidden", "clip"].includes(getComputedStyle(up).overflowX)) return false
+        }
+        return true
+      })
       .slice(0, 5)
       .map(
         (el) =>

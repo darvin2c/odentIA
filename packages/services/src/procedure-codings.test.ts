@@ -1,7 +1,7 @@
 import { clinicalProfileFor } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { procedureCode, procedureCodeSystem, treatmentTemplate } from "@odentia/db/schema/clinical"
+import { procedureCode, procedureCodeProduct, procedureCodeSystem, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { dentalTemplateRule } from "@odentia/db/schema/dental"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -77,6 +77,11 @@ async function seedGlobals(): Promise<{ fluorId: string; resinaId: string }> {
         display: "Inactivación de caries dental",
       },
     ])
+    .onConflictDoNothing()
+  // Los códigos que usa odentIA (ADR 0079): la lista completa trae más.
+  await ownerDb
+    .insert(procedureCodeProduct)
+    .values(["D1208", "D1206", "D2330", "D2391", "D1352"].map((code) => ({ systemKey: "CPMS", code, product: "dental" })))
     .onConflictDoNothing()
   await ownerDb
     .insert(treatmentTemplate)
@@ -509,6 +514,11 @@ it("el rol app no escribe los catálogos globales", async () => {
         version: VERSION,
         display: "Intruso",
       }),
+    ),
+  ).rejects.toThrow()
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.insert(procedureCodeProduct).values({ systemKey: "CPMS", code: "D9999", product: "dental" }),
     ),
   ).rejects.toThrow()
 })

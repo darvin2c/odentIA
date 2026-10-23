@@ -114,16 +114,16 @@ const FURCATION_WORDS: Record<string, string> = {
 function useToothSaver(patientId: string, chartId: string, latest: React.RefObject<CaptureState>) {
   const queryClient = useQueryClient()
   const pending = useRef(new Set<number>())
-  const draining = useRef(false)
+  /** El guardado en curso: quien llega mientras tanto lo espera, no lo da por hecho. */
+  const running = useRef<Promise<void> | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [state, setState] = useState<SaveState>("saved")
   const [error, setError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
 
-  const drain = useCallback(async () => {
-    if (draining.current) return
-    draining.current = true
-    try {
+  const drain = useCallback((): Promise<void> => {
+    if (running.current) return running.current
+    const run = (async () => {
       while (pending.current.size > 0) {
         const tooth = pending.current.values().next().value as number
         pending.current.delete(tooth)
@@ -149,9 +149,11 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
       void queryClient.invalidateQueries({ queryKey: periodontalKeys.chart(patientId, chartId) })
       // La movilidad se ve en el odontograma (M1–M3): se vuelve a pedir.
       void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
-    } finally {
-      draining.current = false
-    }
+    })().finally(() => {
+      running.current = null
+    })
+    running.current = run
+    return run
   }, [chartId, latest, patientId, queryClient])
 
   const schedule = useCallback(
@@ -178,7 +180,9 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
 
   const flush = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current)
+    // Primero termina lo que ya se estaba guardando; luego, lo que quedó (una pieza escrita mientras tanto).
     await drain()
+    if (pending.current.size > 0) await drain()
     return pending.current.size === 0
   }, [drain])
 

@@ -170,8 +170,9 @@ for (const viewport of [
         await menu.focus()
         await page.keyboard.press("Enter")
         await expect(page.getByRole("dialog", { name: "Menú de navegación" })).toBeVisible()
+        // El foco entra al menú por su primer control: el selector de clínica.
         await expect(
-          page.getByRole("dialog").getByRole("link", { name: "Inicio", exact: true }),
+          page.getByRole("dialog").getByRole("button", { name: /Menú de la clínica$/ }),
         ).toBeFocused()
         await audit(page, info, "inicio-menu")
         await page.keyboard.press("Escape")
@@ -246,8 +247,8 @@ for (const viewport of [
       await expect(newPatient).not.toBeVisible()
       await expect(create).toBeFocused()
 
-      // Quien aún no es paciente se agrega desde el menú del botón: «Nuevo contacto».
-      await page.getByRole("button", { name: "Más formas de agregar a alguien", exact: true }).click()
+      // Quien aún no es paciente se agrega desde el menú de la cabecera: «Nuevo contacto».
+      await page.getByRole("button", { name: "Más opciones", exact: true }).click()
       await page.getByRole("menuitem", { name: /^Nuevo contacto/ }).click()
       const dialog = page.getByRole(surfaceRole, { name: "Nuevo contacto", exact: true })
       await expect(dialog).toBeVisible()

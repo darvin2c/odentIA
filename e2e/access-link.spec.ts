@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test"
-import { PANEL, panelPattern } from "./env"
+import { PANEL, panelPattern, tenantPattern } from "./env"
 import { api, expect, test } from "./fixtures"
-import { gotoHydrated } from "./hydration"
+import { gotoHydrated, waitForHydration } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 const NEW_PASSWORD = "una-clave-nueva-larga"
@@ -90,9 +90,13 @@ for (const viewport of [
         await again.getByRole("button", { name: "Entrar", exact: true }).click()
         // Entró: ya no está en la pantalla de entrar (el patrón de «/» también coincide con /login).
         await expect(again).not.toHaveURL(/\/login/)
+        // Termina de llegar a su clínica antes de seguir: la redirección no debe cortar lo que viene.
+        await expect(again).toHaveURL(tenantPattern(owner.org.slug, "/"))
+        await waitForHydration(again)
         await expect(again.getByRole("heading", { level: 1 })).toBeVisible()
-        await api(again, "POST", "/api/auth/sign-out", undefined, {})
-        await gotoHydrated(again, `${PANEL}/login`)
+        expect((await api(again, "POST", "/api/auth/sign-out", undefined, {})).status).toBe(200)
+        // Sin sesión, la app puede llevar a «Entrar» por su cuenta y cortar esta navegación: se intenta otra vez.
+        await gotoHydrated(again, `${PANEL}/login`).catch(() => gotoHydrated(again, `${PANEL}/login`))
         await expect(again.getByRole("heading", { level: 1 })).toContainText(
           `, ${owner.user.firstName}.`,
         )

@@ -75,12 +75,12 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await expect(preview).toContainText("Al encenderlo solo hace lo que ya está prendido.")
   // Con una línea prendida ya no dice que al encenderlo no hace nada.
   await expect(preview).not.toContainText("Al encenderlo no hace nada por su cuenta.")
-  // Las otras siete, apagadas y sin poder prenderse mientras él esté apagado.
+  // Las otras ocho, apagadas y sin poder prenderse mientras él esté apagado.
   const ready = page.getByRole("region", { name: "Listas para activar" })
-  await expect(ready.getByRole("switch")).toHaveCount(7)
+  await expect(ready.getByRole("switch")).toHaveCount(8)
   for (const item of await ready.getByRole("switch").all()) await expect(item).toBeDisabled()
   // Cada línea dice quién lo hace, con palabras. «Seguimiento sin responsable» ya no existe: la oportunidad sin responsable es de Recepción.
-  await expect(ready.getByText("Lo hace Argos")).toHaveCount(4)
+  await expect(ready.getByText("Lo hace Argos")).toHaveCount(5)
   await expect(ready.getByText("Le toca a una persona")).toHaveCount(3)
   await expect(ready).not.toContainText("Seguimiento sin responsable")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -181,7 +181,8 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // --- Tareas: lo que deja el administrador se reconoce por su origen y por qué, y lleva a la persona ---
   await gotoHydrated(page, tenant(org.slug, "/tasks"))
   // Va al equipo clínico: la dueña (área administración) la ve en «Toda la clínica».
-  await page.getByRole("button", { name: "Toda la clínica" }).click()
+  await page.getByRole("button", { name: "Alcance", exact: true }).click()
+  await page.getByText("Toda la clínica", { exact: true }).click()
   const task = page.getByRole("row").filter({ hasText: "Revisar y firmar la atención de Mariana Soto" })
   await expect(task).toContainText("La dejó Argos")
   await expect(task.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
@@ -215,7 +216,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await send.click()
   const unknown = page.getByRole("status").filter({ hasText: "No reconocí una línea" })
   await expect(unknown).toContainText("envíala como pedido desde Ayuda")
-  expect((await admin()).lines).toHaveLength(8)
+  expect((await admin()).lines).toHaveLength(9)
   // Y se puede enviar a odentIA tal cual, diciendo qué viaja con el pedido.
   await expect(unknown).toContainText("Se envía lo que escribiste, con el nombre de tu clínica, tu rol, esta pantalla y la versión de odentIA.")
   await unknown.getByRole("button", { name: "Enviarlo a odentIA como pedido" }).click()
@@ -313,7 +314,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(dialog).toContainText("Lo ya hecho se conserva")
   await dialog.getByRole("button", { name: "Eliminar" }).click()
   await expect(page.getByText("Una persona cancela su cita")).toHaveCount(0)
-  expect((await admin()).lines).toHaveLength(8)
+  expect((await admin()).lines).toHaveLength(9)
   // Una que viene armada no se elimina.
   expect((await api(page, "DELETE", "/api/agent/admin/lines/cobranza_vencida", org.slug)).status).toBe(400)
 })
@@ -337,9 +338,9 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(14)
+  await expect(approved.getByRole("listitem")).toHaveCount(16)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 13 en revisión")
+  await expect(approved).toContainText("1 aprobado · 15 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v2")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

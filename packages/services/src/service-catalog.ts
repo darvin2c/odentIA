@@ -29,8 +29,8 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { orgDentalProfile } from "./dental/profile.js"
 import { saveServiceFinding, serviceLeavesFinding, type TemplateDental, templateDentalColumns } from "./dental/service-finding.js"
-import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
-import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn } from "./procedure-codings.js"
+import { orgClinicalProfile, orgProduct, orgProfileRequired } from "./locale.js"
+import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn, usedByProduct } from "./procedure-codings.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -271,6 +271,7 @@ async function assertTemplateUsable(
  */
 async function assertOwnCode(
   tx: Db,
+  orgId: string,
   list: ServiceListProfile | null,
   code: string | null | undefined,
   options: { creating: boolean },
@@ -285,7 +286,8 @@ async function assertOwnCode(
     if (list.required) throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
-  const coding = await currentProcedureCode(tx, list.system, value)
+  // Solo los códigos que usa el producto de la clínica: la lista está completa (ADR 0079).
+  const coding = await currentProcedureCode(tx, list.system, value, await orgProduct(tx, orgId))
   if (!coding) throw validation(`«${value}» no es un ${list.codeName} vigente`)
   return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
@@ -476,7 +478,8 @@ export async function listTemplates(
 /**
  * El buscador del código oficial de un servicio propio (decisión 3 del
  * lienzo del issue 40): la edición vigente de la lista del país, por nombre o
- * por código, sin tildes. Sin lista, nada.
+ * por código, sin tildes, entre los códigos que usa el producto de la clínica
+ * (ADR 0079: en odentIA, los odontológicos). Sin lista, nada.
  */
 export async function searchOfficialCodes(
   tx: Db,
@@ -507,6 +510,7 @@ export async function searchOfficialCodes(
         eq(procedureCode.systemKey, list.system),
         eq(procedureCode.isActive, true),
         eq(procedureCatalogRelease.isCurrent, true),
+        usedByProduct(tx, list.system, await orgProduct(tx, orgId)),
         q ? foldedWordsMatch([procedureCode.code, procedureCode.display], q) : undefined,
       ),
     )
@@ -761,7 +765,7 @@ export async function createService(
       billingMode: assertBillingMode(input.billingMode),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
-      ...(await assertOwnCode(tx, list, input.officialCode, { creating: true })),
+      ...(await assertOwnCode(tx, orgId, list, input.officialCode, { creating: true })),
       isActive: input.isActive ?? true,
     }
     leaves = await assertLeavesFinding(tx, orgId, input.leavesFinding, scope)
@@ -851,7 +855,7 @@ export async function updateService(
             : null
       Object.assign(
         set,
-        await assertOwnCode(tx, list, patch.officialCode !== undefined ? patch.officialCode : inherited, {
+        await assertOwnCode(tx, orgId, list, patch.officialCode !== undefined ? patch.officialCode : inherited, {
           creating: true,
         }),
       )
@@ -907,7 +911,7 @@ export async function updateService(
     if ((set.source ?? current.source) === "template") {
       throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
     }
-    Object.assign(set, await assertOwnCode(tx, list, patch.officialCode, { creating: false }))
+    Object.assign(set, await assertOwnCode(tx, orgId, list, patch.officialCode, { creating: false }))
     fields.push("officialCode")
   }
   if (patch.priceCents !== undefined) {

@@ -66,7 +66,7 @@ test("bandeja: el mismo texto cinco veces va a Spam y «No es spam» la devuelve
   // El quinto igual en una hora la manda a Spam: lo cuenta su botón, no las pestañas.
   await expect.poll(async () => (await summaryOf(page, org.slug)).spam, { timeout: 30_000 }).toBe(1)
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
-  const spamButton = page.getByRole("button", { name: /^Spam/ })
+  const spamButton = page.getByRole("tab", { name: /^Spam/ })
   await expect(spamButton).toContainText("1")
   // «Bloqueados» queda a la vista junto a Spam, sin que los filtros lo tapen.
   await expect(page.getByRole("tab", { name: "Bloqueados" })).toBeInViewport()

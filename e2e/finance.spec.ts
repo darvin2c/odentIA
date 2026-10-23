@@ -24,6 +24,26 @@ for (const viewport of [
     await page.setViewportSize(viewport)
     const shot = (name: string) =>
       page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true })
+    // En el escritorio cada fila trae «Cobrar»; en el teléfono se cobra desde la barra de abajo, eligiendo a la persona.
+    const phone = viewport.width < 640
+    const collectLucia = async () => {
+      if (!phone) {
+        await page.getByRole("main").getByRole("button", { name: "Cobrar a Lucía Quispe" }).click()
+        return
+      }
+      await page.getByRole("main").getByRole("button", { name: "Cobrar", exact: true }).last().click()
+      await surface(page, { name: "Cobrar", exact: true }).getByLabel("Paciente", { exact: true }).fill("Lucía")
+      await page.getByRole("option", { name: /Lucía Quispe/ }).click()
+    }
+    // En el escritorio «Cerrar caja» va en ⋯ de la cabecera; en el teléfono, en la barra de abajo.
+    const openClose = async () => {
+      if (phone) {
+        await page.getByRole("button", { name: "Cerrar caja", exact: true }).first().click()
+        return
+      }
+      await page.getByRole("button", { name: "Más opciones", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Cerrar caja" }).click()
+    }
 
     await gotoHydrated(page, tenant(slug, "/finance"))
     const main = page.getByRole("main")
@@ -31,7 +51,7 @@ for (const viewport of [
     await shot("caja-con-deuda")
 
     // Cobro en dos medios: 200 en efectivo y 250 por otro medio, en un solo ticket.
-    await main.getByRole("button", { name: "Cobrar a Lucía Quispe" }).click()
+    await collectLucia()
     const drawer = surface(page, { name: "Cobrar", exact: true })
     await expect(drawer.getByLabel("Importe", { exact: true })).toHaveValue("450.00")
     await drawer.getByRole("button", { name: "Añadir otro medio" }).click()
@@ -72,7 +92,7 @@ for (const viewport of [
 
     // Se vuelve a cobrar una parte en efectivo y se cierra la caja contando eso.
     await gotoHydrated(page, tenant(slug, "/finance"))
-    await page.getByRole("main").getByRole("button", { name: "Cobrar a Lucía Quispe" }).click()
+    await collectLucia()
     const second = surface(page, { name: "Cobrar", exact: true })
     await second.getByLabel("Importe", { exact: true }).fill("100")
     await second.getByRole("button", { name: /^Cobrar S\/\s*100\.00/ }).click()
@@ -93,7 +113,7 @@ for (const viewport of [
     await expect(page.getByRole("tab", { name: "Comisiones" })).toHaveAttribute("aria-selected", "true")
     await shot("comisiones")
     await gotoHydrated(page, tenant(slug, "/finance"))
-    await page.getByRole("button", { name: "Cerrar caja", exact: true }).first().click()
+    await openClose()
     const close = surface(page, { name: /^Cerrar caja/ })
     await close.getByLabel("1. Efectivo que contaste").fill("100")
     await shot("cerrar-caja")

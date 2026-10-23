@@ -1,5 +1,5 @@
 {
-  "id": "71f62371-b480-4b8f-8146-b6b80c9243ea",
+  "id": "de80db09-89ef-4564-8f6f-ab86cce65445",
   "prevId": "e6751931-062d-47b9-bf6f-0a7da7e46e65",
   "version": "7",
   "dialect": "postgresql",
@@ -12248,7 +12248,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -19140,6 +19140,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "section": {
+          "name": "section",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -19200,6 +19206,61 @@
             "system_key",
             "code",
             "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "catalog.procedure_code_product": {
+      "name": "procedure_code_product",
+      "schema": "catalog",
+      "columns": {
+        "system_key": {
+          "name": "system_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product": {
+          "name": "product",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "procedure_code_product_system_key_procedure_code_system_key_fk": {
+          "name": "procedure_code_product_system_key_procedure_code_system_key_fk",
+          "tableFrom": "procedure_code_product",
+          "tableTo": "procedure_code_system",
+          "schemaTo": "catalog",
+          "columnsFrom": [
+            "system_key"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "procedure_code_product_system_key_product_code_pk": {
+          "name": "procedure_code_product_system_key_product_code_pk",
+          "columns": [
+            "system_key",
+            "product",
+            "code"
           ]
         }
       },

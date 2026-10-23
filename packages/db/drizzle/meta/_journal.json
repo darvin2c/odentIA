@@ -600,8 +600,22 @@
     {
       "idx": 85,
       "version": "7",
-      "when": 1792732064381,
-      "tag": "0085_dictado_odontograma",
+      "when": 1792728317099,
+      "tag": "0085_listas_oficiales_completas",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1792728325001,
+      "tag": "0086_listas_oficiales_completas_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792762549327,
+      "tag": "0087_dictado_odontograma",
       "breakpoints": true
     }
   ]
