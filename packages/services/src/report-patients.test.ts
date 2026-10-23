@@ -20,7 +20,7 @@ import {
   treatmentPlan,
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, setAppointmentStatus } from "./appointments.js"
@@ -41,6 +41,7 @@ import {
   returnedMany,
 } from "./report-patients.js"
 import { getReportSummary } from "./report-summary.js"
+import { INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -412,10 +413,46 @@ it("si vuelven: activos en 18 meses, volvieron en el año y sin venir hace más 
   expect(missed.rows[0]).not.toHaveProperty("channel")
   // Con una sede elegida, lo que no es de una sede lo dice.
   const branchTab = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09", branchId: c.branchId }, NOW))
-  expect(branchTab.wholeClinic).toEqual(["funnel", "channels", "acceptance", "controls"])
+  expect(branchTab.wholeClinic).toEqual(["funnel", "channels", "acceptance", "controls", "invites"])
   // Sus listas también: los controles son de toda la clínica; «Sin venir», de la sede de su última cita.
   const branchList = (name: "controls_missed" | "lapsed") =>
     c.run((tx) => getPatientReportList(tx, c.orgId, { period: "2026-09", branchId: c.branchId, list: name }, NOW))
   expect((await branchList("controls_missed")).wholeClinic).toBe(true)
   expect((await branchList("lapsed")).wholeClinic).toBe(false)
+})
+
+it("volvieron tras la invitación: invitados del periodo y cuántos vinieron después, a hoy (#139)", async () => {
+  const c = await clinic()
+  const [back, notYet, before, twice] = [await c.person("Volvió"), await c.person("Aún no"), await c.person("Vino antes"), await c.person("Dos veces")]
+  const invite = (patientId: string, at: string, via = "agente") =>
+    ownerDb.insert(auditEvent).values({ organizationId: c.orgId, action: INVITED_TO_RETURN_ACTION, entity: "patient", entityId: patientId, metadata: { via }, createdAt: new Date(at) })
+  // Invitada en septiembre y vino en octubre: cuenta en septiembre, aunque volvió después.
+  await invite(back.patientId, "2026-09-05T15:00:00Z")
+  await c.visit(back.patientId, "2026-10-02T15:00:00Z", "atendida")
+  // Invitada en septiembre y tiene cita, pero todavía no viene.
+  await invite(notYet.patientId, "2026-09-08T15:00:00Z", "telefono")
+  await c.visit(notYet.patientId, "2026-10-20T15:00:00Z", "programada")
+  // Su cita atendida fue antes de la invitación: no volvió por ella.
+  await c.visit(before.patientId, "2026-09-01T15:00:00Z", "atendida")
+  await invite(before.patientId, "2026-09-10T15:00:00Z")
+  // Dos invitaciones en el periodo: una persona, desde la primera.
+  await invite(twice.patientId, "2026-09-03T15:00:00Z")
+  await invite(twice.patientId, "2026-09-20T15:00:00Z", "telefono")
+  await c.visit(twice.patientId, "2026-09-12T15:00:00Z", "atendida")
+
+  const tab = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(tab.invites).toEqual({ invited: 4, returned: 2 })
+  // La lista dice los mismos que la cifra, con la cita en que volvieron, la más reciente primero.
+  const list = await c.run((tx) => getPatientReportList(tx, c.orgId, { period: "2026-09", list: "invited_returned" }, NOW))
+  expect(list.total).toBe(2)
+  expect(list.rows.map((row) => [row.personName, row.at])).toEqual([
+    ["Volvió", "2026-10-02T15:00:00.000Z"],
+    ["Dos veces", "2026-09-12T15:00:00.000Z"],
+  ])
+  // Un periodo sin invitaciones no cuenta las de otro.
+  const august = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-08" }, NOW))
+  expect(august.invites).toEqual({ invited: 0, returned: 0 })
+  // Las invitaciones no son de una sede.
+  const branchList = await c.run((tx) => getPatientReportList(tx, c.orgId, { period: "2026-09", branchId: c.branchId, list: "invited_returned" }, NOW))
+  expect(branchList.wholeClinic).toBe(true)
 })

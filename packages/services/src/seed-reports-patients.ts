@@ -14,12 +14,19 @@
  * - «Cómo nos conoció» de la lista (decisión 3); algunos no lo dijeron.
  * - Un control de mantenimiento seis meses después de la primera visita: lo
  *   hizo quien volvió en esas semanas; los demás siguen pendientes o se cancelaron.
+ * - «Invitar a volver» (#139): de quienes volvieron en los últimos cuatro meses
+ *   tras más de seis sin venir, a la mayoría se la invitó dos o tres semanas
+ *   antes; y a algunos de los que hoy siguen sin venir, en los últimos tres
+ *   meses. Por el agente o con «Ya la invité».
  *
  * Determinista: el orden es el de los números de historia y de las conversaciones.
  */
 import type { Db } from "@odentia/db"
 import { clinicalFollowUp } from "@odentia/db/schema/clinical"
+import { auditEvent } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
+import { LAPSED_MONTHS, lapsedSql } from "./report-patients.js"
+import { INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import { chunks, generator } from "./seed-reports.js"
 
 export interface ReportsPatientsSeedInput {
@@ -55,7 +62,7 @@ const CONTROL_DAYS = 182
 export async function seedReportsPatients(
   tx: Db,
   input: ReportsPatientsSeedInput,
-): Promise<{ moved: number; channels: number; referrals: number; controls: number }> {
+): Promise<{ moved: number; channels: number; referrals: number; controls: number; invitations: number }> {
   const { orgId } = input
   const random = generator(20_261_118)
 
@@ -197,5 +204,40 @@ export async function seedReportsPatients(
   }
   for (const batch of chunks(controls)) await tx.insert(clinicalFollowUp).values(batch)
 
-  return { moved: moved.count ?? 0, channels, referrals: patients.length, controls: controls.length }
+  // --- Invitar a volver -------------------------------------------------------------------------
+  const invitations: Array<typeof auditEvent.$inferInsert> = []
+  const invite = (patientId: string, at: number) => {
+    const byPhone = random.chance(0.3)
+    invitations.push({
+      organizationId: orgId,
+      actorUserId: byPhone ? input.ownerUserId : null,
+      action: INVITED_TO_RETURN_ACTION,
+      entity: "patient",
+      entityId: patientId,
+      metadata: { via: byPhone ? "telefono" : "agente" },
+      createdAt: new Date(at),
+    })
+  }
+  // Volvieron tras más de seis meses: su cita atendida y la anterior.
+  const returns = await tx.execute<{ patient_id: string; starts_at: string }>(sql`
+    select v.patient_id, v.starts_at from (
+      select a.patient_id, a.starts_at, lag(a.starts_at) over (partition by a.patient_id order by a.starts_at, a.id) as before
+      from appointment a where a.organization_id = ${orgId} and a.status = 'atendida'
+    ) v
+    where v.before < v.starts_at - make_interval(months => ${LAPSED_MONTHS})
+      and v.starts_at > now() - interval '4 months' and v.starts_at <= now()
+    order by v.starts_at, v.patient_id`)
+  for (const back of returns) {
+    if (random.chance(0.75)) invite(back.patient_id, new Date(back.starts_at).getTime() - random.int(14, 24) * DAY_MS)
+  }
+  // Siguen sin venir: invitados hace poco, todavía sin respuesta.
+  const lapsed = await tx.execute<{ patient_id: string }>(sql`
+    with ${lapsedSql(orgId, { branch: null, timezone: "UTC" }, new Date(now))}
+    select patient_id from lapsed order by patient_id`)
+  for (const row of lapsed) {
+    if (random.chance(0.35)) invite(row.patient_id, now - random.int(3, 90) * DAY_MS)
+  }
+  for (const batch of chunks(invitations)) await tx.insert(auditEvent).values(batch)
+
+  return { moved: moved.count ?? 0, channels, referrals: patients.length, controls: controls.length, invitations: invitations.length }
 }

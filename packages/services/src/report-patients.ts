@@ -31,6 +31,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { uncountedSql } from "./conversation-state.js"
 import { budgetAcceptanceMany } from "./report-summary.js"
 import { lastMonths } from "./report-periods.js"
+import { INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import {
   at,
   bySpan,
@@ -345,6 +346,38 @@ export async function lapsedCount(tx: Db, orgId: string, scope: ReportScope): Pr
   return row?.count ?? 0
 }
 
+/**
+ * «Volvieron tras la invitación» (#139): los pacientes invitados a volver en
+ * el tramo, por el agente o con «Ya la invité» (`INVITED_TO_RETURN_ACTION`,
+ * contado desde su primera invitación del tramo), y su primera cita atendida
+ * después de esa invitación, a hoy. Da
+ * `invited(patient_id, invited_at, returned_id, returned_at)`; `returned_id`
+ * es nulo si todavía no volvió. Las invitaciones no son de una sede.
+ */
+function invitedSql(orgId: string, span: Pick<Span, "start" | "end">): SQL {
+  return sql`first_invite as (
+      select ae.entity_id as patient_id, min(ae.created_at) as invited_at from audit_event ae
+      where ae.organization_id = ${orgId} and ae.action = ${INVITED_TO_RETURN_ACTION} and ae.entity = 'patient'
+        and ae.created_at >= ${at(span.start)} and ae.created_at < ${at(span.end)}
+      group by ae.entity_id
+    ), invited as (
+      select i.patient_id, i.invited_at, back.id as returned_id, back.starts_at as returned_at
+      from first_invite i
+      left join lateral (
+        select a.id, a.starts_at from appointment a
+        where a.organization_id = ${orgId} and a.patient_id::text = i.patient_id and a.status = 'atendida' and a.starts_at > i.invited_at
+        order by a.starts_at, a.id limit 1
+      ) back on true
+    )`
+}
+
+export async function invitedToReturnCount(tx: Db, orgId: string, span: Pick<Span, "start" | "end">): Promise<{ invited: number; returned: number }> {
+  const [row] = await tx.execute<{ invited: number; returned: number }>(sql`
+    with ${invitedSql(orgId, span)}
+    select count(*)::int as invited, count(returned_id)::int as returned from invited`)
+  return { invited: row?.invited ?? 0, returned: row?.returned ?? 0 }
+}
+
 /** El tramo terminó hace menos de `FUNNEL_OPEN_DAYS` días (o todavía corre): sus personas aún pueden agendar. */
 function stillOpen(end: Date, now: Date): boolean {
   return now.getTime() - end.getTime() < FUNNEL_OPEN_DAYS * DAY_MS
@@ -376,7 +409,7 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
   const spans: Span[] = [window, window.previous]
   // «Volvieron en el año» lleva su línea de 12 meses, que terminan en el último mes del periodo.
   const months = lastMonths(scope.timezone, window.to, 12, window.end)
-  const [funnel, fresh, acceptance, active, returned, referral, controls, previousControls, lapsed] = [
+  const [funnel, fresh, acceptance, active, returned, referral, controls, previousControls, lapsed, invites] = [
     await funnelMany(tx, orgId, spans, now),
     await newPatientsMany(tx, orgId, scope, spans),
     await budgetAcceptanceMany(tx, orgId, spans),
@@ -386,6 +419,7 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
     await controlTotals(tx, orgId, window),
     await controlTotals(tx, orgId, window.previous),
     await lapsedCount(tx, orgId, scope),
+    await invitedToReturnCount(tx, orgId, window),
   ]
   const nth = <T>(list: T[], index: number): T => list[index] as T
   const current = nth(funnel, 0)
@@ -411,8 +445,10 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
     controls: { current: controls, previous: previousControls },
     returned: { current: nth(returned, 0), previous: nth(returned, 1), months: returned.slice(2) },
     lapsed: { count: lapsed, months: LAPSED_MONTHS },
-    /** Personas, conversaciones, presupuestos y controles no son de una sede. */
-    wholeClinic: scope.branch ? (["funnel", "channels", "acceptance", "controls"] as const) : ([] as const),
+    /** Invitados a volver en el periodo y cuántos de ellos ya vinieron, a hoy. */
+    invites,
+    /** Personas, conversaciones, presupuestos, controles e invitaciones no son de una sede. */
+    wholeClinic: scope.branch ? (["funnel", "channels", "acceptance", "controls", "invites"] as const) : ([] as const),
   }
 }
 
@@ -434,6 +470,7 @@ export const PATIENT_REPORT_LISTS = [
   "funnel_stopped",
   "controls_missed",
   "lapsed",
+  "invited_returned",
 ] as const
 export type PatientReportListKey = (typeof PATIENT_REPORT_LISTS)[number]
 
@@ -455,7 +492,7 @@ export type PatientReportListRow = Omit<ReportListRow, "patientId"> & {
 const LIST_LIMIT = 200
 
 /** Quiénes están en cada paso del embudo o se cayeron en él. */
-const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "lapsed">, SQL> = {
+const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "lapsed" | "invited_returned">, SQL> = {
   funnel_sought: sql`true`,
   funnel_booked: sql`f.booked`,
   funnel_came: sql`f.came`,
@@ -513,6 +550,21 @@ export async function getPatientReportList(
         left join "user" u on u.id = v.professional_user_id
         order by v.starts_at, v.patient_id limit ${limit}`)),
     ]
+  } else if (query.list === "invited_returned") {
+    // Los invitados del periodo que ya volvieron, con la cita en que volvieron.
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        with ${invitedSql(orgId, window)}
+        select a.id::text as id, i.returned_at as at, p.id as "patientId", pp.id as "personId", pp.display_name as "personName",
+          a.service_name as title, u.name as "professionalName", br.name as "branchName",
+          false as "hasNextAppointment", null::text as cents, null::text as currency, null::uuid as "conversationId", count(*) over()::int as total
+        from invited i
+        join appointment a on a.id = i.returned_id and a.organization_id = ${orgId}
+        join patient p on p.id = a.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        left join branch br on br.id = a.branch_id and br.organization_id = ${orgId}
+        left join "user" u on u.id = a.professional_user_id
+        order by i.returned_at desc, a.id limit ${limit}`)),
+    ]
   } else {
     rows = [
       ...(await tx.execute<Row>(sql`
@@ -531,7 +583,7 @@ export async function getPatientReportList(
   return {
     ...reportHead(scope),
     list: query.list,
-    /** Las personas del embudo y los controles no son de una sede: con una sede elegida, la lista es de toda la clínica. */
+    /** Las personas del embudo, los controles y las invitaciones no son de una sede: con una sede elegida, la lista es de toda la clínica. */
     wholeClinic: scope.branch !== null && query.list !== "lapsed",
     /** Los plazos con que se arma la lista, para decirlos en «Cómo se calcula». */
     rules: { stoppedDays: STOPPED_WRITING_DAYS, lapsedMonths: LAPSED_MONTHS },

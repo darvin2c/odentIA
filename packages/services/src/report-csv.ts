@@ -100,6 +100,7 @@ const LIST_TITLES: Record<string, string> = {
   funnel_stopped: "Dejaron de escribir",
   controls_missed: "No vinieron a su control",
   lapsed: "Sin venir hace meses",
+  invited_returned: "Volvieron tras la invitación",
 }
 
 /** Los teléfonos de las personas de una lista, por paciente o por conversación. */

@@ -37,6 +37,10 @@ interface ModelPrice {
  *   USD 0,04 y 0,111 por hora de audio, de console.groq.com/docs/models; cobra
  *   como mínimo 10 s por audio (console.groq.com/docs/speech-to-text). Ambas
  *   leídas el 2026-10-20.
+ * - gpt-transcribe (el de producción desde el 2026-10-18, darvin2c/odentIA#158):
+ *   USD 0,0045 por minuto, de developers.openai.com/api/docs/pricing, leída el
+ *   2026-10-23. No publica precio por tokens: si algún día responde con tokens,
+ *   el uso queda con costo null en vez de estimado.
  * - jev-1.13.0 (modelo de decisión de toda clínica, ADR 0047): el de
  *   docs.typesafe.ai/models, leído el 2026-10-17; la salida no se cobra.
  */
@@ -49,6 +53,7 @@ export const AI_PRICES: Record<string, ModelPrice> = {
   "gpt-4o-mini-transcribe": { input: 1.25, output: 5, perMinute: 0.003 },
   "whisper-large-v3-turbo": { perMinute: 0.04 / 60, minSeconds: 10 },
   "whisper-large-v3": { perMinute: 0.111 / 60, minSeconds: 10 },
+  "gpt-transcribe": { perMinute: 0.0045 },
 }
 
 /** Lo que reporta una llamada; los campos ausentes son los que el proveedor no entregó. */
