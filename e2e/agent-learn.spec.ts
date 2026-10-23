@@ -70,7 +70,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(learned).toContainText("Todavía no aprobaste ninguna lección")
   // Las pestañas dicen cuánto espera: una respuesta por revisar.
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
-  await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender\s*1/)
+  await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender · 1 pendiente/)
   await expect(tabs.getByRole("link", { name: /^Esperan su sí/ })).toHaveText("Esperan su sí")
   // De qué agente: Recepción con lo que espera; los que están apagados lo dicen y no se eligen.
   const agents = page.getByRole("tablist", { name: "De qué agente" })
@@ -266,7 +266,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   // --- Teléfono: pestañas en píldoras y secciones que se abren ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
-  await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender\s*1/)
+  await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender · 1 pendiente/)
   expect((await tabs.getByRole("link", { name: /^Aprender/ }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await expect(toApprove.getByRole("heading", { level: 2 })).toHaveText("Lecciones por aprobar · 1")
   const open = toApprove.getByRole("button", { name: /^Ver y aprobar/ })

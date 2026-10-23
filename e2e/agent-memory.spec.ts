@@ -90,7 +90,9 @@ test("memoria de la persona: agregar, corregir y quitar un dato; la última vez;
   // Teléfono: el mismo cajón, con controles tocables y sin desborde horizontal.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
-  await page.getByRole("button", { name: "Contexto", exact: true }).click()
+  // En el teléfono, el contexto se abre desde el menú de la conversación.
+  await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
+  await page.getByRole("menuitem", { name: "Contexto", exact: true }).click()
   await page.getByRole("button", { name: "Lo que recuerda Sofi" }).click()
   const remove = drawer.getByRole("button", { name: "Quitar: Prefiere citas por la mañana" })
   const removeBox = await remove.boundingBox()
