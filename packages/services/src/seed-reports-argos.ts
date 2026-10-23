@@ -2,7 +2,7 @@
  * Semilla de las fases 5 y 6 de Reportes (ADR 0070 y 0071): dos respuestas de
  * Argos fijadas en el Resumen y las metas de cobrado y de pacientes nuevos,
  * con una meta anterior para que se vea que cambiarla no reescribe los meses
- * pasados. Solo CLI de desarrollo (`seed-dev.ts`): nunca en pruebas ni CI.
+ * pasados. Solo CLI de desarrollo (`dental/seed-demo.ts`): nunca en pruebas ni CI.
  * No prende el resumen del lunes: nace apagado y lo prende cada persona.
  */
 import type { Db } from "@odentia/db"
