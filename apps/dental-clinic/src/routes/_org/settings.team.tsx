@@ -32,13 +32,14 @@ import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Plus, Users } from "lucide-react"
+import { CalendarCheck, Plus, Users } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { authClient } from "../../lib/auth-client"
+import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
 import { useMyRole, usePermission } from "../../lib/crm"
 import {
   fetchProfessionalProfiles,
@@ -146,6 +147,7 @@ function TeamPage() {
   const [roleEdit, setRoleEdit] = useState<{ member: Membership; role: OrgRole } | null>(null)
   const [confirmingRole, setConfirmingRole] = useState(false)
   const [removing, setRemoving] = useState<Membership | null>(null)
+  const [stoppingCalendar, setStoppingCalendar] = useState<Membership | null>(null)
   const [cancelling, setCancelling] = useState<Invitation | null>(null)
   const [editingProfile, setEditingProfile] = useState<ProfessionalProfile | null>(null)
 
@@ -256,6 +258,22 @@ function TeamPage() {
     onError: (cause) => toast.error(cause.message),
   })
 
+  // Quién comparte su agenda con su calendario (issue 46): la fila lo dice y quien configura lo apaga.
+  const calendarQuery = useQuery({ queryKey: TEAM_CALENDAR_KEY, queryFn: fetchTeamCalendarFeeds, enabled: canView })
+  const feedByUser = useMemo(
+    () => new Map((calendarQuery.data?.data ?? []).map((feed) => [feed.userId, feed])),
+    [calendarQuery.data],
+  )
+  const stopCalendarMutation = useMutation({
+    mutationFn: (member: Membership) => revokeTeamCalendarFeed(member.userId),
+    onSuccess: async (_result, member) => {
+      setStoppingCalendar(null)
+      toast.success(`${member.user.name} ya no comparte su agenda`)
+      await queryClient.invalidateQueries({ queryKey: TEAM_CALENDAR_KEY })
+    },
+    onError: (cause) => toast.error(cause.message),
+  })
+
   const cancelInvitationMutation = useMutation({
     mutationFn: async (invitation: Invitation) => {
       const { error } = await authClient.organization.cancelInvitation({
@@ -282,12 +300,29 @@ function TeamPage() {
       {
         accessorKey: "user.name",
         header: "Nombre",
-        cell: ({ row }) => (
-          <span className="flex items-center gap-2">
-            {row.original.user.name}
-            {row.original.userId === session.userId ? <Badge variant="secondary">Tú</Badge> : null}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const feed = feedByUser.get(row.original.userId)
+          return (
+            <span className="grid gap-0.5">
+              <span className="flex items-center gap-2">
+                {row.original.user.name}
+                {row.original.userId === session.userId ? <Badge variant="secondary">Tú</Badge> : null}
+              </span>
+              {feed ? (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <CalendarCheck aria-hidden className="size-3.5" />
+                  {[
+                    "Comparte su agenda",
+                    feed.lastUsedAt ? `consultada ${whenWords(feed.lastUsedAt)}` : null,
+                    feed.newUse ? "uso nuevo esta semana" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              ) : null}
+            </span>
+          )
+        },
       },
       {
         accessorKey: "user.email",
@@ -346,11 +381,17 @@ function TeamPage() {
           const isLastOwner = membership.role === "owner" && ownerCount <= 1
           // Un rol que quien administra no puede asignar tampoco lo puede quitar (el de Propietario).
           const outOfReach = !assignable.includes(membership.role as OrgRole)
+          // Apagar el calendario de otro es de quien configura el equipo; el propio, desde la Agenda.
+          const calendarItem =
+            canManage && !isSelf && feedByUser.has(membership.userId)
+              ? [{ key: "calendar", label: "Dejar de compartir su agenda", onSelect: () => setStoppingCalendar(membership) }]
+              : []
           const items =
             !canManage || isSelf || isLastOwner || outOfReach
-              ? profileItem
+              ? [...profileItem, ...calendarItem]
               : [
                   ...profileItem,
+                  ...calendarItem,
                   {
                     key: "role",
                     label: "Cambiar rol",
@@ -372,7 +413,7 @@ function TeamPage() {
         },
       },
     ],
-    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded],
+    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -630,6 +671,17 @@ function TeamPage() {
         confirmLabel="Quitar del equipo"
         variant="destructive"
         pending={removeMutation.isPending}
+      />
+
+      <ConfirmDialog
+        open={stoppingCalendar !== null}
+        onClose={() => setStoppingCalendar(null)}
+        onConfirm={() => stoppingCalendar && stopCalendarMutation.mutate(stoppingCalendar)}
+        title={`¿Dejar de compartir la agenda de ${stoppingCalendar?.user.name ?? ""}?`}
+        description="Su enlace deja de funcionar y sus citas desaparecen de su calendario (puede tardar: depende de su calendario). Si lo quiere de nuevo, lo crea en su Agenda."
+        confirmLabel="Dejar de compartir"
+        variant="destructive"
+        pending={stopCalendarMutation.isPending}
       />
 
       <ConfirmDialog

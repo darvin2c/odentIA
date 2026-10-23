@@ -168,23 +168,12 @@ function timezoneLines(timeZone: string, start: Date, end: Date): string[] {
   return lines
 }
 
-/**
- * El archivo `.ics` de un evento. Sin método es para guardar (la descarga);
- * con método es la invitación de un correo y lleva quién invita y a quién,
- * sin pedir respuesta (`RSVP=FALSE`): la cita ya está reservada.
- */
-export function calendarFile(event: CalendarEvent, method?: CalendarMethod): string {
-  if (method && (!event.organizer || !event.attendee)) throw new Error("Una invitación lleva quién invita y a quién")
+/** Las líneas de un `VEVENT`. Con método lleva quién invita y a quién, sin pedir respuesta. */
+function eventLines(event: CalendarEvent, method?: CalendarMethod): string[] {
   const person = (property: string, who: CalendarPerson, extra = "") =>
     `${property}${who.name ? `;CN=${paramText(who.name)}` : ""}${extra}:mailto:${who.email}`
   const cancelled = event.cancelled || method === "CANCEL"
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    `PRODID:${PRODID}`,
-    "CALSCALE:GREGORIAN",
-    ...(method ? [`METHOD:${method}`] : []),
-    ...timezoneLines(event.timeZone, event.start, event.end),
+  return [
     "BEGIN:VEVENT",
     `UID:${event.uid}`,
     `SEQUENCE:${event.sequence}`,
@@ -203,7 +192,54 @@ export function calendarFile(event: CalendarEvent, method?: CalendarMethod): str
         ]
       : []),
     "END:VEVENT",
-    "END:VCALENDAR",
   ]
+}
+
+/** Un `VTIMEZONE` por zona, que cubre todas sus citas. */
+function zonesFor(events: CalendarEvent[]): string[] {
+  const spans = new Map<string, { start: Date; end: Date }>()
+  for (const event of events) {
+    const span = spans.get(event.timeZone)
+    spans.set(event.timeZone, {
+      start: span && span.start < event.start ? span.start : event.start,
+      end: span && span.end > event.end ? span.end : event.end,
+    })
+  }
+  return [...spans].flatMap(([zone, span]) => timezoneLines(zone, span.start, span.end))
+}
+
+function fileOf(head: string[], events: string[]): string {
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:${PRODID}`, "CALSCALE:GREGORIAN", ...head, ...events, "END:VCALENDAR"]
   return `${lines.map(foldCalendarLine).join("\r\n")}\r\n`
+}
+
+/**
+ * El archivo `.ics` de un evento. Sin método es para guardar (la descarga);
+ * con método es la invitación de un correo y lleva quién invita y a quién,
+ * sin pedir respuesta (`RSVP=FALSE`): la cita ya está reservada.
+ */
+export function calendarFile(event: CalendarEvent, method?: CalendarMethod): string {
+  if (method && (!event.organizer || !event.attendee)) throw new Error("Una invitación lleva quién invita y a quién")
+  return fileOf([...(method ? [`METHOD:${method}`] : []), ...zonesFor([event])], eventLines(event, method))
+}
+
+/**
+ * Un calendario de suscripción (`webcal`): varias citas, con el nombre que
+ * muestra el calendario y cada cuánto pedir de nuevo (RFC 7986
+ * `REFRESH-INTERVAL`, y su equivalente que lee Outlook). Cuánto tarda de
+ * verdad lo decide cada calendario.
+ */
+export function calendarFeedFile(name: string, events: CalendarEvent[], refreshMinutes = 60): string {
+  const every = `PT${refreshMinutes}M`
+  return fileOf(
+    [
+      "METHOD:PUBLISH",
+      `NAME:${escapeCalendarText(name)}`,
+      `X-WR-CALNAME:${escapeCalendarText(name)}`,
+      `REFRESH-INTERVAL;VALUE=DURATION:${every}`,
+      `X-PUBLISHED-TTL:${every}`,
+      ...zonesFor(events),
+    ],
+    events.flatMap((event) => eventLines(event)),
+  )
 }

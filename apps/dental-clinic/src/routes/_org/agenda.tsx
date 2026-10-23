@@ -68,6 +68,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   Armchair,
+  CalendarCheck,
   CalendarClock,
   CalendarDays,
   CalendarX2,
@@ -87,6 +88,7 @@ import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival } from "../../components/agenda/arrival"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
+import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { useActiveBranch } from "../../lib/active-branch"
 import {
@@ -124,6 +126,8 @@ export const Route = createFileRoute("/_org/agenda")({
     who?: string
     group?: string
     status?: string
+    /** «Mi calendario» abierto (lo abre también el aviso de la campana). */
+    calendario?: string
   } => ({
     ...search,
     patientId: typeof search.patientId === "string" ? search.patientId : undefined,
@@ -1076,8 +1080,16 @@ function AgendaPage() {
             ) : null}
           </>
         }
+        secondary={
+          canAttend
+            ? { label: "Mi calendario", icon: <CalendarCheck aria-hidden />, onClick: () => setParam("calendario", "1") }
+            : undefined
+        }
         primary={canWrite ? { label: "Nueva cita", icon: <Plus aria-hidden />, onClick: () => openBooking() } : undefined}
       />
+      {canAttend ? (
+        <MyCalendarDrawer open={get("calendario") === "1"} onClose={() => setParam("calendario", undefined)} />
+      ) : null}
 
       {((requested.patientId &&
         (contextualPatient.error ||

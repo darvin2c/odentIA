@@ -25,7 +25,7 @@ import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { createOwnerDb, withOrgContext } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
@@ -91,6 +91,7 @@ import { ANSWER_READY_MESSAGE, replyId } from "./automation-messages.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
 import { createAppointment, createRoom, setAppointmentArrival } from "./appointments.js"
+import { createMyCalendarFeed } from "./calendar-feeds.js"
 import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
 import {
   addBudgetItems,
@@ -590,6 +591,9 @@ async function wipeSeed(): Promise<void> {
   await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, SEED_ORGS))
   await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
+  // «Mi calendario» apunta a la persona: va antes que el equipo.
+  await db.delete(calendarFeedUse).where(inArray(calendarFeedUse.organizationId, SEED_ORGS))
+  await db.delete(calendarFeed).where(inArray(calendarFeed.organizationId, SEED_ORGS))
   // La atención referencia su cita (ADR 0002): las citas se borran después.
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(scheduleRoom).where(inArray(scheduleRoom.organizationId, SEED_ORGS))
@@ -4021,6 +4025,27 @@ const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: 
 const reportsProgress = await db.transaction((tx) =>
   seedReportsProgress(tx, { orgId: ORG_A, ownerUserId: ANA_ID, branchIds: [miraflores.id, sanIsidro.id] }),
 )
+// «Mi calendario» (issue 46): Luis comparte su agenda; Google la pide todos los
+// días y ayer la abrió un navegador que no reconoció, para ver el aviso.
+await db.transaction(async (tx) => {
+  await createMyCalendarFeed(tx, ORG_A, LUIS_ID, { secretsKey, feedBaseUrl: process.env.BETTER_AUTH_URL ?? null })
+  const [feed] = await tx.select().from(calendarFeed).where(and(eq(calendarFeed.organizationId, ORG_A), eq(calendarFeed.userId, LUIS_ID)))
+  await tx.update(calendarFeed).set({ knownClients: ["google"], createdAt: new Date(Date.now() - 20 * 86_400_000) }).where(eq(calendarFeed.id, feed!.id))
+  /** Ese día a esa hora UTC, nunca después de ahora. */
+  const at = (days: number, hour: number) => {
+    const date = new Date()
+    date.setUTCDate(date.getUTCDate() - days)
+    date.setUTCHours(hour, 0, 0, 0)
+    return new Date(Math.min(date.getTime(), Date.now()))
+  }
+  await tx.insert(calendarFeedUse).values([
+    ...Array.from({ length: 7 }, (_, days) => ({
+      organizationId: ORG_A, feedId: feed!.id, day: at(days, 15).toISOString().slice(0, 10), client: "google", hits: 6,
+      firstAt: at(days, 11), lastAt: at(days, 15),
+    })),
+    { organizationId: ORG_A, feedId: feed!.id, day: at(1, 3).toISOString().slice(0, 10), client: "navegador", hits: 1, firstAt: at(1, 3), lastAt: at(1, 3) },
+  ])
+})
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)

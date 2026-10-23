@@ -582,6 +582,20 @@
       "when": 1792703682273,
       "tag": "0082_historia_bloqueada_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1792724369476,
+      "tag": "0083_agenda_en_mi_calendario",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1792724379772,
+      "tag": "0084_agenda_en_mi_calendario_reglas",
+      "breakpoints": true
     }
   ]
 }

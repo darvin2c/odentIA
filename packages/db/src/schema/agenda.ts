@@ -2,9 +2,12 @@ import { sql } from "drizzle-orm"
 import {
   boolean,
   check,
+  date,
+  foreignKey,
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -182,5 +185,70 @@ export const appointmentBookingLink = pgTable(
     uniqueIndex("appointment_booking_link_token_uidx").on(table.tokenHash),
     index("appointment_booking_link_conversation_idx").on(table.organizationId, table.conversationId),
     index("appointment_booking_link_contact_idx").on(table.organizationId, table.contactId, table.patientId),
+  ],
+)
+
+/**
+ * «Mi calendario» (issue 46, ADR 0082): el enlace privado con el que quien
+ * atiende ve sus citas de la clínica en Google, Apple u Outlook, solo para
+ * leer. Uno activo por persona y clínica. El token no se guarda: se recalcula
+ * con la clave del servidor y el id (como «Su enlace»); aquí queda su huella
+ * para encontrarlo. Cambiarlo o apagarlo deja este revocado, con historia.
+ */
+export const calendarFeed = pgTable(
+  "calendar_feed",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status").notNull().default("activo"),
+    /** Programas que la persona reconoce («Fui yo»): no vuelven a avisar. */
+    knownClients: text("known_clients").array().notNull().default(sql`'{}'::text[]`),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => user.id),
+    /** `cambiado` (pidió otro), `apagado` (dejó de compartir), `administracion` o `sin_acceso` (ya no atiende aquí). */
+    revokeReason: text("revoke_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("calendar_feed_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("calendar_feed_token_uidx").on(table.tokenHash),
+    uniqueIndex("calendar_feed_org_user_active_uidx")
+      .on(table.organizationId, table.userId)
+      .where(sql`"status" = 'activo'`),
+    check("calendar_feed_status_check", sql`${table.status} IN ('activo','revocado')`),
+    check("calendar_feed_revoked_check", sql`(${table.status} <> 'revocado') = (${table.revokedAt} IS NULL)`),
+    check(
+      "calendar_feed_reason_check",
+      sql`${table.revokeReason} IS NULL OR ${table.revokeReason} IN ('cambiado','apagado','administracion','sin_acceso')`,
+    ),
+  ],
+)
+
+/**
+ * Quién usa cada enlace: una fila por día y por programa (Google Calendar,
+ * el calendario del iPhone…), con cuántas veces y la primera y la última hora.
+ * Sin direcciones IP. Lo de más de 90 días se borra al anotar (ADR 0082).
+ */
+export const calendarFeedUse = pgTable(
+  "calendar_feed_use",
+  {
+    organizationId: orgFk("organization_id"),
+    feedId: uuid("feed_id").notNull(),
+    day: date("day").notNull(),
+    client: text("client").notNull(),
+    hits: integer("hits").notNull().default(1),
+    firstAt: timestamp("first_at", { withTimezone: true }).notNull().defaultNow(),
+    lastAt: timestamp("last_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: "calendar_feed_use_pkey", columns: [table.organizationId, table.feedId, table.day, table.client] }),
+    foreignKey({
+      columns: [table.organizationId, table.feedId],
+      foreignColumns: [calendarFeed.organizationId, calendarFeed.id],
+    }).onDelete("cascade"),
   ],
 )
