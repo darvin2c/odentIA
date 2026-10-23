@@ -1,139 +1,139 @@
-system_key,code,version,display
-COLEGIO-CR,1.1,TARIFAS-2025,Consulta Diagnóstica (4 rx, 2 modelos, odontograma)
-COLEGIO-CR,1.2,TARIFAS-2025,Consulta odontológica específica
-COLEGIO-CR,1.3,TARIFAS-2025,Consulta Post Tratamiento
-COLEGIO-CR,1.4,TARIFAS-2025,Fotografía Digital Intraorales y Extraorales
-COLEGIO-CR,1.5,TARIFAS-2025,Consulta de Emergencia
-COLEGIO-CR,1.6,TARIFAS-2025,Consulta Primera Vez (Virtual)
-COLEGIO-CR,1.7,TARIFAS-2025,Escaneo Digital
-COLEGIO-CR,2.1,TARIFAS-2025,Radiografía Convencional o Digital
-COLEGIO-CR,2.2,TARIFAS-2025,Radiografía Oclusal
-COLEGIO-CR,2.3,TARIFAS-2025,Radiografía Panorámica
-COLEGIO-CR,2.4,TARIFAS-2025,Radiografía Cefalométrica
-COLEGIO-CR,2.5,TARIFAS-2025,Estudio de Ortodoncia
-COLEGIO-CR,2.6,TARIFAS-2025,Estudio de Ortodoncia Digital
-COLEGIO-CR,2.7,TARIFAS-2025,Tomografía Computarizada Cone Beam Sextante
-COLEGIO-CR,2.8,TARIFAS-2025,Tomografía Computarizada Cone Beam 1 Arcada
-COLEGIO-CR,2.9,TARIFAS-2025,Tomografía Computarizada Cone Beam 2 Arcadas
-COLEGIO-CR,2.10,TARIFAS-2025,Informe Radiológico
-COLEGIO-CR,3.1,TARIFAS-2025,Amalgama Simple
-COLEGIO-CR,3.2,TARIFAS-2025,Amalgama Compleja
-COLEGIO-CR,3.3,TARIFAS-2025,Resina Simple
-COLEGIO-CR,3.4,TARIFAS-2025,Resina Compleja
-COLEGIO-CR,3.5,TARIFAS-2025,Resina Reconstrucción de Ángulo
-COLEGIO-CR,3.6,TARIFAS-2025,Resina Cervical
-COLEGIO-CR,3.7,TARIFAS-2025,Carilla Resina (Directa)
-COLEGIO-CR,3.8,TARIFAS-2025,Carilla Resina (Indirecta)
-COLEGIO-CR,3.9,TARIFAS-2025,Temporización Simple (ZOE, IV, Otros)
-COLEGIO-CR,3.10,TARIFAS-2025,Temporización Compleja (ZOE, IV, Otros)
-COLEGIO-CR,3.11,TARIFAS-2025,Reconstrucción por Fractura en Resina
-COLEGIO-CR,3.12,TARIFAS-2025,Ajuste Oclusal
-COLEGIO-CR,4.1,TARIFAS-2025,Endodoncia Anteriores y retratamiento (Uniradiculares)
-COLEGIO-CR,4.2,TARIFAS-2025,Endodoncia Premolares y retratamiento (Birradiculares)
-COLEGIO-CR,4.3,TARIFAS-2025,Endodoncia Molares y retratamiento (Multiradiculares)
-COLEGIO-CR,4.4,TARIFAS-2025,Pulpotomía
-COLEGIO-CR,4.5,TARIFAS-2025,Pulpectomía
-COLEGIO-CR,4.6,TARIFAS-2025,Extirpación Pulpar
-COLEGIO-CR,4.7,TARIFAS-2025,Apicectomía y Retrobturación
-COLEGIO-CR,5.1.1.1,TARIFAS-2025,Corona Metálica Semi-Precioso
-COLEGIO-CR,5.1.1.2,TARIFAS-2025,Corona Metálica No Precioso
-COLEGIO-CR,5.1.1.3,TARIFAS-2025,Corona Metal - Porcelana Semi-Precioso
-COLEGIO-CR,5.1.1.4,TARIFAS-2025,Corona Metal - Porcelana no precioso
-COLEGIO-CR,5.1.1.5,TARIFAS-2025,Corona Zirconio y/o Porcelana
-COLEGIO-CR,5.1.1.6,TARIFAS-2025,Atache de Precisión y Corona
-COLEGIO-CR,5.1.1.7,TARIFAS-2025,Remoción de Corona
-COLEGIO-CR,5.1.1.8,TARIFAS-2025,Laminado Zirconio y/o Porcelana
-COLEGIO-CR,5.1.1.9,TARIFAS-2025,Incrustaciones Metal Semi - Precioso
-COLEGIO-CR,5.1.1.10,TARIFAS-2025,Incrustaciones Metal No - Precioso
-COLEGIO-CR,5.1.1.11,TARIFAS-2025,Incrustaciones Zirconio y/o Porcelana
-COLEGIO-CR,5.1.2.1,TARIFAS-2025,Endoposte Prefabricado y Muñón
-COLEGIO-CR,5.1.2.2,TARIFAS-2025,Remoción de Endoposte
-COLEGIO-CR,5.1.3.1,TARIFAS-2025,Corona Provisional en Acrílico o Policarbonato por unidad
-COLEGIO-CR,5.1.3.3,TARIFAS-2025,Corona Provisional de Acrílico Reforzado con Resina
-COLEGIO-CR,5.2.1.1,TARIFAS-2025,Prótesis Parcial Removible Acrílica
-COLEGIO-CR,5.2.1.2,TARIFAS-2025,Prótesis Parcial Removible Acrílica Inmediata
-COLEGIO-CR,5.2.1.3,TARIFAS-2025,Prótesis Parcial Removible Flexible
-COLEGIO-CR,5.2.1.4,TARIFAS-2025,Prótesis Parcial Removible Metálica (Cromo-Cobalto)
-COLEGIO-CR,5.2.2.1,TARIFAS-2025,Prótesis Total Removible Acrílico
-COLEGIO-CR,5.2.2.2,TARIFAS-2025,Prótesis Total Removible Total Acrílico - Base Metálica
-COLEGIO-CR,5.2.2.3,TARIFAS-2025,Prótesis Total Removible Inmediata
-COLEGIO-CR,5.2.3.1,TARIFAS-2025,Reparación Prótesis Agregar Diente
-COLEGIO-CR,5.2.3.2,TARIFAS-2025,Reparación Prótesis Agregar Retenedor
-COLEGIO-CR,5.2.3.3,TARIFAS-2025,Reparación Prótesis Soldadura Metálica
-COLEGIO-CR,5.2.3.4,TARIFAS-2025,Reparación Prótesis Rebasado Autocurado
-COLEGIO-CR,5.2.3.5,TARIFAS-2025,Reparación Prótesis Rebasado Termocurado
-COLEGIO-CR,6.1,TARIFAS-2025,Cirugía de Colocación de Implante Dental
-COLEGIO-CR,6.2,TARIFAS-2025,Cirugía Segunda Fase del Implante
-COLEGIO-CR,6.3,TARIFAS-2025,Guía Quirúrgica Computarizada para colocación de implante
-COLEGIO-CR,6.4,TARIFAS-2025,Colocación de Mini Implantes
-COLEGIO-CR,6.5,TARIFAS-2025,Sobre dentadura sobre Implantes con dos ataches
-COLEGIO-CR,6.6,TARIFAS-2025,Corona Implantosoportada Metal Porcelana + Poste Maquinado
-COLEGIO-CR,6.7,TARIFAS-2025,Corona Implantosoportada Zirconio y/o Porcelana + Poste Maquinado
-COLEGIO-CR,6.8,TARIFAS-2025,Corona Implantosoportada Metal Porcelana + Poste Prefabricado
-COLEGIO-CR,6.9,TARIFAS-2025,Corona Implantosoportada Zirconio y/o Porcelana + Poste Prefabricado
-COLEGIO-CR,6.10,TARIFAS-2025,Corona Implantosoportada Metal Porcelana + Poste Colado
-COLEGIO-CR,6.11,TARIFAS-2025,Corona Implantosoportada Zirconio y/o Porcelana + Poste Colado
-COLEGIO-CR,6.12,TARIFAS-2025,Póntico de Implante Metal Porcelana
-COLEGIO-CR,6.13,TARIFAS-2025,Póntico de Implante Zirconio y/o Solo Porcelana
-COLEGIO-CR,6.14,TARIFAS-2025,Provisional de Corona Implantosoportada
-COLEGIO-CR,6.15,TARIFAS-2025,Prótesis Implantosoportada barra híbrida (fresada o colada) + Prótesis Acrílica
-COLEGIO-CR,6.16,TARIFAS-2025,Prótesis implantosoportada barra zirconio+ porcelana // Prótesis implantosoportada super estructura (zirconio fresado)
-COLEGIO-CR,6.17,TARIFAS-2025,Prótesis implantosoportada metal porcelana (fresada ó colada)
-COLEGIO-CR,7.1,TARIFAS-2025,Limpieza Profiláctica + Flúor + IFO (NO INCLUYE RASPADO)
-COLEGIO-CR,7.3,TARIFAS-2025,Limpieza Profiláctica + Flúor + IFO + Raspado ultrasónico o manual
-COLEGIO-CR,7.4,TARIFAS-2025,Sellante de Fosas y Fisuras
-COLEGIO-CR,8.1,TARIFAS-2025,Motivación y Adaptación
-COLEGIO-CR,8.2,TARIFAS-2025,Corona de Acero Cromado
-COLEGIO-CR,8.3,TARIFAS-2025,Corona de Resina
-COLEGIO-CR,8.4,TARIFAS-2025,Mantenedor de Espacio Unilateral
-COLEGIO-CR,8.5,TARIFAS-2025,Mantenedor de Espacio Bilateral
-COLEGIO-CR,9.1,TARIFAS-2025,Diagnóstico Periodontal (Índice de Sangrado, Índice de Placa Bacteriana y Periodontograma)
-COLEGIO-CR,9.2,TARIFAS-2025,Raspado Ultrasónico o Manual (Por Sesión)
-COLEGIO-CR,9.3,TARIFAS-2025,Cirugía Periodontal (Cuadrante, Sector, Sesión)
-COLEGIO-CR,9.4,TARIFAS-2025,Curetaje
-COLEGIO-CR,10.1,TARIFAS-2025,Control mensual de ortodoncia metálica (Tratamiento terminado a 24 meses)
-COLEGIO-CR,10.2,TARIFAS-2025,Control mensual de ortodoncia estética (Tratamiento terminado a 24 meses)
-COLEGIO-CR,10.3,TARIFAS-2025,Reposición de Brackets Metálico
-COLEGIO-CR,10.4,TARIFAS-2025,Reposición de Brackets Estético
-COLEGIO-CR,10.5,TARIFAS-2025,Cita de Remoción de Ortodoncia
-COLEGIO-CR,10.6,TARIFAS-2025,Retenedor de Ortodoncia Fijo (Incluye las 2 Arcadas)
-COLEGIO-CR,10.7,TARIFAS-2025,Retenedor de Ortodoncia Removible (Incluye las 2 Arcadas)
-COLEGIO-CR,10.8,TARIFAS-2025,Ortodoncia Aditamento Fijo
-COLEGIO-CR,10.9,TARIFAS-2025,Ortodoncia Aditamento Removible
-COLEGIO-CR,10.10,TARIFAS-2025,Cita de Colocación de Ortodoncia Metálica (Prima)
-COLEGIO-CR,10.11,TARIFAS-2025,Cita de Colocación de Ortodoncia Estéticos (Prima)
-COLEGIO-CR,10.12,TARIFAS-2025,Colocación de Ortodoncia Invisible (12 Alineadores) (8 citas)
-COLEGIO-CR,10.13,TARIFAS-2025,Colocación de Ortodoncia Invisible (Hasta 25 Alineadores) (15 citas)
-COLEGIO-CR,11.1,TARIFAS-2025,Blanqueamiento Fundas en Casa
-COLEGIO-CR,11.2,TARIFAS-2025,Blanqueamiento En Sillón Dental
-COLEGIO-CR,11.3,TARIFAS-2025,Blanqueamiento Interno (Pieza no Vital) (Incluye 2 citas)
-COLEGIO-CR,11.4,TARIFAS-2025,Blanqueamiento Mixto
-COLEGIO-CR,12.1,TARIFAS-2025,Exodoncia Simple
-COLEGIO-CR,12.2,TARIFAS-2025,Exodoncia Compleja
-COLEGIO-CR,12.3,TARIFAS-2025,Exodoncia Preservación de Hueso
-COLEGIO-CR,12.4,TARIFAS-2025,Exodoncia Diente Temporal
-COLEGIO-CR,12.5,TARIFAS-2025,Reimplante por Traumatismo
-COLEGIO-CR,12.6,TARIFAS-2025,Biopsia Incisional
-COLEGIO-CR,12.7,TARIFAS-2025,Incisión y Drenaje de Abscesos
-COLEGIO-CR,12.8,TARIFAS-2025,Alargamiento de Corona
-COLEGIO-CR,12.9,TARIFAS-2025,Gingivoplastía
-COLEGIO-CR,12.10,TARIFAS-2025,Frenectomía
-COLEGIO-CR,12.11,TARIFAS-2025,Regularización Ósea Simple
-COLEGIO-CR,12.12,TARIFAS-2025,Regularización Ósea Guiada
-COLEGIO-CR,12.13,TARIFAS-2025,Sutura Heridas Mucosa Oral
-COLEGIO-CR,12.14,TARIFAS-2025,Tratamiento de Alveolitis por Cita
-COLEGIO-CR,12.15,TARIFAS-2025,Exposición Quirúrgica de Diente Retenido + Botón de Ortodoncia
-COLEGIO-CR,12.16,TARIFAS-2025,Cirugía de Terceras Molares Impactadas o Semi-Erupcionadas en Malposición
-COLEGIO-CR,12.17,TARIFAS-2025,Exposición quirúrgica de diente retenido (Ventana Quirúrgica)
-COLEGIO-CR,12.18,TARIFAS-2025,Regeneración Ósea (0.5cc de Hueso)
-COLEGIO-CR,12.19,TARIFAS-2025,Enucleación
-COLEGIO-CR,12.20,TARIFAS-2025,Cirugía de Diente Retenido
-COLEGIO-CR,12.21,TARIFAS-2025,Remoción de Cuerpo Extraño
-COLEGIO-CR,12.22,TARIFAS-2025,Cirugía de Torus
-COLEGIO-CR,12.23,TARIFAS-2025,Cirugía de Diente Supernumerario
-COLEGIO-CR,12.24,TARIFAS-2025,Remoción de tumores benignos (fibroma, papilomas) no incluye biopsia
-COLEGIO-CR,12.25,TARIFAS-2025,Cirugía de Opercubectomía
-COLEGIO-CR,13.1,TARIFAS-2025,Plano de Mordida Miorrelajante
-COLEGIO-CR,13.2,TARIFAS-2025,Plano de Mordida Acrílico Termocurado
-COLEGIO-CR,13.3,TARIFAS-2025,Peritaje Completo
-COLEGIO-CR,13.4,TARIFAS-2025,Ferulización
+system_key,code,version,section,display
+COLEGIO-CR,1.1,TARIFAS-2025,1,Consulta Diagnóstica (4 rx, 2 modelos, odontograma)
+COLEGIO-CR,1.2,TARIFAS-2025,1,Consulta odontológica específica
+COLEGIO-CR,1.3,TARIFAS-2025,1,Consulta Post Tratamiento
+COLEGIO-CR,1.4,TARIFAS-2025,1,Fotografía Digital Intraorales y Extraorales
+COLEGIO-CR,1.5,TARIFAS-2025,1,Consulta de Emergencia
+COLEGIO-CR,1.6,TARIFAS-2025,1,Consulta Primera Vez (Virtual)
+COLEGIO-CR,1.7,TARIFAS-2025,1,Escaneo Digital
+COLEGIO-CR,2.1,TARIFAS-2025,2,Radiografía Convencional o Digital
+COLEGIO-CR,2.2,TARIFAS-2025,2,Radiografía Oclusal
+COLEGIO-CR,2.3,TARIFAS-2025,2,Radiografía Panorámica
+COLEGIO-CR,2.4,TARIFAS-2025,2,Radiografía Cefalométrica
+COLEGIO-CR,2.5,TARIFAS-2025,2,Estudio de Ortodoncia
+COLEGIO-CR,2.6,TARIFAS-2025,2,Estudio de Ortodoncia Digital
+COLEGIO-CR,2.7,TARIFAS-2025,2,Tomografía Computarizada Cone Beam Sextante
+COLEGIO-CR,2.8,TARIFAS-2025,2,Tomografía Computarizada Cone Beam 1 Arcada
+COLEGIO-CR,2.9,TARIFAS-2025,2,Tomografía Computarizada Cone Beam 2 Arcadas
+COLEGIO-CR,2.10,TARIFAS-2025,2,Informe Radiológico
+COLEGIO-CR,3.1,TARIFAS-2025,3,Amalgama Simple
+COLEGIO-CR,3.2,TARIFAS-2025,3,Amalgama Compleja
+COLEGIO-CR,3.3,TARIFAS-2025,3,Resina Simple
+COLEGIO-CR,3.4,TARIFAS-2025,3,Resina Compleja
+COLEGIO-CR,3.5,TARIFAS-2025,3,Resina Reconstrucción de Ángulo
+COLEGIO-CR,3.6,TARIFAS-2025,3,Resina Cervical
+COLEGIO-CR,3.7,TARIFAS-2025,3,Carilla Resina (Directa)
+COLEGIO-CR,3.8,TARIFAS-2025,3,Carilla Resina (Indirecta)
+COLEGIO-CR,3.9,TARIFAS-2025,3,Temporización Simple (ZOE, IV, Otros)
+COLEGIO-CR,3.10,TARIFAS-2025,3,Temporización Compleja (ZOE, IV, Otros)
+COLEGIO-CR,3.11,TARIFAS-2025,3,Reconstrucción por Fractura en Resina
+COLEGIO-CR,3.12,TARIFAS-2025,3,Ajuste Oclusal
+COLEGIO-CR,4.1,TARIFAS-2025,4,Endodoncia Anteriores y retratamiento (Uniradiculares)
+COLEGIO-CR,4.2,TARIFAS-2025,4,Endodoncia Premolares y retratamiento (Birradiculares)
+COLEGIO-CR,4.3,TARIFAS-2025,4,Endodoncia Molares y retratamiento (Multiradiculares)
+COLEGIO-CR,4.4,TARIFAS-2025,4,Pulpotomía
+COLEGIO-CR,4.5,TARIFAS-2025,4,Pulpectomía
+COLEGIO-CR,4.6,TARIFAS-2025,4,Extirpación Pulpar
+COLEGIO-CR,4.7,TARIFAS-2025,4,Apicectomía y Retrobturación
+COLEGIO-CR,5.1.1.1,TARIFAS-2025,5,Corona Metálica Semi-Precioso
+COLEGIO-CR,5.1.1.2,TARIFAS-2025,5,Corona Metálica No Precioso
+COLEGIO-CR,5.1.1.3,TARIFAS-2025,5,Corona Metal - Porcelana Semi-Precioso
+COLEGIO-CR,5.1.1.4,TARIFAS-2025,5,Corona Metal - Porcelana no precioso
+COLEGIO-CR,5.1.1.5,TARIFAS-2025,5,Corona Zirconio y/o Porcelana
+COLEGIO-CR,5.1.1.6,TARIFAS-2025,5,Atache de Precisión y Corona
+COLEGIO-CR,5.1.1.7,TARIFAS-2025,5,Remoción de Corona
+COLEGIO-CR,5.1.1.8,TARIFAS-2025,5,Laminado Zirconio y/o Porcelana
+COLEGIO-CR,5.1.1.9,TARIFAS-2025,5,Incrustaciones Metal Semi - Precioso
+COLEGIO-CR,5.1.1.10,TARIFAS-2025,5,Incrustaciones Metal No - Precioso
+COLEGIO-CR,5.1.1.11,TARIFAS-2025,5,Incrustaciones Zirconio y/o Porcelana
+COLEGIO-CR,5.1.2.1,TARIFAS-2025,5,Endoposte Prefabricado y Muñón
+COLEGIO-CR,5.1.2.2,TARIFAS-2025,5,Remoción de Endoposte
+COLEGIO-CR,5.1.3.1,TARIFAS-2025,5,Corona Provisional en Acrílico o Policarbonato por unidad
+COLEGIO-CR,5.1.3.3,TARIFAS-2025,5,Corona Provisional de Acrílico Reforzado con Resina
+COLEGIO-CR,5.2.1.1,TARIFAS-2025,5,Prótesis Parcial Removible Acrílica
+COLEGIO-CR,5.2.1.2,TARIFAS-2025,5,Prótesis Parcial Removible Acrílica Inmediata
+COLEGIO-CR,5.2.1.3,TARIFAS-2025,5,Prótesis Parcial Removible Flexible
+COLEGIO-CR,5.2.1.4,TARIFAS-2025,5,Prótesis Parcial Removible Metálica (Cromo-Cobalto)
+COLEGIO-CR,5.2.2.1,TARIFAS-2025,5,Prótesis Total Removible Acrílico
+COLEGIO-CR,5.2.2.2,TARIFAS-2025,5,Prótesis Total Removible Total Acrílico - Base Metálica
+COLEGIO-CR,5.2.2.3,TARIFAS-2025,5,Prótesis Total Removible Inmediata
+COLEGIO-CR,5.2.3.1,TARIFAS-2025,5,Reparación Prótesis Agregar Diente
+COLEGIO-CR,5.2.3.2,TARIFAS-2025,5,Reparación Prótesis Agregar Retenedor
+COLEGIO-CR,5.2.3.3,TARIFAS-2025,5,Reparación Prótesis Soldadura Metálica
+COLEGIO-CR,5.2.3.4,TARIFAS-2025,5,Reparación Prótesis Rebasado Autocurado
+COLEGIO-CR,5.2.3.5,TARIFAS-2025,5,Reparación Prótesis Rebasado Termocurado
+COLEGIO-CR,6.1,TARIFAS-2025,6,Cirugía de Colocación de Implante Dental
+COLEGIO-CR,6.2,TARIFAS-2025,6,Cirugía Segunda Fase del Implante
+COLEGIO-CR,6.3,TARIFAS-2025,6,Guía Quirúrgica Computarizada para colocación de implante
+COLEGIO-CR,6.4,TARIFAS-2025,6,Colocación de Mini Implantes
+COLEGIO-CR,6.5,TARIFAS-2025,6,Sobre dentadura sobre Implantes con dos ataches
+COLEGIO-CR,6.6,TARIFAS-2025,6,Corona Implantosoportada Metal Porcelana + Poste Maquinado
+COLEGIO-CR,6.7,TARIFAS-2025,6,Corona Implantosoportada Zirconio y/o Porcelana + Poste Maquinado
+COLEGIO-CR,6.8,TARIFAS-2025,6,Corona Implantosoportada Metal Porcelana + Poste Prefabricado
+COLEGIO-CR,6.9,TARIFAS-2025,6,Corona Implantosoportada Zirconio y/o Porcelana + Poste Prefabricado
+COLEGIO-CR,6.10,TARIFAS-2025,6,Corona Implantosoportada Metal Porcelana + Poste Colado
+COLEGIO-CR,6.11,TARIFAS-2025,6,Corona Implantosoportada Zirconio y/o Porcelana + Poste Colado
+COLEGIO-CR,6.12,TARIFAS-2025,6,Póntico de Implante Metal Porcelana
+COLEGIO-CR,6.13,TARIFAS-2025,6,Póntico de Implante Zirconio y/o Solo Porcelana
+COLEGIO-CR,6.14,TARIFAS-2025,6,Provisional de Corona Implantosoportada
+COLEGIO-CR,6.15,TARIFAS-2025,6,Prótesis Implantosoportada barra híbrida (fresada o colada) + Prótesis Acrílica
+COLEGIO-CR,6.16,TARIFAS-2025,6,Prótesis implantosoportada barra zirconio+ porcelana // Prótesis implantosoportada super estructura (zirconio fresado)
+COLEGIO-CR,6.17,TARIFAS-2025,6,Prótesis implantosoportada metal porcelana (fresada ó colada)
+COLEGIO-CR,7.1,TARIFAS-2025,7,Limpieza Profiláctica + Flúor + IFO (NO INCLUYE RASPADO)
+COLEGIO-CR,7.3,TARIFAS-2025,7,Limpieza Profiláctica + Flúor + IFO + Raspado ultrasónico o manual
+COLEGIO-CR,7.4,TARIFAS-2025,7,Sellante de Fosas y Fisuras
+COLEGIO-CR,8.1,TARIFAS-2025,8,Motivación y Adaptación
+COLEGIO-CR,8.2,TARIFAS-2025,8,Corona de Acero Cromado
+COLEGIO-CR,8.3,TARIFAS-2025,8,Corona de Resina
+COLEGIO-CR,8.4,TARIFAS-2025,8,Mantenedor de Espacio Unilateral
+COLEGIO-CR,8.5,TARIFAS-2025,8,Mantenedor de Espacio Bilateral
+COLEGIO-CR,9.1,TARIFAS-2025,9,Diagnóstico Periodontal (Índice de Sangrado, Índice de Placa Bacteriana y Periodontograma)
+COLEGIO-CR,9.2,TARIFAS-2025,9,Raspado Ultrasónico o Manual (Por Sesión)
+COLEGIO-CR,9.3,TARIFAS-2025,9,Cirugía Periodontal (Cuadrante, Sector, Sesión)
+COLEGIO-CR,9.4,TARIFAS-2025,9,Curetaje
+COLEGIO-CR,10.1,TARIFAS-2025,10,Control mensual de ortodoncia metálica (Tratamiento terminado a 24 meses)
+COLEGIO-CR,10.2,TARIFAS-2025,10,Control mensual de ortodoncia estética (Tratamiento terminado a 24 meses)
+COLEGIO-CR,10.3,TARIFAS-2025,10,Reposición de Brackets Metálico
+COLEGIO-CR,10.4,TARIFAS-2025,10,Reposición de Brackets Estético
+COLEGIO-CR,10.5,TARIFAS-2025,10,Cita de Remoción de Ortodoncia
+COLEGIO-CR,10.6,TARIFAS-2025,10,Retenedor de Ortodoncia Fijo (Incluye las 2 Arcadas)
+COLEGIO-CR,10.7,TARIFAS-2025,10,Retenedor de Ortodoncia Removible (Incluye las 2 Arcadas)
+COLEGIO-CR,10.8,TARIFAS-2025,10,Ortodoncia Aditamento Fijo
+COLEGIO-CR,10.9,TARIFAS-2025,10,Ortodoncia Aditamento Removible
+COLEGIO-CR,10.10,TARIFAS-2025,10,Cita de Colocación de Ortodoncia Metálica (Prima)
+COLEGIO-CR,10.11,TARIFAS-2025,10,Cita de Colocación de Ortodoncia Estéticos (Prima)
+COLEGIO-CR,10.12,TARIFAS-2025,10,Colocación de Ortodoncia Invisible (12 Alineadores) (8 citas)
+COLEGIO-CR,10.13,TARIFAS-2025,10,Colocación de Ortodoncia Invisible (Hasta 25 Alineadores) (15 citas)
+COLEGIO-CR,11.1,TARIFAS-2025,11,Blanqueamiento Fundas en Casa
+COLEGIO-CR,11.2,TARIFAS-2025,11,Blanqueamiento En Sillón Dental
+COLEGIO-CR,11.3,TARIFAS-2025,11,Blanqueamiento Interno (Pieza no Vital) (Incluye 2 citas)
+COLEGIO-CR,11.4,TARIFAS-2025,11,Blanqueamiento Mixto
+COLEGIO-CR,12.1,TARIFAS-2025,12,Exodoncia Simple
+COLEGIO-CR,12.2,TARIFAS-2025,12,Exodoncia Compleja
+COLEGIO-CR,12.3,TARIFAS-2025,12,Exodoncia Preservación de Hueso
+COLEGIO-CR,12.4,TARIFAS-2025,12,Exodoncia Diente Temporal
+COLEGIO-CR,12.5,TARIFAS-2025,12,Reimplante por Traumatismo
+COLEGIO-CR,12.6,TARIFAS-2025,12,Biopsia Incisional
+COLEGIO-CR,12.7,TARIFAS-2025,12,Incisión y Drenaje de Abscesos
+COLEGIO-CR,12.8,TARIFAS-2025,12,Alargamiento de Corona
+COLEGIO-CR,12.9,TARIFAS-2025,12,Gingivoplastía
+COLEGIO-CR,12.10,TARIFAS-2025,12,Frenectomía
+COLEGIO-CR,12.11,TARIFAS-2025,12,Regularización Ósea Simple
+COLEGIO-CR,12.12,TARIFAS-2025,12,Regularización Ósea Guiada
+COLEGIO-CR,12.13,TARIFAS-2025,12,Sutura Heridas Mucosa Oral
+COLEGIO-CR,12.14,TARIFAS-2025,12,Tratamiento de Alveolitis por Cita
+COLEGIO-CR,12.15,TARIFAS-2025,12,Exposición Quirúrgica de Diente Retenido + Botón de Ortodoncia
+COLEGIO-CR,12.16,TARIFAS-2025,12,Cirugía de Terceras Molares Impactadas o Semi-Erupcionadas en Malposición
+COLEGIO-CR,12.17,TARIFAS-2025,12,Exposición quirúrgica de diente retenido (Ventana Quirúrgica)
+COLEGIO-CR,12.18,TARIFAS-2025,12,Regeneración Ósea (0.5cc de Hueso)
+COLEGIO-CR,12.19,TARIFAS-2025,12,Enucleación
+COLEGIO-CR,12.20,TARIFAS-2025,12,Cirugía de Diente Retenido
+COLEGIO-CR,12.21,TARIFAS-2025,12,Remoción de Cuerpo Extraño
+COLEGIO-CR,12.22,TARIFAS-2025,12,Cirugía de Torus
+COLEGIO-CR,12.23,TARIFAS-2025,12,Cirugía de Diente Supernumerario
+COLEGIO-CR,12.24,TARIFAS-2025,12,Remoción de tumores benignos (fibroma, papilomas) no incluye biopsia
+COLEGIO-CR,12.25,TARIFAS-2025,12,Cirugía de Opercubectomía
+COLEGIO-CR,13.1,TARIFAS-2025,13,Plano de Mordida Miorrelajante
+COLEGIO-CR,13.2,TARIFAS-2025,13,Plano de Mordida Acrílico Termocurado
+COLEGIO-CR,13.3,TARIFAS-2025,13,Peritaje Completo
+COLEGIO-CR,13.4,TARIFAS-2025,13,Ferulización

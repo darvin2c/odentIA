@@ -201,6 +201,16 @@ it("services: el código oficial de un servicio propio se busca en la lista del 
   expect(found.data.every((row) => row.system === "CPMS")).toBe(true)
   const byCode = (await (await getJson(app, "/services/official-codes?q=D2391")).json()) as typeof found
   expect(byCode.data.map((row) => row.code)).toEqual(["D2391"])
+  // La CPMS está completa (ADR 0079), pero una clínica dental solo ve y guarda lo
+  // odontológico: 15849 «Retiro de puntos sin anestesia» es de la sección 1.2.
+  const stitches = (await (await getJson(app, "/services/official-codes?q=15849")).json()) as typeof found
+  expect(stitches.data).toEqual([])
+  const notDental = await buildApp("owner").request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Retiro de puntos", specialtyId: await sp("cirugia"), scope: "general", priceCents: 1, officialCode: "15849" }),
+  })
+  expect(notDental.status).toBe(400)
   // Sin lista en el país no hay nada que buscar, ni código que guardar.
   const noList = await buildApp("owner", "org_c").request("/services", {
     method: "POST",

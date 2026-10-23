@@ -3,11 +3,12 @@
  * país y la biblioteca de odentIA con el código de cada tratamiento en ellas.
  *
  * - Listas oficiales: una edición vigente por lista
- *   (`procedure_catalog_release.csv`), con sus códigos odontológicos tal cual
- *   en `procedure_codes_<lista>.csv` (p. ej. la CPMS del Perú, 505 códigos,
- *   con su procedencia; la CUPS de Colombia). Cada CSV sale del archivo
- *   oficial con su SHA-256 (la CPMS con `import:cpms`). Este seed NO lee los
- *   archivos oficiales.
+ *   (`procedure_catalog_release.csv`), con todos sus códigos y la sección
+ *   oficial de cada uno en `procedure_codes_<lista>.csv` (p. ej. la CPMS del
+ *   Perú, 12 002 códigos). Cada CSV sale del archivo oficial con su SHA-256
+ *   (`import:procedures`). Este seed NO lee los archivos oficiales.
+ * - Códigos de cada producto: `procedure_code_products.csv` (ADR 0079), los
+ *   que ofrece su buscador (odentIA, los odontológicos).
  * - Biblioteca: `seeds/biblioteca.csv`, tratamientos de consultorio con nombre
  *   propio, tipo, ámbito, lo que dejan en la pieza, si van en «Más usados» y
  *   si son la variante de una norma que solo se ofrece donde tiene código;
@@ -47,16 +48,13 @@ export function codesFileOf(systemKey: string): string {
   return `procedure_codes_${systemKey.toLowerCase()}.csv`
 }
 
-/**
- * Procedencia por lista, para las que el importador la genera desde el archivo
- * oficial: cada código con su denominación, que debe coincidir.
- */
-const PROVENANCE: Record<string, { file: string; header: string; fields: number }> = {
-  CPMS: {
-    file: "cpms_scope_provenance.csv",
-    header: "code,n_oficial,grupo,seccion,subseccion,nombre_subseccion,denominacion",
-    fields: 7,
-  },
+/** Filas por sentencia al sembrar: miles de códigos sin miles de idas y vueltas. */
+const BATCH = 1000
+
+function chunks<T>(rows: T[]): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < rows.length; i += BATCH) out.push(rows.slice(i, i + BATCH))
+  return out
 }
 
 function strictLines(file: string, header: string): string[] {
@@ -141,34 +139,18 @@ function loadLibrary() {
   const codesBySystem = new Map(
     releases.map((release) => {
       const file = codesFileOf(release.systemKey)
-      const codes = strictLines(file, "system_key,code,version,display").map((line) => {
-        const [systemKey, code, version, display] = splitHead(line, 4)
+      const codes = strictLines(file, "system_key,code,version,section,display").map((line) => {
+        const [systemKey, code, version, section, display] = splitHead(line, 5)
         if (!systemKey || !code || !version || !display) throw new Error(`Línea inválida en ${file}: ${line}`)
         if (systemKey !== release.systemKey || version !== release.version) {
           throw new Error(`Código fuera de la edición vigente en ${file}: ${code}`)
         }
-        return { systemKey, code, version, display }
+        return { systemKey, code, version, section: section || null, display }
       })
       if (codes.length !== release.expectedCount) {
         throw new Error(`Cobertura de ${file}: ${codes.length} códigos frente a expected_count=${release.expectedCount}`)
       }
       if (new Set(codes.map((c) => c.code)).size !== codes.length) throw new Error(`Códigos duplicados en ${file}`)
-      const provenance = PROVENANCE[release.systemKey]
-      if (provenance) {
-        const displays = new Map(
-          strictLines(provenance.file, provenance.header).map((line) => {
-            const parts = splitHead(line, provenance.fields)
-            if (parts.some((part) => !part)) throw new Error(`Línea inválida en ${provenance.file}: ${line}`)
-            return [parts[0]!, parts[provenance.fields - 1]!] as const
-          }),
-        )
-        if (displays.size !== release.expectedCount) {
-          throw new Error(`Cobertura: ${provenance.file} no concilia con expected_count`)
-        }
-        for (const c of codes) {
-          if (displays.get(c.code) !== c.display) throw new Error(`Código sin procedencia o denominación distinta: ${c.code}`)
-        }
-      }
       return [release.systemKey, codes] as const
     }),
   )
@@ -250,12 +232,27 @@ function loadLibrary() {
     perList.add(list)
   }
 
-  return { systems, releases, codesBySystem, templates, mappings }
+  // --- Los códigos de cada producto: de una lista cargada y vigentes en ella ---
+  const products = strictLines("procedure_code_products.csv", "system_key,product,code").map((line) => {
+    const [systemKey, product, code] = splitHead(line, 3)
+    if (!systemKey || !product || !/^[a-z]+$/.test(product) || !code) {
+      throw new Error(`Línea inválida en procedure_code_products.csv: ${line}`)
+    }
+    if (!codeSets.get(systemKey)?.has(code)) {
+      throw new Error(`Código de un producto que no está en la edición vigente: ${systemKey} ${code}`)
+    }
+    return { systemKey, product, code }
+  })
+  if (new Set(products.map((p) => `${p.systemKey}:${p.product}:${p.code}`)).size !== products.length) {
+    throw new Error("Códigos repetidos en procedure_code_products.csv")
+  }
+
+  return { systems, releases, codesBySystem, templates, mappings, products }
 }
 
 /** Siembra idempotente del catálogo oficial sobre una conexión owner. */
 export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResult> {
-  const { systems, releases, codesBySystem, templates, mappings } = loadLibrary()
+  const { systems, releases, codesBySystem, templates, mappings, products } = loadLibrary()
   const scopeKeys = templates.map((t) => t.key)
 
   await db.transaction(async (tx) => {
@@ -324,11 +321,15 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
             "is_current" = true`,
       )
       const codes = codesBySystem.get(release.systemKey)!
-      for (const c of codes) {
+      for (const batch of chunks(codes)) {
         await tx.execute(
-          sql`insert into "procedure_code" ("system_key", "code", "version", "display", "is_active")
-            values (${c.systemKey}, ${c.code}, ${c.version}, ${c.display}, true)
+          sql`insert into "procedure_code" ("system_key", "code", "version", "section", "display", "is_active")
+            values ${sql.join(
+              batch.map((c) => sql`(${c.systemKey}, ${c.code}, ${c.version}, ${c.section}, ${c.display}, true)`),
+              sql`, `,
+            )}
             on conflict ("system_key", "code", "version") do update set
+              "section" = excluded."section",
               "display" = excluded."display",
               "is_active" = true`,
         )
@@ -406,6 +407,20 @@ export async function seedProcedureCodes(db: Db): Promise<ProcedureCodesSeedResu
       await tx.execute(
         sql`insert into "treatment_template_code" ("template_id", "system_key", "code", "version")
           select "id", ${m.systemKey}, ${m.code}, ${m.version} from "treatment_template" where "key" = ${m.templateKey}`,
+      )
+    }
+
+    // Los códigos de cada producto se reemplazan enteros, lista por lista.
+    for (const release of releases) {
+      await tx.execute(sql`delete from "procedure_code_product" where "system_key" = ${release.systemKey}`)
+    }
+    for (const batch of chunks(products)) {
+      await tx.execute(
+        sql`insert into "procedure_code_product" ("system_key", "product", "code")
+          values ${sql.join(
+            batch.map((p) => sql`(${p.systemKey}, ${p.product}, ${p.code})`),
+            sql`, `,
+          )}`,
       )
     }
 

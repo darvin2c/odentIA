@@ -596,6 +596,20 @@
       "when": 1792724379772,
       "tag": "0084_agenda_en_mi_calendario_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1792728317099,
+      "tag": "0085_listas_oficiales_completas",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1792728325001,
+      "tag": "0086_listas_oficiales_completas_reglas",
+      "breakpoints": true
     }
   ]
 }
