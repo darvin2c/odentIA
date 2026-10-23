@@ -1,4 +1,4 @@
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, dictationFindingsText } from "@odentia/services"
+import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
 import { type DictationAsk, demoExtraction, demoSegment, dictationMessages, groundSource, readDictation } from "./dictation.js"
 

@@ -35,7 +35,7 @@ import { normalizeForSearch } from "../knowledge.js"
 import { findOrgLocale, formatOrgMoney, type OrgLocale } from "../locale.js"
 import { OPERATIONS, operationAgentSchema } from "../operation-fields.js"
 import { addPlanItem } from "../plan.js"
-import { productHooks } from "../products.js"
+import { requireDictatingProduct } from "../products.js"
 import { orgStrictVariants } from "./odontogram.js"
 import { registerToothFinding } from "./tooth-panel.js"
 
@@ -141,15 +141,6 @@ function splitMeta(payload: Record<string, unknown>): { data: Record<string, unk
 function withMeta(data: Record<string, unknown>, meta: SuggestionMeta): Record<string, unknown> {
   const kept = Object.fromEntries(Object.entries(meta).filter(([, value]) => value !== undefined && !(Array.isArray(value) && value.length === 0)))
   return Object.keys(kept).length ? { ...data, [META]: kept } : data
-}
-
-/**
- * Clío dicta con el prompt, el formato y el extractor de su producto (ADR
- * 0079): hoy solo el de odentIA. En una clínica de otro producto no dicta.
- */
-export async function requireDictatingProduct(tx: Db, orgId: string): Promise<void> {
-  if (!(await productHooks(tx, orgId)).dictates)
-    throw new ServiceError("CLINICAL_ASSISTANT_UNAVAILABLE", 409, "Clío aún no dicta en esta clínica")
 }
 
 /** ¿El asistente clínico está encendido en esta clínica? */

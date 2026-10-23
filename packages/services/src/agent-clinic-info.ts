@@ -1,7 +1,6 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
-import { kindOfSpecialty, type TreatmentKind } from "@odentia/dental"
 import { orgSpecialty, type PriceDisclosure, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
@@ -9,8 +8,9 @@ import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
 import { normalizeForSearch } from "./knowledge.js"
-import { orgDentalProfile } from "./dental/profile.js"
-import { formatOrgMoney, type OrgLocale } from "./locale.js"
+import { findOrgCountry, formatOrgMoney, type OrgLocale } from "./locale.js"
+import { kindOfSpecialty } from "./product-catalog.js"
+import { productHooks } from "./products.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
 
 /**
@@ -61,7 +61,7 @@ export interface AgentServiceInfo {
    * el de su especialidad del país. Las palabras de la calle del índice van
    * con él; null con una especialidad que creó la clínica.
    */
-  kind: TreatmentKind | null
+  kind: string | null
   durationMin: number | null
   price: AgentPrice
 }
@@ -300,12 +300,13 @@ export async function listAgentServices(
     .where(and(...conditions))
     .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
   const rows = options.limit ? await query.limit(options.limit) : await query
-  const profile = await orgDentalProfile(tx, orgId)
+  const { catalog } = await productHooks(tx, orgId)
+  const specialties = catalog.specialties(await findOrgCountry(tx, orgId))
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
     specialty: row.specialty,
-    kind: (row.templateKind as TreatmentKind | null) ?? kindOfSpecialty(profile, row.specialtyKey),
+    kind: row.templateKind ?? kindOfSpecialty(catalog, specialties, row.specialtyKey),
     durationMin: row.durationMin,
     price: {
       disclosure: row.disclosure as PriceDisclosure,

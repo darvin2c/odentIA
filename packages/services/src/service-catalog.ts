@@ -2,15 +2,6 @@ import {
   type ProcedureCodingSnapshot,
   type ServiceListProfile,
 } from "@odentia/clinical"
-import {
-  isTreatmentKind,
-  type LeavesFinding,
-  TREATMENT_KINDS,
-  TREATMENT_SCOPES,
-  type TreatmentKind,
-  type TreatmentScope,
-  validateLeavesFinding,
-} from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import {
   orgSpecialty,
@@ -27,8 +18,17 @@ import { and, asc, eq, getTableColumns, inArray, isNotNull, or, sql } from "driz
 import { foldedWordsMatch } from "./search-text.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
-import { orgDentalProfile } from "./dental/profile.js"
-import { saveServiceFinding, serviceLeavesFinding, type TemplateDental, templateDentalColumns } from "./dental/service-finding.js"
+import { isCatalogKind } from "./product-catalog.js"
+import {
+  checkServiceFinding,
+  libraryServiceFinding,
+  productHooks,
+  saveServiceFinding,
+  type ServiceLeaves,
+  serviceLeavesFinding,
+  type TemplateProduct,
+  templateProductColumns,
+} from "./products.js"
 import { orgClinicalProfile, orgProduct, orgProfileRequired } from "./locale.js"
 import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn, usedByProduct } from "./procedure-codings.js"
 
@@ -37,14 +37,14 @@ function conflict(code: string, message: string): ServiceError {
 }
 
 /** El servicio con lo que deja en la pieza, que vive en lo dental (ADR 0079). */
-export type ServiceRow = typeof serviceCatalog.$inferSelect & { leavesFinding: LeavesFinding | null }
+export type ServiceRow = typeof serviceCatalog.$inferSelect & { leavesFinding: ServiceLeaves | null }
 /** El servicio como lo lee una pantalla: con el nombre de su especialidad de la clínica. */
 export type ServiceListItem = ServiceRow & { specialtyName: string | null }
 /** El tratamiento de la biblioteca con su parte dental (caras y lo que deja en la pieza). */
-export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateDental
+export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateProduct
 
-const serviceRowColumns = { ...getTableColumns(serviceCatalog), leavesFinding: serviceLeavesFinding }
-const templateRowColumns = { ...getTableColumns(treatmentTemplate), ...templateDentalColumns }
+const serviceRowColumns = () => ({ ...getTableColumns(serviceCatalog), leavesFinding: serviceLeavesFinding })
+const templateRowColumns = () => ({ ...getTableColumns(treatmentTemplate), ...templateProductColumns })
 
 
 export const SERVICE_STATES = ["active", "inactive"] as const
@@ -98,10 +98,10 @@ function assertName(name: string | null | undefined): string {
   return value
 }
 
-/** Tipo de tratamiento: solo filtra la biblioteca, nunca el tarifario. */
-function assertKind(kind: string | null | undefined): TreatmentKind {
+/** Tipo de tratamiento del producto de la clínica: solo filtra la biblioteca, nunca el tarifario. */
+async function assertKind(tx: Db, orgId: string, kind: string | null | undefined): Promise<string> {
   const value = (kind ?? "").trim().toLowerCase()
-  if (!isTreatmentKind(value)) throw validation("Tipo de tratamiento inválido")
+  if (!isCatalogKind((await productHooks(tx, orgId)).catalog, value)) throw validation("Tipo de tratamiento inválido")
   return value
 }
 
@@ -155,13 +155,13 @@ async function assertEvaluationService(
   return evaluation.id
 }
 
-function assertScope(scope: string | null | undefined): TreatmentScope {
-   const value = (scope ?? "").trim().toLowerCase()
-   if (!(TREATMENT_SCOPES as readonly string[]).includes(value)) {
-     throw validation("scope inválido: general|tooth|surfaces|quadrant|arch")
-   }
-   return value as TreatmentScope
- }
+/** El ámbito de un servicio, entre los del producto de la clínica (odentIA: general, pieza, caras, cuadrante y arcada). */
+async function assertScope(tx: Db, orgId: string, scope: string | null | undefined): Promise<string> {
+  const value = (scope ?? "").trim().toLowerCase()
+  const { scopes } = (await productHooks(tx, orgId)).site
+  if (!scopes.includes(value)) throw validation(`scope inválido: ${scopes.join("|")}`)
+  return value
+}
 
 /**
  * Toda oferta tiene tarifa explícita: 0 = incluido sin costo. Nunca null.
@@ -202,39 +202,6 @@ async function orgCurrency(tx: Db, orgId: string): Promise<string> {
     .limit(1)
   if (!profile) throw orgProfileRequired()
   return profile.currency
-}
-
-/**
- * Lo que deja el servicio en la pieza al completarse (lo tratado queda
- * dibujado): `null` = nada. Se valida con el ámbito del servicio y la regla
- * del país de la clínica (en Perú, con su variante).
- */
-async function assertLeavesFinding(
-  tx: Db,
-  orgId: string,
-  leaves: unknown,
-  scope: string | null | undefined,
-): Promise<LeavesFinding | null> {
-  if (leaves === null || leaves === undefined) return null
-  const strictVariants = (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
-  const errors = validateLeavesFinding(leaves, { scope, strictVariants })
-  if (errors.length) throw validation(errors.join(" "))
-  const { condition, variant } = leaves as LeavesFinding
-  return variant ? { condition, variant } : { condition }
-}
-
-/**
- * Lo que deja un servicio de la biblioteca: lo que odentIA puso en su
- * tratamiento (`dental_template_rule`, ADR 0069 y 0079); null si no
- * deja nada claro o no encaja con el ámbito.
- */
-function libraryLeavesFinding(template: TreatmentTemplateRow): LeavesFinding | null {
-  const leaves = template.leavesFinding
-  if (!leaves) return null
-  // La variante se exige al configurar a mano; aquí basta con que encaje en la pieza.
-  return validateLeavesFinding(leaves, { scope: template.scope, strictVariants: false }).length === 0
-    ? { ...leaves }
-    : null
 }
 
 /** La lista de servicios del país de la clínica (ADR 0069), o null. */
@@ -294,7 +261,7 @@ async function assertOwnCode(
 
 async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
   const [row] = await tx
-    .select(templateRowColumns)
+    .select(templateRowColumns())
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.id, templateId))
     .limit(1)
@@ -314,7 +281,7 @@ export async function getTemplate(
   templateId: string,
 ): Promise<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }> {
   const [row] = await tx
-    .select(templateRowColumns)
+    .select(templateRowColumns())
     .from(treatmentTemplate)
     .where(eq(treatmentTemplate.id, templateId))
     .limit(1)
@@ -358,19 +325,19 @@ export interface TemplateCodeList {
 
 export type LibraryTemplate = TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }
 
-const templateColumns = {
+const templateColumns = () => ({
   id: treatmentTemplate.id,
   key: treatmentTemplate.key,
   name: treatmentTemplate.name,
   kind: treatmentTemplate.kind,
   scope: treatmentTemplate.scope,
   product: treatmentTemplate.product,
-  ...templateDentalColumns,
+  ...templateProductColumns,
   isCommon: treatmentTemplate.isCommon,
   codedOnly: treatmentTemplate.codedOnly,
   isActive: treatmentTemplate.isActive,
   version: treatmentTemplate.version,
-}
+})
 
 /**
  * Los tratamientos de la biblioteca con el código de la lista del país:
@@ -379,14 +346,14 @@ const templateColumns = {
  */
 function libraryQuery(tx: Db, list: ServiceListProfile | null, release: { version: string } | null) {
   const columns = {
-    ...templateColumns,
+    ...templateColumns(),
     code: procedureCode.code,
     codeVersion: procedureCode.version,
     display: procedureCode.display,
   }
   if (!list || !release) {
     return tx
-      .select({ ...templateColumns, code: sql<string | null>`null`, codeVersion: sql<string | null>`null`, display: sql<string | null>`null` })
+      .select({ ...templateColumns(), code: sql<string | null>`null`, codeVersion: sql<string | null>`null`, display: sql<string | null>`null` })
       .from(treatmentTemplate)
       .$dynamic()
   }
@@ -450,7 +417,7 @@ export async function listTemplates(
   // Una lista obligatoria sin edición cargada no deja ofrecer nada.
   if (list?.required && !release) return { data: [], nextCursor: null, total: 0, codeList: { system: list.system, required: true } }
   const conditions = [eq(treatmentTemplate.isActive, true), offeredHere(list, release)]
-  if (query.kind) conditions.push(eq(treatmentTemplate.kind, assertKind(query.kind)))
+  if (query.kind) conditions.push(eq(treatmentTemplate.kind, await assertKind(tx, orgId, query.kind)))
   const q = query.q?.trim()
   if (q) {
     const fields = list && release ? [treatmentTemplate.name, procedureCode.code] : [treatmentTemplate.name]
@@ -534,7 +501,7 @@ export interface ListServicesQuery {
 }
 
 /** Columnas de la lista: el servicio y el nombre de su especialidad de la clínica. */
-const serviceListColumns = {
+const serviceListColumns = () => ({
   id: serviceCatalog.id,
   organizationId: serviceCatalog.organizationId,
   templateId: serviceCatalog.templateId,
@@ -557,7 +524,7 @@ const serviceListColumns = {
   isActive: serviceCatalog.isActive,
   createdAt: serviceCatalog.createdAt,
   updatedAt: serviceCatalog.updatedAt,
-}
+})
 
 const specialtyJoin = and(
   eq(orgSpecialty.organizationId, serviceCatalog.organizationId),
@@ -610,7 +577,7 @@ export async function listServices(
     )
   }
   const rows = await tx
-    .select(serviceListColumns)
+    .select(serviceListColumns())
     .from(serviceCatalog)
     .leftJoin(orgSpecialty, specialtyJoin)
     .where(and(...conditions))
@@ -636,7 +603,7 @@ export async function getService(
 ): Promise<ServiceListItem & { officialCoding: ProcedureCodingSnapshot | null }> {
   if (!UUID_SHAPE.test(serviceId)) throw notFound("Servicio del catálogo")
   const [row] = await tx
-    .select(serviceListColumns)
+    .select(serviceListColumns())
     .from(serviceCatalog)
     .leftJoin(orgSpecialty, specialtyJoin)
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, serviceId)))
@@ -651,7 +618,7 @@ export async function requireService(
   serviceId: string,
 ): Promise<ServiceRow> {
   const [row] = await tx
-    .select(serviceRowColumns)
+    .select(serviceRowColumns())
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)
@@ -696,7 +663,7 @@ export interface CreateServiceInput {
    * Qué deja en la pieza al completarse; `null` = nada. De la biblioteca, si
    * no se indica, el que odentIA puso en su tratamiento.
    */
-  leavesFinding?: LeavesFinding | null
+  leavesFinding?: ServiceLeaves | null
   /**
    * Código oficial de un servicio propio en la lista del país (ADR 0069):
    * obligatorio donde la lista lo es. Uno de la biblioteca toma el de su
@@ -716,7 +683,7 @@ export async function createService(
   // columna no tiene valor por defecto).
   const currency = assertCurrency(input.currency ?? (await orgCurrency(tx, orgId)))
   let values: typeof serviceCatalog.$inferInsert
-  let leaves: LeavesFinding | null
+  let leaves: ServiceLeaves | null
   const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
@@ -747,10 +714,10 @@ export async function createService(
     }
     leaves =
       input.leavesFinding === undefined
-        ? libraryLeavesFinding(tpl)
-        : await assertLeavesFinding(tx, orgId, input.leavesFinding, tpl.scope)
+        ? libraryServiceFinding(tpl)
+        : await checkServiceFinding(tx, orgId, input.leavesFinding, tpl.scope)
   } else {
-    const scope = assertScope(input.scope)
+    const scope = await assertScope(tx, orgId, input.scope)
     values = {
       organizationId: orgId,
       templateId: null,
@@ -768,7 +735,7 @@ export async function createService(
       ...(await assertOwnCode(tx, orgId, list, input.officialCode, { creating: true })),
       isActive: input.isActive ?? true,
     }
-    leaves = await assertLeavesFinding(tx, orgId, input.leavesFinding, scope)
+    leaves = await checkServiceFinding(tx, orgId, input.leavesFinding, scope)
   }
   let row: ServiceRow
   try {
@@ -805,7 +772,7 @@ export interface UpdateServicePatch {
   priceDisclosure?: string
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
-  leavesFinding?: LeavesFinding | null
+  leavesFinding?: ServiceLeaves | null
   /** Código oficial de un servicio propio; `null` = sin código (solo donde no es obligatorio). */
   officialCode?: string | null
   isActive?: boolean
@@ -821,7 +788,7 @@ export async function updateService(
   const current = await requireService(tx, orgId, serviceId)
   const set: Partial<typeof serviceCatalog.$inferInsert> = {}
   // Lo que deja en la pieza va aparte, en lo dental; undefined = no cambia.
-  let leaves: LeavesFinding | null | undefined
+  let leaves: ServiceLeaves | null | undefined
   const fields: string[] = []
   const list = await orgServiceList(tx, orgId)
 
@@ -833,7 +800,7 @@ export async function updateService(
         patch.specialtyId !== undefined
           ? await assertServiceSpecialty(tx, orgId, patch.specialtyId)
           : current.specialtyId
-      const scope = patch.scope !== undefined ? assertScope(patch.scope) : current.scope
+      const scope = patch.scope !== undefined ? await assertScope(tx, orgId, patch.scope) : current.scope
       if (!specialtyId || !scope) {
         throw validation(
           "Para independizar la oferta envía su definición completa (nombre, especialidad y ámbito)",
@@ -866,7 +833,7 @@ export async function updateService(
       if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
       // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
       if (patch.leavesFinding === undefined) {
-        leaves = libraryLeavesFinding(tpl)
+        leaves = libraryServiceFinding(tpl)
         fields.push("leavesFinding")
       }
       set.procedureSystem = null
@@ -943,7 +910,7 @@ export async function updateService(
     fields.push("isActive")
   }
   if (patch.leavesFinding !== undefined) {
-    leaves = await assertLeavesFinding(
+    leaves = await checkServiceFinding(
       tx,
       orgId,
       patch.leavesFinding,
@@ -952,7 +919,7 @@ export async function updateService(
     fields.push("leavesFinding")
   } else if (set.scope !== undefined && leaves === undefined && current.leavesFinding) {
     // Cambiar dónde se hace no deja un dibujo que ya no encaja.
-    await assertLeavesFinding(tx, orgId, current.leavesFinding, set.scope)
+    await checkServiceFinding(tx, orgId, current.leavesFinding, set.scope)
   }
 
   const resolvedScope = (set.scope ?? current.scope) as string | null
@@ -1023,7 +990,7 @@ export async function fromTemplates(
   }
   await tx.execute(sql`select "id" from "organization" where "id" = ${orgId} for update`)
   const templates = await tx
-    .select(templateRowColumns)
+    .select(templateRowColumns())
     .from(treatmentTemplate)
     .where(inArray(treatmentTemplate.id, ids))
   if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
@@ -1035,7 +1002,7 @@ export async function fromTemplates(
   }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
-    .select(serviceRowColumns)
+    .select(serviceRowColumns())
     .from(serviceCatalog)
     .where(
       and(
@@ -1078,7 +1045,7 @@ export async function fromTemplates(
       .returning()
     if (!row) throw new Error("No se pudo incorporar la prestación")
     // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
-    const leaves = libraryLeavesFinding(tpl)
+    const leaves = libraryServiceFinding(tpl)
     await saveServiceFinding(tx, row, leaves)
     created.push({ ...row, leavesFinding: leaves })
     await audit(tx, orgId, actorUserId, "catalog.service_created", row.id, {
@@ -1104,7 +1071,7 @@ export interface CustomServiceItem {
   billingMode?: string | null
   durationMin?: number | null
   /** Qué deja en la pieza al completarse; sin indicarlo, nada. */
-  leavesFinding?: LeavesFinding | null
+  leavesFinding?: ServiceLeaves | null
   /** Código oficial en la lista del país; obligatorio donde la lista lo es. */
   officialCode?: string | null
 }
@@ -1201,7 +1168,7 @@ export async function setServicesPriceDisclosure(
 
 export interface StarterSuggestion {
   /** Tipo de tratamiento: agrupa la lista. */
-  key: TreatmentKind
+  key: string
   label: string
   templates: LibraryTemplate[]
 }
@@ -1244,7 +1211,7 @@ export async function listMostUsedServices(
     )
   const ownedIds = new Set(owned.map((row) => row.templateId))
   const suggestions: StarterSuggestion[] = []
-  for (const kind of TREATMENT_KINDS) {
+  for (const kind of (await productHooks(tx, orgId)).catalog.kinds) {
     const templates = rows
       .filter((row) => row.kind === kind.key && !ownedIds.has(row.id))
       .slice(0, perKind)

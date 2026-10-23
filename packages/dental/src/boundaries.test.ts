@@ -10,9 +10,9 @@ import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
 
 const ROOT = join(import.meta.dirname, "..", "..", "..")
-// Las tablas del esquema dental (ADR 0079) también son lo dental.
+// Las tablas del esquema dental (ADR 0079) y lo dental de los servicios y del agente también son lo dental.
 const IMPORTS_DENTAL =
-  /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/db\/schema\/dental"|from "\.\/dental\.js"/
+  /from "@odentia\/dental"|from "(\.\.?\/)+dental\/|import\("@odentia\/dental"\)|from "@odentia\/(db\/schema|services|agent)\/dental"|from "\.\/dental\.js"/
 
 /**
  * Lo común que aún importa lo dental; cada entrega quita lo que separa. La
@@ -29,27 +29,19 @@ const IMPORTS_DENTAL =
  */
 const STILL_COUPLED = [
   "packages/agent/src/agent.test.ts",
-  "packages/agent/src/index.ts",
   "packages/agent/src/product-prompts.test.ts",
-  "apps/api/src/routes/patients.ts",
   "apps/api/src/routes/timeline.test.ts",
   "packages/db/src/procedure-codes.ts",
   "packages/db/src/procedure-seeds.test.ts",
-  "packages/services/src/agent-clinic-info.ts",
-  "packages/services/src/agent-search-index.ts",
   "packages/services/src/clinica-otro-pais.test.ts",
   "packages/services/src/composite-keys.test.ts",
   "packages/services/src/diagnosis-codes.test.ts",
   "packages/services/src/encounter-lifecycle.test.ts",
-  "packages/services/src/index.ts",
   "packages/services/src/patient-history.test.ts",
   "packages/services/src/patients.test.ts",
   "packages/services/src/procedure-codings.test.ts",
-  "packages/services/src/products.test.ts",
   "packages/services/src/saas-actions.test.ts",
   "packages/services/src/seed-dev.ts",
-  "packages/services/src/service-catalog.ts",
-  "packages/services/src/specialties.ts",
   "packages/services/src/treatment-journey.test.ts",
 ]
 
@@ -77,6 +69,7 @@ const DENTAL_INSIDE = [
   "packages/services/src/dental/",
   "packages/agent/src/dental/",
   "apps/api/src/routes/dental/",
+  "apps/api/src/routes/products.ts",
   "packages/services/src/products.ts",
 ]
 
