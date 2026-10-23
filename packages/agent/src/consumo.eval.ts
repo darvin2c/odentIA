@@ -27,7 +27,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base"
 import type { AIMessage, BaseMessage } from "@langchain/core/messages"
 import { whatsappCloudApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, seedProcedureCodes, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { appointment } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
@@ -347,7 +348,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       professionalUserId: specialist,
       rules: [2, 4].map((weekday) => ({ weekday, startMin: 15 * 60, endMin: 19 * 60 })),
     }))
-  await seedProcedureCodes(ownerDb)
+  await seedOdentiaCatalog(ownerDb)
   await inOrg(async (tx) => {
     // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
     const specialtyOf = await librarySpecialtyIds(tx, ORG, CATALOG.map(([key]) => key).concat(["diagnostico", "prevencion", "endodoncia", "estetica", "ortodoncia"]))

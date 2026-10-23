@@ -1,8 +1,8 @@
 import { formatMoney } from "@odentia/clinical"
-import { isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/dental"
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { findingDefinition, isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/dental"
+import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
-import { Check, CircleAlert, X } from "lucide-react"
+import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
@@ -15,6 +15,7 @@ import {
   type DictationSuggestion,
   suggestionText,
 } from "./dictation-session"
+import { RecetasPanel } from "./clinical-panels"
 import { ServicePicker } from "./service-picker"
 
 /**
@@ -45,16 +46,22 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  */
 export function DictationBlockSuggestions({ session, kind }: { session: DictationSession; kind: DictationKind }) {
   const items = session.suggestions.filter((item) => item.kind === kind)
-  if (!session.enabled || items.length === 0) return null
+  const removed = session.removedByVoice.filter((item) => item.kind === kind)
+  if (!session.enabled || items.length + removed.length === 0) return null
+  // La receta dictada es una sola receta con sus medicamentos (issue 109, fase 2).
+  if (kind === "receta") return <PrescriptionSuggestion session={session} items={items} />
   const acting = (item: DictationSuggestion) => session.act.isPending && session.act.variables?.item.id === item.id
   return (
     <div className="flex basis-full flex-col gap-2">
       <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: ${DICTATION_KIND_LABEL[kind]}`} className="flex flex-col gap-2">
         {items.map((item) => {
-          const { title, detail } = suggestionText(item)
+          const { title, detail: summaryDetail } = suggestionText(item)
           const ready = item.status === "lista"
           const busy = acting(item) || session.confirmReady.isPending
           const candidates = candidatesOf(item)
+          const choice = optionsOf(item).length > 0
+          // Con caminos, las opciones se ven abajo: arriba basta con lo que se dijo.
+          const detail = choice ? (item.sourceText ? `Dijiste «${item.sourceText}»` : "") : summaryDetail
           return (
             <li key={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
@@ -103,7 +110,8 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                   <X className="size-4" aria-hidden />
                 </Button>
               </div>
-              {!ready && item.kind === "plan" ? (
+              {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
+              {!ready && item.kind === "plan" && !choice ? (
                 <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Elige la prestación">
                   {candidates.map((candidate) => (
                     <Button
@@ -123,14 +131,295 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                   </Button>
                 </fieldset>
               ) : null}
+              {!ready && item.kind === "odontograma" ? <FindingChoices session={session} item={item} busy={busy} /> : null}
+            </li>
+          )
+        })}
+        {removed.map((item) => {
+          const { title } = suggestionText(item)
+          return (
+            // Quitada por voz (issue 135): a la vista, tachada, hasta firmar; no cuenta como pendiente.
+            <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <Mic className="size-4 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="font-medium line-through">{title}</p>
+                <p>Quitada por voz: dijiste «{item.removal?.said}»</p>
+              </div>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="min-h-11 px-1 sm:min-h-8"
+                disabled={session.act.isPending}
+                onClick={() => session.act.mutate({ item, action: "undo-voice" }, { onSuccess: () => toast.success(`Volvió a tus sugerencias: ${title}`) })}
+              >
+                Deshacer
+              </Button>
             </li>
           )
         })}
       </ul>
-      {session.act.isError && items.some((item) => item.id === session.act.variables?.item.id) ? (
+      {session.act.isError && [...items, ...removed].some((item) => item.id === session.act.variables?.item.id) ? (
         <p role="alert" className="text-sm text-destructive">
           {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
         </p>
+      ) : null}
+    </div>
+  )
+}
+
+interface PlanOption extends Partial<Candidate> {
+  service?: string
+  serviceId?: string
+  serviceName?: string
+  candidates?: Candidate[]
+}
+
+const optionsOf = (item: DictationSuggestion): PlanOption[] => (Array.isArray(item.payload["options"]) ? (item.payload["options"] as PlanOption[]) : [])
+
+const LETTER = ["A", "B", "C"]
+
+/**
+ * «Dos caminos para la 46 · elige uno» (issue 109, fase 2): la opción A es la
+ * recomendada y cada camino lleva su prestación y su precio. «Recomendar» hace
+ * de otro camino la opción A; uno que no se ubicó en los servicios se elige con
+ * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones.
+ */
+function PlanChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
+  const main: PlanOption = {
+    service: String(item.payload["service"] ?? ""),
+    ...(typeof item.payload["serviceId"] === "string" ? { serviceId: item.payload["serviceId"], serviceName: String(item.payload["serviceName"] ?? ""), priceCents: Number(item.payload["priceCents"] ?? 0), currency: String(item.payload["currency"] ?? "") } : {}),
+    candidates: candidatesOf(item),
+  }
+  const options = [main, ...optionsOf(item)]
+  const save = (patch: Record<string, unknown>) => session.save.mutate({ item, patch, confirm: false })
+  const disabled = busy || session.save.isPending
+  // Otra elección ya ocupa el presupuesto: se ve lo dicho, sin nada que elegir (la nota dice qué hacer).
+  const blocked = item.payload["choiceBlocked"] === true
+  return (
+    <div className="flex flex-col gap-2 sm:pl-8">
+      <div className="flex flex-wrap gap-2">
+        {options.map((option, index) => (
+          <div
+            key={LETTER[index]}
+            className={`flex min-w-0 flex-1 basis-56 flex-col gap-1 rounded-lg border bg-background px-3 py-2 ${index === 0 ? "border-2 border-primary" : ""}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1 font-semibold">
+                Opción {LETTER[index]}
+                {index === 0 ? " · recomendada" : ""}
+              </p>
+              {index > 0 && option.serviceId && !blocked ? (
+                <Button type="button" variant="link" size="sm" className="min-h-11 px-1 sm:min-h-8" disabled={disabled} onClick={() => save({ recommend: index })}>
+                  Recomendar
+                </Button>
+              ) : null}
+            </div>
+            {option.serviceId ? (
+              <p>
+                {option.serviceName} · <span className="whitespace-nowrap">{price(option.priceCents ?? 0, option.currency ?? "")}</span>
+              </p>
+            ) : blocked ? (
+              <p className="text-muted-foreground">Dijiste «{option.service}».</p>
+            ) : (
+              <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={`Elige la prestación de la opción ${LETTER[index]}`}>
+                <p className="w-full text-muted-foreground">Dijiste «{option.service}»: elige cuál es.</p>
+                {(option.candidates ?? []).map((candidate) => (
+                  <Button
+                    key={candidate.id}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
+                    disabled={disabled}
+                    onClick={() => save(index === 0 ? { serviceId: candidate.id } : { [`option${index}ServiceId`]: candidate.id })}
+                  >
+                    {candidate.name} · {price(candidate.priceCents, candidate.currency)}
+                  </Button>
+                ))}
+              </fieldset>
+            )}
+          </div>
+        ))}
+      </div>
+      {blocked ? null : (
+        <p className="self-start rounded-md bg-primary-soft px-2.5 py-1.5 text-primary-soft-foreground">
+          Al confirmar, su presupuesto en borrador queda con {options.length === 2 ? "las dos opciones" : "las tres opciones"}; lo demás que indiques hoy va en todas.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Un medicamento dictado como lo pide «Emitir receta»: para abrir el formulario ya lleno. */
+function medicationDraftOf(item: DictationSuggestion) {
+  const text = (key: string) => (typeof item.payload[key] === "string" ? String(item.payload[key]) : "")
+  return {
+    genericName: text("genericName"),
+    strength: text("strength"),
+    dosageForm: text("dosageForm"),
+    dose: text("dose"),
+    route: text("route") || "oral",
+    frequency: text("frequency"),
+    duration: text("duration"),
+    quantity: typeof item.payload["quantity"] === "number" ? String(item.payload["quantity"]) : "",
+    instructions: text("instructions"),
+  }
+}
+
+/**
+ * La receta dictada (issue 109, fase 2): sus medicamentos en una sola
+ * sugerencia, en el bloque Documentos. «Emitir receta» la emite con la
+ * colegiatura de quien atiende, solo cuando está completa y sin aviso; si falta
+ * algo o choca con una alergia, el formulario de siempre se abre ya lleno, con
+ * «Cambiar medicamento» y «Recetar igual, con motivo». Nunca se emite con
+ * «Confirmar las N listas».
+ */
+function PrescriptionSuggestion({ session, items }: { session: DictationSession; items: DictationSuggestion[] }) {
+  const [form, setForm] = useState<null | { overriding: boolean }>(null)
+  const warnings = items.flatMap((item) => (Array.isArray(item.payload["allergyWarnings"]) ? (item.payload["allergyWarnings"] as string[]) : []))
+  const waiting = items.filter((item) => item.status !== "lista" && !(item.payload["allergyWarnings"] as string[] | undefined)?.length)
+  const ready = warnings.length === 0 && waiting.length === 0
+  const busy = session.issuePrescription.isPending || session.act.isPending || session.dictating
+  const count = items.length === 1 ? "1 medicamento" : `${items.length} medicamentos`
+  const voiced = items.find((item) => item.voice)
+  return (
+    <div className="flex basis-full flex-col gap-2">
+      <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: Receta`} className="flex flex-col gap-2">
+        <li className={`flex flex-col gap-2 rounded-xl border p-3 text-sm ${warnings.length ? "border-destructive/40 bg-destructive/5" : "border-agent-border bg-agent-soft"}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            {ready ? (
+              <AgentMark size="sm" />
+            ) : (
+              <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-warning-soft text-warning">
+                <CircleAlert className="size-3.5" />
+              </span>
+            )}
+            <div className="min-w-0 flex-1 basis-40 px-2">
+              <p className="font-medium">Receta · {count}</p>
+              <p className="text-muted-foreground">
+                {warnings.length
+                  ? "Aviso de alergia: resuélvelo antes de emitir."
+                  : waiting.length
+                    ? (waiting[0]?.note ?? "Falta completarla.")
+                    : voiced?.voice
+                      ? `${String(voiced.payload["genericName"] ?? "medicamento").replace(/^./, (first) => first.toLocaleUpperCase(activeOrgLocale()))} corregido por voz, antes ${voiced.voice.before}`
+                      : "Lista para emitir con tu colegiatura."}
+              </p>
+            </div>
+            {warnings.length ? <Badge variant="destructive">Aviso de alergia</Badge> : !ready ? <Badge>Por revisar</Badge> : null}
+            {voiced ? (
+              <Button type="button" variant="link" size="sm" className="min-h-11 px-1 sm:min-h-8" disabled={busy} onClick={() => session.act.mutate({ item: voiced, action: "undo-voice" })}>
+                Deshacer
+              </Button>
+            ) : null}
+            {ready ? (
+              <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={session.issuePrescription.isPending} disabled={busy} onClick={() => session.issuePrescription.mutate()}>
+                Emitir receta
+              </SubmitButton>
+            ) : null}
+            {!warnings.length ? (
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: false })}>
+                {ready ? "Editar" : "Completar"}
+              </Button>
+            ) : null}
+          </div>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0 sm:pl-8">
+            {items.map((item) => {
+              const { title, detail } = suggestionText(item)
+              return (
+                <li key={item.id} className="flex flex-wrap items-start gap-2 rounded-lg border bg-background px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">{title}</p>
+                    {detail ? <p className="text-muted-foreground">{detail}</p> : null}
+                    {waiting.includes(item) && item.note ? <p className="text-xs text-warning">{item.note}</p> : null}
+                    {item.payload["routeImplied"] ? <p className="text-xs text-muted-foreground">Vía oral por ser {String(item.payload["dosageForm"] ?? "").toLowerCase()}.</p> : null}
+                    {item.payload["notInList"] ? <p className="text-xs text-muted-foreground">No está en la lista: no se revisan sus alergias.</p> : null}
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-8" aria-label={`Quitar de la receta: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "discard" })}>
+                    <X className="size-4" aria-hidden />
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+          {warnings.length ? (
+            <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:ml-8">
+              <p className="font-medium">Aviso de alergia</p>
+              <ul className="list-disc pl-5">
+                {warnings.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: false })}>
+                  Cambiar medicamento
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: true })}>
+                  Recetar igual, con motivo
+                </Button>
+              </div>
+              <p className="text-muted-foreground">O dilo: «mejor clindamicina de trescientos cada ocho horas».</p>
+            </div>
+          ) : null}
+        </li>
+      </ul>
+      {session.issuePrescription.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {dictationErrorText(session.issuePrescription.error, "No pude emitir la receta. Revísala y vuelve a intentarlo.")}
+        </p>
+      ) : null}
+      {form ? (
+        <RecetasPanel
+          patientId={session.patientId}
+          encounterId={session.encounterId}
+          encounterOnly
+          drawerOnly
+          createOpen
+          initialMedications={items.map(medicationDraftOf)}
+          startOverriding={form.overriding}
+          onIssued={(prescriptionId) => session.settlePrescription.mutate(prescriptionId)}
+          onCreateOpenChange={(open) => {
+            if (!open) setForm(null)
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Lo que la norma del país pide de un hallazgo dictado y no se dijo (la
+ * profundidad de una caries, el estado de una corona): se elige con un toque,
+ * con los nombres del odontograma. También se puede completar diciéndolo.
+ */
+function FindingChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
+  const condition = String(item.payload["condition"] ?? "")
+  const finding = findingDefinition(condition)
+  const missing = Array.isArray(item.payload["missing"]) ? (item.payload["missing"] as string[]) : []
+  if (!finding || missing.length === 0) return null
+  const choose = (patch: Record<string, string>) => session.save.mutate({ item, patch, confirm: false })
+  const choice = "h-auto min-h-11 whitespace-normal sm:min-h-8"
+  return (
+    <div className="flex flex-col gap-2 sm:pl-8">
+      {missing.includes("variant") && finding.variants ? (
+        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={finding.variantName ?? "Variante"}>
+          {finding.variants.map((variant) => (
+            <Button key={variant.value} type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ variant: variant.value })}>
+              {variant.label}
+            </Button>
+          ))}
+        </fieldset>
+      ) : null}
+      {missing.includes("quality") ? (
+        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Estado">
+          <Button type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ quality: "good" })}>
+            Buen estado
+          </Button>
+          <Button type="button" variant="outline" size="sm" className={choice} disabled={busy || session.save.isPending} onClick={() => choose({ quality: "poor" })}>
+            Mal estado
+          </Button>
+        </fieldset>
       ) : null}
     </div>
   )
@@ -155,6 +444,13 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; labe
     { key: "title", label: "Control" },
     { key: "instructions", label: "Indicaciones", long: true },
   ],
+  // El hallazgo, su variante y su estado se eligen en la tarjeta; aquí, la pieza y una nota.
+  odontograma: [
+    { key: "toothNumber", label: "Pieza", number: true },
+    { key: "note", label: "Nota", long: true },
+  ],
+  // La receta se completa en el formulario de siempre, «Emitir receta», ya lleno.
+  receta: [],
 }
 
 /**

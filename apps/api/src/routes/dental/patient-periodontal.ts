@@ -14,7 +14,7 @@ import {
   listPeriodontalCharts,
   savePeriodontalTooth,
   startPeriodontalChart,
-} from "@odentia/services"
+} from "@odentia/services/dental"
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../../lib/context.js"

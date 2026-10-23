@@ -1,5 +1,5 @@
 {
-  "id": "209e1cca-c113-40a7-aefc-d89200eb0ae9",
+  "id": "bff8705e-3871-4ec5-9548-a69b24874984",
   "prevId": "09dbbfd5-cdeb-4bf3-b166-0734793d9244",
   "version": "7",
   "dialect": "postgresql",
@@ -12248,7 +12248,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -14251,18 +14251,6 @@
           "notNull": true,
           "default": 0
         },
-        "tax_category": {
-          "name": "tax_category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tax_bps": {
-          "name": "tax_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -14551,10 +14539,6 @@
         "patient_charge_amount_check": {
           "name": "patient_charge_amount_check",
           "value": "\"patient_charge\".\"amount_cents\" > 0"
-        },
-        "patient_charge_tax_check": {
-          "name": "patient_charge_tax_check",
-          "value": "(\"patient_charge\".\"tax_category\" IS NULL) = (\"patient_charge\".\"tax_bps\" IS NULL) AND (\"patient_charge\".\"tax_category\" IS NULL OR (\"patient_charge\".\"tax_category\" = 'S' AND \"patient_charge\".\"tax_bps\" BETWEEN 1 AND 5000) OR (\"patient_charge\".\"tax_category\" IN ('E','O','Z') AND \"patient_charge\".\"tax_bps\" = 0))"
         },
         "patient_charge_product_check": {
           "name": "patient_charge_product_check",
@@ -16448,13 +16432,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "tax_cents": {
-          "name": "tax_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "currency": {
           "name": "currency",
           "type": "char(3)",
@@ -16643,10 +16620,6 @@
         "patient_payment_amount_check": {
           "name": "patient_payment_amount_check",
           "value": "\"patient_payment\".\"amount_cents\" > 0"
-        },
-        "patient_payment_tax_check": {
-          "name": "patient_payment_tax_check",
-          "value": "\"patient_payment\".\"tax_cents\" BETWEEN 0 AND \"patient_payment\".\"amount_cents\""
         },
         "patient_payment_method_type_check": {
           "name": "patient_payment_method_type_check",
@@ -16973,13 +16946,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "tax_cents": {
-          "name": "tax_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "refunded_at": {
           "name": "refunded_at",
           "type": "timestamp with time zone",
@@ -17118,10 +17084,6 @@
         "payment_refund_amount_check": {
           "name": "payment_refund_amount_check",
           "value": "\"patient_payment_refund\".\"amount_cents\" > 0"
-        },
-        "payment_refund_tax_check": {
-          "name": "payment_refund_tax_check",
-          "value": "\"patient_payment_refund\".\"tax_cents\" BETWEEN 0 AND \"patient_payment_refund\".\"amount_cents\""
         }
       },
       "isRLSEnabled": false
@@ -27857,13 +27819,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "sales_tax": {
-          "name": "sales_tax",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -28049,10 +28004,6 @@
         "expense_purchase_category_check": {
           "name": "expense_purchase_category_check",
           "value": "\"expense\".\"purchase_order_id\" IS NULL OR \"expense\".\"category\" = 'Materiales'"
-        },
-        "expense_sales_tax_check": {
-          "name": "expense_sales_tax_check",
-          "value": "NOT \"expense\".\"sales_tax\" OR \"expense\".\"category\" = 'Impuestos'"
         }
       },
       "isRLSEnabled": false
@@ -28582,36 +28533,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "tax_legal_form": {
-          "name": "tax_legal_form",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "services_tax_category": {
-          "name": "services_tax_category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "services_tax_bps": {
-          "name": "services_tax_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "products_tax_category": {
-          "name": "products_tax_category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "products_tax_bps": {
-          "name": "products_tax_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -28647,14 +28568,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "org_profile_services_tax_check": {
-          "name": "org_profile_services_tax_check",
-          "value": "(\"org_profile\".\"services_tax_category\" IS NULL) = (\"org_profile\".\"services_tax_bps\" IS NULL) AND (\"org_profile\".\"services_tax_category\" IS NULL OR (\"org_profile\".\"services_tax_category\" = 'S' AND \"org_profile\".\"services_tax_bps\" BETWEEN 1 AND 5000) OR (\"org_profile\".\"services_tax_category\" IN ('E','O','Z') AND \"org_profile\".\"services_tax_bps\" = 0))"
-        },
-        "org_profile_products_tax_check": {
-          "name": "org_profile_products_tax_check",
-          "value": "(\"org_profile\".\"products_tax_category\" IS NULL) = (\"org_profile\".\"products_tax_bps\" IS NULL) AND (\"org_profile\".\"products_tax_category\" IS NULL OR (\"org_profile\".\"products_tax_category\" = 'S' AND \"org_profile\".\"products_tax_bps\" BETWEEN 1 AND 5000) OR (\"org_profile\".\"products_tax_category\" IN ('E','O','Z') AND \"org_profile\".\"products_tax_bps\" = 0))"
-        },
         "org_profile_receipt_width_check": {
           "name": "org_profile_receipt_width_check",
           "value": "\"org_profile\".\"receipt_width\" IN ('58','80')"

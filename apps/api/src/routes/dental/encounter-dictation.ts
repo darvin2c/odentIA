@@ -1,26 +1,32 @@
-import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { extractDictation } from "@odentia/agent/dental"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentsNotPaused,
+  getAgentConfig,
+} from "@odentia/services"
+import {
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationModelLabel,
   dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
-  getAgentConfig,
+  issueDictationPrescription,
   listDictationSuggestions,
+  listVoiceRemovedDictation,
   requireClinicalAssistant,
   saveDictationSegment,
+  settleDictationPrescription,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
-} from "@odentia/services"
+} from "@odentia/services/dental"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
-import { modelProblemResponse } from "../lib/agent-model.js"
-import { errorBody } from "../lib/error.js"
-import { type CrmDeps, runService, validationError } from "./helpers.js"
+import { orgContextOf } from "../../lib/context.js"
+import { modelProblemResponse } from "../../lib/agent-model.js"
+import { errorBody } from "../../lib/error.js"
+import { type CrmDeps, runService, validationError } from "../helpers.js"
 
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
@@ -61,6 +67,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       withOrgContext(deps.db, orgId, async (tx) => ({
         enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled,
         suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
+        // Las quitadas por voz, que se pueden devolver hasta firmar.
+        removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
         // Para decir, antes de firmar, cuántas ya entraron a la atención.
         confirmed: await countConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId),
       })),
@@ -89,7 +97,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
           return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
-        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, repeated: true, model: null }
+        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertAgentsNotPaused(tx, orgId))
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
@@ -108,14 +116,17 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
               const suggestionId = target(item.index)
               return suggestionId ? [{ suggestionId, changes: item.changes }] : []
             }),
-            removals: extracted.removals.flatMap((item) => target(item.index) ?? []),
+            removals: extracted.removals.flatMap((item) => {
+              const suggestionId = target(item.index)
+              return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
+            }),
             segmentId,
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
-        // Lo que el asistente no pudo usar de este tramo, para avisarle al odontólogo en vez de perderlo en silencio.
-        return { ...saved, sources, omitted: extracted.omitted, model: extracted.model }
+        // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
+        return { ...saved, sources, omitted: extracted.omitted, unused: extracted.unused, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
@@ -147,7 +158,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     )
   })
 
-  /** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba. */
+  /** Deshace lo hecho en voz alta, una corrección o un «quita»: la sugerencia vuelve a como estaba. */
   app.post(`${base}/:suggestionId/undo-voice`, async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const at = suggestionParams.safeParse(c.req.param())
@@ -169,6 +180,28 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       )
       return { ok: true }
     })
+  })
+
+  /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos (issue 109, fase 2). */
+  app.post(`${base}/prescription`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => issueDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId)),
+    )
+  })
+
+  /** La receta dictada se terminó en el formulario de siempre: sus sugerencias quedan con esa receta. */
+  app.post(`${base}/prescription/settle`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = z.object({ prescriptionId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => settleDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId, parsed.data.prescriptionId)),
+    )
   })
 
   /** Antes de firmar: lo que no se confirmó no entra a la historia. */

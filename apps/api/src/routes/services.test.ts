@@ -1,6 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
-import { createAppDb, createOwnerDb, type Db, seedProcedureCodes } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
+import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { librarySpecialtyIds, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -107,7 +108,7 @@ beforeAll(async () => {
   )
   // Catálogo real (mismo seed que dev/CI): la biblioteca de odentIA y el
   // código CPMS de cada tratamiento, que en el Perú lleva todo servicio.
-  await seedProcedureCodes(ownerDb)
+  await seedOdentiaCatalog(ownerDb)
 }, 180_000)
 
 afterAll(async () => {

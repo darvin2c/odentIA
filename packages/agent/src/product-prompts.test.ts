@@ -8,6 +8,7 @@ import type { AgentConfig, OrgLocale } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { agentTextsFor } from "@odentia/services"
+import { dictationFindingsText } from "@odentia/services/dental"
 import { argosRouteQuestion, argosRules, argosSchemas } from "./argos"
 import { knowledgeQuestion } from "./decision/knowledge"
 import { triageQuestions } from "./decision/points"
@@ -68,7 +69,7 @@ describe("prompts de odentIA, iguales a los de antes", () => {
   })
 
   it("Clío", async () => {
-    await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10" })).toMatchFileSnapshot(
+    await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", findings: dictationFindingsText() })).toMatchFileSnapshot(
       golden("clio.txt"),
     )
     await expect(json(z.toJSONSchema(extraction))).toMatchFileSnapshot(golden("clio-esquema.json"))

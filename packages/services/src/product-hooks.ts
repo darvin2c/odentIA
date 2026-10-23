@@ -2,6 +2,7 @@ import type { Db } from "@odentia/db"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
+import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
 
 /**
  * Lo que cada producto hace en los momentos de lo común (ADR 0079): lo común
@@ -142,6 +143,8 @@ export interface TimelineQuery {
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
+  /** Los tipos de tratamiento de su biblioteca y las especialidades de cada país. */
+  catalog: ProductCatalog
   /** Si Clío dicta en sus clínicas (odentIA sí; la app médica, cuando tenga su dictado). */
   dictates: boolean
   /**
@@ -225,6 +228,7 @@ export interface ProductHooks {
 /** Un producto que no agrega nada en ningún momento. */
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
+  catalog: NO_CATALOG,
   dictates: false,
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),

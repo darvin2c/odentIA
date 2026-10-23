@@ -308,6 +308,39 @@ export const OPERATIONS = {
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI, si la indicación es para una pieza.", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza que se tratan.", body: "optional", nullable: true, agent: "fills" },
       detail: { kind: "text", max: 2000, label: "Detalle", description: "Una precisión sobre la indicación.", body: "optional", nullable: true, agent: "fills" },
+      // Solo del dictado: «resina, o si no una corona» es una elección del paciente (issue 109, fase 2).
+      alternatives: { kind: "textList", maxItems: 2, maxLength: 200, label: "Otros caminos", description: "Otras prestaciones que dijo como alternativa para lo mismo («o si no una corona»), con sus palabras y en el orden en que las dijo. Vacío si no dijo alternativas.", body: "none", agent: "fills" },
+    },
+  },
+  // Un medicamento de una receta dictada (issue 109, fase 2): los datos de la Guía de la buena
+  // prescripción de la OMS, los mismos de «Emitir receta». La receta la emite `createPrescription`.
+  "receta.medicamento": {
+    label: "Medicamento de una receta",
+    fields: {
+      genericName: { kind: "text", min: 1, max: 200, label: "DCI", description: "El medicamento por su Denominación Común Internacional, en minúsculas (amoxicilina, ibuprofeno), aunque lo nombre por su marca.", body: "required", agent: "requires" },
+      strength: { kind: "text", max: 60, label: "Concentración", description: "La concentración con su unidad, como la dijo («de quinientos» = 500 mg).", body: "required", agent: "fills" },
+      dosageForm: { kind: "text", max: 60, label: "Forma farmacéutica", description: "cápsula, tableta, jarabe, suspensión, gel, enjuague… solo si la dijo o se deduce de la dosis («una cápsula»).", body: "required", agent: "fills" },
+      dose: { kind: "text", max: 200, label: "Dosis", description: "Cuánto en cada toma («1 cápsula», «10 mL»).", body: "required", agent: "fills" },
+      route: { kind: "text", max: 200, label: "Vía", description: "La vía, solo si la dijo (oral, sublingual, tópica…).", body: "required", agent: "fills" },
+      frequency: { kind: "text", max: 200, label: "Frecuencia", description: "Cada cuánto, como la dijo («cada 8 horas», «cada 8 horas si hay dolor»).", body: "required", agent: "fills" },
+      duration: { kind: "text", max: 200, label: "Duración", description: "Por cuánto tiempo («7 días»). Vacío si no lo dijo.", body: "required", agent: "fills" },
+      quantity: { kind: "int", min: 1, max: 9999, label: "Cantidad total", description: "Cuántas unidades en total, solo si la dijo; si no, la calcula el sistema.", body: "optional", nullable: true, agent: "fills" },
+      instructions: { kind: "text", max: 2000, label: "Indicaciones", description: "Una indicación que dijo para ese medicamento («después de las comidas»).", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
+  // Lo que se registra al tocar una pieza (`registerToothFinding`). La lista de hallazgos es del
+  // producto dental y no se declara aquí (ADR 0079): el servicio la comprueba.
+  "odontograma.hallazgo": {
+    label: "Hallazgo del odontograma",
+    fields: {
+      toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (cuarenta y seis = 46).", body: "required", agent: "requires" },
+      condition: { kind: "text", min: 1, max: 40, label: "Hallazgo", description: "El código del hallazgo, de la lista de hallazgos que se te da (por ejemplo, caries o missing_tooth).", body: "required", agent: "requires" },
+      surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
+      variant: { kind: "text", max: 40, label: "Variante", description: "El valor de la variante del hallazgo, de su lista (la profundidad de una caries, el tipo de corona…), solo si el odontólogo la dijo.", body: "optional", nullable: true, agent: "fills" },
+      quality: { kind: "enum", values: ["good", "poor"], label: "Estado", description: "good si dijo que está en buen estado; poor si dijo que está en mal estado. Solo si lo dijo.", body: "optional", nullable: true, agent: "fills" },
+      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo de diagnóstico", description: "confirmed solo si el odontólogo da el diagnóstico por seguro; si no lo dice, no lo indiques.", body: "optional", nullable: true, agent: "fills" },
+      note: { kind: "text", max: 2000, label: "Nota", description: "Una precisión que dijo el odontólogo sobre el hallazgo.", body: "optional", nullable: true, agent: "fills" },
+      encounterId: { kind: "uuid", label: "Atención", description: "La atención en borrador donde se registra.", body: "required", agent: "context" },
     },
   },
   "control.crear": {

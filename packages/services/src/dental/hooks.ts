@@ -34,6 +34,7 @@ import {
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
+import { dentalCatalog } from "./catalog.js"
 import { dentalProductSite, siteColumns } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -161,6 +162,7 @@ export interface DentalEncounterDetailParts {
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
+  catalog: dentalCatalog,
   dictates: true,
 
   async closingParts(tx, { orgId, patientId, encounterId }) {

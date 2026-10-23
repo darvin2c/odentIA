@@ -614,15 +614,29 @@
     {
       "idx": 87,
       "version": "7",
-      "when": 1792766219303,
-      "tag": "0087_impuestos_de_lo_cobrado",
+      "when": 1792762549327,
+      "tag": "0087_dictado_odontograma",
       "breakpoints": true
     },
     {
       "idx": 88,
       "version": "7",
-      "when": 1792766236794,
-      "tag": "0088_impuestos_de_lo_cobrado_reglas",
+      "when": 1792764233491,
+      "tag": "0088_dictado_receta",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792768144938,
+      "tag": "0089_impuestos_de_lo_cobrado",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792768149644,
+      "tag": "0090_impuestos_de_lo_cobrado_reglas",
       "breakpoints": true
     }
   ]

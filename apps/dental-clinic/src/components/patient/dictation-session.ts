@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta"
 
 export interface DictationSuggestion {
   id: string
@@ -15,6 +15,8 @@ export interface DictationSuggestion {
   summary: string
   /** Corregida por voz al seguir dictando: qué decía antes. */
   voice: { before: string } | null
+  /** Quitada por voz: lo que dijo para pedirlo. Se puede deshacer hasta firmar. */
+  removal: { said: string } | null
 }
 
 export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
@@ -22,6 +24,8 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   diagnostico: "Diagnóstico",
   plan: "Plan de tratamiento",
   control: "Controles",
+  odontograma: "Odontograma",
+  receta: "Receta",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -30,6 +34,14 @@ const SILENCE_MS = 2500
 const MIN_SEGMENT_CHARS = 12
 /** Lo último ya ordenado que acompaña a cada tramo, para que se entienda a qué se refiere. */
 const CONTEXT_CHARS = 600
+/**
+ * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
+ * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
+ */
+export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta"
+
+/** Espera antes del único reintento automático de un tramo que no se pudo ordenar. */
+const RETRY_MS = 3000
 
 interface SpeechLike {
   lang: string
@@ -61,9 +73,33 @@ interface Segment {
   context: string
 }
 
-interface SegmentResponse {
-  data: { suggestions: DictationSuggestion[]; corrected: string[]; removed: string[]; sources: string[]; repeated: boolean; model: string | null }
+/** Un tramo que no se pudo ordenar ni al reintentarlo: queda aparte, con su hora, y lo demás sigue. */
+export interface FailedSegment extends Segment {
+  at: Date
+  message: string
 }
+
+interface SegmentResponse {
+  data: {
+    suggestions: DictationSuggestion[]
+    corrected: string[]
+    removed: string[]
+    sources: string[]
+    /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
+    omitted: number
+    unused: string[]
+    repeated: boolean
+    model: string | null
+  }
+}
+
+/** Lo que el asistente no pudo usar desde el último «Entendido»: las frases y si hubo algo sin frase. */
+export interface UnusedDictation {
+  phrases: string[]
+  unnamed: boolean
+}
+
+const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false }
 
 export type DictationMode = "off" | "listening" | "paused"
 
@@ -99,12 +135,14 @@ export function useDictationSession({
 
   const query = useQuery({
     queryKey: key,
-    queryFn: () => apiFetch<{ data: { enabled: boolean; suggestions: DictationSuggestion[]; confirmed: number } }>(base),
+    queryFn: () =>
+      apiFetch<{ data: { enabled: boolean; suggestions: DictationSuggestion[]; removedByVoice: DictationSuggestion[]; confirmed: number } }>(base),
     retry: false,
     enabled: active,
   })
   const enabled = active && query.data?.data.enabled === true
   const suggestions = useMemo(() => query.data?.data.suggestions ?? [], [query.data])
+  const removedByVoice = useMemo(() => query.data?.data.removedByVoice ?? [], [query.data])
   const confirmed = query.data?.data.confirmed ?? 0
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: key }), [queryClient, key])
 
@@ -115,7 +153,8 @@ export function useDictationSession({
   const [highlights, setHighlights] = useState<string[]>([])
   const [micError, setMicError] = useState<string | null>(null)
   const [organizing, setOrganizing] = useState(false)
-  const [organizeError, setOrganizeError] = useState<string | null>(null)
+  const [failed, setFailed] = useState<FailedSegment[]>([])
+  const [unused, setUnused] = useState<UnusedDictation>(NOTHING_UNUSED)
   const [demo, setDemo] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -135,33 +174,79 @@ export function useDictationSession({
     return () => window.clearInterval(timer)
   }, [mode])
 
-  /** Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se queda en la cola con su identidad. */
+  /** Ordena un tramo y refleja lo que volvió: lo resaltado, lo que no se pudo usar y las sugerencias. */
+  const send = useCallback(
+    async (segment: Segment) => {
+      const response = await apiFetch<SegmentResponse>(base, {
+        method: "POST",
+        body: JSON.stringify({ transcript: segment.text, segmentId: segment.id, ...(segment.context ? { context: segment.context } : {}) }),
+      })
+      if (!mounted.current) return
+      const data = response.data
+      if (data.model) setDemo(data.model === "fake")
+      if (data.sources.length) setHighlights((current) => [...current, ...data.sources])
+      if (data.omitted > 0) {
+        setUnused((current) => ({
+          phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
+          unnamed: current.unnamed || data.unused.length === 0,
+        }))
+      }
+      await refresh()
+    },
+    [base, refresh],
+  )
+
+  /**
+   * Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se
+   * reintenta una vez sin avisar (si el fallo es del proveedor); si vuelve a
+   * fallar queda aparte, con su identidad, y los siguientes siguen su curso
+   * (issue 135): lo que se dicta después no se queda trabado detrás.
+   */
   const drain = useCallback(async () => {
     if (draining.current) return
     draining.current = true
     setOrganizing(true)
-    setOrganizeError(null)
     try {
-      while (queue.current.length > 0) {
-        const segment = queue.current[0]
-        if (!segment) break
-        const response = await apiFetch<SegmentResponse>(base, {
-          method: "POST",
-          body: JSON.stringify({ transcript: segment.text, segmentId: segment.id, ...(segment.context ? { context: segment.context } : {}) }),
-        })
-        queue.current.shift()
+      for (let segment = queue.current.shift(); segment; segment = queue.current.shift()) {
+        try {
+          await send(segment)
+        } catch (error) {
+          let last = error
+          // Un rechazo de la clínica (apagado, atención cerrada) no cambia al reintentar.
+          const transient = !(error instanceof ApiError && error.status < 500)
+          if (transient && mounted.current) {
+            await new Promise((resolve) => window.setTimeout(resolve, RETRY_MS))
+            try {
+              await send(segment)
+              last = null
+            } catch (again) {
+              last = again
+            }
+          }
+          if (last && mounted.current) {
+            const message = transient ? "Lo intenté dos veces." : (dictationErrorText(last, "") ?? "")
+            setFailed((current) => [...current, { ...segment, at: new Date(), message }])
+          }
+        }
         if (!mounted.current) return
-        if (response.data.model) setDemo(response.data.model === "fake")
-        if (response.data.sources.length) setHighlights((current) => [...current, ...response.data.sources])
-        await refresh()
       }
-    } catch (error) {
-      if (mounted.current) setOrganizeError(dictationErrorText(error, "No pudimos ordenar lo último que dictaste. Sigue en «Lo dictado»: vuelve a intentarlo."))
     } finally {
       draining.current = false
       if (mounted.current) setOrganizing(false)
     }
-  }, [base, refresh])
+  }, [send])
+
+  /** «Reintentar» una parte que quedó aparte: va primero, porque se dictó antes que lo que espera. */
+  const retryFailed = useCallback(
+    (id: string) => {
+      const segment = failed.find((item) => item.id === id)
+      if (!segment) return
+      setFailed((current) => current.filter((item) => item.id !== id))
+      queue.current.unshift({ id: segment.id, text: segment.text, context: segment.context })
+      void drain()
+    },
+    [failed, drain],
+  )
 
   /** Cierra un tramo con lo dicho desde el anterior. `force`: al pausar, terminar o escribir, aunque sea corto. */
   const cut = useCallback(
@@ -286,6 +371,7 @@ export function useDictationSession({
 
   const act = useMutation({
     retry: false,
+    // «undo-voice» deshace lo hecho en voz alta: una corrección o un «quita».
     mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" }) => {
       await apiFetch(`${base}/${input.item.id}/${input.action}`, { method: "POST" })
       return input
@@ -314,7 +400,7 @@ export function useDictationSession({
     mutationFn: async () => {
       const done: DictationSuggestion[] = []
       try {
-        for (const item of suggestions.filter((entry) => entry.status === "lista")) {
+        for (const item of suggestions.filter(confirmable)) {
           await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
           done.push(item)
         }
@@ -327,12 +413,31 @@ export function useDictationSession({
     onSettled: () => void refresh(),
   })
 
-  const ready = suggestions.filter((item) => item.status === "lista").length
+  /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos. */
+  const issuePrescription = useMutation({
+    retry: false,
+    mutationFn: () => apiFetch<{ data: { prescriptionId: string } }>(`${base}/prescription`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
+      onApplied({ id: "", kind: "receta", payload: {}, sourceText: "", status: "confirmada", note: null, summary: "", voice: null, removal: null })
+    },
+    onSettled: () => void refresh(),
+  })
+  /** La receta dictada se terminó en el formulario de siempre: sus sugerencias quedan con esa receta. */
+  const settlePrescription = useMutation({
+    retry: false,
+    mutationFn: (prescriptionId: string) => apiFetch(`${base}/prescription/settle`, { method: "POST", body: JSON.stringify({ prescriptionId }) }),
+    onSettled: () => void refresh(),
+  })
+
+  const ready = suggestions.filter(confirmable).length
   const dictating = mode !== "off"
   return {
     enabled,
     base,
     suggestions,
+    /** Quitadas por voz, a la vista en su bloque con «Deshacer». No cuentan como pendientes. */
+    removedByVoice,
     pending: suggestions.length,
     ready,
     confirmed,
@@ -348,8 +453,13 @@ export function useDictationSession({
     canListen,
     micError,
     organizing,
-    organizeError,
-    retryOrganize: drain,
+    /** Partes que no se pudieron ordenar ni al reintentar, con «Reintentar» y «Descartar esta parte». */
+    failed,
+    retryFailed,
+    discardFailed: (id: string) => setFailed((current) => current.filter((item) => item.id !== id)),
+    /** Lo que el asistente no pudo usar, hasta «Entendido». */
+    unused,
+    dismissUnused: () => setUnused(NOTHING_UNUSED),
     demo,
     start,
     pause,
@@ -359,6 +469,10 @@ export function useDictationSession({
     act,
     save,
     confirmReady,
+    issuePrescription,
+    settlePrescription,
+    patientId,
+    encounterId,
     editing: suggestions.find((item) => item.id === editingId) ?? null,
     openEdit: (item: DictationSuggestion) => {
       save.reset()
@@ -376,9 +490,11 @@ export function suggestionText(item: DictationSuggestion): { title: string; deta
 
 /** Qué le falta a una sugerencia para poder entrar a la historia, en pocas palabras. */
 export function suggestionMissing(item: DictationSuggestion): string {
+  if (item.kind === "receta") return item.status === "lista" ? "falta emitirla" : "falta completarla"
   if (item.status === "lista") return "falta confirmarla"
   if (item.kind === "plan" && typeof item.payload["serviceId"] !== "string") return "falta elegir la prestación"
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"
+  if (item.kind === "odontograma") return "falta completar el hallazgo"
   return "falta completarla"
 }
 
@@ -388,35 +504,39 @@ export function dictationClock(seconds: number): string {
 }
 
 /**
- * Parte lo dictado en trozos, marcando los que dieron lugar a una sugerencia.
- * Un fragmento solo se marca si aparece tal cual en el texto (el servidor ya
- * descartó lo que el modelo no citó literalmente).
+ * Parte lo dictado en trozos, marcando los que dieron lugar a una sugerencia
+ * (`used`) y los que el asistente no pudo usar (`unused`). Un fragmento solo
+ * se marca si aparece tal cual en el texto (el servidor ya descartó lo que el
+ * modelo no citó literalmente); si un trozo está en los dos, manda «no lo usé».
  */
-export function highlightTranscript(transcript: string, sources: string[]): Array<{ text: string; marked: boolean }> {
+export function highlightTranscript(
+  transcript: string,
+  sources: string[],
+  unused: string[] = [],
+): Array<{ text: string; mark: "used" | "unused" | null }> {
   const lower = transcript.toLowerCase()
-  if (lower.length !== transcript.length) return [{ text: transcript, marked: false }]
-  const ranges: Array<[number, number]> = []
-  const find = (fragment: string) => {
+  if (lower.length !== transcript.length) return [{ text: transcript, mark: null }]
+  const ranges: Array<[number, number, "used" | "unused"]> = []
+  const find = (fragment: string, mark: "used" | "unused") => {
     const needle = fragment.trim().toLowerCase()
     if (needle.length < 3) return false
     const at = lower.indexOf(needle)
     if (at < 0) return false
-    ranges.push([at, at + needle.length])
+    ranges.push([at, at + needle.length, mark])
     return true
   }
+  for (const phrase of unused) find(phrase, "unused")
   for (const source of sources) {
-    if (!find(source)) for (const sentence of source.split(/(?<=[.;!?])\s+/)) find(sentence)
+    if (!find(source, "used")) for (const sentence of source.split(/(?<=[.;!?])\s+/)) find(sentence, "used")
   }
-  ranges.sort((a, b) => a[0] - b[0])
-  const parts: Array<{ text: string; marked: boolean }> = []
-  let cursor = 0
-  for (const [from, to] of ranges) {
-    if (to <= cursor) continue
-    const begin = Math.max(from, cursor)
-    if (begin > cursor) parts.push({ text: transcript.slice(cursor, begin), marked: false })
-    parts.push({ text: transcript.slice(begin, to), marked: true })
-    cursor = to
+  // Cada letra toma la marca más fuerte que la cubre: «no lo usé» antes que «usado».
+  const marks: Array<"used" | "unused" | null> = Array.from({ length: transcript.length }, () => null)
+  for (const [from, to, mark] of ranges) for (let index = from; index < to; index += 1) if (marks[index] !== "unused") marks[index] = mark
+  const parts: Array<{ text: string; mark: "used" | "unused" | null }> = []
+  for (let index = 0; index < transcript.length; index += 1) {
+    const last = parts.at(-1)
+    if (last && last.mark === marks[index]) last.text += transcript[index]
+    else parts.push({ text: transcript[index] ?? "", mark: marks[index] ?? null })
   }
-  if (cursor < transcript.length) parts.push({ text: transcript.slice(cursor), marked: false })
   return parts
 }

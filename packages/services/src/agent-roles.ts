@@ -200,12 +200,13 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     role: "Convierte lo que el odontólogo dicta en el borrador de la atención, para que revise y firme sin escribir.",
     available: true,
     switchable: true,
-    // Solo lo que ya está construido. El odontograma por voz y las recetas llegan después:
-    // mientras no existan, no figuran como funciones.
+    // Solo lo que ya está construido. Las recetas llegan después: mientras no existan, no figuran como funciones.
     functions: [
       { id: "nota", label: "Consulta y evolución", description: "Motivo, enfermedad actual, evolución, indicaciones y pronóstico.", fixed: true, tools: [] },
+      { id: "odontograma", label: "Odontograma", description: "Hallazgos por pieza y cara («la 46 ausente», «caries oclusal en la 36»), con el diagnóstico que les corresponde. Lo que la norma del país pide y no se dijo, se pide con un toque.", fixed: true, tools: [] },
       { id: "diagnostico", label: "Diagnóstico", description: "Registra el código CIE-10 que nombró el odontólogo, con su pieza.", fixed: true, tools: [] },
-      { id: "plan", label: "Plan de tratamiento", description: "Busca cada prestación dictada en los servicios de la clínica; si no hay una sola, la elige el odontólogo.", fixed: true, tools: [] },
+      { id: "plan", label: "Plan de tratamiento", description: "Busca cada prestación dictada en los servicios de la clínica; si no hay una sola, la elige el odontólogo. «Resina, o si no una corona» llega al presupuesto como dos opciones para que el paciente elija.", fixed: true, tools: [] },
+      { id: "receta", label: "Receta", description: "Prepara la receta con lo dictado (medicamento, dosis, frecuencia y duración), calcula la cantidad y avisa si choca con una alergia. El odontólogo la emite con su colegiatura.", fixed: true, tools: [] },
       { id: "controles", label: "Controles", description: "Deja sugerido el próximo control.", fixed: true, tools: [] },
     ],
     always: [],
@@ -222,7 +223,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "Registra solo lo que el odontólogo dijo, sin completar lo que falta. Si se corrige al dictar, vale lo último. Una prestación que no encuentra, o que coincide con varias, queda «Por revisar» para que el odontólogo elija.",
     testedWith: "Con un dictado de práctica: sin paciente ni atención, nada llega a una historia.",
     learningOwner: "No guarda nada de un odontólogo ni de la clínica.",
-    later: "Odontograma por voz y recetas. Elegir el estilo de la nota, breve o detallada.",
+    later: "Consentimientos, imágenes y preguntas sobre la historia. Elegir el estilo de la nota, breve o detallada.",
     learnsLater: "Recordar los términos de cada odontólogo, como algo suyo.",
   },
   administrador: {

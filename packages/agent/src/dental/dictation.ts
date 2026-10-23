@@ -3,18 +3,20 @@ import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
-  DICTATION_CHARS,
-  DICTATION_MAX_SUGGESTIONS,
-  DICTATION_OPERATION,
-  DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
-  type DictationDraft,
   findingDiagnosisCode,
-  getDictationCatalog,
   getOrgLocale,
   operationAgentSchema,
   ServiceError,
 } from "@odentia/services"
+import {
+  DICTATION_CHARS,
+  DICTATION_MAX_SUGGESTIONS,
+  DICTATION_OPERATION,
+  DICTATION_SOURCE_CHARS,
+  type DictationDraft,
+  getDictationCatalog,
+} from "@odentia/services/dental"
 import { z } from "zod"
 import { reportReplyUse } from "../ai-usage.js"
 import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "../llm.js"
@@ -47,16 +49,26 @@ export const extraction = z.object({
     .extend({ dicho: said })
     .optional()
     .describe("Los textos de la consulta que se dictaron. Omite los que no se dijeron."),
+  odontograma: z
+    .array(operationAgentSchema("odontograma.hallazgo").extend({ dicho: said }))
+    .max(DICTATION_MAX_SUGGESTIONS)
+    .default([])
+    .describe("Un elemento por cada hallazgo de una pieza que nombró el odontólogo, de la lista de hallazgos."),
   diagnosticos: z
     .array(operationAgentSchema("atencion.diagnostico").extend({ dicho: said }))
     .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
-    .describe("Un elemento por cada diagnóstico que nombró el odontólogo."),
+    .describe("Un elemento por cada diagnóstico que nombró el odontólogo y no es un hallazgo del odontograma."),
   indicaciones: z
     .array(operationAgentSchema("plan.indicacion").extend({ dicho: said }))
     .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
     .describe("Un elemento por cada tratamiento que indicó para el plan."),
+  recetas: z
+    .array(operationAgentSchema("receta.medicamento").extend({ dicho: said }))
+    .max(DICTATION_MAX_SUGGESTIONS)
+    .default([])
+    .describe("Un elemento por cada medicamento que recetó."),
   controles: z
     .array(operationAgentSchema("control.crear").extend({ dicho: said }))
     .max(DICTATION_MAX_SUGGESTIONS)
@@ -83,16 +95,24 @@ export const extraction = z.object({
 
 const TOOL_NAME = "registrar_dictado"
 
-export function systemPrompt(input: { services: string[]; diagnosisList: string }): string {
+export function systemPrompt(input: { services: string[]; diagnosisList: string; findings: string }): string {
   return [
     "Eres el asistente clínico de una clínica dental. El odontólogo dicta mientras atiende y tú ordenas lo dictado en registros para que él los revise.",
     `Principios que no cambian: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
     "Registra solo lo que el odontólogo dijo. No añadas diagnósticos, piezas, superficies ni tratamientos que no nombró, ni completes lo que falta con lo que sería habitual.",
+    "En `dicho` va solo la frase de la que sale ese registro, no todo lo dictado: con ella el odontólogo ve qué se usó y qué no.",
     "Si se corrige («en la veinticinco… no, es la veintiséis»), vale lo último que dijo. Si pide quitar algo («quita la endodoncia»), no lo registres.",
-    "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo.",
+    "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo. Pero ya no está pendiente (se confirmó o se descartó): si lo nuevo lo cambia o lo vuelve a indicar con otros datos, es un registro nuevo, no una corrección.",
+    "Si el odontólogo nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
-    `Los diagnósticos van con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra.`,
+    "Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.",
+    "Pon la variante o el estado de un hallazgo solo si el odontólogo los dijo («caries en dentina», «corona metalcerámica en buen estado»); si no, déjalos vacíos: el sistema se los pregunta.",
+    "Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, implante, endodoncia, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.",
+    `Lista de hallazgos (código, nombre, variantes):\n${input.findings}`,
+    `En \`diagnosticos\` van los diagnósticos que no son un hallazgo de la lista (por ejemplo, gingivitis o pulpitis), con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra.`,
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
+    "Si dice dos o tres tratamientos para lo mismo, para que el paciente elija («una resina, o si no una corona»), es una sola indicación: en `service` la que recomienda (si no lo dice, la primera que nombró) y las demás en `alternatives`, en el orden en que las dijo. Si ya eligió una, es una indicación sin alternativas.",
+    "En `recetas` va cada medicamento que receta, con lo que dijo: la DCI, la concentración con su unidad, la forma, la dosis, la frecuencia y la duración. No completes lo que no dijo: el sistema lo pregunta y calcula la cantidad. Lo recetado no se repite en el texto de la consulta. Cambiar un medicamento pendiente («mejor paracetamol en vez del ibuprofeno») o completarlo («el naproxeno por cinco días») es una corrección de ese medicamento, con la DCI y lo que cambie, no uno nuevo.",
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
@@ -116,6 +136,7 @@ export interface DictationAsk {
   provider: LlmSpec["provider"]
   services: string[]
   diagnosisList: string
+  findings: string
   zone: { locale: string; timezone: string }
   now: Date
   transcript: string
@@ -134,7 +155,7 @@ export interface DictationAsk {
  * el 2026-10-17, ADR 0012).
  */
 export function dictationMessages(input: DictationAsk): BaseMessage[] {
-  const fixed = systemPrompt({ services: input.services, diagnosisList: input.diagnosisList })
+  const fixed = systemPrompt({ services: input.services, diagnosisList: input.diagnosisList, findings: input.findings })
   const mark = CACHE_MARK[input.provider]
   const today = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full" }).format(input.now)
   const context = input.context.trim().slice(-600)
@@ -177,8 +198,10 @@ const blank = (value: unknown) => value === undefined || value === null || (type
 
 /** Cada bloque de registros de la respuesta, en el orden en que se guardan. */
 const DRAFT_PARTS = [
+  { key: "odontograma", kind: "odontograma" },
   { key: "diagnosticos", kind: "diagnostico" },
   { key: "indicaciones", kind: "plan" },
+  { key: "recetas", kind: "receta" },
   { key: "controles", kind: "control" },
 ] as const
 
@@ -192,7 +215,8 @@ const DRAFT_PARTS = [
  * - lo que no se puede usar se cuenta en `omitted` para avisar al odontólogo:
  *   un registro sin ningún dato, una corrección o un «quita» con un número que
  *   no está entre las pendientes (no se adivina a cuál se refería) y lo que
- *   pasa de lo que el servicio guarda de un tramo.
+ *   pasa de lo que el servicio guarda de un tramo. La frase que lo pidió, si
+ *   de verdad se dijo, va en `unused`: la pantalla la muestra tal cual.
  * Corregir y quitar cambian lo que ya estaba, así que se les cree menos: un
  * «quita» sin lo que el odontólogo dijo para pedirlo no se aplica, y si en una
  * pausa llegan más correcciones o «quita» que los que pide el esquema, no se
@@ -205,6 +229,7 @@ const DRAFT_PARTS = [
 export function readDictation(args: unknown, transcript: string, pendingCount: number): Omit<DictationExtraction, "model"> | null {
   if (!isRecord(args)) return null
   let omitted = 0
+  const unused: string[] = []
   const items = (value: unknown): unknown[] => {
     if (blank(value)) return []
     if (Array.isArray(value)) return value
@@ -212,6 +237,12 @@ export function readDictation(args: unknown, transcript: string, pendingCount: n
     return []
   }
   const quote = (item: Record<string, unknown>) => groundSource(typeof item["dicho"] === "string" ? item["dicho"] : undefined, transcript)
+  /** Algo que no se pudo usar: se cuenta y, si se sabe qué frase lo pidió, se guarda para mostrarla. */
+  const skip = (item: unknown) => {
+    omitted += 1
+    const said = isRecord(item) ? quote(item) : ""
+    if (said && !unused.includes(said)) unused.push(said)
+  }
   /** Solo los campos de su operación: la cita y lo que el modelo agregue de más no llegan al servicio. */
   const fields = (kind: DictationDraft["kind"], item: Record<string, unknown>): Record<string, unknown> => {
     const schema = operationAgentSchema(DICTATION_OPERATION[kind])
@@ -230,12 +261,12 @@ export function readDictation(args: unknown, transcript: string, pendingCount: n
   if (isRecord(nota)) {
     const payload = fields("nota", nota)
     if (Object.values(payload).some((value) => typeof value === "string" && value.trim())) drafts.push({ kind: "nota", payload, sourceText: quote(nota) })
-    else if (Object.values(payload).some((value) => !blank(value))) omitted += 1
+    else if (Object.values(payload).some((value) => !blank(value))) skip(nota)
   } else if (!blank(nota)) omitted += 1
   for (const part of DRAFT_PARTS) {
     for (const item of items(args[part.key])) {
       const payload = isRecord(item) ? fields(part.kind, item) : {}
-      if (!isRecord(item) || Object.keys(payload).length === 0) omitted += 1
+      if (!isRecord(item) || Object.keys(payload).length === 0) skip(item)
       else drafts.push({ kind: part.kind, payload, sourceText: quote(item) })
     }
   }
@@ -243,7 +274,7 @@ export function readDictation(args: unknown, transcript: string, pendingCount: n
   const corrections: DictationExtraction["corrections"] = []
   for (const item of items(args["correcciones"])) {
     const index = isRecord(item) ? pendingIndex(item["sugerencia"]) : null
-    if (!isRecord(item) || index === null || !isRecord(item["cambios"])) omitted += 1
+    if (!isRecord(item) || index === null || !isRecord(item["cambios"])) skip(item)
     else corrections.push({ index, changes: item["cambios"], sourceText: quote(item) })
   }
   const removals: DictationExtraction["removals"] = []
@@ -251,18 +282,18 @@ export function readDictation(args: unknown, transcript: string, pendingCount: n
     const index = isRecord(item) ? pendingIndex(item["sugerencia"]) : null
     const sourceText = isRecord(item) ? quote(item) : ""
     // Quitar es lo único que descarta: sin lo que dijo para pedirlo, la sugerencia se queda.
-    if (index === null || !sourceText) omitted += 1
+    if (index === null || !sourceText) skip(item)
     else removals.push({ index, sourceText })
   }
 
-  const voice = <T>(list: T[]) => {
+  const voice = <T extends { sourceText: string }>(list: T[]) => {
     if (list.length <= VOICE_EDITS_HINT) return list
-    omitted += list.length
+    for (const item of list) skip({ dicho: item.sourceText })
     return []
   }
   const kept = drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
-  omitted += drafts.length - kept.length
-  return { drafts: kept, corrections: voice(corrections), removals: voice(removals), omitted }
+  for (const item of drafts.slice(DICTATION_MAX_SUGGESTIONS)) skip({ dicho: item.sourceText })
+  return { drafts: kept, corrections: voice(corrections), removals: voice(removals), omitted, unused }
 }
 
 /* ---------- Modo de demostración: sin proveedor real ---------- */
@@ -324,6 +355,11 @@ export function demoExtraction(
         sourceText: sentence,
       })
     }
+    // Una pieza ausente es un hallazgo del odontograma (el modelo real lleva ahí también las caries).
+    if (/\b(ausente|falta la|no tiene la)\b/.test(text)) {
+      const tooth = toothIn(sentence)
+      if (tooth) drafts.push({ kind: "odontograma", payload: { toothNumber: tooth, condition: "missing_tooth" }, sourceText: sentence })
+    }
     for (const name of services) {
       const key = plain(name).split(" ").filter((word) => word.length >= 4)[0]
       if (!key || !text.includes(key)) continue
@@ -365,6 +401,8 @@ export interface DictationExtraction {
   removals: Array<{ index: number; sourceText: string }>
   /** Partes de la respuesta que no se pudieron usar (`readDictation`): se le avisa al odontólogo. */
   omitted: number
+  /** Lo que dijo para pedir lo que no se pudo usar, tal cual está en lo dictado: la pantalla lo muestra. */
+  unused: string[]
   model: string
 }
 
@@ -390,7 +428,7 @@ export function demoSegment(
     const fix = /^no,? es (?:en )?la\b/.test(text) ? toothIn(sentence) : null
     if (fix) {
       // Lo último que se dijo: una sugerencia de este mismo tramo o, si no hay, la última pendiente.
-      const last = [...drafts].reverse().find((draft) => draft.kind === "plan" || draft.kind === "diagnostico")
+      const last = [...drafts].reverse().find((draft) => draft.kind !== "nota" && draft.kind !== "control")
       if (last) last.payload = { ...last.payload, toothNumber: fix }
       else if (pending.length) corrections.push({ index: pending.length - 1, changes: { toothNumber: fix }, sourceText: sentence })
       continue
@@ -402,7 +440,7 @@ export function demoSegment(
       if (index >= 0) removals.push({ index, sourceText: sentence })
     }
   }
-  return { drafts, corrections, removals, omitted: 0 }
+  return { drafts, corrections, removals, omitted: 0, unused: [] }
 }
 
 /**
@@ -427,12 +465,13 @@ export async function extractDictation(
   if (transcript.length > DICTATION_CHARS) {
     throw new ServiceError("VALIDATION", 400, `El dictado admite hasta ${DICTATION_CHARS} caracteres por vez; termina y sigue con otro`)
   }
-  const { spec, services, diagnosisSystem, zone } = await withOrgContext(db, input.orgId, async (tx) => {
+  const { spec, services, diagnosisSystem, findings, zone } = await withOrgContext(db, input.orgId, async (tx) => {
     const catalog = await getDictationCatalog(tx, input.orgId)
     return {
       spec: resolveLlmSpec(deps.platform),
       services: catalog.services.map((service) => service.name),
       diagnosisSystem: catalog.diagnosisSystem,
+      findings: catalog.findings,
       zone: await getOrgLocale(tx, input.orgId),
     }
   })
@@ -440,33 +479,45 @@ export async function extractDictation(
   const pending = (input.pending ?? []).slice(0, 40)
   if (spec.provider === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending, diagnosisSystem.key), model: spec.modelName }
 
-  const record = tool(async () => "registrado", {
-    name: TOOL_NAME,
-    description: "Registra, de una sola vez, todo lo que el odontólogo dictó, ordenado por bloques de la atención.",
-    schema: extraction,
-  })
   const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true })
-  const bound = (model as unknown as { bindTools?: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools
-    ? (model as unknown as { bindTools: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools([record])
-    : model
-  const reply = await bound.invoke(
-    dictationMessages({
-      provider: spec.provider,
-      services,
-      diagnosisList: diagnosisSystem.title,
-      zone,
-      now,
-      transcript,
-      context: input.context ?? "",
-      pending,
-    }),
-  )
-  reportReplyUse(spec.provider, spec.modelName, reply)
-  const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
-  const read = call ? readDictation(call.args, transcript, pending.length) : null
+  const { read } = await askDictationModel(model, spec, {
+    provider: spec.provider,
+    services,
+    diagnosisList: diagnosisSystem.title,
+    findings,
+    zone,
+    now,
+    transcript,
+    context: input.context ?? "",
+    pending,
+  })
   if (!read) {
     // El proveedor respondió, pero no con algo que se pueda ordenar: no se inventa nada.
     throw new ServiceError("DICTATION_UNREADABLE", 502, "El asistente no pudo ordenar ese dictado. Vuelve a intentarlo o regístralo a mano.")
   }
   return { ...read, model: spec.modelName }
+}
+
+/**
+ * Una llamada al modelo con una pausa del dictado y su lectura parte por
+ * parte. La usan el dictado de la atención y su medición (`eval:dictado`),
+ * para que se mida lo mismo que corre.
+ */
+export async function askDictationModel(
+  model: unknown,
+  spec: Pick<LlmSpec, "provider" | "modelName">,
+  ask: DictationAsk,
+): Promise<{ read: Omit<DictationExtraction, "model"> | null; reply: AIMessage }> {
+  const record = tool(async () => "registrado", {
+    name: TOOL_NAME,
+    description: "Registra, de una sola vez, todo lo que el odontólogo dictó, ordenado por bloques de la atención.",
+    schema: extraction,
+  })
+  const bound = (model as { bindTools?: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools
+    ? (model as { bindTools: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools([record])
+    : (model as { invoke: (messages: BaseMessage[]) => Promise<AIMessage> })
+  const reply = await bound.invoke(dictationMessages(ask))
+  reportReplyUse(spec.provider, spec.modelName, reply)
+  const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
+  return { read: call ? readDictation(call.args, ask.transcript, ask.pending.length) : null, reply }
 }

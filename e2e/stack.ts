@@ -54,7 +54,7 @@ const TSX_CLI = join(
 export const DB_SETUP_SCRIPTS = [
   "src/migrate.ts",
   "src/seed-diagnoses.ts",
-  "src/seed-procedure-codes.ts",
+  "src/dental/seed-catalog.ts",
 ] as const
 export type DbSetupScript = (typeof DB_SETUP_SCRIPTS)[number]
 
