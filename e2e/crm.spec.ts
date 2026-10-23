@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { opportunityEvent } from "@odentia/db/schema/opportunities"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
@@ -724,4 +725,71 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   expect((await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))).map((row) => row.status)).toEqual(["cancelada"])
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${"0".repeat(64)}`))
   await expect(page.getByText("Este enlace ya no sirve")).toBeVisible()
+})
+
+test("contactos nuevos: cada fila dice cómo llegó y en qué está", async ({ owner, nextEventId }) => {
+  const { page, org } = owner
+  const tg = await createTelegramConnection(page, org.slug)
+  const tgUser = nextEventId()
+  expect(
+    await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
+      fromId: tgUser,
+      chatId: tgUser,
+      text: "Hola, quiero una cita",
+      updateId: nextEventId(),
+    }),
+  ).toBe(200)
+  const conversation = await waitForConversation(page, org.slug, tg.id)
+  await waitForInboundText(page, org.slug, conversation.id, "Hola, quiero una cita")
+  const person = conversation.contact.displayName
+  // Quien registró el equipo no tiene canal de entrada: la fila lo dice.
+  await call(page, "POST", "/api/people", org.slug, { givenNames: "Rosa", familyName: "Quispe", phone: "+51987654100" }, 201)
+
+  await gotoHydrated(page, tenant(org.slug, "/people"))
+  await page.getByRole("tab", { name: /^Contactos nuevos/ }).click()
+  for (const header of ["Cómo llegó", "En qué está", "Siguiente paso"]) {
+    await expect(page.getByRole("columnheader", { name: header, exact: true })).toBeVisible()
+  }
+  // Quien escribió por Telegram: su canal, y «Nueva» porque llegó hace menos de una semana.
+  const fromTelegram = page.getByRole("row", { name: person })
+  await expect(fromTelegram).toContainText("Telegram ·")
+  await expect(fromTelegram).toContainText("Nueva")
+  await expect(page.getByRole("row", { name: /Rosa Quispe/ })).toContainText("Lo registró el equipo")
+})
+
+test("crm ventas: «Movidas por el agente» deja solo las que movió el agente", async ({ owner, nextEventId, fixtureDb }) => {
+  const { page, org } = owner
+  const tg = await createTelegramConnection(page, org.slug)
+  const tgUser = nextEventId()
+  expect(
+    await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
+      fromId: tgUser,
+      chatId: tgUser,
+      text: "Hola",
+      updateId: nextEventId(),
+    }),
+  ).toBe(200)
+  const conversation = await waitForConversation(page, org.slug, tg.id)
+  const contactId = conversation.contact.id
+  const person = conversation.contact.displayName
+  await call(page, "POST", "/api/opportunities", org.slug, { contactId, title: "Hecha por la clínica" }, 201)
+  const moved = await call<{ id: string }>(page, "POST", "/api/opportunities", org.slug, { contactId, title: "Movida por el agente" }, 201)
+  // El agente deja su marca en el historial, como al mover una oportunidad (origen «agente»).
+  await fixtureDb.insert(opportunityEvent).values({ organizationId: org.id, opportunityId: moved.id, action: "opportunity.moved", origin: "agente" })
+
+  await gotoHydrated(page, tenant(org.slug, "/pipeline"))
+  const byHand = page.getByRole("button", { name: `${person} · Hecha por la clínica`, exact: true })
+  const byAgent = page.getByRole("button", { name: `${person} · Movida por el agente`, exact: true })
+  await expect(byHand).toBeVisible()
+  await expect(byAgent).toBeVisible()
+
+  await page.getByRole("button", { name: /^Quién lo movió/ }).click()
+  await page.getByRole("option", { name: "Movidas por el agente", exact: true }).click()
+  await expect(byAgent).toBeVisible()
+  await expect(byHand).toHaveCount(0)
+
+  // Al elegir, el filtro pasa a «Más filtros»; «Limpiar» lo quita y vuelve a mostrar todas.
+  await page.getByRole("button", { name: "Limpiar", exact: true }).click()
+  await expect(byHand).toBeVisible()
+  await expect(byAgent).toBeVisible()
 })
