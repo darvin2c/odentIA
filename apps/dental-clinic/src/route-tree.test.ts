@@ -10,7 +10,7 @@ import {
 } from "@odentia/clinic-app/lib/route-tree-checks"
 import { expect, it } from "vitest"
 
-/** El árbol que arma odentIA: las páginas comunes del paquete y las suyas (ADR 0085). */
+/** El árbol que arma odentIA: las páginas comunes del paquete y las suyas (ADR 0086). */
 const here = dirname(fileURLToPath(import.meta.url))
 const routes = routesOf(readFileSync(resolve(here, "routeTree.gen.ts"), "utf8"))
 const read = (file: string): string | null => {

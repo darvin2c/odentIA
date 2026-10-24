@@ -1,4 +1,4 @@
-# 0085 · Lo común de la clínica en un paquete; cada producto, una app delgada
+# 0086 · Lo común de la clínica en un paquete; cada producto, una app delgada
 
 Fecha: 2026-10-24 · Estado: aceptada · Precisa [0079](0079-un-nucleo-para-varios-productos.md) en las pantallas. Entrega 2 del plan de latidIA (issue #229), camino A del lienzo.
 
