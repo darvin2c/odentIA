@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentProposal } from "@odentia/db/schema/agent"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { member, user } from "@odentia/db/schema/auth"
 import { beforeAll, describe, expect, it } from "vitest"
 import {
@@ -11,6 +11,7 @@ import {
   createProposal,
   executeProposal,
   getProposal,
+  proposalReplyOf,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } from "./conversations.js"
@@ -237,6 +238,29 @@ describe("recorrido comercial directo", () => {
       run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { staffUserId: "owner-1" })),
     ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED", status: 409 })
     expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
+  })
+
+  it("el sí que entendió el modelo de decisión vale solo si es de la persona y posterior a la propuesta", async () => {
+    const { conversationId, contactId, connectionId: connId } = await openConversation("comercial-6", "evt-com-6")
+    const [before] = (await run((tx) => listMessages(tx, ORG, conversationId, { limit: 10 }))).items
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:intent-1" }),
+    )
+    // «Me sirve, ahí estaré el lunes temprano» no es un sí por palabras: lo entiende el modelo de decisión.
+    await inbound("comercial-6", connId, "evt-com-6b", "Me sirve, ahí estaré el lunes temprano")
+    const pending = await run((tx) => proposalReplyOf(tx, ORG, contactId, proposal.id))
+    expect(pending.reply?.body).toBe("Me sirve, ahí estaré el lunes temprano")
+    await expect(run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id))).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+    // Un mensaje de antes de la propuesta no confirma, aunque se lo pase.
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { understoodMessageId: before!.id })),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { understoodMessageId: pending.reply!.id }))
+    expect(done.status).not.toBe("propuesta")
+    const [audit] = await ownerDb.execute<{ metadata: { understood: string } }>(
+      sql`select metadata from audit_event where entity_id = ${proposal.id} and action = 'agent.proposal_confirmed'`,
+    )
+    expect(audit?.metadata.understood).toBe("modelo_de_decision")
   })
 })
 

@@ -18,6 +18,7 @@ import {
   proposalConfirmButtons,
   resendBudgetByContact,
   confirmProposalByContact,
+  proposalReplyOf,
   bookedDataLink,
   answerGeneralPermission,
   chooseMessagesInConversation,
@@ -85,6 +86,7 @@ import {
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
+import { understoodYes } from "./confirm-intent.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
@@ -326,7 +328,8 @@ export interface AgentToolCtx {
   lastInboundText?: string
   /**
    * Modelo de decisión de la organización, si tiene uno: elige qué respuestas
-   * oficiales viajan completas en el turno. Nunca decide un acto.
+   * oficiales viajan completas en el turno y entiende si la persona dijo que sí
+   * a una propuesta (`confirm-intent.ts`). Nunca decide un acto.
    */
   decision?: DecisionModel | null
   /** Trato de la clínica, para el aviso fijo al derivar; si falta se lee de la configuración. */
@@ -1676,10 +1679,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return `[SIMULACIÓN] Confirmado y ejecutado (propuesta ${proposalId}).`
       }
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
+      // El sí se entiende por su intención (ADR 0023): «perfecto», «sí, gracias», «me sirve, ahí estaré».
+      const pending = await inOrg((tx) => proposalReplyOf(tx, ctx.orgId, ctx.contactId, proposalId)).catch(() => null)
+      const understoodMessageId =
+        pending?.reply && (await understoodYes(ctx.decision, { proposed: pending.proposed, reply: pending.reply.body }))
+          ? pending.reply.id
+          : undefined
       let proposal: ProposalItem
       try {
         proposal = await inOrg((tx) =>
-          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
+          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey, understoodMessageId }),
         )
       } catch (e) {
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
