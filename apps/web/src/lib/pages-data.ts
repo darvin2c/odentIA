@@ -423,8 +423,8 @@ export const PAGES = {
             text: "Ninguna nota entra a la historia sin su sí.",
           },
           {
-            title: "Pones un tope de gasto.",
-            text: "Te avisamos antes de llegar y, al llegar, los casos nuevos pasan a tu equipo.",
+            title: "Pones un presupuesto del mes.",
+            text: "Te avisamos antes de llegar y, al llegar, las conversaciones nuevas pasan a tu equipo.",
           },
           {
             title: "Todo queda a la vista.",
@@ -1767,8 +1767,8 @@ export const PAGES = {
             text: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
           },
           {
-            title: "Un tope de gasto",
-            text: "Te avisamos antes de llegar y, al llegar, los casos nuevos pasan a tu equipo.",
+            title: "Un presupuesto del mes",
+            text: "Te avisamos antes de llegar y, al llegar, las conversaciones nuevas pasan a tu equipo.",
           },
         ],
       },
