@@ -14,8 +14,8 @@ type Task = {
   workM?: Pair
   out: string
   outM?: string
-  /** Qué acción cobra; null = no se cobra. */
-  price: "conversation" | "consultation" | "recovered" | null
+  /** Qué cobra (su tipo, ADR 0085); null = no se cobra. */
+  price: "gestiona" | "estandar" | "recovered" | null
 }
 
 /** Ejemplo de un día. Los textos «M» son los del teléfono, más cortos. */
@@ -25,8 +25,8 @@ const TASKS: Task[] = [
     in: ["WhatsApp · Andrea", "«¿Tienen cita para mañana? Me duele una muela.»"],
     inM: ["WhatsApp · Andrea", "«¿Tienen cita para mañana?»"],
     work: ["Sofi · recepción", "Busca un horario y agenda"],
-    out: "Conversación atendida",
-    price: "conversation",
+    out: "Le reservó la cita",
+    price: "gestiona",
   },
   {
     time: "07:00",
@@ -43,7 +43,7 @@ const TASKS: Task[] = [
     workM: ["Clío · clínica", "Ordena el dictado"],
     out: "Nota confirmada por la doctora",
     outM: "Nota confirmada",
-    price: "consultation",
+    price: "estandar",
   },
   {
     time: "11:05",
@@ -319,7 +319,7 @@ export default function PricingHero({
   /** La bajada con las cifras del plan que se muestra (lista o Fundadores). */
   lead: string
 }) {
-  const cost = (key: Task["price"]) => (key ? prices[key] : 0)
+  const cost = (key: Task["price"]) => (key === "recovered" ? prices.recovered : key ? prices.tiers[key] : 0)
   const [step, setStep] = useState<Step>({ task: 0, phase: 0, done: [] })
   const [paused, setPaused] = useState(false)
   const [reduced, setReduced] = useState(false)

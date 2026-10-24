@@ -14,6 +14,7 @@ import {
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gt, ilike, inArray, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { planPrices } from "./saas-actions.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -657,9 +658,24 @@ export interface PublicPlanPrices {
   currency: string
   priceCents: number
   creditCents: number
+  /** Gestiona y Completa; los demás tipos, abajo (ADR 0085). */
   conversationMicros: number | null
   consultationMicros: number | null
   recoveryMicros: number | null
+  /** Los precios por tipo: sin precio propio, el de su acción (como cobra el plan). */
+  tiers: {
+    informa: number | null
+    gestiona: number | null
+    agenda: number | null
+    simple: number | null
+    estandar: number | null
+    completa: number | null
+  }
+  argosIncludedQuestions: number
+  argosPackQuestions: number
+  argosPackMicros: number | null
+  storageIncludedGb: number
+  storageGbMicros: number | null
   trialCreditCents: number
   trialDays: number
 }
@@ -687,6 +703,7 @@ export interface PublicSaasTerms {
 }
 
 function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
+  const prices = planPrices(plan)
   return {
     code: plan.code,
     name: plan.name,
@@ -696,6 +713,19 @@ function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
     conversationMicros: plan.conversationMicros,
     consultationMicros: plan.consultationMicros,
     recoveryMicros: plan.recoveryMicros,
+    tiers: {
+      informa: prices.informa,
+      gestiona: prices.gestiona,
+      agenda: prices.agenda,
+      simple: prices.simple,
+      estandar: prices.estandar,
+      completa: prices.completa,
+    },
+    argosIncludedQuestions: plan.argosIncludedQuestions,
+    argosPackQuestions: plan.argosPackQuestions,
+    argosPackMicros: plan.argosPackMicros,
+    storageIncludedGb: plan.storageIncludedGb,
+    storageGbMicros: plan.storageGbMicros,
     trialCreditCents: plan.trialCreditCents,
     trialDays: plan.trialDays,
   }

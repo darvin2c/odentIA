@@ -814,6 +814,9 @@ h1, h2, h3, p { margin: 0; }
 .pr .arrow { font-family: var(--agent); font-size: 28px; color: var(--sky); text-align: center; }
 .pr .now { font-size: 54px; font-weight: 800; color: var(--sky); text-align: right; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .pr .now.gift { color: var(--amber); }
+/* Los precios por tipo (ADR 0085): tres cifras en una línea. */
+.pr .base.tiers { font-size: 24px; white-space: nowrap; }
+.pr .now.tiers { font-size: 32px; white-space: nowrap; }
 .pr.head { padding: 16px 40px; font-family: var(--agent); font-size: 18px; color: var(--on-3); letter-spacing: .06em; text-transform: uppercase; }
 .pr.head span:nth-child(2), .pr.head span:nth-child(4) { text-align: right; }
 .callback { display: flex; align-items: center; gap: 26px; font-size: 28px; color: var(--on-2); padding: 20px 30px; border-radius: 20px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
@@ -1184,9 +1187,9 @@ h1, h2, h3, p { margin: 0; }
     <span class="tag in">[ Con odentIA · Enfocados en el valor ]</span>
     <h2 class="h2 in" style="--d:.1s">Solo cobramos cuando te damos valor.</h2>
     <div class="results">
-      <div class="res in" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span>USD 0,50</span></span></div><p>Una por persona cada 24 horas, cuando el agente la atendió de verdad.</p><span class="when">Si termina en cita recuperada, solo se cobra la cita.</span></div>
-      <div class="res in" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span>USD 0,40</span></span></div><p>Se cobra cuando el odontólogo confirma lo que propuso el dictado.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
-      <div class="res in" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>USD 4</span></span></div><p>El paciente que no iba a volver reservó después del mensaje de Sofi.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
+      <div class="res in" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span>USD 0,50</span></span></div><p>Según lo que pasó en tu agenda: 0,10 si responde, 0,50 si mueve o reserva una cita y 1,00 si el paciente viene.</p><span class="when">Una por persona cada 24 horas.</span></div>
+      <div class="res in" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span>USD 0,20</span></span></div><p>Según lo que dejó hecho: 0,10 una receta, 0,20 la nota con diagnóstico y 0,50 el presupuesto.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
+      <div class="res in" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>USD 2</span></span></div><p>Pedro no tenía cita y volvió después del mensaje de Argos.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
     </div>
     <div class="free in" style="--d:1s"><span>Incluido, sin cobro:</span><span class="chip">Recordatorios</span><span class="chip">Avisos de cita</span><span class="chip">Tareas al equipo</span><span class="chip">Todo el sistema</span></div>
   </div>
@@ -1195,14 +1198,14 @@ h1, h2, h3, p { margin: 0; }
     <h2 class="h2 in" style="--d:.1s; font-size:66px">Ves cada cobro junto a lo que lo produjo.</h2>
     <div class="day in" style="--d:.25s">
       <div class="row in" style="--d:.45s"><span class="t">08:00</span><span class="what">Recordó su cita a 14 pacientes<small>Recordatorios por WhatsApp</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price zero">Incluido</span></div>
-      <div class="row in" style="--d:.75s"><span class="t">09:12</span><span class="what">Atendió a Lucía por Instagram y agendó su evaluación<small>Conversación atendida</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">USD 0,50</span></div>
-      <div class="row in" style="--d:1.05s"><span class="t">10:40</span><span class="what">Nota de la consulta de Mario, confirmada por la Dra. Ana<small>Consulta dictada y confirmada</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="price num">USD 0,40</span></div>
+      <div class="row in" style="--d:.75s"><span class="t">09:12</span><span class="what">Atendió a Lucía por Instagram y agendó su evaluación<small>Conversación que gestionó una cita</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">USD 0,50</span></div>
+      <div class="row in" style="--d:1.05s"><span class="t">10:40</span><span class="what">Nota y diagnóstico de Mario, confirmados por la Dra. Ana<small>Consulta estándar</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="price num">USD 0,20</span></div>
       <div class="row in" style="--d:1.35s"><span class="t">13:05</span><span class="what">Dejó a caja la tarea de llamar por un saldo pendiente<small>Tarea al equipo</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price zero">Incluido</span></div>
-      <div class="row in" style="--d:1.65s"><span class="t">17:30</span><span class="what">Pedro llegó a su control; reservó después del mensaje de Sofi<small>Cita recuperada · el paciente asistió</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">USD 4</span></div>
-      <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">USD 4,90</span></div>
+      <div class="row in" style="--d:1.65s"><span class="t">17:30</span><span class="what">Pedro llegó a su control; reservó después del mensaje de Argos<small>Cita recuperada · el paciente asistió</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">USD 2</span></div>
+      <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">USD 2,70</span></div>
     </div>
   </div>
-  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: odentIA cobra tres resultados que la clínica puede ver. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
+  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
 </section>
 
 <!-- ============ 12 · Dos formas de trabajar ============ -->
@@ -1249,7 +1252,7 @@ h1, h2, h3, p { margin: 0; }
     <div class="perks">
       <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="100" data-prefix="USD ">USD 100</span><h3>Para tus agentes, de regalo</h3><p>Los primeros USD 100 de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta 90 días para usarlos.</p></div>
       <div class="perk in" style="--d:.45s"><span class="k num" data-count="0" data-prefix="USD ">USD 0</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
-      <div class="perk in" style="--d:.6s"><span class="k num" data-count="40" data-suffix=" %">40 %</span><h3>Menos en cada acción</h3><p>Conversación, consulta y cita recuperada.</p></div>
+      <div class="perk in" style="--d:.6s"><span class="k num" data-count="50" data-suffix=" %">50 %</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
       <div class="perk in" style="--d:.75s"><span class="k num" data-count="12" data-suffix=" meses">12 meses</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante un año.</p></div>
       <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
       <div class="perk next in" style="--d:1.05s"><span class="k">Lo que viene, lo usas primero</span><p>Pregúntale a <b class="c-amber">Argos</b> con palabras y te responde con el gráfico:</p><q>¿Cuánto cobramos en septiembre por sede?</q></div>
@@ -1266,14 +1269,14 @@ h1, h2, h3, p { margin: 0; }
     <div class="prices">
       <div class="pr head in" style="--d:.2s"><span>Qué se cobra</span><span>Precio de lista</span><span></span><span>Fundadora</span></div>
       <div class="pr in" style="--d:.3s"><span class="what">Cuota mensual<small>De lista vuelve como crédito</small></span><span class="base">USD 29</span><span class="arrow">→</span><span class="now gift">USD 0</span></div>
-      <div class="pr in" style="--d:.5s"><span class="what">Conversación atendida<small><b class="c-sky">Sofi</b> · una por persona cada 24 horas</small></span><span class="base">USD 0,50</span><span class="arrow">→</span><span class="now" style="color:var(--sky)">USD 0,30</span></div>
-      <div class="pr in" style="--d:.7s"><span class="what">Consulta dictada y confirmada<small><b class="c-mint">Clío</b> · cuando el odontólogo confirma</small></span><span class="base">USD 0,40</span><span class="arrow">→</span><span class="now" style="color:var(--mint)">USD 0,24</span></div>
-      <div class="pr in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="base">USD 4</span><span class="arrow">→</span><span class="now" style="color:var(--amber)">USD 2,40</span></div>
+      <div class="pr in" style="--d:.5s"><span class="what">Conversación: informa · gestiona · el paciente vino<small><b class="c-sky">Sofi</b> · una por persona cada 24 horas</small></span><span class="base tiers">0,10 · 0,50 · 1,00</span><span class="arrow">→</span><span class="now tiers" style="color:var(--sky)">0,05 · 0,25 · 0,50</span></div>
+      <div class="pr in" style="--d:.7s"><span class="what">Consulta: simple · estándar · completa<small><b class="c-mint">Clío</b> · cuando el odontólogo confirma</small></span><span class="base tiers">0,10 · 0,20 · 0,50</span><span class="arrow">→</span><span class="now tiers" style="color:var(--mint)">0,05 · 0,10 · 0,25</span></div>
+      <div class="pr in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="base">USD 2</span><span class="arrow">→</span><span class="now" style="color:var(--amber)">USD 1</span></div>
     </div>
-    <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><s>USD 4,90</s><span>→</span><b class="num">USD 2,94</b><span>como clínica fundadora.</span></div>
-    <p class="small in" style="--d:1.5s">Precios en dólares, sin impuestos. Lo que cobra Meta por WhatsApp va aparte y se muestra como estimación.</p>
+    <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><s>USD 2,70</s><span>→</span><b class="num">USD 1,35</b><span>como clínica fundadora.</span></div>
+    <p class="small in" style="--d:1.5s">También a mitad de precio: 100 preguntas más a Argos (300 al mes incluidas) por USD 1,50 y cada GB extra sobre 20 por USD 0,10. Precios en dólares, sin impuestos. WhatsApp lo cobra Meta directamente a tu clínica.</p>
   </div>
-  <aside class="notes">Mismo producto, mismas funciones. La cuota desaparece y cada acción cuesta 40 % menos. El día que vimos hace un momento pasa de USD 4,90 a USD 2,94.</aside>
+  <aside class="notes">Mismo producto, mismas funciones. La cuota desaparece y todo cuesta 50 % menos. El día que vimos hace un momento pasa de USD 2,70 a USD 1,35.</aside>
 </section>
 
 <!-- ============ 15 · Cierre ============ -->

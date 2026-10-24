@@ -223,15 +223,15 @@ export async function saasSellerOf(tx: Db, orgId: string): Promise<{ id: string;
   return row ?? null
 }
 
-/* ---------- Tope de gasto y ciclo (tableros C5 y O2) ---------- */
+/* ---------- Presupuesto del mes y ciclo (tableros C5 y O2) ---------- */
 
 /**
- * Lo máximo que la clínica paga al mes por encima del crédito; null lo quita.
- * Lo decide quien administra la clínica. Distinto del tope técnico de
- * corridas por día de Recepción: ese protege el sistema; este es dinero.
+ * El presupuesto del mes: lo máximo que la clínica paga por encima del
+ * crédito; null lo quita. Lo decide quien administra la clínica y es el único
+ * límite de los agentes (ADR 0085).
  */
 export async function setSaasSpendCap(tx: Db, orgId: string, actorUserId: string, capCents: number | null): Promise<void> {
-  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0)) throw validation("El tope debe ser un importe válido")
+  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0)) throw validation("El presupuesto debe ser un importe válido")
   const [row] = await tx
     .update(saasSubscription)
     .set({ spendCapCents: capCents, updatedAt: new Date() })

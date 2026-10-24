@@ -13,15 +13,31 @@ function apiBase(): string {
   return (process.env.ODENTIA_API_INTERNAL_URL || `https://api.${domain}${port}`).replace(/\/+$/, "")
 }
 
+/** El precio de cada tipo de acción (ADR 0085), en unidades. */
+export interface TierPrices {
+  informa: number | null
+  gestiona: number | null
+  agenda: number | null
+  simple: number | null
+  estandar: number | null
+  completa: number | null
+}
+
 export interface PlanPrices {
   name: string
   currency: string
   /** Cuota al mes, en unidades (no centavos). */
   plan: number
   credit: number
+  /** Gestiona y Completa, los de antes de los tipos. */
   conversation: number | null
   consultation: number | null
   recovered: number | null
+  tiers: TierPrices
+  /** Preguntas a Argos incluidas al mes y el paquete de más; null si el plan no los cobra. */
+  argos: { included: number; packQuestions: number; pack: number } | null
+  /** GB incluidos y lo que cuesta cada GB extra al mes; null si el plan no cobra el almacenamiento. */
+  storage: { includedGb: number; perGb: number } | null
   trialCredit: number
   trialDays: number
 }
@@ -64,6 +80,13 @@ interface ApiPlan {
   conversationMicros: number | null
   consultationMicros: number | null
   recoveryMicros: number | null
+  /** Por tipo (ADR 0085); una API anterior no los trae y se usan los de la acción. */
+  tiers?: Record<keyof TierPrices, number | null>
+  argosIncludedQuestions?: number
+  argosPackQuestions?: number
+  argosPackMicros?: number | null
+  storageIncludedGb?: number
+  storageGbMicros?: number | null
   trialCreditCents: number
   trialDays: number
 }
@@ -79,6 +102,19 @@ function planOf(plan: ApiPlan): PlanPrices {
     conversation: fromMicros(plan.conversationMicros),
     consultation: fromMicros(plan.consultationMicros),
     recovered: fromMicros(plan.recoveryMicros),
+    tiers: {
+      informa: fromMicros(plan.tiers?.informa ?? plan.conversationMicros),
+      gestiona: fromMicros(plan.tiers?.gestiona ?? plan.conversationMicros),
+      agenda: fromMicros(plan.tiers?.agenda ?? plan.conversationMicros),
+      simple: fromMicros(plan.tiers?.simple ?? plan.consultationMicros),
+      estandar: fromMicros(plan.tiers?.estandar ?? plan.consultationMicros),
+      completa: fromMicros(plan.tiers?.completa ?? plan.consultationMicros),
+    },
+    argos:
+      plan.argosPackMicros != null
+        ? { included: plan.argosIncludedQuestions ?? 0, packQuestions: plan.argosPackQuestions ?? 100, pack: plan.argosPackMicros / 1_000_000 }
+        : null,
+    storage: plan.storageGbMicros != null ? { includedGb: plan.storageIncludedGb ?? 0, perGb: plan.storageGbMicros / 1_000_000 } : null,
     trialCredit: plan.trialCreditCents / 100,
     trialDays: plan.trialDays,
   }
@@ -135,15 +171,36 @@ export async function loadPricing(): Promise<Pricing> {
 export interface ValuePrices {
   plan: number
   credit: number
+  /** Lo que cuesta en promedio una conversación y una consulta, con la mezcla de tipos de una clínica mediana. */
   conversation: number
   consultation: number
   recovered: number
+  /** El precio de cada tipo, para la portada. */
+  tiers: Record<keyof TierPrices, number>
 }
+
+/**
+ * La mezcla de tipos de la clínica mediana del estudio de precios (ADR 0085):
+ * de cada 100 conversaciones, 50 informan y 50 gestionan una cita, y 25 de
+ * esas citas se dan; de cada 100 consultas, 40 son simples, 35 estándar y 25
+ * completas. Es un promedio para la calculadora, no lo que se cobra.
+ */
+const MIX = { informa: 0.5, gestiona: 0.5, agenda: 0.25, simple: 0.4, estandar: 0.35, completa: 0.25 }
 
 /** Las cifras de un plan para las islas; null si alguna acción no tiene precio. */
 export function valuePricesOf(plan: PlanPrices | null): ValuePrices | null {
-  if (!plan || plan.conversation === null || plan.consultation === null || plan.recovered === null) return null
-  return { plan: plan.plan, credit: plan.credit, conversation: plan.conversation, consultation: plan.consultation, recovered: plan.recovered }
+  if (!plan || plan.recovered === null) return null
+  const t = plan.tiers
+  if (t.informa === null || t.gestiona === null || t.agenda === null || t.simple === null || t.estandar === null || t.completa === null) return null
+  const tiers = { informa: t.informa, gestiona: t.gestiona, agenda: t.agenda, simple: t.simple, estandar: t.estandar, completa: t.completa }
+  return {
+    plan: plan.plan,
+    credit: plan.credit,
+    conversation: MIX.informa * tiers.informa + MIX.gestiona * tiers.gestiona + MIX.agenda * (tiers.agenda - tiers.gestiona),
+    consultation: MIX.simple * tiers.simple + MIX.estandar * tiers.estandar + MIX.completa * tiers.completa,
+    recovered: plan.recovered,
+    tiers,
+  }
 }
 
 /** El plan con que se muestran las cifras: el Fundador mientras se entra por invitación, si no, el de lista. */
