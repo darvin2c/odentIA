@@ -124,6 +124,8 @@ export interface DictationProfile {
   toolDescription: string
   /** Las instrucciones fijas, con lo de la clínica que no cambia en la atención. */
   systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string
+  /** Si el modelo piensa antes de ordenar (`createConfiguredChatModel`); sin él, responde de inmediato. */
+  reasoning?: "low" | "medium" | "high"
   /** El doble de `LLM_MODEL=fake`: por reglas, para ver el recorrido sin proveedor; no mide nada. */
   demoSegment(
     transcript: string,

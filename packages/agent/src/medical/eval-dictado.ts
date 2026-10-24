@@ -65,7 +65,12 @@ if (spec.provider === "fake")
   throw new Error(
     "Esta medición es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor",
   )
-const model = await createConfiguredChatModel(spec, { explicitCache: true })
+// Como en la atención, con el razonamiento del perfil; `--razonamiento=none` lo quita para comparar.
+const reasoning = arg("razonamiento", MEDICAL_DICTATION_PROFILE.reasoning ?? "none")
+const model = await createConfiguredChatModel(spec, {
+  explicitCache: true,
+  ...(reasoning === "none" ? {} : { reasoning: reasoning as "low" | "medium" | "high" }),
+})
 
 const plain = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 // Las cifras dichas en palabras («siete días») valen igual: el servicio las lee.
@@ -117,7 +122,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
     },
     MEDICAL_DICTATION_PROFILE,
   )
-  if (solo) console.log(JSON.stringify(read, null, 2))
+  if (solo) console.log(JSON.stringify({ llamadas: (reply.tool_calls ?? []).map((call) => ({ nombre: call.name, args: call.args })), leido: read }, null, 2))
   const meta = (reply.usage_metadata ?? {}) as {
     input_tokens?: number
     output_tokens?: number
