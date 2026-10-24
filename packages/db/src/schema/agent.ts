@@ -381,6 +381,12 @@ export const aiUsage = pgTable(
     audioSeconds: integer("audio_seconds"),
     costMicros: bigint("cost_micros", { mode: "number" }),
     conversationId: uuid("conversation_id"),
+    /**
+     * A qué acción pertenece el gasto, para ver lo que costó cada cosa (ADR
+     * 0085): la atención de un dictado, la pregunta a Argos. Null si no se sabe.
+     */
+    encounterId: uuid("encounter_id"),
+    reportQuestionId: uuid("report_question_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

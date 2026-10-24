@@ -38,6 +38,7 @@ async function action(orgId: string, at: Date, micros = 500_000) {
   await ownerDb.insert(saasAction).values({
     organizationId: orgId,
     kind: "conversacion",
+    tier: "gestiona",
     occurredAt: at,
     contactId: randomUUID(),
     detail: "Atendió una conversación por WhatsApp",

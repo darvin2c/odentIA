@@ -3,7 +3,8 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
 import { markReviewsCredited, pendingReviewCredits } from "./saas-action-review.js"
-import { listPeriodActions, microsToCents, netMicros, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
+import { listPeriodActions, microsToCents, netMicros, SAAS_BILLED_KINDS, SAAS_TIERS_OF, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
+import { countStorageAction } from "./saas-included.js"
 import { AGENT_NAMES } from "./agent-names.js"
 import { saasTermsAt } from "./saas-commercial-terms.js"
 
@@ -27,10 +28,39 @@ export function addMonth(date: Date): Date {
   return next
 }
 
-const KIND_LINE: Record<SaasActionKind, (count: number) => string> = {
-  conversacion: (n) => `${AGENT_NAMES.recepcion}: ${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"} por encima del crédito`,
-  consulta: (n) => `${AGENT_NAMES.asistente_clinico}: ${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"} por encima del crédito`,
-  cita: (n) => `${AGENT_NAMES.administrador}: ${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"} por encima del crédito`,
+const TIER_WORDS: Record<string, [string, string]> = {
+  informa: ["que informó", "que informaron"],
+  gestiona: ["que gestionó una cita", "que gestionaron una cita"],
+  agenda: ["cuya cita se dio", "cuyas citas se dieron"],
+  simple: ["simple", "simples"],
+  estandar: ["estándar", "estándar"],
+  completa: ["completa", "completas"],
+}
+
+/** «150 que informaron, 60 que gestionaron una cita»: el detalle por tipo de una línea (ADR 0085). */
+function tiersText(kind: SaasActionKind, rows: SaasActionRow[]): string {
+  const parts = (SAAS_TIERS_OF[kind] ?? []).flatMap((tier) => {
+    const n = rows.filter((row) => row.tier === tier).length
+    const words = TIER_WORDS[tier]
+    return n && words ? [`${n} ${n === 1 ? words[0] : words[1]}`] : []
+  })
+  return parts.length ? ` (${parts.join(", ")})` : ""
+}
+
+const KIND_LINE: Record<SaasActionKind, (rows: SaasActionRow[]) => string> = {
+  conversacion: (rows) =>
+    `${AGENT_NAMES.recepcion}: ${rows.length} ${rows.length === 1 ? "conversación" : "conversaciones"}${tiersText("conversacion", rows)} por encima del crédito`,
+  consulta: (rows) =>
+    `${AGENT_NAMES.asistente_clinico}: ${rows.length} ${rows.length === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}${tiersText("consulta", rows)} por encima del crédito`,
+  cita: (rows) => `${AGENT_NAMES.administrador}: ${rows.length} ${rows.length === 1 ? "cita recuperada" : "citas recuperadas"} por encima del crédito`,
+  preguntas: (rows) => {
+    const n = rows.reduce((sum, row) => sum + (row.units ?? 0), 0)
+    return `${AGENT_NAMES.administrador}: ${n} preguntas más (${rows.length} ${rows.length === 1 ? "paquete" : "paquetes"}) por encima del crédito`
+  },
+  almacenamiento: (rows) => {
+    const n = rows.reduce((sum, row) => sum + (row.units ?? 0), 0)
+    return `Almacenamiento: ${n} GB por encima de lo incluido`
+  },
 }
 
 /** ¿Cobra esta suscripción por acción? Activa o en gracia, con plan, no demo y con su mes empezado. */
@@ -61,11 +91,13 @@ async function issueCycleCharge(
     .where(and(eq(saasCharge.organizationId, orgId), eq(saasCharge.dedupeKey, dedupeKey)))
     .limit(1)
   if (existing) return existing.id
+  // El GB extra del mes se cuenta al cerrarlo, con el promedio de sus días (ADR 0085).
+  if (input.final) await countStorageAction(tx, orgId, { start: input.periodStart, end: input.periodEnd })
   const all = await listPeriodActions(tx, orgId, { start: input.periodStart, end: input.periodEnd, credit: "mes", creditCents: plan.creditCents })
   const pending = all.filter((row) => row.chargeId === null && row.occurredAt < input.until)
   const over = pending.filter((row) => row.state === "sobre_credito")
   const covered = pending.filter((row) => row.state === "credito")
-  const kinds: SaasActionKind[] = ["conversacion", "consulta", "cita"]
+  const kinds = SAAS_BILLED_KINDS
   const lines: Array<Omit<typeof saasChargeLine.$inferInsert, "organizationId" | "chargeId">> = []
   let sort = 0
   if (input.final) {
@@ -85,11 +117,12 @@ async function issueCycleCharge(
     const bases = new Set(rows.map((row) => row.basePriceMicros))
     lines.push({
       kind,
-      description: KIND_LINE[kind](rows.length),
-      quantity: rows.length,
+      description: KIND_LINE[kind](rows),
+      quantity: kind === "almacenamiento" ? rows.reduce((sum, row) => sum + (row.units ?? 0), 0) : rows.length,
       // Un precio por línea solo si todas las acciones lo comparten (un cambio de precio a mitad de mes deja varios).
-      unitBaseMicros: bases.size === 1 ? (rows[0]?.basePriceMicros ?? null) : null,
-      unitPriceMicros: prices.size === 1 ? (rows[0]?.priceMicros ?? null) : null,
+      // El almacenamiento se cuenta en GB y su fila ya trae el total: sin precio por unidad.
+      unitBaseMicros: kind !== "almacenamiento" && bases.size === 1 ? (rows[0]?.basePriceMicros ?? null) : null,
+      unitPriceMicros: kind !== "almacenamiento" && prices.size === 1 ? (rows[0]?.priceMicros ?? null) : null,
       amountCents: amount,
       sortOrder: sort++,
     })

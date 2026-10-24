@@ -106,6 +106,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             { secretsKey: deps.secretsKey, platform: deps.llm },
             { orgId, transcript, context, pending: before.map((item) => ({ label: dictationModelLabel(item) })) },
           ),
+          { encounterId: at.data.encounterId },
         )
         // El número que usó el modelo es la posición en la lista que se le dio.
         const target = (index: number) => before[index]?.id

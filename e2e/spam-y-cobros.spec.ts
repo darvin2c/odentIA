@@ -149,6 +149,7 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   const row = (contactId: string, minutesAgo: number, conversationId: string | null = null) => ({
     organizationId: org.id,
     kind: "conversacion",
+    tier: "gestiona",
     occurredAt: new Date(now - minutesAgo * 60_000),
     contactId,
     conversationId,

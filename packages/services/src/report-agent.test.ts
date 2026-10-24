@@ -172,6 +172,7 @@ async function filler(orgId: string, count: number, from: Date, everyHours = 1) 
     await ownerDb.insert(saasAction).values({
       organizationId: orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: new Date(from.getTime() + index * everyHours * 3_600_000),
       contactId: randomUUID(),
       detail: "Atendió una conversación por WhatsApp",
@@ -206,6 +207,7 @@ describe("lo que pagaste por el agente", () => {
     await ownerDb.insert(saasAction).values({
       organizationId: c.orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: day("2026-10-28T15:00:00Z"),
       contactId: rosa.contactId,
       detail: "Atendió una conversación por WhatsApp",
