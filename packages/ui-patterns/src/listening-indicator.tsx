@@ -43,7 +43,7 @@ function usePrefersReducedMotion(): boolean {
 
 /**
  * Que se note que odentIA escucha (lienzo del dictado, opción A): la onda
- * entre los corchetes de la marca Odentia[32]. Cinco barras siguen el volumen
+ * entre los corchetes de la marca odentIA[32]. Cinco barras siguen el volumen
  * real de la voz; en silencio quedan planas; en pausa, corchetes y puntos en
  * gris. Con movimiento reducido, un punto fijo entre los corchetes.
  */

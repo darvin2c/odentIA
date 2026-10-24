@@ -266,7 +266,7 @@ resumen. En el formulario de tarea el contexto va después del título editable.
 
 ## Identidad visual y temas
 
-La única firma vigente es `Odentia[32]`: O mayúscula, IBM Plex Mono Regular y separación ajustada; el isotipo independiente conserva `[32]`. `Brand` en `@odentia/ui-patterns` sirve la firma y su variante `compact`. Los activos canónicos viven en `assets/brand/`: maestros SVG con curvas editables, PNG transparentes, PDF vectoriales RGB, favicon SVG/ICO, licencia, guía y ZIP. Panel y plataforma importan los favicons de esa carpeta mediante Vite. No se mantienen propuestas descartadas en `refs/`.
+La única firma vigente es `odentIA[32]`: «odent» en la tinta e «IA» en el color del isotipo, IBM Plex Mono Regular y separación ajustada (latidIA, igual: `latidIA[72]`); el isotipo independiente conserva `[32]`. `Brand` en `@odentia/ui-patterns` sirve la firma y su variante `compact`. Los activos canónicos viven en `assets/brand/`: maestros SVG con curvas editables, PNG transparentes, PDF vectoriales RGB, favicon SVG/ICO, licencia, guía y ZIP. Panel y plataforma importan los favicons de esa carpeta mediante Vite. No se mantienen propuestas descartadas en `refs/`.
 
 Los colores de identidad usan `--identity-accent` y `--identity-ink`, separados de `--primary`: las organizaciones pueden cambiar el color de sus acciones sin recolorear la marca de la plataforma. Claro: cian `#0e7490` y tinta `#0f172a`; oscuro: cian `#4fc3d7` y tinta `#f1f5f9`. No redefinir los tokens de identidad en paletas de organización. La marca de una clínica y la de la plataforma son identidades distintas.
 
