@@ -45,6 +45,43 @@ export interface ProductUi {
   documents: ProductDocumentsUi
   /** La atención: sus bloques en borrador, lo que dice el cierre y lo que se ve al leerla. */
   encounter: ProductEncounterUi
+  /** Antecedentes: lo del producto en la «Entrevista de salud». */
+  health: ProductHealthUi
+  /** El resumen de la persona: lo del producto junto a las alertas clínicas. */
+  summary: ProductSummaryUi
+}
+
+/**
+ * Lo del producto en Antecedentes (odentIA: «Odontológicos y hábitos»;
+ * latidIA: embarazo y lactancia con fecha, gineco-obstétricos, hábitos y
+ * vacunas, issue 229). Las claves son las de su entrevista (`ProductInterview`).
+ */
+export interface ProductHealthUi {
+  /** «Personales» pregunta el embarazo (odentIA); latidIA lo pregunta en su sección, con fecha y lactancia. */
+  asksPregnancy: boolean
+  /** Sus secciones de la entrevista, después de «Familiares». */
+  InterviewSections(props: InterviewSectionsProps): ReactNode
+  /** Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. */
+  Summary(props: { answers: Record<string, unknown> }): ReactNode
+}
+
+export interface InterviewSectionsProps {
+  /** La entrevista como se está editando. */
+  answers: Record<string, unknown>
+  /** Cambia un dato de un grupo; `undefined` lo quita (y el grupo, si queda vacío). */
+  update(group: string, key: string, value: unknown): void
+  /** Reemplaza un grupo entero (una lista, como las vacunas); `undefined` lo quita. */
+  setGroup(key: string, value: unknown): void
+  disabled: boolean
+  /** Prefijo único para los `id` de los campos. */
+  idPrefix: string
+  /** El sexo de la ficha: lo gineco-obstétrico no se le pregunta a un hombre. */
+  sex: string | null
+}
+
+export interface ProductSummaryUi {
+  /** Sus tarjetas en el resumen clínico, junto a las alertas (latidIA: la lista de problemas). */
+  ClinicalCards(props: { patientId: string; onSection: (section: string) => void }): ReactNode
 }
 
 export interface ProductEncounterUi {
@@ -338,6 +375,8 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     services: { kinds: [], leaves: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },
     documents: { kind: null, usePapers: () => NO_PAPERS },
+    health: { asksPregnancy: true, InterviewSections: () => null, Summary: () => null },
+    summary: { ClinicalCards: () => null },
     encounter: {
       examination: {
         title: "Examen clínico",

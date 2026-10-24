@@ -53,6 +53,7 @@ import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { clinicToday } from "./inventory-stock.js"
 import { requirePatient } from "./patients.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -585,21 +586,14 @@ export async function initializeDeclaredPatientHealth(
     [declared.allergies, declared.conditions, declared.medications].some(
       (group) => group && group.state !== "unanswered",
     ) ||
-    [declared.personal, declared.dental].some((group) =>
+    [declared.personal, declared.dental, declared.medical].some((group) =>
       Object.values(group ?? {}).some((value) => value !== undefined && value !== ""),
     )
   if (!hasData) return getPatientHealth(tx, orgId, patientId)
   const state = (value: string | undefined) =>
     value === "none" || value === "recorded" ? value : "unknown"
-  const answered = (group: Record<string, unknown> | undefined) =>
-    Object.fromEntries(Object.entries(group ?? {}).filter(([, value]) => value !== "" && value !== undefined))
-  // Lo que declaró de su salud y de su boca entra a la entrevista de la ficha con sus mismas claves.
-  const dental = answered(declared.dental)
-  const personal = answered(declared.personal)
-  const interview = {
-    ...(Object.keys(personal).length ? { antecedentesPersonales: personal } : {}),
-    ...(Object.keys(dental).length ? { antecedentesOdontologicos: dental } : {}),
-  }
+  // Lo que declaró entra a la entrevista de la ficha como la arma su producto (odentIA: su boca; latidIA: el embarazo con fecha).
+  const interview = (await productHooks(tx, orgId)).interview.declared(declared, await clinicToday(tx, orgId))
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,
@@ -873,7 +867,11 @@ async function persistPatientHealth(
     if (!Number.isInteger(input.anamnesis.expectedVersion) || input.anamnesis.expectedVersion < 0) {
       throw validation("anamnesis.expectedVersion debe ser un entero >= 0")
     }
-    interviewAnswers = assertNewInterview(input.anamnesis.answers)
+    // Lo del producto en la entrevista (latidIA: embarazo y lactancia con fecha, hábitos, vacunas).
+    interviewAnswers = (await productHooks(tx, orgId)).interview.check(
+      assertNewInterview(input.anamnesis.answers),
+      await clinicToday(tx, orgId),
+    )
     const [latest] = await tx
       .select()
       .from(patientAnamnesis)

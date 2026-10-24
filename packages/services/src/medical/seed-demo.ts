@@ -4,7 +4,8 @@
  * borra junto con sus clínicas y lo crea al final. Lo mínimo para recorrerlo:
  * la Dra. Elena Vela (propietaria) y Ana Torres, que también dirige Dental
  * Smile y entra una vez en cada dominio; una sede con dos salas y horario, la
- * agenda de hoy y mañana, y los controles de presión de Luis con su examen.
+ * agenda de hoy y mañana, los controles de presión de Luis con su examen y los
+ * antecedentes médicos de los tres.
  *
  * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
  */
@@ -20,6 +21,7 @@ import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
+import { savePatientHealth } from "../clinical.js"
 import { createSpecialty, setProfessionalSpecialties } from "../clinical-forms.js"
 import { createContact } from "../contacts.js"
 import { createPatient } from "../patients.js"
@@ -243,6 +245,59 @@ export async function seedMedicalDemo(
       endsAt: lima(item.day, item.end),
       status: "programada",
     })
+  }
+
+  // Sus antecedentes médicos (entrega 5b): Julia, embarazada de 12 semanas;
+  // Luis, hipertenso y fumador; Rosa, con sus vacunas al día.
+  const today = lima(0, "12:00").slice(0, 10)
+  const history: Array<{
+    patientId: string
+    conditions: Array<{ name: string; status: string }>
+    answers: Record<string, unknown>
+  }> = [
+    {
+      patientId: julia,
+      conditions: [],
+      answers: {
+        embarazoLactancia: {
+          embarazo: { estado: "si", fecha: today, semanas: 12 },
+          lactancia: { estado: "no", fecha: today },
+        },
+        ginecoObstetricos: { gestas: 1, partos: 0, cesareas: 0, metodo: "ninguno" },
+        habitos: { tabaco: "nunca", alcohol: "no", actividadFisica: "ligera" },
+      },
+    },
+    {
+      patientId: luis,
+      conditions: [{ name: "Hipertensión arterial", status: "activa" }],
+      answers: { habitos: { tabaco: "fuma", cigarrillosDia: 10, alcohol: "ocasional", actividadFisica: "sedentaria" } },
+    },
+    {
+      patientId: rosa,
+      conditions: [],
+      answers: {
+        vacunas: [
+          // La del año pasado: siempre en el pasado, sea el mes que sea.
+          { vacuna: "Influenza", fecha: `${Number(today.slice(0, 4)) - 1}-04-15` },
+          { vacuna: "Tétanos" },
+        ],
+      },
+    },
+  ]
+  for (const item of history) {
+    await db.transaction((tx) =>
+      savePatientHealth(tx, ORG, VELA_ID, item.patientId, {
+        expectedRevision: 0,
+        reviewStatus: {
+          allergies: "unknown",
+          conditions: item.conditions.length ? "recorded" : "unknown",
+          medications: "unknown",
+        },
+        conditions: item.conditions,
+        medications: [],
+        anamnesis: { expectedVersion: 0, answers: item.answers },
+      }),
+    )
   }
 
   // Los controles de presión de Luis, ya firmados (entrega 5): la sección

@@ -49,6 +49,7 @@ import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
 import { PersonTomographies } from "./person-tomographies"
+import { productUi } from "../../product/product-ui"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -101,6 +102,7 @@ export function PersonSummary({
   ) => void
 }) {
   const patientId = person.patient?.id ?? null
+  const ProductClinicalCards = productUi().summary.ClinicalCards
   const can = useCan()
   const receptionName = useReceptionName()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
@@ -201,6 +203,11 @@ export function PersonSummary({
                 onAntecedentes={() => onSection("antecedentes")}
               />
             )}
+            {/* Lo del producto junto a las alertas (latidIA: la lista de problemas, issue 229). */}
+            <ProductClinicalCards
+              patientId={patientId}
+              onSection={(section) => onSection(section as PatientSectionId)}
+            />
             <PlanNextCard
               patientId={patientId}
               onAction={(step) => {

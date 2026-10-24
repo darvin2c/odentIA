@@ -11,6 +11,8 @@ import {
   updateEncounterDraft,
 } from "./encounters.js"
 import { getPatientSummary } from "./patient-history.js"
+import { getPatientHealth, savePatientHealth } from "./clinical.js"
+import { clinicToday } from "./inventory-stock.js"
 import { loadPatientRecord, patientRecordFhirBundle } from "./patient-record.js"
 import { requireDictatingProduct } from "./products.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -51,9 +53,10 @@ it("cada momento de lo común pregunta al producto: una clínica médica no ve n
     expect(
       await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id)),
     ).not.toHaveProperty("odontogramEntries")
+    // La copia de latidIA lleva sus antecedentes médicos, no el odontograma.
     expect(
-      (await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))).productSections,
-    ).toEqual([])
+      (await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))).productSections.map((s) => s.title),
+    ).toEqual(["Antecedentes médicos"])
     // Cerrar sigue igual en lo común, sin nada del odontograma.
     await f.ready(f.encounter.id)
     const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
@@ -191,6 +194,51 @@ it("el examen y los signos vitales los pone el producto: la boca en odentIA, los
       status: "borrador",
       vitals: { presionSistolica: 118, glucosaCapilar: 110 },
     })
+  } finally {
+    await setProduct("dental")
+  }
+})
+
+it("los antecedentes médicos van en la entrevista de latidIA y en su copia de la historia (issue 229)", async () => {
+  const f = await clinicalFixture()
+  await setProduct("medical")
+  try {
+    const today = await f.run((tx) => clinicToday(tx, "org_a"))
+    const save = async (answers: Record<string, unknown>) => {
+      const health = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+      return f.run((tx) =>
+        savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+          expectedRevision: health.revision,
+          reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+          conditions: [],
+          medications: [],
+          anamnesis: { expectedVersion: health.latestAnamnesis?.version ?? 0, answers },
+        }),
+      )
+    }
+    // Sin la fecha, el embarazo no se guarda: la receta no sabría si sigue vigente.
+    await expect(save({ embarazoLactancia: { embarazo: { estado: "si" } } })).rejects.toThrow(/fecha/)
+    const saved = await save({
+      embarazoLactancia: { embarazo: { estado: "si", fecha: today, semanas: 12 } },
+      habitos: { tabaco: "dejo", cigarrillosDia: 10 },
+      vacunas: [{ vacuna: "Influenza", fecha: today }],
+    })
+    // Lo que no vale para quien dejó de fumar se limpia al guardar.
+    expect(saved.latestAnamnesis?.answers).toMatchObject({ habitos: { tabaco: "dejo" } })
+    expect(saved.latestAnamnesis?.answers).not.toHaveProperty("habitos.cigarrillosDia")
+    const record = await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+    const [day, month, year] = [today.slice(8, 10), today.slice(5, 7), today.slice(0, 4)]
+    expect(record.productSections).toEqual([
+      {
+        title: "Antecedentes médicos",
+        lines: [
+          `Embarazada, 12 semanas (registrado el ${day}/${month}/${year})`,
+          "Hábitos: tabaco: lo dejó",
+          `Vacunas: Influenza (${day}/${month}/${year})`,
+        ],
+        empty: "Sin embarazo, hábitos ni vacunas registrados.",
+      },
+    ])
   } finally {
     await setProduct("dental")
   }

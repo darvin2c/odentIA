@@ -2,7 +2,6 @@ import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -57,6 +56,7 @@ import {
   ReviewStateSelect,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
 
 type Rec = Record<string, unknown>
 
@@ -267,11 +267,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [openPersonales, setOpenPersonales] = useState(true)
   const [openFamiliares, setOpenFamiliares] = useState(true)
-  const [openOdonto, setOpenOdonto] = useState(true)
   const dirtyRef = useRef(false)
   dirtyRef.current = dirty || interviewDirty
 
   const health = healthQuery.data?.data ?? null
+  // Lo del producto en la entrevista (issue 229).
+  const productHealth = productUi().health
   const versions = useMemo(() => historyQuery.data?.data ?? [], [historyQuery.data])
   const latestVersion = health?.latestAnamnesis?.version ?? 0
 
@@ -473,7 +474,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   }
 
   const personales = groupOf(interview, "antecedentesPersonales")
-  const odontologicos = groupOf(interview, "antecedentesOdontologicos")
   const legacy = legacyTexts(health.latestAnamnesis?.answers as AnamnesisAnswers | undefined)
   const fid = (name: string): string => `${uid}-${name}`
   const registration = patientQuery.data?.data.registration ?? null
@@ -584,6 +584,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           pendingReview={pendingReview}
         />
       )}
+      <productHealth.Summary answers={(health.latestAnamnesis?.answers ?? {}) as Rec} />
 
       <FormDrawer
         open={drawerOpen}
@@ -786,6 +787,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                         }
                       />
                     </Field>
+                    {productHealth.asksPregnancy ? (
                     <Field>
                       <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
                       <Select
@@ -815,7 +817,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                         </SelectContent>
                       </Select>
                     </Field>
-                    {personales["embarazo"] === true ? (
+                    ) : null}
+                    {productHealth.asksPregnancy && personales["embarazo"] === true ? (
                       <Field>
                         <FieldLabel htmlFor={fid("emb-sem")}>Semanas de embarazo (0–42)</FieldLabel>
                         <Input
@@ -948,171 +951,15 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                 </CollapsibleContent>
               </Collapsible>
 
-              <Collapsible open={openOdonto} onOpenChange={setOpenOdonto}>
-                <CollapsibleTrigger className="text-sm font-medium">
-                  <span className="flex items-center gap-1">
-                    Odontológicos y hábitos <ChevronDown aria-hidden className="size-4" />
-                  </span>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="grid gap-4 pt-2 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor={fid("od-ult")}>Última visita</FieldLabel>
-                      <Input
-                        id={fid("od-ult")}
-                        value={strOf(odontologicos["ultimaVisita"])}
-                        disabled={!canWrite}
-                        onChange={(e) =>
-                          updateInterview(
-                            "antecedentesOdontologicos",
-                            "ultimaVisita",
-                            e.target.value === "" ? undefined : e.target.value,
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={fid("od-cep")}>Cepillados al día (0–10)</FieldLabel>
-                      <Input
-                        id={fid("od-cep")}
-                        type="number"
-                        min={0}
-                        max={10}
-                        value={strOf(odontologicos["cepilladosAlDia"])}
-                        disabled={!canWrite}
-                        onChange={(e) => {
-                          const t = e.target.value.trim()
-                          updateInterview(
-                            "antecedentesOdontologicos",
-                            "cepilladosAlDia",
-                            t === "" ? undefined : Number(t),
-                          )
-                        }}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={fid("od-exp")}>Experiencia previa</FieldLabel>
-                      <Select
-                        value={
-                          strOf(odontologicos["experienciaPrevia"]) === ""
-                            ? "sin-indicar"
-                            : strOf(odontologicos["experienciaPrevia"])
-                        }
-                        onValueChange={(v) =>
-                          updateInterview(
-                            "antecedentesOdontologicos",
-                            "experienciaPrevia",
-                            !v || v === "sin-indicar" ? undefined : v,
-                          )
-                        }
-                        disabled={!canWrite}
-                      >
-                        <SelectTrigger id={fid("od-exp")}>
-                          <SelectValue placeholder="Sin indicar" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sin-indicar">Sin indicar</SelectItem>
-                          <SelectItem value="positiva">Positiva</SelectItem>
-                          <SelectItem value="regular">Regular</SelectItem>
-                          <SelectItem value="traumatica">Traumática</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={fid("od-ans")}>Ansiedad dental</FieldLabel>
-                      <Select
-                        value={
-                          strOf(odontologicos["ansiedadDental"]) === ""
-                            ? "sin-indicar"
-                            : strOf(odontologicos["ansiedadDental"])
-                        }
-                        onValueChange={(v) =>
-                          updateInterview(
-                            "antecedentesOdontologicos",
-                            "ansiedadDental",
-                            !v || v === "sin-indicar" ? undefined : v,
-                          )
-                        }
-                        disabled={!canWrite}
-                      >
-                        <SelectTrigger id={fid("od-ans")}>
-                          <SelectValue placeholder="Sin indicar" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sin-indicar">Sin indicar</SelectItem>
-                          <SelectItem value="ninguna">Ninguna</SelectItem>
-                          <SelectItem value="leve">Leve</SelectItem>
-                          <SelectItem value="moderada">Moderada</SelectItem>
-                          <SelectItem value="alta">Alta</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={fid("od-hilo")}
-                          checked={odontologicos["hiloDental"] === true}
-                          disabled={!canWrite}
-                          onCheckedChange={(c: boolean) =>
-                            updateInterview(
-                              "antecedentesOdontologicos",
-                              "hiloDental",
-                              c === true ? true : undefined,
-                            )
-                          }
-                        />
-                        <label htmlFor={fid("od-hilo")} className="text-sm">
-                          Hilo dental
-                        </label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={fid("od-brux")}
-                          checked={odontologicos["bruxismo"] === true}
-                          disabled={!canWrite}
-                          onCheckedChange={(c: boolean) =>
-                            updateInterview(
-                              "antecedentesOdontologicos",
-                              "bruxismo",
-                              c === true ? true : undefined,
-                            )
-                          }
-                        />
-                        <label htmlFor={fid("od-brux")} className="text-sm">
-                          Bruxismo
-                        </label>
-                      </div>
-                    </div>
-                    <Field>
-                      <FieldLabel htmlFor={fid("od-hab")}>
-                        Hábitos (separados por coma, máx. 10)
-                      </FieldLabel>
-                      <Input
-                        id={fid("od-hab")}
-                        placeholder="tabaquismo, onicofagia"
-                        value={
-                          Array.isArray(odontologicos["habitos"])
-                            ? (odontologicos["habitos"] as string[]).join(", ")
-                            : ""
-                        }
-                        disabled={!canWrite}
-                        onChange={(e) => {
-                          const items = e.target.value
-                            .split(",")
-                            .map((x) => x.trim())
-                            .filter((x) => x !== "")
-                            .slice(0, 10)
-                          updateInterview(
-                            "antecedentesOdontologicos",
-                            "habitos",
-                            items.length > 0 ? items : undefined,
-                          )
-                        }}
-                      />
-                    </Field>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+              {/* Lo del producto (odentIA: «Odontológicos y hábitos»; latidIA: embarazo, hábitos y vacunas). */}
+              <productHealth.InterviewSections
+                answers={interview as Rec}
+                update={updateInterview}
+                setGroup={setTopInterview}
+                disabled={!canWrite}
+                idPrefix={uid}
+                sex={patientQuery.data?.data.patient.sex ?? null}
+              />
 
               {legacy.length > 0 ? (
                 <div

@@ -60,6 +60,7 @@ import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
 import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
+import { productUi } from "../../product/product-ui"
 
 /**
  * El registro que llena el paciente (código QR, enlace de la clínica) y su
@@ -129,6 +130,10 @@ interface Draft {
   floss: YesNo
   bruxism: YesNoUnknown
   habits: string[]
+  /** latidIA (issue 229): lactancia, tabaco y alcohol. */
+  breastfeeding: YesNo
+  tobacco: "" | "nunca" | "fuma" | "dejo"
+  alcohol: "" | "no" | "ocasional" | "frecuente"
   maritalStatus: string
   educationLevel: string
   occupation: string
@@ -191,6 +196,9 @@ const EMPTY: Draft = {
   floss: "",
   bruxism: "",
   habits: [],
+  breastfeeding: "",
+  tobacco: "",
+  alcohol: "",
   maritalStatus: "",
   educationLevel: "",
   occupation: "",
@@ -225,6 +233,16 @@ const EXPERIENCES = [
   { value: "regular", label: "Regular" },
   { value: "traumatica", label: "Mal" },
 ] as const
+const TOBACCO_OPTIONS: ReadonlyArray<{ value: Exclude<Draft["tobacco"], "">; label: string }> = [
+  { value: "nunca", label: "Nunca fumé" },
+  { value: "fuma", label: "Fumo" },
+  { value: "dejo", label: "Lo dejé" },
+]
+const ALCOHOL_OPTIONS: ReadonlyArray<{ value: Exclude<Draft["alcohol"], "">; label: string }> = [
+  { value: "no", label: "No" },
+  { value: "ocasional", label: "A veces" },
+  { value: "frecuente", label: "Seguido" },
+]
 const ANXIETY = [
   { value: "ninguna", label: "No" },
   { value: "leve", label: "Un poco" },
@@ -287,6 +305,8 @@ const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
   ["health.bloodGroup", "health", "bloodGroup"],
   ["health.personal", "history"],
   ["health.dental", "dental"],
+  ["health.medical.lactancia", "history"],
+  ["health.medical", "habits"],
   ["privacyAccepted", "send"],
 ]
 
@@ -386,11 +406,13 @@ export function RegistrationQuestionnaire({
   }
   // En «Su enlace» se pregunta solo lo que falta; la salud, si nadie la registró, como la pide la clínica.
   const wants = (key: string) => !fill || fillWants(fill, key)
+  // Lo de un producto (`dental.*`, `medical.*`) solo en las clínicas de ese producto.
+  const product = productUi().product
   const asked = (key: RegistrationFieldKey) =>
     !fill
-      ? registrationFieldAsked(config, key, countryCode)
-      : HEALTH_KEYS.has(key) || key.startsWith("personal.") || key.startsWith("dental.")
-        ? fill.health && registrationFieldAsked(config, key, countryCode)
+      ? registrationFieldAsked(config, key, countryCode, product)
+      : HEALTH_KEYS.has(key) || key.startsWith("personal.") || key.startsWith("dental.") || key.startsWith("medical.")
+        ? fill.health && registrationFieldAsked(config, key, countryCode, product)
         : fillWants(fill, key)
   const required = (key: RegistrationFieldKey) => config.fields[key] === "required"
   // Menor sin representante legal: en «Su enlace» deja los datos de su madre, padre o tutor.
@@ -446,8 +468,11 @@ export function RegistrationQuestionnaire({
   )
   const pregnancyAsked =
     asked("personal.embarazo") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
+  const breastfeedingAsked =
+    asked("medical.lactancia") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
   const historyAsked =
     pregnancyAsked ||
+    breastfeedingAsked ||
     (["personal.cirugias", "personal.hospitalizaciones", "personal.transfusiones"] as const).some(
       asked,
     )
@@ -614,6 +639,12 @@ export function RegistrationQuestionnaire({
       dental.bruxismo = d.bruxism === "si"
     if (asked("dental.habitos") && d.habits.length) dental.habitos = d.habits
     if (Object.keys(dental).length) health.dental = dental
+    type Medical = NonNullable<Health["medical"]>
+    const medical: Medical = {}
+    if (breastfeedingAsked && d.breastfeeding) medical.lactancia = d.breastfeeding === "si"
+    if (asked("medical.tabaco") && d.tobacco) medical.tabaco = d.tobacco
+    if (asked("medical.alcohol") && d.alcohol) medical.alcohol = d.alcohol
+    if (Object.keys(medical).length) health.medical = medical
     if (Object.keys(health).length) answers.health = health
     if (config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
     return answers
@@ -1423,6 +1454,7 @@ export function RegistrationQuestionnaire({
             set({
               pregnant: "",
               pregnancyWeeks: "",
+              breastfeeding: "",
               surgeries: "",
               surgeriesText: "",
               hospitalized: "",
@@ -1460,6 +1492,21 @@ export function RegistrationQuestionnaire({
                   <span className="text-sm text-muted-foreground">semanas (si lo sabes)</span>
                 </div>
               ) : null}
+            </Labeled>
+          ) : null}
+          {breastfeedingAsked ? (
+            <Labeled
+              name="breastfeeding"
+              label={you("¿Estás dando de lactar?", `¿${first || "La persona"} está dando de lactar?`)}
+              optional
+            >
+              <ChoiceButtons
+                label="Lactancia"
+                value={draft.breastfeeding || null}
+                options={YES_NO}
+                onChange={(value) => set({ breastfeeding: value })}
+                columns={2}
+              />
             </Labeled>
           ) : null}
           {asked("personal.cirugias") ? (
@@ -1611,6 +1658,42 @@ export function RegistrationQuestionnaire({
                 options={HABITS}
                 onChange={(value) => set({ habits: value })}
                 columns={2}
+              />
+            </Labeled>
+          ) : null}
+        </Question>
+
+        <Question
+          name="habits"
+          grouped
+          disabled={!(["medical.tabaco", "medical.alcohol"] as const).some(asked)}
+          title={you("Tus hábitos", `Los hábitos de ${name}`)}
+          description="Nos ayuda a cuidarte mejor."
+          onSkip={() => set({ tobacco: "", alcohol: "" })}
+        >
+          {asked("medical.tabaco") ? (
+            <Labeled name="tobacco" label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
+              <ChoiceButtons
+                label="Tabaco"
+                value={draft.tobacco || null}
+                options={TOBACCO_OPTIONS}
+                onChange={(value) => set({ tobacco: value })}
+                columns={3}
+              />
+            </Labeled>
+          ) : null}
+          {asked("medical.alcohol") ? (
+            <Labeled
+              name="alcohol"
+              label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
+              optional
+            >
+              <ChoiceButtons
+                label="Alcohol"
+                value={draft.alcohol || null}
+                options={ALCOHOL_OPTIONS}
+                onChange={(value) => set({ alcohol: value })}
+                columns={3}
               />
             </Labeled>
           ) : null}
