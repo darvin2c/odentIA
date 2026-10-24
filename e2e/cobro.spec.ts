@@ -109,9 +109,9 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
 
   // La plataforma avisa arriba de cada pantalla, con su acción.
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  // Con el crédito y el tope en el límite, avisa primero el tope: corta los casos nuevos.
+  // Con el crédito y el presupuesto en el límite, avisa primero el presupuesto (ADR 0085).
   // La franja pinta el escritorio y el teléfono: se mira la que está a la vista.
-  await expect(page.getByText("Llegaste a tu tope de gasto", { exact: false }).filter({ visible: true })).toBeVisible()
+  await expect(page.getByText("Llegaste al presupuesto del mes", { exact: false }).filter({ visible: true })).toBeVisible()
   await shot("plataforma-aviso")
 
   // Una segunda clínica en prueba con el saldo casi agotado, para Hoy.

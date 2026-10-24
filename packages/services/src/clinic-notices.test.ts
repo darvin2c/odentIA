@@ -161,7 +161,7 @@ describe("franja de avisos: el pago del mes", () => {
 })
 
 describe("franja de avisos: el tope y el crédito", () => {
-  it("el tope alcanzado llega también a quien atiende conversaciones, sin «Subir tope»", async () => {
+  it("el presupuesto alcanzado llega también a quien atiende conversaciones, sin «Subir presupuesto»", async () => {
     const { orgId, read } = await clinic()
     await withOrgContext(appDb, orgId, (tx) => setSaasSpendCap(tx, orgId, "avisos-admin", 100))
     await ownerDb.insert(saasAction).values(
@@ -185,7 +185,7 @@ describe("franja de avisos: el tope y el crédito", () => {
     const reception = await read("reception")
     expect(reception).toHaveLength(1)
     expect(reception[0]).toMatchObject({ topic: "tope", tone: "limite", action: null })
-    expect(reception[0]?.message).toContain("te llegan a ti")
+    expect(reception[0]?.message).toContain("Sofi te pasa las conversaciones nuevas")
     expect(await read("cashier")).toEqual([])
   })
 })
