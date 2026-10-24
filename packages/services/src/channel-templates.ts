@@ -10,7 +10,7 @@ import {
 import type { Db } from "@odentia/db"
 import { channelConnection, channelTemplate, clinicMessage, clinicMessageVersion } from "@odentia/db/schema/crm"
 import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm"
-import { AUTOMATION_MESSAGE_LANGUAGE, CATALOG_MESSAGE_KEYS, catalogMessageOf } from "./automation-messages.js"
+import { AUTOMATION_MESSAGE_LANGUAGE, CATALOG_MESSAGE_KEYS, catalogTemplatesOf } from "./automation-messages.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { acceptsPromotions } from "./message-permission.js"
 import { decryptConfig } from "./secrets.js"
@@ -77,7 +77,7 @@ function toItem(row: ChannelTemplateRow): TemplateItem {
 
 /** Mensaje del catálogo al que corresponde el nombre de la plantilla con la que viene escrito. */
 function catalogKeyOfTemplate(name: string): string | null {
-  return CATALOG_MESSAGE_KEYS.find((key) => catalogMessageOf(key)?.template === name) ?? null
+  return CATALOG_MESSAGE_KEYS.find((key) => catalogTemplatesOf(key).includes(name)) ?? null
 }
 
 /**

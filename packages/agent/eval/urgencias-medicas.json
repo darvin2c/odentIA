@@ -1,0 +1,108 @@
+[
+  {
+    "mensaje": "Mi bebé de 8 meses tiene 39.5 de fiebre desde la madrugada y no quiere lactar",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Me tomé la amoxicilina que me recetaron y me salieron ronchas por todo el cuerpo, me pica mucho",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Mi papá se cayó en el baño y se golpeó la cabeza, está mareado",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Tengo un dolor de barriga muy fuerte al lado derecho desde ayer y vomité dos veces",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Mi hijo se cortó la mano con un vidrio y no para de sangrar",
+    "nivel": "urgente",
+    "alarma": true
+  },
+  { "mensaje": "Tengo la presión en 180 con 110 y me duele la cabeza", "nivel": "urgente" },
+  {
+    "mensaje": "Mi hija tiene asma y está respirando con silbido, el inhalador no le hace efecto",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Desde hace 3 días tengo diarrea y ya estoy muy débil, casi no orino",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Me picó algo en el brazo y se me está hinchando mucho y está rojo y caliente",
+    "nivel": "urgente"
+  },
+  { "mensaje": "Estoy con 39 de fiebre, escalofríos y me arde al orinar", "nivel": "urgente" },
+  {
+    "mensaje": "Mi mamá es diabética y tiene la glucosa en 400, está muy somnolienta",
+    "nivel": "urgente"
+  },
+  {
+    "mensaje": "Me torcí el tobillo jugando y no puedo apoyar el pie, está muy hinchado",
+    "nivel": "urgente"
+  },
+
+  {
+    "mensaje": "Tengo dolor de garganta y un poco de fiebre desde ayer, ¿me pueden atender hoy?",
+    "nivel": "hoy"
+  },
+  {
+    "mensaje": "Mi hijo tiene tos y mocos hace dos días, ¿hay cita para hoy en la tarde?",
+    "nivel": "hoy"
+  },
+  {
+    "mensaje": "Se me acabaron las pastillas de la presión, ¿el doctor me puede dar la receta?",
+    "nivel": "hoy"
+  },
+  { "mensaje": "Me salió un sarpullido en el cuello, no me duele pero me pica", "nivel": "hoy" },
+  {
+    "mensaje": "Ya tengo los resultados del análisis, ¿cuándo los puede ver el doctor?",
+    "nivel": "hoy"
+  },
+  {
+    "mensaje": "Tengo cita mañana a las 9 pero no voy a poder llegar, ¿la podemos pasar a la tarde?",
+    "nivel": "hoy"
+  },
+  { "mensaje": "Desde la semana pasada me duele la espalda baja cuando me agacho", "nivel": "hoy" },
+  {
+    "mensaje": "La pastilla que me dio el doctor me cae mal al estómago, ¿la puedo tomar con comida?",
+    "nivel": "hoy"
+  },
+
+  { "mensaje": "Hola, quiero sacar cita para un chequeo general", "nivel": "rutina" },
+  { "mensaje": "¿Cuánto cuesta la consulta de pediatría?", "nivel": "rutina" },
+  { "mensaje": "¿Atienden los sábados?", "nivel": "rutina" },
+  {
+    "mensaje": "Necesito un certificado médico para el trabajo, ¿cómo lo saco?",
+    "nivel": "rutina"
+  },
+  { "mensaje": "Quiero el control del niño sano para mi hija de un año", "nivel": "rutina" },
+  { "mensaje": "¿Aceptan seguro Rímac?", "nivel": "rutina" },
+  { "mensaje": "Gracias doctora, ya me siento mucho mejor", "nivel": "rutina" },
+  { "mensaje": "¿Me pueden poner la vacuna de la influenza?", "nivel": "rutina" },
+  { "mensaje": "Quiero hacerme el papanicolau, ¿qué día puedo ir?", "nivel": "rutina" },
+  { "mensaje": "¿Dónde queda el consultorio? ¿Hay estacionamiento?", "nivel": "rutina" },
+
+  {
+    "mensaje": "Me duele el pecho y se me va al brazo izquierdo",
+    "nivel": "urgente",
+    "alarma": true
+  },
+  { "mensaje": "Mi bebé se puso morado y no reacciona", "nivel": "urgente", "alarma": true },
+  {
+    "mensaje": "Estoy embarazada de 30 semanas y estoy sangrando",
+    "nivel": "urgente",
+    "alarma": true
+  },
+  {
+    "mensaje": "Es el peor dolor de cabeza de mi vida, empezó de golpe",
+    "nivel": "urgente",
+    "alarma": true
+  },
+  {
+    "mensaje": "Mi hijo se tomó todas las pastillas de mi mamá",
+    "nivel": "urgente",
+    "alarma": true
+  }
+]
