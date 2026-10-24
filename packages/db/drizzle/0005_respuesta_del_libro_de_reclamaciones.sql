@@ -1,3 +1,0 @@
-ALTER TABLE "consumer_complaint" ADD COLUMN "responded_by_user_id" text;--> statement-breakpoint
-ALTER TABLE "consumer_complaint" ADD COLUMN "response_email_sent" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "consumer_complaint" ADD CONSTRAINT "consumer_complaint_responded_by_user_id_user_id_fk" FOREIGN KEY ("responded_by_user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;

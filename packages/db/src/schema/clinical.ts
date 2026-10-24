@@ -628,6 +628,8 @@ export const patientDocument = pgTable(
   },
   (table) => [
     index("patient_document_org_patient_idx").on(table.organizationId, table.patientId),
+    // Destino de las claves compuestas que impiden apuntar a otra clínica.
+    uniqueIndex("patient_document_org_id_uidx").on(table.organizationId, table.id),
     check(
       "patient_document_image_type_check",
       sql`${table.imageType} IS NULL OR ${table.category} IN ('radiografia','foto_clinica')`,
@@ -1187,6 +1189,8 @@ export const serviceCatalog = pgTable(
     uniqueIndex("service_catalog_org_code_uidx")
       .on(table.organizationId, table.code)
       .where(sql`"code" IS NOT NULL`),
+    // Destino de las claves compuestas que impiden apuntar a otra clínica.
+    uniqueIndex("service_catalog_org_id_finance_uidx").on(table.organizationId, table.id),
     index("service_catalog_org_active_idx").on(table.organizationId, table.isActive),
     index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialtyId),
     foreignKey({

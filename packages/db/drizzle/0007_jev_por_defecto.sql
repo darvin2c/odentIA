@@ -1,1 +1,0 @@
-ALTER TABLE "agent_config" ALTER COLUMN "decision_provider" SET DEFAULT 'jev';

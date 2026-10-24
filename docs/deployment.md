@@ -20,7 +20,7 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Termina después; detenido con código cero es su estado normal. API y worker
   dependen de su finalización. La CIE-10 no está incluida: con el permiso escrito
   de la OPS se carga una vez con su archivo (ver `docs/development.md`).
-- La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045). Una
+- La historia de migraciones empieza en la base del 2026-10-24 (ADR 0088). Una
   base creada antes no se migra a ella, tampoco la de producción: se recrea su
   volumen antes de desplegar. Antes de esa fecha no hubo datos reales.
 - El rol `dentalagent_app` y sus permisos por defecto los crea el init de la
