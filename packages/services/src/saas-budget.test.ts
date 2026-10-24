@@ -168,8 +168,9 @@ describe("Argos", () => {
       .where(eq(saasSubscription.organizationId, ORG))
     const reached = {
       code: "ARGOS_BUDGET_REACHED",
-      message:
-        "Llegaste al presupuesto del mes, así que no puedo sumar más preguntas. Súbelo en Plan y pagos y sigo respondiendo.",
+      message: expect.stringMatching(
+        /^Llegaste al presupuesto de \p{L}+, así que no puedo sumar más preguntas\. Súbelo en Plan y pagos y sigo respondiendo\.$/u,
+      ),
     }
     await expect(run((tx) => ensureArgosQuestion(tx, ORG))).rejects.toMatchObject(reached)
     await expect(run((tx) => addArgosPack(tx, ORG, { automatic: false }))).rejects.toMatchObject(

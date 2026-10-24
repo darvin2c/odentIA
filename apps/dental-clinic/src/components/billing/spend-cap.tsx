@@ -1,8 +1,9 @@
 /**
- * Cambiar el tope de gasto (ADR 0031, tablero C5): cuánto como mucho al mes
+ * Cambiar el presupuesto del mes (ADR 0031 y 0085): cuánto como mucho al mes
  * por encima del crédito, con lo que se usará a este ritmo y lo que pasa al
- * llegar, dicho antes de guardar. Desde la franja de avisos se abre igual,
- * con «+10» y «+25» para subirlo sin hacer la cuenta (ADR 0065).
+ * llegar, dicho antes de guardar. Es el único límite de los agentes. Desde la
+ * franja de avisos se abre igual, con «+10» y «+25» para subirlo sin hacer la
+ * cuenta (ADR 0065).
  */
 import { Button, Input, Label } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
@@ -52,7 +53,7 @@ export function SpendCapDrawer({
       await onSave(cents)
       onClose()
     } catch {
-      setError("No se pudo guardar el tope. Reintenta en un momento.")
+      setError("No se pudo guardar el presupuesto. Reintenta en un momento.")
     } finally {
       setSaving(false)
     }
@@ -61,20 +62,20 @@ export function SpendCapDrawer({
     <FormDrawer
       open={open}
       onClose={onClose}
-      title="Tope de gasto en agentes"
-      description="Es lo máximo que pagarás al mes por encima de tu crédito."
+      title="Presupuesto del mes"
+      description="Es lo máximo que pagarás al mes por encima de tu crédito. El almacenamiento no cuenta."
       onSubmit={submit}
       isDirty={text !== (currentCents === null ? "" : centsToMajor(currentCents, currency))}
       isSubmitting={saving}
       error={error}
-      submitLabel="Guardar tope"
+      submitLabel="Guardar presupuesto"
     >
       <div className="flex flex-col gap-2">
-        <Label htmlFor="spend-cap">Tope mensual ({currency}, sin impuestos)</Label>
-        <Input id="spend-cap" inputMode="decimal" autoComplete="off" value={text} onChange={(event) => setText(event.target.value)} placeholder="Sin tope" />
+        <Label htmlFor="spend-cap">Presupuesto mensual ({currency}, sin impuestos)</Label>
+        <Input id="spend-cap" inputMode="decimal" autoComplete="off" value={text} onChange={(event) => setText(event.target.value)} placeholder="Sin presupuesto" />
         {currentCents !== null ? (
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="sr-only">Subir el tope</legend>
+            <legend className="sr-only">Subir el presupuesto</legend>
             {[1_000, 2_500].map((step) => (
               <Button
                 key={step}
@@ -94,10 +95,10 @@ export function SpendCapDrawer({
         ) : null}
       </div>
       <div className="rounded-lg border p-3 text-sm">
-        <p className="font-medium">Cuando llegue al tope</p>
+        <p className="font-medium">Cuando llegue al presupuesto</p>
         <p className="mt-1 text-muted-foreground">
-          {receptionName} deja de atender casos nuevos y se los pasa a tu equipo con un mensaje fijo. Nadie se queda sin respuesta. El dictado y las citas en
-          curso siguen.
+          {receptionName} pasa todo a tu equipo con un mensaje fijo: nadie se queda sin respuesta. Clío no escucha en las atenciones nuevas y Argos no
+          escribe para recuperar ni suma preguntas. Lo que ya empezó se termina y se cobra.
         </p>
       </div>
       {cents !== null && cents > 0 && terms ? (
@@ -109,7 +110,7 @@ export function SpendCapDrawer({
           </p>
         </div>
       ) : cents !== null && cents > 0 ? null : (
-        <p className="text-xs text-muted-foreground">Déjalo vacío si no quieres tope: los agentes siguen atendiendo y cada acción se cobra con tu precio.</p>
+        <p className="text-xs text-muted-foreground">Déjalo vacío si no quieres presupuesto: los agentes siguen atendiendo y cada acción se cobra con tu precio.</p>
       )}
     </FormDrawer>
   )

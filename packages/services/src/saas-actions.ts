@@ -165,6 +165,22 @@ export function priceFor(
   return { basePriceMicros: base, priceMicros: discountedMicros(base, discount), discountBps: discount }
 }
 
+/**
+ * Lo que se cobra cuando la cita que reservó Sofi se da (ADR 0085): la
+ * diferencia de «Gestiona» a «Agenda», con el descuento si se negocia. Null
+ * si el plan no tiene uno de los dos precios.
+ */
+export function agendaUpgradePrice(
+  pricing: Pick<ActionPricing, "prices" | "fixed" | "discountBps">,
+): { basePriceMicros: number | null; priceMicros: number | null; discountBps: number } {
+  const agenda = pricing.prices.agenda
+  const gestiona = pricing.prices.gestiona
+  if (agenda === null || gestiona === null) return { basePriceMicros: null, priceMicros: null, discountBps: 0 }
+  const diff = agenda - gestiona
+  const discount = pricing.fixed.has("agenda") ? 0 : pricing.discountBps
+  return { basePriceMicros: diff, priceMicros: discountedMicros(diff, discount), discountBps: discount }
+}
+
 /** La clave de precio de una acción: su tipo, o la acción si no tiene. */
 const priceKeyOf = (kind: SaasActionKind, tier: SaasActionTier | null): SaasPriceKey =>
   tier ?? (kind === "conversacion" ? "gestiona" : kind === "consulta" ? "completa" : kind)
@@ -386,12 +402,9 @@ export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: s
     .limit(1)
   if (!booking) return false
   const pricing = await getActionPricing(tx, orgId)
-  const agenda = pricing.prices.agenda
-  const gestiona = pricing.prices.gestiona
-  const diff = agenda !== null && gestiona !== null ? agenda - gestiona : null
+  const upgrade = agendaUpgradePrice(pricing)
   // Sin diferencia (un plan con un solo precio) no hay nada que subir.
-  if (diff !== null && diff <= 0) return false
-  const discount = pricing.fixed.has("agenda") ? 0 : pricing.discountBps
+  if (upgrade.basePriceMicros !== null && upgrade.basePriceMicros <= 0) return false
   const [row] = await tx
     .insert(saasAction)
     .values({
@@ -405,9 +418,7 @@ export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: s
       channel: booking.channel,
       detail: "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda",
       currency: pricing.currency,
-      basePriceMicros: diff,
-      priceMicros: diff === null ? null : discountedMicros(diff, discount),
-      discountBps: diff === null ? 0 : discount,
+      ...upgrade,
       dedupeKey: `agenda:${appointmentId}`,
     })
     .onConflictDoNothing({ target: [saasAction.organizationId, saasAction.dedupeKey] })
@@ -784,6 +795,35 @@ export async function listPeriodActions(
   })
 }
 
+/**
+ * Las conversaciones «Gestiona» cuya cita, reservada por Sofi en su ventana,
+ * aún no se da (tablero C2): si la persona viene, suben a «Agenda». Por fila,
+ * lo que sumaría (null si el plan no tiene los dos precios).
+ */
+export async function agendaPendingOf(tx: Db, orgId: string, rows: SaasActionRow[]): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>()
+  const candidates = rows.filter((row) => row.kind === "conversacion" && row.tier === "gestiona" && row.contactId)
+  if (!candidates.length) return result
+  const contacts = [...new Set(candidates.map((row) => row.contactId as string))]
+  const booked = (await tx.execute(sql`
+    select pc.contact_id, a.created_at from appointment a
+    join patient_contact pc on pc.organization_id = a.organization_id and pc.patient_id = a.patient_id and pc.relationship = 'self'
+    where a.organization_id = ${orgId}
+      and a.source in (${sql.join(AGENT_SOURCES.map((source) => sql`${source}`), sql`, `)})
+      and a.status in ('programada', 'confirmada') and a.starts_at > now()
+      and pc.contact_id in (${sql.join(contacts.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{ contact_id: string; created_at: Date | string }>
+  if (!booked.length) return result
+  const windowMs = await conversationWindowMs(tx, new Date())
+  const upgrade = agendaUpgradePrice(await getActionPricing(tx, orgId)).priceMicros
+  for (const row of candidates) {
+    const from = row.occurredAt.getTime()
+    if (booked.some((item) => item.contact_id === row.contactId && asDate(item.created_at).getTime() >= from && asDate(item.created_at).getTime() < from + windowMs)) {
+      result.set(row.id, upgrade)
+    }
+  }
+  return result
+}
+
 /** Las revisiones de estas acciones, por acción. */
 export async function reviewsOf(tx: Db, orgId: string, actionIds: string[]): Promise<Map<string, SaasReviewView>> {
   const result = new Map<string, SaasReviewView>()
@@ -990,7 +1030,8 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
       baseAmountCents: microsToCents(base),
       tiers: (SAAS_TIERS_OF[kind] ?? []).map((tier) => {
         const ofTier = ofKind.filter((row) => row.tier === tier)
-        const own = priceFor(pricing, tier)
+        // «Agenda» se cobra aparte por la diferencia: es lo que dice cada fila.
+        const own = tier === "agenda" ? agendaUpgradePrice(pricing) : priceFor(pricing, tier)
         return {
           tier,
           count: ofTier.length,

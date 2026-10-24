@@ -391,8 +391,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     alsoAt: ["/settings/plan/acciones"],
     title: "Plan y pagos",
     parent: SETTINGS,
-    purpose: "Lo que la clínica paga a odentIA: el plan, lo que hicieron los agentes este mes y cada acción cobrada, el crédito y el tope de gasto, los cargos, el comprobante y los pagos. Solo lo ven propietario y administrador, y sigue abierto aunque la clínica esté en solo lectura.",
-    terms: ["suscripción", "factura de odentIA", "pagar odentIA", "mi plan", "cargo", "comprobante", "tope de gasto", "crédito del mes", "cada acción", "pedir revisión", "solo lectura", "pago pendiente"],
+    purpose: "Lo que la clínica paga a odentIA: el plan, lo que hicieron los agentes este mes y cada acción cobrada, el crédito y el presupuesto del mes, las preguntas a Argos y el almacenamiento, los cargos, el comprobante y los pagos. Solo lo ven propietario y administrador, y sigue abierto aunque la clínica esté en solo lectura.",
+    terms: ["suscripción", "factura de odentIA", "pagar odentIA", "mi plan", "cargo", "comprobante", "presupuesto del mes", "tope de gasto", "crédito del mes", "preguntas a argos", "almacenamiento", "sumar solas", "cada acción", "pedir revisión", "solo lectura", "pago pendiente"],
   },
   {
     id: "pipelines",

@@ -42,9 +42,9 @@ export function ReceptionOffNotice({ className }: { className?: string }) {
 }
 
 /**
- * Llegaron al tope de gasto (ADR 0065): Sofi deja de atender casos nuevos
- * y le llegan al equipo. Lo dice en la Bandeja y en el Agente, con el texto que
- * el servidor da a cada uno; «Subir tope» solo para quien ve Plan y pagos.
+ * Llegaron al presupuesto del mes (ADR 0065 y 0085): Sofi pasa al equipo las
+ * conversaciones nuevas. Lo dice en la Bandeja y en el Agente, con el texto que
+ * el servidor da a cada uno; «Subir presupuesto» solo para quien ve Plan y pagos.
  */
 export function CapReachedNotice({ className }: { className?: string }) {
   const notices = useClinicNotices()
@@ -55,12 +55,12 @@ export function CapReachedNotice({ className }: { className?: string }) {
   return (
     <PageNotice
       tone="limite"
-      label="Tope de gasto"
+      label="Presupuesto del mes"
       className={className}
       action={
         cap.action?.kind === "subir_tope" ? (
           <Button variant="outline" size="sm" className="min-h-11 sm:min-h-9" onClick={raiseCap}>
-            Subir tope
+            Subir presupuesto
           </Button>
         ) : undefined
       }

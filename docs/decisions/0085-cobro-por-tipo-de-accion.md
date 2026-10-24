@@ -1,6 +1,6 @@
 # 0085 · Cobro por tipo de acción, Argos con preguntas incluidas y almacenamiento por GB
 
-Fecha: 2026-10-24 · Estado: aceptada; fases 1 y 2 (contar y cobrar) y 3 (sin topes y el presupuesto) implementadas, las pantallas van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
+Fecha: 2026-10-24 · Estado: aceptada; implementadas las fases 1 y 2 (contar y cobrar), 3 (sin topes y el presupuesto) y 4 (lo que ve la clínica); la administración, la web y los planes de producción van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
 
 ## Problema
 
