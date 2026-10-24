@@ -9,7 +9,7 @@ import {
   saasSubscription,
   storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { STORAGE_GB_BYTES } from "./saas-actions.js"
@@ -79,11 +79,13 @@ beforeAll(async () => {
     .values({
       organizationId: ORG,
       ...active(plan!.id, new Date(now - 10 * DAY)),
+      // La atribución congela el % del vendedor en la suscripción.
       sellerId: seller!.id,
+      sellerRateBps: 1000,
     })
     .onConflictDoUpdate({
       target: saasSubscription.organizationId,
-      set: { ...active(plan!.id, new Date(now - 10 * DAY)), sellerId: seller!.id },
+      set: { ...active(plan!.id, new Date(now - 10 * DAY)), sellerId: seller!.id, sellerRateBps: 1000 },
     })
   // La Fundadora entró hace 70 días y nunca encendió un agente.
   await ownerDb
@@ -223,6 +225,32 @@ describe("costo y margen de una clínica", () => {
     expect(cost.sellerName).toBe("Carla Núñez")
     expect(cost.marginPct).toBe(Math.round((1 - cost.costMicros / 29_000_000) * 100))
     expect(cost).toMatchObject({ alarm: false, idle: false, founder: false })
+  })
+
+  it("las preguntas que pasan de las incluidas cuestan en la fila de los paquetes", async () => {
+    const planOf = sql`(select plan_id from saas_subscription where organization_id = ${ORG})`
+    // Con 0 incluidas y paquetes, la única pregunta del mes se pagó con un paquete.
+    await ownerDb.execute(sql`update saas_plan set argos_pack_micros = 3000000, argos_included_questions = 0 where id = ${planOf}`)
+    const cost = await getClinicCostMargin(ownerDb, ORG)
+    const line = (key: string) => cost.lines.find((item) => item.key === key)
+    expect(line("argos:preguntas")).toMatchObject({ count: 0, costMicros: 0 })
+    expect(line("argos:paquetes")).toMatchObject({ costMicros: 2_000 })
+    await ownerDb.execute(sql`update saas_plan set argos_pack_micros = null where id = ${planOf}`)
+  })
+
+  it("descuenta la comisión como se paga: el % congelado, la atribución abierta y solo los primeros meses", async () => {
+    const commission = async () => (await getClinicCostMargin(ownerDb, ORG)).commissionCents
+    // Cambiar el % del vendedor no toca lo atribuido a la clínica.
+    await ownerDb.update(saasSeller).set({ rateBps: 3000 })
+    expect(await commission()).toBe(290)
+    // Pasados los meses que comisiona (12 al empezar), ya no se paga.
+    await ownerDb.update(saasSubscription).set({ trialStartedAt: new Date(Date.now() - 400 * DAY) }).where(eq(saasSubscription.organizationId, ORG))
+    expect(await commission()).toBe(0)
+    // Con la atribución terminada, tampoco.
+    await ownerDb.update(saasSubscription).set({ trialStartedAt: null, sellerEndedAt: new Date() }).where(eq(saasSubscription.organizationId, ORG))
+    expect(await commission()).toBe(0)
+    await ownerDb.update(saasSubscription).set({ sellerEndedAt: null }).where(eq(saasSubscription.organizationId, ORG))
+    await ownerDb.update(saasSeller).set({ rateBps: 1000 })
   })
 
   it("la alarma interna avisa desde USD 30 de IA al mes, sin cortar nada", async () => {

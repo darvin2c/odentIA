@@ -342,7 +342,7 @@ const FAQ_MODEL: FaqItem = {
 }
 const FAQ_META: FaqItem = {
   q: "¿Tengo que pagarle algo más a WhatsApp?",
-  a: "Responder a quien te escribe, dentro de las 24 horas, no tiene costo de Meta. Los mensajes de plantilla, como un recordatorio fuera de esa ventana, los cobra Meta directamente a la clínica. odentIA te muestra el estimado.",
+  a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
 }
 const FAQ_TRAINING: FaqItem = {
   q: "¿Usan los datos de mi clínica para entrenar la IA?",
@@ -800,7 +800,7 @@ export const PAGES = {
       },
       {
         q: "¿Los recordatorios por WhatsApp tienen costo?",
-        a: "odentIA no cobra los recordatorios. Si se envían por WhatsApp fuera de las 24 horas de la última conversación, son mensajes de plantilla y Meta se los cobra directamente a la clínica; odentIA te muestra el estimado.",
+        a: "odentIA no cobra los recordatorios. Si salen por WhatsApp, Meta puede cobrarlos directamente a la clínica, con sus propias tarifas: lo revisas en tu cuenta de Meta.",
       },
       {
         q: "¿Escribe a todos mis pacientes?",
@@ -929,7 +929,7 @@ export const PAGES = {
     path: "/whatsapp-para-clinicas-dentales",
     title: "WhatsApp Business para clínica dental",
     description:
-      "WhatsApp Business para tu clínica dental: conecta tu número y responde, agenda y recuerda citas desde la ficha de cada paciente. Responder dentro de 24 horas no tiene costo de Meta.",
+      "WhatsApp Business para tu clínica dental: conecta tu número y responde, agenda y recuerda citas desde la ficha de cada paciente. Lo que cobra Meta lo revisas en tu cuenta de Meta.",
     crumb: "WhatsApp para clínicas",
     parent: ["Omnicanal", "/omnicanal"],
     hero: {
@@ -967,12 +967,12 @@ export const PAGES = {
         title: "Qué cuesta WhatsApp, sin letra chica.",
         items: [
           {
-            title: "Responder no tiene costo de Meta",
-            text: "Responder a quien te escribe, dentro de las 24 horas, no tiene costo de Meta.",
+            title: "WhatsApp lo cobra Meta a la clínica",
+            text: "Con sus propias tarifas: los mensajes de plantilla, como un recordatorio, y las respuestas cuando pasan de lo que Meta deja gratis.",
           },
           {
-            title: "Las plantillas las cobra Meta a la clínica",
-            text: "Los mensajes de plantilla, como un recordatorio fuera de esa ventana, los cobra Meta directamente a la clínica. odentIA te muestra el estimado.",
+            title: "Lo revisas en tu cuenta de Meta",
+            text: "odentIA no lo cobra ni lo estima: en Plan y pagos tienes el enlace a tu cuenta de Meta.",
           },
           {
             title: "Lo que cobra odentIA",

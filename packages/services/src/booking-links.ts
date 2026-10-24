@@ -25,6 +25,7 @@ import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
+import { refreshConversationTier } from "./saas-actions.js"
 import { contactDecides } from "./responsibilities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
@@ -831,6 +832,8 @@ export async function reserveBookingLink(
     .update(appointmentBookingLink)
     .set({ appointmentId: created.id, ...(forTreatment ? {} : { usedAt: new Date() }) })
     .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+  // Quien abrió el enlace (la madre que reserva para su hijo) es quien conversó: su conversación pasa a «Gestiona» (ADR 0085).
+  await refreshConversationTier(tx, orgId, { contactId: link.row.contactId, at: new Date() })
   const view = await appointmentView(tx, orgId, created.id)
   if (!view) throw notFound("Cita")
   const when = await whenText(tx, orgId, view.startsAt, view.timeZone)
