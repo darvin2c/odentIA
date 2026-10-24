@@ -151,6 +151,9 @@ export function EncounterDetailView({
   const activeProcedures = procedures.filter((proc) => !proc.voidedAt)
   // Lo del producto en la atención (odentIA: el odontograma vinculado y el periodontograma).
   const ProductDetail = productUi().encounter.Detail
+  // El examen como lo cuenta el producto (latidIA: por sistemas, con lo no examinado).
+  const exam = productUi().encounter.examination
+  const examLines = exam.readLines(encounter.examination)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -195,6 +198,18 @@ export function EncounterDetailView({
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Signos vitales</dt>
               <dd className="text-sm">{formatVitals(encounter.vitals)}</dd>
+            </div>
+          ) : null}
+          {examLines.length > 0 ? (
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">{exam.title}</dt>
+              <dd className="text-sm">
+                <ul className="flex flex-col gap-0.5">
+                  {examLines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </dd>
             </div>
           ) : null}
           {encounter.prognosis ? (

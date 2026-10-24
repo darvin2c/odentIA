@@ -89,7 +89,8 @@ export function EncounterHandoff({
   const done: string[] = [
     `${(detail.diagnoses ?? []).filter((dx) => !dx.voidedAt).length} diagnóstico(s)`,
     `${activeProcedures.length} acto(s) realizado(s)`,
-    `${detail.odontogramEntries.length} hallazgo(s) en el odontograma`,
+    // Solo el producto que dibuja el odontograma lo trae (latidIA no).
+    `${(detail.odontogramEntries ?? []).length} hallazgo(s) en el odontograma`,
     `${ownPrescriptions.length} receta(s)`,
     `${ownControls.length} control(es) indicado(s)`,
     `${detail.documents.length} documento(s)`,

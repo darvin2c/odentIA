@@ -85,26 +85,73 @@ export const VITAL_SIGNS = [
     max: 250,
     decimals: 0,
   },
+  // Los que solo registra el producto que los pide (latidIA, decisión 6 del issue 229).
+  {
+    key: "perimetroCefalico",
+    loinc: "9843-4",
+    unit: "cm",
+    label: "Perímetro cefálico",
+    suffix: "cm",
+    min: 20,
+    max: 70,
+    decimals: 1,
+  },
+  {
+    key: "glucosaCapilar",
+    loinc: "41653-7",
+    unit: "mg/dL",
+    label: "Glucosa capilar",
+    suffix: "mg/dL",
+    min: 20,
+    max: 600,
+    decimals: 0,
+  },
 ] as const
 
 export type VitalSignKey = (typeof VITAL_SIGNS)[number]["key"]
 export type Vitals = Partial<Record<VitalSignKey, number>>
 
+/** Los que registra toda clínica: los ocho del perfil de signos vitales de siempre. */
+export const CORE_VITAL_KEYS: readonly VitalSignKey[] = [
+  "presionSistolica",
+  "presionDiastolica",
+  "frecuenciaCardiaca",
+  "frecuenciaRespiratoria",
+  "temperatura",
+  "saturacionOxigeno",
+  "peso",
+  "talla",
+]
+
+/** El índice de masa corporal (LOINC 39156-5, kg/m²): sale del peso y la talla, no se guarda. */
+export const BMI_LOINC = "39156-5"
+
+/** IMC con un decimal; null si falta el peso o la talla. */
+export function bodyMassIndex(vitals: Vitals | null | undefined): number | null {
+  const weight = vitals?.peso
+  const height = vitals?.talla
+  if (weight === undefined || height === undefined) return null
+  const meters = height / 100
+  return Math.round((weight / (meters * meters)) * 10) / 10
+}
+
 /**
  * Valida y normaliza los signos vitales: solo claves conocidas, números
  * dentro del rango de plausibilidad y con los decimales de su medida. La
  * presión se registra completa (sistólica y diastólica) o no se registra.
- * Devuelve el mensaje del primer error o los valores limpios.
+ * Devuelve el mensaje del primer error o los valores limpios. `allowed` son
+ * los que registra el producto de la clínica; por omisión, todos.
  */
 export function parseVitals(
   input: unknown,
+  allowed: readonly VitalSignKey[] = VITAL_SIGNS.map((v) => v.key),
 ): { ok: true; value: Vitals | null } | { ok: false; error: string } {
   if (input === null || input === undefined) return { ok: true, value: null }
   if (typeof input !== "object" || Array.isArray(input))
     return { ok: false, error: "Los signos vitales deben ser un objeto" }
   const out: Vitals = {}
   for (const [key, raw] of Object.entries(input as Record<string, unknown>)) {
-    const def = VITAL_SIGNS.find((v) => v.key === key)
+    const def = VITAL_SIGNS.find((v) => v.key === key && allowed.includes(v.key))
     if (!def) return { ok: false, error: `Signo vital desconocido: ${key}` }
     if (raw === null || raw === undefined || raw === "") continue
     const value = typeof raw === "number" ? raw : Number(raw)
@@ -139,6 +186,8 @@ export function formatVitals(vitals: Vitals | null | undefined): string {
     saturacionOxigeno: "SatO₂",
     peso: "Peso",
     talla: "Talla",
+    perimetroCefalico: "PC",
+    glucosaCapilar: "Glucosa",
   }
   for (const def of VITAL_SIGNS) {
     const value = vitals[def.key]

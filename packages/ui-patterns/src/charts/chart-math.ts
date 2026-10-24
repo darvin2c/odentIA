@@ -16,6 +16,31 @@ export function niceTicks(max: number, count = 3): number[] {
   return ticks
 }
 
+/**
+ * Eje de una línea que no empieza en cero (la presión, el peso): pasos
+ * redondos que cubren de `min` a `max`. Un solo valor queda al medio, con
+ * aire arriba y abajo; nunca baja de cero si los datos no lo hacen.
+ */
+export function rangeTicks(min: number, max: number, count = 3): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0, 1]
+  let low = Math.min(min, max)
+  let high = Math.max(min, max)
+  if (low === high) {
+    const air = Math.max(1, Math.abs(low) * 0.05)
+    low -= air
+    high += air
+  }
+  const raw = (high - low) / count
+  const power = 10 ** Math.floor(Math.log10(raw))
+  const unit = raw / power
+  const step = (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 2.5 ? 2.5 : unit <= 5 ? 5 : 10) * power
+  const first = Math.max(Math.min(min, max) >= 0 ? 0 : -Infinity, Math.floor(low / step) * step)
+  const last = Math.ceil(high / step) * step
+  const ticks: number[] = []
+  for (let value = first; value < last + step * 1e-9; value += step) ticks.push(Number(value.toPrecision(12)))
+  return ticks.length > 1 ? ticks : [first, first + step]
+}
+
 /** Paso de la escala de cuatro (0 es el vacío): cuánto de `max` alcanza `value`. */
 export function scaleLevel(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
   if (!(value > 0) || !(max > 0)) return 0

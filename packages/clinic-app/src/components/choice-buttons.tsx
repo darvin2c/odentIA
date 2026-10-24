@@ -7,12 +7,14 @@ import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-grou
  * «primary» marca con el color de la marca lo elegido cuando la elección
  * cambia lo que sigue; «neutral», cuando solo es un dato. Con `columns` las
  * opciones ocupan celdas iguales (textos largos o muchas opciones) en vez de
- * ir una detrás de otra.
+ * ir una detrás de otra. Con `onClear`, tocar otra vez lo elegido lo desmarca
+ * (el examen por sistemas vuelve a «No examinado»).
  */
 export function ChoiceButtons<T extends string>({
   value,
   options,
   onChange,
+  onClear,
   label,
   tone = "neutral",
   columns,
@@ -22,6 +24,8 @@ export function ChoiceButtons<T extends string>({
   value: T | null
   options: ReadonlyArray<{ value: T; label: string }>
   onChange: (value: T) => void
+  /** Tocar otra vez lo elegido lo desmarca; sin él, lo elegido se queda. */
+  onClear?: () => void
   /** Nombre accesible del grupo cuando no lo da una etiqueta visible. */
   label: string
   tone?: "neutral" | "primary"
@@ -36,6 +40,7 @@ export function ChoiceButtons<T extends string>({
       onValueChange={(next: unknown[]) => {
         const picked = next[0]
         if (typeof picked === "string") onChange(picked as T)
+        else onClear?.()
       }}
       disabled={disabled}
       spacing={1}

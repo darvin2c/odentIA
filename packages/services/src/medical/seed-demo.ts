@@ -3,8 +3,8 @@
  * semilla de desarrollo que la de odentIA (`../dental/seed-demo.ts`), que lo
  * borra junto con sus clínicas y lo crea al final. Lo mínimo para recorrerlo:
  * la Dra. Elena Vela (propietaria) y Ana Torres, que también dirige Dental
- * Smile y entra una vez en cada dominio; una sede con dos salas y horario, y la
- * agenda de hoy y mañana.
+ * Smile y entra una vez en cada dominio; una sede con dos salas y horario, la
+ * agenda de hoy y mañana, y los controles de presión de Luis con su examen.
  *
  * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
  */
@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
+import { encounter } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -241,6 +242,46 @@ export async function seedMedicalDemo(
       startsAt: lima(item.day, item.start),
       endsAt: lima(item.day, item.end),
       status: "programada",
+    })
+  }
+
+  // Los controles de presión de Luis, ya firmados (entrega 5): la sección
+  // «Signos vitales» los dibuja en el tiempo y el examen dice lo no examinado.
+  const controls = [
+    { daysAgo: 240, vitals: { presionSistolica: 152, presionDiastolica: 96, frecuenciaCardiaca: 84, peso: 86, talla: 170, glucosaCapilar: 132 } },
+    { daysAgo: 180, vitals: { presionSistolica: 146, presionDiastolica: 92, frecuenciaCardiaca: 80, peso: 85, talla: 170 } },
+    { daysAgo: 120, vitals: { presionSistolica: 138, presionDiastolica: 88, frecuenciaCardiaca: 78, peso: 83.5, talla: 170, glucosaCapilar: 118 } },
+    { daysAgo: 60, vitals: { presionSistolica: 132, presionDiastolica: 84, frecuenciaCardiaca: 76, peso: 82, talla: 170, glucosaCapilar: 112 } },
+  ]
+  for (const control of controls) {
+    const startedAt = new Date(lima(-control.daysAgo, "10:00"))
+    await db.insert(encounter).values({
+      organizationId: ORG,
+      patientId: luis,
+      branchId: sede.id,
+      professionalUserId: VELA_ID,
+      status: "finalizada",
+      reason: "Control de presión arterial",
+      vitals: control.vitals,
+      examination: {
+        sistemas: {
+          estadoGeneral: { estado: "sin_alteraciones" },
+          toraxPulmones: { estado: "sin_alteraciones" },
+          corazon: { estado: "sin_alteraciones" },
+          extremidades:
+            control.daysAgo > 150
+              ? { estado: "con_hallazgos", hallazgo: "Edema leve en ambos tobillos, con fóvea." }
+              : { estado: "sin_alteraciones" },
+        },
+      },
+      evolution: "Hipertensión arterial en control; continúa con enalapril y dieta baja en sal.",
+      startedAt,
+      endedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
+      finalizedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
+      finalizedBy: VELA_ID,
+      signerName: "Elena Vela",
+      signerTitle: "Médico cirujano",
+      signerRegistration: "CMP 045678",
     })
   }
 }

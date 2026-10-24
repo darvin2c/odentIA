@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react"
 import { PageShell } from "../page-shell.js"
-import { type ChartCategory, ColumnChart, HeatmapGrid, ShareBar, Sparkline, WaterfallChart, type WaterfallStep } from "./index.js"
+import { type ChartCategory, ColumnChart, HeatmapGrid, LineChart, ShareBar, Sparkline, WaterfallChart, type WaterfallStep } from "./index.js"
 
 /**
  * Gráficos de datos de Reportes. Cada marca es un control: se recorre con el
@@ -212,6 +212,45 @@ export const Cascada: Story = {
           format={(cents) => (cents < 0 ? `−${soles(-cents)}` : soles(cents))}
           short={(cents) => (cents < 0 ? "−" : "") + Math.round(Math.abs(cents) / 100).toLocaleString("en-US").split(",").join(" ")}
           height={220}
+        />
+      </section>
+    </PageShell>
+  ),
+}
+
+const VISITS: ChartCategory[] = [
+  { key: "2026-02-14", label: "14 de febrero", short: "14 feb" },
+  { key: "2026-04-18", label: "18 de abril", short: "18 abr" },
+  { key: "2026-06-13", label: "13 de junio", short: "13 jun" },
+  { key: "2026-08-12", label: "12 de agosto", short: "12 ago" },
+  { key: "2026-10-23", label: "23 de octubre", short: "23 oct" },
+]
+
+/** La presión de cada atención en el tiempo: dos líneas, un eje que no empieza en cero y una visita sin medir. */
+export const PresionEnElTiempo: Story = {
+  render: () => (
+    <PageShell>
+      <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-5">
+        <h2 className="font-semibold">Presión arterial</h2>
+        <LineChart
+          title="Presión arterial en cada atención: la sistólica baja de 142 a 118 y la diastólica de 92 a 76"
+          categories={VISITS}
+          series={[
+            { key: "sistolica", label: "Sistólica", tone: "series-1", values: [142, 136, null, 124, 118] },
+            { key: "diastolica", label: "Diastólica", tone: "series-2", values: [92, 88, null, 80, 76] },
+          ]}
+          format={(value) => `${value} mmHg`}
+          axis={String}
+        />
+      </section>
+      <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-5">
+        <h3 className="font-semibold">Peso</h3>
+        <LineChart
+          title="Peso en cada atención: baja de 68 a 62 kilos"
+          categories={VISITS}
+          series={[{ key: "peso", label: "Peso", tone: "series-1", values: [68, 67, 65.5, 64, 62] }]}
+          format={(value) => `${value.toLocaleString("es-PE")} kg`}
+          axis={String}
         />
       </section>
     </PageShell>

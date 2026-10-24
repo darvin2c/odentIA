@@ -10,6 +10,8 @@ import {
   codeAllergySubstance,
   medicationGroupOfAtc,
   searchAllergens,
+  bodyMassIndex,
+  CORE_VITAL_KEYS,
   formatVitals,
   parseVitals,
   MAX_TAGS,
@@ -68,6 +70,19 @@ describe("signos vitales", () => {
     expect(formatVitals({ presionSistolica: 120, presionDiastolica: 80, temperatura: 36.5 })).toBe(
       "PA 120/80 mmHg · T 36.5 °C",
     )
+  })
+
+  it("cada producto registra los suyos; el IMC sale del peso y la talla (issue 229)", () => {
+    // La glucosa capilar es de latidIA: con los ocho de siempre no se acepta.
+    expect(parseVitals({ glucosaCapilar: 110 }, CORE_VITAL_KEYS)).toMatchObject({ ok: false })
+    expect(parseVitals({ glucosaCapilar: 110, perimetroCefalico: "48.25" })).toEqual({
+      ok: true,
+      value: { glucosaCapilar: 110, perimetroCefalico: 48.3 },
+    })
+    expect(parseVitals({ glucosaCapilar: 900 })).toMatchObject({ ok: false })
+    expect(bodyMassIndex({ peso: 62, talla: 160 })).toBe(24.2)
+    expect(bodyMassIndex({ peso: 62 })).toBeNull()
+    expect(formatVitals({ glucosaCapilar: 110 })).toBe("Glucosa 110 mg/dL")
   })
 })
 

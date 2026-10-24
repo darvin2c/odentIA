@@ -11,6 +11,7 @@ import {
   useEncounterPeriodontal,
 } from "../../components/dental/periodontal/encounter-periodontal"
 import { useOdontogram } from "../../lib/dental/use-odontogram"
+import { dentalExamination } from "./examination"
 import { ApiError } from "@odentia/clinic-app/lib/api"
 import type { ClosingCheck, ClosingOdontogram } from "@odentia/clinic-app/lib/encounters"
 import { type EncounterDetail, statusLabel } from "@odentia/clinic-app/lib/patients"
@@ -33,7 +34,8 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
   // El periodontograma de esta atención, si se empezó (issue 49).
   const periodontal = useEncounterPeriodontal(ctx.patientId, ctx.encounterId)
   const [capture, setCapture] = useState<string | null>(null)
-  const findings = ctx.detail.odontogramEntries.length
+  // odentIA siempre los trae en el detalle (`encounterDetailParts`).
+  const findings = (ctx.detail.odontogramEntries ?? []).length
   return {
     blocks: [
       {
@@ -193,7 +195,7 @@ function DentalClosing({
 
 /** El odontograma vinculado a la atención, con lo registrado. */
 function DentalDetailRecorded({ detail }: { detail: EncounterDetail }) {
-  const entries = detail.odontogramEntries
+  const entries = detail.odontogramEntries ?? []
   return (
     <section aria-label="Odontograma vinculado">
       <h4 className="mb-2 text-sm font-medium">Odontograma vinculado ({entries.length})</h4>
@@ -260,8 +262,9 @@ function DentalDetailEnd({ patientId, detail }: { patientId: string; detail: Enc
   )
 }
 
-/** odentIA en la atención: el odontograma y el periodontograma. */
+/** odentIA en la atención: el examen de la boca, el odontograma y el periodontograma. */
 export const dentalEncounter: ProductEncounterUi = {
+  examination: dentalExamination,
   useBlocks: useDentalBlocks,
   Closing: (props) => <DentalClosing {...props} />,
   signLabel: (closing) => (closing?.periodontal?.pending ? "Firmar como parcial" : null),

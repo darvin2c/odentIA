@@ -1,4 +1,9 @@
-import { diagnosisCodeLabel, findingDiagnosisCode, isDiagnosisSystem } from "@odentia/clinical"
+import {
+  CORE_VITAL_KEYS,
+  diagnosisCodeLabel,
+  findingDiagnosisCode,
+  isDiagnosisSystem,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import {
@@ -35,6 +40,7 @@ import {
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { dentalCatalog } from "./catalog.js"
+import { dentalExamination } from "./examination.js"
 import { dentalProductSite, siteColumns } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -162,6 +168,8 @@ export interface DentalEncounterDetailParts {
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
+  examination: dentalExamination,
+  vitals: CORE_VITAL_KEYS,
   catalog: dentalCatalog,
   dictates: true,
 
