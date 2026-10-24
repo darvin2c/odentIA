@@ -1,6 +1,6 @@
-import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "@odentia/dental"
+import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "./anatomy.js"
 import { describe, expect, it } from "vitest"
-import { ARCH_ASPECT, type ArchLayout, archLayout, archNeighbor } from "./odontogram-arch"
+import { ARCH_ASPECT, type ArchLayout, archLayout, archNeighbor } from "./odontogram-arch.js"
 
 const adult = { upper: FDI_ADULT_ROWS[0]!, lower: FDI_ADULT_ROWS[1]! }
 const child = { upper: FDI_CHILD_ROWS[0]!, lower: FDI_CHILD_ROWS[1]! }

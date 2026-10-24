@@ -1,0 +1,52 @@
+---
+// La tarjeta del plan que se muestra: la del Fundador (sin cuota, el regalo y el precio de lista
+// tachado) o la del plan de lista (su cuota vuelve como crédito). Va al lado de «Calcula tu mes».
+import { businessDays, money, shownPlan } from "../../lib/pricing"
+import { ctaOf } from "../../lib/site"
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
+const cta = ctaOf(pricing)
+---
+{plan ? (
+  <div class="plan">
+    <span class="tag tag-d">{founder ? "Programa Fundadores" : plan.name}</span>
+    <div class="amount">
+      <span class="big">{money(plan.plan, plan.currency)}</span><span class="per">al mes</span>
+      {founder && list && list.plan !== plan.plan ? <s class="per"><span class="sr">antes </span>{money(list.plan, list.currency)}</s> : null}
+    </div>
+    {founder ? (
+      <p class="back">
+        Sin cuota. Los primeros <b class="gift">{money(plan.trialCredit, plan.currency)}</b> de tus agentes los pagamos nosotros y, después,
+        pagas solo lo que hacen{founder.discountPercent ? `, con ${founder.discountPercent} % menos` : ""}{founder.discountPercent && founder.guaranteeMonths ? ` durante ${founder.guaranteeMonths} meses` : ""}.
+      </p>
+    ) : (
+      <p class="back">Te devolvemos los {money(plan.credit, plan.currency)} en crédito para lo que hagan tus agentes. Es lo mínimo que pagas en un mes.</p>
+    )}
+    <a class="btn btn-p cta" href={cta.href}>{cta.label}</a>
+    <span class="mono trial">
+      {founder
+        ? `Sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}.`
+        : <>{plan.trialDays} días gratis, con <span class="gift">{money(plan.trialCredit, plan.currency)}</span> de crédito para tus agentes.</>}
+    </span>
+  </div>
+) : null}
+
+<style>
+  .plan { border-radius: 26px; padding: 36px; background: var(--night); color: var(--on-night); display: flex; flex-direction: column; gap: 18px; }
+  .tag { letter-spacing: .1em; }
+  .amount { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+  .big { font-size: clamp(48px, 6vw, 72px); font-weight: 800; letter-spacing: -.05em; line-height: .9; }
+  .per { color: #9fb8bf; }
+  .back { font-size: 18px; line-height: 1.5; color: #d6e8ec; }
+  .cta { align-self: flex-start; }
+  .trial { font-size: 13px; line-height: 1.5; color: var(--on-night-3); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @media (max-width: 720px) {
+    .plan { border-radius: 20px; padding: 22px 20px; gap: 14px; }
+    .back { font-size: 16px; }
+    .cta { align-self: stretch; }
+  }
+</style>

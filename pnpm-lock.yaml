@@ -543,6 +543,9 @@ importers:
       '@odentia/brand-scene':
         specifier: workspace:*
         version: link:../../packages/brand-scene
+      '@odentia/dental':
+        specifier: workspace:*
+        version: link:../../packages/dental
       astro:
         specifier: 7.3.5
         version: 7.3.5(@types/node@24.19.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)

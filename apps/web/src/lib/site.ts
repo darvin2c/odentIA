@@ -27,7 +27,20 @@ export function ctaOf(pricing: Pricing): { href: string; label: string } {
 
 export type NavLink = { href: string; label: string }
 
+/** Una página de agente en el menú «Agentes ▾»: su color (sobre claro) y una línea de lo que hace. */
+export type AgentNavLink = NavLink & { text: string; color: string }
+
+/** El menú de Agentes (lienzo del paso 3, tablero 1): cada agente con su color y lo que hace. */
+export const agentNav: AgentNavLink[] = MEDICAL
+  ? []
+  : [
+      { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde, informa y agenda por todos tus canales, a cualquier hora.", color: "#0e7490" },
+      { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas la consulta y prepara la nota, el odontograma y el presupuesto.", color: "#1f9d7a" },
+      { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes de tu clínica.", color: "#c98a1c" },
+    ]
+
 // latidIA empieza con su web mínima (decisión 18 del issue 229): inicio, precios, invitación y legales.
+// En odentIA, «Agentes» abre el menú de los tres (agentNav); su dirección lleva a los tres juntos.
 export const mainNav: NavLink[] = MEDICAL
   ? [
       { href: "/#agentes", label: "Agentes" },
@@ -58,7 +71,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
     links: [
       { href: "/agentes", label: "Los tres agentes" },
       { href: "/agentes/recepcion", label: "Sofi · recepción" },
-      { href: "/agentes/asistente-clinico", label: "Clío · clínica" },
+      { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
       { href: "/agentes/administrador", label: "Argos · administración" },
     ],
   },

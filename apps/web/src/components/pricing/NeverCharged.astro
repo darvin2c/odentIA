@@ -1,0 +1,38 @@
+---
+// «Lo que nunca se cobra» (ADR 0047, 0054 y 0085): lo que no es trabajo de un agente dice USD 0.
+---
+<section class="section never">
+  <div class="wrap in">
+    <div class="head">
+      <span class="tag">[ Lo que nunca se cobra ]</span>
+      <h2 class="h2 t">Lo que no es trabajo de un agente, no se cobra.</h2>
+      <p class="lead">Así no hay sorpresas: si el agente no hizo nada útil, la fila dice USD 0.</p>
+    </div>
+    <ul class="list">
+      <li><b>El spam</b> y los mensajes que no son para la clínica.</li>
+      <li><b>Los recordatorios</b> y los avisos de cita.</li>
+      <li><b>El borrador que descartas</b>: si Clío no te sirvió, no cuenta.</li>
+      <li><b>Lo que responde tu equipo</b> y los avisos a tu equipo.</li>
+      <li><b>La cita recuperada</b> si el paciente no vino.</li>
+      <li><b>Las preguntas</b> que Argos no pudo responder.</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .never { padding: 96px 0; background: var(--bg); }
+  .in { display: flex; flex-wrap: wrap; gap: 32px; }
+  .head { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .t { font-size: clamp(32px, 3.6vw, 44px); }
+  .lead { font-size: 18px; }
+  .list { flex: 1 1 520px; min-width: 0; margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; align-content: start; }
+  .list li { background: var(--paper); border-radius: 16px; padding: 18px 20px; font-size: 16px; line-height: 1.45; }
+  @media (max-width: 720px) {
+    .never { padding: 64px 0; }
+    .in { gap: 20px; }
+    .head { gap: 12px; }
+    .lead { font-size: 16px; }
+    .list { gap: 10px; }
+    .list li { padding: 14px 16px; font-size: 15px; }
+  }
+</style>

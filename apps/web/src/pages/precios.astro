@@ -1,30 +1,25 @@
 ---
 import CtaBand from "../components/CtaBand.astro"
 import Faq from "../components/Faq.astro"
-import PageHero from "../components/PageHero.astro"
-import Difference from "../components/pricing/Difference.astro"
-import HowWeCharge from "../components/pricing/HowWeCharge.astro"
-import PlanPrices from "../components/pricing/PlanPrices.astro"
-import PricingHero from "../components/pricing/PricingHero"
+import AgentPrices from "../components/pricing/AgentPrices.astro"
+import NeverCharged from "../components/pricing/NeverCharged.astro"
+import PricingHero from "../components/pricing/PricingHero.astro"
 import ValueSection from "../components/pricing/ValueSection.astro"
-// Precios: pagas por el valor que recibes, no por el software. Todas las cifras salen de lib/pricing.
+// Precios: no pagas por el software, pagas por el trabajo hecho. Todas las cifras salen de lib/pricing.
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
-import { businessDays, days, giftOf, money, shownPlan, valuePricesOf } from "../lib/pricing"
+import { businessDays, days, giftOf, money, shownPlan } from "../lib/pricing"
 import { WORDS } from "../lib/product"
-import { ctaOf } from "../lib/site"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
-const prices = valuePricesOf(plan)
-const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
 // Las condiciones comerciales: de la administración, como los precios (issue 167).
 const terms = pricing.terms
 
-const title = "Precios: pagas por el valor, no por el software"
+const title = "Precios: pagas por el trabajo hecho, no por el software"
 // Lo que cobra cada agente, de lo más simple a lo que trae pacientes (ADR 0085).
 const range = plan ? `desde ${m(plan.tiers.informa)} una respuesta hasta ${m(plan.recovered)} una cita recuperada` : null
 const description = !plan
@@ -32,13 +27,26 @@ const description = !plan
   : founder
     ? `Software para ${WORDS.audience}. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
     : `Software para ${WORDS.audience} con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
-const lead = !plan
-  ? "Pagas por lo que hacen tus agentes, no por el software. Cada cobro es un trabajo que ves: lo simple cuesta poco y lo que te trae pacientes cuesta más."
-  : founder
-    ? `Pagas por lo que hacen tus agentes, no por el software. Como Fundador entras sin cuota y los primeros ${m(plan.trialCredit)} los pagamos nosotros. Lo simple cuesta poco y lo que te trae pacientes cuesta más.`
-    : `Pagas por lo que hacen tus agentes, no por el software. Un plan de ${m(plan.plan)} al mes que vuelve completo como crédito. Lo simple cuesta poco y lo que te trae pacientes cuesta más.`
-
 const faq: FaqItem[] = [
+  {
+    // ADR 0085: reservar ya es «Gestiona»; la cita que se da suma la diferencia hasta «Agenda».
+    q: "¿Me cobran si Sofi reserva y el paciente no viene?",
+    a: "Sí, como «gestiona»: Sofi hizo el trabajo de agendar. Si el paciente viene, se suma la diferencia hasta «agenda». Si era una cita recuperada por Argos, se cobra solo la cita.",
+  },
+  {
+    q: "¿Y si un mes mis agentes gastan mucho?",
+    a: "Pones un presupuesto del mes. Te avisamos al acercarte y, al llegar, Sofi pasa las conversaciones nuevas a tu equipo con un mensaje fijo, Clío no escucha en las atenciones nuevas y Argos no escribe para recuperar. Lo que ya empezó se termina y ningún paciente se queda sin respuesta.",
+  },
+  {
+    q: "¿Cuántas preguntas le puedo hacer a Argos?",
+    a: plan?.argos
+      ? `${plan.argos.included} al mes vienen incluidas. Al usarlas, Argos te pregunta antes de sumar ${plan.argos.packQuestions} más por ${m(plan.argos.pack)}; si prefieres, se suman solas. Las que no puede responder no cuentan.`
+      : "Las que necesites: Argos responde con las cifras de tu clínica.",
+  },
+  {
+    q: "¿Y WhatsApp?",
+    a: `WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. ${WORDS.name} no lo cobra ni lo estima.`,
+  },
   {
     q: "¿Por qué no hay planes con más funciones?",
     a: "Porque no vendemos funciones. Todas las clínicas tienen el sistema completo; lo que cambia de una a otra es cuánto trabajo hacen sus agentes, y solo eso se paga.",
@@ -58,20 +66,10 @@ const faq: FaqItem[] = [
     } y te respondemos en ${businessDays(terms.reviewAnswerDays)}. Lo que ya estaba facturado vuelve en tu cargo siguiente.`,
   },
   {
-    q: "¿Y si un mes mis agentes gastan mucho?",
-    a: "Pones un presupuesto del mes. Te avisamos al acercarte y, al llegar, Sofi pasa las conversaciones nuevas a tu equipo con un mensaje fijo, Clío no escucha en las atenciones nuevas y Argos no escribe para recuperar. Lo que ya empezó se termina y ningún paciente se queda sin respuesta.",
-  },
-  {
     q: `¿Y si mis ${WORDS.heavyImages} ocupan mucho?`,
     a: plan?.storage
       ? `Tienes ${plan.storage.includedGb} GB incluidos. Desde ahí, cada GB cuesta ${m(plan.storage.perGb)} al mes, y nunca dejamos de guardar.`
       : "Lo que guardas no tiene tope: nunca dejamos de guardar.",
-  },
-  {
-    q: "¿Cuántas preguntas le puedo hacer a Argos?",
-    a: plan?.argos
-      ? `${plan.argos.included} al mes vienen incluidas. Al usarlas, Argos te pregunta antes de sumar ${plan.argos.packQuestions} más por ${m(plan.argos.pack)}; si prefieres, se suman solas. Las que no puede responder no cuentan.`
-      : "Las que necesites: Argos responde con las cifras de tu clínica.",
   },
   {
     q: "¿Qué no se cobra?",
@@ -97,10 +95,6 @@ const faq: FaqItem[] = [
   {
     q: "¿Cada cuánto me cobran?",
     a: `Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
-  },
-  {
-    q: "¿Y WhatsApp?",
-    a: `WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. ${WORDS.name} no lo cobra ni lo estima.`,
   },
   {
     q: "¿Y si mi clínica tiene mucho movimiento?",
@@ -146,19 +140,26 @@ const jsonLd = [
 ]
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
-  {/* Sin un plan publicado, la misma portada sin la escena de la cuenta: la cabecera clara y el h1 siguen en su sitio. */}
-  {prices ? (
-    <PricingHero client:load prices={prices} ctaHref={cta.href} ctaLabel={cta.label} lead={lead} />
-  ) : (
-    <PageHero tag="Precios" title="Pagas por el valor que recibes," accent="no por el software." lead={lead} />
-  )}
-  <HowWeCharge />
-  <PlanPrices />
+  <PricingHero />
+  <AgentPrices />
+  <NeverCharged />
   <ValueSection />
-  <Difference />
-  <Faq items={faq} title="Sobre el precio." />
-  <CtaBand
-    title={gift ? (founder ? `Los primeros ${gift} los pagamos nosotros.` : `Obtén ${gift} de crédito y pruébalo ${plan?.trialDays} días.`) : "Tu equipo, de vuelta con sus pacientes."}
-    text={`${gift ? "Con ese crédito tus" : "Tus"} agentes trabajan en tu clínica desde el primer día. Precios en ${plan?.currency === "USD" ? "dólares" : (plan?.currency ?? "dólares")}, más los impuestos de tu país.`}
-  />
+  <div class="faqwrap"><Faq items={faq} title="Sobre el precio." /></div>
+  <CtaBand title="Pagas por el trabajo hecho. Empieza hoy.">
+    <Fragment slot="text">
+      {gift ? (
+        founder ? (
+          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        ) : (
+          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        )
+      ) : (
+        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
+      )}
+    </Fragment>
+  </CtaBand>
 </Base>
+
+<style>
+  .faqwrap { background: var(--bg); }
+</style>

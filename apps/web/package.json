@@ -20,6 +20,7 @@
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@odentia/auth": "workspace:*",
     "@odentia/brand-scene": "workspace:*",
+    "@odentia/dental": "workspace:*",
     "astro": "7.3.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

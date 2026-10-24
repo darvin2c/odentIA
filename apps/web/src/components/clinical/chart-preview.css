@@ -1,0 +1,16 @@
+/* Tarjeta de la portada de Historia: odontograma y panel de la pieza, lado a lado si caben. */
+.cp { background: #fff; color: var(--ink); border-radius: 26px; padding: 20px; display: flex; flex-wrap: wrap; gap: 16px; }
+.cp-arch { flex: 1 1 420px; min-width: 0; padding: 22px 16px; background: var(--bg); border-radius: 18px; }
+.cp-panel { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 6px; }
+.cp-n { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--soft); }
+.cp-name { font-size: 18px; line-height: 1.25; }
+.cp-chip { align-self: flex-start; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 6px 10px; background: #f1f5f9; color: #334155; }
+.cp-chip.red { background: #fde2e2; color: #b91c1c; }
+.cp-chip.blue { background: #dbe7fe; color: #1d4ed8; }
+.cp-detail { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.cp-note { margin-top: auto; font-size: 12px; color: var(--soft); }
+@media (max-width: 720px) {
+  .cp { padding: 12px; border-radius: 20px; }
+  .cp-arch { padding: 16px 8px; flex-basis: 100%; }
+  .cp-note { margin-top: 4px; }
+}

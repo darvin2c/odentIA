@@ -1,5 +1,5 @@
 import { Fragment, type RefObject, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { archLayout, archNeighbor, type ArchRows } from "../../lib/dental/odontogram-arch"
+import { archLayout, archNeighbor, type ArchRows } from "@odentia/dental/odontogram-arch"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { ToothSVG } from "./tooth-svg"
 

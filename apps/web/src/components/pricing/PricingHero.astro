@@ -1,0 +1,79 @@
+---
+// Portada de Precios: «No pagas por el software. Pagas por el trabajo hecho.» y, al lado, la cuenta
+// de un jueves que se llena fila por fila (isla WorkDayLedger) con los precios del plan que se muestra.
+// Sin un plan publicado, la misma portada sin la cuenta: el h1 sigue en su sitio.
+import { businessDays, days, giftOf, shownPlan, valuePricesOf } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { contactHref, ctaOf } from "../../lib/site"
+import WorkDayLedger from "./WorkDayLedger"
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const prices = valuePricesOf(plan)
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+---
+<section class:list={["hero", "ph", { split: prices }]}>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap in">
+    <div class="copy">
+      <span class="tag tag-d rise">[ Precios ]</span>
+      <h1 class="t rise d1">No pagas por el software. <span class="acc">Pagas por el trabajo hecho.</span></h1>
+      <p class="lead lead-d rise d2">
+        Cada cosa que hace un agente es un trabajo con su precio: lo simple cuesta poco y lo que te trae pacientes cuesta
+        más. El sistema completo viene incluido, sin límite de {WORDS.clinicians}, sedes ni usuarios.
+      </p>
+      <div class="ctas rise d3">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        {prices ? <a class="btn btn-g" href="#calcula">Calcula tu mes</a> : null}
+      </div>
+      <p class="mono note rise d4">
+        {founder && gift ? (
+          <>Fundadores: sin cuota y sin tarjeta. Los primeros <span class="gift">{gift}</span> los pagamos nosotros.</>
+        ) : plan && gift ? (
+          <>Sin tarjeta para probar: {days(plan.trialDays)} con <span class="gift">{gift}</span> de crédito para tus agentes.</>
+        ) : !plan ? (
+          // Sin plan publicado, lo mismo que las páginas de cada agente: no hay cifras que esconder.
+          <>Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</>
+        ) : pricing.signupMode === "invitacion" ? (
+          `Sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}.`
+        ) : (
+          "Sin tarjeta para probar. Tú decides qué puede hacer cada agente."
+        )}
+      </p>
+    </div>
+    {prices && plan ? (
+      <div class="ledger rise d2">
+        <WorkDayLedger
+          client:load
+          prices={prices}
+          currency={plan.currency}
+          note={founder ? "Ejemplo con precios de Fundadores." : `Ejemplo con los precios del ${plan.name}.`}
+        />
+      </div>
+    ) : null}
+  </div>
+</section>
+
+<style>
+  /* La cabecera va encima, absoluta: el espacio de arriba es el suyo. */
+  .ph { padding: 160px 0 88px; }
+  .in { position: relative; z-index: 2; display: grid; gap: 56px; align-items: center; }
+  .split .in { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .copy { display: flex; flex-direction: column; gap: 24px; max-width: 640px; }
+  .t { font-size: clamp(38px, 4.4vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .note { font-size: 13px; color: var(--on-night-3); line-height: 1.5; }
+  .note a { color: var(--sky-2); text-decoration: underline; text-underline-offset: 3px; }
+  .ledger { min-width: 0; }
+  @media (max-width: 960px) {
+    .ph { padding: 110px 0 64px; }
+    .split .in { grid-template-columns: 1fr; gap: 36px; }
+  }
+  @media (max-width: 720px) {
+    .copy { gap: 18px; }
+    .ctas .btn { flex: 1 1 100%; }
+  }
+</style>

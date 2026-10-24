@@ -124,22 +124,6 @@ const agentStyle = (i: CardItem["agent"]) =>
         <p class="note">{b.note}</p>
       </div>
     )}
-
-    {b.kind === "sheet" && (
-      <div class="card sheet" style={agentStyle(1)}>
-        <div class="sh"><strong>{b.sheet.head}</strong><span class="mono">{b.sheet.meta}</span></div>
-        <dl>
-          {b.sheet.rows.map((r) => (
-            <div class="row">
-              <dt class="mono">{r.label}</dt>
-              <dd>{r.code && <span class="code mono">{r.code}</span>} {r.text}</dd>
-            </div>
-          ))}
-        </dl>
-        <p class="done"><span aria-hidden="true">✓</span> {b.sheet.done}</p>
-        {b.note && <p class="note">{b.note}</p>}
-      </div>
-    )}
   </div>
 </section>
 
@@ -184,7 +168,7 @@ const agentStyle = (i: CardItem["agent"]) =>
   /* Conversación */
   .chat { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }
   .person { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
-  .section-white .person, .section-white .thread, .section-white .log, .section-white .sheet { background: var(--bg); box-shadow: none; }
+  .section-white .person, .section-white .thread, .section-white .log { background: var(--bg); box-shadow: none; }
   .pid { display: flex; gap: 12px; align-items: center; }
   .pid > span:last-child { display: flex; flex-direction: column; }
   .av { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--teal-soft); color: var(--teal); font-weight: 800; }
@@ -213,17 +197,6 @@ const agentStyle = (i: CardItem["agent"]) =>
   .lt { font-size: 13px; color: var(--soft); }
   .lw { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #eef2f6; color: var(--ink-2); }
 
-  /* Nota clínica */
-  .sheet { padding: 26px; max-width: 860px; box-shadow: inset 0 3px 0 var(--ad), 0 12px 40px -18px rgba(15,23,42,.18); }
-  .sh { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-  .sh .mono { font-size: 12.5px; color: var(--soft); }
-  dl { margin: 0; }
-  .row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-  dt { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--soft); padding-top: 3px; }
-  dd { margin: 0; line-height: 1.55; }
-  .code { font-size: 12.5px; padding: 2px 8px; border-radius: 6px; background: #e4f6ef; color: #146c54; }
-  .done { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #e4f6ef; color: #0f5a45; font-weight: 600; }
-
   @media (max-width: 860px) {
     .split, .chat { grid-template-columns: 1fr; gap: 24px; }
   }
@@ -234,6 +207,5 @@ const agentStyle = (i: CardItem["agent"]) =>
     .msg { max-width: 92%; }
     .log li { grid-template-columns: 44px 10px 1fr; }
     .lw { display: none; }
-    .row { grid-template-columns: 1fr; gap: 4px; }
   }
 </style>

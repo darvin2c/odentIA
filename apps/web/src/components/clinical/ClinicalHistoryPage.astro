@@ -1,0 +1,172 @@
+---
+// /historia-clinica-y-odontograma (lienzo del paso 3, tablero «Historia»): la portada con el
+// odontograma real de la app, lo que incluye, el periodontograma y la tomografía con capturas
+// reales, las preguntas y el cierre. Título, descripción y migas salen de PAGES.historia.
+import { FDI_ADULT, toothNameOf } from "@odentia/dental"
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import ChartPreview from "./ChartPreview"
+
+const page = PAGES.historia
+const cta = ctaOf(Astro.locals.pricing)
+const trail: [string, string][] = [["Inicio", "/"], [page.crumb, page.path]]
+// Los nombres de las piezas se arman aquí, en el servidor: la isla no carga el dominio dental entero.
+const names = Object.fromEntries(FDI_ADULT.map((tooth) => [tooth, toothNameOf(tooth)]))
+
+const includes = [
+  { title: "Odontograma en herradura", text: "Permanente, mixta y temporal, con su historial: «Ver estado al» cualquier fecha." },
+  { title: "Periodontograma", text: "Seis sitios por pieza, sangrado, placa, clasificación y la comparación entre fechas." },
+  { title: "Tomografía en el navegador", text: "Subes la carpeta del CD y la ves en panorámica y cortes, con medidas." },
+  { title: "Diagnósticos con su código", text: "De la lista que eliges: CIE-10 o CIE-11 de la OMS." },
+  { title: "Documentos e imágenes", text: "Recetas, consentimientos firmados y radiografías en una sola lista, por pieza." },
+  { title: "Alergias que avisan", text: "Una receta con un medicamento al que es alérgico avisa antes de emitirse." },
+]
+
+// Las preguntas del tablero; las que ya estaban en PAGES.historia se toman de ahí.
+const asked = (q: string) => page.faq.find((item) => item.q === q)
+const faq: FaqItem[] = [
+  {
+    q: "¿Puedo dictar el odontograma?",
+    a: "Sí. Lo que dices de una pieza queda como sugerencia en el odontograma y entra cuando la confirmas. Implantes, endodoncias y la movilidad se marcan en la pieza.",
+  },
+  ...[asked("¿Qué notación usa el odontograma?")].filter((item): item is FaqItem => Boolean(item)),
+  {
+    q: "¿Puedo imprimir el odontograma firmado?",
+    a: "Sí. El odontograma, las recetas, las órdenes y los consentimientos tienen su versión para imprimir. En Perú el odontograma se firma como pide la norma y lo firmado ya no se altera.",
+  },
+  ...[asked("¿Quién puede ver la historia clínica?")].filter((item): item is FaqItem => Boolean(item)),
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <section class="hero hh">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap hh-in">
+      <div class="hh-copy">
+        <span class="tag tag-d rise">[ Historia y odontograma ]</span>
+        <h1 class="hh-h1 rise d1">Historia clínica dental y odontograma, <span class="acc">en una sola ficha.</span></h1>
+        <p class="hh-lead rise d2">El odontograma en herradura con la notación FDI, el periodontograma, la tomografía y cada atención en orden. Clío prepara lo que dictas y tú lo confirmas.</p>
+        <div class="hh-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="/agentes/asistente-clinico">Conoce a Clío</a>
+        </div>
+      </div>
+      <div class="hh-card rise d2">
+        <ChartPreview client:visible names={names} />
+      </div>
+    </div>
+  </section>
+
+  <section class="section hs">
+    <div class="wrap hs-in">
+      <div class="hs-head">
+        <span class="tag">[ Qué incluye ]</span>
+        <h2 class="hs-h2">Todo lo clínico del paciente, en orden.</h2>
+      </div>
+      <div class="hs-grid">
+        {includes.map((item) => (
+          <div class="hs-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-white">
+    <div class="wrap shots">
+      <div class="shot">
+        <div class="shot-copy">
+          <span class="tag">[ Periodontograma ]</span>
+          <h2 class="shot-h2">Lo que antes era una hoja, con su gráfico y su clasificación.</h2>
+          <p>Una pieza y una cara a la vez, con el teclado. Propone el estadio y el grado; tú lo confirmas.</p>
+        </div>
+        <figure>
+          <img
+            src="/img/product/periodontal-chart.jpg"
+            width="976"
+            height="620"
+            loading="lazy"
+            decoding="async"
+            alt="Periodontograma de la arcada superior: sangrado, recesión y profundidad de cada sitio, la línea de la encía y la de la bolsa sobre las piezas, y al lado el detalle de la pieza 15 con su placa."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+      <div class="shot rev">
+        <figure>
+          <img
+            src="/img/product/cbct-viewer.jpg"
+            width="1000"
+            height="562"
+            loading="lazy"
+            decoding="async"
+            alt="Visor de tomografía con tres cortes, desde arriba, de frente y de lado, con los botones de brillo, Medir y Ángulo y la nota de medidas guardadas."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+        <div class="shot-copy">
+          <span class="tag">[ Tomografía ]</span>
+          <h2 class="shot-h2">La tomografía, sin instalar un programa.</h2>
+          <p>Recepción sube el CD del centro de imágenes; el odontólogo la abre en la ficha, mide y guarda la vista en la atención.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={faq} />
+  </div>
+  <CtaBand title="Tu historia clínica, en orden desde hoy." />
+</Base>
+
+<style>
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 64 de aire, como en el tablero. */
+  .hh { padding: 152px 0 88px; }
+  .hh-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 48px; align-items: center; }
+  .hh-copy { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .hh-h1 { font-size: clamp(38px, 4.4vw, 54px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .hh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .hh-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .hh-card { min-width: 0; }
+
+  .hs { background: var(--bg); }
+  .hs-in { display: flex; flex-direction: column; gap: 36px; }
+  .hs-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .hs-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .hs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .hs-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .hs-card h3 { font-size: 20px; line-height: 1.25; }
+  .hs-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+
+  .shots { display: flex; flex-direction: column; gap: 48px; }
+  .shot { display: flex; flex-wrap: wrap; gap: 40px; align-items: center; }
+  .shot.rev { flex-wrap: wrap-reverse; }
+  .shot-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .shot-h2 { font-size: clamp(28px, 3vw, 40px); line-height: 1.05; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .shot-copy p { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .shot figure { flex: 1.6 1 560px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .shot img { width: 100%; height: auto; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(10, 33, 41, .35); }
+  .shot figcaption { font-size: 13px; color: var(--soft); }
+
+  .faqwrap { background: var(--bg); padding-bottom: 8px; }
+
+  @media (max-width: 1080px) {
+    .hh-in { grid-template-columns: minmax(0, 1fr); }
+    .hh-copy { max-width: 640px; }
+  }
+  @media (max-width: 720px) {
+    .hh { padding: 104px 0 56px; }
+    .hh-in { gap: 32px; }
+    .hh-lead { font-size: 17px; }
+    .shots { gap: 40px; }
+    .shot { gap: 20px; }
+    .shot-copy, .shot figure { flex-basis: 100%; }
+  }
+</style>

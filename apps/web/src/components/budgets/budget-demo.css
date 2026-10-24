@@ -1,0 +1,177 @@
+/* El presupuesto de Carlos (isla BudgetDemo), una tarjeta clara sobre la portada oscura. */
+.bd {
+  border-radius: 26px;
+  padding: 22px;
+  background: var(--paper);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.bd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bd-head b {
+  font-size: 18px;
+}
+.bd-meta {
+  font-family: var(--agent-font);
+  font-size: 12px;
+  color: var(--soft);
+}
+.bd-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+}
+.bd-opt {
+  border: 1px solid #cbd5e1;
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition:
+    background-color 0.5s,
+    box-shadow 0.5s;
+}
+.bd-pick {
+  border: 2px solid var(--teal);
+  padding: 15px;
+}
+.bd-accepted {
+  background: #f0fafc;
+  box-shadow: 0 0 0 4px rgba(14, 116, 144, 0.15);
+}
+.bd-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.bd-badge {
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--teal);
+  background: var(--teal-soft);
+  transition:
+    background-color 0.5s,
+    color 0.5s;
+}
+.bd-accepted .bd-badge {
+  color: #fff;
+  background: var(--teal);
+}
+.bd-line,
+.bd-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+}
+.bd-total {
+  font-size: 16px;
+  font-weight: 800;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.bd-tax {
+  font-size: 12px;
+  color: var(--soft);
+}
+.bd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.bd-chip,
+.bd-done {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.5s,
+    transform 0.5s;
+}
+.bd-on {
+  opacity: 1;
+  transform: none;
+}
+.bd-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  border-radius: 999px;
+  padding: 8px 12px;
+}
+.bd-chip i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.bd-clio {
+  background: #f1f5f9;
+}
+.bd-clio i {
+  background: #1f9d7a;
+}
+.bd-argos {
+  background: #fef6e4;
+}
+.bd-argos i {
+  background: #c98a1c;
+}
+.bd-done {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 14px;
+  background: var(--teal-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.bd-done-t {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bd-done-t svg {
+  flex: none;
+  color: var(--teal);
+}
+.bd-when {
+  font-family: var(--agent-font);
+  font-size: 12px;
+  color: var(--teal);
+}
+@media (max-width: 720px) {
+  .bd {
+    border-radius: 20px;
+    padding: 16px;
+  }
+  .bd-head b {
+    font-size: 16px;
+  }
+  .bd-chip {
+    border-radius: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bd-chip,
+  .bd-done {
+    opacity: 1;
+    transform: none;
+  }
+}

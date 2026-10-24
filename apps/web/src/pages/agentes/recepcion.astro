@@ -1,6 +1,151 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.recepcion).
-import InnerPage from "../../components/pages/InnerPage.astro"
+// Sofi, el agente de recepción (lienzo del paso 3, tablero Sofi; decisión 3): el nombre enorme con su
+// frase, el h1 para los buscadores en chico y la conversación que se escribe sola; lo que hace hoy,
+// cuánto cobra con los precios del plan, lo que decides tú, preguntas y el cierre.
+// Título, descripción, migas y las preguntas de siempre salen de PAGES.recepcion (lib/pages-data.ts).
+import AgentCharges from "../../components/agents/AgentCharges.astro"
+import FeatureGrid from "../../components/agents/FeatureGrid.astro"
+import SofiDemo from "../../components/agents/SofiDemo"
+import SplitHero from "../../components/agents/SplitHero.astro"
+import CtaBand from "../../components/CtaBand.astro"
+import Faq from "../../components/Faq.astro"
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
+import { hours } from "../../lib/pricing"
+import { AGENT_COLORS, ctaOf } from "../../lib/site"
+
+const page = PAGES.recepcion
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const color = AGENT_COLORS.recepcion
+const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.parent] : []), [page.crumb, page.path]]
+
+// Una conversación por persona en la ventana de las condiciones comerciales (de la administración).
+const windowHours = pricing.terms.conversationWindowHours
+const perPerson = windowHours === 24 ? "al día" : `cada ${hours(windowHours)}`
+
+const faq: FaqItem[] = [
+  ...page.faq,
+  {
+    q: "¿Responde aunque la clínica esté cerrada?",
+    a: "Sí. Sofi responde siempre: de día, de noche y en domingo. El horario de recontacto solo dice cuándo puede escribir por su cuenta, por ejemplo un recordatorio; viene de lunes a viernes de 8:00 a 20:00 y el sábado hasta las 14:00, y lo cambias.",
+  },
+  {
+    q: "¿Qué hace si alguien escribe por una urgencia?",
+    a: "Ante frases de alarma le da el número de emergencias del país y avisa a tu equipo.",
+  },
+  {
+    q: "¿Entiende las notas de voz?",
+    a: "Sí. Si el paciente manda un audio, Sofi lo lee como si fuera texto y responde.",
+  },
+  {
+    q: "¿Me cobran los mensajes de spam?",
+    a: "No. Publicidad, cadenas y vendedores van a una lista aparte: no se responden ni se cobran.",
+  },
+  {
+    q: "¿Qué pasa si alguien de mi equipo escribe en la conversación?",
+    a: "Sofi espera 15 minutos antes de volver a escribir, para no pisarle la respuesta.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
-<InnerPage page={PAGES.recepcion} />
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <SplitHero
+    tag="Tu agente de recepción"
+    copyBasis={500}
+    demoBasis={460}
+    gap={56}
+    color={color.dark}
+    h1="Responde el WhatsApp de tu clínica dental, Instagram, Messenger, Telegram, el chat de tu web y el correo, y agenda con el sí del paciente."
+    meaning="De sophía, sabiduría: sabe todo de la clínica y responde con su tono. Tú le pones el nombre."
+  >
+    <p class="sh-name">Sofi.</p>
+    <p class="sh-phrase">Tu recepción, a cualquier hora.</p>
+    <Fragment slot="actions">
+      <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+      <a class="btn btn-g" href="#cobra">Cuánto cobra Sofi</a>
+    </Fragment>
+    <SofiDemo slot="demo" client:visible />
+  </SplitHero>
+
+  <FeatureGrid
+    tag="Lo que hace hoy"
+    tagColor={color.light}
+    title="Siempre responde. Y hace el trabajo de recepción."
+    items={[
+      { title: "Responde siempre", text: "De día, de noche y en domingo, por el canal donde le escriben. Nunca se calla por un tope." },
+      { title: "Agenda, mueve o cancela", text: "En los horarios libres de quien hace ese servicio, siempre con el sí del paciente." },
+      { title: "Entiende notas de voz", text: "Si el paciente manda un audio, lo lee como si fuera texto y responde." },
+      { title: "Reconoce una urgencia", text: "Ante frases de alarma da el número de emergencias del país y avisa a tu equipo." },
+      { title: "Deja fuera el spam", text: "Publicidad, cadenas y vendedores van a una lista aparte: no se responden ni se cobran." },
+      { title: "Te pasa lo que es tuyo", text: "Con un resumen de lo hablado. Si alguien de tu equipo escribe, Sofi espera 15 minutos." },
+    ]}
+  />
+
+  <AgentCharges
+    agent="sofi"
+    id="cobra"
+    white
+    tag="Cuánto cobra Sofi"
+    tagColor={color.light}
+    title={`Una vez por persona ${perPerson}, según lo que pasó en tu agenda.`}
+    text="Aunque sean veinte mensajes, es una sola conversación."
+  >
+    <a class="more" href="/precios">Todos los precios →</a>
+  </AgentCharges>
+
+  <section class="decide">
+    <div class="wrap decide-in">
+      <div class="decide-copy">
+        <span class="tag decide-tag" style={`color: ${color.light}`}>[ Tú decides ]</span>
+        <h2 class="decide-h2">Lo que hace, lo prendes o lo apagas.</h2>
+        <p>Y eliges cuándo puede escribir por su cuenta: el horario de recontacto. Responder, responde siempre.</p>
+      </div>
+      <ul class="decide-list" aria-label="Así se ve en tu clínica">
+        <li>
+          <span><b>Agendar citas</b><span>Apagado: envía su enlace para que la persona elija la hora.</span></span>
+          <span class="switch" aria-hidden="true"><span></span></span>
+        </li>
+        <li>
+          <span><b>Horario de recontacto</b><span>Lunes a viernes de 8:00 a 20:00 y sábado hasta las 14:00.</span></span>
+          <span class="change" aria-hidden="true">Cambiar</span>
+        </li>
+        <li>
+          <span><b>Nombre y tono</b><span>Cercano, neutro o formal; de tú o de usted; con pocos emojis o ninguno.</span></span>
+          <span class="change" aria-hidden="true">Cambiar</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={faq} />
+  </div>
+  <CtaBand title="Que Sofi atienda tu recepción esta noche." />
+</Base>
+
+<style>
+  .more { font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; align-self: flex-start; }
+  .more:hover { text-decoration: underline; }
+  .decide { padding: 96px 0 120px; background: var(--bg); }
+  .decide-in { display: flex; flex-wrap: wrap; gap: 40px; }
+  .decide-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .decide-tag { font-size: 13px; letter-spacing: .12em; }
+  .decide-h2 { margin: 0; font-size: clamp(32px, 3.6vw, 44px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .decide-copy p { margin: 0; font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .decide-list { flex: 1 1 520px; min-width: 0; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .decide-list li { background: var(--paper); border-radius: 16px; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .decide-list li > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+  .decide-list li > span:first-child > span { font-size: 15px; line-height: 1.45; color: var(--muted); }
+  .switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: var(--teal); display: flex; justify-content: flex-end; padding: 3px; box-sizing: border-box; }
+  .switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
+  .change { flex: none; font-weight: 700; color: var(--teal); }
+  .faqwrap { background: var(--paper); }
+  @media (max-width: 720px) {
+    .decide { padding: 64px 0; }
+    .decide-in { gap: 24px; }
+    .decide-list li { padding: 16px; }
+    .decide-list li > span:first-child > span { font-size: 14px; }
+  }
+</style>

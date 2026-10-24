@@ -1,6 +1,7 @@
 ---
 // Pie: el mapa completo de la web y las páginas legales.
 import { WORDS } from "../lib/product"
+import { TITULAR } from "../lib/legal/types"
 import { footerGroups, legalLinks } from "../lib/site"
 ---
 <footer class="foot">
@@ -18,7 +19,7 @@ import { footerGroups, legalLinks } from "../lib/site"
   </div>
   <div class="wrap legal">
     <nav aria-label="Legal">{legalLinks.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
-    <span>Precios en dólares, más los impuestos de tu país.</span>
+    <span class="who">{TITULAR.razonSocial} · RUC {TITULAR.ruc} · Precios en dólares, más los impuestos de tu país.</span>
   </div>
 </footer>
 

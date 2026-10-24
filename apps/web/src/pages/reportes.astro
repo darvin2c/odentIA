@@ -1,6 +1,117 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.reportes).
-import InnerPage from "../components/pages/InnerPage.astro"
+// Reportes (lienzo del paso 3, tablero Reportes): «Pregúntale a tu clínica.» con el h1 para los buscadores
+// en chico y Argos que escribe la pregunta, piensa y responde en columnas; las cinco pestañas con la
+// captura real de Finanzas, por qué confiar en su respuesta, preguntas y el cierre.
+// Título, descripción, migas y las preguntas de siempre salen de PAGES.reportes (lib/pages-data.ts).
+import ArgosDemo from "../components/agents/ArgosDemo"
+import FeatureGrid from "../components/agents/FeatureGrid.astro"
+import SplitHero from "../components/agents/SplitHero.astro"
+import CtaBand from "../components/CtaBand.astro"
+import Faq from "../components/Faq.astro"
+import Base from "../layouts/Base.astro"
+import { REPORTS_OWED } from "../lib/argos-demo"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { PAGES } from "../lib/pages-data"
+import { AGENT_COLORS, ctaOf } from "../lib/site"
+
+const page = PAGES.reportes
+const cta = ctaOf(Astro.locals.pricing)
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  [page.crumb, page.path],
+]
+// El ámbar de Argos sobre claro no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
+const argosTag = "#9a6a12"
+const REPLAY = "odentia:reportes-preguntar"
+
+const faq: FaqItem[] = [
+  ...page.faq,
+  {
+    q: "¿Argos inventa las cifras?",
+    a: "No. Usa las mismas cuentas de Reportes y debajo de cada respuesta dice cómo lo calculó: qué contó, de qué periodo y de qué sedes. Si odentIA no registra ese dato, te lo dice y te ofrece lo más cercano.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
-<InnerPage page={PAGES.reportes} />
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <SplitHero
+    tag="Reportes"
+    color="var(--sky-2)"
+    h1="Reportes de tu clínica dental sin armar planillas: las cifras por sede y por mes, y Argos para todo lo demás."
+    lead="Escribes la pregunta como se la harías a tu administrador. Argos responde con las mismas cuentas de Reportes y te dice cómo lo calculó."
+  >
+    <p class="sh-title">Pregúntale a <span style={`color: ${AGENT_COLORS.administrador.dark}`}>tu clínica.</span></p>
+    <Fragment slot="actions">
+      <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+      <button type="button" class="btn btn-g" data-replay={REPLAY}>Preguntar otra vez</button>
+    </Fragment>
+    <ArgosDemo
+      slot="demo"
+      client:visible
+      questions={[REPORTS_OWED]}
+      chart="columns"
+      head={{ title: "Reportes", scope: "Octubre · Todas las sedes" }}
+      field="amber"
+      actions={[{ label: "Ver quiénes", primary: true }, { label: "Fijar en Resumen" }, { label: "Descargar" }]}
+      note="Demostración con datos de ejemplo."
+      replayEvent={REPLAY}
+    />
+  </SplitHero>
+
+  <FeatureGrid
+    tag="Qué muestran"
+    title="Cinco pestañas, sin copiar nada a una planilla."
+    min={210}
+    small
+    items={[
+      { title: "Resumen", text: "Las cifras del mes contra el anterior, tus metas y lo que fijaste." },
+      { title: "Finanzas", text: "Lo cobrado, lo que te deja tras impuestos y comisiones, y quién debe." },
+      { title: "Pacientes", text: "Por dónde llegan, en qué paso se caen y quién no vuelve." },
+      { title: "Agenda", text: "Quién vino, quién no y qué tan llena está cada agenda." },
+      { title: "Agente", text: "Qué hizo cada agente y cuánto pagaste por ellos." },
+    ]}
+  >
+    <figure class="shot">
+      <img
+        src="/img/product/reports-finance.jpg"
+        width="1000"
+        height="896"
+        loading="lazy"
+        decoding="async"
+        alt="Reportes › Finanzas: lo cobrado, lo que deja el mes, las comisiones, lo que te deben y la cascada de lo cobrado a lo que deja, con el impuesto aparte."
+      />
+      <figcaption>Captura real de Reportes › Finanzas, con datos de prueba.</figcaption>
+    </figure>
+  </FeatureGrid>
+
+  <FeatureGrid
+    tag="Por qué confiar en su respuesta"
+    tagColor={argosTag}
+    title="Argos no adivina: cuenta."
+    min={240}
+    small
+    white
+    items={[
+      { title: "La cifra oficial", text: "Usa las mismas cuentas de Reportes, y te lo dice debajo de la respuesta." },
+      { title: "«Así lo calculé»", text: "Cada respuesta dice qué contó, de qué periodo y de qué sedes." },
+      { title: "Sin nombres para la IA", text: "El modelo nunca ve los nombres de tus pacientes; la lista la arma tu sistema." },
+      { title: "Lo que no sabe, lo dice", text: "Si odentIA no registra ese dato, te ofrece lo más cercano. Y no cuenta como pregunta." },
+    ]}
+  />
+
+  <Faq items={faq} />
+  <CtaBand title="Pregúntale a tu clínica desde hoy." />
+</Base>
+
+<script>
+  // «Preguntar otra vez»: la demostración de Argos (isla) escucha este evento y vuelve a empezar.
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-replay]")) {
+    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.replay ?? "")))
+  }
+</script>
+
+<style>
+  .shot { margin: 0; display: flex; flex-direction: column; gap: 8px; max-width: 900px; align-self: center; width: 100%; }
+  .shot img { width: 100%; height: auto; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(10, 33, 41, .35); }
+  .shot figcaption { font-size: 13px; color: var(--soft); }
+</style>

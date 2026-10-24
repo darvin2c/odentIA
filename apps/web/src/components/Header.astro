@@ -1,11 +1,12 @@
 ---
 // Cabecera: se superpone a la portada oscura de cada página; en teléfono, un menú desplegable.
+// «Agentes» abre los tres agentes (lienzo del paso 3, tablero 1): con clic o Enter, y se cierra con Esc o afuera.
 import latidiaDark from "../assets/latidia-logotipo-dark.svg?raw"
 import latidiaLight from "../assets/latidia-logotipo-light.svg?raw"
 import logoDark from "../assets/logotipo-dark.svg?raw"
 import logoLight from "../assets/logotipo-light.svg?raw"
 import { MEDICAL, WORDS } from "../lib/product"
-import { ctaOf, loginUrl, mainNav } from "../lib/site"
+import { agentNav, ctaOf, loginUrl, mainNav } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
@@ -20,7 +21,28 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
   <div class="wrap row">
     <a href="/" class="logo" aria-label={`${WORDS.name}, inicio`} set:html={logo} />
     <nav class="nav" aria-label="Principal">
-      {mainNav.map((l) => <a href={l.href} class:list={["navlink", { cur: current(l.href) }]} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>)}
+      {mainNav.map((l) =>
+        l.href === "/agentes" && agentNav.length ? (
+          <details class="dd" data-dd>
+            <summary class:list={["navlink", { cur: current(l.href) }]}>
+              {l.label}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+            </summary>
+            <div class="panel">
+              {agentNav.map((a) => (
+                <a href={a.href} class="ag" aria-current={current(a.href) ? "page" : undefined}>
+                  <i style={`background: ${a.color}`} aria-hidden="true" />
+                  <span><b>{a.label}</b><span>{a.text}</span></span>
+                  <span aria-hidden="true" style={`color: ${a.color}`}>→</span>
+                </a>
+              ))}
+              <a href="/agentes" class="all" aria-current={path === "/agentes" ? "page" : undefined}><span>Los tres juntos, en un caso de principio a fin</span><span aria-hidden="true">→</span></a>
+            </div>
+          </details>
+        ) : (
+          <a href={l.href} class:list={["navlink", { cur: current(l.href) }]} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>
+        ),
+      )}
     </nav>
     <div class="acts">
       <a class="navlink" href={loginUrl}>Ingresar</a>
@@ -29,13 +51,40 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
     <details class="menu">
       <summary aria-label="Abrir menú"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" /></svg></summary>
       <div class="sheet">
-        {mainNav.map((l) => <a href={l.href} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>)}
+        {mainNav.map((l) =>
+          l.href === "/agentes" && agentNav.length ? (
+            <>
+              <span class="st">Agentes</span>
+              {agentNav.map((a) => (
+                <a href={a.href} class="sa" aria-current={current(a.href) ? "page" : undefined}><i style={`background: ${a.color}`} aria-hidden="true" />{a.label}</a>
+              ))}
+              <a href="/agentes" class="sub" aria-current={path === "/agentes" ? "page" : undefined}>Los tres juntos</a>
+            </>
+          ) : (
+            <a href={l.href} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>
+          ),
+        )}
         <a href={loginUrl}>Ingresar</a>
         <a class="btn btn-d" href={cta.href}>{cta.label}</a>
       </div>
     </details>
   </div>
 </header>
+
+<script>
+  // El menú de Agentes se cierra con Esc (vuelve el foco a «Agentes») y al hacer clic afuera.
+  for (const dd of document.querySelectorAll<HTMLDetailsElement>("[data-dd]")) {
+    dd.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && dd.open) {
+        dd.open = false
+        dd.querySelector("summary")?.focus()
+      }
+    })
+    document.addEventListener("click", (event) => {
+      if (dd.open && !dd.contains(event.target as Node)) dd.open = false
+    })
+  }
+</script>
 
 <style>
   .site-head { position: absolute; top: 0; left: 0; right: 0; z-index: 10; }
@@ -58,6 +107,23 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
   .sheet a:not(.btn) { color: var(--ink); text-decoration: none; font-weight: 700; padding: 12px; border-radius: 10px; }
   .sheet a:not(.btn):hover, .sheet a[aria-current] { background: #eef4f7; }
   .sheet .btn { margin-top: 8px; }
+  .st { padding: 12px 12px 4px; font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+  .sheet a.sa { display: flex; align-items: center; gap: 10px; }
+  .sa i, .ag i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .sheet a.sub { padding-left: 32px; font-weight: 600; color: var(--teal); }
+  .dd { position: relative; }
+  .dd summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .dd summary::-webkit-details-marker { display: none; }
+  .dd summary svg { transition: transform .2s; }
+  .dd[open] summary svg { transform: rotate(180deg); }
+  .panel { position: absolute; left: 50%; top: calc(100% + 14px); transform: translateX(-50%); width: 560px; padding: 12px; border-radius: 20px; background: var(--paper); box-shadow: 0 30px 70px -30px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 2px; }
+  .ag { display: grid; grid-template-columns: 12px 1fr auto; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .ag > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }
+  .ag b { font-size: 16px; }
+  .ag > span:nth-child(2) > span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+  .ag:hover, .ag[aria-current] { background: var(--teal-soft); }
+  .all { display: flex; justify-content: space-between; margin-top: 6px; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--teal); text-decoration: none; font-weight: 700; font-size: 15px; }
+  .all:hover { color: var(--teal-hover); }
   @media (max-width: 960px) {
     .nav, .acts { display: none; }
     .menu { display: block; }
