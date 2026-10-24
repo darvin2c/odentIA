@@ -5,7 +5,8 @@ import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 const DAY = [
   {
-    time: "07:00",
+    // El horario de recontacto por defecto empieza a las 8:00 (ADR 0084).
+    time: "08:00",
     agent: "Argos",
     what: "Recordó las 18 citas del día.",
     why: "Los recordatorios no se cobran.",
@@ -22,8 +23,8 @@ const DAY = [
   {
     time: "09:40",
     agent: "Clío",
-    what: "La Dra. Paredes dictó la consulta de Carlos y confirmó la nota.",
-    why: "Una consulta simple: se cobra cuando la doctora confirma.",
+    what: "La Dra. Paredes dictó el control de Ana y confirmó la nota.",
+    why: "Una consulta simple, una sola parte: se cobra cuando la doctora confirma.",
     price: "simple" as const,
   },
   {
@@ -44,9 +45,9 @@ const DAY = [
     time: "16:05",
     agent: "Argos",
     what: "Rosa faltó ayer a su cita. Le ofreció otro horario y Rosa reservó el viernes con Sofi.",
-    why: "La cita recuperada se cobra solo si Rosa asiste.",
-    price: null,
-    pending: true,
+    // ADR 0085: reservar es «Gestiona»; si Rosa viene, esa conversación se devuelve y se cobra solo la cita recuperada.
+    why: "La conversación que gestionó su cita. Si Rosa asiste, se devuelve y se cobra la cita recuperada.",
+    price: "gestiona" as const,
   },
   {
     time: "22:47",
@@ -101,7 +102,7 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
               <span className="dwhy">{r.why}</span>
             </span>
             <span className={cost(r.price) > 0 ? "price price-l dprice" : "price price-0 dprice"}>
-              {r.pending ? `${usd(prices.recovered)} si asiste` : usd(cost(r.price))}
+              {usd(cost(r.price))}
             </span>
           </div>
         ))}
@@ -111,7 +112,9 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
             <span>Total del día</span>
             <strong className="mono">{usd(total)}</strong>
             <span className="mono dpend">
-              {day >= 6 ? `+ ${usd(prices.recovered)} el viernes, si Rosa asiste` : ""}
+              {day >= 6
+                ? `Si Rosa asiste el viernes: + ${usd(prices.recovered)} y se devuelven ${usd(prices.tiers.gestiona)}`
+                : ""}
             </span>
           </span>
         </div>

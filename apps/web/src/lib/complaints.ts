@@ -11,9 +11,9 @@
  * Mientras tengan marcadores, la página va sin indexar.
  */
 export const COMPLAINTS_PROVIDER = {
-  legalName: "[Por completar: razón social]",
-  ruc: "[Por completar: RUC]",
-  address: "[Por completar: domicilio]",
+  legalName: "SALLCA GROUP E.I.R.L.",
+  ruc: "20603338741",
+  address: "Av. Mariscal Andrés de Santa Cruz 176, Urb. Fundo Oyague, Jesús María, Lima, Perú",
 } as const
 
 /** ¿Falta algún dato real del proveedor? Entonces la página no se indexa. */

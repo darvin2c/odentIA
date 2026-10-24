@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import {
+  CONSUMER_COMPLAINT_PROVIDER,
   type ConsumerComplaintInput,
   consumerComplaintEmails,
   consumerComplaintResponseEmails,
@@ -162,7 +163,7 @@ describe("Libro de Reclamaciones", () => {
     expect(copy.html).toContain("&lt;script&gt;")
     expect(copy.html).toContain("quince (15) días hábiles improrrogables")
     expect(copy.text).toContain("INDECOPI")
-    expect(copy.text).toContain("[Por completar: RUC]")
+    expect(copy.text).toContain(CONSUMER_COMPLAINT_PROVIDER.ruc)
     expect(notice.subject).toContain("Reclamo")
   })
 

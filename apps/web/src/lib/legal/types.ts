@@ -39,9 +39,9 @@ export const LEGAL_UPDATED_ISO = "2026-10-24"
 
 /** Datos del titular; lo pendiente conserva el mismo marcador en todos los documentos. */
 export const TITULAR = {
-  razonSocial: "[Por completar: razón social]",
-  ruc: "[Por completar: RUC]",
-  domicilio: "[Por completar: domicilio fiscal]",
+  razonSocial: "SALLCA GROUP E.I.R.L.",
+  ruc: "20603338741",
+  domicilio: "Av. Mariscal Andrés de Santa Cruz 176, Urb. Fundo Oyague, Jesús María, Lima",
   correoPrivacidad: privacyEmail,
 } as const
 

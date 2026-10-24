@@ -30,7 +30,7 @@ const SW = [
     id: "recuperar",
     agent: "Argos",
     label: "Avisar los controles",
-    on: "Escribe a quien ya le toca su control.",
+    on: "Escribe dos días antes de que le toque su control.",
     off: "Te deja la lista y tu equipo decide a quién llamar.",
     phone: false,
   },

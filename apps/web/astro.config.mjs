@@ -9,7 +9,7 @@ import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
 const LEGAL_EN_PREPARACION =
-  /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal|pe\/libro-de-reclamaciones)$/
+  /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal)$/
 
 // La web de latidIA es el mismo código con VITE_PRODUCT=medical (decisión 18 del issue 229): su
 // dominio y solo sus páginas en el mapa del sitio (`src/lib/latidia-pages.json`).

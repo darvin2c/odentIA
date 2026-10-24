@@ -1,4 +1,4 @@
-// Portada de Precios: entra el trabajo, sale el resultado y solo ese se cobra.
+// Portada de Precios: entra el trabajo, sale hecho y cada cosa con su precio (ADR 0085).
 // En pantallas anchas, corchetes metálicos en WebGL (como los del logo); en el teléfono (≤ 720 px),
 // corchetes en 2D con CSS para no cargar una escena 3D.
 import { type PointerEvent, useEffect, useRef, useState } from "react"
@@ -30,8 +30,9 @@ const DENTAL_TASKS: Task[] = [
     price: "gestiona",
   },
   {
-    time: "07:00",
-    in: ["Recordatorio · Carlos", "Su cita es hoy a las 9:00."],
+    // El horario de recontacto por defecto empieza a las 8:00 (ADR 0084).
+    time: "08:00",
+    in: ["Recordatorio · Carlos", "Su cita es hoy a las 9:40."],
     work: ["Argos · administración", "Le recuerda la cita"],
     out: "Recordatorio enviado",
     price: null,
@@ -67,8 +68,9 @@ const DENTAL_TASKS: Task[] = [
     in: ["Faltó a su cita · Pedro", "No llegó el lunes a su control."],
     inM: ["Faltó a su cita · Pedro", "No llegó el lunes."],
     work: ["Argos · administración", "Le ofrece otro horario"],
+    // ADR 0085: reservar con Sofi ya es «Gestiona», aunque Pedro no venga; lo que no se cobra es la cita recuperada.
     out: "Pedro reservó, pero no vino",
-    price: null,
+    price: "gestiona",
   },
 ]
 
@@ -466,7 +468,7 @@ export default function PricingHero({
               {paused ? "Activar movimiento" : "Pausar movimiento"}
             </button>
             <span>
-              Entra el trabajo. Sale el resultado, y solo ese se cobra. Ejemplo de un día.
+              Entra el trabajo, sale hecho y cada cosa con su precio. Ejemplo de un día.
             </span>
           </div>
         </div>
@@ -529,7 +531,7 @@ export default function PricingHero({
         </div>
       </div>
       <div className="pz-mrow">
-        <span>Entra el trabajo. Sale el resultado, y solo ese se cobra.</span>
+        <span>Entra el trabajo, sale hecho y cada cosa con su precio.</span>
         <button type="button" className="pill" onClick={togglePause} aria-pressed={paused}>
           {paused ? "Activar" : "Pausar"}
         </button>

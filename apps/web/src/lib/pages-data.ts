@@ -315,7 +315,7 @@ const CASE_LUCIA: Step[] = [
     when: "Seis meses después",
     channel: "WhatsApp",
     agent: 2,
-    title: "Le escribe a Carmen, Lucía reserva y vuelve: cita recuperada.",
+    title: "Le escribe a Carmen, y Lucía reserva su control y vuelve.",
   },
 ]
 const NOTE_CARLOS = {
@@ -335,6 +335,11 @@ const NOTE_CARLOS = {
 const FAQ_ERROR: FaqItem = {
   q: "¿Y si el agente no sabe qué responder o se equivoca?",
   a: "Si no sabe, le dice a la persona que alguien de tu equipo la va a atender y te deja el caso con todo lo que se habló. Todo lo que hace queda registrado, así que si se equivoca lo ves y lo corriges. Y nada clínico entra a la historia sin el sí del odontólogo.",
+}
+// Argos responde con las cifras oficiales de Reportes (ADR 0075 y 0078); cuántas preguntas trae el plan lo dice Precios.
+const FAQ_ARGOS: FaqItem = {
+  q: "¿Le puedo preguntar a Argos por las cifras de mi clínica?",
+  a: "Sí. Escribes la pregunta en Reportes o en el buscador, por ejemplo «¿Qué se vendió más este mes?», y Argos responde con las mismas cifras de Reportes y te dice cómo lo calculó. Puedes fijar la respuesta en tu resumen o descargarla. Lo que no puede responder te lo dice y no cuenta.",
 }
 const FAQ_MODEL: FaqItem = {
   q: "¿Qué inteligencia artificial usa?",
@@ -392,21 +397,21 @@ export const PAGES = {
             agent: 1,
             title: "Tu agente clínico",
             label: "Prepara la nota mientras el odontólogo atiende. Solo falta su sí.",
-            text: "Del dictado propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia sin la confirmación del odontólogo.",
+            text: "Del dictado propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles. Nada entra a la historia sin la confirmación del odontólogo.",
             href: "/agentes/asistente-clinico",
           },
           {
             agent: 2,
             title: "Tu agente administrador",
             label: "Recuerda citas y trae de vuelta a los pacientes.",
-            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo.",
+            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo. Y te responde lo que le preguntes con las cifras de tu clínica.",
             href: "/agentes/administrador",
           },
         ],
       },
       {
         kind: "steps",
-        tag: "Las dos juntas",
+        tag: "Un caso",
         title: "Un caso, de principio a fin.",
         lead: "Empieza con una pregunta por Instagram y termina con Lucía de vuelta en su control. Cada paso dice qué agente lo hizo y por dónde.",
         steps: CASE_LUCIA,
@@ -432,15 +437,7 @@ export const PAGES = {
           },
         ],
       },
-      {
-        kind: "split",
-        tag: "Lo que viene",
-        title: "Lista para los agentes de IA del navegador.",
-        paragraphs: [
-          "Los asistentes de IA de los navegadores ya empiezan a hacer tareas por las personas. Estamos preparando odentIA para ellos con WebMCP: un asistente podrá consultar los precios o calcular el mes sin leer la pantalla, y cualquier acción irá con la confirmación de la persona.",
-          "Lo anunciaremos cuando funcione. Todavía no tiene fecha.",
-        ],
-      },
+      // WebMCP (issue 88) se anuncia cuando funcione con un agente real, en su propia página.
     ],
     related: [
       "/agentes/recepcion",
@@ -578,7 +575,7 @@ export const PAGES = {
     path: "/agentes/asistente-clinico",
     title: "Dictado de notas clínicas para odontólogos",
     description:
-      "Dicta la consulta y Clío, tu agente clínico, propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia clínica sin la confirmación del odontólogo.",
+      "Dicta la consulta y Clío, tu agente clínico, propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles. Nada entra a la historia clínica sin la confirmación del odontólogo.",
     crumb: "Clío",
     parent: AGENTS_PARENT,
     hero: {
@@ -589,7 +586,7 @@ export const PAGES = {
       title: "Dictado de notas clínicas para odontólogos:",
       accent: "la historia se escribe sola.",
       accentColor: AGENT_COLORS.clinico.dark,
-      lead: "Propone la nota, el diagnóstico con su código, el plan y los controles mientras atiendes. Nada entra a la historia sin tu confirmación.",
+      lead: "Propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles mientras atiendes. Nada entra a la historia sin tu confirmación.",
     },
     blocks: [
       {
@@ -603,7 +600,8 @@ export const PAGES = {
           },
           {
             title: "Propone lo que va en la historia",
-            text: "La nota de la consulta, el diagnóstico con su código, el plan con los tratamientos de tu tarifario y los controles.",
+            // ADR 0012, actualización del 2026-10-23: odontograma, opciones del plan y receta por voz.
+            text: "La nota de la consulta, lo que dices de cada pieza en el odontograma, el diagnóstico con su código, el plan con los tratamientos de tu tarifario (con sus opciones, si dices más de una), la receta y los controles.",
           },
           {
             title: "Tú confirmas, corriges o descartas",
@@ -640,8 +638,8 @@ export const PAGES = {
           },
           {
             agent: 1,
-            title: "No marca el odontograma por voz",
-            text: "El odontograma lo actualizas tú, en la misma ficha del paciente.",
+            title: "No emite la receta por ti",
+            text: "Los medicamentos que dictas quedan como una receta por emitir. La emites tú, y te avisa si el paciente es alérgico.",
           },
         ],
       },
@@ -657,7 +655,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Lo que dicto entra directo a la historia?",
-        a: "No. Clío propone la nota, el diagnóstico, el plan y los controles, y nada entra a la historia hasta que el odontólogo lo confirma. También puede corregirlo o descartarlo.",
+        a: "No. Clío propone la nota, el odontograma, el diagnóstico, el plan, la receta y los controles, y nada entra a la historia hasta que el odontólogo lo confirma. También puede corregirlo o descartarlo.",
       },
       {
         q: "¿Qué códigos usa para el diagnóstico?",
@@ -665,7 +663,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo dictar el odontograma?",
-        a: "No. Clío documenta la consulta; el odontograma lo actualizas tú en la ficha del paciente.",
+        a: "Sí. Lo que dices de una pieza (una caries, una pieza ausente, una corona) queda como sugerencia en el odontograma y entra cuando la confirmas. Los implantes, las endodoncias y la movilidad se siguen marcando en la pieza.",
       },
       {
         q: "¿Quién puede ver la nota?",
@@ -705,7 +703,7 @@ export const PAGES = {
           {
             agent: 2,
             title: "Avisa los controles",
-            text: "Encuentra a quien ya le toca su control y le escribe para buscarle un horario.",
+            text: "Dos días antes de que a alguien le toque su control, le escribe para buscarle un horario.",
           },
           {
             agent: 2,
@@ -721,6 +719,13 @@ export const PAGES = {
             agent: 2,
             title: "Deja tareas a tu equipo",
             text: "Si no puede escribirle a alguien, por ejemplo porque no tiene WhatsApp, le deja la tarea a recepción con el motivo.",
+          },
+          {
+            // ADR 0075 y 0078: se le pregunta desde Reportes y el buscador; en Precios, las preguntas incluidas.
+            agent: 2,
+            title: "Responde tus preguntas",
+            text: "Le preguntas por tu clínica, por ejemplo «¿Cuánto me deben y desde cuándo?», y responde con la cifra y cómo la calculó.",
+            href: "/reportes",
           },
         ],
       },
@@ -771,7 +776,7 @@ export const PAGES = {
           {
             agent: 2,
             title: "Avisar los controles",
-            text: "Escribe a quien ya le toca su control. Apagado: te deja la lista y tu equipo decide a quién llamar.",
+            text: "Escribe dos días antes de que le toque su control. Apagado: te deja la lista y tu equipo decide a quién llamar.",
           },
           {
             agent: 2,
@@ -806,6 +811,7 @@ export const PAGES = {
         q: "¿Escribe a todos mis pacientes?",
         a: "Solo lo que tú prendes: recordar citas, avisar controles o retomar presupuestos. Las promociones solo van a quien aceptó recibirlas.",
       },
+      FAQ_ARGOS,
     ],
   },
 
@@ -1202,7 +1208,7 @@ export const PAGES = {
         kind: "sheet",
         tag: "Con Clío",
         title: "Dictas la consulta. Confirmas la nota.",
-        lead: "Clío propone la nota, el diagnóstico con su código, el plan y los controles. Nada entra a la historia sin tu sí.",
+        lead: "Clío propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles. Nada entra a la historia sin tu sí.",
         sheet: NOTE_CARLOS,
         note: "Ejemplo con datos inventados.",
       },
@@ -1240,7 +1246,7 @@ export const PAGES = {
       },
       {
         q: "¿Puedo dictar el odontograma?",
-        a: "No. Clío documenta la consulta a partir de tu dictado; el odontograma lo actualizas tú en la ficha.",
+        a: "Sí. Lo que dices de una pieza (una caries, una pieza ausente, una corona) queda como sugerencia en el odontograma y entra cuando la confirmas. Los implantes, las endodoncias y la movilidad se siguen marcando en la pieza.",
       },
       {
         q: "¿Quién puede ver la historia clínica?",
@@ -1561,25 +1567,32 @@ export const PAGES = {
         kind: "cards",
         tag: "Qué muestran",
         title: "Las preguntas de siempre, respondidas con tus datos.",
+        // Las pestañas de Reportes v2 (Resumen · Finanzas · Pacientes · Agenda · Agente) y Argos (ADR 0075).
         items: [
           {
-            title: "Atención",
-            text: "Cómo respondimos a quien escribió, y en cuánto tiempo llegó la primera respuesta.",
-          },
-          { title: "Citas", text: "Si los pacientes vinieron y quién los atendió." },
-          {
-            title: "Pacientes y ventas",
-            text: "El trabajo nuevo que entró y el que se hizo, con los pacientes nuevos.",
+            title: "Resumen",
+            text: "Las cifras del mes comparadas con el anterior, con tus metas y lo que fijaste.",
           },
           {
             title: "Finanzas",
-            text: "Cuánto entró, cuánto se gastó y cuánto falta cobrar.",
+            text: "Lo cobrado, lo que te deja después de impuestos y comisiones, y quién te debe desde cuándo.",
             href: "/caja-y-cobros",
           },
           {
-            title: "Tus agentes",
-            text: "Qué hizo cada agente, con quién y cuánto costó.",
+            title: "Pacientes",
+            text: "Por dónde llegan, en qué paso se caen y quién no vuelve hace meses.",
+          },
+          { title: "Agenda", text: "Quién vino, quién no y qué tan llena está la agenda de cada profesional." },
+          {
+            title: "Agente",
+            text: "Qué hizo cada agente, cómo respondimos a quien escribió y cuánto pagaste por ellos.",
             href: "/agentes",
+          },
+          {
+            agent: 2,
+            title: "Pregúntale a Argos",
+            text: "Escribes «¿Qué profesional tiene más inasistencias?» y responde con la cifra y cómo la calculó.",
+            href: "/agentes/administrador",
           },
         ],
       },
@@ -1605,6 +1618,7 @@ export const PAGES = {
         q: "¿Puedo ver lo que hicieron los agentes?",
         a: "Sí. Queda registrado qué hizo cada agente, con quién y cuánto costó.",
       },
+      FAQ_ARGOS,
       {
         q: "¿Quién puede ver los reportes?",
         a: "Quien tiene ese permiso en tu clínica. Cada rol ve lo que necesita.",
@@ -1895,7 +1909,7 @@ export const LEGAL = {
   libro: {
     path: "/pe/libro-de-reclamaciones",
     title: "Libro de reclamaciones",
-    description: "Libro de reclamaciones de odentIA para Perú. Texto en preparación.",
+    description: "Libro de reclamaciones virtual de odentIA para Perú: deja tu reclamo o queja y recibe la copia en tu correo.",
     covers:
       "Solo para Perú: dónde dejar un reclamo o una queja. Un abogado confirma si aplica a un servicio entre empresas.",
   },

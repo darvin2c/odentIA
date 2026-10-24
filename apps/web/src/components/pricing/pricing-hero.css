@@ -2,7 +2,8 @@
 .pz-hero {
   background: radial-gradient(1100px 700px at 70% 40%, #0f3a45 0%, #0a2129 50%, #061318 100%);
 }
-.pz-copywrap {
+/* Con «.pz-hero» delante: web.css se carga después y su «.wrap { padding: 0 32px }» anularía el padding-top. */
+.pz-hero .pz-copywrap {
   position: relative;
   z-index: 2;
   display: flex;
@@ -279,7 +280,7 @@
 }
 
 @media (max-width: 960px) {
-  .pz-copywrap {
+  .pz-hero .pz-copywrap {
     min-height: 0;
     padding-top: 120px;
     padding-bottom: 24px;
@@ -299,7 +300,7 @@
   .pz-hero {
     background: radial-gradient(520px 420px at 60% 40%, #0f3a45 0%, #0a2129 55%, #061318 100%);
   }
-  .pz-copywrap {
+  .pz-hero .pz-copywrap {
     padding-top: 84px;
     padding-bottom: 0;
   }

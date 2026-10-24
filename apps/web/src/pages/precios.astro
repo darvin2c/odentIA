@@ -1,6 +1,7 @@
 ---
 import CtaBand from "../components/CtaBand.astro"
 import Faq from "../components/Faq.astro"
+import PageHero from "../components/PageHero.astro"
 import Difference from "../components/pricing/Difference.astro"
 import HowWeCharge from "../components/pricing/HowWeCharge.astro"
 import PlanPrices from "../components/pricing/PlanPrices.astro"
@@ -76,12 +77,17 @@ const faq: FaqItem[] = [
     q: "¿Qué no se cobra?",
     a: "El spam, los mensajes ajenos a tu clínica, lo que responde tu equipo, los recordatorios y avisos de cita, y el borrador que descartas.",
   },
-  {
-    q: "¿Qué pasa si no uso el crédito?",
-    a: founder
-      ? "Como Fundador no pagas cuota: si un mes tus agentes no hacen nada, no pagas nada."
-      : `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${m(plan?.plan ?? null)} del plan. El crédito es el de ese mes.`,
-  },
+  // Sin un plan publicado no hay cuota ni crédito que explicar.
+  ...(plan
+    ? [
+        {
+          q: "¿Qué pasa si no uso el crédito?",
+          a: founder
+            ? "Como Fundador no pagas cuota: si un mes tus agentes no hacen nada, no pagas nada."
+            : `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${m(plan.plan)} del plan. El crédito es el de ese mes.`,
+        },
+      ]
+    : []),
   {
     q: "¿La prueba pide tarjeta?",
     a: founder
@@ -98,7 +104,8 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Y si mi clínica tiene mucho movimiento?",
-    a: "Escríbenos. Revisamos tu caso y te damos un precio por acción para tu volumen.",
+    // ADR 0085: solo se negocian Gestiona, Agenda, Completa y la cita recuperada; lo demás es fijo.
+    a: "Escríbenos. Revisamos tu caso y te proponemos un precio para tu volumen en las citas que Sofi gestiona, la consulta en la que Clío arma el presupuesto y la cita recuperada. Lo demás tiene un precio fijo.",
   },
 ]
 
@@ -139,7 +146,12 @@ const jsonLd = [
 ]
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
-  {prices ? <PricingHero client:load prices={prices} ctaHref={cta.href} ctaLabel={cta.label} lead={lead} /> : null}
+  {/* Sin un plan publicado, la misma portada sin la escena de la cuenta: la cabecera clara y el h1 siguen en su sitio. */}
+  {prices ? (
+    <PricingHero client:load prices={prices} ctaHref={cta.href} ctaLabel={cta.label} lead={lead} />
+  ) : (
+    <PageHero tag="Precios" title="Pagas por el valor que recibes," accent="no por el software." lead={lead} />
+  )}
   <HowWeCharge />
   <PlanPrices />
   <ValueSection />
@@ -147,6 +159,6 @@ const jsonLd = [
   <Faq items={faq} title="Sobre el precio." />
   <CtaBand
     title={gift ? (founder ? `Los primeros ${gift} los pagamos nosotros.` : `Obtén ${gift} de crédito y pruébalo ${plan?.trialDays} días.`) : "Tu equipo, de vuelta con sus pacientes."}
-    text={`Con ese crédito tus agentes trabajan en tu clínica desde el primer día. Precios en ${plan?.currency === "USD" ? "dólares" : (plan?.currency ?? "dólares")}, más los impuestos de tu país.`}
+    text={`${gift ? "Con ese crédito tus" : "Tus"} agentes trabajan en tu clínica desde el primer día. Precios en ${plan?.currency === "USD" ? "dólares" : (plan?.currency ?? "dólares")}, más los impuestos de tu país.`}
   />
 </Base>
