@@ -119,14 +119,15 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     // Con las palabras del producto de la clínica: su nombre, sus meses y su profesional (issue 229).
-    const roles = await withOrgContext(deps.db, orgId, async (tx) => agentRolesFor(await productAgentTexts(tx, orgId)))
+    const texts = await withOrgContext(deps.db, orgId, (tx) => productAgentTexts(tx, orgId))
+    const roles = agentRolesFor(texts)
     return c.json({
       data: {
         principles: AGENT_BASE_PRINCIPLES,
         // «Qué puede llenar» sale de la misma declaración que valida la ruta y la herramienta.
         roles: AGENT_ROLE_IDS.map((id) => ({
           ...roles[id],
-          functions: roles[id].functions.map((fn) => ({ ...fn, fills: operationFillsOf(fn.tools) })),
+          functions: roles[id].functions.map((fn) => ({ ...fn, fills: operationFillsOf(fn.tools, { room: texts.room, clinician: texts.clinician }) })),
         })),
       },
     })

@@ -272,7 +272,7 @@ export function ProductFormDrawer({
               <FieldDescription>Aparece en «Cobrar» con su precio de venta.</FieldDescription>
             </FieldContent>
           </Field>
-          <FieldDescription id={helpId("usage")}>Marca una o las dos. Un enjuague puede usarse en la limpieza y venderse.</FieldDescription>
+          <FieldDescription id={helpId("usage")}>Marca una o las dos. {appWords().examples.usedAndSold}</FieldDescription>
           {errorOf("usage")}
         </FieldSet>
 

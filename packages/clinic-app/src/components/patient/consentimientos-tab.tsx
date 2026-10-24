@@ -168,7 +168,7 @@ export function NewConsentDrawer({
             value={procedureRef}
             onChange={(event) => setProcedureRef(event.target.value)}
             maxLength={500}
-            placeholder="p. ej. Exodoncia pieza 38"
+            placeholder={`p. ej. ${appWords().examples.consentProcedure}`}
           />
         </Field>
         <DiagnosisSearch

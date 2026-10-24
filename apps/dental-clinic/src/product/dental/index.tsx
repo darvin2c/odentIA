@@ -113,6 +113,7 @@ export const dentalUi: ProductUi = {
     placeholder: "En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…",
     practice:
       "Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal. Control en seis meses.",
+    corrections: { change: "no, es la veintiséis", remove: "quita la endodoncia" },
   },
   // Lo dental del país: `dentalProfileFor` (ADR 0036 y 0079).
   country: {

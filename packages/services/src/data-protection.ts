@@ -144,11 +144,12 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
       (select count(*)::int from contact where organization_id = ${orgId}
         and is_active and record_locked_at is null) as people`)
 
+  const product = await orgProduct(tx, orgId)
   const activities: DataProtectionActivity[] = [
     {
       id: "atender",
       purpose: "Atenderla",
-      data: "Identidad, contacto, historia clínica, odontograma, imágenes, recetas y consentimientos",
+      data: `Identidad, contacto, historia clínica, ${product === "dental" ? "odontograma" : "examen físico"}, imágenes, recetas y consentimientos`,
       basis: "Su atención de salud y la ley",
       keep: "Lo que pide la norma de salud del país",
     },

@@ -535,7 +535,7 @@ function AgendaPage() {
       end: item.endsAt,
       status: item.status,
       ...stateOf(item),
-      warning: conflictLabel(conflicts.get(item.id)) ?? insideAbsence(item),
+      warning: conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item),
     }),
   )
   const active = entries.filter((entry) => occupies(entry.status))

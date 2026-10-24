@@ -29,7 +29,7 @@ import {
   updateSpecialty,
 } from "../../lib/clinical-forms"
 import { useMyRole, useOrgMembers, usePermission } from "../../lib/crm"
-import { appRoleLabel } from "../../lib/product-words"
+import { appRoleLabel, appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings/specialties")({
   component: SpecialtiesPage,
@@ -361,7 +361,7 @@ function SpecialtyForm({
           <Input
             id={`${ids}-nombre`}
             value={name}
-            placeholder="Endodoncia"
+            placeholder={appWords().examples.specialty}
             maxLength={120}
             aria-invalid={nameError ? true : undefined}
             onChange={(event) => setName(event.target.value)}

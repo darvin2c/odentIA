@@ -1,3 +1,4 @@
+import { type ClinicalProduct } from "@odentia/clinical"
 import type { TemplateCategory } from "@odentia/channels"
 import type { ConsentPurpose } from "@odentia/db/schema/automation"
 
@@ -87,6 +88,29 @@ export const MESSAGE_VARIABLES = {
   oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
+
+/**
+ * Los ejemplos que cambian en un consultorio (issue 229): la vista previa, la
+ * línea de Argos y lo que se manda a Meta para aprobar la plantilla no deben
+ * hablar de ortodoncia en latidIA.
+ */
+const PRODUCT_EXAMPLES: Partial<Record<ClinicalProduct, Partial<Record<MessageVariable, string>>>> = {
+  medical: {
+    lugar: "Consultorio Vida, sede Centro",
+    clinica: "Consultorio Vida",
+    control: "Control de presión arterial",
+    presupuesto: "Chequeo preventivo",
+    oportunidad: "Chequeo preventivo",
+  },
+}
+
+/** Los valores de ejemplo de cada dato, con los del producto. */
+export function messageExampleValues(product: ClinicalProduct = "dental"): Record<MessageVariable, string> {
+  const values = Object.fromEntries(
+    Object.entries(MESSAGE_VARIABLES).map(([name, spec]) => [name, spec.example]),
+  ) as Record<MessageVariable, string>
+  return { ...values, ...PRODUCT_EXAMPLES[product] }
+}
 
 /**
  * Lo que se puede apagar se apaga con un toque, de ese tipo de mensaje y no de

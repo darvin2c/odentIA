@@ -12,7 +12,7 @@ import {
   planStatusLabel,
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
-import { diagnosisSiteLabel } from "./encounter-diagnoses"
+import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
@@ -261,12 +261,14 @@ export function EncounterDetailView({
               </dd>
             </div>
           ) : null}
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
-            <dd className="text-sm">
-              {teeth.length === 0 ? "—" : teeth.map((t) => `Pieza ${t}`).join(", ")}
-            </dd>
-          </div>
+          {productUi().site ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
+              <dd className="text-sm">
+                {teeth.length === 0 ? "—" : teeth.map((t) => `Pieza ${t}`).join(", ")}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </section>
 
@@ -285,8 +287,8 @@ export function EncounterDetailView({
                 <p className="text-xs text-muted-foreground">
                   {dx.diagnosisType
                     ? (DIAGNOSIS_TYPE_LABELS[dx.diagnosisType] ?? dx.diagnosisType)
-                    : "Sin tipo (histórico)"}{" "}
-                  · {diagnosisSiteLabel(dx)}
+                    : "Sin tipo (histórico)"}
+                  {diagnosisSiteSuffix(dx)}
                   {dx.status === "resuelto" ? " · Resuelto" : ""}
                 </p>
               </li>
@@ -301,7 +303,8 @@ export function EncounterDetailView({
             <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
               {voidedDiagnoses.map((dx) => (
                 <li key={dx.id}>
-                  <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span> · {diagnosisSiteLabel(dx)} ·
+                  <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  {diagnosisSiteSuffix(dx)} ·
                   Motivo: {dx.voidReason}
                 </li>
               ))}

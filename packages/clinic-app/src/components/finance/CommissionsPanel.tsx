@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 /**
  * Comisiones: lo que le corresponde a cada profesional por lo que atendió y ya
  * se cobró.
@@ -615,8 +616,8 @@ function ProfessionalDetailBody({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        El pago queda como gasto de Personal. Lo que agrega caja sin atención, como vender un
-        cepillo, no cuenta para ningún profesional.
+        El pago queda como gasto de Personal. Lo que agrega caja sin atención, como vender{" "}
+        {appWords().examples.soldItem}, no cuenta para ningún profesional.
       </p>
 
       <RateDrawer

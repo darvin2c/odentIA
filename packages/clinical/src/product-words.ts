@@ -21,6 +21,37 @@ export interface ProductWords {
    * femenina en todos los productos: las frases no cambian de artículo.
    */
   room: { one: string; many: string }
+  /**
+   * Los ejemplos de los campos y de los textos de ayuda: lo que se escribe en
+   * una clínica dental o en un consultorio (revisión final del issue 229).
+   */
+  examples: {
+    /** Lo que se pide al reservar o se pregunta por precio: «una limpieza». */
+    service: string
+    /** Un motivo de consulta, sin «Ej.:». */
+    visitReason: string
+    /** Un procedimiento que pide consentimiento. */
+    consentProcedure: string
+    /** Una imagen que se ordena, un estudio que se sube y de dónde viene. */
+    imagingOrder: string
+    imagingTitle: string
+    imagingSource: string
+    /** Una interconsulta. */
+    referral: string
+    /** Una especialidad de la clínica. */
+    specialty: string
+    /** Lo que se ofrece en una oportunidad. */
+    treatment: string
+    /** Lo que no es medicamento ni alimento en la lista de alergias. */
+    allergyOthers: string
+    /** Un producto que se vende y varios, en plural. */
+    soldItem: string
+    soldItems: string
+    /** Un insumo que se usa en la atención y también se vende. */
+    usedAndSold: string
+  }
+  /** Lo que hace estándar y completa una consulta de Clío (`consultationTierOf` en services). */
+  clioTiers: { estandar: string; completa: string }
 }
 
 const WORDS: Record<ClinicalProduct, ProductWords> = {
@@ -30,6 +61,25 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
     place: { one: "clínica", indefinite: "una clínica" },
     clinician: { label: "Odontólogo", one: "odontólogo", many: "odontólogos" },
     room: { one: "unidad dental", many: "unidades dentales" },
+    examples: {
+      service: "una limpieza",
+      visitReason: "dolor en muela inferior derecha desde anoche",
+      consentProcedure: "Exodoncia pieza 38",
+      imagingOrder: "Radiografía panorámica",
+      imagingTitle: "Panorámica inicial",
+      imagingSource: "Sensor intraoral · sala 2 o centro externo",
+      referral: "Evaluación de ortodoncia",
+      specialty: "Endodoncia",
+      treatment: "Ortodoncia",
+      allergyOthers: "materiales dentales",
+      soldItem: "un cepillo",
+      soldItems: "cepillos, blanqueadores",
+      usedAndSold: "Un enjuague puede usarse en la limpieza y venderse.",
+    },
+    clioTiers: {
+      estandar: "Nota con diagnóstico, receta, controles u odontograma",
+      completa: "Armó el presupuesto",
+    },
   },
   medical: {
     name: "latidIA",
@@ -37,6 +87,25 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
     place: { one: "consultorio", indefinite: "un consultorio" },
     clinician: { label: "Médico", one: "médico", many: "médicos" },
     room: { one: "sala", many: "salas" },
+    examples: {
+      service: "una consulta",
+      visitReason: "fiebre y dolor de garganta desde hace dos días",
+      consentProcedure: "Infiltración en la rodilla derecha",
+      imagingOrder: "Radiografía de tórax",
+      imagingTitle: "Radiografía de tórax inicial",
+      imagingSource: "Ecógrafo · sala 2 o centro externo",
+      referral: "Evaluación por cardiología",
+      specialty: "Pediatría",
+      treatment: "Control de diabetes",
+      allergyOthers: "látex",
+      soldItem: "un tensiómetro",
+      soldItems: "tensiómetros, glucómetros",
+      usedAndSold: "Un antiséptico puede usarse en una curación y venderse.",
+    },
+    clioTiers: {
+      estandar: "Nota con examen o diagnóstico, receta o controles",
+      completa: "Dejó indicado lo que sigue",
+    },
   },
 }
 

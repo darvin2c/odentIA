@@ -497,18 +497,20 @@ export function RecorridoClinicoTab({
               </p>
             ) : null}
             {journey.item.detail ? <p className="text-sm">{journey.item.detail}</p> : null}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  onTabChange("odontograma", { tooth: journey.item.toothNumber ?? undefined })
-                }
-              >
-                Ver odontograma
-              </Button>
-            </div>
+            {productUi().site ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    onTabChange("odontograma", { tooth: journey.item.toothNumber ?? undefined })
+                  }
+                >
+                  Ver odontograma
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
@@ -935,17 +937,19 @@ export function RecorridoClinicoTab({
               </ChoiceSelect>
             </Field>
           ) : null}
-          <Field>
-            <FieldLabel htmlFor={`${uid}-revise-tooth`}>
-              {service?.scope === "quadrant" || service?.scope === "arch" ? "Pieza (opcional)" : "Pieza"}
-            </FieldLabel>
-            <Input
-              id={`${uid}-revise-tooth`}
-              inputMode="numeric"
-              value={toothNumber}
-              onChange={(event) => setToothNumber(event.target.value)}
-            />
-          </Field>
+          {productUi().site ? (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-revise-tooth`}>
+                {service?.scope === "quadrant" || service?.scope === "arch" ? "Pieza (opcional)" : "Pieza"}
+              </FieldLabel>
+              <Input
+                id={`${uid}-revise-tooth`}
+                inputMode="numeric"
+                value={toothNumber}
+                onChange={(event) => setToothNumber(event.target.value)}
+              />
+            </Field>
+          ) : null}
           <DiagnosisSearch value={diagnosis} onChange={(code) => setDiagnosis(code)} label="Diagnóstico" />
           <Field>
             <FieldLabel htmlFor={`${uid}-revise-detail`}>Detalle clínico</FieldLabel>

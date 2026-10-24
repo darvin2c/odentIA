@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 import { Button, Field, FieldLabel, Input, ScrollArea } from "@odentia/ui"
 import { DataRefreshMarker } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -15,9 +16,10 @@ interface Turn {
   result?: SandboxResult
 }
 
-const STARTERS = [
-  { label: "Quiere una cita", text: "Hola, quiero una cita para una limpieza." },
-  { label: "Pregunta un precio", text: "Hola, ¿cuánto cuesta una limpieza?" },
+/** Los mensajes para empezar, con lo que se pide en el producto de la app. */
+const starters = () => [
+  { label: "Quiere una cita", text: `Hola, quiero una cita para ${appWords().examples.service}.` },
+  { label: "Pregunta un precio", text: `Hola, ¿cuánto cuesta ${appWords().examples.service}?` },
   { label: "Se queja", text: "Llevo una hora esperando y nadie me atiende. Qué mal servicio." },
   { label: "Pide una persona", text: "Prefiero hablar con una persona, por favor." },
 ]
@@ -139,7 +141,7 @@ export function AgentSandbox({
         : null
   // En teléfono es la pantalla entera y su título es el de la página; al lado de la página, una sección.
   const Title = screen ? "h1" : "h2"
-  const used = STARTERS.find((starter) => starter.text === turns[0]?.text)?.label
+  const used = starters().find((starter) => starter.text === turns[0]?.text)?.label
   const saved = cases.data?.data.filter((item) => item.agent === "recepcion").length
 
   return (
@@ -185,7 +187,7 @@ export function AgentSandbox({
           className="relative m-0 flex min-w-0 gap-2 border-0 p-0 max-sm:px-4 max-sm:pb-2 sm:flex-wrap"
           aria-label="Ejemplos"
         >
-          {STARTERS.map((starter) => (
+          {starters().map((starter) => (
             <Button
               key={starter.label}
               type="button"

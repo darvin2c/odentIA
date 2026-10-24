@@ -51,6 +51,7 @@ export const medicalUi: ProductUi = {
     placeholder: "Presión 118 con 76, temperatura 38 y medio, amígdalas con placas, pulmones limpios…",
     practice:
       "Viene por fiebre y dolor de garganta hace tres días. Presión 118 con 76, temperatura 38 y medio. Amígdalas con placas, pulmones limpios. Parece una amigdalitis. Control en una semana.",
+    corrections: { change: "no, la temperatura es 38,4", remove: "quita el ibuprofeno" },
   },
   health: medicalHealth,
   summary: { ClinicalCards: (props) => <ProblemsCard {...props} /> },

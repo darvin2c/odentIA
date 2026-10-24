@@ -1,3 +1,5 @@
+import { productUi } from "../../product/product-ui"
+import { appWords } from "../../lib/product-words"
 import {
   Attachment,
   AttachmentAction,
@@ -638,7 +640,7 @@ function QueuedRow({
                 value={row.title}
                 disabled={busy}
                 onChange={(e) => onPatch({ title: e.currentTarget.value, validationError: null })}
-                placeholder="p. ej. Panorámica inicial"
+                placeholder={`p. ej. ${appWords().examples.imagingTitle}`}
                 maxLength={200}
               />
             </Field>
@@ -722,7 +724,7 @@ function QueuedRow({
             onToggle={(e) => onPatch({ expanded: (e.currentTarget as HTMLDetailsElement).open })}
           >
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-              Extras: piezas, tratamiento, vínculos y etiquetas
+              {productUi().site ? "Extras: piezas, tratamiento, vínculos y etiquetas" : "Extras: tratamiento, vínculos y etiquetas"}
               {row.teeth.length > 0 ||
               row.planItemId ||
               row.encounterProcedureId ||
@@ -743,7 +745,7 @@ function QueuedRow({
                     value={row.source}
                     maxLength={120}
                     disabled={busy}
-                    placeholder="p. ej. Sensor intraoral · sala 2 o centro externo"
+                    placeholder={`p. ej. ${appWords().examples.imagingSource}`}
                     onChange={(e) => onPatch({ source: e.currentTarget.value })}
                   />
                 </Field>

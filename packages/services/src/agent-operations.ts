@@ -75,8 +75,7 @@ import {
   formatZoned,
   formatZonedShort,
   getOrgLocale,
-  type OrgLocale,
-} from "./locale.js"
+  type OrgLocale, orgProductName } from "./locale.js"
 
 export { CONFIRM_TTL_HOURS }
 /** Ventana en ms derivada del plazo (una sola fuente de verdad). */
@@ -3280,7 +3279,7 @@ export async function notifyAgentProviderProblem(
     {
       dedupeKey: `agent-provider:${problem.code}:${day}`,
       title: "Sofi no puede usar el modelo",
-      body: AGENT_MODEL_DOWN_NOTICE,
+      body: agentModelDownNotice(await orgProductName(tx, orgId)),
       href: "/agent/recepcion",
       permission: "agent.write",
       // Se retira solo cuando el agente vuelve a responder.
@@ -3289,8 +3288,11 @@ export async function notifyAgentProviderProblem(
   )
 }
 
-/** Lo que dicen la página de Sofi y la campana cuando el modelo deja de responder. */
-export const AGENT_MODEL_DOWN_NOTICE = "Sofi no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA."
+/** Lo que dicen la página de Sofi y la campana cuando el modelo deja de responder, con la marca de la clínica. */
+export function agentModelDownNotice(brand: string): string {
+  return `Sofi no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a ${brand}.`
+}
+export const AGENT_MODEL_DOWN_NOTICE = agentModelDownNotice("odentIA")
 
 /**
  * La corrida por un mensaje entrante terminó sin responder ni derivar.

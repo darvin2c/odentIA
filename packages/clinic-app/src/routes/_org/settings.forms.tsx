@@ -1,3 +1,4 @@
+import { productUi } from "../../product/product-ui"
 import {
   Badge,
   Button,
@@ -694,7 +695,8 @@ function FieldEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FIELD_TYPES.map((type) => (
+              {/* «Pieza dentaria» solo donde el producto registra el «dónde» (o si ya la usa). */}
+              {FIELD_TYPES.filter((type) => type !== "pieza" || productUi().site || field.type === "pieza").map((type) => (
                 <SelectItem key={type} value={type}>
                   {FIELD_TYPE_LABELS[type]}
                 </SelectItem>
