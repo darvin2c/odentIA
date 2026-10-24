@@ -543,8 +543,9 @@ describe("Argos: preguntas incluidas y paquetes", () => {
     await expect(run((tx) => ensureArgosQuestion(tx, ORG))).rejects.toMatchObject({
       code: "ARGOS_QUESTIONS_USED",
     })
+    // El mes es el del día en que cierra el de la clínica: «Usaste las 3 preguntas de noviembre».
     await expect(run((tx) => ensureArgosQuestion(tx, ORG))).rejects.toThrow(
-      "Usaste las 3 preguntas de este mes. ¿Sumo 2 más por USD 3?",
+      /^Usaste las 3 preguntas de \p{L}+\. ¿Sumo 2 más por USD 3\? Las uso para responder esta pregunta y las que vengan hasta el \d+ de \p{L}+\.$/u,
     )
     const after = await run((tx) => addArgosPack(tx, ORG, { automatic: false }))
     expect(after).toMatchObject({ added: 2, remaining: 2 })

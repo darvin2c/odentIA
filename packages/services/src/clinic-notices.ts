@@ -49,7 +49,7 @@ const DISMISS: Record<ClinicNoticeTone, ClinicNotice["dismiss"]> = { aviso: "niv
 const PAY = { kind: "pagar", label: "Registrar pago", shortLabel: "Pagar" } as const
 const CHOOSE = { kind: "elegir_plan", label: "Elegir plan", shortLabel: "Elegir" } as const
 const SEE_PLAN = { kind: "ver_plan", label: "Ver mi plan", shortLabel: "Ver" } as const
-const RAISE_CAP = { kind: "subir_tope", label: "Subir tope", shortLabel: "Subir" } as const
+const RAISE_CAP = { kind: "subir_tope", label: "Subir presupuesto", shortLabel: "Subir" } as const
 const SUPPORT = { kind: "escribir_soporte", label: "Escribir a soporte", shortLabel: "Soporte" } as const
 
 const ALERT_ACTION: Record<SaasAlert["action"], ClinicNoticeAction> = {

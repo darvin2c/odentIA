@@ -1,12 +1,13 @@
 /**
  * Cada acción de los agentes en el tramo que corre y en el anterior (ADR 0031,
- * tablero C3; ADR 0054, tablero 6): la factura suma exactamente estas filas.
+ * tablero C3; ADR 0054, tablero 6; ADR 0085, tablero C2): la factura suma
+ * exactamente estas filas, cada una con su tipo.
  * Lo que no se cobra no aparece; lo que se cuenta pero no suma (va dentro de
  * una cita, cita anulada, devuelta al revisarla) lo dice en su estado. De
  * cualquier fila se pide revisión desde su «⋯». Solo owner/admin, como el
  * resto de Plan y pagos, dentro de la clínica (ADR 0065).
  */
-import { Button, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { Badge, Button, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import { DataTable, EmptyState, ErrorState, LoadingState, PageHeader, RowActions } from "@odentia/ui-patterns"
 import { seesBilling } from "@odentia/auth/permissions"
 import { useQuery } from "@tanstack/react-query"
@@ -15,7 +16,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ArrowLeft } from "lucide-react"
 import { useMemo, useState } from "react"
 import { type ActionReview, ActionReviewDrawer, type ReviewTarget, reviewStateWords } from "../../components/billing/action-review"
-import { agentOfKind, PriceWithDiscount, type SaasActionKind } from "../../components/billing/consumption"
+import { agentOfKind, PriceWithDiscount, type SaasActionKind, type SaasActionTier, TIER_NAME } from "../../components/billing/consumption"
 import { formatMicros } from "../../components/billing/money"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { PersonLink } from "../../components/person-link"
@@ -49,6 +50,10 @@ type ActionState = "prueba" | "credito" | "sobre_credito" | "dentro_de_cita" | "
 interface ActionRow {
   id: string
   kind: SaasActionKind
+  /** Su tipo (ADR 0085); null en la cita recuperada, las preguntas y el almacenamiento. */
+  tier: SaasActionTier | null
+  /** Preguntas del paquete o GB extra. */
+  units: number | null
   occurredAt: string
   contactId: string | null
   personName: string | null
@@ -66,6 +71,8 @@ interface ActionRow {
   refunds?: Array<{ actionId: string; occurredAt: string; priceMicros: number }>
   /** La revisión que pidió la clínica, si pidió. */
   review: ActionReview | null
+  /** Gestiona cuya cita reservada aún no se da: lo que sumaría si viene (ADR 0085). */
+  agendaPendingMicros?: number | null
 }
 
 interface ActionsPage {
@@ -82,7 +89,7 @@ const STATE_WORDS: Record<ActionState, string> = {
   credito: "Del crédito del mes",
   sobre_credito: "Por encima del crédito",
   dentro_de_cita: "Va dentro de la cita recuperada",
-  esperando: "Esperando que asista",
+  esperando: "Esperando que venga",
   sin_precio: "Sin precio en tu plan",
   anulada: "No se cobra: la cita ya no figura como atendida",
   devuelta: "No se cobra: se devolvió al revisarla",
@@ -99,7 +106,17 @@ const CHANNEL_WORDS: Record<string, string> = {
   enlace: "desde el enlace",
 }
 
-type Filter = "todo" | SaasActionKind | "esperando"
+/** De quién es cada fila (tablero C2): Argos son sus citas recuperadas y sus paquetes de preguntas. */
+type Filter = "todo" | "sofi" | "clio" | "argos" | "almacenamiento" | "esperando"
+
+/** La etiqueta de cada fila: su tipo, o lo que es si no tiene. */
+function kindLabel(row: Pick<ActionRow, "kind" | "tier" | "units">): string {
+  if (row.tier) return TIER_NAME[row.tier]
+  if (row.kind === "cita") return "Cita recuperada"
+  if (row.kind === "preguntas") return `${row.units ?? ""} preguntas`.trim()
+  if (row.kind === "almacenamiento") return `${row.units ?? ""} GB extra`.trim()
+  return ""
+}
 type Period = "actual" | "anterior"
 const PAGE = 50
 
@@ -142,7 +159,7 @@ function ActionsPage() {
   const [reviewing, setReviewing] = useState<ReviewTarget | null>(null)
   const params = new URLSearchParams({ orgId: organizationId, limit: String(PAGE), offset: String(offset), periodo: period })
   if (filter === "esperando") params.set("state", "esperando")
-  else if (filter !== "todo") params.set("kind", filter)
+  else if (filter !== "todo") params.set("agente", filter)
   const actions = useQuery({
     queryKey: ["billing", organizationId, "actions", period, filter, offset],
     queryFn: () => apiFetch<{ data: ActionsPage }>(`/api/account/billing/actions?${params.toString()}`).then((res) => res.data),
@@ -177,9 +194,14 @@ function ActionsPage() {
           const channel = row.original.channel ? CHANNEL_WORDS[row.original.channel] ?? row.original.channel : null
           return (
             <span className="block min-w-48 whitespace-normal">
-              <span className="block text-xs text-muted-foreground">
+              <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 {agentOfKind(row.original.kind, receptionName)}
                 {channel ? ` · ${channel}` : ""}
+                {kindLabel(row.original) ? (
+                  <Badge variant={row.original.kind === "cita" ? "warning" : "soft"} className="h-5 px-1.5 text-[11px]">
+                    {kindLabel(row.original)}
+                  </Badge>
+                ) : null}
               </span>
               {row.original.detail}
               {row.original.conversationId ? (
@@ -230,6 +252,12 @@ function ActionsPage() {
             <span className="block min-w-32 whitespace-normal text-sm">
               {review ? reviewStateWords(review, row.original.priceMicros, row.original.chargeId !== null) : STATE_WORDS[row.original.state]}
               {review ? <ReviewAnswer review={review} /> : null}
+              {row.original.agendaPendingMicros !== undefined ? (
+                <span className="block text-xs text-muted-foreground">
+                  Esperando que venga a su cita: si viene, sube a Agenda
+                  {row.original.agendaPendingMicros !== null ? ` (+${formatMicros(row.original.agendaPendingMicros, "USD")})` : ""}
+                </span>
+              ) : null}
               {review?.status === "pendiente" && review.caseId ? (
                 <>
                   {" · "}
@@ -295,11 +323,12 @@ function ActionsPage() {
         >
           <TabsList aria-label="Qué mostrar">
             <TabsTrigger value="todo">Todo</TabsTrigger>
-            <TabsTrigger value="conversacion">{receptionName}</TabsTrigger>
-            <TabsTrigger value="consulta">{CLINICAL_NAME}</TabsTrigger>
-            <TabsTrigger value="cita">{ADMIN_NAME}</TabsTrigger>
+            <TabsTrigger value="sofi">{receptionName}</TabsTrigger>
+            <TabsTrigger value="clio">{CLINICAL_NAME}</TabsTrigger>
+            <TabsTrigger value="argos">{ADMIN_NAME}</TabsTrigger>
+            <TabsTrigger value="almacenamiento">Almacenamiento</TabsTrigger>
             {period === "actual" ? (
-              <TabsTrigger value="esperando">Esperando que asista{actions.data?.pending ? ` (${actions.data.pending})` : ""}</TabsTrigger>
+              <TabsTrigger value="esperando">Esperando que venga{actions.data?.pending ? ` (${actions.data.pending})` : ""}</TabsTrigger>
             ) : null}
           </TabsList>
         </Tabs>
@@ -325,7 +354,7 @@ function ActionsPage() {
       ) : total === 0 ? (
         <EmptyState
           title={filter === "esperando" ? "Ninguna cita espera asistencia" : period === "anterior" ? "No hubo acciones ese mes" : "Aún no hay acciones en este tramo"}
-          description="Cuando un agente atienda una conversación, ordene una consulta dictada o recupere una cita, aparecerá aquí con su precio."
+          description="Cuando un agente atienda una conversación, ordene una consulta dictada, recupere una cita o sume preguntas, aparecerá aquí con su tipo y su precio."
         />
       ) : (
         <>

@@ -496,6 +496,17 @@ export async function assertClioCanListen(tx: Db, orgId: string, encounterId: st
   )
 }
 
+/** Lo que dice la atención antes de dictar (tablero C4): por qué Clío no escucha aquí, o null si escucha. */
+export async function clioListenBlock(tx: Db, orgId: string, encounterId: string): Promise<{ code: string; message: string } | null> {
+  try {
+    await assertClioCanListen(tx, orgId, encounterId)
+    return null
+  } catch (error) {
+    if (error instanceof ServiceError && (error.code === "CLIO_BUDGET_REACHED" || error.code === "AGENTS_PAUSED")) return { code: error.code, message: error.message }
+    throw error
+  }
+}
+
 /** Para el dictado (Clío) y Argos: con el saldo de prueba agotado los agentes no trabajan. */
 export async function assertAgentsNotPaused(tx: Db, orgId: string): Promise<void> {
   const gate = await getAgentSpendGate(tx, orgId)

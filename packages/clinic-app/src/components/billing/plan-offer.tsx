@@ -1,14 +1,17 @@
 /**
- * Activar el plan (ADR 0031, tablero C1): lo que resalta es que la cuota
- * vuelve en crédito; después el precio de cada acción, con cuándo se cobra y
- * cuándo no, y un estimado sacado de lo que la clínica hizo en su prueba.
+ * Activar el plan (ADR 0031 y 0085, tablero C1): lo que resalta es que la
+ * cuota vuelve en crédito; después el precio de cada tipo de acción por
+ * agente, lo que no se cobra, y un estimado sacado de lo que la clínica hizo
+ * en su prueba.
  */
 import { Button } from "@odentia/ui"
 import type { Consumption } from "./consumption"
 import { formatMicros, formatPlanMoney } from "./money"
 import { agentName } from "../../lib/agent"
-import { useReceptionName, withReceptionName } from "../../lib/agent-names"
-import { conversationRule, type SaasTerms, useSaasTerms } from "../../lib/billing"
+import { useReceptionName } from "../../lib/agent-names"
+import { conversationRule, useSaasTerms } from "../../lib/billing"
+import { activeOrgLocale } from "../../lib/locale"
+import { META_ACCOUNT_URL } from "../../lib/whatsapp"
 
 export interface OfferPlan {
   code: string
@@ -19,36 +22,64 @@ export interface OfferPlan {
   /** El plan de lista de odentIA (el por defecto de la administración). */
   isDefault: boolean
   creditCents: number
+  /** Gestiona y Completa: los de antes de los tipos (ADR 0085). */
   conversationMicros: number | null
   consultationMicros: number | null
   recoveryMicros: number | null
+  conversationInformMicros?: number | null
+  conversationAgendaMicros?: number | null
+  consultationSimpleMicros?: number | null
+  consultationStandardMicros?: number | null
+  argosIncludedQuestions?: number
+  argosPackQuestions?: number
+  argosPackMicros?: number | null
+  storageIncludedGb?: number
+  storageGbMicros?: number | null
 }
 
-const ACTIONS = [
-  {
-    key: "conversationMicros" as const,
-    agent: "recepcion",
-    what: "Conversación atendida",
-    /** La ventana de las condiciones comerciales; sin ellas todavía, la frase sin cifra. */
-    when: (terms: SaasTerms | undefined) => (terms ? `${conversationRule(terms)}.` : "Una por persona, aunque escriba diez mensajes o cambie de canal."),
-    /** «Sofi» se cambia por el nombre de la clínica al mostrarlo. */
-    not: "No se cobra si responde tu equipo, si se deriva sin IA o si Sofi falla.",
-  },
-  {
-    key: "consultationMicros" as const,
-    agent: "asistente_clinico",
-    what: "Consulta dictada y confirmada",
-    when: () => "Una por atención, sin importar cuántos minutos dictes.",
-    not: "No se cobra si descartas el borrador.",
-  },
-  {
-    key: "recoveryMicros" as const,
-    agent: "administrador",
-    what: "Cita recuperada",
-    when: () => "Cuando un paciente vuelve tras un seguimiento y asiste.",
-    not: "No se cobran recordatorios, mensajes sin respuesta ni citas canceladas.",
-  },
-]
+/** Los precios de cada agente, en el orden del tablero: lo que se cobra y cuándo (ADR 0085). */
+function priceColumns(plan: OfferPlan, receptionName: string) {
+  const or = (own: number | null | undefined, fallback: number | null) => own ?? fallback
+  return [
+    {
+      agent: receptionName,
+      about: "lo que pasó en la agenda",
+      rows: [
+        { label: "Informa", micros: or(plan.conversationInformMicros, plan.conversationMicros) },
+        { label: "Gestiona", micros: plan.conversationMicros },
+        { label: "Agenda, si viene", micros: or(plan.conversationAgendaMicros, plan.conversationMicros) },
+      ],
+    },
+    {
+      agent: agentName("asistente_clinico", receptionName),
+      about: "lo que dejó hecho",
+      rows: [
+        { label: "Simple", micros: or(plan.consultationSimpleMicros, plan.consultationMicros) },
+        { label: "Estándar", micros: or(plan.consultationStandardMicros, plan.consultationMicros) },
+        { label: "Completa", micros: plan.consultationMicros },
+      ],
+    },
+    {
+      agent: agentName("administrador", receptionName),
+      about: "y espacio",
+      rows: [
+        { label: "Cita recuperada", micros: plan.recoveryMicros },
+        ...(plan.argosPackMicros !== null && plan.argosPackMicros !== undefined
+          ? [
+              { label: `${plan.argosIncludedQuestions ?? 0} preguntas`, micros: null, text: "incluidas" },
+              { label: `${plan.argosPackQuestions ?? 100} preguntas más`, micros: plan.argosPackMicros },
+            ]
+          : []),
+        ...(plan.storageGbMicros !== null && plan.storageGbMicros !== undefined
+          ? [
+              { label: `${plan.storageIncludedGb ?? 0} GB`, micros: null, text: "incluidos" },
+              { label: "GB extra al mes", micros: plan.storageGbMicros },
+            ]
+          : []),
+      ],
+    },
+  ]
+}
 
 export function PlanOffer({
   plan,
@@ -73,7 +104,8 @@ export function PlanOffer({
   const receptionName = useReceptionName()
   const terms = useSaasTerms().data
   const money = (cents: number) => formatPlanMoney(cents, plan.currency)
-  const priced = ACTIONS.some((action) => plan[action.key] !== null)
+  const priced = plan.conversationMicros !== null || plan.consultationMicros !== null || plan.recoveryMicros !== null
+  const unit = (micros: number) => new Intl.NumberFormat(activeOrgLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
   const returnsCredit = plan.creditCents > 0 && plan.creditCents >= plan.priceCents
   // El estimado sale de lo que hicieron los agentes en la prueba, llevado a un mes.
   const estimate =
@@ -106,33 +138,51 @@ export function PlanOffer({
           Te devolvemos los {money(plan.creditCents)} en crédito para las acciones de tus agentes.
         </p>
       ) : null}
-      <p className="text-sm text-muted-foreground">
-        Todo el sistema, sin límite de odontólogos, sedes ni cuentas. Recordatorios y avisos al equipo incluidos. Pagas mes a mes, sin
-        permanencia. Tu mes empieza el día que activas{trialing ? " (si estás en prueba, cuando termina)" : ""}.
-      </p>
+      {!current ? (
+        <p className="text-sm text-muted-foreground">
+          Pagas mes a mes, sin permanencia. Tu mes empieza el día que activas{trialing ? " (si estás en prueba, cuando termina)" : ""}.
+        </p>
+      ) : null}
       {priced ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">Lo que pase del crédito se paga por acción: solo cuando un agente hace su trabajo.</p>
-          <ul className="flex flex-col divide-y rounded-lg border">
-            {ACTIONS.map((action) => {
-              const price = plan[action.key]
-              if (price === null) return null
-              return (
-                <li key={action.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
-                  <div className="min-w-0 flex-1 basis-60">
-                    <p className="text-xs text-muted-foreground">{agentName(action.agent, receptionName)}</p>
-                    <p className="text-sm font-medium">{action.what}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {action.when(terms)} {withReceptionName(action.not, receptionName)}
-                    </p>
-                  </div>
-                  <p className="text-base font-semibold tabular-nums">{formatMicros(price, plan.currency)}</p>
-                </li>
-              )
-            })}
-          </ul>
+          <p className="text-sm">
+            Todo el sistema, sin límite de odontólogos, sedes ni cuentas. Lo que pase del crédito se paga por lo que hace cada agente{" "}
+            <span className="text-muted-foreground">({plan.currency})</span>.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {priceColumns(plan, receptionName).map((column) => (
+              <div key={column.agent} className="flex flex-col gap-1.5 rounded-lg border p-3">
+                <p className="text-xs">
+                  <span className="font-semibold text-agent">{column.agent}</span>
+                  <span className="text-muted-foreground"> · {column.about}</span>
+                </p>
+                <dl className="flex flex-col gap-0.5 text-sm">
+                  {column.rows
+                    .filter((row) => row.micros !== null || "text" in row)
+                    .map((row) => (
+                      <div key={row.label} className="flex items-baseline justify-between gap-3">
+                        <dt>{row.label}</dt>
+                        <dd className="font-semibold tabular-nums">{row.micros !== null ? unit(row.micros) : "text" in row ? row.text : ""}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {terms ? `${conversationRule(terms)}. ` : ""}No se cobran el spam, los mensajes ajenos, lo que pasa a tu equipo, los recordatorios ni el borrador
+            descartado. WhatsApp lo cobra Meta directamente a tu clínica:{" "}
+            <a href={META_ACCOUNT_URL} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
+              revisa sus tarifas y tu facturación en Meta
+            </a>
+            .
+          </p>
         </div>
-      ) : null}
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Todo el sistema, sin límite de odontólogos, sedes ni cuentas. Recordatorios y avisos al equipo incluidos. Pagas mes a mes, sin permanencia.
+        </p>
+      )}
       {estimate ? (
         <p className="text-sm">
           A este ritmo serían unos <strong>{money(estimate.total)}</strong> al mes{taxLabel ? ` más ${taxLabel}` : ""}: {money(plan.priceCents)} que vuelven en crédito
@@ -140,8 +190,8 @@ export function PlanOffer({
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        ¿Tu clínica tiene mucho volumen? Tu asesor puede mejorar tus precios por acción; siempre verás el precio base junto al tuyo. WhatsApp lo
-        pagas directo a Meta. El crédito que no usas no pasa al mes siguiente.
+        ¿Tu clínica tiene mucho volumen? Tu asesor puede mejorar los precios de Gestiona, Agenda, Completa y la cita recuperada; siempre verás el precio
+        base junto al tuyo. El crédito que no usas no pasa al mes siguiente.
       </p>
     </section>
   )

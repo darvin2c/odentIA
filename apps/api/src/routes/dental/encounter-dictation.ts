@@ -3,6 +3,7 @@ import { extractDictation } from "@odentia/agent/dental"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertClioCanListen,
+  clioListenBlock,
   getAgentConfig,
 } from "@odentia/services"
 import {
@@ -71,6 +72,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
         // Para decir, antes de firmar, cuántas ya entraron a la atención.
         confirmed: await countConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId),
+        // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085): se dice antes de dictar.
+        blocked: await clioListenBlock(tx, orgId, at.data.encounterId),
       })),
     )
   })

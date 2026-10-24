@@ -1,7 +1,11 @@
 import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
 import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
 import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
+import { seesBilling } from "@odentia/auth/permissions"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { PLAN_PATH } from "../../lib/billing"
+import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
 
@@ -74,7 +78,10 @@ export function DictationPanel({
 }) {
   const [typing, setTyping] = useState(false)
   const [typed, setTyped] = useState("")
+  const role = useMyRole()
   const { mode, pending, ready } = session
+  // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085, tablero C4).
+  const blocked = session.blocked
   const listening = mode === "listening"
   // El reconocimiento del navegador no expone su flujo de audio: el nivel se
   // mide en un getUserMedia paralelo de solo-nivel, solo mientras se escucha.
@@ -187,13 +194,26 @@ export function DictationPanel({
               <>
                 {readiness(session)}. Todavía no hay nada en la historia.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
+            ) : blocked ? (
+              <>
+                {blocked.message}{" "}
+                {blocked.code === "CLIO_BUDGET_REACHED" ? (
+                  seesBilling(role) ? (
+                    <Link to={PLAN_PATH} className="text-primary underline underline-offset-4">
+                      Subir presupuesto
+                    </Link>
+                  ) : (
+                    "Avísale a quien administra la clínica."
+                  )
+                ) : null}
+              </>
             ) : (
               "Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
             )}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {session.canListen ? (
+          {session.canListen && !blocked ? (
             <Button
               type="button"
               variant={pending > 0 ? "outline" : "default"}
@@ -207,7 +227,7 @@ export function DictationPanel({
               <Mic className="size-4" aria-hidden /> {pending > 0 ? "Seguir dictando" : "Dictar"}
             </Button>
           ) : null}
-          {!typing ? (
+          {!typing && !blocked ? (
             <Button type="button" variant={session.canListen ? "ghost" : "outline"} className="min-h-11 sm:min-h-9" onClick={() => setTyping(true)}>
               Escribir lo dictado
             </Button>
@@ -226,7 +246,7 @@ export function DictationPanel({
       </div>
 
       {/* Antes de la primera sugerencia, qué se puede decir; después está en «Lo dictado». */}
-      {pending === 0 && session.removedByVoice.length === 0 && !session.transcript ? (
+      {pending === 0 && session.removedByVoice.length === 0 && !session.transcript && !blocked ? (
         <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
           <p className="text-sm font-semibold">Por ejemplo</p>
           <DictationExamples />

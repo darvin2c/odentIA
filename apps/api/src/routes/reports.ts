@@ -19,6 +19,7 @@ import {
   boundArgosQuery,
   getAdminSettings,
   getArgosAnswer,
+  getArgosPanelAllowance,
   getOrgLocale,
   getAgendaReport,
   getPatientReportList,
@@ -237,6 +238,19 @@ export function createReportsRoute(deps: ReportsDeps) {
         }
       }
     })
+  })
+
+  /**
+   * Lo que dice el panel de Argos arriba y en su tarjeta (ADR 0085, tablero
+   * C3): las preguntas del mes y, para quien ve Facturación, si puede sumar
+   * un paquete (lo suma la ruta de Plan y pagos, con la misma regla).
+   */
+  app.get("/argos/allowance", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    return runService(c, 200, async () => ({
+      ...(await withOrgContext(deps.db, orgId, (tx) => getArgosPanelAllowance(tx, orgId))),
+      canAdd: seesBilling(memberRole),
+    }))
   })
 
   /** La fila del buscador (D1): Jev decide con solo el texto si es una pregunta de los datos, de la Ayuda o algo para buscar. */

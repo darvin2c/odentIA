@@ -26,7 +26,7 @@ import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES } from "@odentia/clinical"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { createOwnerDb, withOrgContext } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
-import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
@@ -3990,6 +3990,12 @@ await db.transaction(async (tx) => {
       dedupeKey: "semilla:preguntas:0",
     },
   ]).onConflictDoNothing()
+  // Lo guardado hoy (ADR 0085): 14,2 de los 20 GB incluidos, para ver el medidor de Plan y pagos.
+  // El reloj SaaS lo vuelve a medir con lo que de verdad hay guardado.
+  await db
+    .insert(storageUsageDay)
+    .values({ organizationId: ORG_A, day: new Date().toISOString().slice(0, 10), bytes: Math.round(14.2 * 1024 ** 3) })
+    .onConflictDoNothing()
   // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos
   // conversaciones; odentIA mantuvo una con su respuesta y la otra espera en
   // Soporte. Sus avisos a soporte quedan como enviados: la semilla no envía nada.
