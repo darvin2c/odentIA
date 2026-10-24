@@ -1,5 +1,7 @@
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
+import { orgProfile } from "@odentia/db/schema/org"
 import { invitationTemplate } from "@odentia/mail"
 import {
   type AssistedOrganizationResult,
@@ -39,6 +41,8 @@ import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 export interface AdminOrganizationsDeps
   extends Pick<AppDeps, "auth" | "ownerDb" | "mailer" | "webURL"> {
+  /** El panel de cada producto: la invitación se acepta en el dominio de la clínica. */
+  panelUrlOf?: (product: ClinicalProduct) => string
   getBillingSummary?: OrganizationBillingLoaders["getBillingSummary"]
   startTrial?: OrganizationBillingLoaders["startTrial"]
 }
@@ -68,6 +72,7 @@ const assistedInput = z.object({
   planCode: z.string().trim().min(1).max(60).optional(),
   sellerId: z.string().trim().max(120).optional(),
   isDemo: z.boolean().optional(),
+  product: z.enum(CLINICAL_PRODUCTS).optional(),
 })
 
 const blockInput = z.object({
@@ -130,13 +135,25 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     organizationName: string
     invitationId: string
     inviterName: string
+    /** El de la clínica: la invitación se acepta en el panel de su dominio. */
+    product: ClinicalProduct
   }): Promise<void> {
+    const panel = deps.panelUrlOf?.(args.product) ?? deps.webURL
     const template = invitationTemplate({
       organizationName: args.organizationName,
       inviterName: args.inviterName,
-      url: `${deps.webURL}/accept-invitation/${args.invitationId}`,
+      url: `${panel}/accept-invitation/${args.invitationId}`,
     })
     await deps.mailer.send({ to: args.email, ...template })
+  }
+
+  async function productOf(organizationId: string): Promise<ClinicalProduct> {
+    const [row] = await deps.ownerDb
+      .select({ product: orgProfile.product })
+      .from(orgProfile)
+      .where(eq(orgProfile.organizationId, organizationId))
+      .limit(1)
+    return isClinicalProduct(row?.product) ? row.product : "dental"
   }
 
   async function orgNameOf(organizationId: string): Promise<string> {
@@ -190,6 +207,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
             planCode: parsed.data.planCode,
             sellerId: parsed.data.sellerId,
             isDemo: parsed.data.isDemo,
+            product: parsed.data.product,
           },
           loaders,
         ),
@@ -206,6 +224,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
           organizationName: parsed.data.orgName,
           invitationId: created.invitationId,
           inviterName: await staffName(actor.userId),
+          product: parsed.data.product ?? "dental",
         })
       } catch {
         throw new ServiceError(
@@ -409,6 +428,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         organizationName: await orgNameOf(resent.organizationId),
         invitationId: resent.id,
         inviterName: await staffName(actor.userId),
+        product: await productOf(resent.organizationId),
       })
     } catch {
       throw new ServiceError(

@@ -3,6 +3,7 @@ import { SubmitButton } from "@odentia/ui-patterns"
 import { Check, Minus } from "lucide-react"
 import { useState } from "react"
 import { formatPortalDate, formatPortalMoney, type PortalBudget } from "../../lib/portal"
+import { appWords } from "../../lib/product-words"
 
 export type BudgetDecision = "aceptado" | "rechazado" | "pospuesto"
 
@@ -80,7 +81,7 @@ export function BudgetResponder({
                   </span>
                   <span className="text-muted-foreground">
                     {[
-                      option.isRecommended ? "La recomienda tu odontólogo" : null,
+                      option.isRecommended ? `La recomienda tu ${appWords().clinician.one}` : null,
                       budget.items
                         .filter((item) => item.optionId === option.id)
                         .map((item) => item.title)

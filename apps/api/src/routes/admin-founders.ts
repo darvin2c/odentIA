@@ -1,3 +1,4 @@
+import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -27,8 +28,8 @@ export interface AdminFoundersDeps {
   /** La lista de espera y la política de alta son de la plataforma: solo owner (migración 0028). */
   ownerDb: Db
   mailer: Mailer
-  /** Origen del panel (`app.`): el enlace de la invitación lleva a crear la cuenta ahí. */
-  panelURL: string
+  /** Origen del panel (`app.`) de cada producto: la invitación lleva a crear la cuenta en el de su solicitud. */
+  panelUrlOf: (product: ClinicalProduct) => string
   /** Buzón que lee las respuestas (FOUNDERS_EMAIL). */
   replyTo?: string | undefined
 }
@@ -64,7 +65,8 @@ function dayText(date: Date): string {
  */
 export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
   const app = new Hono()
-  const invitationUrl = (token: string) => `${deps.panelURL.replace(/\/+$/, "")}/register?invitacion=${encodeURIComponent(token)}`
+  const invitationUrl = (token: string, product: ClinicalProduct) =>
+    `${deps.panelUrlOf(product).replace(/\/+$/, "")}/register?invitacion=${encodeURIComponent(token)}`
 
   app.get("/", async (c) => {
     const parsed = listQuery.safeParse(c.req.query())
@@ -120,7 +122,7 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
         if (!plan) throw new ServiceError("NOT_FOUND", 404, "Plan no encontrado")
         return { ...result, offer: await founderOffer(tx, plan) }
       })
-      const url = invitationUrl(issued.token)
+      const url = invitationUrl(issued.token, issued.request.product)
       let emailSent = false
       if (parsed.data.send) {
         try {

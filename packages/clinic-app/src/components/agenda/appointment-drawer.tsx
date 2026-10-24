@@ -52,6 +52,7 @@ import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
 import { PhoneWhatsAppNote } from "../person/phone-whatsapp"
 import { ServiceSelect } from "../service-select"
+import { appWords, upperFirst } from "../../lib/product-words"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
@@ -357,7 +358,7 @@ export function AppointmentDrawer({
             />
             <ResourceSelect
               id="cita-editar-sillon"
-              label="Unidad dental"
+              label={upperFirst(appWords().room.one)}
               options={resources.rooms.map((room) => ({ id: room.id, label: room.label }))}
               value={draft.roomId}
               onChange={(roomId) =>
@@ -525,7 +526,7 @@ export function AppointmentDrawer({
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
               <DetailField label="Profesional">{appointment.professionalName}</DetailField>
-              <DetailField label="Unidad dental">{appointment.roomName}</DetailField>
+              <DetailField label={upperFirst(appWords().room.one)}>{appointment.roomName}</DetailField>
               {appointment.reason ? (
                 <DetailField label="Motivo">{appointment.reason}</DetailField>
               ) : null}

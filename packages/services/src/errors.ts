@@ -22,9 +22,12 @@ export function branchNotFound(): ServiceError {
   return new ServiceError("NOT_FOUND", 404, "Sede no encontrada")
 }
 
-/** La unidad dental no existe (o no es de la organización): también en femenino. */
-export function roomNotFound(): ServiceError {
-  return new ServiceError("NOT_FOUND", 404, "Unidad dental no encontrada")
+/**
+ * Lo que se reserva no existe (o no es de la organización): en femenino, como
+ * su palabra en todos los productos («Unidad dental no encontrada»).
+ */
+export function roomNotFound(word = "unidad dental"): ServiceError {
+  return new ServiceError("NOT_FOUND", 404, `${word.charAt(0).toLocaleUpperCase("es")}${word.slice(1)} no encontrada`)
 }
 
 /** La orden de compra no existe (o no es de la organización): también en femenino. */

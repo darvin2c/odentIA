@@ -1,4 +1,5 @@
 import { useOrgProfile } from "./org"
+import { appWords } from "./product-words"
 
 /**
  * Los nombres de los agentes (issue 183), los mismos que `@odentia/services`
@@ -10,10 +11,13 @@ export const RECEPTION_DEFAULT_NAME = "Sofi"
 export const CLINICAL_NAME = "Clío"
 export const ADMIN_NAME = "Argos"
 
+/** El porqué del nombre de Clío, con quien atiende en el producto de esta app. */
+export const clinicalNameReason = (): string =>
+  `La musa de la historia: escribe la historia clínica mientras el ${appWords().clinician.one} atiende.`
+
 /** El porqué de cada nombre: subtítulo en la página de cada agente. */
 export const AGENT_NAME_REASONS = {
   recepcion: "De sophía, sabiduría: sabe todo de la clínica y responde con su tono, a cualquier hora.",
-  asistente_clinico: "La musa de la historia: escribe la historia clínica mientras el odontólogo atiende.",
   administrador: "El gigante de los cien ojos: ve toda la clínica y no deja a ningún paciente atrás.",
 } as const
 

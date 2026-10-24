@@ -12,6 +12,7 @@ import { useReceptionName } from "../../lib/agent-names"
 import { conversationRule, useSaasTerms } from "../../lib/billing"
 import { activeOrgLocale } from "../../lib/locale"
 import { META_ACCOUNT_URL } from "../../lib/whatsapp"
+import { appWords } from "../../lib/product-words"
 
 export interface OfferPlan {
   code: string
@@ -146,7 +147,7 @@ export function PlanOffer({
       {priced ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm">
-            Todo el sistema, sin límite de odontólogos, sedes ni cuentas. Lo que pase del crédito se paga por lo que hace cada agente{" "}
+            Todo el sistema, sin límite de {appWords().clinician.many}, sedes ni cuentas. Lo que pase del crédito se paga por lo que hace cada agente{" "}
             <span className="text-muted-foreground">({plan.currency})</span>.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -180,7 +181,7 @@ export function PlanOffer({
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Todo el sistema, sin límite de odontólogos, sedes ni cuentas. Recordatorios y avisos al equipo incluidos. Pagas mes a mes, sin permanencia.
+          Todo el sistema, sin límite de {appWords().clinician.many}, sedes ni cuentas. Recordatorios y avisos al equipo incluidos. Pagas mes a mes, sin permanencia.
         </p>
       )}
       {estimate ? (

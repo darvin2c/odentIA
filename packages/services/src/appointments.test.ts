@@ -219,6 +219,30 @@ it("la doble reserva de la misma unidad dental o profesional responde 409 APPOIN
   expect(contiguous.startsAt).toBe(new Date(NEXT).toISOString())
 })
 
+it("los avisos de la agenda dicen lo que se reserva con la palabra del producto (entrega 3 del issue 229)", async () => {
+  const clash = { patientId, professionalUserId: PROFESSIONAL_2, roomId, startsAt: OVERLAP, endsAt: OVERLAP_END }
+  const missingRoom = { patientId, professionalUserId: PROFESSIONAL, roomId: "00000000-0000-4000-8000-000000000000", startsAt: "2026-10-06T14:00:00Z", durationMin: 30 }
+  await expect(run((tx) => createAppointment(tx, ORG, ACTOR, clash))).rejects.toMatchObject({
+    message: "El profesional o la unidad dental ya están ocupados en ese horario",
+  })
+  await expect(run((tx) => createAppointment(tx, ORG, ACTOR, missingRoom))).rejects.toMatchObject({
+    message: "Unidad dental no encontrada",
+  })
+  await ownerDb.execute(sql`
+    insert into org_profile (organization_id, legal_name, country_code, currency, timezone, locale, product)
+    values (${ORG}, 'Clínica Agenda Svc', 'PE', 'PEN', 'America/Lima', 'es-PE', 'medical')`)
+  try {
+    await expect(run((tx) => createAppointment(tx, ORG, ACTOR, clash))).rejects.toMatchObject({
+      message: "El profesional o la sala ya están ocupados en ese horario",
+    })
+    await expect(run((tx) => createAppointment(tx, ORG, ACTOR, missingRoom))).rejects.toMatchObject({
+      message: "Sala no encontrada",
+    })
+  } finally {
+    await ownerDb.execute(sql`delete from org_profile where organization_id = ${ORG}`)
+  }
+})
+
 it("mover a un hueco libre sube la versión; versión vieja da STALE_VERSION", async () => {
   const created = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {

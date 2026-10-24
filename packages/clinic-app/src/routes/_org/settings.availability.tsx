@@ -45,6 +45,7 @@ import type {
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
+import { appWords, upperFirst } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
@@ -285,7 +286,7 @@ function AvailabilityPage() {
       ? "toda la sede"
       : (rooms?.find((room) => room.id === block.roomId)?.name ??
         resources?.rooms.find((room) => room.id === block.roomId)?.label ??
-        "una unidad dental")
+        `una ${appWords().room.one}`)
   const reasonOf = (block: ScheduleBlock) =>
     block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
 
@@ -461,23 +462,23 @@ function AvailabilityPage() {
           <div className="grid gap-4 lg:grid-cols-2">
             <section className={CARD}>
               <CardHead
-                title="Unidades dentales"
+                title={upperFirst(appWords().room.many)}
                 action={
                   canConfigure ? (
                     <Button variant="outline" size="sm" onClick={() => setRoomForm("new")}>
                       <Plus aria-hidden />
-                      Añadir unidad dental
+                      Añadir {appWords().room.one}
                     </Button>
                   ) : null
                 }
               />
               {roomsQuery.isError && rooms === undefined ? (
-                <CardError what="las unidades dentales" onRetry={() => void roomsQuery.refetch()} />
+                <CardError what={`las ${appWords().room.many}`} onRetry={() => void roomsQuery.refetch()} />
               ) : rooms === undefined ? (
                 <Skeleton className="h-9 w-full" />
               ) : rooms.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Esta sede aún no tiene unidades dentales: sin al menos una no se puede reservar.
+                  Esta sede aún no tiene {appWords().room.many}: sin al menos una no se puede reservar.
                 </p>
               ) : (
                 <>
@@ -527,7 +528,7 @@ function AvailabilityPage() {
                   </ul>
                   {activeRooms.length === 0 ? (
                     <p className="text-sm font-medium text-warning">
-                      Ninguna unidad dental está activa: sin al menos una no se puede reservar.
+                      Ninguna {appWords().room.one} está activa: sin al menos una no se puede reservar.
                     </p>
                   ) : null}
                 </>
@@ -646,7 +647,7 @@ function AvailabilityPage() {
           key={roomForm === "new" ? "new" : roomForm.id}
           branchId={resources.branchId}
           branchName={resources.branchName}
-          suggestedName={`Unidad dental ${(rooms?.length ?? resources.rooms.length) + 1}`}
+          suggestedName={`${upperFirst(appWords().room.one)} ${(rooms?.length ?? resources.rooms.length) + 1}`}
           room={roomForm === "new" ? undefined : { id: roomForm.id, name: roomForm.name }}
           onClose={() => setRoomForm(null)}
           onSaved={async () => {
@@ -702,16 +703,17 @@ function AvailabilityPage() {
 
 /** Lo que pasa al desactivar una unidad dental, con sus citas por delante y si es la última activa. */
 function roomConsequence(room: RoomSetting, activeCount: number): string {
+  const word = appWords().room.one
   const parts = ["No se podrán reservar citas nuevas en ella. Puedes reactivarla cuando quieras."]
   if (room.upcomingAppointments === 1) {
-    parts.push("Tiene 1 cita por venir: sigue en esta unidad dental y no se mueve sola.")
+    parts.push(`Tiene 1 cita por venir: sigue en esta ${word} y no se mueve sola.`)
   } else if (room.upcomingAppointments > 1) {
     parts.push(
-      `Tiene ${room.upcomingAppointments} citas por venir: siguen en esta unidad dental y no se mueven solas.`,
+      `Tiene ${room.upcomingAppointments} citas por venir: siguen en esta ${word} y no se mueven solas.`,
     )
   }
   if (activeCount <= 1)
-    parts.push("Es la única unidad dental activa de la sede: sin una no se puede reservar.")
+    parts.push(`Es la única ${word} activa de la sede: sin una no se puede reservar.`)
   return parts.join(" ")
 }
 

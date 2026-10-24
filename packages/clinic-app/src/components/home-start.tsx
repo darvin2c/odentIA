@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
 import { ADMIN_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../lib/agent-names"
 import type { WorkspaceHome } from "../lib/workspace"
+import { appWords } from "../lib/product-words"
 
 /**
  * Los pasos de una clínica nueva; solo los recibe quien puede configurarla. El
@@ -12,7 +13,7 @@ import type { WorkspaceHome } from "../lib/workspace"
 function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>, receptionName = RECEPTION_DEFAULT_NAME) {
   return [
     { title: "Definir horarios", description: "Indica cuándo atiende cada profesional.", href: "/settings/availability", done: setup.availability },
-    { title: "Preparar una unidad dental", description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.rooms },
+    { title: `Preparar una ${appWords().room.one}`, description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.rooms },
     { title: "Registrar un paciente", description: "Busca primero para evitar fichas duplicadas.", href: "/people", done: setup.patients },
     ...(setup.agent === undefined
       ? []

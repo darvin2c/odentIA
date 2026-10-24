@@ -306,3 +306,23 @@ it("ciclo de vida: quien invitó a otra cuenta no se borra ni pierde su invitaci
   expect(rows).toHaveLength(1)
   expect(rows[0]?.inviterId).toBe("t-invitador")
 })
+
+it("alta asistida de latidIA: la clínica nace médica y la invitación nombra el rol como en su producto", async () => {
+  const created = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, {
+      orgName: "Consultorio San Martín",
+      slug: "t-alta-latidia",
+      email: "t-latidia@example.test",
+      countryCode: "PE",
+      product: "medical",
+    }),
+  )
+  const [pending] = await listMyInvitations(ownerDb, "t-latidia@example.test")
+  expect(pending).toMatchObject({ id: created.invitationId, product: "medical" })
+  // Sin decirlo, odentIA, como siempre.
+  const dental = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Clínica Sonríe", slug: "t-alta-odentia", email: "t-odentia@example.test", countryCode: "PE" }),
+  )
+  const [own] = await listMyInvitations(ownerDb, "t-odentia@example.test")
+  expect(own).toMatchObject({ id: dental.invitationId, product: "dental", roleLabel: "Propietario" })
+})

@@ -3,7 +3,6 @@ import {
   ORG_ROLES,
   type OrgRole,
   ROLE_DESCRIPTIONS,
-  ROLE_LABELS,
 } from "@odentia/auth/permissions"
 import {
   Badge,
@@ -41,6 +40,7 @@ import { ChoiceSelect } from "../../components/ui/choice-select"
 import { authClient } from "../../lib/auth-client"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
 import { useMyRole, usePermission } from "../../lib/crm"
+import { appRoleLabel } from "../../lib/product-words"
 import {
   fetchProfessionalProfiles,
   type ProfessionalProfile,
@@ -75,7 +75,7 @@ const inviteSchema = z.object({
 })
 
 function roleLabel(role: string): string {
-  return (ROLE_LABELS as Record<string, string>)[role] ?? role
+  return appRoleLabel(role)
 }
 
 function roleDescription(role: string): string {

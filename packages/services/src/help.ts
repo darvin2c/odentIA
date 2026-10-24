@@ -19,6 +19,7 @@ import {
 } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { receptionName } from "./agent-names.js"
+import { roomWord } from "./locale.js"
 
 /* ---------- Ayuda de odentIA: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
@@ -100,7 +101,10 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
   const total = async (query: Promise<Array<{ total: number }>>) => Number((await query)[0]?.total ?? 0)
   if (topic.id === "agenda" || topic.id === "disponibilidad") {
     const rooms = await total(tx.select({ total: count() }).from(scheduleRoom).where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.isActive, true))))
-    if (rooms === 0) out.push({ text: "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.", ...at("disponibilidad") })
+    if (rooms === 0) {
+      const room = (await roomWord(tx, orgId)).one
+      out.push({ text: `No hay ninguna ${room} creada. Sin ${room} no se puede reservar una cita.`, ...at("disponibilidad") })
+    }
     // Solo el vigente: cambiar un horario deja cerrado el anterior (ADR 0060), y ese ya no reserva nada.
     const schedules = await total(
       tx.select({ total: count() }).from(professionalSchedule).where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true))),

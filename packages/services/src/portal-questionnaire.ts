@@ -1,3 +1,4 @@
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
@@ -7,6 +8,7 @@ import { and, desc, eq, isNull } from "drizzle-orm"
 import { assertAnswers, assertFormSchema, type FormSchemaDef } from "./clinical-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
+import { orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -191,7 +193,11 @@ async function saveQuestionnaire(
       ? existing
       : null
   if (existing?.submittedAt && !open && existing.templateId === template.id && existing.status === "borrador")
-    throw new ServiceError("ALREADY_SUBMITTED", 409, "Ya enviaste este cuestionario; tu odontólogo lo revisará")
+    throw new ServiceError(
+      "ALREADY_SUBMITTED",
+      409,
+      `Ya enviaste este cuestionario; tu ${productWords(await orgProduct(tx, who.orgId)).clinician.one} lo revisará`,
+    )
   const now = new Date()
   let id: string
   if (open) {

@@ -13,6 +13,8 @@ import {
   getProfessionalSchedule,
   listAppointments,
   listRooms,
+  roomNotFound,
+  roomWord,
   listScheduleBlocks,
   listScheduleResources,
   moveAppointment,
@@ -127,6 +129,8 @@ const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
 
 /** Agenda: recursos, huecos, horarios y bloqueos. */
 export function createAgendaRoute(deps: CrmDeps) {
+  /** Lo que se reserva, con la palabra del producto de la clínica, para los mensajes de la ruta. */
+  const roomWordOf = (orgId: string) => withOrgContext(deps.db, orgId, (tx) => roomWord(tx, orgId))
   const app = new Hono()
 
   app.get("/resources", async (c) => {
@@ -164,7 +168,7 @@ export function createAgendaRoute(deps: CrmDeps) {
   app.post("/rooms", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", `No tienes permiso para configurar ${(await roomWordOf(orgId)).many}`), 403)
     }
     const parsed = roomInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -177,7 +181,7 @@ export function createAgendaRoute(deps: CrmDeps) {
   app.get("/rooms", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la configuración de unidades dentales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", `No tienes permiso para ver la configuración de ${(await roomWordOf(orgId)).many}`), 403)
     }
     const branchId = c.req.query("branchId")
     if (!branchId || !z.uuid().safeParse(branchId).success) {
@@ -192,11 +196,11 @@ export function createAgendaRoute(deps: CrmDeps) {
   app.patch("/rooms/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", `No tienes permiso para configurar ${(await roomWordOf(orgId)).many}`), 403)
     }
     const id = c.req.param("id")
     if (!z.uuid().safeParse(id).success) {
-      return c.json(errorBody(c, "NOT_FOUND", "Unidad dental no encontrada"), 404)
+      return c.json(errorBody(c, "NOT_FOUND", roomNotFound((await roomWordOf(orgId)).one).message), 404)
     }
     const parsed = roomPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
