@@ -79,6 +79,7 @@ async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bo
     .values({
       organizationId: orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: input.talkedAt,
       contactId,
       detail: "Atendió una conversación por WhatsApp",
@@ -119,6 +120,7 @@ async function filler(orgId: string, count: number, from: Date) {
     await ownerDb.insert(saasAction).values({
       organizationId: orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: new Date(from.getTime() + index * 3_600_000),
       contactId: randomUUID(),
       detail: "Atendió una conversación por WhatsApp",

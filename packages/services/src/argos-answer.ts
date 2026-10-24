@@ -7,25 +7,25 @@
  *
  * Cada pregunta deja una fila en `report_question` con la consulta que corrió
  * y cómo terminó, nunca el texto (decisión D2). Las que pasaron por el modelo
- * cuentan para `REPORT_DAILY_LIMIT`; las que fallaron por el modelo o la base
- * no (decisión D6: el costo lo asume odentIA).
+ * gastan de las preguntas del mes de la clínica (ADR 0085); las que fallaron
+ * por el modelo o la base no (decisión D6).
  */
 import type { Db } from "@odentia/db"
 import { reportQuestion } from "@odentia/db/schema/reports"
-import { and, count, eq, gte, ne } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
 import type { ArgosNames } from "./argos-figures.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
-import { REPORT_DAILY_LIMIT } from "./report-ask.js"
+import { ServiceError } from "./errors.js"
+import { ensureArgosQuestion } from "./saas-included.js"
 import { type ReportQuery, reportScope } from "./report-scope.js"
 
 export const ARGOS_WORDS = {
   // Se ven en Reportes y en el buscador: no nombran una pantalla.
   apagado: "Argos está apagado. Enciéndelo para preguntarle.",
-  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de las últimas 24 horas. En unas horas sigo respondiendo.`,
+  tope: "Usaste las preguntas de este mes. Pide a quien administra la clínica que sume más en Plan y pagos.",
   sinModelo: "Ahora no puedo leer preguntas. Prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
   tiempo: "La consulta tardaba más de 3 segundos y la detuve. Prueba con un periodo más corto.",
@@ -36,25 +36,26 @@ export const ARGOS_WORDS = {
 
 export type ArgosOutcome = "respondida" | "parcial" | "no_sabe" | "ayuda" | "otro" | "no_pudo"
 
-/** Lo que hace falta antes de llamar a los modelos: si Argos está encendido, si queda tope y el formato de la clínica. */
-export async function prepareArgosQuestion(
-  tx: Db,
-  orgId: string,
-  now: Date = new Date(),
-): Promise<{ enabled: boolean; roomLeft: number; zone: OrgLocale }> {
+/** Lo que hace falta antes de llamar a los modelos: si Argos está encendido y el formato de la clínica. */
+export async function prepareArgosQuestion(tx: Db, orgId: string): Promise<{ enabled: boolean; zone: OrgLocale }> {
   const { enabled } = await getAdminSettings(tx, orgId)
-  const [row] = await tx
-    .select({ total: count() })
-    .from(reportQuestion)
-    .where(
-      and(
-        eq(reportQuestion.organizationId, orgId),
-        eq(reportQuestion.usedModel, true),
-        ne(reportQuestion.outcome, "no_pudo"),
-        gte(reportQuestion.createdAt, new Date(now.getTime() - 86_400_000)),
-      ),
-    )
-  return { enabled, roomLeft: Math.max(0, REPORT_DAILY_LIMIT - Number(row?.total ?? 0)), zone: await getOrgLocale(tx, orgId) }
+  return { enabled, zone: await getOrgLocale(tx, orgId) }
+}
+
+/**
+ * Antes de que una pregunta del negocio pase por el modelo: si quedan
+ * preguntas del mes, sigue (con «Sumar solas», suma un paquete); si no,
+ * devuelve lo que dice Argos para pedir permiso de sumar más (ADR 0085).
+ * Sin tope diario: el límite es lo que la clínica decide.
+ */
+export async function argosQuestionLimit(tx: Db, orgId: string, now: Date = new Date()): Promise<string | null> {
+  try {
+    await ensureArgosQuestion(tx, orgId, now)
+    return null
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "ARGOS_QUESTIONS_USED") return error.message
+    throw error
+  }
 }
 
 /**

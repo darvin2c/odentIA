@@ -14,7 +14,7 @@ import { patient, patientPayment } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { reportQuestion } from "@odentia/db/schema/reports"
-import { getArgosAnswer, getOrgLocale, prepareArgosQuestion, secretsKeyFromEnv, updateAdminSettings } from "@odentia/services"
+import { getArgosAllowance, getArgosAnswer, getOrgLocale, secretsKeyFromEnv, updateAdminSettings } from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -294,12 +294,12 @@ describe("Argos sobre las vistas", () => {
     expect(await ask(twice, "¿Cuánto cobramos?")).toMatchObject({ kind: "sin_modelo" })
   })
 
-  it("si el modelo no responde lo dice, y ese intento no cuenta para el tope", async () => {
-    const before = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
+  it("si el modelo no responde lo dice, y ese intento no gasta preguntas del mes", async () => {
+    const before = await withOrgContext(appDb, ORG, (tx) => getArgosAllowance(tx, ORG))
     const answer = await ask(new ScriptedModel([new Error("proveedor caído")]), "¿Cuánto cobramos?")
     expect(answer).toMatchObject({ kind: "sin_modelo" })
-    const after = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
-    expect(after.roomLeft).toBe(before.roomLeft)
+    const after = await withOrgContext(appDb, ORG, (tx) => getArgosAllowance(tx, ORG))
+    expect(after.used).toBe(before.used)
     expect(await lastQuestion()).toMatchObject({ outcome: "no_pudo" })
   })
 
@@ -338,18 +338,18 @@ describe("Argos sobre las vistas", () => {
     expect(String(wrongPeriod.calls[1]?.at(-1)?.content)).toContain("«la_quincena» no sirve")
   })
 
-  it("cambiar el periodo vuelve a correr la misma consulta sin el modelo ni el tope; solo quien preguntó", async () => {
+  it("cambiar el periodo vuelve a correr la misma consulta sin el modelo ni gastar preguntas; solo quien preguntó", async () => {
     const model = new ScriptedModel([COBRADO_MES])
     const answer = await ask(model, "¿Cuánto cobramos comparado con el mes anterior?")
     if (answer.kind !== "respuesta") throw new Error(answer.kind)
-    const before = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
+    const before = await withOrgContext(appDb, ORG, (tx) => getArgosAllowance(tx, ORG))
     const rerun = await rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { period: "mes_pasado" } })
     expect(model.calls).toHaveLength(1)
     expect(rerun.period).toMatchObject({ value: "mes_pasado", compare: "anterior", label: expect.not.stringContaining("hasta hoy") })
     expect(rerun.text).toMatch(/^En .+ se cobró S\/\s?0\.00; en .+, S\/\s?0\.00\.$/)
     expect(rerun.how).toMatch(/^Lo cobrado en .+, contra lo cobrado en .+\.$/)
-    const after = await withOrgContext(appDb, ORG, (tx) => prepareArgosQuestion(tx, ORG))
-    expect(after.roomLeft).toBe(before.roomLeft)
+    const after = await withOrgContext(appDb, ORG, (tx) => getArgosAllowance(tx, ORG))
+    expect(after.used).toBe(before.used)
     await expect(rerunArgos(appDb, { orgId: ORG, userId: "otra_persona", memberRole: "owner", questionId: answer.questionId, choice: { period: "mes_pasado" } })).rejects.toMatchObject({ status: 404 })
     await expect(rerunArgos(appDb, { orgId: ORG, userId: OWNER, memberRole: "owner", questionId: answer.questionId, choice: { period: "2999-01" } })).rejects.toMatchObject({ status: 400 })
   })

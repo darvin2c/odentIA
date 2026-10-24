@@ -3,7 +3,7 @@
  * en las carpetas `dental/` de los servicios, el agente, la base y la API, y en
  * la app de odentIA; cada producto se conecta con lo común solo por
  * `products.ts` (servicios y API) y, en las pantallas, por `productUi()` de
- * `@odentia/clinic-app` (ADR 0085). Ningún código de lo común importa lo dental: solo las pruebas de la
+ * `@odentia/clinic-app` (ADR 0086). Ningún código de lo común importa lo dental: solo las pruebas de la
  * lista de abajo, que prueban lo común con odentIA como ejemplo. Un archivo
  * nuevo que lo necesite es una señal de que falta un punto de extensión del
  * producto, no de agregarlo aquí.

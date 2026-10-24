@@ -2,7 +2,7 @@ import { platformPathPermission } from "@odentia/auth/permissions"
 import { expect, it } from "vitest"
 
 // Que cada pantalla del árbol tenga su regla lo prueba cada app contra su árbol
-// (`lib/route-tree-checks.ts`, ADR 0085).
+// (`lib/route-tree-checks.ts`, ADR 0086).
 
 it("«Pendientes» la abre quien la abría como «Aprobaciones»: también quien solo decide por el agente", () => {
   // Recepción decide por el agente (`agent.decide`) sin supervisarlo (`agent.read`):

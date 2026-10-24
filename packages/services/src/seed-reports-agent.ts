@@ -30,7 +30,7 @@ import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-
 import { eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { addMonths, currentMonthIn, monthStart } from "./report-periods.js"
-import { discountedMicros } from "./saas-actions.js"
+import { CLIO_DETAIL, discountedMicros, planPrices, SOFI_DETAIL } from "./saas-actions.js"
 import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import { addMonth } from "./saas-invoicing.js"
 import { seedSaasBilling } from "./seed-saas-billing.js"
@@ -103,6 +103,7 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   if (!plan) throw new Error(`Falta el plan semilla ${ACTION_PLAN_CODE}`)
   const price = (micros: number | null) => (micros === null ? null : discountedMicros(micros, 0))
   const priced = (micros: number | null) => ({ currency: plan.currency, basePriceMicros: micros, priceMicros: price(micros), discountBps: 0 })
+  const prices = planPrices(plan)
 
   // --- La suscripción: prueba al empezar la historia y un mes por tramo -------------------
   const { timezone } = await getOrgLocale(tx, orgId)
@@ -163,9 +164,11 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
         contactId: reply.contact_id,
         conversationId: reply.conversation_id,
         channel: reply.channel,
-        detail: `Atendió una conversación por ${CHANNEL_NAME[reply.channel] ?? reply.channel}`,
+        // Tres de cada diez reservan, mueven o cancelan una cita; las demás preguntan (ADR 0085).
+        ...(mark(`tipo:${reply.contact_id}:${at.toISOString()}`) < 0.3
+          ? { tier: "gestiona", detail: `${SOFI_DETAIL.gestiona} por ${CHANNEL_NAME[reply.channel] ?? reply.channel}`, ...priced(prices.gestiona) }
+          : { tier: "informa", detail: `${SOFI_DETAIL.informa} por ${CHANNEL_NAME[reply.channel] ?? reply.channel}`, ...priced(prices.informa) }),
         dedupeKey: `conversacion:${reply.contact_id}:${at.toISOString()}`,
-        ...priced(plan.conversationMicros),
       })
     }
     const roll = mark(`pase:${reply.external_thread_id}`)
@@ -253,15 +256,19 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
       const share = from + (to - from) * Math.min(1, Math.max(0, (endedAt.getTime() - sinceAt.getTime()) / span))
       if (mark(`dictado:${professional.userId}:${endedAt.toISOString()}`) >= share) continue
       const name = names.get(professional.userId)
+      // Lo que dejó hecho Clío: una de cada cuatro arma el presupuesto, una de cada tres ordena la consulta (ADR 0085).
+      const roll = mark(`tipo:${row.id}`)
+      const tier = roll < 0.25 ? "completa" : roll < 0.6 ? "estandar" : "simple"
       consultations.push({
         organizationId: orgId,
         kind: "consulta",
         occurredAt: endedAt,
         contactId: row.contact_id,
         encounterId: row.id,
-        detail: name ? `Ordenó la consulta dictada por ${name}` : "Ordenó una consulta dictada",
+        tier,
+        detail: name ? `${CLIO_DETAIL[tier]} por ${name}` : CLIO_DETAIL[tier],
+        ...priced(prices[tier]),
         dedupeKey: `consulta:${row.id}`,
-        ...priced(plan.consultationMicros),
       })
     }
   }

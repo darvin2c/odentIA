@@ -51,7 +51,7 @@ import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { countRecoveredAppointment } from "./saas-actions.js"
+import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -922,6 +922,15 @@ export async function createAppointment(
     if (standing && startsAt.getTime() > Date.now()) {
       await advanceForAppointment(tx, orgId, { patientId: input.patientId, serviceId: service?.id ?? null, startsAt, source: input.source })
     }
+    // Reservó desde el enlace de Sofi: su conversación de esa ventana pasa a «Gestiona» (ADR 0085).
+    if (input.source === "enlace") {
+      const [self] = await tx
+        .select({ contactId: patientContact.contactId })
+        .from(patientContact)
+        .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, input.patientId), eq(patientContact.relationship, "self")))
+        .limit(1)
+      if (self) await refreshConversationTier(tx, orgId, { contactId: self.contactId, at: new Date() })
+    }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, created.id)
     return notice ? { ...item, notice } : item
@@ -1375,7 +1384,11 @@ export async function setAppointmentStatus(
     if (!updated) throw notFound("Cita")
     await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
     // El paciente asistió: si el Administrador lo recuperó, cuenta la cita (ADR 0031).
-    if (next === "atendida") await countRecoveredAppointment(tx, orgId, id, new Date())
+    // Si no, y la reservó Sofi, su conversación sube de «Gestiona» a «Agenda» (ADR 0085): nunca las dos.
+    if (next === "atendida") {
+      const at = new Date()
+      if (!(await countRecoveredAppointment(tx, orgId, id, at))) await countAgendaUpgrade(tx, orgId, id, at)
+    }
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     const notice =

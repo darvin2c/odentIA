@@ -97,7 +97,7 @@ async function lastMonth(db: Db, owner: OwnerFixture) {
 
   // Lo que contó el cobro: 60 conversaciones (las 58 primeras llenan el crédito), 2 consultas y la cita recuperada.
   const action = (kind: "conversacion" | "consulta" | "cita", at: Date, micros: number, detail: string, extra: Partial<typeof saasAction.$inferInsert> = {}) => ({
-    organizationId, kind, occurredAt: at, contactId: randomUUID(), detail, currency: "USD", basePriceMicros: micros, priceMicros: micros, discountBps: 0, dedupeKey: randomUUID(), ...extra,
+    organizationId, kind, tier: kind === "conversacion" ? "gestiona" : kind === "consulta" ? "completa" : null, occurredAt: at, contactId: randomUUID(), detail, currency: "USD", basePriceMicros: micros, priceMicros: micros, discountBps: 0, dedupeKey: randomUUID(), ...extra,
   })
   await db.insert(saasAction).values([
     ...Array.from({ length: 60 }, (_, index) => action("conversacion", new Date(inMonth(1, 2).getTime() + index * 3_600_000), 500_000, "Atendió una conversación por WhatsApp", { channel: "whatsapp" })),

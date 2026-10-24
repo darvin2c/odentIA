@@ -489,8 +489,8 @@ it("sin saldo de prueba los agentes se pausan: el caso pasa al equipo sin llamar
   await ownerDb.execute(sql`update saas_subscription set status = 'prueba', is_demo = false, trial_started_at = now() - interval '25 days',
     trial_ends_at = now() + interval '5 days', current_period_start = now() - interval '25 days', current_period_end = now() + interval '5 days'
     where organization_id = ${ORG}`)
-  await ownerDb.execute(sql`insert into saas_action (organization_id, kind, occurred_at, detail, currency, base_price_micros, price_micros, dedupe_key)
-    values (${ORG}, 'conversacion', now() - interval '1 hour', 'Atendió una conversación', 'USD', 1000000, 1000000, 'uso-pausa-1')`)
+  await ownerDb.execute(sql`insert into saas_action (organization_id, kind, tier, occurred_at, detail, currency, base_price_micros, price_micros, dedupe_key)
+    values (${ORG}, 'conversacion', 'gestiona', now() - interval '1 hour', 'Atendió una conversación', 'USD', 1000000, 1000000, 'uso-pausa-1')`)
   try {
     const model = new RecordingModel()
     const inbound = await ingest("tg:uso-pausa", "uso-pausa-1", "Hola, ¿tienen turno?")

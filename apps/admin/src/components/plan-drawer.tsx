@@ -39,7 +39,7 @@ export interface AdminPlan {
 }
 
 interface PriceCheck {
-  kind: "conversacion" | "consulta" | "cita"
+  kind: string
   baseMicros: number | null
   minimumMicros: number | null
   baseMultiple: number | null
@@ -47,7 +47,17 @@ interface PriceCheck {
   ok: boolean
 }
 
-const KIND_WORDS = { conversacion: "Conversación", consulta: "Consulta dictada y confirmada", cita: "Cita recuperada" } as const
+const KIND_WORDS: Record<string, string> = {
+  informa: "Conversación que informa",
+  gestiona: "Conversación que gestiona una cita",
+  agenda: "Conversación cuya cita se dio",
+  simple: "Consulta simple",
+  estandar: "Consulta estándar",
+  completa: "Consulta completa",
+  cita: "Cita recuperada",
+  preguntas: "Paquete de preguntas a Argos",
+  almacenamiento: "GB extra",
+}
 
 /** «0.50» → 500000 millonésimas; null si está vacío o no es un importe. */
 function toMicros(text: string): number | null {

@@ -6,7 +6,7 @@ import viteReact from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
 /**
- * Las páginas comunes viven en @odentia/clinic-app (ADR 0085), una sola vez para
+ * Las páginas comunes viven en @odentia/clinic-app (ADR 0086), una sola vez para
  * cada producto. La app pone su raíz (nombre, ícono y estilos) y sus propias
  * páginas dentro de la zona con sesión: las de `src/routes/dental`.
  */

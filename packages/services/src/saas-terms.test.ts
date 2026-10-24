@@ -55,6 +55,7 @@ async function spent(orgId: string, cents: number) {
     Array.from({ length: count }, (_, index) => ({
       organizationId: orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: new Date(Date.now() - (index + 1) * 60_000),
       contactId: randomUUID(),
       detail: "Atendió una conversación por WhatsApp",
@@ -92,7 +93,7 @@ beforeAll(async () => {
 describe("precio mínimo", () => {
   it("ningún precio, al descuento máximo, queda bajo el doble de su peor costo", async () => {
     const checks = checkActionPricing({ conversationMicros: 500_000, consultationMicros: 400_000, recoveryMicros: 4_000_000, maxDiscountBps: 6000, currency: "USD" })
-    expect(checks.find((item) => item.kind === "conversacion")).toMatchObject({ minimumMicros: 200_000, baseMultiple: 12.5, minimumMultiple: 5, ok: true })
+    expect(checks.find((item) => item.kind === "gestiona")).toMatchObject({ minimumMicros: 200_000, baseMultiple: 8.3, minimumMultiple: 3.3, ok: true })
     await expect(
       createSaasPlan(ownerDb, admin.userId, { code: "barato", name: "Barato", currency: "USD", priceCents: 2900, conversationMicros: 100_000, maxDiscountBps: 6000 }),
     ).rejects.toMatchObject({ code: "SAAS_PRICE_BELOW_FLOOR" })
@@ -104,8 +105,8 @@ describe("precio mínimo", () => {
 
   it("el peor caso del plan deja margen a precio base y al mínimo", () => {
     expect(planMarginScenario({ priceCents: 2900, creditCents: 2900, conversationMicros: 500_000, maxDiscountBps: 6000, currency: "USD" })).toEqual({
-      atBase: 86,
-      atMinimum: 74,
+      atBase: 82,
+      atMinimum: 64,
     })
   })
 

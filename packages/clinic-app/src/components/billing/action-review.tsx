@@ -68,6 +68,8 @@ const KIND_WORDS: Record<SaasActionKind, string> = {
   conversacion: "Conversación",
   consulta: "Consulta dictada",
   cita: "Cita recuperada",
+  preguntas: "Paquete de preguntas",
+  almacenamiento: "Almacenamiento",
 }
 
 const NOTE_MAX = 1000

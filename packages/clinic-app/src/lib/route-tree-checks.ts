@@ -2,7 +2,7 @@ import { platformPathPermission } from "@odentia/auth/permissions"
 
 /**
  * Comprobaciones del árbol de rutas que arma cada app con las páginas comunes
- * (ADR 0085): la prueba de cada app las corre contra su `routeTree.gen.ts`.
+ * (ADR 0086): la prueba de cada app las corre contra su `routeTree.gen.ts`.
  */
 
 export interface TreeRoute {
