@@ -5,6 +5,7 @@ import type {
 } from "@odentia/clinical"
 import { Lock } from "lucide-react"
 import { ChoiceButtons } from "../choice-buttons"
+import { productUi } from "../../product/product-ui"
 
 /**
  * Qué se le pide al paciente, dato por dato, con tres botones que dicen lo que
@@ -63,6 +64,14 @@ const DENTAL: PickerItem[] = [
     label: "Hábitos",
     hint: "Fumar, morderse las uñas, respirar por la boca…",
   },
+]
+/** Lo que pregunta latidIA (issue 229): la lactancia, junto al embarazo, y los hábitos. */
+const MEDICAL_PERSONAL: PickerItem[] = [
+  { keys: ["medical.lactancia"], label: "Lactancia", hint: "Solo a mujeres de 12 a 55 años" },
+]
+const MEDICAL_HABITS: PickerItem[] = [
+  { keys: ["medical.tabaco"], label: "Si fuma" },
+  { keys: ["medical.alcohol"], label: "Si toma alcohol" },
 ]
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -166,6 +175,8 @@ export function RegistrationFieldsPicker({
   /** «Procedencia» solo en clínicas de Perú. */
   showOrigin: boolean
 }) {
+  // Lo de cada producto: «Su historia dental» en odentIA; la lactancia y los hábitos en latidIA.
+  const product = productUi().product
   return (
     <div className="flex flex-col gap-7">
       <dl className="grid gap-2 rounded-2xl bg-muted/60 p-4 text-sm sm:grid-cols-3">
@@ -232,21 +243,33 @@ export function RegistrationFieldsPicker({
       <Group
         title="Otros antecedentes"
         help="Llegan a su entrevista de salud. Nunca son obligatorios."
-        items={PERSONAL}
+        items={product === "medical" ? [...PERSONAL, ...MEDICAL_PERSONAL] : PERSONAL}
         fields={fields}
         options={TWO}
         onMode={onMode}
         disabled={disabled}
       />
-      <Group
-        title="Su historia dental"
-        help="Ayuda a preparar la primera visita."
-        items={DENTAL}
-        fields={fields}
-        options={TWO}
-        onMode={onMode}
-        disabled={disabled}
-      />
+      {product === "dental" ? (
+        <Group
+          title="Su historia dental"
+          help="Ayuda a preparar la primera visita."
+          items={DENTAL}
+          fields={fields}
+          options={TWO}
+          onMode={onMode}
+          disabled={disabled}
+        />
+      ) : (
+        <Group
+          title="Sus hábitos"
+          help="Llegan a sus antecedentes. Nunca son obligatorios."
+          items={MEDICAL_HABITS}
+          fields={fields}
+          options={TWO}
+          onMode={onMode}
+          disabled={disabled}
+        />
+      )}
       <Group
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."

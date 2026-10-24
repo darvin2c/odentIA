@@ -23,6 +23,7 @@ import { ToothSiteSelector } from "../../components/dental/tooth-site-selector"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
 import type { ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { dentalEncounter } from "./encounter"
+import { dentalHealth } from "./health"
 
 /** El «dónde» de odentIA: la pieza en FDI (ISO 3950) y sus caras. */
 const dentalSite: ProductSiteUi = {
@@ -142,4 +143,6 @@ export const dentalUi: ProductUi = {
     usePapers: useSignedOdontogramPapers,
   },
   encounter: dentalEncounter,
+  health: dentalHealth,
+  summary: { ClinicalCards: () => null },
 }

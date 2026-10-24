@@ -1,4 +1,4 @@
-import { CORE_VITAL_KEYS, type VitalSignKey } from "@odentia/clinical"
+import { CORE_VITAL_KEYS, type RegistrationAnswers, type VitalSignKey } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
@@ -177,9 +177,41 @@ export const NO_EXAMINATION: ProductExamination = {
   observations: () => [],
 }
 
+/** Lo que la persona declaró de su salud en el registro (`registrationAnswersSchema.health`). */
+export type DeclaredHealth = NonNullable<RegistrationAnswers["health"]>
+
+/**
+ * La «Entrevista de salud» de la ficha (`patient_anamnesis.answers`): lo común
+ * (personales y familiares) y lo de cada producto (odentIA: sus antecedentes
+ * odontológicos; latidIA: embarazo y lactancia con fecha, gineco-obstétricos,
+ * hábitos y vacunas, issue 229).
+ */
+export interface ProductInterview {
+  /** Valida y limpia lo del producto; lo común queda igual. Lanza `validation`. `today`: el día de la clínica. */
+  check(answers: Record<string, unknown>, today: string): Record<string, unknown>
+  /** Lo que la persona declaró en su registro, ya con las claves de la entrevista. */
+  declared(health: DeclaredHealth, today: string): Record<string, unknown>
+}
+
+/** Lo que se respondió de un grupo, sin lo vacío. */
+export function answeredOf(group: Record<string, unknown> | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(group ?? {}).filter(([, value]) => value !== "" && value !== undefined))
+}
+
+/** La entrevista común: los antecedentes personales que declaró, con sus mismas claves. */
+export const COMMON_INTERVIEW: ProductInterview = {
+  check: (answers) => answers,
+  declared: (health) => {
+    const personal = answeredOf(health.personal)
+    return Object.keys(personal).length ? { antecedentesPersonales: personal } : {}
+  },
+}
+
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
+  /** La «Entrevista de salud»: lo del producto. */
+  interview: ProductInterview
   /** El examen físico de la atención. */
   examination: ProductExamination
   /** Los signos vitales que registra la atención (los ocho de siempre; latidIA suma dos). */
@@ -269,6 +301,7 @@ export interface ProductHooks {
 /** Un producto que no agrega nada en ningún momento. */
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
+  interview: COMMON_INTERVIEW,
   examination: NO_EXAMINATION,
   vitals: CORE_VITAL_KEYS,
   catalog: NO_CATALOG,

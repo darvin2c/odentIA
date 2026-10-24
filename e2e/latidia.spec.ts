@@ -196,12 +196,12 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await context.close()
 })
 
-test("latidIA: la ficha médica con el examen por sistemas y los signos vitales en el tiempo", async ({
+test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, los antecedentes y la lista de problemas", async ({
   browser,
   fixtureDb,
   passwordHash,
 }, testInfo) => {
-  test.setTimeout(180_000)
+  test.setTimeout(240_000)
   const vela = await createVela(fixtureDb, passwordHash)
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
@@ -331,5 +331,39 @@ test("latidIA: la ficha médica con el examen por sistemas y los signos vitales 
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
   await shot("signos-vitales-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // Antecedentes (entrega 5b): embarazo y lactancia con la fecha en que se dijo, hábitos y vacunas; nada de la boca.
+  const personId = person.body.data.personId
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${personId}?tab=antecedentes`))
+  await page.getByRole("button", { name: "Registrar antecedentes" }).first().click()
+  const drawer = page.getByRole("dialog", { name: "Registrar antecedentes" })
+  await expect(drawer.getByText("Odontológicos y hábitos")).toHaveCount(0)
+  await drawer.getByRole("group", { name: "Embarazo" }).getByRole("button", { name: "Sí" }).click()
+  await drawer.getByLabel("Semanas ese día").fill("10")
+  await drawer.getByRole("group", { name: "Tabaco" }).getByRole("button", { name: "Fuma" }).click()
+  await drawer.getByLabel("Cigarrillos al día").fill("5")
+  await drawer.getByRole("button", { name: "Agregar vacuna" }).click()
+  await drawer.getByLabel("Vacuna", { exact: true }).fill("Influenza")
+  await shot("antecedentes-formulario")
+  await drawer.getByRole("button", { name: "Guardar antecedentes" }).click()
+  await expect(drawer).toBeHidden()
+  const history = page.getByRole("region", { name: "Antecedentes médicos" })
+  await expect(history.getByText(/^Embarazada, 10 semanas \(registrado el \d{2}\/\d{2}\/\d{4}\)$/)).toBeVisible()
+  await expect(history.getByText("Hábitos: tabaco: fuma, 5 al día")).toBeVisible()
+  await expect(history.getByText("Vacunas: Influenza")).toBeVisible()
+  await shot("antecedentes")
+
+  // En el resumen, la lista de problemas empieza por el embarazo: cambia lo que se receta.
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${personId}`))
+  const problems = page.getByRole("region", { name: "Lista de problemas" })
+  await expect(problems.getByText(/^Embarazada, 10 semanas/)).toBeVisible()
+  await expect(problems.getByText(/^Sin diagnósticos activos\./)).toBeVisible()
+  await shot("resumen")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("resumen-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("resumen-oscuro")
   await context.close()
 })

@@ -148,7 +148,10 @@ function hasMeaningfulHealth(health: NonNullable<RegistrationAnswers["health"]> 
   for (const group of [health.allergies, health.conditions, health.medications]) {
     if (group && group.state !== "unanswered") return true
   }
-  return Object.values(health.dental ?? {}).some((v) => v !== undefined && v !== "")
+  // Lo de la entrevista también cuenta: un registro que solo dice el embarazo no se pierde.
+  return [health.personal, health.dental, health.medical].some((group) =>
+    Object.values(group ?? {}).some((v) => v !== undefined && v !== ""),
+  )
 }
 
 /**

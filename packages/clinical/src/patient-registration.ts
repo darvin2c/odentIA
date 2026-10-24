@@ -69,7 +69,9 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  *   de la ficha con las mismas claves y solo pueden ser opcionales.
  *
  * Un dato con `product` es de ese producto (ADR 0079): «Tu boca» (`dental.*`)
- * solo lo preguntan las clínicas dentales.
+ * solo lo preguntan las clínicas dentales; la lactancia y los hábitos
+ * (`medical.*`), los consultorios de latidIA (issue 229, decisión 13), que
+ * guardan el embarazo con la fecha del registro.
  *
  * Solo entran aquí datos que el paciente sabe responder solo y que la ficha ya
  * guarda. Lo que se pregunta junto (la referencia con la dirección, el
@@ -106,6 +108,9 @@ export const REGISTRATION_FIELDS = [
   { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
   { key: "personal.hospitalizaciones", label: "Hospitalizaciones", step: "personales", group: "health" },
   { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
+  { key: "medical.lactancia", label: "Lactancia", step: "personales", group: "health", product: "medical" },
+  { key: "medical.tabaco", label: "Tabaco", step: "habitos", group: "health", product: "medical" },
+  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", product: "medical" },
   { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", product: "dental" },
   { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", product: "dental" },
   { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", product: "dental" },
@@ -126,7 +131,10 @@ export const CENSUS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGIS
  * operaciones, historia dental), que nunca impiden registrar.
  */
 export const OPTIONAL_ONLY_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
-  .filter((field) => field.group === "census" || field.step === "personales" || field.step === "odontologicos")
+  .filter(
+    (field) =>
+      field.group === "census" || field.step === "personales" || field.step === "odontologicos" || field.step === "habitos",
+  )
   .map((field) => field.key)
 
 export interface RegistrationConfig {
@@ -217,6 +225,11 @@ export const registrationAnswersSchema = z.strictObject({
       ansiedadDental: z.enum(["ninguna", "leve", "moderada", "alta"]).optional(),
       cepilladosAlDia: z.number().int().min(0).max(10).optional(), hiloDental: z.boolean().optional(),
       bruxismo: z.boolean().optional(), habitos: z.array(text(100).min(1)).max(10).optional(),
+    }).optional(),
+    /** Lo que pregunta latidIA: va a «Embarazo y lactancia» y «Hábitos» de su entrevista. */
+    medical: z.strictObject({
+      lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
+      alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
     }).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
@@ -371,6 +384,7 @@ export function validateDemographics(
 function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
   const key = field.key
   if (key.startsWith("dental.")) return data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
+  if (key.startsWith("medical.")) return data.health?.medical?.[key.slice(8) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["medical"]>]
   if (key.startsWith("personal.")) return data.health?.personal?.[key.slice(9) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["personal"]>]
   if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
   return data.demographics[key as keyof RegistrationDemographics]
@@ -437,8 +451,8 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
 
 /**
  * Si el registro de esta clínica pregunta ese dato: «Procedencia» solo en
- * clínicas de Perú y lo de un producto (`dental.*`, «Tu boca») solo en las de
- * ese producto.
+ * clínicas de Perú y lo de un producto (`dental.*`, «Tu boca»; `medical.*`)
+ * solo en las de ese producto.
  */
 export function registrationFieldAsked(
   config: Pick<RegistrationConfig, "fields">,
