@@ -3,7 +3,7 @@
  * impuesto frente a lo que nos costó, por agente y tipo, con la alarma
  * interna y la Fundadora sin uso. Solo lo ve odentIA (rol admin).
  */
-import { Badge, Button, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { Badge, Button, ScrollArea, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -215,7 +215,7 @@ function CostTable({ data }: { data: ClinicCostMargin }) {
     </Fragment>
   )
   return (
-    <div className="overflow-x-auto">
+    <ScrollArea horizontal className="max-w-full">
       <table className="w-full min-w-[34rem] text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr>
@@ -271,7 +271,7 @@ function CostTable({ data }: { data: ClinicCostMargin }) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </ScrollArea>
   )
 }
 
@@ -452,7 +452,7 @@ export function CostMarginOverviewSection() {
           </TabsList>
         </Tabs>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <ScrollArea horizontal className="max-w-full rounded-xl border bg-card">
         <table className="w-full min-w-[40rem] text-sm">
           <thead className="text-xs text-muted-foreground">
             <tr>
@@ -511,7 +511,7 @@ export function CostMarginOverviewSection() {
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollArea>
       <p className="text-xs text-muted-foreground">
         La alarma avisa cuando la IA de una clínica pasa del 20 % de lo que paga o de USD 30 al mes.
         Nunca corta nada: es para revisar si hay un error o un abuso. El servidor y los gastos fijos
