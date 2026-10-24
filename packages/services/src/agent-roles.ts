@@ -240,7 +240,9 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       ...ADMIN_LINES.map((line) => ({
         id: line.key,
         label: line.name,
-        description: `${line.trigger(line.defaultDays)}: ${line.agent ? `${AGENT_NAMES.recepcion} ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
+        // La ficha es una sola para los dos productos: dice los meses de odentIA
+        // (la página del Administrador de cada clínica dice los suyos).
+        description: `${line.trigger(line.defaultDays, 6)}: ${line.agent ? `${AGENT_NAMES.recepcion} ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
         fixed: false,
         tools: [],
       })),

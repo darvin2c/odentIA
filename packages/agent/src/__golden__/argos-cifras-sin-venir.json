@@ -1,0 +1,14 @@
+[
+  {
+    "sql": "with ahora as (select coalesce(sum(v), 0) as v from (select 1 as v from pacientes where not archivado and ultima_atencion_en < now() - interval '6 months' and proxima_cita is null and not presupuesto_esperando and not control_pendiente) as filas) select ahora.v as pacientes from ahora",
+    "name": "Sin venir hace más de 6 meses",
+    "describes": "Pacientes que dejaron de venir: más de 6 meses sin una cita atendida y sin cita, presupuesto ni control pendiente, hoy.",
+    "how": "Pacientes no archivados con más de 6 meses desde su última cita atendida, sin cita por venir, presupuesto esperando ni control pendiente."
+  },
+  {
+    "sql": "with ahora as (select count(distinct paciente_id) as v from (select inicio as t, dia, sede, profesional, paciente_id from (select inicio, dia, sede, profesional, paciente_id, lag(inicio) over (partition by paciente_id order by inicio) as anterior from citas where estado = 'atendida') as c where anterior < inicio - interval '6 months') as filas where t >= :desde and t < :hasta and (:sede is null or sede = :sede)) select ahora.v as pacientes from ahora",
+    "name": "Pacientes reactivados",
+    "describes": "Pacientes que volvieron tras más de 6 meses sin venir: su cita atendida del periodo llegó más de 6 meses después de la anterior.",
+    "how": "Pacientes con una cita atendida en el periodo cuya cita atendida anterior fue más de 6 meses antes."
+  }
+]

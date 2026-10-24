@@ -7,6 +7,8 @@
  * mismo cambio que la migración.
  */
 
+import { type ProductAgentTexts, productName } from "./product-agent.js"
+
 /** La llave de base de cada rol (`argosRoleOf`), sin el prefijo `argos_`. */
 export type ArgosKey = "gestion" | "recepcion" | "clinico" | "caja"
 
@@ -45,7 +47,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "tickets",
-    about: "Los tickets de pago. odentIA no emite facturas ni boletas: solo tickets. Un ticket junta lo cobrado en una visita, no es una venta.",
+    about: "Los tickets de pago. {producto} no emite facturas ni boletas: solo tickets. Un ticket junta lo cobrado en una visita, no es una venta.",
     columns: "numero, emitido_en (timestamptz), dia, sede, paciente, paciente_id, total, a_favor_usado, anulado (bool)",
     keys: ["gestion", "caja"],
   },
@@ -75,7 +77,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "citas",
     about: "Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron se divide entre todas las de ya_paso, canceladas incluidas.",
     columns:
-      "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la unidad dental de la cita)",
+      "cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la {sala} de la cita)",
     keys: ["gestion", "recepcion", "clinico"],
   },
   {
@@ -100,7 +102,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "pacientes",
     about:
-      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion, y nuevo de una sede si además su primera_sede es esa sede (como Reportes: no basta con una cita ahí). «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '6 months' (más de 6 meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.",
+      "Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion, y nuevo de una sede si además su primera_sede es esa sede (como Reportes: no basta con una cita ahí). «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '{meses} months' (más de {meses} meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.",
     columns:
       "paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en, ultima_atencion_en (timestamptz: la hora de su última cita atendida), primera_atencion_en (timestamptz: la hora de su primera cita atendida), primera_sede (la sede de esa cita)",
     keys: ALL,
@@ -109,7 +111,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     name: "tratamientos_hechos",
     about: "Lo realizado: procedimientos de atenciones firmadas, sin anulados. Sin diagnósticos ni notas.",
     columns:
-      "fecha (timestamptz), dia, paciente, paciente_id, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: 'Endodoncia', 'Cirugía oral', 'Odontología general'…), cantidad, precio",
+      "fecha (timestamptz), dia, paciente, paciente_id, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: {especialidades}…), cantidad, precio",
     keys: ["gestion", "clinico"],
   },
   {
@@ -117,7 +119,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Una fila por tratamiento indicado en un plan (no por plan: para contar planes, count(distinct plan_id)), con la decisión del paciente y su avance. «Pendiente» = aceptado y por empezar, programado o en curso; un plan sin iniciar = sus tratamientos aceptados (sin los cancelados) siguen todos por empezar o programados, sin ninguno iniciado. No hay fecha prevista de término.",
     columns:
-      "plan_id, paciente, paciente_id, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
+      "plan_id, paciente, paciente_id, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ({fases}), indicado_por (profesional que lo indicó; no se sabe quién lo hará)",
     keys: ["gestion", "clinico"],
   },
   {
@@ -204,7 +206,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
     about:
       "Una fila por persona que nos buscó por primera vez (prospecto), como el embudo de Reportes: su primer contacto (su primer mensaje, el de quien escribió por ella y la registró, o su registro) y hasta dónde llegó desde entonces. Cada paso cuenta a quien llegó a él o a uno posterior. Quien ya era paciente y escribe después no está aquí.",
     columns:
-      "primer_contacto_en (timestamptz), dia, canal ('whatsapp'|'instagram'|…|'registro_en_linea'|'recepcion'), persona, persona_id, paciente_id (null si aún no es paciente), agendo (bool), vino (bool), recibio_presupuesto (bool), acepto (bool), pago (bool: aceptó y pagó algo)",
+      "primer_contacto_en (timestamptz), dia, canal ('whatsapp'|'instagram'|…|'registro_en_linea'|'recepcion'), persona, persona_id, paciente_id (null si aún no es paciente), agendo (bool), vino (bool), recibio_presupuesto (bool), acepto (bool), pago (bool: {pago})",
     keys: ["gestion", "recepcion"],
   },
   {
@@ -215,8 +217,8 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "equipo",
-    about: "Las personas del equipo de la clínica, con su rol y las especialidades que atienden. Quien atiende pacientes (los odontólogos, los profesionales) es atiende, no el rol: la propietaria también puede atender.",
-    columns: "profesional, rol ('propietario'|'administración'|'odontología'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene), atiende (bool: tiene horario o citas como profesional)",
+    about: "Las personas del equipo de la clínica, con su rol y las especialidades que atienden. Quien atiende pacientes ({profesionales}) es atiende, no el rol: la propietaria también puede atender.",
+    columns: "profesional, rol ('propietario'|'administración'|'{rol_profesional}'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene), atiende (bool: tiene horario o citas como profesional)",
     keys: ALL,
   },
 ]
@@ -238,7 +240,7 @@ export const ARGOS_NOT_RECORDED: readonly string[] = [
 
 /** Lo que odentIA sí guarda pero Argos no lee: la respuesta dice que no lo puede consultar, nunca que no se registra. */
 export const ARGOS_NOT_READABLE: readonly string[] = [
-  "La historia clínica (diagnósticos, enfermedades, alergias, odontogramas, periodontogramas, notas): está en la ficha de cada paciente, y Argos no la lee.",
+  "La historia clínica (diagnósticos, enfermedades, alergias, {fichas}notas): está en la ficha de cada paciente, y Argos no la lee.",
 ]
 
 /** Las vistas que lee una llave. */
@@ -247,14 +249,33 @@ export function argosViewsOf(key: ArgosKey): readonly ArgosView[] {
 }
 
 /** El catálogo en texto, para el modelo: solo las vistas de la llave. */
-export function argosCatalogText(key: ArgosKey): string {
+export function argosCatalogText(key: ArgosKey, texts: ProductAgentTexts): string {
   const views = argosViewsOf(key)
-  return [
+  return withProductWords(texts, [
     "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
     ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
-    "\nLo que odentIA no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
+    "\nLo que {producto} no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
     ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
-    "\nLo que odentIA guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):",
+    "\nLo que {producto} guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):",
     ...ARGOS_NOT_READABLE.map((item) => `- ${item}`),
-  ].join("\n")
+  ].join("\n"))
+}
+
+/**
+ * Las palabras del producto en el catálogo (issue 229, entrega 9): su nombre,
+ * sus meses sin venir, su sala, sus especialidades y fases, qué es «pago» en
+ * su embudo y cómo se llama a quien atiende. En odentIA, las de siempre.
+ */
+function withProductWords(texts: ProductAgentTexts, text: string): string {
+  const { argos } = texts
+  return text
+    .replaceAll("{producto}", productName(texts))
+    .replaceAll("{meses}", String(texts.recallMonths))
+    .replaceAll("{sala}", texts.room || "sala")
+    .replaceAll("{especialidades}", argos.specialtyExamples || "'Medicina general'")
+    .replaceAll("{fases}", argos.phases || "'general'")
+    .replaceAll("{pago}", argos.paid)
+    .replaceAll("{profesionales}", argos.clinicians)
+    .replaceAll("{rol_profesional}", argos.clinicianRole)
+    .replaceAll("{fichas}", argos.clinicalCharts ? `${argos.clinicalCharts}, ` : "")
 }

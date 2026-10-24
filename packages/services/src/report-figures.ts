@@ -48,6 +48,8 @@ import {
   whole,
 } from "./report-words.js"
 import { appointmentTotalsMany, controlTotals, newPatientsMany, waitInRoom } from "./reports.js"
+import { type ProductAgentTexts, productName } from "./product-agent.js"
+import { productAgentTexts } from "./products.js"
 import { OVERDUE_DAYS } from "./report-debts.js"
 
 // --- Lo que se puede preguntar -------------------------------------------------------------
@@ -557,9 +559,9 @@ export const REPORT_FIGURES: ReportFigure[] = [
   {
     key: "sin_venir",
     area: "pacientes",
-    name: "Sin venir hace más de 6 meses",
+    name: "Sin venir hace más de {meses} meses",
     describes: "Cuántos pacientes dejaron de venir hace tiempo, los pacientes perdidos o inactivos que habría que invitar a volver.",
-    how: "Pacientes cuya última cita atendida fue hace más de 6 meses, a hoy, sin cita por venir, sin presupuesto esperando respuesta y sin control pendiente.",
+    how: "Pacientes cuya última cita atendida fue hace más de {meses} meses, a hoy, sin cita por venir, sin presupuesto esperando respuesta y sin control pendiente.",
     unit: "count",
     noun: PATIENTS,
     tab: "pacientes",
@@ -742,7 +744,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
           out.push({
             text:
               paid.overCents > 0
-                ? ` Por encima del crédito del plan, odentIA te cobró ${moneyWords(paid.overCents, paid.currency, locale)} por el agente.`
+                ? ` Por encima del crédito del plan, ${productName(await productAgentTexts(tx, orgId))} te cobró ${moneyWords(paid.overCents, paid.currency, locale)} por el agente.`
                 : ` Lo del agente (${moneyWords(paid.totalCents, paid.currency, locale)}) entró en el crédito del plan.`,
           })
         }
@@ -795,8 +797,8 @@ export const REPORT_FIGURES: ReportFigure[] = [
     key: "agente_dictadas",
     area: "agente",
     name: "Consultas dictadas",
-    describes: "Cuántas consultas se dictaron con Clío, el asistente clínico que escucha al odontólogo y ordena la atención.",
-    how: "Atenciones dictadas que el odontólogo confirmó, por el día en que se cerró la atención.",
+    describes: "Cuántas consultas se dictaron con Clío, el asistente clínico que escucha al {profesional} y ordena la atención.",
+    how: "Atenciones dictadas que el {profesional} confirmó, por el día en que se cerró la atención.",
     unit: "count",
     noun: { one: "consulta", many: "consultas" },
     tab: "agente",
@@ -808,7 +810,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     key: "agente_pagado",
     area: "agente",
     name: "Lo que pagaste por el agente",
-    describes: "Cuánto cuesta o cuánto se le paga a odentIA por el agente: la factura del agente.",
+    describes: "Cuánto cuesta o cuánto se le paga a {producto} por el agente: la factura del agente.",
     how: "Las acciones del agente del periodo con las mismas cuentas de Plan y pagos, en la moneda del plan.",
     unit: "money",
     tab: "agente",
@@ -875,8 +877,24 @@ export const REPORT_FIGURES: ReportFigure[] = [
 
 const BY_KEY = new Map(REPORT_FIGURES.map((figure) => [figure.key, figure]))
 
+/** La cifra por su clave, con sus textos tal cual (`{meses}` sin llenar): para lo que no se lee. */
 export function reportFigureOf(key: string): ReportFigure | undefined {
   return BY_KEY.get(key)
+}
+
+/**
+ * La cifra con las palabras del producto: los meses de «Sin venir»
+ * (`ProductHooks.recallMonths`: 6 en odentIA, 12 en latidIA, los de su cuenta
+ * `lapsedCount`), quien atiende («odontólogo», «médico») y su nombre.
+ */
+export function withFigureWords(figure: ReportFigure, texts: ProductAgentTexts): ReportFigure {
+  const words = (text: string) =>
+    text
+      .replaceAll("{meses}", String(texts.recallMonths))
+      .replaceAll("{profesional}", texts.clinician)
+      .replaceAll("{producto}", productName(texts))
+  if (![figure.name, figure.describes, figure.how].some((text) => /\{(meses|profesional|producto)\}/.test(text))) return figure
+  return { ...figure, name: words(figure.name), describes: words(figure.describes), how: words(figure.how) }
 }
 
 /** Las cifras que puede ver quien pregunta: lo pagado a odentIA solo si ve Facturación. */
@@ -932,7 +950,8 @@ function byValue(a: FigureRow, b: FigureRow): number {
  * inventa un reparto que la consulta no sabe hacer.
  */
 export async function computeFigure(ctx: FigureContext, request: FigureRequest): Promise<FigureResult> {
-  const figure = reportFigureOf(request.figure)
+  const official = reportFigureOf(request.figure)
+  const figure = official && withFigureWords(official, await productAgentTexts(ctx.tx, ctx.orgId))
   if (!figure || (figure.billing && !ctx.billing)) throw new Error(`Cifra desconocida: ${request.figure}`)
   const allowed = groupsOf(figure)
   const wanted = request.group === "total" && figure.defaultGroup ? figure.defaultGroup : request.group

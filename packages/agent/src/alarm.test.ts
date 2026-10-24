@@ -1,3 +1,4 @@
+import { agentTextsFor } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { hasAlarmSignal } from "./alarm.js"
 
@@ -40,6 +41,38 @@ describe("señales de alarma (ADR 0084)", () => {
       undefined,
     ]) {
       expect(hasAlarmSignal(text), String(text)).toBe(false)
+    }
+  })
+
+  it("latidIA suma las de un consultorio; odentIA, ninguna", () => {
+    const medical = agentTextsFor("medical").alarmSignals
+    const urgent = [
+      "estoy embarazada y estoy sangrando",
+      "Tengo sangrado y estoy embarazada de 20 semanas",
+      "ya no siento a mi bebé, estoy de 8 meses",
+      "se me rompió la fuente",
+      "mi hijo tiene los labios morados",
+      "el bebé se puso morado",
+      "mi papá no reacciona",
+      "es el peor dolor de cabeza de mi vida",
+      "vomité con sangre",
+      "se tomó todas las pastillas",
+      "creo que se envenenó",
+    ]
+    for (const text of urgent) {
+      expect(hasAlarmSignal(text, medical), text).toBe(true)
+      expect(hasAlarmSignal(text, agentTextsFor("dental").alarmSignals), text).toBe(false)
+    }
+    for (const text of [
+      "estoy embarazada, ¿puedo sacar cita para control?",
+      "me sangra la nariz a veces",
+      "tengo un moretón morado en la pierna",
+      "me duele la cabeza desde ayer",
+      "vomité dos veces, ¿me pueden atender hoy?",
+      "olvidé tomar mis pastillas",
+      "mi bebé tiene fiebre desde anoche",
+    ]) {
+      expect(hasAlarmSignal(text, medical), text).toBe(false)
     }
   })
 })

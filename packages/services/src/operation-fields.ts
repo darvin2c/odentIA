@@ -468,13 +468,18 @@ export function operationBodyShape(operation: OperationId): Record<string, z.Zod
  * él llena, cada uno con su descripción. Lo demás lo pone el sistema desde la
  * conversación o queda reservado a una persona.
  */
-export function operationAgentSchema<O extends OperationId>(operation: O): z.ZodObject<AgentShape<O>> {
+export function operationAgentSchema<O extends OperationId>(
+  operation: O,
+  words: { room?: string } = {},
+): z.ZodObject<AgentShape<O>> {
   const shape: Record<string, z.ZodType> = {}
   for (const [name, field] of Object.entries(specOf(operation).fields)) {
     if (field.agent !== "requires" && field.agent !== "fills") continue
     const schema = field.kind === "enum" && field.agentValues ? z.enum(field.agentValues) : fieldSchema(field)
+    // El recurso que se reserva con la palabra del producto (latidIA: «sala»).
+    const description = words.room ? field.description.replaceAll("unidad dental", words.room) : field.description
     // La descripción va en el esquema final: el envoltorio opcional no hereda la del interior.
-    shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(field.description)
+    shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(description)
   }
   return z.object(shape) as unknown as z.ZodObject<AgentShape<O>>
 }

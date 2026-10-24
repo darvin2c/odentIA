@@ -242,8 +242,10 @@ const EMOJI_TEXT: Record<AgentConfig["emojis"], string> = {
  * el dato, y siempre con un paso siguiente. Nada de urgencia, cupos ni
  * condiciones que no estén en los datos.
  */
-const SELLS =
-  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que te devolvió la agenda. Si un precio se define en la evaluación, o la persona duda o tiene miedo, explícalo con calma y ofrece la evaluación (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona."
+const sells = ({ visit }: ProductAgentTexts): string => {
+  const noun = visit.word.replace(/^la /, "")
+  return `Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o ${visit.word}). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita ${noun} —de un servicio o de una promoción— dilo siempre junto al precio y ofrece ${visit.word}: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que te devolvió la agenda. Si un precio se define en ${visit.word}, o la persona duda o tiene miedo, explícalo con calma y ofrece ${visit.word} (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona.`
+}
 
 /**
  * Lo que el modelo recibe de verdad en este turno: con esto se arma el texto,
@@ -267,7 +269,8 @@ function listed(items: string[]): string {
  * y, pasados unos pocos precios, ofrece la evaluación. La comprobación antes de
  * enviar cuenta los servicios cuyo precio ya dijo y no deja pasar uno más.
  */
-const PRICE_LIST_RULE = `Nunca envías la lista de precios ni el tarifario, aunque te lo pidan: responde el precio de los servicios por los que pregunta la persona, como mucho ${PRICES_PER_CONVERSATION} servicios distintos en la conversación, y después ofrécele una evaluación, donde le dan un presupuesto a su medida. Si ya tiene un presupuesto de la clínica, ese sí se lo reenvías.`
+const priceListRule = ({ visit }: ProductAgentTexts): string =>
+  `Nunca envías la lista de precios ni el tarifario, aunque te lo pidan: responde el precio de los servicios por los que pregunta la persona, como mucho ${PRICES_PER_CONVERSATION} servicios distintos en la conversación, y después ofrécele ${visit.offer}. Si ya tiene un presupuesto de la clínica, ese sí se lo reenvías.`
 
 export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts, texts: ProductAgentTexts): string {
   const room = roomWord(texts)
@@ -314,8 +317,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     lookups.length
       ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad. Más abajo figuran ${below}; para lo que no esté ahí usa ${listed(lookups)}.${searchFirst}`
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
-    on("informar") ? SELLS : whenOff("informar"),
-    on("informar") ? PRICE_LIST_RULE : null,
+    on("informar") ? sells(texts) : whenOff("informar"),
+    on("informar") ? priceListRule(texts) : null,
     on("agendar")
       ? `Para buscar huecos usa el id exacto de la sede que figura en «Sedes» y, si ya sabes qué servicio quiere, su id${facts.services === "indice" && has("buscar_en_la_clinica") ? " (de buscar_en_la_clinica)" : ""}: así el hueco dura lo que dura ese servicio. Reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, ${room}, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí${has("enviar_enlace_cita") ? "; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere" : ""}.`
       : agendarOff,

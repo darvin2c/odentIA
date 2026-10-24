@@ -11,6 +11,20 @@ import { reportQuestions } from "./report-questions.js"
 const golden = (name: string) => `./__golden__/${name}`
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
 
+describe("preguntas de latidIA: nada dental ni de odentIA, y sus 12 meses", () => {
+  it("Administrador y Reportes", () => {
+    const medical = agentTextsFor("medical")
+    for (const text of [JSON.stringify(adminQuestions(medical)), JSON.stringify(reportQuestions(medical))]) {
+      expect(text).not.toMatch(/\b(dental|dientes?|odont\w*|ortodon\w*|piezas?)\b/i)
+      expect(text).not.toContain("odentIA")
+      // Sin venir es un año en latidIA (decisión 16); «lo que deja un paciente nuevo en 6 meses» es otra cuenta.
+      expect(text).not.toMatch(/\b(6|seis) meses (sin venir|sin atenderse)\b|sin venir hace más de 6 meses/i)
+    }
+    expect(JSON.stringify(reportQuestions(medical))).toContain("Sin venir hace más de 12 meses")
+    expect(JSON.stringify(adminQuestions(medical))).toContain("Un año sin venir")
+  })
+})
+
 describe("preguntas de odentIA, iguales a las de antes", () => {
   it("Administrador", async () => {
     await expect(json(adminQuestions(agentTextsFor("dental")))).toMatchFileSnapshot(golden("administrador.json"))

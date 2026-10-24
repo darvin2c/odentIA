@@ -1,0 +1,56 @@
+Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):
+
+citas: Una fila por cita de la agenda. Para contar citas agendadas (cuántas hay, por día, por profesional) deja fuera las canceladas, salvo que pregunten por ellas. Un porcentaje sobre las citas que ya pasaron se divide entre todas las de ya_paso, canceladas incluidas.
+  cita_id, inicio (timestamptz), dia, dia_semana ('lunes'…'domingo'), hora (0-23), sede, profesional, paciente_id, paciente, servicio, estado ('programada'|'confirmada'|'atendida'|'no_vino'|'cancelada'), ya_paso (bool: ya terminó su hora), duracion_min, llego_en (timestamptz: cuándo llegó a la sala), atencion_inicio, espera_min (minutos en sala antes de ser atendido), origen ('recepcion': la agendó el equipo|'agent': la reservó Sofi en la conversación|'enlace': la reservó la persona con el enlace que le mandó Sofi), unidad_dental (la unidad dental de la cita)
+
+agenda_por_dia: Las horas de cada profesional por día, de 400 días atrás a 60 adelante: su horario, lo disponible (horario menos bloqueos y feriados) y lo ocupado por citas no canceladas.
+  dia, dia_semana, sede, profesional, minutos_horario, minutos_disponibles, minutos_ocupados, horario_supuesto (bool: antes de su primer horario guardado se usa el de hoy)
+
+agenda_por_hora: Lo mismo por hora del día (solo las horas con algo disponible).
+  dia, dia_semana, hora (0-23), sede, profesional, minutos_disponibles, minutos_ocupados
+
+ausencias: Las ausencias del equipo (vacaciones, permisos), por sede, sin su motivo. Ya están descontadas de lo disponible en la agenda.
+  profesional, sede, desde (timestamptz), hasta (timestamptz: no entra), primer_dia (date), ultimo_dia (date: el último día que falta)
+
+pacientes: Una fila por paciente (sin spam ni bloqueados). Un paciente es «nuevo» en el periodo que contiene su primera_atencion, y nuevo de una sede si además su primera_sede es esa sede (como Reportes: no basta con una cita ahí). «Activos» = con ultima_atencion en los 18 meses anteriores, archivados incluidos. «Sin venir» (dejaron de venir, sin decir cuánto) = no archivados con ultima_atencion_en < now() - interval '6 months' (más de 6 meses, sin el día límite, como Reportes), sin proxima_cita, sin presupuesto_esperando y sin control_pendiente. «No han vuelto en N días o meses» = no archivados con ultima_atencion_en < now() − N, sin más condiciones.
+  paciente_id, nombre, archivado (bool), primera_atencion (date: su primera cita atendida), ultima_atencion (date), atenciones (citas atendidas en total), proxima_cita (timestamptz o null), como_nos_conocio ('Recomendación de alguien'|'Redes sociales'|'Google o mapas'|'Pasaba por aquí'|'Convenio o empresa'|'Otro'|'No lo dijo'), presupuesto_esperando (bool), control_pendiente (bool), registrado_en, ultima_atencion_en (timestamptz: la hora de su última cita atendida), primera_atencion_en (timestamptz: la hora de su primera cita atendida), primera_sede (la sede de esa cita)
+
+tratamientos_hechos: Lo realizado: procedimientos de atenciones firmadas, sin anulados. Sin diagnósticos ni notas.
+  fecha (timestamptz), dia, paciente, paciente_id, profesional, sede, tratamiento, tipo_tratamiento (tipo de la biblioteca; a menudo null), especialidad (de la clínica: 'Endodoncia', 'Cirugía oral', 'Odontología general'…), cantidad, precio
+
+planes: Una fila por tratamiento indicado en un plan (no por plan: para contar planes, count(distinct plan_id)), con la decisión del paciente y su avance. «Pendiente» = aceptado y por empezar, programado o en curso; un plan sin iniciar = sus tratamientos aceptados (sin los cancelados) siguen todos por empezar o programados, sin ninguno iniciado. No hay fecha prevista de término.
+  plan_id, paciente, paciente_id, tratamiento, especialidad, decision ('pendiente'|'aceptado'|'pospuesto'|'rechazado'|'no_elegida'), estado ('pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'), indicado_en, decidido_en, iniciado_en, terminado_en (timestamptz), precio, fase ('urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'), indicado_por (profesional que lo indicó; no se sabe quién lo hará)
+
+controles: Controles clínicos programados a los pacientes (sin el texto de las indicaciones).
+  paciente, paciente_id, tipo ('tratamiento'|'mantenimiento'), vence_en (timestamptz), vence_dia, estado ('pendiente'|'programado'|'realizado'|'cancelado'), tiene_cita (bool), hecho_en
+
+presupuestos: Un presupuesto por fila; los importes son de la opción que vale (nunca sumar opciones). Entregados = estado 'presentado', 'aceptado', 'parcial', 'pospuesto' o 'rechazado' ('sustituido' y 'cancelado' no cuentan). El valor de un presupuesto aceptado es lo aceptado (columna aceptado), no su valor entero. Los que esperan respuesta (pendientes, sin aceptar) son los de espera_respuesta, a hoy; lo que esperan, en dinero, es sum(sin_decidir), no el valor entero.
+  presupuesto_id, numero, paciente, paciente_id, presentado_en (timestamptz), presentado_dia, estado ('presentado'|'aceptado'|'parcial'|'pospuesto'|'rechazado'|'sustituido'|'cancelado'), decidido_en, profesional (quien lo armó), valor, aceptado (lo aceptado), sin_decidir (pendiente o pospuesto), espera_respuesta (bool)
+
+lineas_presupuesto: Cada tratamiento de la opción que vale de un presupuesto entregado.
+  presupuesto_id, numero, paciente, paciente_id, presentado_en, presentado_dia, estado_presupuesto, tratamiento, decision ('aceptado'|'rechazado'|'pospuesto'|'pendiente'), importe, promocion, estado_tratamiento (cómo va ese tratamiento en el plan: 'pendiente'|'programado'|'en_curso'|'suspendido'|'realizado'|'cancelado'; null si no está en un plan)
+
+promociones: Las promociones de la clínica. Abiertas, vigentes o activas hoy = vigente_hoy.
+  nombre, inicio, fin (timestamptz o null), activa (bool), vigente_hoy (bool: activa y dentro de sus fechas)
+
+conversaciones: Conversaciones con personas por los canales (sin mensajes). No hay campañas ni encuestas.
+  inicio (timestamptz), dia, canal ('whatsapp'|'messenger'|'instagram'|'telegram'|'webchat'|'email'), estado ('open'|'closed'), motivo_cierre ('resuelta'|'sin_respuesta': la persona dejó de responder|'equipo'|'manual'), cerrada_en, ultimo_mensaje_en, persona, persona_id (una persona puede tener varias conversaciones), paciente_id (null si aún no es paciente), es_paciente (bool), agente ('on'|'off'), asignada_a, espera_respuesta (bool: su último mensaje es de la persona y nadie le respondió todavía, a hoy)
+
+equipo: Las personas del equipo de la clínica, con su rol y las especialidades que atienden. Quien atiende pacientes (los odontólogos, los profesionales) es atiende, no el rol: la propietaria también puede atender.
+  profesional, rol ('propietario'|'administración'|'odontología'|'recepción'|'caja', separados por coma si tiene varios), especialidades (las de la clínica, separadas por coma; null si no tiene), atiende (bool: tiene horario o citas como profesional)
+
+Lo que odentIA no registra (tipo no_existe o parcial, con lo más cercano que sí existe):
+- Facturas o boletas: solo tickets de pago.
+- Una fecha prevista para cada tratamiento: no se sabe cuáles están atrasados ni cuáles se abandonaron. Lo más cercano: los tratamientos pendientes, los planes sin iniciar o parados y cuánto dura un tratamiento.
+- Quién hará un tratamiento: solo quién lo indicó (planes.indicado_por).
+- Costos por tratamiento o por profesional (laboratorio, materiales de cada tratamiento, costos fijos): su rentabilidad no se puede saber. Lo más cercano: por tratamiento, lo cobrado de cada uno (pagos_por_venta), sin restarle nada, porque las comisiones y los gastos no se ligan a cada tratamiento; por profesional, lo cobrado de lo que atendió menos su comisión.
+- Quién canceló una cita (la persona o la clínica) ni si se reprogramó.
+- Cuotas o tratamientos financiados.
+- Lo que se debía al cierre de meses pasados (cómo evolucionó la cartera o la deuda): solo está lo que se debe hoy (deudas). No lo reemplaces con lo cargado o lo cobrado de esos meses.
+- Campañas de marketing y gasto en publicidad: tampoco el costo de conseguir un paciente.
+- Encuestas, satisfacción, recomendación (NPS) y quejas.
+- El costo de los lotes: el inventario no se puede valorizar.
+- El consumo de materiales por procedimiento: se registra por atención (por profesional sí).
+
+Lo que odentIA guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):
+- La historia clínica (diagnósticos, enfermedades, alergias, odontogramas, periodontogramas, notas): está en la ficha de cada paciente, y Argos no la lee.

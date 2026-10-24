@@ -102,8 +102,8 @@ export function readNumbers(text: string): { days: number | null; hours: number 
   }
 }
 
-function describeOption(line: AdminLine): string {
-  return `${line.name}: ${line.trigger(line.defaultDays)}. ${line.agent ? `El agente ${say(line.agent.does)}` : line.team.does}.`
+function describeOption(line: AdminLine, recallMonths: number): string {
+  return `${line.name}: ${line.trigger(line.defaultDays, recallMonths)}. ${line.agent ? `El agente ${say(line.agent.does)}` : line.team.does}.`
 }
 
 /** Las preguntas que se le hacen al modelo, todas con opciones cerradas. */
@@ -117,7 +117,7 @@ export function adminQuestions(
       kind: "choice",
       instructions:
         `La persona que administra una ${clinicWord(texts)} le pide algo a su asistente. ¿De cuál de estas tareas automáticas está hablando? Elige «ninguna» si no habla de ninguna de ellas.`,
-      options: [...lines.map((line) => ({ value: line.key, description: describeOption(line) })), { value: "ninguna", description: "No habla de ninguna de estas tareas." }],
+      options: [...lines.map((line) => ({ value: line.key, description: describeOption(line, texts.recallMonths) })), { value: "ninguna", description: "No habla de ninguna de estas tareas." }],
     },
     {
       id: "intencion",

@@ -4,8 +4,9 @@ import { DENTAL_AGENT_TEXTS } from "./dental/agent-texts.js"
 import { dentalHooks } from "./dental/hooks.js"
 import { ServiceError } from "./errors.js"
 import { orgProduct } from "./locale.js"
+import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
 import { medicalHooks } from "./medical/hooks.js"
-import { NO_AGENT_TEXTS, type ProductAgentTexts } from "./product-agent.js"
+import type { ProductAgentTexts } from "./product-agent.js"
 import type { ProductHooks } from "./product-hooks.js"
 
 /**
@@ -33,8 +34,8 @@ export async function requireDictatingProduct(tx: Db, orgId: string): Promise<vo
 
 const AGENT_TEXTS: Record<ClinicalProduct, ProductAgentTexts> = {
   dental: DENTAL_AGENT_TEXTS,
-  // La app médica aún no tiene sus textos: se escriben y se miden con ella.
-  medical: NO_AGENT_TEXTS,
+  // Los de latidIA (entrega 9 del issue 229): se miden antes de abrir consultorios reales.
+  medical: MEDICAL_AGENT_TEXTS,
 }
 
 /** Las palabras del producto en lo que lee el modelo (ADR 0079). */

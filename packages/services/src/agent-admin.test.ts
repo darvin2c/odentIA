@@ -210,7 +210,7 @@ describe("su página", () => {
 
   it("el flujo de una línea que solo deja trabajo al equipo no tiene decisión ni aviso", () => {
     const line = ADMIN_LINES.find((item) => item.key === "atenciones_sin_firmar")!
-    const flow = flowOf(line, { agentPart: false, teamPart: true }, { days: 2 })
+    const flow = flowOf(line, { agentPart: false, teamPart: true }, { days: 2, recallMonths: 6 })
     expect(flow.otherwise).toBeNull()
     expect(flow.main.map((step) => [step.label, step.actorLabel])).toEqual([
       ["Una atención lleva 2 días sin firmar", null],

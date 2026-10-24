@@ -51,9 +51,9 @@ function fold(text: string): string {
     .replace(/\s+/g, " ")
 }
 
-/** Lo que escribió trae una señal de alarma. */
-export function hasAlarmSignal(text: string | null | undefined): boolean {
+/** Lo que escribió trae una señal de alarma, de las comunes o de las del producto (`ProductAgentTexts.alarmSignals`). */
+export function hasAlarmSignal(text: string | null | undefined, productSignals: readonly RegExp[] = []): boolean {
   if (!text) return false
   const folded = fold(text)
-  return SIGNALS.some((signal) => signal.test(folded))
+  return SIGNALS.some((signal) => signal.test(folded)) || productSignals.some((signal) => signal.test(folded))
 }

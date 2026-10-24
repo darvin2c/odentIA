@@ -24,6 +24,7 @@ import { and, asc, eq, sql } from "drizzle-orm"
 import { listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
 import { listArgosBranches } from "./argos-period.js"
+import type { ProductAgentTexts } from "./product-agent.js"
 
 /** Por qué se separa o filtra una cifra. Cada fuente dice cuáles sabe. */
 export const ARGOS_CUTS = [
@@ -251,7 +252,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "cargado",
     name: "Lo cargado",
     describes:
-      "Lo cargado a los pacientes: lo atendido y los productos entregados, pagado o no. «Facturado» no existe en odentIA: esto es lo más cercano.",
+      "Lo cargado a los pacientes: lo atendido y los productos entregados, pagado o no. «Facturado» no existe en {producto}: esto es lo más cercano.",
     how: "Lo cargado a los pacientes en el periodo (tratamientos hechos y productos), sin lo anulado y con lo devuelto descontado, pagado o no.",
     unit: "dinero",
     column: "cargado_dinero",
@@ -619,8 +620,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "reactivados",
     name: "Pacientes reactivados",
-    describes: "Pacientes que volvieron tras más de 6 meses sin venir: su cita atendida del periodo llegó más de 6 meses después de la anterior.",
-    how: "Pacientes con una cita atendida en el periodo cuya cita atendida anterior fue más de 6 meses antes.",
+    describes: "Pacientes que volvieron tras más de {meses} meses sin venir: su cita atendida del periodo llegó más de {meses} meses después de la anterior.",
+    how: "Pacientes con una cita atendida en el periodo cuya cita atendida anterior fue más de {meses} meses antes.",
     unit: "cantidad",
     column: "pacientes",
     time: "instante",
@@ -629,7 +630,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        rows: "select inicio as t, dia, sede, profesional, paciente_id from (select inicio, dia, sede, profesional, paciente_id, lag(inicio) over (partition by paciente_id order by inicio) as anterior from citas where estado = 'atendida') as c where anterior < inicio - interval '6 months'",
+        rows: "select inicio as t, dia, sede, profesional, paciente_id from (select inicio, dia, sede, profesional, paciente_id, lag(inicio) over (partition by paciente_id order by inicio) as anterior from citas where estado = 'atendida') as c where anterior < inicio - interval '{meses} months'",
         cuts: [...WHEN, "sede", "profesional"],
       },
     ],
@@ -655,10 +656,10 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   },
   {
     key: "sin_venir",
-    name: "Sin venir hace más de 6 meses",
+    name: "Sin venir hace más de {meses} meses",
     describes:
-      "Pacientes que dejaron de venir: más de 6 meses sin una cita atendida y sin cita, presupuesto ni control pendiente, hoy.",
-    how: "Pacientes no archivados con más de 6 meses desde su última cita atendida, sin cita por venir, presupuesto esperando ni control pendiente.",
+      "Pacientes que dejaron de venir: más de {meses} meses sin una cita atendida y sin cita, presupuesto ni control pendiente, hoy.",
+    how: "Pacientes no archivados con más de {meses} meses desde su última cita atendida, sin cita por venir, presupuesto esperando ni control pendiente.",
     unit: "cantidad",
     column: "pacientes",
     time: "a_hoy",
@@ -668,7 +669,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["pacientes"],
-        rows: "select 1 as v from pacientes where not archivado and ultima_atencion_en < now() - interval '6 months' and proxima_cita is null and not presupuesto_esperando and not control_pendiente",
+        rows: "select 1 as v from pacientes where not archivado and ultima_atencion_en < now() - interval '{meses} months' and proxima_cita is null and not presupuesto_esperando and not control_pendiente",
         cuts: [],
       },
     ],
@@ -1370,7 +1371,21 @@ export function argosFiguresOf(key: ArgosKey): ArgosFigure[] {
 }
 
 /** Las cifras en texto, para el modelo: clave, qué responde, cómo se mide y por qué se separa. */
-export function argosFiguresText(key: ArgosKey): string {
+/**
+ * Las palabras del producto en las cifras: su nombre y los meses con que se
+ * cuentan «sin venir» y «reactivados» (`ProductHooks.recallMonths`: 6 en
+ * odentIA, 12 en latidIA), como Reportes.
+ */
+export interface ArgosFigureWords {
+  productName: string
+  recallMonths: number
+}
+
+function withWords(text: string, words: ArgosFigureWords): string {
+  return text.replaceAll("{meses}", String(words.recallMonths)).replaceAll("{producto}", words.productName)
+}
+
+export function argosFiguresText(key: ArgosKey, words: ArgosFigureWords): string {
   return argosFiguresOf(key)
     .map((figure) => {
       const cuts = [...new Set(sourcesFor(figure, key).flatMap((source) => source.cuts))]
@@ -1380,7 +1395,7 @@ export function argosFiguresText(key: ArgosKey): string {
           : figure.ahead
             ? "en un periodo, también por venir"
             : "en un periodo"
-      return `- ${figure.key}: ${figure.name}. ${figure.describes} (${time}; ${cuts.length ? `se separa y filtra por ${cuts.join(", ")}` : "una sola cifra"})`
+      return `- ${figure.key}: ${withWords(figure.name, words)}. ${withWords(figure.describes, words)} (${time}; ${cuts.length ? `se separa y filtra por ${cuts.join(", ")}` : "una sola cifra"})`
     })
     .join("\n")
 }
@@ -1440,19 +1455,26 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
   }
 }
 
-const ROLE_WORDS: Record<string, string> = { owner: "propietario", admin: "administración", clinician: "odontología", reception: "recepción", cashier: "caja" }
+/** Los roles como los dice la vista `equipo`; el de quien atiende es del producto («odontología», «medicina»). */
+const ROLE_WORDS: Record<string, string> = { owner: "propietario", admin: "administración", reception: "recepción", cashier: "caja" }
 
 /**
  * Quien pregunta, con el rol con que pregunta (como lo dice la vista
  * `equipo`): «yo», «mis pacientes» o «lo que atendí» es esa persona. Solo su
  * nombre y su rol.
  */
-export async function argosAsker(tx: Db, userId: string, memberRole: string): Promise<string | null> {
+export async function argosAsker(
+  tx: Db,
+  userId: string,
+  memberRole: string,
+  texts: ProductAgentTexts,
+): Promise<string | null> {
   const [row] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
   if (!row) return null
+  const words: Record<string, string> = { ...ROLE_WORDS, clinician: texts.argos.clinicianRole }
   const roles = memberRole
     .split(",")
-    .map((role) => ROLE_WORDS[role.trim()] ?? "otro")
+    .map((role) => words[role.trim()] ?? "otro")
     .join(", ")
   return `${row.name} (${roles})`
 }
@@ -1550,9 +1572,16 @@ const WEEKDAY_ORDER =
  */
 export function compileArgosFigure(
   ask: ArgosFigureAsk,
-  options: { key: ArgosKey; compare: boolean; names: ArgosNames | null },
+  options: { key: ArgosKey; compare: boolean; names: ArgosNames | null; words: ArgosFigureWords },
 ): ArgosFigureCompiled | { problem: string } {
-  const figure = argosFigure(ask.cifra)
+  const official = argosFigure(ask.cifra)
+  // Con las palabras del producto ya puestas en sus textos.
+  const figure = official && {
+    ...official,
+    name: withWords(official.name, options.words),
+    describes: withWords(official.describes, options.words),
+    how: withWords(official.how, options.words),
+  }
   const readable = figure ? sourcesFor(figure, options.key) : []
   if (!figure || !readable.length) {
     const keys = argosFiguresOf(options.key).map((item) => item.key)
@@ -1612,7 +1641,7 @@ export function compileArgosFigure(
   }
 
   const rowsOf = (range: Range) =>
-    typeof source.rows === "string" ? source.rows : source.rows(range)
+    withWords(typeof source.rows === "string" ? source.rows : source.rows(range), options.words)
   const time = (range: Range): string | null =>
     figure.time === "instante"
       ? `t >= ${range.desde} and t < ${range.hasta}`

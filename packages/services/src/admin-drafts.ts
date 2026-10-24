@@ -33,6 +33,7 @@ import { mayWriteFirstSql } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { AGENT_NAMES } from "./agent-names.js"
+import { productHooks } from "./products.js"
 
 /* ---------- Pedírselo con palabras: del pedido al borrador ---------- */
 
@@ -589,10 +590,11 @@ export async function draftViewOf(
   const state = stateOf(line, rule)
   const next = applyChanges(line, state, draft.changes)
   const team = TASK_AREA_LABELS[line.team.area].team
+  const { recallMonths } = await productHooks(tx, orgId)
   const changes: AdminDraftChange[] = []
   const marks: AdminDraftView["marks"] = {}
   if (draft.changes.days !== undefined) {
-    changes.push({ kind: "cambio", before: line.trigger(state.days), after: line.trigger(next.days) })
+    changes.push({ kind: "cambio", before: line.trigger(state.days, recallMonths), after: line.trigger(next.days, recallMonths) })
     marks.inicio = "cambio"
     if (line.wait(state.days, state.timing) !== line.wait(next.days, next.timing)) marks.espera = "cambio"
   }
@@ -641,7 +643,7 @@ export async function draftViewOf(
     action: turnsOff ? "apagar" : turnsOn ? "prender" : "guardar",
     summary,
     changes,
-    flow: flowOf(line, next, { days: next.days, timing: next.timing }),
+    flow: flowOf(line, next, { days: next.days, timing: next.timing, recallMonths }),
     marks,
     unsupported: draft.unsupported,
     test: turnsOff || !can(line.permission) ? null : await testAdminLine(tx, orgId, line, next),

@@ -1,9 +1,11 @@
+import { productWords } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { agentSearchItem, type SearchItemKind } from "@odentia/db/schema/agent"
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { listAgentPromotions, listAgentProfessionals, listAgentServices } from "./agent-clinic-info.js"
 import { listActiveKnowledge } from "./knowledge.js"
+import { orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -62,6 +64,8 @@ interface WantedItem {
 export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedItem[]> {
   const services = await listAgentServices(tx, orgId)
   const { kindWords } = (await productHooks(tx, orgId)).catalog
+  // «odontólogo» en odentIA, «médico» en latidIA: así lo busca la gente.
+  const clinician = productWords(await orgProduct(tx, orgId)).clinician.one
   const promotions = await listAgentPromotions(tx, orgId)
   const professionals = await listAgentProfessionals(tx, orgId)
   const answers = await listActiveKnowledge(tx, orgId)
@@ -81,7 +85,7 @@ export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedIt
     ...professionals.map((p) => ({
       kind: "profesional" as const,
       refId: p.id,
-      text: `Profesional de la clínica, odontólogo: ${p.name}.${p.specialties.length ? ` Especialista en ${p.specialties.join(", ")}.` : ""}`,
+      text: `Profesional de la clínica, ${clinician}: ${p.name}.${p.specialties.length ? ` Especialista en ${p.specialties.join(", ")}.` : ""}`,
     })),
     ...answers.map((a) => ({
       kind: "respuesta" as const,

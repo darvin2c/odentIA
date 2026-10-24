@@ -86,6 +86,7 @@ import { getAgentSpendGate } from "./saas-terms.js"
 import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { productHooks } from "./products.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -2155,7 +2156,7 @@ export async function deliverJob(
   // También mientras los agentes están en pausa por el saldo de prueba: nada se pierde.
   if (!line.agent || !rule.agentPart || runtime.agentsPaused) {
     const taskId = await leaveTask(tx, orgId, job, {
-      reason: payload.detail ?? line.trigger(lineDays(rule, job.kind)),
+      reason: payload.detail ?? line.trigger(lineDays(rule, job.kind), (await productHooks(tx, orgId)).recallMonths),
       note: lineConfigOf(rule.config).taskNote,
       dueAt: await reminderDue(tx, orgId, job),
       timeZone: tz,
@@ -2336,7 +2337,7 @@ export async function deliverJob(
     let told = false
     if (written.length > 0) {
       try {
-        told = await deps.alreadyTold(orgId, { kind: job.kind, reason: line.trigger(lineDays(rule, job.kind)), messages: written })
+        told = await deps.alreadyTold(orgId, { kind: job.kind, reason: line.trigger(lineDays(rule, job.kind), (await productHooks(tx, orgId)).recallMonths), messages: written })
       } catch {
         // Sin modelo, lo prendido sigue funcionando.
         told = false
@@ -3420,7 +3421,7 @@ export async function automationReplyOf(
     kind: origin.kind,
     button: tapped.title,
     asks,
-    hint: `El interlocutor tocó el botón «${tapped.title}» del mensaje automático de la clínica${line ? ` por «${line.trigger(lineDays(null, origin.kind))}»` : ""}. ${wants}`,
+    hint: `El interlocutor tocó el botón «${tapped.title}» del mensaje automático de la clínica${line ? ` por «${line.trigger(lineDays(null, origin.kind), (await productHooks(tx, orgId)).recallMonths)}»` : ""}. ${wants}`,
   }
 }
 

@@ -891,7 +891,7 @@ async function lineView(
     key: line.key,
     name: line.name,
     area: line.area,
-    trigger: line.trigger(days),
+    trigger: line.trigger(days, (await productHooks(tx, orgId)).recallMonths),
     actor: actorOf(line, state),
     description: describeLine(line, state, timing),
     ...state,
@@ -1100,6 +1100,7 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
   const month = await weekOf(tx, orgId, SUGGESTION_DAYS)
   const timing = lineTiming(rule)
   const view = await lineView(tx, orgId, can, line, rule, { zone, week, month, receptionOn: runtime.receptionOn })
+  const { recallMonths } = await productHooks(tx, orgId)
   // Lo que recibe la persona: el texto vigente de la clínica, con datos de ejemplo.
   const spec = await currentAutomationMessageOf(tx, orgId, line.key)
   const example = spec
@@ -1116,8 +1117,8 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
   const words = CAUSE_WORDS.sin_permiso
   return {
     ...view,
-    flow: flowOf(line, view, { days: view.days, timing }),
-    fullFlow: flowOf(line, view, { days: view.days, timing, all: true }),
+    flow: flowOf(line, view, { days: view.days, timing, recallMonths }),
+    fullFlow: flowOf(line, view, { days: view.days, timing, all: true, recallMonths }),
     message: spec && example ? { text: example.text, buttons: spec.buttons.map((button) => button.title) } : null,
     noticeExample: line.agent ? `No pude escribirle a Tomás Rivas: ${words.one}. ${words.fix}` : null,
     weekStats: week.get(line.key) ?? null,

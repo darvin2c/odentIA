@@ -23,8 +23,10 @@ const NAMES: ArgosNames = {
   promociones: ["Blanqueamiento 2×1"],
 }
 
+/** Las palabras de odentIA en las cifras. */
+const WORDS = { productName: "odentIA", recallMonths: 6 }
 const compile = (ask: Parameters<typeof compileArgosFigure>[0], compare = false) =>
-  compileArgosFigure(ask, { key: "gestion", compare, names: NAMES })
+  compileArgosFigure(ask, { key: "gestion", compare, names: NAMES, words: WORDS })
 
 describe("las cifras oficiales de Argos", () => {
   it("una cifra se arma con los huecos del periodo y la sede, y el revisor la acepta", () => {
@@ -148,10 +150,10 @@ describe("las cifras oficiales de Argos", () => {
     const reception = argosFiguresOf("recepcion").map((figure) => figure.key)
     expect(reception).toContain("atendidas")
     expect(reception).not.toContain("cobrado")
-    expect(argosFiguresText("recepcion")).not.toContain("- cobrado:")
+    expect(argosFiguresText("recepcion", WORDS)).not.toContain("- cobrado:")
     expect(argosFiguresOf("caja").map((figure) => figure.key)).toContain("cobrado")
     expect(
-      compileArgosFigure({ cifra: "cobrado" }, { key: "recepcion", compare: false, names: NAMES }),
+      compileArgosFigure({ cifra: "cobrado" }, { key: "recepcion", compare: false, names: NAMES, words: WORDS }),
     ).toMatchObject({ problem: expect.stringMatching(/no es una cifra oficial que puedas pedir/) })
   })
 

@@ -757,8 +757,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }
     const left = Math.max(0, PRICES_PER_CONVERSATION - before.length)
     return left === 0
-      ? `No enviado: en esta conversación ya diste el precio de ${PRICES_PER_CONVERSATION} servicios. No mandas el tarifario: no des el precio de otro servicio por aquí; ofrécele una evaluación, donde le dan un presupuesto a su medida, y vuelve a enviar la respuesta sola en su paso, sin ese precio.`
-      : `No enviado: en esta conversación solo puedes dar el precio de ${left} ${left === 1 ? "servicio más" : "servicios más"} (no mandas el tarifario). Responde el que más le interese y, para el resto, ofrécele una evaluación; vuelve a enviar la respuesta sola en su paso.`
+      ? `No enviado: en esta conversación ya diste el precio de ${PRICES_PER_CONVERSATION} servicios. No mandas el tarifario: no des el precio de otro servicio por aquí; ofrécele ${texts.visit.offer}, y vuelve a enviar la respuesta sola en su paso, sin ese precio.`
+      : `No enviado: en esta conversación solo puedes dar el precio de ${left} ${left === 1 ? "servicio más" : "servicios más"} (no mandas el tarifario). Responde el que más le interese y, para el resto, ofrécele ${texts.visit.word.replace(/^la /, "una ")}; vuelve a enviar la respuesta sola en su paso.`
   }
 
   /**
@@ -1337,7 +1337,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       name: "proponer_cita",
       description:
         `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).`,
-      schema: operationAgentSchema("cita.reservar"),
+      schema: operationAgentSchema("cita.reservar", { room }),
     },
   )
 
@@ -1366,7 +1366,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       name: "reprogramar_cita",
       description:
         "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Queda esperando la confirmación del interlocutor (confirmar_propuesta).",
-      schema: operationAgentSchema("cita.mover"),
+      schema: operationAgentSchema("cita.mover", { room }),
     },
   )
 

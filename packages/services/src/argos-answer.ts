@@ -18,6 +18,7 @@ import type { ArgosNames } from "./argos-figures.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
+import { type ProductAgentTexts, productName } from "./product-agent.js"
 import { ServiceError } from "./errors.js"
 import { ensureArgosQuestion } from "./saas-included.js"
 import { type ReportQuery, reportScope } from "./report-scope.js"
@@ -29,10 +30,15 @@ export const ARGOS_WORDS = {
   sinModelo: "Ahora no puedo leer preguntas. Prueba de nuevo en un momento.",
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
   tiempo: "La consulta tardaba más de 3 segundos y la detuve. Prueba con un periodo más corto.",
-  noExiste: "Eso no está en los datos que registra odentIA.",
-  ayuda: "Eso es de cómo se usa odentIA: te lo explica la Ayuda.",
+  noExiste: "Eso no está en los datos que registra {producto}.",
+  ayuda: "Eso es de cómo se usa {producto}: te lo explica la Ayuda.",
   otro: "Respondo preguntas sobre los datos de la clínica: dinero, pacientes, agenda, tratamientos, presupuestos e inventario. Prueba con «¿cuánto cobramos este mes?».",
 } as const
+
+/** Lo que dice Argos, con el nombre del producto de la clínica (odentIA, latidIA). */
+export function argosWord(key: keyof typeof ARGOS_WORDS, texts: ProductAgentTexts): string {
+  return ARGOS_WORDS[key].replaceAll("{producto}", productName(texts))
+}
 
 export type ArgosOutcome = "respondida" | "parcial" | "no_sabe" | "ayuda" | "otro" | "no_pudo"
 
@@ -71,7 +77,7 @@ export async function argosQuestionGate(tx: Db, orgId: string, now: Date = new D
  * Maxilar», «extrac» por «Exodoncia simple», «Surco» por «Sede Surco») y la
  * cifra sale en cero sin que nada falle. Son nombres, no datos de pacientes.
  */
-export function argosNamesText(names: ArgosNames, key: ArgosKey): string {
+export function argosNamesText(names: ArgosNames, key: ArgosKey, texts: ProductAgentTexts): string {
   const groups = new Map<string, string[]>()
   for (const service of names.servicios) {
     const list = groups.get(service.specialty ?? "Otros") ?? []
@@ -81,7 +87,7 @@ export function argosNamesText(names: ArgosNames, key: ArgosKey): string {
   const services = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "es")).map(([name, list]) => `  - ${name}: ${list.join(", ")}.`)
   const seesStock = argosViewsOf(key).some((view) => view.name === "inventario")
   const lines = [
-    "Los nombres de esta clínica, como están en las vistas. En la consulta escríbelos tal cual aunque la pregunta los diga de otra forma («Surco» es la sede que lo lleva, «extracciones» son los servicios de exodoncia, «ortodoncia» es la especialidad que la nombra). Para un tipo de tratamiento, filtra por su especialidad si es toda una, o por los nombres de sus servicios.",
+    `Los nombres de esta clínica, como están en las vistas. En la consulta escríbelos tal cual aunque la pregunta los diga de otra forma («Surco» es la sede que lo lleva${texts.argos.streetName ? `, ${texts.argos.streetName}` : ""}). Para un tipo de tratamiento, filtra por su especialidad si es toda una, o por los nombres de sus servicios.`,
     `- Sedes: ${names.sedes.join(", ") || "ninguna"}.`,
     `- Equipo: ${names.equipo.join(", ") || "nadie"}. Atienden pacientes (tienen horario o citas como profesional, lleven o no «Dr.»): ${names.atienden.join(", ") || "nadie"}.`,
     services.length ? `- Servicios por especialidad:\n${services.join("\n")}` : "- Servicios: ninguno.",
