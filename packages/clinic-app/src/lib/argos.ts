@@ -84,9 +84,39 @@ export type ArgosResult =
       source: "oficial" | "argos"
       /** Varios pacientes se llaman como el de la pregunta (D23): se elige antes de ver la respuesta. */
       choose: { message: string; options: ArgosPatientOption[] } | null
+      /** Sumó un paquete de preguntas solo («Sumar solas», ADR 0085): lo dice arriba de la respuesta. */
+      packAdded?: string | null
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: (ArgosShown & { query: string }) | null }
-  | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
+  /** `tope`: usó las preguntas del mes; `presupuesto`: la clínica llegó al suyo (ADR 0085). */
+  | { kind: "ayuda" | "otro" | "apagado" | "tope" | "presupuesto" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
+
+/** Las preguntas a Argos del mes, como las dice el panel (tablero C3). */
+export interface ArgosAllowance {
+  limited: boolean
+  used: number
+  total: number
+  remaining: number
+  month: string
+  lastDay: string
+  packQuestions: number
+  packPrice: string | null
+  autoPack: boolean
+  budgetReached: boolean
+  /** Quien mira ve Facturación: puede sumar un paquete. */
+  canAdd: boolean
+}
+
+export const ARGOS_ALLOWANCE_KEY = ["argos", "allowance"] as const
+
+export function getArgosAllowance(): Promise<ArgosAllowance> {
+  return apiFetch<{ data: ArgosAllowance }>("/api/reports/argos/allowance").then((res) => res.data)
+}
+
+/** Suma un paquete de preguntas (lo cobra la factura del mes); solo quien ve Facturación. */
+export function addArgosPack(orgId: string): Promise<unknown> {
+  return apiFetch("/api/account/billing/argos-pack", { method: "POST", body: JSON.stringify({ orgId }) })
+}
 
 export interface ArgosAskBody {
   text: string

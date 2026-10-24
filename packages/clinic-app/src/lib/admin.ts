@@ -87,6 +87,8 @@ export interface AdminPage {
   monthTemplates: number
   /** Prendida, pero casi no escribe: la mayoría no aceptó ese tipo de mensaje. */
   permissionGaps: Array<{ purpose: "novedades"; refused: number; total: number; asks: boolean; lineKey: string }>
+  /** Llegó al presupuesto del mes: los mensajes para recuperar esperan (ADR 0085). */
+  budgetHold?: { until: string; total: number; lines: Array<{ kind: string; name: string; count: number }> } | null
 }
 
 export interface AdminFlowStep {

@@ -10,15 +10,18 @@
  */
 import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, ScrollArea, toast } from "@odentia/ui"
 import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { getRouteApi, Link } from "@tanstack/react-router"
 import { ArrowRight, Check, Download, LoaderCircle, Pin, Search } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { ADMIN_NAME } from "../../lib/agent-names"
 import {
+  ARGOS_ALLOWANCE_KEY,
   ARGOS_SCREEN_LINKS,
   ASK_ARGOS_EVENT,
+  addArgosPack,
+  type ArgosAllowance,
   type ArgosAskEvent,
   type ArgosChoice,
   type ArgosResult,
@@ -27,6 +30,7 @@ import {
   askArgos,
   choiceOf,
   downloadArgos,
+  getArgosAllowance,
   openArgos,
   pinArgos,
   rerunArgos,
@@ -41,6 +45,7 @@ import { PersonLink } from "../person-link"
 import { ArgosPeriodRow } from "./argos-period"
 
 const DESCRIPTION = "Responde con los datos de la clínica que tú puedes ver"
+const orgRouteApi = getRouteApi("/_org")
 const SAMPLES = ["¿Cuánto cobramos este mes?", "¿Qué pacientes tienen saldos pendientes?", "¿Cuántas citas hay mañana?"]
 const ANSWER = "flex min-w-0 flex-col gap-3 rounded-2xl rounded-bl-md border bg-card px-3.5 py-3 text-sm"
 /** Filas de la tabla a la vista; el resto con «Ver las N». */
@@ -67,6 +72,10 @@ interface Exchange {
   patientId?: string
   /** Ya llegó la respuesta del paciente elegido: antes no se muestra nada (la del otro no se ve ni atenuada). */
   patientReady?: boolean
+  /** Lo que dice Argos arriba de la respuesta: que sumó preguntas (ADR 0085). */
+  note?: string
+  /** Eligió «Ahora no» en la tarjeta de las preguntas del mes. */
+  declined?: boolean
 }
 
 /** Mientras Argos trabaja: los pasos hechos con su marca y el que va, con su espera (D22). */
@@ -429,6 +438,88 @@ function ArgosAnswer({
   )
 }
 
+/**
+ * Usó las preguntas del mes o la clínica llegó a su presupuesto (ADR 0085,
+ * tablero C3): quien ve Facturación suma un paquete aquí mismo y Argos
+ * responde la pregunta; los demás leen a quién pedírselo.
+ */
+function ArgosAllowanceCard({
+  exchange,
+  allowance,
+  adding,
+  onAdd,
+  onDecline,
+}: {
+  exchange: Exchange
+  allowance: ArgosAllowance | undefined
+  adding: boolean
+  onAdd: () => void
+  onDecline: () => void
+}) {
+  const result = exchange.result
+  if (!result || (result.kind !== "tope" && result.kind !== "presupuesto")) return null
+  const canAdd = allowance?.canAdd === true
+  if (result.kind === "presupuesto") {
+    return (
+      <div className={ANSWER}>
+        <p className="text-[15px] leading-6">
+          {allowance ? `Llegaste al presupuesto de ${allowance.month}, así que no puedo sumar más preguntas.` : result.message}{" "}
+          {canAdd ? (
+            <>
+              <Link to="/settings/plan" className="text-primary underline underline-offset-4">
+                Súbelo en Plan y pagos
+              </Link>{" "}
+              y sigo respondiendo.
+            </>
+          ) : allowance ? (
+            "Avísale a quien administra la clínica."
+          ) : null}
+        </p>
+        <p className="text-[13px] text-muted-foreground">Reportes, Fijadas y las cifras siguen funcionando: solo se detienen las preguntas nuevas.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5 rounded-2xl rounded-bl-md border border-warning/40 bg-warning-soft px-3.5 py-3 text-sm">
+      {allowance ? (
+        <>
+          <p className="text-[15px] font-semibold">
+            Usaste las {allowance.total} preguntas de {allowance.month}
+          </p>
+          {canAdd && allowance.packPrice ? (
+            <p className="text-[15px] leading-6">
+              ¿Sumo {allowance.packQuestions} más por {allowance.packPrice}? Las uso para responder esta pregunta y las que vengan hasta el {allowance.lastDay}.
+            </p>
+          ) : (
+            <p className="text-[15px] leading-6">Para seguir preguntando, pídele a quien administra la clínica que sume más preguntas en Plan y pagos.</p>
+          )}
+        </>
+      ) : (
+        <p className="text-[15px] leading-6">{result.message}</p>
+      )}
+      {canAdd && allowance?.packPrice && !exchange.declined ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className="min-h-11 sm:min-h-9" disabled={adding} aria-busy={adding} onClick={onAdd}>
+              {adding ? "Sumando…" : `Sumar ${allowance.packQuestions} · ${allowance.packPrice}`}
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-9" disabled={adding} onClick={onDecline}>
+              Ahora no
+            </Button>
+          </div>
+          <p className="text-[12px] text-muted-foreground">
+            Se suma a tu factura de {allowance.month}. Para que se sumen solas,{" "}
+            <Link to="/settings/plan" className="text-primary underline underline-offset-4">
+              actívalo en Plan y pagos
+            </Link>
+            .
+          </p>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 /** Lo que dice Argos cuando no hay una respuesta con cifras (tableros 4 y 5), con su salida. */
 function ArgosReply({ exchange, onRetry, onClose }: { exchange: Exchange; onRetry: () => void; onClose: () => void }) {
   const role = useMyRole()
@@ -494,6 +585,8 @@ function ArgosReply({ exchange, onRetry, onClose }: { exchange: Exchange; onRetr
  */
 export function ArgosPanel() {
   const allowed = usePermission("reports.read")
+  const { org } = orgRouteApi.useRouteContext()
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [draft, setDraft] = useState("")
@@ -508,11 +601,29 @@ export function ArgosPanel() {
     retry: false,
     mutationFn: (input: { id: number; body: Parameters<typeof askArgos>[0] }) =>
       askArgos(input.body, (step) => setExchanges((current) => current.map((item) => (item.id === input.id ? { ...item, steps: [...(item.steps ?? []), step] } : item)))),
-    onSuccess: (response, input) => update(input.id, { result: response.data }),
+    onSuccess: (response, input) => {
+      update(input.id, { result: response.data })
+      // Cada pregunta gasta de las del mes: el contador de arriba se pone al día.
+      void queryClient.invalidateQueries({ queryKey: ARGOS_ALLOWANCE_KEY })
+    },
     onError: (error, input) =>
       update(input.id, {
         error: error instanceof ApiError && error.status !== 500 && error.shape.message ? error.shape.message : "No pude responder ahora. Vuelve a intentarlo en un momento.",
       }),
+  })
+  // Las preguntas del mes (ADR 0085): el contador de arriba y la tarjeta para sumar más.
+  const allowance = useQuery({ queryKey: ARGOS_ALLOWANCE_KEY, queryFn: getArgosAllowance, enabled: allowed && open, retry: false })
+  const addPack = useMutation({
+    mutationFn: (exchange: Exchange) => addArgosPack(org.id).then(() => exchange),
+    onSuccess: async (exchange) => {
+      void queryClient.invalidateQueries({ queryKey: ["billing", org.id] })
+      const after = (await allowance.refetch()).data
+      const note = after?.packPrice
+        ? `Listo: sumé ${after.packQuestions} preguntas por ${after.packPrice}. Te quedan ${after.remaining} hasta el ${after.lastDay}.`
+        : undefined
+      pushRef.current(exchange.question, { screen: exchange.screen, ...(exchange.routed ? { routed: true } : {}), ...(note ? { note } : {}) })
+    },
+    onError: (error) => toast.error(mutationErrorMessage(error) ?? "No se pudieron sumar las preguntas."),
   })
 
   // Otro periodo o sede (D9): la misma consulta en el servidor, sin el modelo. Lo de antes queda hasta que llega lo nuevo.
@@ -543,7 +654,7 @@ export function ArgosPanel() {
       }),
   })
 
-  function push(question: string, options: { screen?: ReportQuery | undefined; routed?: boolean } = {}) {
+  function push(question: string, options: { screen?: ReportQuery | undefined; routed?: boolean; note?: string } = {}) {
     const id = next.current++
     // La anterior con respuesta viaja con su consulta, nunca con su resultado (D3): la de la opción que se
     // está viendo, para que «¿y de esos…?» hable de lo que está en la pantalla.
@@ -560,7 +671,19 @@ export function ArgosPanel() {
           : null,
       ...(options.routed ? { routed: true } : {}),
     }
-    setExchanges((current) => [...current, { id, question, ...(options.screen ? { screen: options.screen } : {}), ...(options.routed ? { routed: true } : {}), result: null, error: null, option: null }])
+    setExchanges((current) => [
+      ...current,
+      {
+        id,
+        question,
+        ...(options.screen ? { screen: options.screen } : {}),
+        ...(options.routed ? { routed: true } : {}),
+        ...(options.note ? { note: options.note } : {}),
+        result: null,
+        error: null,
+        option: null,
+      },
+    ])
     setOpen(true)
     ask.mutate({ id, body })
   }
@@ -613,7 +736,14 @@ export function ArgosPanel() {
 
   return (
     // Se puede cerrar mientras pregunta: la respuesta llega igual a su pregunta y se ve al volver a abrir.
-    <DetailDrawer open title={ADMIN_NAME} description={DESCRIPTION} onClose={() => setOpen(false)}>
+    <DetailDrawer
+      open
+      title={ADMIN_NAME}
+      description={
+        allowance.data?.limited ? `${DESCRIPTION} · ${allowance.data.used} de ${allowance.data.total} preguntas de ${allowance.data.month}` : DESCRIPTION
+      }
+      onClose={() => setOpen(false)}
+    >
       <div className="flex flex-col gap-4">
         {exchanges.length === 0 ? (
           <section aria-label="Prueba una pregunta" className="flex flex-col gap-1.5">
@@ -634,6 +764,11 @@ export function ArgosPanel() {
                   <span className="sr-only">Preguntaste: </span>
                   {exchange.question}
                 </p>
+                {exchange.note || (exchange.result?.kind === "respuesta" && exchange.result.packAdded) ? (
+                  <p className="text-[13px] text-muted-foreground">
+                    {exchange.note ?? (exchange.result?.kind === "respuesta" ? exchange.result.packAdded : null)}
+                  </p>
+                ) : null}
                 {exchange.error ? (
                   <div className={ANSWER}>
                     <p role="alert" className="text-[15px] leading-6">
@@ -645,6 +780,14 @@ export function ArgosPanel() {
                   </div>
                 ) : !exchange.result ? (
                   <ArgosSteps steps={exchange.steps ?? []} />
+                ) : exchange.result.kind === "tope" || exchange.result.kind === "presupuesto" ? (
+                  <ArgosAllowanceCard
+                    exchange={exchange}
+                    allowance={allowance.data}
+                    adding={addPack.isPending}
+                    onAdd={() => addPack.mutate(exchange)}
+                    onDecline={() => update(exchange.id, { declined: true })}
+                  />
                 ) : exchange.result.kind === "respuesta" ? (
                   <ArgosAnswer
                     exchange={exchange}

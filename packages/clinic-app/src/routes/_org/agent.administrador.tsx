@@ -188,6 +188,25 @@ function MissingNotices({
   }
   return (
     <>
+      {page.budgetHold ? (
+        // Al llegar al presupuesto, Argos no escribe para recuperar (ADR 0085, tablero C4).
+        <div role="status" className="flex flex-col gap-1 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
+          <p className="font-semibold">
+            Pausado hasta el {page.budgetHold.until} o hasta que subas el presupuesto
+            {page.budgetHold.total > 0
+              ? `: ${page.budgetHold.total} ${page.budgetHold.total === 1 ? "mensaje para recuperar un paciente espera" : "mensajes para recuperar pacientes esperan"}`
+              : ""}
+            .
+          </p>
+          {page.budgetHold.lines.length ? (
+            <p className="text-muted-foreground">{page.budgetHold.lines.map((line) => `${line.name} (${line.count})`).join(" · ")}</p>
+          ) : null}
+          <p>
+            Siguen saliendo los recordatorios y los avisos de cita: el paciente ya tiene su cita y no se cobran. Al subirlo salen los que siguen
+            teniendo sentido; si la persona ya reservó, se descartan solos.
+          </p>
+        </div>
+      ) : null}
       {page.permissionGaps.map((gap) => (
         <div key={gap.purpose} role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
           <div className="min-w-0 flex-1 basis-64">

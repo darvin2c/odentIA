@@ -8,14 +8,14 @@ const ALERT_TOPIC: Record<SaasAlertFamily, string> = {
   saldo_prueba: "tu saldo de prueba",
   dias_prueba: "tu prueba termina pronto",
   credito: "el crédito del mes",
-  tope: "tu tope de gasto",
+  tope: "tu presupuesto del mes",
   precio_especial: "tu precio especial termina",
   condiciones: "tus condiciones de Fundador terminan",
 }
 
 const ALERT_ACTION: Record<SaasAlert["action"], string> = {
   elegir_plan: "Elegir un plan",
-  cambiar_tope: "Cambiar mi tope",
+  cambiar_tope: "Cambiar mi presupuesto",
   ver_consumo: "Ver mi consumo",
   ver_plan: "Ver mi plan",
 }

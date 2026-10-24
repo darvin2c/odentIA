@@ -2,17 +2,20 @@ import { randomUUID } from "node:crypto"
 import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { aiUsage } from "@odentia/db/schema/agent"
 import { session } from "@odentia/db/schema/auth"
-import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { reportQuestion } from "@odentia/db/schema/reports"
+import { saasAction, saasPlan, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { desc, eq } from "drizzle-orm"
 import { hostUrl, tenant } from "./env"
 import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * Cobro por acción (ADR 0031): lo que hicieron los agentes en Plan y pagos y
- * fila por fila, el aviso de la plataforma, y en la administración el plan,
- * la ficha de la clínica y Hoy. Los datos de cobro se preparan por la base:
- * contarlos ya lo prueban los servicios; aquí se recorre lo que se ve.
+ * Cobro por acción (ADR 0031 y 0085): lo que hicieron los agentes en Plan y
+ * pagos por tipo y fila por fila, las preguntas a Argos y lo guardado, el
+ * presupuesto alcanzado con lo cobrado después y su aviso, y en la
+ * administración el plan, la ficha de la clínica y Hoy. Los datos de cobro se
+ * preparan por la base: contarlos ya lo prueban los servicios; aquí se recorre
+ * lo que se ve.
  */
 test("cobro por acción: la clínica ve sus acciones y su aviso; la administración, el plan, la ficha y Hoy", async ({ owner, createOwner, fixtureDb }, testInfo) => {
   test.setTimeout(180_000)
@@ -29,9 +32,21 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
       currency: "USD",
       priceCents: 2900,
       creditCents: 2900,
+      // Los precios por tipo del lienzo «Cobro por tipo» (ADR 0085).
+      conversationInformMicros: 100_000,
       conversationMicros: 500_000,
-      consultationMicros: 400_000,
-      recoveryMicros: 4_000_000,
+      conversationAgendaMicros: 1_000_000,
+      consultationSimpleMicros: 100_000,
+      consultationStandardMicros: 200_000,
+      consultationMicros: 500_000,
+      recoveryMicros: 2_000_000,
+      argosIncludedQuestions: 300,
+      argosPackQuestions: 100,
+      argosPackMicros: 3_000_000,
+      storageIncludedGb: 20,
+      storageGbMicros: 200_000,
+      fixedPriceTiers: ["informa", "simple", "estandar", "preguntas"],
+      maxDiscountBps: 4000,
       trialCreditCents: 5000,
       trialMaxCreditCents: 13000,
     })
@@ -50,55 +65,90 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
       currentPeriodEnd: new Date(now + 20 * day),
     })
     .where(eq(saasSubscription.organizationId, org.id))
-  const action = (kind: "conversacion" | "consulta" | "cita", minutesAgo: number, base: number, detail: string, channel: string | null) => ({
+  type Kind = "conversacion" | "consulta" | "cita" | "preguntas"
+  /** Una acción con su precio congelado: lo fijo sin descuento, lo demás con el 10 %. */
+  const action = (kind: Kind, tier: string | null, minutesAgo: number, base: number, detail: string, channel: string | null, fixed = false, units: number | null = null) => ({
     organizationId: org.id,
     kind,
-    // Con el único precio de antes de los tipos (ADR 0085): Gestiona y Completa.
-    tier: kind === "conversacion" ? "gestiona" : kind === "consulta" ? "completa" : null,
+    tier,
+    units,
     occurredAt: new Date(now - minutesAgo * 60_000),
     contactId: randomUUID(),
     channel,
     detail,
     currency: "USD",
     basePriceMicros: base,
-    priceMicros: Math.round(base * 0.9),
-    discountBps: 1000,
+    priceMicros: fixed ? base : Math.round(base * 0.9),
+    discountBps: fixed ? 0 : 1000,
     dedupeKey: randomUUID(),
   })
   await fixtureDb.insert(saasAction).values([
-    ...Array.from({ length: 64 }, (_, index) => action("conversacion", 600 + index * 60, 500_000, "Atendió una conversación por WhatsApp", "whatsapp")),
-    action("consulta", 300, 400_000, "Ordenó la consulta dictada por Ana Pruebas", null),
-    action("cita", 200, 4_000_000, "Volvió tras «Seguir un presupuesto» y reservó desde el enlace", "enlace"),
+    ...Array.from({ length: 30 }, (_, index) => action("conversacion", "informa", 9_000 + index * 60, 100_000, "Atendió una conversación por WhatsApp", "whatsapp", true)),
+    ...Array.from({ length: 52 }, (_, index) => action("conversacion", "gestiona", 3_000 + index * 60, 500_000, "Atendió una conversación y gestionó una cita por WhatsApp", "whatsapp")),
+    action("consulta", "simple", 2_400, 100_000, "Dejó lista una cosa de la consulta dictada por Ana Pruebas", null, true),
+    action("consulta", "simple", 2_300, 100_000, "Dejó lista una cosa de la consulta dictada por Ana Pruebas", null, true),
+    action("consulta", "estandar", 2_200, 200_000, "Ordenó la consulta dictada por Ana Pruebas", null, true),
+    action("consulta", "completa", 2_100, 500_000, "Ordenó la consulta dictada y armó el presupuesto por Ana Pruebas", null),
+    action("preguntas", null, 2_000, 3_000_000, "Sumó 100 preguntas a Argos", null, true, 100),
+    // Ya pasado el presupuesto: resultados de un trabajo ya hecho, que se cobran igual.
+    action("conversacion", "agenda", 300, 500_000, "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda", "whatsapp"),
+    action("cita", null, 200, 2_000_000, "Volvió tras «Seguir un presupuesto» y reservó desde el enlace", "enlace"),
   ])
+  // 150 preguntas a Argos este mes y 14,2 GB guardados.
+  await fixtureDb.insert(reportQuestion).values(
+    Array.from({ length: 150 }, () => ({ organizationId: org.id, userId: user.id, outcome: "respondida", usedModel: true, createdAt: new Date(now - day) })),
+  )
+  await fixtureDb
+    .insert(storageUsageDay)
+    .values({ organizationId: org.id, day: new Date(now).toISOString().slice(0, 10), bytes: Math.round(14.2 * 1024 ** 3) })
+    .onConflictDoNothing()
   await fixtureDb.insert(aiUsage).values([
     { organizationId: org.id, origin: "recepcion", provider: "openai", model: "gpt-6-luna", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
     { organizationId: org.id, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 3, inputTokens: 6_000, outputTokens: 900, costMicros: 1_050 },
     { organizationId: org.id, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: 50 },
   ])
 
-  // Plan y pagos: lo que hicieron los agentes con el precio base y el propio.
+  // Plan y pagos: cada agente con sus tipos, cuántas y a cuánto (tablero C1).
   await gotoHydrated(page, tenant(org.slug, "/settings/plan"))
   const consumption = page.getByRole("region", { name: "Lo que hicieron tus agentes este mes" })
   await expect(consumption).toBeVisible()
-  await expect(consumption.getByText("64 conversaciones atendidas")).toBeVisible()
+  await expect(consumption.getByText("Informa", { exact: true })).toBeVisible()
+  await expect(consumption.getByText(/^30 × 0[.,]10$/)).toBeVisible()
+  await expect(consumption.getByText(/^52 × 0[.,]45$/)).toBeVisible()
+  await expect(consumption.getByText("Completa", { exact: true })).toBeVisible()
+  await expect(consumption.getByText("Citas recuperadas", { exact: true })).toBeVisible()
+  await expect(consumption.getByText("150 de 400 incluidas y sumadas")).toBeVisible()
+  await expect(consumption.getByText(/^14[.,]2 GB$/)).toBeVisible()
   await expect(consumption.getByText("Se factura al cerrar tu mes", { exact: false })).toBeVisible()
-  await expect(consumption.getByRole("meter", { name: "Crédito del mes" })).toBeVisible()
-  await expect(consumption.getByRole("meter", { name: "Tope por encima del crédito" })).toBeVisible()
+  for (const meter of ["Crédito del mes", "Presupuesto del mes", "Preguntas a Argos", "Almacenamiento"]) {
+    await expect(consumption.getByRole("meter", { name: meter })).toBeVisible()
+  }
+  // Pasado el presupuesto, lo que se cobró igual por un trabajo ya hecho (tablero C4).
+  const after = consumption.getByRole("region", { name: "Cobrado tras el presupuesto" })
+  await expect(after).toBeVisible()
+  await expect(after.getByText("1 paciente vino a la cita que reservó Sofi")).toBeVisible()
+  await expect(after.getByText("1 cita recuperada")).toBeVisible()
   await expect(page.getByText("Te devolvemos los", { exact: false }).first()).toBeVisible()
+  await expect(page.getByText("100 preguntas más")).toBeVisible()
   await shot("panel-plan-y-pagos")
 
-  // El tope se cambia en su panel lateral, con lo que pasa al llegar dicho antes de guardar.
-  await consumption.getByRole("button", { name: "Cambiar tope" }).click()
-  await expect(page.getByText("Cuando llegue al tope")).toBeVisible()
-  await shot("panel-tope")
+  // El presupuesto se cambia en su panel lateral, con lo que pasa al llegar dicho antes de guardar.
+  await consumption.getByRole("button", { name: "Cambiar presupuesto" }).click()
+  await expect(page.getByText("Cuando llegue al presupuesto")).toBeVisible()
+  await shot("panel-presupuesto")
   await page.keyboard.press("Escape")
 
-  // Ver cada acción: la factura suma exactamente estas filas.
+  // Ver cada acción: la factura suma exactamente estas filas, cada una con su tipo (tablero C2).
   await consumption.getByRole("button", { name: "Ver cada acción" }).click()
   await expect(page.getByRole("heading", { name: "Cada acción de tus agentes" })).toBeVisible()
   await expect(page.getByText("Por encima del crédito").first()).toBeVisible()
   await expect(page.getByText("Del crédito del mes").first()).toBeVisible()
+  await expect(page.getByText("Agenda", { exact: true }).first()).toBeVisible()
   await shot("panel-cada-accion")
+  await page.getByRole("tab", { name: "Argos" }).click()
+  await expect(page.getByText("100 preguntas", { exact: true })).toBeVisible()
+  await expect(page.getByText("Cita recuperada", { exact: true })).toBeVisible()
+  await shot("panel-cada-accion-argos")
 
   // En el teléfono, el mismo orden y el detalle en tarjetas.
   await page.setViewportSize({ width: 390, height: 844 })
@@ -109,7 +159,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
 
   // La plataforma avisa arriba de cada pantalla, con su acción.
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  // Con el crédito y el presupuesto en el límite, avisa primero el presupuesto (ADR 0085).
+  // Con el crédito y el presupuesto pasados, avisa primero el presupuesto (ADR 0085).
   // La franja pinta el escritorio y el teléfono: se mira la que está a la vista.
   await expect(page.getByText("Llegaste al presupuesto del mes", { exact: false }).filter({ visible: true })).toBeVisible()
   await shot("plataforma-aviso")
@@ -150,8 +200,9 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await planRow.getByRole("button", { name: "Editar" }).click()
   // Exacto: la nota de las condiciones comerciales también nombra esta comprobación.
   await expect(page.getByText("Comprobación antes de guardar", { exact: true })).toBeVisible()
-  await expect(page.getByText("12.5 veces su peor costo", { exact: false })).toBeVisible()
-  await expect(page.getByText("margen de 86 %", { exact: false })).toBeVisible()
+  // Gestiona a USD 0,50 frente a su peor costo de USD 0,06 (ADR 0085).
+  await expect(page.getByText("8.3 veces su peor costo", { exact: false })).toBeVisible()
+  await expect(page.getByText(/margen de \d+ %/)).toBeVisible()
   await shot("admin-plan")
   await page.keyboard.press("Escape")
 

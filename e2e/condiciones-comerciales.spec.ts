@@ -37,7 +37,7 @@ test("condiciones comerciales: se leen en frases, se cambian por grupo y quedan 
     await shot("seccion")
 
     // Un valor fuera de lo que admite se dice junto al campo y no se guarda.
-    await section.getByRole("button", { name: "Cambiar: Prueba y avisos del tope" }).click()
+    await section.getByRole("button", { name: "Cambiar: Prueba y avisos del presupuesto" }).click()
     const warn = page.getByRole("textbox", { name: "Avisar al usar" })
     await warn.fill(String(before!.alarmPercent + 2))
     await expect(page.getByText(`El aviso va antes que la alarma: escribe menos de ${before!.alarmPercent} %.`)).toBeVisible()
