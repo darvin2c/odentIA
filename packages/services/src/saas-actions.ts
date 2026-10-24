@@ -1,15 +1,24 @@
 import type { Db } from "@odentia/db"
+import { agentProposal } from "@odentia/db/schema/agent"
+import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDictationSuggestion, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { type SaasActionKind, saasAction, saasActionReview, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
+import {
+  type SaasActionKind,
+  type SaasActionTier,
+  saasAction,
+  saasActionReview,
+  saasPlan,
+  saasSubscription,
+} from "@odentia/db/schema/saas-billing"
+import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
 import { SAAS_TERMS_INITIAL, saasTermsAt } from "./saas-commercial-terms.js"
 
-/* ---------- Lo que hicieron los agentes, por acción (ADR 0031) ---------- */
+/* ---------- Lo que hicieron los agentes, por acción (ADR 0031 y 0085) ---------- */
 
 /**
  * Una conversación por persona en la ventana de las condiciones comerciales
@@ -21,12 +30,15 @@ async function conversationWindowMs(tx: Db, at: Date): Promise<number> {
 }
 /**
  * Lo que escribe el Administrador y no recupera nada: los recordatorios y los
- * avisos de una cita reservada, movida o cancelada (ADR 0031). Quien los recibe
- * ya tenía su cita: si después reserva otra con Sofi, esa cita no estaba perdida.
+ * avisos de una cita reservada, movida o cancelada (ADR 0031), y el saldo
+ * vencido, que cobra y no trae de vuelta a nadie (ADR 0085). El aviso de un
+ * control sí puede recuperar: lo decide si la persona ya tenía su cita.
  */
-const NOT_RECOVERY_KINDS = ["recordatorio_cita", "recordatorio_control", ...APPOINTMENT_NOTICE_KEYS]
+const NOT_RECOVERY_KINDS = ["recordatorio_cita", "cobranza_vencida", ...APPOINTMENT_NOTICE_KEYS]
 /** Por dónde reservó el agente: en su conversación o desde su enlace. La que agenda el equipo no cuenta. */
 export const AGENT_SOURCES = ["agent", "enlace"]
+/** Lo que hizo Sofi en la agenda y cambia el tipo de la conversación a «Gestiona» (ADR 0085). */
+export const AGENDA_ACTIONS = ["reservar_cita", "reprogramar_cita", "cancelar_cita"]
 
 const CHANNEL_NAME: Record<string, string> = {
   whatsapp: "WhatsApp",
@@ -40,13 +52,45 @@ const CHANNEL_NAME: Record<string, string> = {
 /** 1 centavo = 10.000 millonésimas. */
 export const microsToCents = (micros: number): number => Math.round(micros / 10_000)
 
+/** 1 GB de almacenamiento, en bytes (el mismo GB del tope de una tomografía). */
+export const STORAGE_GB_BYTES = 1024 ** 3
+
+/** Lo que cobra un tipo de acción, o la acción sin tipo (cita, paquete de preguntas, GB extra). */
+export type SaasPriceKey = SaasActionTier | "cita" | "preguntas" | "almacenamiento"
+
 export interface ActionPricing {
   planId: string | null
   currency: string | null
   creditCents: number
   discountBps: number
   maxDiscountBps: number
+  /** Precio base de cada acción en el tipo con que se compara (Gestiona, Completa) y de lo que no tiene tipo. */
   base: Record<SaasActionKind, number | null>
+  /** Precio base de cada tipo (ADR 0085). */
+  prices: Record<SaasPriceKey, number | null>
+  /** Lo que no admite descuento negociado: siempre a su precio base. */
+  fixed: ReadonlySet<SaasPriceKey>
+  argos: { included: number; packQuestions: number }
+  storageIncludedGb: number
+}
+
+/**
+ * Los precios de un plan, por tipo; sin plan, todos null. Un plan sin precio
+ * para un tipo cobra ese tipo como antes de la ADR 0085, con el único precio
+ * de su acción (y la conversación no sube a «Agenda»).
+ */
+export function planPrices(plan: typeof saasPlan.$inferSelect | undefined): Record<SaasPriceKey, number | null> {
+  return {
+    informa: plan?.conversationInformMicros ?? plan?.conversationMicros ?? null,
+    gestiona: plan?.conversationMicros ?? null,
+    agenda: plan?.conversationAgendaMicros ?? plan?.conversationMicros ?? null,
+    simple: plan?.consultationSimpleMicros ?? plan?.consultationMicros ?? null,
+    estandar: plan?.consultationStandardMicros ?? plan?.consultationMicros ?? null,
+    completa: plan?.consultationMicros ?? null,
+    cita: plan?.recoveryMicros ?? null,
+    preguntas: plan?.argosPackMicros ?? null,
+    almacenamiento: plan?.storageGbMicros ?? null,
+  }
 }
 
 /**
@@ -72,6 +116,7 @@ export async function getActionPricing(tx: Db, orgId: string, now = new Date()):
         .from(saasPlan)
         .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
         .limit(1)
+  const prices = planPrices(plan)
   return {
     planId: plan?.id ?? null,
     currency: plan?.currency ?? null,
@@ -79,10 +124,16 @@ export async function getActionPricing(tx: Db, orgId: string, now = new Date()):
     discountBps: Math.min(activeDiscountBps(sub ?? null, now), plan?.maxDiscountBps ?? 0),
     maxDiscountBps: plan?.maxDiscountBps ?? 0,
     base: {
-      conversacion: plan?.conversationMicros ?? null,
-      consulta: plan?.consultationMicros ?? null,
-      cita: plan?.recoveryMicros ?? null,
+      conversacion: prices.gestiona,
+      consulta: prices.completa,
+      cita: prices.cita,
+      preguntas: prices.preguntas,
+      almacenamiento: prices.almacenamiento,
     },
+    prices,
+    fixed: new Set((plan?.fixedPriceTiers ?? []) as SaasPriceKey[]),
+    argos: { included: plan?.argosIncludedQuestions ?? 0, packQuestions: plan?.argosPackQuestions ?? 100 },
+    storageIncludedGb: plan?.storageIncludedGb ?? 0,
   }
 }
 
@@ -101,36 +152,150 @@ export function discountedMicros(baseMicros: number, discountBps: number): numbe
   return Math.round((baseMicros * (10_000 - discountBps)) / 10_000)
 }
 
-async function insertAction(
+/** Precio base, propio y descuento de una acción de ese tipo; lo fijo no se negocia (ADR 0085). */
+export function priceFor(
+  pricing: Pick<ActionPricing, "prices" | "fixed" | "discountBps">,
+  key: SaasPriceKey,
+  units = 1,
+): { basePriceMicros: number | null; priceMicros: number | null; discountBps: number } {
+  const unit = pricing.prices[key]
+  if (unit === null) return { basePriceMicros: null, priceMicros: null, discountBps: 0 }
+  const discount = pricing.fixed.has(key) ? 0 : pricing.discountBps
+  const base = unit * units
+  return { basePriceMicros: base, priceMicros: discountedMicros(base, discount), discountBps: discount }
+}
+
+/** La clave de precio de una acción: su tipo, o la acción si no tiene. */
+const priceKeyOf = (kind: SaasActionKind, tier: SaasActionTier | null): SaasPriceKey =>
+  tier ?? (kind === "conversacion" ? "gestiona" : kind === "consulta" ? "completa" : kind)
+
+export async function insertAction(
   tx: Db,
   orgId: string,
   kind: SaasActionKind,
   values: Omit<typeof saasAction.$inferInsert, "organizationId" | "kind" | "basePriceMicros" | "priceMicros" | "discountBps" | "currency">,
+  pricing?: ActionPricing,
 ): Promise<boolean> {
-  const pricing = await getActionPricing(tx, orgId)
-  const base = pricing.base[kind]
+  const own = pricing ?? (await getActionPricing(tx, orgId))
   const [row] = await tx
     .insert(saasAction)
     .values({
       ...values,
       organizationId: orgId,
       kind,
-      currency: pricing.currency,
-      basePriceMicros: base,
-      priceMicros: base === null ? null : discountedMicros(base, pricing.discountBps),
-      discountBps: base === null ? 0 : pricing.discountBps,
+      currency: own.currency,
+      // El GB extra se cobra por cada GB; el paquete de preguntas, por paquete.
+      ...priceFor(own, priceKeyOf(kind, (values.tier as SaasActionTier | null | undefined) ?? null), kind === "almacenamiento" ? (values.units ?? 1) : 1),
     })
     .onConflictDoNothing({ target: [saasAction.organizationId, saasAction.dedupeKey] })
     .returning({ id: saasAction.id })
   return Boolean(row)
 }
 
+/* ---------- Sofi: según lo que pasó en la agenda (ADR 0085) ---------- */
+
+export const SOFI_DETAIL: Record<"informa" | "gestiona", string> = {
+  informa: "Atendió una conversación",
+  gestiona: "Atendió una conversación y gestionó una cita",
+}
+
+/**
+ * El tipo de la conversación de una persona en su ventana: «Gestiona» si Sofi
+ * reservó, movió o canceló una cita (sus propuestas ejecutadas) o la persona
+ * reservó desde el enlace; si no, «Informa». Una cita que mueve el equipo no
+ * cuenta como trabajo de Sofi.
+ */
+export async function conversationTierOf(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; from: Date; to: Date },
+): Promise<"informa" | "gestiona"> {
+  const [proposal] = await tx
+    .select({ id: agentProposal.id })
+    .from(agentProposal)
+    .where(
+      and(
+        eq(agentProposal.organizationId, orgId),
+        eq(agentProposal.contactId, input.contactId),
+        eq(agentProposal.status, "ejecutada"),
+        inArray(agentProposal.action, AGENDA_ACTIONS),
+        gte(agentProposal.executedAt, input.from),
+        lt(agentProposal.executedAt, input.to),
+      ),
+    )
+    .limit(1)
+  if (proposal) return "gestiona"
+  const [booked] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .innerJoin(
+      patientContact,
+      and(
+        eq(patientContact.organizationId, appointment.organizationId),
+        eq(patientContact.patientId, appointment.patientId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(patientContact.contactId, input.contactId),
+        eq(appointment.source, "enlace"),
+        gte(appointment.createdAt, input.from),
+        lt(appointment.createdAt, input.to),
+      ),
+    )
+    .limit(1)
+  return booked ? "gestiona" : "informa"
+}
+
+/**
+ * Sube de tipo la conversación de esa persona cuya ventana contiene `at`, si
+ * aún no se cobró: lo cobrado no se reescribe (lo impide la base).
+ */
+export async function refreshConversationTier(tx: Db, orgId: string, input: { contactId: string; at: Date }): Promise<void> {
+  const windowMs = await conversationWindowMs(tx, input.at)
+  const [row] = await tx
+    .select({ id: saasAction.id, tier: saasAction.tier, occurredAt: saasAction.occurredAt, channel: saasAction.channel })
+    .from(saasAction)
+    .where(
+      and(
+        eq(saasAction.organizationId, orgId),
+        eq(saasAction.contactId, input.contactId),
+        eq(saasAction.kind, "conversacion"),
+        inArray(saasAction.tier, ["informa", "gestiona"]),
+        lte(saasAction.occurredAt, input.at),
+        gt(saasAction.occurredAt, new Date(input.at.getTime() - windowMs)),
+        isNull(saasAction.chargeId),
+      ),
+    )
+    .orderBy(asc(saasAction.occurredAt))
+    .limit(1)
+  if (!row || row.tier === "gestiona") return
+  const tier = await conversationTierOf(tx, orgId, {
+    contactId: input.contactId,
+    from: row.occurredAt,
+    to: new Date(row.occurredAt.getTime() + windowMs),
+  })
+  if (tier === row.tier) return
+  const pricing = await getActionPricing(tx, orgId)
+  await tx
+    .update(saasAction)
+    .set({
+      tier,
+      detail: `${SOFI_DETAIL[tier]} por ${CHANNEL_NAME[row.channel ?? ""] ?? row.channel ?? "un canal"}`,
+      ...priceFor(pricing, tier),
+    })
+    .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.id, row.id), isNull(saasAction.chargeId)))
+}
+
 /**
  * Recepción atendió con IA (la corrida respondió y llamó al modelo): una
  * conversación por persona en la ventana de las condiciones (24 horas al
- * empezar). No cuentan lo que respondió el
- * equipo, la derivación sin IA, el texto fijo ni la corrida que falló: quien
- * llama solo lo pide con una corrida `ok` que llamó al modelo.
+ * empezar), con el tipo de lo que pasó en la agenda (ADR 0085). No cuentan lo
+ * que respondió el equipo, la derivación sin IA, el texto fijo ni la corrida
+ * que falló: quien llama solo lo pide con una corrida `ok` que llamó al
+ * modelo. Una corrida siguiente de la misma ventana sube su tipo.
  */
 export async function countConversationAction(tx: Db, orgId: string, input: { conversationId: string; at: Date }): Promise<boolean> {
   const [conv] = await tx
@@ -143,6 +308,7 @@ export async function countConversationAction(tx: Db, orgId: string, input: { co
   if (!conv || conv.isTest) return false
   // Dos corridas a la vez de la misma persona (dos canales) no cuentan dos.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas-action:${orgId}:${conv.contactId}`}, 0))`)
+  const windowMs = await conversationWindowMs(tx, input.at)
   const [recent] = await tx
     .select({ id: saasAction.id })
     .from(saasAction)
@@ -151,33 +317,136 @@ export async function countConversationAction(tx: Db, orgId: string, input: { co
         eq(saasAction.organizationId, orgId),
         eq(saasAction.contactId, conv.contactId),
         eq(saasAction.kind, "conversacion"),
-        gt(saasAction.occurredAt, new Date(input.at.getTime() - (await conversationWindowMs(tx, input.at)))),
+        inArray(saasAction.tier, ["informa", "gestiona"]),
+        gt(saasAction.occurredAt, new Date(input.at.getTime() - windowMs)),
       ),
     )
     .limit(1)
-  if (recent) return false
+  if (recent) {
+    await refreshConversationTier(tx, orgId, { contactId: conv.contactId, at: input.at })
+    return false
+  }
+  const tier = await conversationTierOf(tx, orgId, {
+    contactId: conv.contactId,
+    from: input.at,
+    to: new Date(input.at.getTime() + windowMs),
+  })
   return insertAction(tx, orgId, "conversacion", {
+    tier,
     occurredAt: input.at,
     contactId: conv.contactId,
     conversationId: input.conversationId,
     channel: conv.channel,
-    detail: `Atendió una conversación por ${CHANNEL_NAME[conv.channel] ?? conv.channel}`,
+    detail: `${SOFI_DETAIL[tier]} por ${CHANNEL_NAME[conv.channel] ?? conv.channel}`,
     dedupeKey: `conversacion:${conv.contactId}:${input.at.toISOString()}`,
   })
 }
 
 /**
+ * La cita que reservó Sofi se dio (ADR 0085): la conversación sube de
+ * «Gestiona» a «Agenda» con una fila aparte por la diferencia, una sola vez.
+ * No pasa si la cita ya se cobró como recuperada: nunca se cobra doble.
+ * Si la persona no tiene una conversación cobrada que la reservó, no hay nada
+ * que subir.
+ */
+export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: string, at: Date): Promise<boolean> {
+  const [appt] = await tx
+    .select({ id: appointment.id, source: appointment.source, createdAt: appointment.createdAt, patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
+    .limit(1)
+  if (!appt || !AGENT_SOURCES.includes(appt.source ?? "")) return false
+  const [recovered] = await tx
+    .select({ id: saasAction.id })
+    .from(saasAction)
+    .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.kind, "cita"), eq(saasAction.appointmentId, appointmentId)))
+    .limit(1)
+  if (recovered) return false
+  const [self] = await tx
+    .select({ contactId: patientContact.contactId })
+    .from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, appt.patientId), eq(patientContact.relationship, "self")))
+    .limit(1)
+  if (!self) return false
+  const windowMs = await conversationWindowMs(tx, appt.createdAt)
+  const [booking] = await tx
+    .select({ id: saasAction.id, conversationId: saasAction.conversationId, channel: saasAction.channel, discountBps: saasAction.discountBps })
+    .from(saasAction)
+    .where(
+      and(
+        eq(saasAction.organizationId, orgId),
+        eq(saasAction.contactId, self.contactId),
+        eq(saasAction.kind, "conversacion"),
+        eq(saasAction.tier, "gestiona"),
+        lte(saasAction.occurredAt, appt.createdAt),
+        gt(saasAction.occurredAt, new Date(appt.createdAt.getTime() - windowMs)),
+      ),
+    )
+    .orderBy(asc(saasAction.occurredAt))
+    .limit(1)
+  if (!booking) return false
+  const pricing = await getActionPricing(tx, orgId)
+  const agenda = pricing.prices.agenda
+  const gestiona = pricing.prices.gestiona
+  const diff = agenda !== null && gestiona !== null ? agenda - gestiona : null
+  // Sin diferencia (un plan con un solo precio) no hay nada que subir.
+  if (diff !== null && diff <= 0) return false
+  const discount = pricing.fixed.has("agenda") ? 0 : pricing.discountBps
+  const [row] = await tx
+    .insert(saasAction)
+    .values({
+      organizationId: orgId,
+      kind: "conversacion",
+      tier: "agenda",
+      occurredAt: at,
+      contactId: self.contactId,
+      conversationId: booking.conversationId,
+      appointmentId,
+      channel: booking.channel,
+      detail: "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda",
+      currency: pricing.currency,
+      basePriceMicros: diff,
+      priceMicros: diff === null ? null : discountedMicros(diff, discount),
+      discountBps: diff === null ? 0 : discount,
+      dedupeKey: `agenda:${appointmentId}`,
+    })
+    .onConflictDoNothing({ target: [saasAction.organizationId, saasAction.dedupeKey] })
+    .returning({ id: saasAction.id })
+  return Boolean(row)
+}
+
+/* ---------- Clío: según lo que dejó hecho (ADR 0085) ---------- */
+
+/**
+ * El tipo de una atención por lo que Clío dejó hecho y el odontólogo
+ * confirmó: «Completa» si armó un presupuesto (una indicación del plan);
+ * «Estándar» con un diagnóstico, el odontograma o dos bloques o más;
+ * «Simple» con un solo bloque (receta, nota o control).
+ */
+export function consultationTierOf(kinds: ReadonlySet<string>): "simple" | "estandar" | "completa" {
+  if (kinds.has("plan")) return "completa"
+  if (kinds.has("diagnostico") || kinds.has("odontograma") || kinds.size > 1) return "estandar"
+  return "simple"
+}
+
+export const CLIO_DETAIL: Record<"simple" | "estandar" | "completa", string> = {
+  simple: "Dejó lista una cosa de la consulta dictada",
+  estandar: "Ordenó la consulta dictada",
+  completa: "Ordenó la consulta dictada y armó el presupuesto",
+}
+
+/**
  * El Asistente clínico ordenó lo dictado y el odontólogo lo confirmó: una
- * consulta por atención, al cerrarla. Sin sugerencias confirmadas no cuenta
- * (el borrador descartado no se cobra).
+ * consulta por atención, al cerrarla, con el tipo de lo que dejó hecho. Sin
+ * sugerencias confirmadas no cuenta (el borrador descartado no se cobra).
  */
 export async function countConsultationAction(
   tx: Db,
   orgId: string,
   input: { patientId: string; encounterId: string; at: Date },
 ): Promise<boolean> {
-  const [confirmed] = await tx
-    .select({ n: sql<number>`count(*)::int` })
+  const confirmed = await tx
+    .selectDistinct({ kind: encounterDictationSuggestion.kind })
     .from(encounterDictationSuggestion)
     .where(
       and(
@@ -187,7 +456,8 @@ export async function countConsultationAction(
         eq(encounterDictationSuggestion.status, "confirmada"),
       ),
     )
-  if (!confirmed?.n) return false
+  if (!confirmed.length) return false
+  const tier = consultationTierOf(new Set(confirmed.map((row) => row.kind)))
   const [row] = await tx
     .select({ professional: user.name })
     .from(encounter)
@@ -206,10 +476,11 @@ export async function countConsultationAction(
     )
     .limit(1)
   return insertAction(tx, orgId, "consulta", {
+    tier,
     occurredAt: input.at,
     contactId: self?.contactId ?? null,
     encounterId: input.encounterId,
-    detail: row?.professional ? `Ordenó la consulta dictada por ${row.professional}` : "Ordenó una consulta dictada",
+    detail: row?.professional ? `${CLIO_DETAIL[tier]} por ${row.professional}` : CLIO_DETAIL[tier],
     dedupeKey: `consulta:${input.encounterId}`,
   })
 }
@@ -229,10 +500,13 @@ interface RecoveredRow {
 /**
  * La regla de la cita recuperada, una sola vez: reservada por el agente (en
  * su conversación o desde su enlace) dentro de los días siguientes a un
- * mensaje del Administrador a esa persona que no fue un recordatorio ni un
- * aviso de cita. Los días son los de las condiciones que regían al reservar
- * (`recovery_window_days`, ADR 0074): una reserva hecha conserva su plazo. Mira la cita creada después del mensaje: la que Sofi mueve
- * tras un «No podré ir» no es nueva y no cuenta (ADR 0031).
+ * mensaje del Administrador a esa persona que no fue un recordatorio, un
+ * aviso de cita ni el saldo vencido. Los días son los de las condiciones que
+ * regían al reservar (`recovery_window_days`, ADR 0074): una reserva hecha
+ * conserva su plazo. Mira la cita creada después del mensaje: la que Sofi
+ * mueve tras un «No podré ir» no es nueva y no cuenta (ADR 0031). Y lo decide
+ * si la persona ya tenía su cita (ADR 0085): no cuenta si, cuando Argos le
+ * escribió, tenía otra cita por venir o un tratamiento aceptado sin terminar.
  */
 function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
   return sql`
@@ -253,6 +527,17 @@ function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
         and coalesce(m.created_at, j.updated_at) > a.created_at - make_interval(days => coalesce((
           select t.recovery_window_days from saas_commercial_terms t
           where t.effective_from <= a.created_at order by t.effective_from desc limit 1), ${SAAS_TERMS_INITIAL.recoveryWindowDays}))
+        and not exists (
+          select 1 from appointment o
+          where o.organization_id = a.organization_id and o.patient_id = a.patient_id and o.id <> a.id
+            and o.created_at <= coalesce(m.created_at, j.updated_at) and o.starts_at > coalesce(m.created_at, j.updated_at)
+            and o.status <> 'cancelada')
+        and not exists (
+          select 1 from treatment_plan_item i
+          where i.organization_id = a.organization_id and i.patient_id = a.patient_id
+            and i.decision_status = 'aceptado' and i.decided_at <= coalesce(m.created_at, j.updated_at)
+            and (i.completed_at is null or i.completed_at > coalesce(m.created_at, j.updated_at))
+            and i.status not in ('cancelado', 'reemplazado'))
       order by coalesce(m.created_at, j.updated_at) desc
       limit 1
     ) j on true
@@ -322,6 +607,10 @@ export interface SaasReviewView {
 export interface SaasActionRow {
   id: string
   kind: SaasActionKind
+  /** Su tipo (ADR 0085); null en la cita recuperada, las preguntas y el almacenamiento. */
+  tier: SaasActionTier | null
+  /** Preguntas del paquete o GB extra; null en lo demás. */
+  units: number | null
   occurredAt: Date
   contactId: string | null
   personName: string | null
@@ -396,6 +685,8 @@ export async function listPeriodActions(
     .select({
       id: saasAction.id,
       kind: saasAction.kind,
+      tier: saasAction.tier,
+      units: saasAction.units,
       occurredAt: saasAction.occurredAt,
       contactId: saasAction.contactId,
       personName: contact.displayName,
@@ -413,7 +704,9 @@ export async function listPeriodActions(
     .leftJoin(contact, and(eq(contact.id, saasAction.contactId), eq(contact.organizationId, saasAction.organizationId)))
     .where(and(eq(saasAction.organizationId, orgId), gte(saasAction.occurredAt, period.start), lt(saasAction.occurredAt, period.end)))
     .orderBy(asc(saasAction.occurredAt), asc(saasAction.id))
-  const appointmentIds = rows.filter((row) => row.kind === "cita" && row.appointmentId).map((row) => row.appointmentId as string)
+  // La cita recuperada y la subida a «Agenda» existen mientras el paciente asistió: si se deshace, se anulan.
+  const needsVisit = (row: (typeof rows)[number]) => row.kind === "cita" || (row.kind === "conversacion" && row.tier === "agenda")
+  const appointmentIds = rows.filter((row) => needsVisit(row) && row.appointmentId).map((row) => row.appointmentId as string)
   const attended = new Set<string>()
   const bookedAt = new Map<string, Date>()
   if (appointmentIds.length) {
@@ -432,6 +725,7 @@ export async function listPeriodActions(
   // La conversación de la persona entre el mensaje del Administrador y la reserva va dentro de la cita.
   const insideCita = (row: (typeof rows)[number]) =>
     row.kind === "conversacion" &&
+    row.tier !== "agenda" &&
     rows.some(
       (cita) =>
         cita.kind === "cita" &&
@@ -454,7 +748,7 @@ export async function listPeriodActions(
     let state: SaasActionState
     const own = refunds.get(row.id) ?? []
     const review = reviews.get(row.id) ?? null
-    if (row.kind === "cita" && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
+    if (needsVisit(row) && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
     // Devuelta antes de cobrarse: no gasta crédito ni se cobra (ADR 0054). Ya cobrada, la devuelve el cargo siguiente.
     else if (row.chargeId === null && review?.status === "devuelta") state = "devuelta"
     // La que aún no se cobró va dentro de la cita; la ya cobrada se devuelve con ella.
@@ -468,6 +762,8 @@ export async function listPeriodActions(
       refunds: state === "anulada" ? [] : own,
       id: row.id,
       kind: row.kind as SaasActionKind,
+      tier: (row.tier as SaasActionTier | null) ?? null,
+      units: row.units,
       occurredAt: row.occurredAt,
       contactId: row.contactId,
       personName: row.personName,
@@ -542,7 +838,7 @@ async function refundsOf(
         where cita.contact_id = v.contact_id and v.occurred_at >= cita.window_start and v.occurred_at <= cita.booked_at
         order by cita.occurred_at, cita.id limit 1) as cita_id
     from saas_action v
-    where v.organization_id = ${orgId} and v.kind = 'conversacion' and v.charge_id is not null and v.price_micros is not null
+    where v.organization_id = ${orgId} and v.kind = 'conversacion' and v.tier <> 'agenda' and v.charge_id is not null and v.price_micros is not null
       and v.contact_id in (${sql.join(contactIds.map((id) => sql`${id}`), sql`, `)})
     order by v.occurred_at, v.id`)) as unknown as Array<{
     id: string
@@ -585,6 +881,8 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
   return rows.map((row) => ({
     id: `pendiente:${row.appointment_id}`,
     kind: "cita",
+    tier: null,
+    units: null,
     occurredAt: asDate(row.created_at),
     contactId: row.contact_id,
     personName: nameOf.get(row.contact_id) ?? null,
@@ -602,14 +900,35 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
   }))
 }
 
-export interface SaasConsumptionLine {
-  kind: SaasActionKind
+export interface SaasConsumptionTier {
+  tier: SaasActionTier
   count: number
   basePriceMicros: number | null
   priceMicros: number | null
   amountCents: number
-  baseAmountCents: number
 }
+
+export interface SaasConsumptionLine {
+  kind: SaasActionKind
+  count: number
+  /** Preguntas sumadas o GB extra: las unidades de lo que no se cuenta por acción. */
+  units: number
+  basePriceMicros: number | null
+  priceMicros: number | null
+  amountCents: number
+  baseAmountCents: number
+  /** Por tipo (ADR 0085): Sofi y Clío; vacío en lo demás. */
+  tiers: SaasConsumptionTier[]
+}
+
+/** Los tipos de cada acción, en el orden en que se muestran. */
+export const SAAS_TIERS_OF: Partial<Record<SaasActionKind, SaasActionTier[]>> = {
+  conversacion: ["informa", "gestiona", "agenda"],
+  consulta: ["simple", "estandar", "completa"],
+}
+
+/** Lo que se cobra, en el orden de la factura. */
+export const SAAS_BILLED_KINDS: SaasActionKind[] = ["conversacion", "consulta", "cita", "preguntas", "almacenamiento"]
 
 export interface SaasConsumption {
   period: { start: Date; end: Date; credit: "prueba" | "mes" }
@@ -639,7 +958,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   const actions = await listPeriodActions(tx, orgId, period)
   const pending = await listPendingRecoveries(tx, orgId)
   const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita" && row.state !== "devuelta")
-  const kinds: SaasActionKind[] = ["conversacion", "consulta", "cita"]
+  const kinds = SAAS_BILLED_KINDS
   const lines = kinds.map((kind) => {
     const ofKind = billable.filter((row) => row.kind === kind)
     const price = ofKind.reduce((sum, row) => sum + netMicros(row), 0)
@@ -647,14 +966,26 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
       (sum, row) => sum + Math.max(0, (row.basePriceMicros ?? 0) - row.refunds.reduce((total, refund) => total + refund.basePriceMicros, 0)),
       0,
     )
-    const currentBase = pricing.base[kind]
+    const current = priceFor(pricing, priceKeyOf(kind, null))
     return {
       kind,
       count: ofKind.length,
-      basePriceMicros: currentBase,
-      priceMicros: currentBase === null ? null : discountedMicros(currentBase, pricing.discountBps),
+      units: ofKind.reduce((sum, row) => sum + (row.units ?? 0), 0),
+      basePriceMicros: current.basePriceMicros,
+      priceMicros: current.priceMicros,
       amountCents: microsToCents(price),
       baseAmountCents: microsToCents(base),
+      tiers: (SAAS_TIERS_OF[kind] ?? []).map((tier) => {
+        const ofTier = ofKind.filter((row) => row.tier === tier)
+        const own = priceFor(pricing, tier)
+        return {
+          tier,
+          count: ofTier.length,
+          basePriceMicros: own.basePriceMicros,
+          priceMicros: own.priceMicros,
+          amountCents: microsToCents(ofTier.reduce((sum, row) => sum + netMicros(row), 0)),
+        }
+      }),
     }
   })
   const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
@@ -670,7 +1001,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   return {
     period: { start: period.start, end: period.end, credit: period.credit },
     currency: pricing.currency,
-    priced: kinds.some((kind) => pricing.base[kind] !== null),
+    priced: Object.values(pricing.prices).some((price) => price !== null),
     discountBps: pricing.discountBps,
     lines,
     refunds: {
@@ -692,74 +1023,124 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
 /* ---------- Precio mínimo: ningún precio por debajo del doble de su peor costo ---------- */
 
 /**
- * Peor costo medido de cada acción en millonésimas de USD (estudio de precios
- * del 2026-10-15, con los dos modelos y el caso más largo): conversación
- * S/ 0,15, dictado S/ 0,19 y cita S/ 0,16, a 3,75 por dólar. Se actualiza
- * con `eval:month` y el costo real de `ai_usage`.
+ * Peor costo medido de cada tipo en millonésimas de USD (estudio de precios
+ * del 2026-10-23, ADR 0085): una conversación muy larga de Sofi (unas 20
+ * respuestas), una atención de 60 pausas de Clío, la cita recuperada con su
+ * conversación, 100 preguntas a Argos en su versión más larga y un GB guardado
+ * un mes en el proveedor. Se actualiza con `eval:month` y el costo real de
+ * `ai_usage`.
  */
-export const SAAS_WORST_COST_MICROS: Record<SaasActionKind, number> = {
-  conversacion: 40_000,
-  consulta: 51_000,
+export const SAAS_WORST_COST_MICROS: Record<SaasPriceKey, number> = {
+  informa: 15_000,
+  gestiona: 60_000,
+  agenda: 60_000,
+  simple: 52_000,
+  estandar: 52_000,
+  completa: 52_000,
   cita: 43_000,
+  preguntas: 500_000,
+  almacenamiento: 15_000,
 }
 /** Cuántas veces su peor costo debe valer como mínimo una acción, al precio más bajo negociable. */
 export const SAAS_PRICE_FLOOR_MULTIPLE = 2
 
 export interface ActionPriceCheck {
-  kind: SaasActionKind
+  kind: SaasPriceKey
   baseMicros: number | null
   minimumMicros: number | null
   /** Veces su peor costo, a precio base y al mínimo. */
   baseMultiple: number | null
   minimumMultiple: number | null
+  /** No se negocia: su mínimo es su precio base (ADR 0085). */
+  fixed: boolean
   ok: boolean
+  /** Fijo y por debajo del doble en el peor caso: se puede guardar, y se muestra «Atento». */
+  watch: boolean
+}
+
+/** Los precios de un plan que se comprueban: los que ya existían y los de cada tipo (ADR 0085). */
+export interface PlanPriceInput {
+  conversationMicros: number | null
+  consultationMicros: number | null
+  recoveryMicros: number | null
+  conversationInformMicros?: number | null
+  conversationAgendaMicros?: number | null
+  consultationSimpleMicros?: number | null
+  consultationStandardMicros?: number | null
+  argosPackMicros?: number | null
+  storageGbMicros?: number | null
+  fixedPriceTiers?: readonly string[]
+  maxDiscountBps: number
+  currency: string
 }
 
 /**
  * Comprobación del plan antes de guardar (tablero O1): cada precio base y su
- * mínimo (el base con el descuento máximo) contra el peor costo. La pantalla
- * la anticipa; el servidor la exige.
+ * mínimo contra el peor costo. Lo que se negocia, al descuento máximo, vale
+ * al menos el doble. Lo fijo es barato a propósito y su peor costo es un caso
+ * extremo (una atención de 60 pausas que deja una receta): por debajo del
+ * doble se puede guardar y queda «Atento» (ADR 0085). La pantalla la
+ * anticipa; el servidor la exige.
  */
-export function checkActionPricing(plan: {
-  conversationMicros: number | null
-  consultationMicros: number | null
-  recoveryMicros: number | null
-  maxDiscountBps: number
-  currency: string
-}): ActionPriceCheck[] {
-  const bases: Record<SaasActionKind, number | null> = {
-    conversacion: plan.conversationMicros,
-    consulta: plan.consultationMicros,
+export function checkActionPricing(plan: PlanPriceInput): ActionPriceCheck[] {
+  const bases: Record<SaasPriceKey, number | null> = {
+    informa: plan.conversationInformMicros ?? null,
+    gestiona: plan.conversationMicros,
+    agenda: plan.conversationAgendaMicros ?? null,
+    simple: plan.consultationSimpleMicros ?? null,
+    estandar: plan.consultationStandardMicros ?? null,
+    completa: plan.consultationMicros,
     cita: plan.recoveryMicros,
+    preguntas: plan.argosPackMicros ?? null,
+    almacenamiento: plan.storageGbMicros ?? null,
   }
-  return (Object.keys(bases) as SaasActionKind[]).map((kind) => {
+  const fixedSet = new Set(plan.fixedPriceTiers ?? [])
+  return (Object.keys(bases) as SaasPriceKey[]).flatMap((kind): ActionPriceCheck[] => {
     const base = bases[kind]
-    if (base === null) return { kind, baseMicros: null, minimumMicros: null, baseMultiple: null, minimumMultiple: null, ok: true }
-    const minimum = discountedMicros(base, plan.maxDiscountBps)
+    const fixed = fixedSet.has(kind)
+    if (base === null) return []
+    const minimum = fixed ? base : discountedMicros(base, plan.maxDiscountBps)
     const worst = SAAS_WORST_COST_MICROS[kind]
     // El peor costo está en dólares: en otra moneda no hay con qué comparar y no se afirma nada.
-    if (plan.currency !== "USD") return { kind, baseMicros: base, minimumMicros: minimum, baseMultiple: null, minimumMultiple: null, ok: true }
-    return {
-      kind,
-      baseMicros: base,
-      minimumMicros: minimum,
-      baseMultiple: Math.round((base / worst) * 10) / 10,
-      minimumMultiple: Math.round((minimum / worst) * 10) / 10,
-      ok: minimum >= worst * SAAS_PRICE_FLOOR_MULTIPLE,
-    }
+    if (plan.currency !== "USD") return [{ kind, baseMicros: base, minimumMicros: minimum, baseMultiple: null, minimumMultiple: null, fixed, ok: true, watch: false }]
+    const double = minimum >= worst * SAAS_PRICE_FLOOR_MULTIPLE
+    const ok = double || fixed
+    return [
+      {
+        kind,
+        baseMicros: base,
+        minimumMicros: minimum,
+        baseMultiple: Math.round((base / worst) * 10) / 10,
+        minimumMultiple: Math.round((minimum / worst) * 10) / 10,
+        fixed,
+        ok,
+        watch: ok && !double,
+      },
+    ]
   })
 }
 
-const KIND_WORDS: Record<SaasActionKind, string> = { conversacion: "La conversación", consulta: "La consulta", cita: "La cita recuperada" }
+const KIND_WORDS: Record<SaasPriceKey, string> = {
+  informa: "La conversación que informa",
+  gestiona: "La conversación que gestiona una cita",
+  agenda: "La conversación cuya cita se dio",
+  simple: "La consulta simple",
+  estandar: "La consulta estándar",
+  completa: "La consulta completa",
+  cita: "La cita recuperada",
+  preguntas: "El paquete de preguntas a Argos",
+  almacenamiento: "El GB extra",
+}
 
-/** Lanza `SAAS_PRICE_BELOW_FLOOR` si algún precio, al descuento máximo, queda bajo el doble de su peor costo. */
-export function assertActionPricingFloor(plan: Parameters<typeof checkActionPricing>[0]): void {
+/** Lanza `SAAS_PRICE_BELOW_FLOOR` si algún precio queda bajo lo que exige la comprobación. */
+export function assertActionPricingFloor(plan: PlanPriceInput): void {
   const failed = checkActionPricing(plan).find((item) => !item.ok)
   if (!failed) return
+  const price = new Intl.NumberFormat("es", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)
   throw new ServiceError(
     "SAAS_PRICE_BELOW_FLOOR",
     409,
-    `${KIND_WORDS[failed.kind]} quedaría en ${new Intl.NumberFormat("es", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)} con el descuento máximo: menos del doble de su peor costo. Sube el precio o baja el descuento máximo.`,
+    `${KIND_WORDS[failed.kind]} quedaría en ${price} con el descuento máximo: menos del doble de su peor costo. Sube el precio, baja el descuento máximo o deja ese precio sin descuento.`,
   )
 }
 
@@ -778,6 +1159,7 @@ export async function hasOpenConversationAction(tx: Db, orgId: string, contactId
         eq(saasAction.organizationId, orgId),
         eq(saasAction.contactId, contactId),
         eq(saasAction.kind, "conversacion"),
+        inArray(saasAction.tier, ["informa", "gestiona"]),
         gt(saasAction.occurredAt, new Date(now.getTime() - (await conversationWindowMs(tx, now)))),
       ),
     )
@@ -807,7 +1189,7 @@ export function planMarginScenario(plan: {
   if (plan.currency !== "USD" || !plan.conversationMicros || plan.priceCents <= 0) return { atBase: null, atMinimum: null }
   const margin = (price: number) => {
     const conversations = (plan.creditCents * 10_000) / price
-    const cost = conversations * SAAS_WORST_COST_MICROS.conversacion + SAAS_UNBILLED_AI_MICROS
+    const cost = conversations * SAAS_WORST_COST_MICROS.gestiona + SAAS_UNBILLED_AI_MICROS
     return Math.round((1 - cost / (plan.priceCents * 10_000)) * 100)
   }
   return { atBase: margin(plan.conversationMicros), atMinimum: margin(discountedMicros(plan.conversationMicros, plan.maxDiscountBps)) }

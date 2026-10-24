@@ -209,7 +209,9 @@ export function meterAiUse<T>(
   orgId: string,
   origin: AiUsageOrigin,
   run: () => Promise<T>,
-  conversationId: string | null = null,
+  link: string | null | { conversationId?: string | null; encounterId?: string | null } = null,
 ): Promise<T> {
-  return withAiMeter(run, (entries) => withOrgContext(db, orgId, (tx) => recordAiUsage(tx, orgId, { origin, conversationId, entries })))
+  // La conversación sola, o a qué acción pertenece el gasto (la atención de un dictado, ADR 0085).
+  const of = typeof link === "string" || link === null ? { conversationId: link } : link
+  return withAiMeter(run, (entries) => withOrgContext(db, orgId, (tx) => recordAiUsage(tx, orgId, { origin, ...of, entries })))
 }

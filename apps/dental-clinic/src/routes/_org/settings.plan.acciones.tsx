@@ -15,11 +15,10 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ArrowLeft } from "lucide-react"
 import { useMemo, useState } from "react"
 import { type ActionReview, ActionReviewDrawer, type ReviewTarget, reviewStateWords } from "../../components/billing/action-review"
-import { AGENT_OF, PriceWithDiscount, type SaasActionKind } from "../../components/billing/consumption"
+import { agentOfKind, PriceWithDiscount, type SaasActionKind } from "../../components/billing/consumption"
 import { formatMicros } from "../../components/billing/money"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { PersonLink } from "../../components/person-link"
-import { agentName } from "../../lib/agent"
 import { ADMIN_NAME, CLINICAL_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { PLAN_PATH, useClinicLine } from "../../lib/billing"
@@ -179,7 +178,7 @@ function ActionsPage() {
           return (
             <span className="block min-w-48 whitespace-normal">
               <span className="block text-xs text-muted-foreground">
-                {agentName(AGENT_OF[row.original.kind].agent, receptionName)}
+                {agentOfKind(row.original.kind, receptionName)}
                 {channel ? ` · ${channel}` : ""}
               </span>
               {row.original.detail}

@@ -36,7 +36,14 @@ export function knownCostMicros(entries: readonly AiUsageEntry[]): number | null
 export async function recordAiUsage(
   tx: Db,
   orgId: string,
-  input: { origin: AiUsageOrigin; conversationId?: string | null; entries: readonly AiUsageEntry[] },
+  input: {
+    origin: AiUsageOrigin
+    conversationId?: string | null
+    /** A qué acción pertenece el gasto, si se sabe (ADR 0085). */
+    encounterId?: string | null
+    reportQuestionId?: string | null
+    entries: readonly AiUsageEntry[]
+  },
 ): Promise<void> {
   if (!(AI_USAGE_ORIGINS as readonly string[]).includes(input.origin)) throw validation("origen de uso inválido")
   const rows = input.entries.filter((entry) => entry.calls > 0)
@@ -55,6 +62,8 @@ export async function recordAiUsage(
       audioSeconds: cleanInt(entry.audioSeconds),
       costMicros: cleanInt(entry.costMicros),
       conversationId: input.conversationId ?? null,
+      encounterId: input.encounterId ?? null,
+      reportQuestionId: input.reportQuestionId ?? null,
     })),
   )
 }

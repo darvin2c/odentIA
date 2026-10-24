@@ -45,7 +45,7 @@ import {
   sendOutbound,
 } from "./conversations.js"
 import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
-import { countConversationAction } from "./saas-actions.js"
+import { AGENDA_ACTIONS, countConversationAction, refreshConversationTier } from "./saas-actions.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   CHOOSABLE_LOST_REASONS,
@@ -2964,6 +2964,10 @@ export async function executeProposal(
       metadata: { error: coded.slice(0, 300), errorCode: code },
     })
     return enrichProposal(tx, orgId, row)
+  }
+  // Sofi movió la agenda: su conversación de esa ventana pasa a «Gestiona» (ADR 0085).
+  if (executed.contactId && executed.executedAt && AGENDA_ACTIONS.includes(executed.action)) {
+    await refreshConversationTier(tx, orgId, { contactId: executed.contactId, at: executed.executedAt })
   }
   await notify(tx, { orgId, kind: "agent.proposal.executed", at: new Date().toISOString() })
   return enrichProposal(tx, orgId, executed)

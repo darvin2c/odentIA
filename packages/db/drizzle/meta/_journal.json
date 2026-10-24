@@ -645,6 +645,20 @@
       "when": 1792810721733,
       "tag": "0091_sofi_responde_siempre",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1792819044073,
+      "tag": "0092_cobro_por_tipo",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792819095382,
+      "tag": "0093_cobro_por_tipo_reglas",
+      "breakpoints": true
     }
   ]
 }

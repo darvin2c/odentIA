@@ -12,7 +12,7 @@ import { useReceptionName } from "../../lib/agent-names"
 
 type AgentRoleId = Exclude<AgentRole["id"], "ayuda">
 
-export type SaasActionKind = "conversacion" | "consulta" | "cita"
+export type SaasActionKind = "conversacion" | "consulta" | "cita" | "preguntas" | "almacenamiento"
 
 export interface Consumption {
   period: { start: string; end: string; credit: "prueba" | "mes" }
@@ -52,11 +52,22 @@ export interface Consumption {
 }
 
 /** De qué agente es cada acción (su id de rol: el nombre se dice con `agentName`). */
-export const AGENT_OF: Record<SaasActionKind, { agent: AgentRoleId; what: (count: number) => string }> = {
+export const AGENT_OF: Record<SaasActionKind, { agent: AgentRoleId | null; what: (count: number) => string }> = {
   conversacion: { agent: "recepcion", what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}` },
   consulta: { agent: "asistente_clinico", what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}` },
   cita: { agent: "administrador", what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}` },
+  preguntas: { agent: "administrador", what: (n) => `${n} ${n === 1 ? "paquete de preguntas" : "paquetes de preguntas"}` },
+  almacenamiento: { agent: null, what: () => "Almacenamiento por encima de lo incluido" },
 }
+
+/** El agente de una acción, o «odentIA» para lo que no hace un agente (el almacenamiento). */
+export function agentOfKind(kind: SaasActionKind, receptionName: string): string {
+  const agent = AGENT_OF[kind].agent
+  return agent ? agentName(agent, receptionName) : "odentIA"
+}
+
+/** Lo que se cobra sin ser una acción de siempre solo se muestra si hubo (ADR 0085). */
+const ALWAYS_SHOWN: ReadonlySet<SaasActionKind> = new Set(["conversacion", "consulta", "cita"])
 
 function day(iso: string): string {
   return new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "long", timeZone: activeOrgTimeZone() }).format(new Date(iso))
@@ -127,10 +138,10 @@ export function ConsumptionCard({
       ) : null}
 
       <ul className="flex flex-col divide-y rounded-lg border">
-        {data.lines.map((line) => (
+        {data.lines.filter((line) => ALWAYS_SHOWN.has(line.kind) || line.count > 0).map((line) => (
           <li key={line.kind} className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">{agentName(AGENT_OF[line.kind].agent, receptionName)}</p>
+              <p className="text-xs text-muted-foreground">{agentOfKind(line.kind, receptionName)}</p>
               <p className="text-sm font-medium">
                 {AGENT_OF[line.kind].what(line.count)}
                 {line.kind === "cita" && data.pendingRecoveries > 0 ? (

@@ -118,6 +118,7 @@ import { createConnection } from "../connections.js"
 import { createContact, updateContact } from "../contacts.js"
 import { blockContact, markSpam } from "../contact-screen.js"
 import { decideActionReview, requestActionReview } from "../saas-action-review.js"
+import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import {
   markImagingFilesUploaded,
   pendingImagingFiles,
@@ -3906,36 +3907,64 @@ await db.transaction(async (tx) => {
     )
   }
 })
-// Lo que hicieron los agentes este mes (ADR 0031), para ver Plan y pagos y
-// «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
-// el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
+// Lo que hicieron los agentes este mes (ADR 0031 y 0085), para ver Plan y
+// pagos y «Ver cada acción» con datos: conversaciones de cada tipo, consultas
+// de cada tipo, una cita recuperada y un paquete de preguntas a Argos, con el
+// precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
 {
   const people = [...contactIdByName.values()].slice(0, 6)
   const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+  const sofi = ["informa", "gestiona", "gestiona", "informa", "gestiona", "informa"] as const
+  const sofiMicros = { informa: 100_000, gestiona: 500_000 }
+  const clio = [
+    { tier: "simple", micros: 100_000, hours: 20 },
+    { tier: "estandar", micros: 200_000, hours: 44 },
+    { tier: "completa", micros: 500_000, hours: 70 },
+  ] as const
   await db.insert(saasAction).values([
-    ...people.map((contactId, index) => ({
+    ...people.map((contactId, index) => {
+      const tier = sofi[index] ?? "informa"
+      const channel = index % 2 === 0 ? "WhatsApp" : "Instagram"
+      return {
+        organizationId: ORG_A,
+        kind: "conversacion",
+        tier,
+        occurredAt: hoursAgo(6 + index * 30),
+        contactId,
+        channel: channel.toLowerCase(),
+        detail: `${SOFI_DETAIL[tier]} por ${channel}`,
+        currency: "USD",
+        basePriceMicros: sofiMicros[tier],
+        priceMicros: sofiMicros[tier],
+        dedupeKey: `semilla:conversacion:${index}`,
+      }
+    }),
+    // La persona vino a la cita que le reservó Sofi: la diferencia de Gestiona a Agenda.
+    {
       organizationId: ORG_A,
       kind: "conversacion",
-      occurredAt: hoursAgo(6 + index * 30),
-      contactId,
-      channel: index % 2 === 0 ? "whatsapp" : "instagram",
-      detail: `Atendió una conversación por ${index % 2 === 0 ? "WhatsApp" : "Instagram"}`,
+      tier: "agenda",
+      occurredAt: hoursAgo(10),
+      contactId: people[2] ?? null,
+      channel: "whatsapp",
+      detail: "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda",
       currency: "USD",
       basePriceMicros: 500_000,
       priceMicros: 500_000,
-      dedupeKey: `semilla:conversacion:${index}`,
-    })),
-    {
+      dedupeKey: "semilla:agenda:0",
+    },
+    ...clio.map((item, index) => ({
       organizationId: ORG_A,
       kind: "consulta",
-      occurredAt: hoursAgo(20),
-      contactId: people[0] ?? null,
-      detail: "Ordenó la consulta dictada por Ana Torres",
+      tier: item.tier,
+      occurredAt: hoursAgo(item.hours),
+      contactId: people[index] ?? null,
+      detail: `${CLIO_DETAIL[item.tier]} por Ana Torres`,
       currency: "USD",
-      basePriceMicros: 400_000,
-      priceMicros: 400_000,
-      dedupeKey: "semilla:consulta:0",
-    },
+      basePriceMicros: item.micros,
+      priceMicros: item.micros,
+      dedupeKey: `semilla:consulta:${index}`,
+    })),
     {
       organizationId: ORG_A,
       kind: "cita",
@@ -3945,9 +3974,20 @@ await db.transaction(async (tx) => {
       windowStart: hoursAgo(120),
       detail: "Volvió tras «Seguir un presupuesto» y reservó desde el enlace",
       currency: "USD",
-      basePriceMicros: 4_000_000,
-      priceMicros: 4_000_000,
+      basePriceMicros: 2_000_000,
+      priceMicros: 2_000_000,
       dedupeKey: "semilla:cita:0",
+    },
+    {
+      organizationId: ORG_A,
+      kind: "preguntas",
+      units: 100,
+      occurredAt: hoursAgo(30),
+      detail: "Sumó 100 preguntas a Argos",
+      currency: "USD",
+      basePriceMicros: 3_000_000,
+      priceMicros: 3_000_000,
+      dedupeKey: "semilla:preguntas:0",
     },
   ]).onConflictDoNothing()
   // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos

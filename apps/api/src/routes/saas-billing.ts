@@ -7,6 +7,7 @@ import type { Auth } from "@odentia/auth"
 import { seesBilling } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { invitation, member } from "@odentia/db/schema/auth"
+import { SAAS_ACTION_KINDS } from "@odentia/db/schema/saas-billing"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
@@ -40,6 +41,10 @@ import {
   setSaasTerms,
   getSaasTrialWatch,
   getWhatsappEstimate,
+  getArgosAllowance,
+  getStorageUsage,
+  addArgosPack,
+  setArgosAutoPack,
   isChargingPeriod,
   listSaasNegotiations,
   listWhatsappRates,
@@ -125,6 +130,14 @@ function forbid(c: Context, message = "No tienes acceso a facturación") {
 const cents = z.number().int().min(0).max(2147483647)
 const currency = z.string().regex(/^[A-Z]{3}$/)
 const isoDateTime = z.iso.datetime({ offset: true })
+const tierPrices = {
+  conversationInformMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+  conversationAgendaMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+  consultationSimpleMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+  consultationStandardMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+  argosPackMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+  storageGbMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+}
 const planInput = z
   .object({
     code: z.string().trim().min(1).max(80),
@@ -138,6 +151,12 @@ const planInput = z
     conversationMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
     consultationMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
     recoveryMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+    // Por tipo, preguntas a Argos y almacenamiento (ADR 0085).
+    ...tierPrices,
+    argosIncludedQuestions: z.number().int().min(0).max(100_000).optional(),
+    argosPackQuestions: z.number().int().min(1).max(10_000).optional(),
+    storageIncludedGb: z.number().int().min(0).max(100_000).optional(),
+    fixedPriceTiers: z.array(z.string()).max(20).optional(),
     maxDiscountBps: z.number().int().min(0).max(9000).optional(),
     sellerDiscountBps: z.number().int().min(0).max(9000).optional(),
     trialCreditCents: cents.optional(),
@@ -360,6 +379,8 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
         conversationMicros: z.number().int().min(0).nullable(),
         consultationMicros: z.number().int().min(0).nullable(),
         recoveryMicros: z.number().int().min(0).nullable(),
+        ...tierPrices,
+        fixedPriceTiers: z.array(z.string()).max(20).optional(),
         maxDiscountBps: z.number().int().min(0).max(9000),
       })
       .safeParse(await c.req.json().catch(() => null))
@@ -1020,6 +1041,9 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
           warnPercent: terms.warnPercent,
           alarmPercent: terms.alarmPercent,
           charging: isChargingPeriod(summary.status, summary.isDemo),
+          // Preguntas a Argos del mes y lo guardado (ADR 0085).
+          argos: await getArgosAllowance(tx, orgId),
+          storage: await getStorageUsage(tx, orgId),
           whatsapp: await getWhatsappEstimate(tx, orgId),
           tax: await saasTaxOf(tx, orgId),
         }
@@ -1077,6 +1101,31 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     )
   })
 
+  // Argos llegó a las preguntas del mes: quien administra suma un paquete (ADR 0085).
+  app.post("/argos-pack", async (c) => {
+    const parsed = z.object({ orgId: z.string().min(1) }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const membership = await accountOwnerOrAdmin(deps, c, parsed.data.orgId)
+    if (!membership) return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra suma preguntas a Argos"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, parsed.data.orgId, (tx) => addArgosPack(tx, parsed.data.orgId, { automatic: false })),
+    )
+  })
+
+  // «Sumar solas»: al acabar las preguntas, se suma un paquete sin preguntar.
+  app.post("/argos-auto-pack", async (c) => {
+    const parsed = z.object({ orgId: z.string().min(1), on: z.boolean() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const membership = await accountOwnerOrAdmin(deps, c, parsed.data.orgId)
+    if (!membership) return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra cambia esto"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, parsed.data.orgId, async (tx) => {
+        await setArgosAutoPack(tx, parsed.data.orgId, parsed.data.on)
+        return getArgosAllowance(tx, parsed.data.orgId)
+      }),
+    )
+  })
+
   // C3: cada acción del tramo con su estado; las citas que esperan asistencia al final.
   app.get("/actions", async (c) => {
     const orgId = c.req.query("orgId")
@@ -1087,7 +1136,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const parsed = z
       .object({
         orgId: z.string(),
-        kind: z.enum(["conversacion", "consulta", "cita"]).optional(),
+        kind: z.enum(SAAS_ACTION_KINDS).optional(),
         state: z.enum(["esperando"]).optional(),
         // El mes anterior también se ve, para pedir revisión de lo ya facturado (decisión 7).
         periodo: z.enum(["actual", "anterior"]).default("actual"),

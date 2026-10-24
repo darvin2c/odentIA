@@ -55,6 +55,7 @@ import {
   argosSentenceProblem,
   fillArgosSentence,
   formatArgosValue,
+  argosQuestionLimit,
   prepareArgosQuestion,
   recordArgosQuestion,
   type ReportQuery,
@@ -571,7 +572,7 @@ export async function askArgos(
     withOrgContext(db, input.orgId, (tx) => recordArgosQuestion(tx, input.orgId, input.userId, { outcome, query, usedModel, plan }))
 
   const ready = await withOrgContext(db, input.orgId, async (tx) => ({
-    ...(await prepareArgosQuestion(tx, input.orgId, now)),
+    ...(await prepareArgosQuestion(tx, input.orgId)),
     screen: input.screen ? await argosScreen(tx, input.orgId, input.screen, now) : null,
     branches: await listArgosBranches(tx, input.orgId),
     names: await listArgosNames(tx, input.orgId, key),
@@ -579,7 +580,6 @@ export async function askArgos(
     texts: await productAgentTexts(tx, input.orgId),
   }))
   if (!ready.enabled) return { kind: "apagado", message: ARGOS_WORDS.apagado }
-  if (ready.roomLeft <= 0) return { kind: "tope", message: ARGOS_WORDS.tope }
 
   // Quien eligió «Preguntarle a Argos» con un nombre suelto («buscar») también recibe respuesta.
   const route = input.routed ? "negocio" : await routeArgos(db, deps, input.orgId, input.text, () => "negocio", ARGOS_PANEL_AWAY)
@@ -587,6 +587,9 @@ export async function askArgos(
     await record(route, null, false)
     return { kind: route, message: ARGOS_WORDS[route] }
   }
+  // Una pregunta del negocio gasta de las del mes (ADR 0085): sin ninguna, Argos pide permiso para sumar más.
+  const limit = await withOrgContext(db, input.orgId, (tx) => argosQuestionLimit(tx, input.orgId, now))
+  if (limit) return { kind: "tope", message: limit }
 
   const ask: ArgosAsk = { texts: ready.texts, question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key), asker: ready.asker }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
