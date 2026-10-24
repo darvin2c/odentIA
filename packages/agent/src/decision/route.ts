@@ -192,8 +192,15 @@ export function widenDescription(path: RoutePath): string {
   return `Para este mensaje tienes solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
 }
 
-/** Desde esta urgencia (de 0 a 2) un caso es urgente: prioridad alta y el aviso da el teléfono para urgencias de la clínica. */
-export const URGENT_SCORE = 1.5
+/**
+ * Desde esta urgencia (de 0 a 2) un caso es urgente: prioridad alta y el aviso
+ * da el teléfono para urgencias de la clínica. Medido con Jev el 2026-10-24,
+ * tres veces por mensaje (`eval:urgencia-medica` y `decisiones-ejemplos.json`):
+ * lo urgente sacó 1,92 o más en los dos productos, y lo que no lo es, como
+ * máximo 1,62 en latidIA («me duele la espalda baja desde la semana pasada»,
+ * que con 1,5 se marcaba urgente) y 1,27 en odentIA. 1,8 queda en medio.
+ */
+export const URGENT_SCORE = 1.8
 
 /**
  * Cómo llega al equipo un caso que el modelo de decisión pasó a una persona:
