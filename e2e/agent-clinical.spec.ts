@@ -34,7 +34,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const dictation = () => call<{ enabled: boolean; suggestions: Array<{ kind: string; status: string }> }>(page, "GET", dictationPath, org.slug)
 
   // --- Apagado: la atención no ofrece dictar y el servidor no acepta dictados ---
-  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], confirmed: 0 })
+  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], confirmed: 0, blocked: null })
   expect((await api(page, "POST", dictationPath, org.slug, { transcript: DICTATION })).status).toBe(409)
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))

@@ -302,7 +302,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Sin horario ni canales: Sofi responde siempre (ADR 0084).
   await expect(mobileLimits.getByText("A qué horas responde")).toHaveCount(0)
   await expect(mobileLimits.getByText("En qué canales responde")).toHaveCount(0)
-  await expect(mobileLimits.getByLabel("Tope diario de respuestas")).toHaveValue("300")
+  await expect(mobileLimits.getByLabel("Tope diario de respuestas")).toHaveCount(0)
   await expect(mobileLimits.getByLabel("Pasa siempre a una persona si mencionan")).toHaveValue("queja, reclamo")
   await info.attach("limites-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await mobileLimits.getByRole("button", { name: "Cancelar" }).click()

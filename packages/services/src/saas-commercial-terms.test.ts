@@ -40,7 +40,7 @@ it("parte de los valores que estaban en el código, en una versión que no se re
     "Qué se cobra",
     "Revisión de cobros",
     "Pagos",
-    "Prueba y avisos del tope",
+    "Prueba y avisos del presupuesto",
     "Invitaciones y vendedores",
     "Avisos antes de que termine algo",
   ])

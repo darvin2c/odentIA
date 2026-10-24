@@ -136,7 +136,16 @@ export function useDictationSession({
   const query = useQuery({
     queryKey: key,
     queryFn: () =>
-      apiFetch<{ data: { enabled: boolean; suggestions: DictationSuggestion[]; removedByVoice: DictationSuggestion[]; confirmed: number } }>(base),
+      apiFetch<{
+        data: {
+          enabled: boolean
+          suggestions: DictationSuggestion[]
+          removedByVoice: DictationSuggestion[]
+          confirmed: number
+          /** Por qué Clío no escucha en esta atención (el presupuesto del mes o el saldo de prueba); null si escucha. */
+          blocked?: { code: string; message: string } | null
+        }
+      }>(base),
     retry: false,
     enabled: active,
   })
@@ -144,6 +153,7 @@ export function useDictationSession({
   const suggestions = useMemo(() => query.data?.data.suggestions ?? [], [query.data])
   const removedByVoice = useMemo(() => query.data?.data.removedByVoice ?? [], [query.data])
   const confirmed = query.data?.data.confirmed ?? 0
+  const blocked = query.data?.data.blocked ?? null
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: key }), [queryClient, key])
 
   const [mode, setMode] = useState<DictationMode>("off")
@@ -226,6 +236,8 @@ export function useDictationSession({
           if (last && mounted.current) {
             const message = transient ? "Lo intenté dos veces." : (dictationErrorText(last, "") ?? "")
             setFailed((current) => [...current, { ...segment, at: new Date(), message }])
+            // Se llegó al presupuesto mientras tanto: la atención lo dice arriba (ADR 0085).
+            if (last instanceof ApiError && (last.shape.code === "CLIO_BUDGET_REACHED" || last.shape.code === "AGENTS_PAUSED")) void refresh()
           }
         }
         if (!mounted.current) return
@@ -441,6 +453,8 @@ export function useDictationSession({
     pending: suggestions.length,
     ready,
     confirmed,
+    /** Clío no escucha en esta atención (ADR 0085): la pantalla lo dice antes de dictar. */
+    blocked,
     refresh,
     mode,
     dictating,

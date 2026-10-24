@@ -57,6 +57,7 @@ import {
   listPendingRecoveries,
   listSaasChargeLines,
   listPeriodActions,
+  agendaPendingOf,
   getSaasReceiptUrl,
   getSaasSubscription,
   getSaasUsage30d,
@@ -965,6 +966,14 @@ async function accountOwnerOrAdmin(deps: SaasBillingAccountDeps, c: Context, org
   return membership
 }
 
+/** Lo de cada agente en «Cada acción» (tablero C2). */
+const AGENT_KINDS: Record<"sofi" | "clio" | "argos" | "almacenamiento", readonly string[]> = {
+  sofi: ["conversacion"],
+  clio: ["consulta"],
+  argos: ["cita", "preguntas"],
+  almacenamiento: ["almacenamiento"],
+}
+
 const RECEIPT_UPLOAD_MIME = ["image/png", "image/jpeg", "image/webp", "application/pdf"] as const
 const RECEIPT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 
@@ -1137,6 +1146,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       .object({
         orgId: z.string(),
         kind: z.enum(SAAS_ACTION_KINDS).optional(),
+        // De quién es (tablero C2): Argos son sus citas recuperadas y sus paquetes de preguntas.
+        agente: z.enum(["sofi", "clio", "argos", "almacenamiento"]).optional(),
         state: z.enum(["esperando"]).optional(),
         // El mes anterior también se ve, para pedir revisión de lo ya facturado (decisión 7).
         periodo: z.enum(["actual", "anterior"]).default("actual"),
@@ -1161,14 +1172,17 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
           query.state === "esperando"
             ? pending
             : [...(await listPeriodActions(tx, orgId, period)).reverse(), ...pending].filter(
-                (row) => !query.kind || row.kind === query.kind,
+                (row) => (!query.kind || row.kind === query.kind) && (!query.agente || AGENT_KINDS[query.agente].includes(row.kind)),
               )
+        const shown = rows.slice(query.offset, query.offset + query.limit)
+        // Si la persona viene a la cita que reservó Sofi, la conversación sube a Agenda: se dice en su fila.
+        const agenda = query.periodo === "anterior" ? new Map<string, number | null>() : await agendaPendingOf(tx, orgId, shown)
         return {
           period: { start: period.start, end: period.end, credit: period.credit },
           previous: { start: previous.start, end: previous.end },
           total: rows.length,
           pending: pending.length,
-          items: rows.slice(query.offset, query.offset + query.limit),
+          items: shown.map((row) => (agenda.has(row.id) ? { ...row, agendaPendingMicros: agenda.get(row.id) ?? null } : row)),
         }
       }),
     )

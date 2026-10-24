@@ -20,10 +20,12 @@ import {
 } from "./admin-lines.js"
 import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
 import { MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { currentSaasPeriod } from "./saas-actions.js"
 import { currentAutomationMessageOf } from "./clinic-messages.js"
 import {
   activeSince,
   adminRuntime,
+  listBudgetHeldJobs,
   CAUSE_WORDS,
   type DeliverDeps,
   deliverDueJobs,
@@ -936,6 +938,12 @@ export interface AdminPage {
    * pacientes lo pregunta, que es donde se corrige.
    */
   permissionGaps: PermissionGap[]
+  /**
+   * La clínica llegó a su presupuesto del mes (ADR 0085, tablero C4): Argos no
+   * escribe para recuperar y estos mensajes esperan hasta que lo suba o
+   * empiece otro mes (`until`, su último día). Null si no llegó.
+   */
+  budgetHold: { until: string; total: number; lines: Array<{ kind: string; name: string; count: number }> } | null
 }
 
 export interface PermissionGap {
@@ -1018,6 +1026,19 @@ export async function getAdminPage(tx: Db, orgId: string, can: (permission: stri
     },
     monthTemplates: Number(counts?.templates ?? 0),
     permissionGaps: settings.enabled ? await permissionGaps(tx, orgId, rules) : [],
+    budgetHold: runtime.recoveryPaused ? await budgetHoldOf(tx, orgId, zone) : null,
+  }
+}
+
+/** Lo que espera por el presupuesto, por línea, y hasta cuándo como mucho. */
+async function budgetHoldOf(tx: Db, orgId: string, zone: { locale: string; timezone: string }): Promise<NonNullable<AdminPage["budgetHold"]>> {
+  const held = await listBudgetHeldJobs(tx, orgId)
+  const period = await currentSaasPeriod(tx, orgId)
+  const until = new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "long", timeZone: zone.timezone }).format(new Date(period.end.getTime() - 1))
+  return {
+    until,
+    total: held.reduce((sum, item) => sum + item.count, 0),
+    lines: held.map((item) => ({ kind: item.kind, name: adminLineOf(item.kind)?.name ?? item.kind, count: item.count })),
   }
 }
 

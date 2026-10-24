@@ -267,7 +267,7 @@ const GROUPS: GroupSpec[] = [
   },
   {
     key: "prueba",
-    title: "Prueba y avisos del tope",
+    title: "Prueba y avisos del presupuesto",
     fields: [
       {
         key: "trialDays",
@@ -281,7 +281,7 @@ const GROUPS: GroupSpec[] = [
       },
       {
         key: "warnPercent",
-        name: "Aviso del tope de gasto",
+        name: "Aviso del presupuesto del mes",
         label: "Avisar al usar",
         unit: "% del tope",
         min: 50,
@@ -291,7 +291,7 @@ const GROUPS: GroupSpec[] = [
       },
       {
         key: "alarmPercent",
-        name: "Alarma del tope de gasto",
+        name: "Alarma del presupuesto del mes",
         label: "Alarma al usar",
         unit: "% del tope",
         min: 50,
@@ -302,7 +302,7 @@ const GROUPS: GroupSpec[] = [
     ],
     sentences: (x) => [
       [t("Prueba de "), v(days(x.trialDays)), t(" cuando no hay un plan por defecto.")],
-      [t("Aviso al usar el "), v(percent(x.warnPercent)), t(" del tope de gasto y alarma al "), v(percent(x.alarmPercent)), t(".")],
+      [t("Aviso al usar el "), v(percent(x.warnPercent)), t(" del presupuesto del mes y alarma al "), v(percent(x.alarmPercent)), t(".")],
     ],
   },
   {

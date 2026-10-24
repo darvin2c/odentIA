@@ -21,6 +21,7 @@ import { type BillingSummary, SubscriptionStatusCard } from "../../components/bi
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError, apiFetch } from "../../lib/api"
 import { PLAN_ACTIONS_PATH, useClinicLine, useSaasTerms } from "../../lib/billing"
+import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
@@ -132,6 +133,16 @@ function PlanContent() {
     refresh()
   }
 
+  // «Sumar solas» las preguntas a Argos (ADR 0085): al acabarse, se suma un paquete sin preguntar.
+  const autoPack = useMutation({
+    mutationFn: (on: boolean) =>
+      apiFetch("/api/account/billing/argos-auto-pack", { method: "POST", body: JSON.stringify({ orgId: organizationId, on }) }),
+    onSuccess: () => {
+      refresh()
+      void queryClient.invalidateQueries({ queryKey: ARGOS_ALLOWANCE_KEY })
+    },
+  })
+
   const choosePlan = useMutation({
     mutationFn: (planCode: string) =>
       apiFetch<{ data: unknown }>("/api/account/billing/plan", {
@@ -219,6 +230,8 @@ function PlanContent() {
           exempt={summary.isDemo}
           onShowActions={() => void navigate({ to: PLAN_ACTIONS_PATH })}
           onChangeCap={summary.isDemo ? undefined : () => setCapOpen(true)}
+          onAutoPack={summary.isDemo ? undefined : (on) => autoPack.mutate(on)}
+          autoPackPending={autoPack.isPending}
         />
       )}
       {consumption.data ? (
