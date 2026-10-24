@@ -2,11 +2,13 @@ import type { ClinicalProduct } from "./products.js"
 
 /**
  * Las palabras que cambian de un producto a otro en lo que ve el equipo y el
- * paciente (entrega 3 del issue 229): quien atiende y lo que se reserva junto
+ * paciente (entrega 3 del issue 229): su nombre, quien atiende y lo que se reserva junto
  * con la sede y el profesional. Lo que lee el modelo va aparte, en
  * `ProductAgentTexts` de services, porque se mide antes de cambiarlo.
  */
 export interface ProductWords {
+  /** El nombre del producto: «odentIA» o «latidIA». */
+  name: string
   /** Quien atiende (el rol `clinician`): «Odontólogo», «odontólogo», «odontólogos». */
   clinician: { label: string; one: string; many: string }
   /**
@@ -19,10 +21,12 @@ export interface ProductWords {
 
 const WORDS: Record<ClinicalProduct, ProductWords> = {
   dental: {
+    name: "odentIA",
     clinician: { label: "Odontólogo", one: "odontólogo", many: "odontólogos" },
     room: { one: "unidad dental", many: "unidades dentales" },
   },
   medical: {
+    name: "latidIA",
     clinician: { label: "Médico", one: "médico", many: "médicos" },
     room: { one: "sala", many: "salas" },
   },

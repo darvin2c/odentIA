@@ -13,7 +13,9 @@ export function appWords(): ProductWords {
 
 /** El nombre de un rol en esta app; uno desconocido se muestra tal cual o con `unknown`. */
 export function appRoleLabel(role: string, unknown = role): string {
-  return (ORG_ROLES as readonly string[]).includes(role) ? roleLabel(role as OrgRole, productUi().product) : unknown
+  return (ORG_ROLES as readonly string[]).includes(role)
+    ? roleLabel(role as OrgRole, productUi().product)
+    : unknown
 }
 
 export { upperFirst } from "@odentia/clinical"

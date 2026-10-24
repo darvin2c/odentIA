@@ -27,6 +27,7 @@ import {
   SearchInput,
   SubmitButton,
 } from "@odentia/ui-patterns"
+import { CLINICAL_PRODUCTS, productWords, upperFirst } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable, type VisibilityState } from "@tanstack/react-table"
@@ -90,6 +91,7 @@ const row = z.object({
   city: z.string(),
   professionals: z.string(),
   currentTool: z.string(),
+  product: z.enum(CLINICAL_PRODUCTS),
   status: z.enum(["por_revisar", "invitada", "entro", "descartada"]),
   note: z.string().nullable(),
   discardReason: z.string().nullable(),
@@ -197,8 +199,9 @@ function WaitlistPage() {
         cell: ({ row: r }) => `${r.original.firstName} ${r.original.lastName}`,
         meta: { view: { primary: true } },
       },
+      { id: "product", header: "Producto", cell: ({ row: r }) => productWords(r.original.product).name },
       { id: "where", header: "Dónde", cell: ({ row: r }) => `${r.original.city}, ${countryName(r.original.countryCode)}` },
-      { id: "professionals", header: "Odontólogos", cell: ({ row: r }) => PROFESSIONALS_LABEL[r.original.professionals] ?? r.original.professionals },
+      { id: "professionals", header: "Atienden", cell: ({ row: r }) => PROFESSIONALS_LABEL[r.original.professionals] ?? r.original.professionals },
       { id: "tool", header: "Usan hoy", cell: ({ row: r }) => TOOL_LABEL[r.original.currentTool] ?? r.original.currentTool },
       { id: "asked", header: "Pidió", cell: ({ row: r }) => askedText(r.original.createdAt, new Date()) },
       {
@@ -210,7 +213,7 @@ function WaitlistPage() {
     ],
     [],
   )
-  const columnVisibility: VisibilityState = compact ? { where: false, professionals: false, tool: false, asked: false, who: false } : {}
+  const columnVisibility: VisibilityState = compact ? { product: false, where: false, professionals: false, tool: false, asked: false, who: false } : {}
   const table = useReactTable({ data: rows, columns, state: { columnVisibility }, getCoreRowModel: getCoreRowModel() })
   const counts = list.data?.counts ?? {}
   const seats = list.data?.seats ?? null
@@ -468,6 +471,7 @@ function RequestDrawer({
               <DetailField label="Quién">
                 {item.firstName} {item.lastName}
               </DetailField>
+              <DetailField label="Producto">{productWords(item.product).name}</DetailField>
               <DetailField label="Dónde">
                 {item.city}, {countryName(item.countryCode)}
               </DetailField>
@@ -477,7 +481,9 @@ function RequestDrawer({
                   {item.phone}
                 </a>
               </DetailField>
-              <DetailField label="Odontólogos">{PROFESSIONALS_LABEL[item.professionals] ?? item.professionals}</DetailField>
+              <DetailField label={upperFirst(productWords(item.product).clinician.many)}>
+                {PROFESSIONALS_LABEL[item.professionals] ?? item.professionals}
+              </DetailField>
               <DetailField label="Usan hoy">{TOOL_LABEL[item.currentTool] ?? item.currentTool}</DetailField>
             </DetailList>
           </DetailSection>

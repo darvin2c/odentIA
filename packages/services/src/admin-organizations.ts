@@ -1,4 +1,4 @@
-import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
@@ -214,6 +214,8 @@ export interface AssistedOrganizationInput {
   planCode?: string
   sellerId?: string
   isDemo?: boolean
+  /** odentIA o latidIA; sin decirlo, odentIA. */
+  product?: ClinicalProduct
 }
 
 export interface AssistedOrganizationResult {
@@ -716,6 +718,8 @@ const assistedInputSchema = z.object({
   planCode: z.string().trim().min(1).max(60).optional(),
   sellerId: z.string().trim().max(120).optional(),
   isDemo: z.boolean().optional(),
+  /** odentIA o latidIA (entrega 3 del issue 229); sin decirlo, odentIA. No cambia después. */
+  product: z.enum(CLINICAL_PRODUCTS).optional(),
 })
 
 /**
@@ -768,6 +772,7 @@ export async function createAssistedOrganization(
   })
   await tx.insert(orgProfile).values({
     organizationId,
+    product: input.product ?? "dental",
     legalName: input.orgName,
     countryCode: region.countryCode,
     currency: region.currency,

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { ALL_PERMISSIONS, canAccess, canAccessAny, platformPathPermission } from "./permissions.js"
+import { ALL_PERMISSIONS, canAccess, canAccessAny, platformPathPermission, roleLabel } from "./permissions.js"
+
+describe("el nombre del rol según el producto (entrega 3 del issue 229)", () => {
+  it("quien atiende es «Odontólogo» en odentIA y «Médico» en latidIA; los demás roles no cambian", () => {
+    expect(roleLabel("clinician")).toBe("Odontólogo")
+    expect(roleLabel("clinician", "medical")).toBe("Médico")
+    expect(roleLabel("reception", "medical")).toBe("Recepción")
+    expect(roleLabel("owner", "medical")).toBe("Propietario")
+  })
+})
 
 // Límites del permiso operativo del agente: recepción decide en sus dominios
 // sin administrar el agente (sin agent.write), sin lectura general (sin

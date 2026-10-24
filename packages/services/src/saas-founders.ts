@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
+import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
@@ -91,6 +92,16 @@ export const waitlistInputSchema = z.strictObject({
 })
 export type WaitlistInput = z.input<typeof waitlistInputSchema>
 
+/**
+ * La solicitud de un producto: pregunta por quien atiende con su palabra
+ * («cuántos médicos» en latidIA; decisión 17 del issue 229).
+ */
+export function waitlistInputSchemaFor(product: ClinicalProduct) {
+  return waitlistInputSchema.extend({
+    professionals: z.enum(SAAS_WAITLIST_PROFESSIONALS, `Elige cuántos ${productWords(product).clinician.many} atienden`),
+  })
+}
+
 export interface WaitlistSubmitResult {
   id: string
   /** Ya había una solicitud viva con ese correo: no se duplica ni se vuelve a escribir. */
@@ -100,11 +111,16 @@ export interface WaitlistSubmitResult {
 }
 
 /**
- * Deja la solicitud en la lista. Un mismo correo con una solicitud viva
- * (por revisar o invitada) no crea otra: se devuelve la que hay.
+ * Deja la solicitud en la lista, con el producto del dominio donde se pidió.
+ * Un mismo correo con una solicitud viva (por revisar o invitada) no crea
+ * otra: se devuelve la que hay.
  */
-export async function submitWaitlistRequest(tx: Db, input: WaitlistInput): Promise<WaitlistSubmitResult> {
-  const parsed = waitlistInputSchema.safeParse(input)
+export async function submitWaitlistRequest(
+  tx: Db,
+  input: WaitlistInput,
+  product: ClinicalProduct = "dental",
+): Promise<WaitlistSubmitResult> {
+  const parsed = waitlistInputSchemaFor(product).safeParse(input)
   if (!parsed.success) throw validation(parsed.error.issues[0]?.message ?? "Revisa los datos de la solicitud")
   const data = parsed.data
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${data.email}`}, 0))`)
@@ -116,7 +132,7 @@ export async function submitWaitlistRequest(tx: Db, input: WaitlistInput): Promi
   if (alive) return { id: alive.id, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
   const [row] = await tx
     .insert(saasWaitlistRequest)
-    .values(data)
+    .values({ ...data, product })
     .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
   return { id: row.id, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
@@ -139,6 +155,8 @@ export interface WaitlistRow {
   city: string
   professionals: string
   currentTool: string
+  /** odentIA o latidIA: la clínica nace con él y la invitación abre su panel. */
+  product: ClinicalProduct
   status: SaasWaitlistStatus
   note: string | null
   discardReason: string | null
@@ -267,6 +285,7 @@ function toWaitlistRow(
     city: row.city,
     professionals: row.professionals,
     currentTool: row.currentTool,
+    product: isClinicalProduct(row.product) ? row.product : "dental",
     status: row.status as SaasWaitlistStatus,
     note: row.note,
     discardReason: row.discardReason,
