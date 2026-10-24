@@ -114,15 +114,16 @@ const REQUEST_TOKENS = 1_525
 
 /**
  * Lo que la persona escribiría al responder, por línea. El primero es el botón que toca. Las que
- * reservan o mueven una cita terminan con el «sí» a la propuesta: sin él la cita no se hace y la
- * conversación se cobra como «informa» (ADR 0085).
+ * reservan o mueven una cita terminan con el «sí» a la propuesta, dicho como lo dice la gente: sin
+ * él la cita no se hace y la conversación se cobra como «informa» (ADR 0085). «Me sirve, nos vemos el
+ * lunes temprano» no es un sí por palabras: lo entiende el modelo de decisión (ADR 0023).
  */
 const SCRIPTS: Array<{ kind: string; label: string; button: "responder" | null; turns: string[] }> = [
-  { kind: "recordatorio_cita", label: "no podrá ir y pide otra fecha", button: "responder", turns: ["No podré ir", "¿Me la pueden pasar para la próxima semana, de preferencia en la mañana?", "El primer horario está bien, gracias", "Sí"] },
-  { kind: "recordatorio_control", label: "quiere agendar su control", button: "responder", turns: ["Quiero agendar", "¿Qué horarios tienen la próxima semana?", "El primero está bien", "Sí"] },
-  { kind: "seguimiento_presupuesto", label: "pregunta y quiere empezar", button: "responder", turns: ["Quiero retomarlo", "¿Se puede pagar en partes?", "Ok, quiero una cita para empezar la próxima semana", "El primer horario está bien", "Sí"] },
-  { kind: "seguimiento_no_asistencia", label: "reprograma", button: "responder", turns: ["Sí, otro horario", "¿Tienen algo la próxima semana por la mañana?", "El primero está bien", "Sí"] },
-  { kind: "cita_cancelada", label: "pide otra fecha", button: "responder", turns: ["Sí, otra fecha", "La próxima semana por la tarde, si se puede", "El primero está bien", "Sí"] },
+  { kind: "recordatorio_cita", label: "no podrá ir y pide otra fecha", button: "responder", turns: ["No podré ir", "¿Me la pueden pasar para la próxima semana, de preferencia en la mañana?", "El primer horario está bien, gracias", "Sí, confírmala"] },
+  { kind: "recordatorio_control", label: "quiere agendar su control", button: "responder", turns: ["Quiero agendar", "¿Qué horarios tienen la próxima semana?", "El primero está bien", "Perfecto, ahí estaré"] },
+  { kind: "seguimiento_presupuesto", label: "pregunta y quiere empezar", button: "responder", turns: ["Quiero retomarlo", "¿Se puede pagar en partes?", "Ok, quiero una cita para empezar la próxima semana", "El primer horario está bien", "Sí, por favor"] },
+  { kind: "seguimiento_no_asistencia", label: "reprograma", button: "responder", turns: ["Sí, otro horario", "¿Tienen algo la próxima semana por la mañana?", "El primero está bien", "Me sirve, nos vemos el lunes temprano"] },
+  { kind: "cita_cancelada", label: "pide otra fecha", button: "responder", turns: ["Sí, otra fecha", "La próxima semana por la tarde, si se puede", "El primero está bien", "Dale, gracias"] },
   { kind: "seguimiento_no_asistencia", label: "responde corto", button: null, turns: ["Gracias, yo les aviso"] },
 ]
 

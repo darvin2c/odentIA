@@ -2259,39 +2259,35 @@ async function pendingConflict(tx: Db, orgId: string, id: string): Promise<Servi
 
 /**
  * Confirmación del interlocutor en el chat (solo actos `confirmar_usuario`
- * con hilo). Evidencia estricta y ligada a la propuesta: un mensaje entrante
- * posterior a ESTA propuesta cuyo texto completo sea una afirmación (sin
- * negaciones ni preguntas). El mensaje que confirma queda en la auditoría.
+ * con hilo). Evidencia ligada a la propuesta: un mensaje entrante posterior a
+ * ESTA propuesta que dice que sí, por palabras (`isAffirmative`) o porque el
+ * modelo de decisión entendió que acepta (`understoodMessageId`). El mensaje
+ * que confirma y cómo se entendió quedan en la auditoría.
  * Los actos directos no aceptan confirmación del contacto.
  * Vencida a las 48h: se devuelve `expirada` (HTTP 200, sin
  * reintento), nunca update+throw. El staff que confirma desde consola queda
  * auditado. Devuelve `ejecutada`, `fallida` o `expirada` (HTTP 200: la UI
  * distingue por `status`).
  */
-const AFFIRMATIVE_PHRASES = new Set([
-  "si",
-  "confirmo",
-  "confirmado",
-  "de acuerdo",
-  "vale",
-  "ok",
-  "adelante",
-  "dale",
-  "acepto",
-  "quiero",
-  "si quiero",
-  "si confirmo",
-  // La respuesta natural a «¿Es correcto?» al repetirle una lista.
-  "correcto",
-  "es correcto",
-  "si correcto",
-  "si es correcto",
-  "asi es",
-  "si asi es",
-  "exacto",
-  "si exacto",
-  "esta bien",
-  "si esta bien",
+/**
+ * El sí por palabras, sin modelo: el mensaje dice que sí con las palabras de
+ * siempre y nada más. «Sí», «perfecto», «sí, gracias», «sí, por favor»,
+ * «confírmala», «ok, ahí estaré». Si trae otra cosa («sí, pero a las 10»,
+ * «¿puede ser más tarde?»), no lo da por sí: lo decide quien entiende la
+ * intención (el modelo de decisión en la herramienta del agente).
+ */
+const YES_WORDS = new Set([
+  "si", "sip", "sii", "siii", "claro", "perfecto", "perfecta", "confirmo", "confirmado", "confirmada",
+  "confirmala", "confirmalo", "confirmame", "reservala", "reservalo", "reservame", "agendala", "agendalo", "agendame",
+  "acepto", "aceptado", "acuerdo", "vale", "ok", "okay", "okey", "oki", "adelante", "dale", "correcto", "exacto",
+  "asi", "bien", "listo", "lista", "genial", "excelente", "super", "quiero", "sirve", "supuesto", "obvio", "estare",
+  "estaremos", "\u{1f44d}", "\u{1f44c}",
+])
+/** Lo que acompaña al sí sin cambiarlo: cortesía, a quién le habla y cómo lo dice. */
+const YES_COMPANY = new Set([
+  "gracias", "muchas", "mil", "porfa", "porfis", "favor", "por", "please", "sofi", "doctora", "dra", "doctor", "dr",
+  "entonces", "eso", "todo", "bueno", "buenisimo", "y", "a", "la", "el", "lo", "es", "esta", "de", "me", "parece", "que",
+  "va", "una", "ahi", "alla", "alli", "voy", "nos", "vemos", "tambien", "muy", "senorita", "amiga",
 ])
 
 export function isAffirmative(text: string | null): boolean {
@@ -2303,9 +2299,30 @@ export function isAffirmative(text: string | null): boolean {
     .replace(/[¡!¿?.,;:()"'-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-  if (!normal || normal.length > 40) return false
-  if (/(^| )no( |$)/.test(normal)) return false
-  return AFFIRMATIVE_PHRASES.has(normal)
+  if (!normal || normal.length > 80) return false
+  const words = normal.split(" ")
+  // Cada palabra es un sí o lo acompaña, y hay al menos un sí: «no», «pero», «mejor», «otro»… no están.
+  return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
+}
+
+/**
+ * La respuesta de la persona que espera una propuesta (ADR 0023): su último
+ * mensaje después de la propuesta y lo que el agente le propuso. Con esto la
+ * herramienta del agente le pregunta al modelo de decisión si acepta.
+ */
+export async function proposalReplyOf(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  id: string,
+): Promise<{ reply: { id: string; body: string } | null; proposed: string | null }> {
+  const current = await requireProposal(tx, orgId, id)
+  if (current.contactId !== contactId) throw notFound("Propuesta")
+  const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
+  const after = items.filter((m) => new Date(m.createdAt).getTime() >= current.createdAt.getTime())
+  const reply = after.filter((m) => m.direction === "in" && m.body).at(-1)
+  const proposed = after.find((m) => m.direction === "out" && m.body)
+  return { reply: reply ? { id: reply.id, body: reply.body ?? "" } : null, proposed: proposed?.body ?? null }
 }
 
 export async function confirmProposalByContact(
@@ -2313,7 +2330,15 @@ export async function confirmProposalByContact(
   orgId: string,
   contactId: string,
   id: string,
-  opts: { staffUserId?: string | null; secretsKey?: Buffer } = {},
+  opts: {
+    staffUserId?: string | null
+    secretsKey?: Buffer
+    /**
+     * El mensaje que el modelo de decisión entendió como un sí a esta propuesta
+     * («perfecto, ahí estaré»). Vale solo si es de la persona y posterior a la propuesta.
+     */
+    understoodMessageId?: string
+  } = {},
 ): Promise<ProposalItem> {
   const current = await requireProposal(tx, orgId, id)
   if (current.contactId !== contactId) throw notFound("Propuesta")
@@ -2331,12 +2356,11 @@ export async function confirmProposalByContact(
     )
   }
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
-  const confirmation = items.find(
-    (m) =>
-      m.direction === "in" &&
-      new Date(m.createdAt).getTime() >= current.createdAt.getTime() &&
-      isAffirmative(m.body),
-  )
+  const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= current.createdAt.getTime()
+  const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
+  // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
+  const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
+  const confirmation = byWords ?? byIntent
   if (!confirmation) {
     throw new ServiceError(
       "PROPOSAL_NOT_CONFIRMED",
@@ -2358,7 +2382,7 @@ export async function confirmProposalByContact(
     action: "agent.proposal_confirmed",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId },
+    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId, understood: byWords ? "palabras" : "modelo_de_decision" },
   })
   return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
 }
