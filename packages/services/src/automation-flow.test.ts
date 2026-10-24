@@ -1906,4 +1906,17 @@ describe("al llegar al presupuesto del mes (ADR 0085)", () => {
     expect(followUp(booked.patientId)).toMatchObject({ status: "cancelado", lastError: expect.stringContaining("Ya tiene su cita") })
     expect(await run(c, (tx) => listBudgetHeldJobs(tx, c.orgId))).toEqual([])
   })
+
+  it("quien ya tiene su cita no espera: el seguimiento de su presupuesto es servicio y sale igual", async () => {
+    const c = await clinic()
+    await overBudget(c)
+    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
+    // Luis tiene un presupuesto pendiente y una limpieza la semana que viene.
+    const luis = await person(c, "Luis con su limpieza", { consent: ["seguimiento", "novedades"], openWindow: true })
+    await appointmentFor(c, luis.patientId, new Date(NOW.getTime() + 5 * DAY))
+    await dueBudget(c, luis.patientId)
+    await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    expect(await run(c, (tx) => listBudgetHeldJobs(tx, c.orgId))).toEqual([])
+  })
 })

@@ -158,16 +158,19 @@ const budgetReachedText = (month: string) =>
  * solas», sin preguntar. Se cobra en la factura del mes, como todo. Con el
  * presupuesto del mes alcanzado no se suma: el presupuesto es el límite.
  */
-export async function addArgosPack(tx: Db, orgId: string, input: { automatic: boolean; now?: Date }): Promise<ArgosAllowance> {
+export async function addArgosPack(tx: Db, orgId: string, input: { automatic: boolean; now?: Date }): Promise<ArgosAllowance & { packAdded: boolean }> {
   const now = input.now ?? new Date()
-  const before = await getArgosAllowance(tx, orgId, now)
-  if (!before.limited) throw new ServiceError("ARGOS_PACK_UNAVAILABLE", 409, "Tu plan no tiene paquetes de preguntas a Argos")
+  const first = await getArgosAllowance(tx, orgId, now)
+  if (!first.limited) throw new ServiceError("ARGOS_PACK_UNAVAILABLE", 409, "Tu plan no tiene paquetes de preguntas a Argos")
   if ((await getAgentSpendGate(tx, orgId, now)).capReached) {
-    throw new ServiceError("ARGOS_BUDGET_REACHED", 409, budgetReachedText((await periodWords(tx, orgId, before.periodEnd)).month))
+    throw new ServiceError("ARGOS_BUDGET_REACHED", 409, budgetReachedText((await periodWords(tx, orgId, first.periodEnd)).month))
   }
   const period = await currentSaasPeriod(tx, orgId, now)
-  // Dos compras a la vez no suman dos paquetes por el mismo agotamiento.
+  // Dos compras a la vez (dos preguntas con «Sumar solas», un doble clic) no suman dos paquetes
+  // por el mismo agotamiento: con el bloqueo se vuelve a mirar, y si la otra ya sumó, no se suma otro.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`argos-pack:${orgId}`}, 0))`)
+  const before = await getArgosAllowance(tx, orgId, now)
+  if (before.remaining > 0) return { ...before, packAdded: false }
   const [count] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(saasAction)
@@ -180,7 +183,7 @@ export async function addArgosPack(tx: Db, orgId: string, input: { automatic: bo
       : `Sumó ${before.packQuestions} preguntas a Argos`,
     dedupeKey: `preguntas:${period.start.toISOString()}:${(count?.n ?? 0) + 1}`,
   })
-  return getArgosAllowance(tx, orgId, now)
+  return { ...(await getArgosAllowance(tx, orgId, now)), packAdded: true }
 }
 
 /** Lo que dice Argos al sumar un paquete: con el permiso de quien administra o solo. */
@@ -205,7 +208,8 @@ export async function ensureArgosQuestion(tx: Db, orgId: string, now = new Date(
   if ((await getAgentSpendGate(tx, orgId, now)).capReached) throw new ServiceError("ARGOS_BUDGET_REACHED", 409, budgetReachedText(words.month))
   if (allowance.autoPack) {
     const after = await addArgosPack(tx, orgId, { automatic: true, now })
-    return { added: await argosPackAddedText(tx, orgId, after, true) }
+    // Si otra pregunta a la vez ya sumó el paquete, esta solo lo usa: lo dijo la otra.
+    return { added: after.packAdded ? await argosPackAddedText(tx, orgId, after, true) : null }
   }
   const total = allowance.included + allowance.added
   const price = moneyText(allowance.currency ?? "USD", microsToCents(allowance.packPriceMicros ?? 0))
