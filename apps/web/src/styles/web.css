@@ -400,3 +400,27 @@ details.q p {
    sobre fondo oscuro y uno más oscuro sobre fondo claro, para que se lea. Dentro de un botón, no. */
 .gift { color: var(--amber); }
 .gift-light { color: #b45309; }
+
+/* latidIA (issue 229, decisiones 1 y 18): la misma web con su lila, medido contra sus fondos:
+   el primario #6d3fc0 con texto blanco (6,7:1) y el lila claro #b79cf0 con texto #1e0b3d. */
+:root[data-brand="latidia"] {
+  --teal: #6d3fc0;
+  --teal-hover: #4c2a8a;
+  --teal-soft: #ece4fb;
+  --night: #1e0b3d;
+  --night-2: #12062a;
+  --on-night-2: #d3c6ee;
+  --on-night-3: #b3a2da;
+  --sky: #b79cf0;
+  --sky-2: #cbb6f5;
+}
+:root[data-brand="latidia"] .btn-p,
+:root[data-brand="latidia"] .btn-p:hover {
+  color: #1e0b3d;
+}
+:root[data-brand="latidia"] .btn-p:hover {
+  background: #cbb6f5;
+}
+:root[data-brand="latidia"] .hero {
+  background: radial-gradient(1200px 700px at 72% 42%, #3a1d6e 0%, var(--night) 48%, var(--night-2) 100%);
+}

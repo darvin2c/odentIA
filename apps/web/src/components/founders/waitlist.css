@@ -54,3 +54,9 @@
   .wl-grid { grid-template-columns: 1fr; }
   .wl-wide { grid-column: auto; }
 }
+
+/* latidIA (decisión 18 del issue 229): el mismo formulario con su lila. */
+:root[data-brand="latidia"] .wl-aside { background: radial-gradient(90% 75% at 50% 0%, #3a1d6e 0%, #1e0b3d 50%, #12062a 100%); }
+:root[data-brand="latidia"] .wl-chips li { border-color: #43306f; background: rgba(183, 156, 240, .12); }
+:root[data-brand="latidia"] .wl-field input:focus-visible,
+:root[data-brand="latidia"] .wl-field select:focus-visible { outline-color: rgba(109, 63, 192, .35); }

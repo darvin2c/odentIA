@@ -137,6 +137,12 @@ los servicios `latidia-panel` (puerto 3014) y `latidia` (3015) del compose, con 
 perfil `latidia`. El túnel lleva `app.latidia72.com` al primero y `*.latidia72.com` al
 segundo; `api.latidia72.com`, a la misma API.
 
+La web de `latidia72.com` es la misma `apps/web` con ese build (`latidia-web`, puerto
+3016, perfil `latidia`): solo inicio, precios, pedir invitación y las páginas legales
+(`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. El túnel lleva
+`latidia72.com` (y `www.`, que redirige) a ese servicio. La lista de espera guarda el
+producto del dominio desde el que se pide (decisión 17).
+
 ## Variables: una sola fuente
 
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.

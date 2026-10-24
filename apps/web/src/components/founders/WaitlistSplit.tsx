@@ -2,9 +2,10 @@
 // la noche, con las 32 piezas de la portada y la acción de un agente, como entrar y crear cuenta; a la
 // derecha la solicitud. Al enviarla, la misma pantalla dice qué sigue. La solicitud va a la ruta
 // pública de la API (excepción a ADR 0046, como el Libro de Reclamaciones).
-import { AGENTS, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
+import { AGENTS, CalmPulseScene, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
 import { type SyntheticEvent, useEffect, useState } from "react"
 import { businessDays } from "../../lib/pricing"
+import { MEDICAL, WORDS } from "../../lib/product"
 import { waitlistApiUrl } from "../../lib/site"
 import "./waitlist.css"
 
@@ -142,7 +143,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
                     Los primeros <span className="gift wl-gift">{gift}</span> los pagamos nosotros.
                   </>
                 ) : (
-                  "Tu lugar en odentIA."
+                  `Tu lugar en ${WORDS.name}.`
                 )}
                 <br />
                 <span className="wl-accent">Tus agentes empiezan hoy.</span>
@@ -155,7 +156,8 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
             </>
           )}
         </div>
-        <CalmToothScene className="wl-scene" onWork={setWork} />
+        {/* latidIA: el pulso de su acceso en lugar de las piezas de odentIA. */}
+        {MEDICAL ? <CalmPulseScene className="wl-scene" /> : <CalmToothScene className="wl-scene" onWork={setWork} />}
         {agent && work ? (
           <div className="wl-work">
             <span className="wl-dot" style={{ background: agent.color }} aria-hidden="true" />
@@ -173,7 +175,7 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
             <ol className="wl-steps">
               <li>Revisamos tu solicitud en {businessDays(sent.answerDays)}.</li>
               <li>Te escribimos por WhatsApp al {sent.phone} para una llamada corta.</li>
-              <li>Te llega tu invitación por correo y abres tu clínica como Fundadora.</li>
+              <li>Te llega tu invitación por correo y abres {WORDS.yourClinic} como Fundadora.</li>
             </ol>
             <p className="wl-note">Te enviamos una copia a {sent.email}. Si te equivocaste en un dato, responde ese correo.</p>
             <a className="btn btn-g wl-back" href="/">
@@ -222,11 +224,11 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
                 </span>
               </div>
               <div className="wl-field">
-                <label htmlFor="wl-clinicName">Nombre de la clínica</label>
+                <label htmlFor="wl-clinicName">{MEDICAL ? "Nombre del consultorio" : "Nombre de la clínica"}</label>
                 <input id="wl-clinicName" name="clinicName" autoComplete="organization" required maxLength={120} />
               </div>
               <div className="wl-field">
-                <label htmlFor="wl-professionals">Odontólogos que atienden</label>
+                <label htmlFor="wl-professionals">{MEDICAL ? "Médicos que atienden" : "Odontólogos que atienden"}</label>
                 <select id="wl-professionals" name="professionals" required defaultValue="">
                   <option value="" disabled>
                     Elige

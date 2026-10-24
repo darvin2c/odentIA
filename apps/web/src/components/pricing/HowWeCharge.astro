@@ -1,5 +1,6 @@
 ---
 // «Solo cobramos cuando te damos valor»: tres tarjetas que explican qué se cobra y qué no.
+import { MEDICAL, WORDS } from "../../lib/product"
 ---
 <section class="section section-white">
   <div class="wrap in">
@@ -12,14 +13,14 @@
       <div class="prc">
         <span class="n">01</span>
         <h3>Cada cobro es un resultado que puedes ver.</h3>
-        <p>Una persona atendida, una nota que el odontólogo confirmó o un paciente que volvió y fue atendido. Cada uno aparece en tu cuenta con su fecha, su paciente y su precio. Si algo no cuadra, pides revisión desde esa misma fila.</p>
+        <p>Una persona atendida, una nota que el {WORDS.clinician} confirmó o un paciente que volvió y fue atendido. Cada uno aparece en tu cuenta con su fecha, su paciente y su precio. Si algo no cuadra, pides revisión desde esa misma fila.</p>
       </div>
       <div class="prc">
         <span class="n">02</span>
         <h3>Sin resultado, no hay cobro.</h3>
         <ul>
           <li>El paciente no asistió a la cita.</li>
-          <li>El odontólogo descartó la nota.</li>
+          <li>El {WORDS.clinician} descartó la nota.</li>
           <li>El agente no llegó a responder.</li>
           <li>El spam y los mensajes que no son para la clínica.</li>
           <li>Los recordatorios y los avisos a tu equipo: nunca se cobran.</li>
@@ -28,7 +29,11 @@
       <div class="prc">
         <span class="n">03</span>
         <h3>El sistema no se vende por partes.</h3>
-        <p><a href="/agenda-odontologica">Agenda</a>, <a href="/historia-clinica-y-odontograma">historia clínica</a>, <a href="/presupuestos-dentales">presupuestos</a>, <a href="/caja-y-cobros">caja</a> y <a href="/reportes">reportes</a> vienen incluidos para todas las clínicas. No hay módulos ni planes con más funciones, ni cobro por odontólogo, sede o usuario.</p>
+        {MEDICAL ? (
+          <p>Agenda, historia clínica, recetas, caja y reportes vienen incluidos para todos los consultorios. No hay módulos ni planes con más funciones, ni cobro por médico, sede o usuario.</p>
+        ) : (
+          <p><a href="/agenda-odontologica">Agenda</a>, <a href="/historia-clinica-y-odontograma">historia clínica</a>, <a href="/presupuestos-dentales">presupuestos</a>, <a href="/caja-y-cobros">caja</a> y <a href="/reportes">reportes</a> vienen incluidos para todas las clínicas. No hay módulos ni planes con más funciones, ni cobro por odontólogo, sede o usuario.</p>
+        )}
       </div>
     </div>
   </div>
