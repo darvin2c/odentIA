@@ -1,0 +1,246 @@
+/**
+ * La demo de latidIA (issue 229, entrega 4): un consultorio médico en la misma
+ * semilla de desarrollo que la de odentIA (`../dental/seed-demo.ts`), que lo
+ * borra junto con sus clínicas y lo crea al final. Lo mínimo para recorrerlo:
+ * la Dra. Elena Vela (propietaria) y Ana Torres, que también dirige Dental
+ * Smile y entra una vez en cada dominio; una sede con dos salas y horario, y la
+ * agenda de hoy y mañana.
+ *
+ * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
+ */
+
+import { randomUUID } from "node:crypto"
+import { LEGAL } from "@odentia/auth/legal"
+import type { Db } from "@odentia/db"
+import { account, member, organization, user } from "@odentia/db/schema/auth"
+import { branch, orgProfile } from "@odentia/db/schema/org"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
+import { eq } from "drizzle-orm"
+import { createAppointment, createRoom } from "../appointments.js"
+import { setProfessionalSchedule } from "../availability.js"
+import { createSpecialty, setProfessionalSpecialties } from "../clinical-forms.js"
+import { createContact } from "../contacts.js"
+import { createPatient } from "../patients.js"
+import { ensureDefaultPaymentMethods } from "../payment-methods.js"
+import { setProfessionalProfile } from "../professional-profiles.js"
+
+export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
+export const VELA_ID = "seed-user-vela"
+
+/** «2026-10-24T09:00:00-05:00»: el día de Lima, no el de UTC (desde las 19:00 de Lima en UTC ya es mañana). */
+function lima(dayOffset: number, hhmm: string): string {
+  const base = new Date(Date.now() - 5 * 60 * 60 * 1000)
+  base.setUTCDate(base.getUTCDate() + dayOffset)
+  return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
+}
+
+/** El primer día desde `from` en que atiende el consultorio (lunes a sábado), en días desde hoy en Lima. */
+function openDay(from: number): number {
+  const base = new Date(Date.now() - 5 * 60 * 60 * 1000)
+  base.setUTCDate(base.getUTCDate() + from)
+  return base.getUTCDay() === 0 ? from + 1 : from
+}
+
+export async function seedMedicalDemo(
+  db: Db,
+  input: { anaId: string; passwordHash: string },
+): Promise<void> {
+  const ORG = MEDICAL_DEMO_ORG
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(organization)
+      .values({ id: ORG, name: "Consultorio San Martín", slug: "sanmartin", createdAt: new Date() })
+    await tx
+      .update(saasSubscription)
+      .set({ isDemo: true })
+      .where(eq(saasSubscription.organizationId, ORG))
+  })
+  await db.insert(user).values({
+    id: VELA_ID,
+    name: "Dra. Elena Vela",
+    firstName: "Elena",
+    lastName: "Vela",
+    email: "vela@odentia.dev",
+    emailVerified: true,
+    termsVersion: LEGAL.terms.version,
+    termsAcceptedAt: new Date(),
+  })
+  await db.insert(account).values({
+    id: randomUUID(),
+    accountId: VELA_ID,
+    providerId: "credential",
+    userId: VELA_ID,
+    password: input.passwordHash,
+  })
+  await db.insert(member).values([
+    {
+      id: randomUUID(),
+      organizationId: ORG,
+      userId: VELA_ID,
+      role: "owner",
+      createdAt: new Date(),
+    },
+    // Ana dirige Dental Smile y también este consultorio: «Elige tu clínica» muestra los dos.
+    {
+      id: randomUUID(),
+      organizationId: ORG,
+      userId: input.anaId,
+      role: "admin",
+      createdAt: new Date(),
+    },
+  ])
+  await db
+    .insert(processingAgreementAcceptance)
+    .values({ organizationId: ORG, version: LEGAL.agreement.version, acceptedBy: VELA_ID })
+  // Nace médico: así lo crearía el panel de latidIA (ADR 0087).
+  await db.insert(orgProfile).values({
+    organizationId: ORG,
+    product: "medical",
+    legalName: "Consultorio San Martín S.A.C.",
+    tradeName: "Consultorio San Martín",
+    fiscalDocNumber: "20609876543",
+    countryCode: "PE",
+    currency: "PEN",
+    locale: "es-PE",
+    timezone: "America/Lima",
+    diagnosisSystem: "ICD-10",
+    emergencyPhone: "+5115550188",
+  })
+  await setProfessionalProfile(db, ORG, VELA_ID, VELA_ID, {
+    professionalTitle: "Médico cirujano",
+    registrationBody: "CMP",
+    registrationNumber: "045678",
+    signatureName: "Elena Vela",
+  })
+  await db.transaction((tx) => ensureDefaultPaymentMethods(tx, ORG, VELA_ID, "PE"))
+
+  const [sede] = await db
+    .insert(branch)
+    .values({
+      organizationId: ORG,
+      name: "Sede San Martín",
+      addressLine1: "Av. Perú 1820",
+      city: "San Martín de Porres",
+      district: "Lima",
+      region: "PE-LMA",
+      country: "PE",
+    })
+    .returning({ id: branch.id })
+  if (!sede) throw new Error("No se pudo crear la Sede San Martín")
+  const [sala1, sala2] = await Promise.all(
+    ["Sala 1", "Sala 2"].map((name) => createRoom(db, ORG, { branchId: sede.id, name })),
+  )
+  if (!sala1 || !sala2) throw new Error("No se pudieron crear las salas")
+  // Lunes a viernes, mañana y tarde; el sábado, solo la mañana.
+  await setProfessionalSchedule(db, ORG, VELA_ID, {
+    branchId: sede.id,
+    professionalUserId: VELA_ID,
+    rules: [
+      ...[1, 2, 3, 4, 5].flatMap((weekday) => [
+        { weekday, startMin: 8 * 60, endMin: 13 * 60 },
+        { weekday, startMin: 15 * 60, endMin: 19 * 60 },
+      ]),
+      { weekday: 6, startMin: 8 * 60, endMin: 13 * 60 },
+    ],
+  })
+
+  // La especialidad de quien atiende. Los servicios llegan con el catálogo médico (entrega 8):
+  // en Perú cada uno lleva su código CPMS y los médicos aún no están en la lista de latidIA.
+  const general = await db.transaction((tx) =>
+    createSpecialty(tx, ORG, VELA_ID, { name: "Medicina general" }),
+  )
+  await db.transaction((tx) => setProfessionalSpecialties(tx, ORG, VELA_ID, VELA_ID, [general.id]))
+
+  const people = [
+    {
+      given: "Rosa",
+      family: "Paredes Luna",
+      phone: "+51987650201",
+      doc: "40112233",
+      birthDate: "1980-03-14",
+      sex: "F",
+    },
+    {
+      given: "Luis",
+      family: "Gómez Salas",
+      phone: "+51987650202",
+      doc: "08123456",
+      birthDate: "1963-11-02",
+      sex: "M",
+    },
+    {
+      given: "Julia",
+      family: "Ramos Vega",
+      phone: "+51987650203",
+      doc: "72345678",
+      birthDate: "1994-07-21",
+      sex: "F",
+    },
+  ]
+  const patients: string[] = []
+  for (const person of people) {
+    const displayName = `${person.given} ${person.family}`
+    const contact = await createContact(
+      db,
+      ORG,
+      { displayName, givenNames: person.given, familyName: person.family, phone: person.phone },
+      { userId: VELA_ID },
+    )
+    const patient = await createPatient(db, ORG, VELA_ID, {
+      displayName,
+      givenNames: person.given,
+      familyName: person.family,
+      contacts: [{ contactId: contact.id, relationship: "self", isPreferred: true }],
+      docType: "DNI",
+      docNumber: person.doc,
+      nationality: "PE",
+      birthDate: person.birthDate,
+      sex: person.sex,
+    })
+    patients.push(patient.id)
+  }
+  const [rosa, luis, julia] = patients
+  if (!rosa || !luis || !julia) throw new Error("Faltan los pacientes del consultorio")
+  // Hoy (o el próximo día que atiende) y el siguiente.
+  const first = openDay(0)
+  const second = openDay(first + 1)
+  const agenda = [
+    {
+      patientId: rosa,
+      roomId: sala1.id,
+      day: first,
+      start: "09:00",
+      end: "09:30",
+      reason: "Consulta por dolor de cabeza",
+    },
+    {
+      patientId: luis,
+      roomId: sala2.id,
+      day: first,
+      start: "10:00",
+      end: "10:15",
+      reason: "Control de presión arterial",
+    },
+    {
+      patientId: julia,
+      roomId: sala1.id,
+      day: second,
+      start: "09:30",
+      end: "10:00",
+      reason: "Chequeo anual",
+    },
+  ]
+  for (const item of agenda) {
+    await createAppointment(db, ORG, VELA_ID, {
+      branchId: sede.id,
+      patientId: item.patientId,
+      professionalUserId: VELA_ID,
+      roomId: item.roomId,
+      reason: item.reason,
+      startsAt: lima(item.day, item.start),
+      endsAt: lima(item.day, item.end),
+      status: "programada",
+    })
+  }
+}

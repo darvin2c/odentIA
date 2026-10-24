@@ -60,6 +60,19 @@ export function clinicOrigin(
   return url.origin
 }
 
+/**
+ * El panel de un producto (`app.` de su dominio): ahí está «Elige tu clínica»
+ * y desde ahí se entra a Plan y pagos. odentIA, el de `webURL`; sin
+ * configurar, ninguno.
+ */
+export function panelOrigin(product: ClinicalProduct = "dental", config: PublicLinkConfig | null = configured): string | null {
+  if (!config) return null
+  const url = new URL(config.webURL)
+  const domain = config.productDomains?.[product]
+  if (domain && product !== "dental") url.hostname = `app.${domain.replace(/^\./, "")}`
+  return url.origin
+}
+
 /** La dirección de «Su enlace» (la página `/reserva`), con su token. */
 export function personalLinkAddress(origin: string, token: string): string {
   return `${origin}/reserva?token=${token}`

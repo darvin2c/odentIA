@@ -1,4 +1,4 @@
-import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
@@ -143,6 +143,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
       organizationName: args.organizationName,
       inviterName: args.inviterName,
       url: `${panel}/accept-invitation/${args.invitationId}`,
+      brand: productWords(args.product).brand,
     })
     await deps.mailer.send({ to: args.email, ...template })
   }

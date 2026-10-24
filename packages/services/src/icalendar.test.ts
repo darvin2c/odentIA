@@ -17,6 +17,11 @@ const event: CalendarEvent = {
 const lines = (text: string) => text.replace(/\r\n /g, "").split("\r\n")
 
 describe("iCalendar", () => {
+  it("dice quién lo generó: la plataforma de la clínica (entrega 4b del issue 229)", () => {
+    expect(lines(calendarFile(event))).toContain("PRODID:-//odentIA//Citas//ES")
+    expect(lines(calendarFile(event, undefined, "latidIA"))).toContain("PRODID:-//latidIA//Citas//ES")
+  })
+
   it("escapa barra, punto y coma, coma y salto de línea", () => {
     expect(escapeCalendarText("a\\b; c, d\ne")).toBe("a\\\\b\\; c\\, d\\ne")
   })

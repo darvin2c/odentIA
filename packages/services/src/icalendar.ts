@@ -36,7 +36,8 @@ export interface CalendarEvent {
   attendee?: CalendarPerson
 }
 
-const PRODID = "-//odentIA//Citas//ES"
+/** Quién generó el archivo (RFC 5545 §3.7.3): la plataforma de la clínica, odentIA o latidIA. */
+const prodid = (software: string) => `-//${software}//Citas//ES`
 
 /** Texto según RFC 5545 §3.3.11: barra, punto y coma, coma y salto de línea escapados. */
 export function escapeCalendarText(value: string): string {
@@ -208,8 +209,8 @@ function zonesFor(events: CalendarEvent[]): string[] {
   return [...spans].flatMap(([zone, span]) => timezoneLines(zone, span.start, span.end))
 }
 
-function fileOf(head: string[], events: string[]): string {
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:${PRODID}`, "CALSCALE:GREGORIAN", ...head, ...events, "END:VCALENDAR"]
+function fileOf(head: string[], events: string[], software: string): string {
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", `PRODID:${prodid(software)}`, "CALSCALE:GREGORIAN", ...head, ...events, "END:VCALENDAR"]
   return `${lines.map(foldCalendarLine).join("\r\n")}\r\n`
 }
 
@@ -218,9 +219,9 @@ function fileOf(head: string[], events: string[]): string {
  * con método es la invitación de un correo y lleva quién invita y a quién,
  * sin pedir respuesta (`RSVP=FALSE`): la cita ya está reservada.
  */
-export function calendarFile(event: CalendarEvent, method?: CalendarMethod): string {
+export function calendarFile(event: CalendarEvent, method?: CalendarMethod, software = "odentIA"): string {
   if (method && (!event.organizer || !event.attendee)) throw new Error("Una invitación lleva quién invita y a quién")
-  return fileOf([...(method ? [`METHOD:${method}`] : []), ...zonesFor([event])], eventLines(event, method))
+  return fileOf([...(method ? [`METHOD:${method}`] : []), ...zonesFor([event])], eventLines(event, method), software)
 }
 
 /**
@@ -229,7 +230,7 @@ export function calendarFile(event: CalendarEvent, method?: CalendarMethod): str
  * `REFRESH-INTERVAL`, y su equivalente que lee Outlook). Cuánto tarda de
  * verdad lo decide cada calendario.
  */
-export function calendarFeedFile(name: string, events: CalendarEvent[], refreshMinutes = 60): string {
+export function calendarFeedFile(name: string, events: CalendarEvent[], refreshMinutes = 60, software = "odentIA"): string {
   const every = `PT${refreshMinutes}M`
   return fileOf(
     [
@@ -241,5 +242,6 @@ export function calendarFeedFile(name: string, events: CalendarEvent[], refreshM
       ...zonesFor(events),
     ],
     events.flatMap((event) => eventLines(event)),
+    software,
   )
 }

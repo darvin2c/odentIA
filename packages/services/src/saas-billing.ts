@@ -9,11 +9,12 @@
  * abren el contexto. Dinero en enteros de la unidad menor, moneda ISO 4217.
  * Sin pasarela ni precios en código: los planes y métodos los configura admin.
  */
+import { isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import type { MailTemplate } from "@odentia/mail"
+import type { MailBrand, MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
 import { member, organization, user } from "@odentia/db/schema/auth"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import {
   type SaasChargeStatus,
   type SaasSubscriptionStatus,
@@ -34,6 +35,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, s
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale } from "./locale.js"
+import { panelOrigin } from "./public-links.js"
 import { assertActionPricingFloor } from "./saas-actions.js"
 import { getSaasAlerts } from "./saas-terms.js"
 import { loadSaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
@@ -2756,17 +2758,30 @@ export async function tickSaasBilling(
     return owners.length ? owners.map((owner) => owner.email).join(", ") : null
   }
 
-  // El ciclo corre cada minuto y casi siempre el aviso ya existe: el nombre se lee una vez por clínica.
-  const clinicNames = new Map<string, string>()
-  async function clinicName(orgId: string): Promise<string> {
-    const known = clinicNames.get(orgId)
+  // El ciclo corre cada minuto y casi siempre el aviso ya existe: el nombre, la marca y
+  // el enlace se leen una vez por clínica. El botón va al panel del dominio de su
+  // producto y el correo lleva su marca (odentIA o latidIA, issue 229).
+  const clinics = new Map<string, { clinic: string; url: string | null; brand: MailBrand }>()
+  async function clinicFields(orgId: string): Promise<{ clinic: string; url: string | null; brand: MailBrand }> {
+    const known = clinics.get(orgId)
     if (known) return known
-    const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
-    const name = org?.name ?? "tu clínica"
-    clinicNames.set(orgId, name)
-    return name
+    const [org] = await tx
+      .select({ name: organization.name, product: orgProfile.product })
+      .from(organization)
+      .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
+      .where(eq(organization.id, orgId))
+      .limit(1)
+    const product = isClinicalProduct(org?.product) ? org.product : "dental"
+    const panel = product === "dental" ? links.panelUrl : (panelOrigin(product) ?? links.panelUrl)
+    const fields = { clinic: org?.name ?? "tu clínica", url: saasBillingUrl(panel, orgId), brand: productWords(product).brand }
+    clinics.set(orgId, fields)
+    return fields
   }
-  const billingUrl = (orgId: string) => saasBillingUrl(links.panelUrl, orgId)
+  /** Los argumentos sueltos de un aviso: el nombre, el enlace y la marca de la clínica. */
+  const clinicArgs = async (orgId: string): Promise<[string, string | null, MailBrand]> => {
+    const { clinic, url, brand } = await clinicFields(orgId)
+    return [clinic, url, brand]
+  }
 
   /** El último día de la gracia y lo que se debe, como se leen en la clínica. */
   async function overdueEmail(orgId: string, lastDay: Date): Promise<MailTemplate> {
@@ -2783,7 +2798,7 @@ export async function tickSaasBilling(
       .map((entry) =>
         new Intl.NumberFormat(locale?.locale ?? "es", { style: "currency", currency: entry.currency }).format(entry.cents / 100),
       )
-    return saasOverdueEmail({ clinic: await clinicName(orgId), lastDay: day, amounts, url: billingUrl(orgId) })
+    return saasOverdueEmail({ ...(await clinicFields(orgId)), lastDay: day, amounts })
   }
 
   async function recordNotice(
@@ -2841,7 +2856,7 @@ export async function tickSaasBilling(
         emailTo
           ? {
               to: emailTo,
-              ...mailParts(saasAlertEmail(alert, await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
+              ...mailParts(saasAlertEmail(alert, ...(await clinicArgs(sub.organizationId)))),
               dedupeKey: `${dedupeKey}:${sub.organizationId}`,
               organizationId: sub.organizationId,
               kind: `${alert.family}_${alert.level}`,
@@ -2891,7 +2906,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            ...mailParts(saasChargeIssuedEmail({ clinic: await clinicName(orgId), monthText, amount, dueDay, url: billingUrl(orgId) })),
+            ...mailParts(saasChargeIssuedEmail({ ...(await clinicFields(orgId)), monthText, amount, dueDay })),
             dedupeKey: `cargo:${orgId}:${charge.id}`,
             organizationId: orgId,
             kind: "cargo_emitido",
@@ -2933,7 +2948,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            ...mailParts(saasRestrictionSoonEmail({ clinic: await clinicName(sub.organizationId), amounts, url: billingUrl(sub.organizationId) })),
+            ...mailParts(saasRestrictionSoonEmail({ ...(await clinicFields(sub.organizationId)), amounts })),
             dedupeKey: `restriccion-manana:${sub.organizationId}:${day}`,
             organizationId: sub.organizationId,
             kind: "restriccion_manana",
@@ -2982,7 +2997,7 @@ export async function tickSaasBilling(
         emailTo
           ? {
               to: emailTo,
-              ...mailParts(saasTrialEndedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
+              ...mailParts(saasTrialEndedEmail(...(await clinicArgs(sub.organizationId)))),
               dedupeKey: `prueba-vencida-sin-plan:${sub.organizationId}:${day}`,
               organizationId: sub.organizationId,
               kind: "prueba_vencida_sin_plan",
@@ -3016,7 +3031,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            ...mailParts(saasPlanStartedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
+            ...mailParts(saasPlanStartedEmail(...(await clinicArgs(sub.organizationId)))),
             dedupeKey: `plan-activo:${sub.organizationId}:${day}`,
             organizationId: sub.organizationId,
             kind: "plan_activo",
@@ -3082,7 +3097,7 @@ export async function tickSaasBilling(
       emailTo
         ? {
             to: emailTo,
-            ...mailParts(saasRestrictedEmail(await clinicName(sub.organizationId), billingUrl(sub.organizationId))),
+            ...mailParts(saasRestrictedEmail(...(await clinicArgs(sub.organizationId)))),
             dedupeKey: `restriccion:${sub.organizationId}:${now.toISOString().slice(0, 10)}`,
             organizationId: sub.organizationId,
             kind: "restriccion_inicio",

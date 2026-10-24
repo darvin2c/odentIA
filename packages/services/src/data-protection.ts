@@ -6,6 +6,7 @@
  * la pantalla y en el PDF para la autoridad.
  */
 import { DATA_PROCESSORS, type DataProcessor } from "@odentia/auth/data-processors"
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -14,6 +15,7 @@ import { desc, eq, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { type Establishment, header, newWriter, zoneOf } from "./health-documents.js"
 import { clinicToday } from "./inventory-stock.js"
+import { orgProduct } from "./locale.js"
 import { MUTED, type Zone } from "./pdf-writer.js"
 
 export interface DataProtectionActivity {
@@ -34,6 +36,8 @@ export interface DataProtectionProcessor {
 }
 
 export interface DataProtectionView {
+  /** La plataforma que guarda y procesa los datos: odentIA o latidIA, según el producto de la clínica (issue 229). */
+  platform: string
   responsible: Establishment & {
     /** Lo que falta para que el registro esté completo, en palabras. */
     missing: string[]
@@ -239,6 +243,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     where organization_id = ${orgId} and extract(year from requested_on) = ${year}`)
 
   return {
+    platform: productWords(await orgProduct(tx, orgId)).name,
     responsible: { ...responsible, missing },
     agreement: agreement
       ? { version: agreement.version, acceptedAt: agreement.acceptedAt.toISOString(), acceptedByName: agreement.acceptedByName }
@@ -263,14 +268,14 @@ export async function renderDataProtectionPdf(view: DataProtectionView): Promise
   const { pdf, w } = await newWriter("Registro de actividades de tratamiento")
   header(w, view.responsible)
   w.text("Registro de actividades de tratamiento", { size: 15, bold: true })
-  w.text(`Al ${day(new Date(), zone)} · generado por odentIA`, { size: 8, color: MUTED })
+  w.text(`Al ${day(new Date(), zone)} · generado por ${view.platform}`, { size: 8, color: MUTED })
   w.heading("1. Responsable y encargado")
   const fiscal = [view.responsible.fiscalDocType, view.responsible.fiscalDocNumber].filter(Boolean).join(" ")
   w.text(`Responsable: ${[view.responsible.legalName, fiscal].filter(Boolean).join(", ") || "sin datos"}.`)
   w.text(
     view.agreement
-      ? `Encargado: odentIA, según el contrato de encargo aceptado el ${day(view.agreement.acceptedAt, zone)} (versión ${view.agreement.version}).`
-      : "Encargado: odentIA. El contrato de encargo aún no se aceptó.",
+      ? `Encargado: ${view.platform}, según el contrato de encargo aceptado el ${day(view.agreement.acceptedAt, zone)} (versión ${view.agreement.version}).`
+      : `Encargado: ${view.platform}. El contrato de encargo aún no se aceptó.`,
   )
   w.heading("2. Actividades")
   for (const a of view.activities)

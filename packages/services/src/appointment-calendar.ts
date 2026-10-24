@@ -9,6 +9,7 @@
  * - Sin datos clínicos: el título es «Cita en <clínica>», sin el servicio,
  *   porque los calendarios se sincronizan con terceros.
  */
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
@@ -18,7 +19,7 @@ import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter, bran
 import { clinicDisplayName } from "./clinic-identity.js"
 import { notFound } from "./errors.js"
 import { calendarFile, type CalendarEvent, type CalendarMethod, type CalendarPerson } from "./icalendar.js"
-import { findOrgLocale } from "./locale.js"
+import { findOrgLocale, orgProduct } from "./locale.js"
 
 export const APPOINTMENT_CALENDAR_MIME = "text/calendar"
 export const APPOINTMENT_CALENDAR_FILENAME = "cita.ics"
@@ -66,7 +67,7 @@ export async function appointmentCalendarEvent(tx: Db, orgId: string, appointmen
 
 /** El `.ics` para guardar: lo que descargan el portal y «Su enlace». */
 export async function appointmentCalendarDownload(tx: Db, orgId: string, appointmentId: string): Promise<string> {
-  return calendarFile(await appointmentCalendarEvent(tx, orgId, appointmentId))
+  return calendarFile(await appointmentCalendarEvent(tx, orgId, appointmentId), undefined, await platformOf(tx, orgId))
 }
 
 /**
@@ -83,5 +84,10 @@ export async function appointmentCalendarInvite(
 ): Promise<{ text: string; method: CalendarMethod }> {
   const event = await appointmentCalendarEvent(tx, orgId, appointmentId, now)
   const method: CalendarMethod = event.cancelled ? "CANCEL" : "REQUEST"
-  return { text: calendarFile({ ...event, ...people }, method), method }
+  return { text: calendarFile({ ...event, ...people }, method, await platformOf(tx, orgId)), method }
+}
+
+/** La plataforma de la clínica, para el archivo (issue 229). */
+async function platformOf(tx: Db, orgId: string): Promise<string> {
+  return productWords(await orgProduct(tx, orgId)).name
 }

@@ -42,6 +42,8 @@ const envSchema = z.object({
   SMTP_USER: z.string().default(""),
   SMTP_PASS: z.string().default(""),
   SMTP_FROM: z.string().min(1),
+  // El remitente de los correos de latidIA (issue 229); vacío, el de SMTP_FROM con su nombre.
+  MEDICAL_SMTP_FROM: z.string().optional(),
   GMAIL_CLIENT_ID: z.string().default(""),
   GMAIL_CLIENT_SECRET: z.string().default(""),
   GMAIL_REDIRECT_URI: z.string().default(""),

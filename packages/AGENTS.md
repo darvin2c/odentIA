@@ -11,7 +11,7 @@ Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni dupli
 | `agent` | Contexto autorizado, razonamiento y herramientas; efectos mediante servicios y políticas. |
 | `clinical` | Utilidades clínicas comunes a todos los productos; no una historia paralela ni otra capa de persistencia. Nunca importa `dental`. |
 | `dental` | Dominio dental puro (ADR 0079): odontograma, periodontograma, tipos de tratamiento y lo dental de cada país (`dentalProfileFor`). Lo común no lo importa: lo dental de `services`, `agent` y `db` vive en su `src/dental/` (`@odentia/services/dental`, `@odentia/agent/dental`, `@odentia/db/dental`) y se conecta con lo común solo por `products.ts`; la prueba de límites lo exige. |
-| `mail` | Correo transaccional de la plataforma; distinto del buzón omnicanal de una organización. |
+| `mail` | Correo transaccional de la plataforma; distinto del buzón omnicanal de una organización. Cada correo lleva la marca del producto de su clínica o de la instancia de sesión que lo envía (`brand`: odentIA o latidIA): logo, color, firma, la web del pie y el nombre del remitente (`fromByBrand`, `MEDICAL_SMTP_FROM`). Los internos del equipo son de odentIA. |
 | `ui` | Primitivas visuales y accesibles sin negocio. La marca de la app (`BrandProvider`, `useBrand`: odentIA o latidIA, ADR 0087) decide el logo, el isotipo y el `Spinner`; el color, `[data-brand]` en `globals.css`. |
 | `ui-patterns` | Composiciones reutilizables, con stories; las apps deciden sus datos y permisos. |
 | `clinic-app` | Las pantallas comunes de la clínica (ADR 0086): componentes, `lib`, páginas y el contrato del producto (`productUi()`). Cada producto lo monta en su app; nunca importa lo de un producto. |

@@ -1,3 +1,4 @@
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   changeEmailConfirmationTemplate,
@@ -39,8 +40,9 @@ export interface CreateAuthOptions {
   /**
    * El producto en cuyo dominio va la sesión (odentIA o latidIA; decisión 9 del
    * issue 229): una instancia por dominio, con la misma base y el mismo secreto.
+   * Da el nombre de la app (segundo factor, passkeys) y la marca de sus correos.
    */
-  appName?: string
+  product?: ClinicalProduct
 }
 
 /**
@@ -86,8 +88,9 @@ export function createAuth({
   ownerDb,
   passwordBreachCheck: breachCheck = true,
   clientIpHeader,
-  appName = "odentIA",
+  product = "dental",
 }: CreateAuthOptions) {
+  const { name: appName, brand } = productWords(product)
   return betterAuth({
     appName,
     secret,
@@ -110,8 +113,8 @@ export function createAuth({
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url, token }) => {
         const template = isChangeEmailToken(token)
-          ? changeEmailVerificationTemplate({ url })
-          : verifyEmailTemplate({ url })
+          ? changeEmailVerificationTemplate({ url, brand })
+          : verifyEmailTemplate({ url, brand })
         await mailer.send({ to: user.email, ...template })
       },
     },
@@ -129,7 +132,7 @@ export function createAuth({
       changeEmail: {
         enabled: true,
         sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
-          const template = changeEmailConfirmationTemplate({ newEmail, url })
+          const template = changeEmailConfirmationTemplate({ newEmail, url, brand })
           await mailer.send({ to: user.email, ...template })
         },
       },
@@ -183,7 +186,7 @@ export function createAuth({
       // fresca verificada en /api/admin/access (regla propia); con credencial
       // siempre exige contraseña. Solo lo enrolan staff (única UI).
       twoFactor({ allowPasswordless: true }),
-      accessLink({ mailer, webURL }),
+      accessLink({ mailer, webURL, brand }),
       passwordBreachCheck({ enabled: breachCheck }),
       legalAcceptance(),
       organization({
@@ -234,6 +237,7 @@ export function createAuth({
             organizationName: org.name,
             inviterName: inviter.user.name,
             url: `${webURL}/accept-invitation/${invitation.id}`,
+            brand,
           })
           await mailer.send({ to: email, ...template })
         },

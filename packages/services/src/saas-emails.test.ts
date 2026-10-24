@@ -31,6 +31,15 @@ describe("correos de Plan y pagos", () => {
     expect(sinBoton.html).not.toContain("Registrar mi comprobante")
   })
 
+  it("un consultorio de latidIA recibe los avisos con su marca (entrega 4b del issue 229)", () => {
+    const mail = saasRestrictedEmail("Consultorio San Martín", url, "latidia")
+    expect(mail.brand).toBe("latidia")
+    expect(mail.text).toContain("administras el plan de Consultorio San Martín en latidIA")
+    expect(mail.html).not.toContain("odentIA")
+    // odentIA, como siempre.
+    expect(saasRestrictedEmail("Clínica Sonrisa", url).text).toContain("en odentIA")
+  })
+
   it("cada aviso con el molde común", () => {
     const mails = {
       alertaCredito: saasAlertEmail(

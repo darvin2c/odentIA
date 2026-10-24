@@ -13,12 +13,14 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { canAccess, seesBilling } from "@odentia/auth/permissions"
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { reportDigest, reportDigestSend } from "@odentia/db/schema/reports"
-import { renderEmail, type MailTemplate } from "@odentia/mail"
+import { type MailBrand, mailBrandName, renderEmail, type MailTemplate } from "@odentia/mail"
 import { and, eq, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminSettings } from "./agent-admin.js"
 import { collectedNetMany } from "./finance.js"
+import { orgProduct } from "./locale.js"
 import { clinicOriginOf } from "./public-links.js"
 import { agentBookedMany } from "./report-agent.js"
 import { appointmentsByProfessional } from "./report-agenda.js"
@@ -258,6 +260,7 @@ export async function composeReportDigest(
     recommendation: blocks.find((block) => block.title === "Argos te recomienda")?.text ?? null,
     reportsUrl: origin ? `${origin}/reports?period=${encodeURIComponent(period)}` : null,
     stopUrl: origin ? `${origin}/resumen-lunes/baja/${reportDigestToken(deps.secretsKey, orgId, userId)}` : null,
+    brand: productWords(await orgProduct(tx, orgId)).brand,
   })
   return { to: person.email, mail }
 }
@@ -274,12 +277,15 @@ export interface ReportDigestEmailInput {
   recommendation: string | null
   reportsUrl: string | null
   stopUrl: string | null
+  /** La marca de la clínica (issue 229); sin ella, odentIA. */
+  brand?: MailBrand
 }
 
 /** El correo del resumen del lunes (tablero A4), con el molde común: cifras, lo que cambió, la recomendación y el botón. */
 export function reportDigestEmail(input: ReportDigestEmailInput): MailTemplate {
   const things = input.changes.length + (input.recommendation ? 1 : 0)
   return renderEmail({
+    brand: input.brand,
     subject: `Tu semana: ${input.collected} cobrados${things > 0 ? ` y ${things} ${things === 1 ? "cosa" : "cosas"} que mirar` : ""}`,
     preview: `Así fue la semana ${input.week} en ${input.clinic}.`,
     eyebrow: input.clinic,
@@ -291,7 +297,7 @@ export function reportDigestEmail(input: ReportDigestEmailInput): MailTemplate {
       ...(input.recommendation ? [{ title: "Argos te recomienda", text: input.recommendation }] : []),
     ],
     ...(input.reportsUrl ? { action: { label: "Ver Reportes", url: input.reportsUrl } } : {}),
-    note: "Lo arma odentIA con las mismas cifras de Reportes y frases fijas; no lo escribe un modelo. No lleva datos clínicos ni nombres de pacientes.",
+    note: `Lo arma ${mailBrandName(input.brand)} con las mismas cifras de Reportes y frases fijas; no lo escribe un modelo. No lleva datos clínicos ni nombres de pacientes.`,
     reason: "Lo recibes porque lo prendiste en Reportes.",
     ...(input.stopUrl ? { unsubscribe: { label: "Dejar de recibirlo", url: input.stopUrl } } : {}),
   })

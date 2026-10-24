@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { accessLinkTemplate, type Mailer, passwordChangedTemplate } from "@odentia/mail"
+import { accessLinkTemplate, type Mailer, type MailBrand, passwordChangedTemplate } from "@odentia/mail"
 import type { BetterAuthPlugin } from "better-auth"
 import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api"
 import { setSessionCookie } from "better-auth/cookies"
@@ -42,6 +42,8 @@ export interface AccessLinkOptions {
   mailer: Mailer
   /** Origen del panel: adonde vuelve la persona tras abrir el enlace. */
   webURL: string
+  /** La marca de los correos: la del dominio de la instancia (issue 229). */
+  brand?: MailBrand
 }
 
 type PasswordMark = { session: string | null; createdAt: string }
@@ -186,6 +188,7 @@ export const accessLink = (options: AccessLinkOptions) => {
               firstName,
               url: url.toString(),
               expiresText: expiresText(expiresAt, ctx.body.timeZone),
+              brand: options.brand,
             }),
           })
           return ctx.json({ status: true })
@@ -351,6 +354,7 @@ export const accessLink = (options: AccessLinkOptions) => {
                 whenText,
                 deviceText: deviceText(ctx.request?.headers.get("user-agent")),
                 url: `${panel}/forgot-password`,
+                brand: options.brand,
               }),
             })
           } catch {
