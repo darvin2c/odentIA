@@ -191,49 +191,69 @@ h1, h2, h3, p { margin: 0; }
 
 /* ===== 2 · 22:47 ===== */
 .clock { font-family: var(--agent); font-size: 132px; font-weight: 500; letter-spacing: -0.04em; line-height: 1; color: var(--on); }
-.notifs { display: flex; flex-direction: column; gap: 14px; }
-.notif {
-  display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center;
-  padding: 18px 22px; border-radius: 18px; background: rgba(13,38,47,.75); border: 1px solid var(--line);
-  animation: rise .5s cubic-bezier(.2,.7,.2,1) both;
-}
-.notif .who { font-size: 22px; font-weight: 700; color: var(--on-2); }
-.notif .who span { font-family: var(--agent); font-weight: 500; font-size: 18px; color: var(--on-3); margin-left: 10px; }
-.notif .txt { grid-column: 1 / -1; font-size: 23px; color: var(--on-3); }
-.notif .late { font-family: var(--agent); font-size: 17px; color: var(--warn); border: 1px solid rgba(232,146,124,.5); padding: 4px 10px; border-radius: 999px; opacity: 0; transition: opacity .4s; }
-.notif.lost .late { opacity: 1; }
-.notif.lost { border-color: rgba(232,146,124,.3); }
-.lost-count { font-family: var(--agent); font-size: 24px; color: var(--warn); }
-/* 2 · La noche entera */
-.p1head { display: flex; justify-content: space-between; font-family: var(--agent); font-size: 26px; color: var(--warn); margin-bottom: 16px; }
-.p1head b { font-weight: 600; }
-.p1feed { display: flex; flex-direction: column; gap: 10px; height: 600px; overflow: hidden; }
-.p1feed .notif { padding: 12px 20px; gap: 4px 16px; flex: none; animation: p1in .35s cubic-bezier(.2,.7,.2,1) both; transition: opacity .4s; }
-.p1feed .notif .txt { font-size: 21px; }
 @keyframes p1in { from { opacity: 0; transform: translateY(-24px); } to { opacity: 1; transform: none; } }
-.notif.gone2 { opacity: .6; border-color: rgba(232,146,124,.5); }
-.notif.gone2 .late { opacity: 1; color: #fff; background: #b3402a; border-color: #b3402a; }
-.notif.gone2 .txt { text-decoration: line-through; text-decoration-color: var(--warn); }
-.p1end { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 12px; z-index: 2; }
-.p1end div { padding: 16px 22px; border-radius: 16px; background: rgba(6,19,24,.97); border: 2px solid var(--warn); font-size: 27px; line-height: 1.35; box-shadow: 0 0 50px -12px var(--warn); animation: fade .4s both; }
+/* 2 · Lucía, esa noche: su teléfono (problema y respuesta son espejo) y después toda la noche de la clínica. */
+/* 548 + el relleno = 600: a la izquierda queda lugar para lo que esperó. */
+.phone.lph { position: absolute; right: 0; top: 0; width: 548px; z-index: 3; transition: opacity .6s, transform .7s cubic-bezier(.6,0,.3,1); }
+.lph.away { opacity: 0; transform: translateY(-40px) scale(.6); pointer-events: none; }
+.lph .chat { transition: opacity .3s; }
+.lph .chat.swap { opacity: 0; }
+.lph .av.cs { background: #3b5a63; color: var(--on); }
+.lph .av.cs.warm { background: var(--sky); color: #06222a; }
+.lph .av.other { background: #ebe6dc; color: #1b2a2e; }
+.lph .msg.me { align-self: flex-end; background: #2a4a55; color: var(--on); border-bottom-right-radius: 6px; }
+.lph .msg.clinic { align-self: flex-start; background: #173944; border-bottom-left-radius: 6px; }
+.lph .msg.sofi2 { align-self: flex-start; background: var(--sky); color: #06222a; border-bottom-left-radius: 6px; }
+.lph .msg.log { background: rgba(79,195,215,.1); color: var(--sky); border-color: rgba(79,195,215,.5); }
+.lph .typing.left { align-self: flex-start; background: rgba(143,176,184,.18); }
+.lph .typing.left i { background: var(--on-2); }
+.lph .typing.left.sky { background: rgba(79,195,215,.25); }
+.lph .typing.left.sky i { background: var(--sky); }
+.p1seen { align-self: flex-end; margin-top: -4px; font-family: var(--agent); font-size: 17px; color: var(--on-3); animation: fade .3s both; }
+.p1seen.late { color: var(--warn); }
+.p1seen b { font-weight: 600; }
+.p1stamp { align-self: center; font-family: var(--agent); font-size: 19px; font-weight: 600; color: #fff; background: #b3402a; border-radius: 10px; padding: 7px 16px; animation: pop .4s both; }
+.p1stamp.ok { background: transparent; border: 1.5px solid var(--sky); color: var(--sky); }
+/* Cuánto esperó Lucía, al lado del teléfono. */
+.p1wait { position: absolute; left: 0; top: 150px; width: 170px; display: flex; flex-direction: column; gap: 30px; transition: opacity .4s; }
+.p1wait div { display: flex; flex-direction: column; gap: 6px; font-family: var(--agent); animation: fade .4s both; }
+.p1wait b { font-size: 50px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; color: var(--warn); white-space: nowrap; }
+.p1wait span { font-size: 20px; line-height: 1.3; color: var(--on-2); }
+.p1wait .other b { color: #ebe6dc; }
+.p1wait .sky b { color: var(--sky); }
+/* Toda la noche: una persona por mensaje. */
+.p1night { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 20px; opacity: 0; transition: opacity .5s; pointer-events: none; }
+.p1night.on { opacity: 1; }
+.p1nhead { font-family: var(--agent); font-size: 27px; line-height: 1.35; color: var(--warn); }
+.p1nhead b { font-weight: 600; }
+.p1night.ok .p1nhead { color: var(--sky); }
+.p1people { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.p1p { display: flex; align-items: center; gap: 9px; padding: 11px 10px; border-radius: 14px; background: rgba(13,38,47,.85); border: 1.5px solid var(--line); animation: pop .3s both; transition: border-color .3s, opacity .4s, box-shadow .3s; min-width: 0; }
+.p1p i { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px; font-weight: 800; background: #3b5a63; color: var(--on); transition: background .3s, color .3s; }
+.p1p span { display: flex; flex-direction: column; min-width: 0; }
+.p1p b { font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p1p small { font-family: var(--agent); font-size: 14px; color: var(--on-3); }
+.p1p.left { border-color: var(--warn); box-shadow: 0 0 22px -8px var(--warn); }
+.p1p.gone { border-style: dashed; }
+.p1p > * { transition: opacity .4s; }
+.p1p.gone > * { opacity: .22; }
+.p1p.done { border-color: rgba(79,195,215,.6); }
+.p1p.done i { background: var(--sky); color: #06222a; }
+.p1p.urg { border-color: var(--amber); }
+.p1p.urg i { background: var(--amber); color: #2a1a00; }
+.p1box { border-radius: 18px; padding: 14px 18px; border: 2px dashed rgba(232,146,124,.7); display: flex; flex-direction: column; gap: 10px; }
+.p1box h3 { font-family: var(--agent); font-size: 19px; font-weight: 500; color: var(--warn); }
+.p1box.ok { border-color: rgba(79,195,215,.7); }
+.p1box.ok h3 { color: var(--sky); }
+.p1box .row { display: flex; gap: 10px; flex-wrap: wrap; min-height: 44px; }
+.p1box .row i, .p1fly { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px; font-weight: 800; background: var(--warn); color: #3a1a10; }
+.p1box.ok .row i, .p1fly.ok { background: var(--sky); color: #06222a; }
+.p1fly { position: absolute; z-index: 6; pointer-events: none; }
+.p1end { display: flex; flex-direction: column; gap: 12px; }
+.p1end div { padding: 15px 22px; border-radius: 16px; background: rgba(6,19,24,.97); border: 2px solid var(--warn); font-size: 24px; line-height: 1.35; box-shadow: 0 0 50px -12px var(--warn); animation: fade .4s both; }
 .p1end b { font-family: var(--agent); font-weight: 600; color: var(--warn); }
-.p1head.ok { color: var(--sky); }
-.p1head.ok b.sky { color: var(--sky); }
-.notif.sofi { border-color: rgba(79,195,215,.35); grid-template-columns: 1fr auto; }
-.notif.sofi .late { opacity: 1; color: var(--sky); border-color: rgba(79,195,215,.5); }
-.notif.sofi .late i { display: inline-block; width: 6px; height: 6px; margin: 0 1px; border-radius: 50%; background: var(--sky); animation: blink 1s infinite; }
-.notif.sofi .late i:nth-child(2) { animation-delay: .15s; } .notif.sofi .late i:nth-child(3) { animation-delay: .3s; }
-.notif.sofi .rep { grid-column: 1 / -1; font-size: 20px; color: var(--on); padding-left: 14px; border-left: 3px solid var(--sky); animation: fade .3s both; }
-.notif.sofi .rep b { color: var(--sky); }
-.notif.sofi.done .late { color: #04252c; background: var(--sky); border-color: var(--sky); font-weight: 600; }
-.notif.sofi.urg.done .late { background: transparent; border: 1.5px solid var(--sky); color: var(--sky); }
-.r1phone { position: absolute; left: 100px; top: 0; z-index: 3; transition: opacity .6s, transform .7s cubic-bezier(.6,0,.3,1); }
-.r1phone.away { opacity: 0; transform: translateY(-40px) scale(.6); pointer-events: none; }
-.r1list { opacity: 0; transition: opacity .5s; }
-.r1list.on { opacity: 1; }
 .p1end.ok div { border-color: var(--sky); box-shadow: 0 0 50px -12px var(--sky); }
 .p1end.ok b { color: var(--sky); }
-.r1phone .msg.log { background: rgba(79,195,215,.1); color: var(--sky); border-color: rgba(79,195,215,.5); }
 /* 3 · Una persona, tres fichas */
 .p2cards { position: absolute; left: 0; top: 0; width: 800px; height: 330px; }
 .p2card { position: absolute; top: 0; width: 250px; height: 320px; box-sizing: border-box; padding: 16px 16px; border-radius: 18px; background: rgba(13,38,47,.85); border: 1.5px dashed var(--line-2); display: flex; flex-direction: column; gap: 8px; animation: p1in .4s both; }
@@ -837,7 +857,7 @@ h1, h2, h3, p { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .layer, .layer.cur { transition: opacity .2s; transform: none; filter: none; }
-  .layer.cur *, .layer.cur *::after, .msg, .tl, .act, .blk, .p8w, .p8ck .own, .p8ck .kid, .notif, .draft, .orch-log div { animation: none !important; }
+  .layer.cur *, .layer.cur *::after, .msg, .tl, .act, .blk, .p8w, .p8ck .own, .p8ck .kid, .p1p, .draft, .orch-log div { animation: none !important; }
   .layer.cur .pr .base::after { transform: scaleX(1); }
   .layer.cur .mod { color: var(--on); border-color: rgba(79,195,215,.4); }
   .layer.cur .mod i { background: var(--sky); }
@@ -885,37 +905,28 @@ h1, h2, h3, p { margin: 0; }
     <span class="tag in">[ Problema 1 ]</span>
     <div class="pair">
       <div class="copy">
-        <div class="clock num in" style="--d:.1s" id="p1clock">19:00</div>
+        <div class="clock num in" style="--d:.1s" id="p1clock">22:47</div>
         <h2 class="h2 in" style="--d:.25s; font-size:70px">Tu clínica cerró. Tus pacientes siguen escribiendo.</h2>
-        <p class="lead in" style="--d:.45s">Toda la noche llegan preguntas, citas y urgencias. A la mañana, varios ya reservaron en otra clínica.</p>
+        <p class="lead in" style="--d:.45s">A Lucía le duele una muela y te escribe a las 22:47. Nadie le contesta. Otra clínica sí.</p>
         <span class="small in" style="--d:.6s">Ejemplo</span>
       </div>
-      <div class="scene">
-        <div class="p1head"><span><b id="p1n">0</b> sin responder</span><span><b id="p1gone">0</b> se fueron a otra clínica</span></div>
-        <div class="p1feed" id="notifs"></div>
-        <div class="p1end" id="p1end"></div>
-      </div>
+      <div class="scene" id="p1scene" aria-hidden="true"></div>
     </div>
   </div>
   <div class="layer" data-scene="chat">
-    <span class="was"><s>23 mensajes sin responder</s></span>
+    <span class="was"><s>Lucía reservó en otra clínica</s></span>
     <span class="tag in" style="color:var(--sky)">[ Con odentIA · Agente Sofi ]</span>
     <div class="pair">
       <div class="copy">
-        <div class="clock num in" style="--d:.1s; color:var(--sky)" id="r1clock">19:00</div>
+        <div class="clock num in" style="--d:.1s; color:var(--sky)" id="r1clock">22:47</div>
         <h2 class="h2 in" style="--d:.25s; font-size:70px">La misma noche. <span class="c-sky">Sofi</span> le contesta a cada uno.</h2>
-        <p class="lead in" style="--d:.45s">Al momento y con horarios reales: agenda, envía precios y te pasa lo urgente. Mañana tu equipo encuentra el trabajo hecho.</p>
+        <p class="lead in" style="--d:.45s">Lucía tiene respuesta en segundos, con horarios reales, y su cita queda en tu agenda. Lo urgente, Sofi se lo pasa a la doctora.</p>
         <span class="small in" style="--d:.6s">Ejemplo</span>
       </div>
-      <div class="scene">
-        <div class="phone r1phone" id="r1phone"><div class="phone-top"><span class="av">L</span><div><b>Lucía Torres</b><span>Instagram · 19:12</span></div></div><div class="chat" id="r1chat"></div></div>
-        <div class="r1list" id="r1list"><div class="p1head ok"><span><b class="sky" id="r1n">0</b> respondidos al momento</span><span><b id="r1c">0</b> citas en tu agenda</span></div>
-        <div class="p1feed" id="chat"></div></div>
-        <div class="p1end ok" id="r1end"></div>
-      </div>
+      <div class="scene" id="r1scene" aria-hidden="true"></div>
     </div>
   </div>
-  <aside class="notes">Pregunten a la sala cuántos mensajes les llegan después de cerrar. Toda la noche escriben: precios, citas, urgencias. Cuando recepción abre, encuentra decenas sin responder y varios pacientes ya reservaron en otra clínica (las cifras son de ejemplo). Clic: la misma noche, los mismos mensajes, con Sofi, su agente de recepción. Contesta cada uno en segundos con el tono de la clínica: agenda con horarios reales, mueve citas, envía precios y presupuestos, guarda la radiografía en la ficha. Lo urgente no lo resuelve sola: se lo pasa a la doctora con el resumen. A las 8:00 el equipo encuentra todo respondido y las citas en la agenda.</aside>
+  <aside class="notes">Cuenten la historia de Lucía. A las 22:47 le duele una muela y le escribe a la clínica por Instagram: «¿Tienen cita el viernes?». Nadie contesta. A los 11 minutos le escribe a otra clínica, que le responde en un minuto, y reserva ahí. A las 8:00 recepción le dice «Buenos días»: ya es tarde. Y no fue solo Lucía: esa noche escribieron 23 personas y 7 se fueron a otra clínica (las cifras son de ejemplo). Clic: la misma noche con Sofi, su agente de recepción. Lucía escribe a las 22:47 y en segundos tiene respuesta, con los horarios reales de la Dra. Ana; a las 22:48 su cita ya está en la agenda y nunca le escribió a otra clínica. Lo mismo con los 23 mensajes de la noche: 8 citas nuevas, y las 2 urgencias pasaron a la doctora con el resumen, porque lo urgente Sofi no lo resuelve sola.</aside>
 </section>
 
 <!-- ============ 3 · Omnicanal ============ -->
@@ -1478,120 +1489,163 @@ h1, h2, h3, p { margin: 0; }
     });
   };
 
-  // 2 · Problema: la noche entera de mensajes; los que esperan se van a otra clínica.
-  const P1MSG = [
-    ["Lucía", "Instagram", "19:12", "Hola, ¿tienen cita el viernes? Me duele una muela"],
-    ["Jorge", "WhatsApp", "19:40", "¿Cuánto cuesta un blanqueamiento?"],
-    ["Ana", "Messenger", "20:05", "¿Atienden los sábados?"],
-    ["Pedro", "WhatsApp", "20:31", "Se me cayó una corona, ¿me pueden ver mañana?"],
-    ["Carla", "Instagram", "21:02", "Vi su promoción de limpieza, ¿sigue?"],
-    ["Luis", "WhatsApp", "21:26", "¿Trabajan con mi seguro?"],
-    ["Marta", "Correo", "21:50", "Quiero el presupuesto de mi hija para brackets"],
-    ["Diego", "WhatsApp", "22:13", "Me sangran las encías, ¿es grave?"],
-    ["Sofía", "Instagram", "22:47", "¿Cuánto cuestan los implantes?"],
-    ["Raúl", "Messenger", "23:05", "¿Tienen estacionamiento?"],
-    ["Elena", "WhatsApp", "23:31", "Necesito una cita urgente, tengo la cara hinchada"],
-    ["Tomás", "WhatsApp", "00:12", "¿Puedo pagar en cuotas?"],
-    ["Inés", "Instagram", "00:48", "¿Atienden niños?"],
-    ["Hugo", "WhatsApp", "01:30", "No puedo dormir del dolor"],
-    ["Paula", "Correo", "05:55", "Les envío mi radiografía"],
-    ["Rosa", "WhatsApp", "06:22", "Necesito cambiar mi cita de hoy"],
-    ["Iván", "Messenger", "06:40", "¿Abren hoy temprano?"],
-    ["Nora", "WhatsApp", "06:58", "¿Me confirman la cita de las 9?"],
-    ["Óscar", "Instagram", "07:10", "¿Hacen carillas?"],
-    ["Bea", "WhatsApp", "07:24", "¿Cuánto cuesta una endodoncia?"],
-    ["Julio", "WhatsApp", "07:38", "Llego tarde a mi cita, ¿la muevo?"],
-    ["Silvia", "Instagram", "07:49", "¿Tienen cita hoy?"],
-    ["Mateo", "WhatsApp", "07:58", "¿Me pueden atender ya?"],
+  // 2 · Lucía, esa noche. Problema y respuesta son espejo: el mismo teléfono (el de Lucía), el
+  // mismo mensaje y la misma hora. Sin respuesta, a los 11 minutos reserva en otra clínica; con
+  // Sofi, en segundos queda en tu agenda. Después, toda la noche: una persona por mensaje.
+  const LUCIA_MSG = "Hola, ¿tienen cita el viernes? Me duele una muela 😣";
+  /** Quién escribió esa noche, a qué hora y qué le dejó hecho Sofi (cita, urgencia o una respuesta). */
+  const P1NIGHT = [
+    ["Sofía", "19:12", "cita"], ["Jorge", "19:40", ""], ["Ana", "20:05", ""], ["Pedro", "20:31", "cita"],
+    ["Carla", "21:02", ""], ["Luis", "21:26", ""], ["Marta", "21:50", ""], ["Diego", "22:13", "cita"],
+    ["Lucía", "22:47", "cita"], ["Raúl", "23:05", ""], ["Elena", "23:31", "urg"], ["Tomás", "00:12", ""],
+    ["Inés", "00:48", "cita"], ["Hugo", "01:30", "urg"], ["Paula", "05:55", ""], ["Rosa", "06:22", ""],
+    ["Iván", "06:40", ""], ["Nora", "06:58", ""], ["Óscar", "07:10", "cita"], ["Bea", "07:24", ""],
+    ["Julio", "07:38", ""], ["Silvia", "07:49", "cita"], ["Mateo", "07:58", "cita"],
   ];
-  const P1GONE = new Set([0, 1, 3, 7, 10, 13, 16]);
-  scenes.notifs = async () => {
-    const box = document.getElementById("notifs"), clock = document.getElementById("p1clock");
-    const nEl = document.getElementById("p1n"), goneEl = document.getElementById("p1gone"), end = document.getElementById("p1end");
-    box.innerHTML = ""; end.innerHTML = ""; clock.textContent = "19:00"; nEl.textContent = "0"; goneEl.textContent = "0";
-    const cards = []; let gone = 0;
-    await p6wait(900);
-    for (let i = 0; i < P1MSG.length; i++) {
-      const [who, ch, at, txt] = P1MSG[i];
-      const n = el("div", "notif", `<span class="who">${who}<span>${ch} · ${at}</span></span><span class="late">Sin respuesta</span><span class="txt">${txt}</span>`);
-      box.prepend(n); cards.push(n); clock.textContent = at; nEl.textContent = i + 1;
-      later(() => n.classList.add("lost"), 500);
-      // El que esperó un rato ya escribió a otra clínica (todavía se ve en la lista).
-      const j = i - 3;
-      if (j >= 0 && P1GONE.has(j)) { cards[j].classList.add("gone2"); cards[j].querySelector(".late").textContent = "Reservó en otra clínica"; gone++; goneEl.textContent = gone; }
-      await p6wait(Math.max(260, 1000 - i * 55));
-    }
-    for (let j = P1MSG.length - 3; j < P1MSG.length; j++) if (P1GONE.has(j)) { gone++; goneEl.textContent = gone; }
-    await p6wait(500);
-    clock.textContent = "08:00";
-    end.appendChild(el("div", "", `<b>08:00</b> · Recepción abre: <b>${P1MSG.length} mensajes</b> sin responder. Y siguen llegando.`));
-    await p6wait(1600);
-    end.appendChild(el("div", "", `<b>${gone} pacientes</b> se fueron anoche · <b>USD 840</b> que no entraron`));
-  };
+  /** Los que esperaron y reservaron en otra clínica (Lucía entre ellos). */
+  const P1GONE = [1, 3, 7, 8, 10, 13, 16];
+  const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
-  // 2 · Respuesta: los mismos mensajes; Sofi contesta cada uno y deja hecho lo que pedían.
-  const R1 = [
-    ["El viernes tengo 16:30 con la Dra. Ana. ¿Te la dejo?", "Agendó · vie 16:30", "cita"],
-    ["El blanqueamiento cuesta USD 180. ¿Quieres una evaluación?", "Precio enviado"],
-    ["Sí, los sábados de 9:00 a 13:00.", "Respondió"],
-    ["Te veo mañana a las 9:00 para revisar la corona.", "Agendó · mañana 9:00", "cita"],
-    ["Sí, la limpieza sigue a USD 25 hasta fin de mes.", "Promoción enviada"],
-    ["Trabajamos con varios seguros. ¿Cuál tienes?", "Respondió"],
-    ["Te envío el presupuesto de brackets de tu hija.", "Presupuesto enviado"],
-    ["Conviene revisarlo. Tengo mañana 10:00.", "Agendó · mañana 10:00", "cita"],
-    ["Primero una evaluación: jueves 11:00, ¿te sirve?", "Agendó · jue 11:00", "cita"],
-    ["Sí, tenemos estacionamiento gratis.", "Respondió"],
-    ["Le aviso ya a la Dra. Ana y te guardo las 8:00.", "Urgencia → Dra. Ana", "urg"],
-    ["Sí, hasta 6 cuotas sin interés.", "Respondió"],
-    ["Sí. Te propongo el sábado 10:00 para tu hijo.", "Agendó · sáb 10:00", "cita"],
-    ["Te paso con la Dra. Ana ahora mismo.", "Urgencia → Dra. Ana", "urg"],
-    ["Recibida. La guardé en tu ficha.", "Radiografía en su ficha"],
-    ["Listo, te moví a mañana 17:00.", "Movió la cita"],
-    ["Hoy abrimos a las 8:00.", "Respondió"],
-    ["Confirmada: hoy 9:00 con el Dr. Luis.", "Confirmó la cita"],
-    ["Sí. Evaluación el lunes 15:00, ¿te sirve?", "Agendó · lun 15:00", "cita"],
-    ["Desde USD 150. ¿Te agendo una evaluación?", "Precio enviado"],
-    ["Te muevo a las 10:30, sin problema.", "Movió la cita"],
-    ["Hoy tengo 12:00 o 16:00.", "Agendó · hoy 12:00", "cita"],
-    ["Te espero a las 8:30.", "Agendó · hoy 8:30", "cita"],
-  ];
-  scenes.chat = async () => {
-    const box = document.getElementById("chat"), clock = document.getElementById("r1clock");
-    const nEl = document.getElementById("r1n"), cEl = document.getElementById("r1c"), end = document.getElementById("r1end");
-    box.innerHTML = ""; end.innerHTML = ""; clock.textContent = "19:12"; nEl.textContent = "0"; cEl.textContent = "0";
-    const phone = document.getElementById("r1phone"), chat = document.getElementById("r1chat"), list = document.getElementById("r1list");
-    phone.classList.remove("away"); list.classList.remove("on"); chat.innerHTML = "";
-    const add = (cls, html) => { const d = el("div", cls, html); chat.appendChild(d); return d; };
-    await p6wait(700); add("msg them", "Hola, ¿tienen cita el viernes? Me duele una muela 😣<small>19:12</small>");
-    await p6wait(800); let t = add("typing", "<i></i><i></i><i></i>");
-    await p6wait(1300); t.remove(); add("msg us", "Hola, Lucía. Soy Sofi, de Clínica Sonrisa. El viernes tengo 10:00 o 16:30 con la Dra. Ana. ¿Cuál te queda mejor?<small>19:12</small>");
-    await p6wait(1700); add("msg them", "16:30, por favor<small>19:13</small>"); clock.textContent = "19:13";
-    await p6wait(700); t = add("typing", "<i></i><i></i><i></i>");
-    await p6wait(1100); t.remove(); add("msg us", "Listo: viernes 16:30 con la Dra. Ana. Te recuerdo un día antes.<small>19:13</small>");
-    await p6wait(900); add("msg log", "Sofi · Agendó · → Agenda, viernes 16:30");
-    await p6wait(1800);
-    phone.classList.add("away"); list.classList.add("on");
-    let done = 0, citas = 0, urg = 0;
-    await p6wait(500);
-    for (let i = 0; i < P1MSG.length; i++) {
-      const [who, ch, at, txt] = P1MSG[i], [reply, chip, kind] = R1[i];
-      const n = el("div", "notif sofi" + (kind === "urg" ? " urg" : ""), `<span class="who">${who}<span>${ch} · ${at}</span></span><span class="late">Sofi <i></i><i></i><i></i></span><span class="txt">${txt}</span>`);
-      box.prepend(n); clock.textContent = at;
-      // Ya se vio cómo conversa: en la lista queda solo lo que dejó hecho (la de Lucía, al instante).
-      const gap = i === 0 ? 500 : Math.max(260, 820 - i * 30);
-      later(() => {
-        n.querySelector(".late").textContent = "✓ " + chip; n.classList.add("done");
-        done++; nEl.textContent = done;
-        if (kind === "cita") { citas++; cEl.textContent = citas; }
-        if (kind === "urg") urg++;
-      }, i === 0 ? 60 : 180);
-      await p6wait(gap);
+  function p1Build(sc) {
+    sc.innerHTML = `<div class="phone lph"><div class="phone-top"><span class="av cs">CS</span><div><b>Clínica Sonrisa</b><span>Instagram · lo que ve Lucía</span></div></div><div class="chat"></div></div>
+      <div class="p1wait"></div>
+      <div class="p1night"><p class="p1nhead"></p><div class="p1people"></div><div class="p1box"><h3></h3><div class="row"></div></div><div class="p1end"></div></div>`;
+    const phone = sc.querySelector(".lph"), chat = sc.querySelector(".chat"), av = sc.querySelector(".av"), name = sc.querySelector(".phone-top b"), wait = sc.querySelector(".p1wait");
+    const scale = () => stage.getBoundingClientRect().width / 1920;
+    const at = (node) => { const r = node.getBoundingClientRect(), q = sc.getBoundingClientRect(), s = scale(); return { x: (r.left - q.left) / s, y: (r.top - q.top) / s }; };
+    const say = (who, text, time) => { const d = el("div", "msg " + who, `${text}<small>${time}</small>`); chat.appendChild(d); return d; };
+    const note = (html, cls = "") => { const d = el("div", "p1seen " + cls, html); chat.appendChild(d); return d; };
+    const typing = (cls = "") => { const d = el("div", "typing left " + cls, "<i></i><i></i><i></i>"); chat.appendChild(d); return d; };
+    const stamp = (text, ok) => chat.appendChild(el("div", "p1stamp" + (ok ? " ok" : ""), text));
+    const counter = (cls) => { const d = el("div", cls, "<b></b><span></span>"); wait.appendChild(d); return { set: (big, small) => { d.children[0].textContent = big; d.children[1].textContent = small; } }; };
+    // Cambia de conversación en el teléfono: otra clínica, o de vuelta a la tuya.
+    const open = async (clinic) => {
+      chat.classList.add("swap"); await p6wait(320);
+      chat.innerHTML = "";
+      av.textContent = clinic === "otra" ? "DN" : "CS"; av.className = "av " + (clinic === "otra" ? "other" : "cs");
+      name.textContent = clinic === "otra" ? "Dental Norte · otra clínica" : "Clínica Sonrisa";
+      chat.classList.remove("swap");
+    };
+    return { sc, phone, chat, av, say, note, typing, stamp, counter, open, wait, at,
+      night: sc.querySelector(".p1night"), head: sc.querySelector(".p1nhead"), people: sc.querySelector(".p1people"),
+      box: sc.querySelector(".p1box"), boxTitle: sc.querySelector(".p1box h3"), boxRow: sc.querySelector(".p1box .row"), end: sc.querySelector(".p1end") };
+  }
+
+  // Toda la noche, en una pantalla: cada persona que escribió y adónde fue a parar.
+  async function p1Night(w, ok) {
+    w.phone.classList.add("away"); w.wait.style.opacity = "0";
+    await p6wait(450);
+    w.night.classList.toggle("ok", ok); w.box.classList.toggle("ok", ok); w.end.classList.toggle("ok", ok);
+    w.night.classList.add("on");
+    w.head.innerHTML = ok
+      ? `Esa noche escribieron <b>${P1NIGHT.length} personas</b>. Sofi les respondió a todas.`
+      : `Y no fue solo Lucía: esa noche escribieron <b>${P1NIGHT.length} personas</b>.`;
+    w.boxTitle.textContent = ok ? "Nuevas en tu agenda" : "Reservaron en otra clínica";
+    const tiles = P1NIGHT.map(([who, time], i) => {
+      const t = el("div", "p1p", `<i>${who[0]}</i><span><b>${who}</b><small>${time}</small></span>`);
+      t.style.animationDelay = `${i * 45}ms`; w.people.appendChild(t); return t;
+    });
+    await p6wait(1600);
+    // Lo que va a la caja: en el problema, los que reservaron en otra clínica; en la respuesta, las citas nuevas.
+    const moving = ok ? P1NIGHT.map((item, i) => (item[2] === "cita" ? i : -1)).filter((i) => i >= 0) : P1GONE;
+    if (ok) {
+      for (const [i, t] of tiles.entries()) later(() => t.classList.add(P1NIGHT[i][2] === "urg" ? "urg" : "done"), i * 55);
+      await p6wait(P1NIGHT.length * 55 + 500);
+    }
+    for (const i of moving) {
+      const t = tiles[i];
+      if (!ok) t.classList.add("left");
+      await p6wait(ok ? 120 : 260);
+      const slot = el("i", "", P1NIGHT[i][0][0]); slot.style.visibility = "hidden"; w.boxRow.appendChild(slot);
+      const from = w.at(t.querySelector("i")), to = w.at(slot);
+      const fly = el("div", "p1fly" + (ok ? " ok" : ""), P1NIGHT[i][0][0]); fly.style.left = from.x + "px"; fly.style.top = from.y + "px"; w.sc.appendChild(fly);
+      if (!ok) t.classList.add("gone");
+      await p6anim(ok ? 420 : 560, (e) => { fly.style.left = (from.x + (to.x - from.x) * e) + "px"; fly.style.top = (from.y + (to.y - from.y) * e - Math.sin(e * Math.PI) * 60) + "px"; });
+      fly.remove(); slot.style.visibility = "visible";
     }
     await p6wait(600);
-    clock.textContent = "08:00";
-    end.appendChild(el("div", "", `<b>08:00</b> · Recepción abre: <b>${done} de ${P1MSG.length}</b> respondidos, <b>${citas} citas</b> nuevas en la agenda.`));
+    const urgent = P1NIGHT.filter((item) => item[2] === "urg").length;
+    w.end.appendChild(el("div", "", ok
+      ? `<b>08:00</b> · Recepción abre: <b>${P1NIGHT.length} de ${P1NIGHT.length}</b> respondidos y <b>${moving.length} citas</b> nuevas en tu agenda.`
+      : `<b>08:00</b> · Recepción abre: <b>${P1NIGHT.length} mensajes</b> sin responder.`));
+    await p6wait(1400);
+    w.end.appendChild(el("div", "", ok
+      ? `<b>0 pacientes</b> se fueron a otra clínica · <b>${urgent} urgencias</b> ya avisadas a la Dra. Ana`
+      : `<b>${P1GONE.length} pacientes</b> se fueron a otra clínica · <b>USD 840</b> que no entraron`));
+  }
+
+  // 2 · Problema: nadie le contesta a Lucía y reserva en otra clínica.
+  scenes.notifs = async () => {
+    const w = p1Build(document.getElementById("p1scene"));
+    const clock = document.getElementById("p1clock");
+    clock.textContent = "22:47";
+    await p6wait(900);
+    w.say("me", LUCIA_MSG, "22:47");
+    const seen = w.note("Enviado · 22:47");
+    await p6wait(1100);
+    const ours = w.counter("");
+    for (let m = 1; m <= 11; m++) {
+      clock.textContent = hhmm(22 * 60 + 47 + m);
+      seen.classList.add("late"); seen.innerHTML = `Enviado · sin respuesta · <b>${m} min</b>`;
+      ours.set(`${m} min`, "y tu clínica no le contesta");
+      await p6wait(m < 3 ? 520 : 300);
+    }
+    await p6wait(800);
+    // Le escribe a otra clínica, que contesta en un minuto.
+    await w.open("otra");
+    w.say("me", "Hola, ¿tienen cita el viernes? Me duele una muela", "22:58");
+    await p6wait(700);
+    let t = w.typing();
+    await p6wait(1100); t.remove(); clock.textContent = "22:59";
+    w.say("clinic", "¡Hola, Lucía! Sí, el viernes a las 16:30. ¿Te la reservo?", "22:59");
+    w.counter("other").set("1 min", "y otra clínica le contesta");
     await p6wait(1500);
-    end.appendChild(el("div", "", `<b>0 pacientes</b> se fueron a otra clínica · <b>${urg} urgencias</b> ya avisadas a la Dra. Ana`));
+    w.say("me", "Sí, por favor", "22:59");
+    await p6wait(600); t = w.typing();
+    await p6wait(900); t.remove(); clock.textContent = "23:00";
+    w.say("clinic", "Listo: te esperamos el viernes a las 16:30.", "23:00");
+    await p6wait(500); w.stamp("Reservó en otra clínica", false);
+    await p6wait(2000);
+    // A la mañana, recepción le contesta: ya es tarde.
+    await w.open("tuya");
+    clock.textContent = "08:00";
+    w.say("me", LUCIA_MSG, "22:47");
+    w.note(`Sin respuesta · <b>9 h 13 min</b>`, "late");
+    ours.set("9 h", "y tu clínica no le contesta");
+    await p6wait(900);
+    w.say("clinic", "Buenos días, Lucía. ¿En qué te podemos ayudar?", "08:00");
+    await p6wait(1500); clock.textContent = "08:03";
+    w.say("me", "Gracias, ya reservé en otra clínica.", "08:03");
+    await p6wait(2600);
+    await p1Night(w, false);
+  };
+
+  // 2 · Respuesta (espejo): el mismo mensaje a la misma hora; Sofi contesta en segundos y agenda.
+  scenes.chat = async () => {
+    const w = p1Build(document.getElementById("r1scene"));
+    w.av.classList.add("warm");
+    const clock = document.getElementById("r1clock");
+    clock.textContent = "22:47";
+    await p6wait(900);
+    w.say("me", LUCIA_MSG, "22:47");
+    const seen = w.note("Enviado · 22:47");
+    await p6wait(600);
+    let t = w.typing("sky");
+    await p6wait(1200); t.remove(); seen.remove();
+    w.say("sofi2", "Hola, Lucía. Soy Sofi, de Clínica Sonrisa. El viernes tengo 10:00 o 16:30 con la Dra. Ana. ¿Cuál te queda mejor?", "22:47");
+    w.counter("sky").set("8 s", "y Sofi le contesta");
+    await p6wait(1700); clock.textContent = "22:48";
+    w.say("me", "16:30, por favor", "22:48");
+    await p6wait(600); t = w.typing("sky");
+    await p6wait(1000); t.remove();
+    w.say("sofi2", "Listo: viernes 16:30 con la Dra. Ana. Te recuerdo un día antes.", "22:48");
+    await p6wait(800); w.chat.appendChild(el("div", "msg log", "Sofi · Agendó · → Agenda, viernes 16:30"));
+    await p6wait(700); w.stamp("No le escribió a otra clínica", true);
+    w.counter("sky").set("0", "veces que buscó otra clínica");
+    await p6wait(2600);
+    // La mañana, como en el problema: recepción abre y encuentra la noche hecha.
+    clock.textContent = "08:00";
+    await p1Night(w, true);
   };
 
   // 3 · Problema: la misma persona en tres fichas; cada cosa cae en una distinta.
