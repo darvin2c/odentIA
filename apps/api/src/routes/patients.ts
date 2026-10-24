@@ -98,6 +98,7 @@ import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
 import type { PlatformLlm } from "@odentia/agent"
+import { createEncounterDictationRoute } from "./encounter-dictation.js"
 import { patientProductRoutes } from "./products.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
@@ -1586,8 +1587,10 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.route("/", createImagingStudiesRoute(deps))
   app.route("/", createPatientTreatmentsRoute(deps))
   app.route("/", createPatientFollowUpsRoute(deps))
-  // Lo que agrega el producto (odentIA: odontograma, periodontograma y el dictado de Clío).
+  // Lo que agrega el producto (odentIA: odontograma y periodontograma).
   app.route("/", patientProductRoutes(deps))
+  // El dictado de Clío, con el prompt y el formato del producto; sin el proveedor del modelo no se monta.
+  if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))
   app.route("/", createPatientMedicalLeavesRoute(deps))
   app.route("/", createPatientDataRequestsRoute(deps))

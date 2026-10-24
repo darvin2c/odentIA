@@ -7,7 +7,7 @@ import { orgProduct } from "./locale.js"
 import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
 import { medicalHooks } from "./medical/hooks.js"
 import type { ProductAgentTexts } from "./product-agent.js"
-import type { ProductHooks } from "./product-hooks.js"
+import type { ProductDictation, ProductHooks } from "./product-hooks.js"
 
 /**
  * El único lugar de lo común que conoce los productos (ADR 0079): qué hace
@@ -23,13 +23,19 @@ export async function productHooks(tx: Db, orgId: string): Promise<ProductHooks>
   return HOOKS[await orgProduct(tx, orgId)]
 }
 
+/** Lo que Clío dicta en esta clínica; null si su producto no dicta. */
+export async function productDictation(tx: Db, orgId: string): Promise<ProductDictation | null> {
+  return (await productHooks(tx, orgId)).dictation
+}
+
 /**
  * Clío dicta con el prompt, el formato y el extractor de su producto (ADR
- * 0079): hoy solo el de odentIA. En una clínica de otro producto no dicta.
+ * 0079). En una clínica de un producto sin dictado no dicta.
  */
-export async function requireDictatingProduct(tx: Db, orgId: string): Promise<void> {
-  if (!(await productHooks(tx, orgId)).dictates)
-    throw new ServiceError("CLINICAL_ASSISTANT_UNAVAILABLE", 409, "Clío aún no dicta en esta clínica")
+export async function requireDictatingProduct(tx: Db, orgId: string): Promise<ProductDictation> {
+  const dictation = await productDictation(tx, orgId)
+  if (!dictation) throw new ServiceError("CLINICAL_ASSISTANT_UNAVAILABLE", 409, "Clío aún no dicta en esta clínica")
+  return dictation
 }
 
 const AGENT_TEXTS: Record<ClinicalProduct, ProductAgentTexts> = {

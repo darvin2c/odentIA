@@ -12,7 +12,7 @@ import {
   operationFillsOf,
   upsertAgentConfig,
 } from "@odentia/services"
-import { agentProductRoutes } from "./products.js"
+import { createClioPracticeRoute } from "./clio-practice.js"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -137,8 +137,8 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     )
   })
 
-  // Lo que agrega el producto (odentIA: la práctica del dictado de Clío).
-  app.route("/", agentProductRoutes(deps))
+  // La práctica del dictado de Clío, con el producto de la clínica.
+  app.route("/", createClioPracticeRoute(deps))
 
   return app
 }

@@ -1,2 +1,2 @@
-/** Lo dental del agente (ADR 0079): Clío, que dicta la atención de odentIA. Lo común no lo importa. */
-export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"
+/** Lo dental del agente (ADR 0079): cómo dicta Clío en odentIA. Lo común no lo importa. */
+export { DENTAL_DICTATION_PROFILE, demoExtraction, demoSegment } from "./dictation.js"
