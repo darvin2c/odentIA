@@ -42,18 +42,24 @@ export async function prepareArgosQuestion(tx: Db, orgId: string): Promise<{ ena
   return { enabled, zone: await getOrgLocale(tx, orgId) }
 }
 
+export type ArgosQuestionGate =
+  /** Sigue; `added`: lo que dice Argos si sumó un paquete solo («Sumar solas»). */
+  | { ok: true; added: string | null }
+  /** `tope`: usó las del mes y pide permiso para sumar más; `presupuesto`: la clínica llegó al suyo. */
+  | { ok: false; kind: "tope" | "presupuesto"; message: string }
+
 /**
- * Antes de que una pregunta del negocio pase por el modelo: si quedan
- * preguntas del mes, sigue (con «Sumar solas», suma un paquete); si no,
- * devuelve lo que dice Argos para pedir permiso de sumar más (ADR 0085).
- * Sin tope diario: el límite es lo que la clínica decide.
+ * Antes de que una pregunta del negocio pase por el modelo (ADR 0085): si
+ * quedan preguntas del mes, sigue (con «Sumar solas», suma un paquete y lo
+ * dice); si no, lo que dice Argos para pedir permiso de sumar más, o que la
+ * clínica llegó a su presupuesto. Sin tope diario: el límite lo decide la clínica.
  */
-export async function argosQuestionLimit(tx: Db, orgId: string, now: Date = new Date()): Promise<string | null> {
+export async function argosQuestionGate(tx: Db, orgId: string, now: Date = new Date()): Promise<ArgosQuestionGate> {
   try {
-    await ensureArgosQuestion(tx, orgId, now)
-    return null
+    return { ok: true, added: (await ensureArgosQuestion(tx, orgId, now)).added }
   } catch (error) {
-    if (error instanceof ServiceError && error.code === "ARGOS_QUESTIONS_USED") return error.message
+    if (error instanceof ServiceError && error.code === "ARGOS_QUESTIONS_USED") return { ok: false, kind: "tope", message: error.message }
+    if (error instanceof ServiceError && error.code === "ARGOS_BUDGET_REACHED") return { ok: false, kind: "presupuesto", message: error.message }
     throw error
   }
 }

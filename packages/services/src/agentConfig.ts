@@ -9,7 +9,6 @@ import { ServiceError, validation } from "./errors.js"
 export interface AgentConfig {
   organizationId: string
   enabled: boolean
-  dailyRunLimit: number
   /** Modelo de decisión: none | baseline | jev. Toda clínica nace con Jev (ADR 0047). */
   decisionProvider: DecisionProvider
   handoffKeywords: string[]
@@ -58,7 +57,6 @@ export const AGENT_MODEL_LABEL = "ChatGPT 6"
 
 const DEFAULTS = {
   enabled: false,
-  dailyRunLimit: 500,
   // Jev elige el camino de cada mensaje: lo ajeno sale con el texto fijo y no se cobra (ADR 0047).
   // La columna de la base nace con el mismo valor: cambian juntos.
   decisionProvider: "jev" as DecisionProvider,
@@ -81,7 +79,6 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
   return {
     organizationId: row.organizationId,
     enabled: row.enabled,
-    dailyRunLimit: row.dailyRunLimit,
     decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
       ? (row.decisionProvider as DecisionProvider)
       : "none",
@@ -113,7 +110,6 @@ export async function getAgentConfig(tx: Db, orgId: string): Promise<AgentConfig
 
 export interface UpsertAgentConfigInput {
   enabled?: boolean
-  dailyRunLimit?: number
   decisionProvider?: DecisionProvider
   handoffKeywords?: string[]
   maxTurns?: number
@@ -160,12 +156,6 @@ export async function upsertAgentConfig(
     (!Number.isInteger(input.maxTurns) || input.maxTurns < 1 || input.maxTurns > 50)
   ) {
     throw validation("maxTurns debe ser entero entre 1 y 50")
-  }
-  if (
-    input.dailyRunLimit !== undefined &&
-    (!Number.isInteger(input.dailyRunLimit) || input.dailyRunLimit < 1 || input.dailyRunLimit > 100_000)
-  ) {
-    throw validation("dailyRunLimit debe ser entero entre 1 y 100000")
   }
   if (
     input.handoffKeywords !== undefined &&
@@ -243,9 +233,6 @@ export async function upsertAgentConfig(
   if (!row) throw new Error("No se pudo guardar la configuración del agente")
 
   const changed: string[] = []
-  if (patch.dailyRunLimit !== undefined && patch.dailyRunLimit !== (current?.dailyRunLimit ?? DEFAULTS.dailyRunLimit)) {
-    changed.push("dailyRunLimit")
-  }
   if (patch.decisionProvider !== undefined && patch.decisionProvider !== (current?.decisionProvider ?? DEFAULTS.decisionProvider)) {
     changed.push("decisionProvider")
   }
@@ -290,7 +277,7 @@ export async function upsertAgentConfig(
       action: "agent.config_updated",
       entity: "agent_config",
       entityId: orgId,
-      metadata: { changed, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
+      metadata: { changed, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
     })
   }
   return toConfig(row)

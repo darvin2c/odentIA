@@ -9,6 +9,7 @@ import { clinicalFollowUp, patientContact, patientResponsibility, treatmentBudge
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile, } from "@odentia/db/schema/org"
+import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -21,6 +22,7 @@ import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./autom
 import {
   applyTemplateUpdates,
   automationReplyOf,
+  BUDGET_HOLD,
   cancelAppointmentByToken,
   confirmAppointmentByToken,
   deliverDueJobs,
@@ -28,6 +30,7 @@ import {
   getMessagePermissions,
   getPublicLinkInfo,
   handleAutomationReply,
+  listBudgetHeldJobs,
   reconcileDeliveries,
   requestNeededTemplates,
   setConsent,
@@ -1834,5 +1837,56 @@ describe("La invitación de calendario en los avisos de cita por correo (issue 4
     const [job] = await jobsOf(c)
     expect((await messageOf(job!.sentMessageId)).contentType).toBe("text")
     expect(stored).toEqual([])
+  })
+})
+
+describe("al llegar al presupuesto del mes (ADR 0085)", () => {
+  /** La clínica pasó su crédito de USD 29 y su presupuesto de USD 1 este mes (con el reloj real: así lo mide el cobro). */
+  async function overBudget(c: Clinic) {
+    const [plan] = await ownerDb
+      .insert(saasPlan)
+      .values({ code: `presupuesto-${c.orgId}`, name: "Plan", currency: "USD", priceCents: 2900, creditCents: 2900, conversationMicros: 500_000, trialCreditCents: 0, trialMaxCreditCents: 0 })
+      .returning({ id: saasPlan.id })
+    const now = Date.now()
+    const values = { status: "activa", isDemo: false, planId: plan!.id, spendCapCents: 100, currentPeriodStart: new Date(now - 10 * DAY), currentPeriodEnd: new Date(now + 20 * DAY) }
+    await ownerDb.insert(saasSubscription).values({ organizationId: c.orgId, ...values }).onConflictDoUpdate({ target: saasSubscription.organizationId, set: values })
+    await ownerDb.insert(saasAction).values(
+      Array.from({ length: 62 }, (_, index) => ({
+        organizationId: c.orgId, kind: "conversacion", tier: "gestiona", occurredAt: new Date(now - (index + 1) * HOUR), contactId: randomUUID(),
+        detail: "Atendió una conversación por WhatsApp", currency: "USD", basePriceMicros: 500_000, priceMicros: 500_000, dedupeKey: randomUUID(),
+      })),
+    )
+  }
+
+  it("Argos no escribe para recuperar: el mensaje espera y el recordatorio sale; al subirlo sale lo que sigue teniendo sentido (D5)", async () => {
+    const c = await clinic()
+    await overBudget(c)
+    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const reminded = await person(c, "Con su cita", { consent: ["recordatorio"], openWindow: true })
+    await appointmentFor(c, reminded.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    const waiting = await person(c, "Sin cita", { consent: ["seguimiento", "novedades"], openWindow: true })
+    const booked = await person(c, "Reservó después", { consent: ["seguimiento", "novedades"], openWindow: true })
+    await dueBudget(c, waiting.patientId)
+    await dueBudget(c, booked.patientId)
+    await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    const held = await deliver(c)
+    expect(held.map((result) => [result.outcome, result.detail ?? null]).sort()).toEqual([
+      ["enviado", null],
+      ["pospuesto", BUDGET_HOLD],
+      ["pospuesto", BUDGET_HOLD],
+    ])
+    expect(await run(c, (tx) => listBudgetHeldJobs(tx, c.orgId))).toEqual([{ kind: "seguimiento_presupuesto", count: 2 }])
+    // Mientras espera, una de las dos personas reservó su cita.
+    await appointmentFor(c, booked.patientId, new Date(NOW.getTime() + 3 * DAY))
+    await ownerDb.update(saasSubscription).set({ spendCapCents: 100_000 }).where(eq(saasSubscription.organizationId, c.orgId))
+    const later = await deliver(c, new Date(NOW.getTime() + 2 * HOUR))
+    expect(later.map((result) => result.outcome).sort()).toEqual(["cancelado", "enviado"])
+    const jobs = await jobsOf(c)
+    const followUp = (patientId: string) => jobs.find((job) => job.kind === "seguimiento_presupuesto" && job.patientId === patientId)
+    expect(followUp(waiting.patientId)?.status).toBe("enviado")
+    expect(followUp(booked.patientId)).toMatchObject({ status: "cancelado", lastError: expect.stringContaining("Ya tiene su cita") })
+    expect(await run(c, (tx) => listBudgetHeldJobs(tx, c.orgId))).toEqual([])
   })
 })

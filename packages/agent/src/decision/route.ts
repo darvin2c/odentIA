@@ -268,6 +268,17 @@ export function handoffFallbackNotice(
   return emergency ? `${emergency} ${notice}` : notice
 }
 
+/**
+ * Lo que recibe quien escribe cuando la clínica llegó a su presupuesto del mes
+ * (D4 del cobro por tipo, ADR 0085): un texto fijo, sin la IA y sin cobro. En
+ * el chat web se usa el aviso de siempre, que pide dónde avisarle.
+ */
+export function budgetNotice(clinic: string, treatment: "tu" | "usted" | null): string {
+  return treatment === "usted"
+    ? `Gracias por escribir a ${clinic}. En un momento le atiende alguien del equipo.`
+    : `Gracias por escribir a ${clinic}. En un momento te atiende alguien del equipo.`
+}
+
 function teamNotice(treatment: "tu" | "usted" | null, channel: string | null, where: "preguntar" | "ya_dejo" | "aqui"): string {
   if (channel === "webchat") {
     const usted = treatment === "usted"

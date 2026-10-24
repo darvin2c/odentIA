@@ -386,12 +386,14 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
+  // El presupuesto del mes (ADR 0085): lo que va por encima del crédito, sin el almacenamiento.
   if (sub.status !== "prueba" && sub.spendCapCents !== null && sub.spendCapCents > 0) {
-    const level = levelOf(levels, consumption.overCreditCents, sub.spendCapCents, false)
-    // Cuándo se llega al tope a este ritmo: lo de encima del crédito corre desde que se acabó.
+    const spent = consumption.budget.spentCents
+    const level = levelOf(levels, spent, sub.spendCapCents, false)
+    // Cuándo se llega a este ritmo: lo de encima del crédito corre desde que se acabó.
     const reachesAt =
       level && level !== "limite"
-        ? exhaustionDate(consumption.overCreditCents, sub.spendCapCents, consumption.creditExhaustedAt ?? consumption.period.start, now)
+        ? exhaustionDate(spent, sub.spendCapCents, consumption.creditExhaustedAt ?? consumption.period.start, now)
         : null
     const reachesThisPeriod = reachesAt !== null && reachesAt < consumption.period.end ? reachesAt : null
     if (level) {
@@ -399,15 +401,15 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         family: "tope",
         level,
         periodKey,
-        title: level === "limite" ? "Tope alcanzado" : level === "alarma" ? "Alarma" : "Aviso",
+        title: level === "limite" ? "Presupuesto alcanzado" : level === "alarma" ? "Alarma" : "Aviso",
         message:
           level === "limite"
-            ? "Llegaste a tu tope de gasto: Sofi pasa los casos nuevos a tu equipo con un mensaje fijo. El dictado y las citas en curso siguen."
-            : `Los agentes llevan ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)} este mes.${reachesThisPeriod ? ` A este ritmo llegas el ${fmtDay(reachesThisPeriod)}.` : ""}`,
+            ? `Llegaste al presupuesto del mes (${money(sub.spendCapCents)}): Sofi pasa todo a tu equipo, Clío no escucha en las atenciones nuevas y Argos no escribe para recuperar. Lo que ya empezó se termina.`
+            : `Los agentes llevan ${money(spent)} de tu presupuesto de ${money(sub.spendCapCents)} este mes.${reachesThisPeriod ? ` A este ritmo llegas el ${fmtDay(reachesThisPeriod)}.` : ""}`,
         short:
           level === "limite"
-            ? "Llegaste a tu tope de gasto"
-            : `Llevas ${money(consumption.overCreditCents)} de tu tope de ${money(sub.spendCapCents)}`,
+            ? "Llegaste al presupuesto del mes"
+            : `Llevas ${money(spent)} de tu presupuesto de ${money(sub.spendCapCents)}`,
         action: "cambiar_tope",
       })
     }
@@ -454,7 +456,11 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
 export interface AgentSpendGate {
   /** Se usó todo el saldo de prueba: los agentes se pausan. */
   trialExhausted: boolean
-  /** Se llegó al tope del mes: Sofi pasa los casos nuevos al equipo. */
+  /**
+   * Se llegó al presupuesto del mes (ADR 0085): Sofi pasa al equipo a quien no
+   * estaba conversando, Clío no escucha en las atenciones nuevas y Argos no
+   * escribe para recuperar ni suma preguntas. Lo que ya empezó se termina.
+   */
   capReached: boolean
 }
 
@@ -465,6 +471,29 @@ export async function getAgentSpendGate(tx: Db, orgId: string, now = new Date())
     trialExhausted: alerts.some((alert) => alert.family === "saldo_prueba" && alert.level === "limite"),
     capReached: alerts.some((alert) => alert.family === "tope" && alert.level === "limite"),
   }
+}
+
+/**
+ * Antes de que Clío escuche un tramo (ADR 0085): con el saldo de prueba
+ * agotado no trabaja; con el presupuesto del mes alcanzado no empieza a
+ * escuchar en una atención nueva, pero la que ya dictaba sigue hasta firmarse.
+ * Lo sabe por el gasto de IA de esa atención (`ai_usage.encounter_id`).
+ */
+export async function assertClioCanListen(tx: Db, orgId: string, encounterId: string): Promise<void> {
+  await assertAgentsNotPaused(tx, orgId)
+  const gate = await getAgentSpendGate(tx, orgId)
+  if (!gate.capReached) return
+  const [started] = await tx
+    .select({ id: aiUsage.id })
+    .from(aiUsage)
+    .where(and(eq(aiUsage.organizationId, orgId), eq(aiUsage.encounterId, encounterId)))
+    .limit(1)
+  if (started) return
+  throw new ServiceError(
+    "CLIO_BUDGET_REACHED",
+    409,
+    "Llegaste al presupuesto del mes: Clío no escucha en esta atención. Puedes escribir como siempre.",
+  )
 }
 
 /** Para el dictado (Clío) y Argos: con el saldo de prueba agotado los agentes no trabajan. */

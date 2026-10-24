@@ -270,9 +270,6 @@ describe("resumen del agente", () => {
     await run((tx) => upsertAgentConfig(tx, ORG, { tone: "formal" }, { actorUserId: OWNER }))
     // Las corridas sembradas arriba no llamaron al modelo, y un error que no es del proveedor no dice nada de él.
     expect(await provider()).toEqual({ problem: null, at: null })
-    // El tope diario tiene su propio aviso.
-    await entry("error", at(-1), { error: "DAILY_LIMIT: Se alcanzó el tope diario de 500 corridas del agente" })
-    expect((await provider()).problem).toBeNull()
     const failedAt = at(-2)
     await entry("error", failedAt, { error: "PROVIDER_REJECTED: HTTP 401: clave inválida" })
     // Viaja la clase del problema y cuándo fue; nunca el texto del proveedor.

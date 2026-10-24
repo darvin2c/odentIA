@@ -105,14 +105,12 @@ export function orgModelCheck(deps: AgentModelDeps, orgId: string): AgentModelCh
  */
 export async function modelProblemResponse(c: Context, deps: AgentModelDeps, orgId: string, error: unknown, who: "agente" | "asistente") {
   const problem = describeProviderProblem(error)
-  if (problem.code !== "DAILY_LIMIT") {
-    await reportFailed(deps, orgId, {
-      model: llmModelName(deps.llm),
-      responds: false,
-      problem: { code: problem.code, detail: problem.detail },
-      checkedAt: new Date().toISOString(),
-    })
-  }
+  await reportFailed(deps, orgId, {
+    model: llmModelName(deps.llm),
+    responds: false,
+    problem: { code: problem.code, detail: problem.detail },
+    checkedAt: new Date().toISOString(),
+  })
   const message =
     who === "agente"
       ? "Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA."

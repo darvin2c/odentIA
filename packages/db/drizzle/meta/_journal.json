@@ -659,6 +659,13 @@
       "when": 1792819095382,
       "tag": "0093_cobro_por_tipo_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1792821939536,
+      "tag": "0094_sin_topes",
+      "breakpoints": true
     }
   ]
 }

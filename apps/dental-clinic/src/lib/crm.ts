@@ -630,7 +630,6 @@ export interface ConnectionItem {
 export interface AgentConfig {
   organizationId: string
   enabled: boolean
-  dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev. */
   decisionProvider: "none" | "baseline" | "jev"
   handoffKeywords: string[]

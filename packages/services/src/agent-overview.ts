@@ -3,7 +3,6 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentLesson } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
-import { countAgentModelRunsToday } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
 import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
 import { countOpenKnowledgeGaps, getKnowledgeBasics, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
@@ -66,8 +65,6 @@ export interface AgentOverview {
     /** Pruebas que el modelo respondió. */
     sandboxTurns: number
   }
-  /** Corridas con llamada al modelo hoy frente al tope diario. */
-  usage: { runsToday: number; dailyRunLimit: number }
 }
 
 /**
@@ -250,7 +247,6 @@ export async function getAgentOverview(
       receivers: receivers.map((row) => row.name),
       sandboxTurns: turns?.sandboxTurns ?? 0,
     },
-    usage: { runsToday: await countAgentModelRunsToday(tx, orgId), dailyRunLimit: cfg.dailyRunLimit },
   }
 }
 

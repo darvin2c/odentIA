@@ -3215,39 +3215,9 @@ async function notifyUsers(
 }
 
 /**
- * Corridas de hoy (zona de la organización) que llamaron al modelo: es lo
- * que acota el tope diario. Las filas sin `llm_calls` (anteriores a la
- * métrica) no cuentan.
- */
-export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<number> {
-  const { timezone } = await getOrgLocale(tx, orgId)
-  const [row] = await tx.execute<{ count: number }>(sql`
-    select count(*)::int as count from agent_run_ledger
-    where organization_id = ${orgId} and llm_calls > 0
-      and (started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
-  return row?.count ?? 0
-}
-
-/**
- * Corridas con modelo de hoy (zona de la clínica) en las conversaciones de una
- * persona. Acota a quien escribe sin parar (un bot, una cadena): sin este tope
- * por persona, un solo número podía agotar el tope diario de la clínica y
- * dejar sin agente a todos los demás.
- */
-export async function countContactModelRunsToday(tx: Db, orgId: string, contactId: string): Promise<number> {
-  const { timezone } = await getOrgLocale(tx, orgId)
-  const [row] = await tx.execute<{ count: number }>(sql`
-    select count(*)::int as count from agent_run_ledger l
-    join conversation c on c.id = l.conversation_id and c.organization_id = l.organization_id
-    where l.organization_id = ${orgId} and c.contact_id = ${contactId} and l.llm_calls > 0
-      and (l.started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
-  return row?.count ?? 0
-}
-
-/**
  * ¿Hubo hoy (zona de la clínica), en las conversaciones de una persona, una
- * corrida que terminó con este estado y este motivo? Así el agente pasa al
- * equipo una sola vez por día a quien llegó a su tope por persona.
+ * corrida que terminó con este estado y este motivo? Así el mensaje fijo del
+ * presupuesto le llega una sola vez por día (ADR 0085).
  */
 export async function contactHadRunToday(
   tx: Db,
@@ -3287,8 +3257,7 @@ export async function contactGotAgentTextToday(tx: Db, orgId: string, contactId:
 
 /**
  * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
- * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
- * por problema y día. El del modelo no nombra claves ni variables: la cuenta
+ * saldo): aviso a quien administra el agente, uno por problema y día. El del modelo no nombra claves ni variables: la cuenta
  * es de odentIA, la clínica no puede arreglarla y odentIA ya recibió el caso
  * en Soporte. El enlace lleva a la página de Sofi. No lleva datos del interlocutor.
  */
@@ -3304,17 +3273,14 @@ export async function notifyAgentProviderProblem(
     .limit(20)
   const { timezone } = await getOrgLocale(tx, orgId)
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date())
-  const dailyLimit = problem.code === "DAILY_LIMIT"
   await notifyUsers(
     tx,
     orgId,
     rows.map((r) => r.userId),
     {
       dedupeKey: `agent-provider:${problem.code}:${day}`,
-      title: dailyLimit ? "Sofi alcanzó su tope diario" : "Sofi no puede usar el modelo",
-      body: dailyLimit
-        ? `${problem.detail.slice(0, 900)}. Mientras tanto, los casos pasan al equipo.`
-        : AGENT_MODEL_DOWN_NOTICE,
+      title: "Sofi no puede usar el modelo",
+      body: AGENT_MODEL_DOWN_NOTICE,
       href: "/agent/recepcion",
       permission: "agent.write",
       // Se retira solo cuando el agente vuelve a responder.

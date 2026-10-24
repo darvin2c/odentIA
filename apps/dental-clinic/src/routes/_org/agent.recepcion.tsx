@@ -349,7 +349,6 @@ function ReceptionPage() {
   }
 
   const disabled = toggleFunction.isPending && toggleFunction.variables ? toggleFunction.variables : config.disabledFunctions
-  const dailyLimit = count(config.dailyRunLimit, "respuesta", "respuestas")
   const closeAfter = `A las ${count(config.closeAfterHours, "hora", "horas")} sin respuesta`
   const voice = [
     `Se presenta como ${config.personaName?.trim() || receptionName}`,
@@ -537,9 +536,6 @@ function ReceptionPage() {
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-semibold">Límites que aplica el sistema</h3>
                 <ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
-                  <li>
-                    <EntryRow label="Tope diario" value={dailyLimit} onClick={canWrite ? () => setLimits("tope") : undefined} />
-                  </li>
                   <li>
                     <EntryRow label="Cerrar la conversación" value={closeAfter} onClick={canWrite ? () => setLimits("cierre") : undefined} />
                   </li>

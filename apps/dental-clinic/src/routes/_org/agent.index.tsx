@@ -163,7 +163,6 @@ function AgentSummaryPage() {
   const overview = overviewQuery.data?.data
   const roles = rolesQuery.data?.data
   const config = configQuery.data?.data
-  const limitReached = overview ? overview.usage.runsToday >= overview.usage.dailyRunLimit : false
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -183,21 +182,6 @@ function AgentSummaryPage() {
             >
               {agentModelDown(receptionName).body}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
-            </SummaryNotice>
-          ) : null}
-          {limitReached && overview.enabled ? (
-            <SummaryNotice
-              tone="warning"
-              title={`Llegó al tope de ${overview.usage.dailyRunLimit} respuestas de hoy`}
-              action={
-                canWrite ? (
-                  <Link to="/agent/recepcion" className={outlineLink}>
-                    Cambiar el tope
-                  </Link>
-                ) : null
-              }
-            >
-              Lo que llegue hasta mañana pasa a tu equipo.
             </SummaryNotice>
           ) : null}
 
