@@ -180,6 +180,7 @@ export const dentalHooks: ProductHooks = {
   catalog: dentalCatalog,
   dictates: true,
   budgetRequired: true,
+  recallMonths: 6,
 
   async closingParts(tx, { orgId, patientId, encounterId }) {
     const parts: DentalClosingParts = {

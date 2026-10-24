@@ -71,6 +71,7 @@ import {
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
+import { productHooks } from "./products.js"
 import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
 import { nextOpportuneFrom } from "./opportune-hours.js"
 import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
@@ -906,14 +907,18 @@ export interface ClinicMessageItem {
 const HOURS = (n: number) => (n === 1 ? "una hora" : `${n} horas`)
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
+/** «seis meses», «un año». */
+const MONTHS_WORDS = (n: number) => (n === 6 ? "seis meses" : n === 12 ? "un año" : `${n} meses`)
+
 /** «Cuándo sale» de cada mensaje del agente, con los tiempos vigentes de su línea. */
-const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTiming) => string> = {
+const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTiming, recallMonths: number) => string> = {
   recordatorio_cita: (_, timing) => `${capital(beforePhrase(timing.hoursBefore))} de la cita.`,
   recordatorio_control: () => "Dos días antes de un control pendiente.",
   seguimiento_presupuesto: (days) =>
     `Cuando un presupuesto lleva ${days === 1 ? "1 día" : `${days ?? 2} días`} sin respuesta.`,
   seguimiento_comercial: () => "Cuando una oportunidad tiene su próxima acción vencida.",
-  invitar_a_volver: () => "Cuando una persona lleva seis meses sin venir, sin cita ni pendientes.",
+  invitar_a_volver: (_, __, recallMonths) =>
+    `Cuando una persona lleva ${MONTHS_WORDS(recallMonths)} sin venir, sin cita ni pendientes.`,
   seguimiento_no_asistencia: (_, timing) =>
     `Al día siguiente de que una persona falta a su cita${timing.hour === undefined ? "" : `, a las ${hourPhrase(timing.hour)}`}.`,
   cita_cancelada: (_, timing) =>
@@ -1001,6 +1006,8 @@ interface ListContext {
   values: Record<MessageVariable, string>
   rules: Map<string, typeof automationRule.$inferSelect>
   waiting: Map<string, number>
+  /** Los meses sin venir de «Invitar a volver» (6 en odentIA, 12 en latidIA). */
+  recallMonths: number
 }
 
 async function listContext(tx: Db, orgId: string): Promise<ListContext> {
@@ -1021,6 +1028,7 @@ async function listContext(tx: Db, orgId: string): Promise<ListContext> {
     values: await exampleValues(tx, orgId),
     rules: new Map(rules.map((rule) => [rule.kind, rule])),
     waiting: new Map(soon.map((row) => [row.kind, Number(row.n)])),
+    recallMonths: (await productHooks(tx, orgId)).recallMonths,
   }
 }
 
@@ -1042,7 +1050,7 @@ function itemOf(
     origin: def.origin,
     title: def.title,
     when: line
-      ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule))
+      ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule), context.recallMonths)
       : def.id === PERSONAL_LINK_MESSAGE_KEY
         ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
         : def.id === ANSWER_READY_MESSAGE_KEY

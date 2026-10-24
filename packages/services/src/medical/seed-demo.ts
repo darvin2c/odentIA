@@ -4,8 +4,8 @@
  * borra junto con sus clínicas y lo crea al final. Lo mínimo para recorrerlo:
  * la Dra. Elena Vela (propietaria) y Ana Torres, que también dirige Dental
  * Smile y entra una vez en cada dominio; una sede con dos salas y horario, la
- * agenda de hoy y mañana, los controles de presión de Luis con su examen y los
- * antecedentes médicos de los tres.
+ * agenda de hoy y mañana, los controles de presión de Luis con su examen y el
+ * próximo, que se repite cada 3 meses, y los antecedentes médicos de los tres.
  *
  * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
  */
@@ -23,6 +23,7 @@ import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
 import { savePatientHealth } from "../clinical.js"
 import { createSpecialty, setProfessionalSpecialties } from "../clinical-forms.js"
+import { createFollowUp } from "../follow-ups.js"
 import { createContact } from "../contacts.js"
 import { createPatient } from "../patients.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
@@ -308,9 +309,10 @@ export async function seedMedicalDemo(
     { daysAgo: 120, vitals: { presionSistolica: 138, presionDiastolica: 88, frecuenciaCardiaca: 78, peso: 83.5, talla: 170, glucosaCapilar: 118 } },
     { daysAgo: 60, vitals: { presionSistolica: 132, presionDiastolica: 84, frecuenciaCardiaca: 76, peso: 82, talla: 170, glucosaCapilar: 112 } },
   ]
+  let lastControl: string | null = null
   for (const control of controls) {
     const startedAt = new Date(lima(-control.daysAgo, "10:00"))
-    await db.insert(encounter).values({
+    const [signed] = await db.insert(encounter).values({
       organizationId: ORG,
       patientId: luis,
       branchId: sede.id,
@@ -337,6 +339,20 @@ export async function seedMedicalDemo(
       signerName: "Elena Vela",
       signerTitle: "Médico cirujano",
       signerRegistration: "CMP 045678",
-    })
+    }).returning({ id: encounter.id })
+    lastControl = signed?.id ?? lastControl
   }
+
+  // El próximo control de presión se repite cada 3 meses (entrega 7, decisión 16):
+  // al completarlo queda indicado el siguiente, hasta que la doctora lo detenga.
+  await db.transaction((tx) =>
+    createFollowUp(tx, ORG, VELA_ID, luis, {
+      kind: "mantenimiento",
+      title: "Control de presión arterial",
+      instructions: "Traer el registro de presión de la casa.",
+      dueAt: lima(openDay(30), "09:00"),
+      originEncounterId: lastControl,
+      repeatEveryMonths: 3,
+    }),
+  )
 }

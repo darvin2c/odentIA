@@ -49,6 +49,15 @@ export type ResponsibilityKind = (typeof RESPONSIBILITY_KINDS)[number]
 export const FOLLOW_UP_STATUSES = ["pendiente", "programado", "realizado", "cancelado"] as const
 export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number]
 
+/** Cada cuántos meses puede repetirse un control (issue 229, decisión 16). */
+export const FOLLOW_UP_REPEAT_MONTHS = [1, 3, 6, 12] as const
+export type FollowUpRepeatMonths = (typeof FOLLOW_UP_REPEAT_MONTHS)[number]
+
+/** «cada mes», «cada 3 meses». */
+export function followUpRepeatWords(months: number): string {
+  return months === 1 ? "cada mes" : `cada ${months} meses`
+}
+
 /**
  * Lo que se sube como documento del paciente. Presupuestos, recetas y
  * comprobantes no se suben: salen de sus propias tablas.
