@@ -6,13 +6,13 @@
  * actuar lleva a la línea de Argos que lo haría.
  *
  * Cada pregunta deja una fila en `report_question`, sin el texto: la cifra que
- * eligió y cómo terminó. Las que pasaron por el modelo cuentan para el tope
- * diario de la clínica (`REPORT_DAILY_LIMIT`, como el de la Ayuda). Tocar una
+ * eligió y cómo terminó. Sin tope diario (ADR 0085): las preguntas a Argos
+ * las cuenta `saas-included.ts` (incluidas del mes y paquetes). Tocar una
  * opción de la respuesta («¿Y en agosto?», «Por sede») no llama al modelo.
  */
 import { reportPin, reportQuestion, REPORT_PIN_LIMIT } from "@odentia/db/schema/reports"
 import type { Db } from "@odentia/db"
-import { and, count, eq, gte, isNotNull, sql } from "drizzle-orm"
+import { and, eq, isNotNull, sql } from "drizzle-orm"
 import type { ProductAgentTexts } from "./product-agent.js"
 import { productAgentTexts } from "./products.js"
 import { getAdminSettings } from "./agent-admin.js"
@@ -42,12 +42,8 @@ import { type ReportQuery, type ReportScope, reportScope } from "./report-scope.
 import { countWords, monthWords } from "./report-words.js"
 import { type ReportAdvice, getReportAdvice } from "./reports.js"
 
-/** Preguntas con modelo por clínica en 24 horas (decisión 7): odentIA asume su costo. */
-export const REPORT_DAILY_LIMIT = 200
-
 export const REPORT_ASK_WORDS = {
   apagado: "Argos está apagado. Enciéndelo para preguntarle; las cifras de Reportes no dependen de él.",
-  tope: `La clínica llegó a las ${REPORT_DAILY_LIMIT} preguntas de hoy. Mañana sigo respondiendo; las cifras de Reportes siguen a la vista.`,
   sinModelo: "Ahora no puedo leer preguntas. Las cifras de Reportes siguen a la vista; prueba de nuevo en un momento.",
   noSabe: "Todavía no sé responder eso: no está entre las cifras que conozco.",
   clinico: "Eso está en la historia clínica y no lo veo. Respondo solo con cifras de gestión: dinero, agenda, pacientes y el agente.",
@@ -101,7 +97,7 @@ export type ReportAskResult =
   | { kind: "pregunta"; message: string; options: Array<{ label: string; query: ReportAskQuery }> }
   | { kind: "no_sabe"; message: string; closest: Array<{ label: string; query: ReportAskQuery }> }
   | { kind: "accion"; message: string; line: { key: string; name: string } | null }
-  | { kind: "clinico" | "otro" | "tope" | "sin_modelo" | "apagado"; message: string }
+  | { kind: "clinico" | "otro" | "sin_modelo" | "apagado"; message: string }
 
 export interface ReportAskOptions {
   billing: boolean
@@ -116,24 +112,19 @@ async function record(tx: Db, orgId: string, userId: string, outcome: Outcome, u
 }
 
 /**
- * Lo que hace falta antes de llamar al modelo: si Argos está encendido, si
- * queda tope y lo que se lee con reglas. Con la pantalla, la valida antes (una
+ * Lo que hace falta antes de llamar al modelo: si Argos está encendido y lo
+ * que se lee con reglas. Con la pantalla, la valida antes (una
  * sede que ya no existe falla aquí, no después de pagar la llamada).
  */
 export async function prepareReportQuestion(tx: Db, orgId: string, now: Date = new Date(), screen?: ReportQuery) {
   if (screen) await reportScope(tx, orgId, screen, now)
   const { enabled } = await getAdminSettings(tx, orgId)
-  const since = new Date(now.getTime() - 86_400_000)
-  const [row] = await tx
-    .select({ total: count() })
-    .from(reportQuestion)
-    .where(and(eq(reportQuestion.organizationId, orgId), eq(reportQuestion.usedModel, true), gte(reportQuestion.createdAt, since)))
   const [zone] = await tx.execute<{ timezone: string }>(sql`select timezone from org_profile where organization_id = ${orgId}`)
   const branches = await tx.execute<{ id: string; name: string }>(sql`select id, name from branch where organization_id = ${orgId} and is_active order by name, id`)
-  return { enabled, roomLeft: Math.max(0, REPORT_DAILY_LIMIT - Number(row?.total ?? 0)), timezone: zone?.timezone ?? "UTC", branches: [...branches] }
+  return { enabled, timezone: zone?.timezone ?? "UTC", branches: [...branches] }
 }
 
-/** El modelo no respondió: queda anotado (cuenta para el tope, porque se le llamó). */
+/** El modelo no respondió: queda anotado, porque se le llamó. */
 export async function recordReportQuestionFailure(tx: Db, orgId: string, userId: string): Promise<ReportAskResult> {
   await record(tx, orgId, userId, "no_pudo", true)
   return { kind: "sin_modelo", message: REPORT_ASK_WORDS.sinModelo }

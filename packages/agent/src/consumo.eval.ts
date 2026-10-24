@@ -30,7 +30,7 @@ import { whatsappCloudApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { appointment } from "@odentia/db/schema/agenda"
-import { agentDecisionLog, agentHandoff, agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
@@ -112,13 +112,17 @@ const REPLY_RATE: Record<string, number> = {
 const REQUESTS_PER_MONTH = 10
 const REQUEST_TOKENS = 1_525
 
-/** Lo que la persona escribiría al responder, por línea. El primero es el botón que toca. */
+/**
+ * Lo que la persona escribiría al responder, por línea. El primero es el botón que toca. Las que
+ * reservan o mueven una cita terminan con el «sí» a la propuesta: sin él la cita no se hace y la
+ * conversación se cobra como «informa» (ADR 0085).
+ */
 const SCRIPTS: Array<{ kind: string; label: string; button: "responder" | null; turns: string[] }> = [
-  { kind: "recordatorio_cita", label: "no podrá ir y pide otra fecha", button: "responder", turns: ["No podré ir", "¿Me la pueden pasar para la próxima semana, de preferencia en la mañana?", "El primer horario está bien, gracias"] },
-  { kind: "recordatorio_control", label: "quiere agendar su control", button: "responder", turns: ["Quiero agendar", "¿Qué horarios tienen la próxima semana?", "El primero está bien"] },
-  { kind: "seguimiento_presupuesto", label: "pregunta y quiere empezar", button: "responder", turns: ["Quiero retomarlo", "¿Se puede pagar en partes?", "Ok, quiero una cita para empezar la próxima semana", "El primer horario está bien"] },
-  { kind: "seguimiento_no_asistencia", label: "reprograma", button: "responder", turns: ["Sí, otro horario", "¿Tienen algo la próxima semana por la mañana?", "El primero está bien"] },
-  { kind: "cita_cancelada", label: "pide otra fecha", button: "responder", turns: ["Sí, otra fecha", "La próxima semana por la tarde, si se puede", "El primero está bien"] },
+  { kind: "recordatorio_cita", label: "no podrá ir y pide otra fecha", button: "responder", turns: ["No podré ir", "¿Me la pueden pasar para la próxima semana, de preferencia en la mañana?", "El primer horario está bien, gracias", "Sí"] },
+  { kind: "recordatorio_control", label: "quiere agendar su control", button: "responder", turns: ["Quiero agendar", "¿Qué horarios tienen la próxima semana?", "El primero está bien", "Sí"] },
+  { kind: "seguimiento_presupuesto", label: "pregunta y quiere empezar", button: "responder", turns: ["Quiero retomarlo", "¿Se puede pagar en partes?", "Ok, quiero una cita para empezar la próxima semana", "El primer horario está bien", "Sí"] },
+  { kind: "seguimiento_no_asistencia", label: "reprograma", button: "responder", turns: ["Sí, otro horario", "¿Tienen algo la próxima semana por la mañana?", "El primero está bien", "Sí"] },
+  { kind: "cita_cancelada", label: "pide otra fecha", button: "responder", turns: ["Sí, otra fecha", "La próxima semana por la tarde, si se puede", "El primero está bien", "Sí"] },
   { kind: "seguimiento_no_asistencia", label: "responde corto", button: null, turns: ["Gracias, yo les aviso"] },
 ]
 
@@ -702,6 +706,11 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     measured.set(key, { llm, decision, turns: script.turns.length, label: script.label, costMicros, unpriced: Number(spent?.unpriced ?? 0), tier: charged?.tier ?? null })
     console.log(`  ${adminLineOf(script.kind)?.name ?? script.kind} · ${script.label}: ${script.turns.length} mensajes de la persona → ${llm} tokens del modelo que escribe (${llmIn} de entrada y ${llmOut} de salida; ${calls} llamadas, ${cached} de entrada desde caché) y ${decision} del de decisión; costó USD ${(costMicros / 1_000_000).toFixed(4)} y se cobra como ${charged?.tier ?? "nada"}. Corridas: ${runs.map((row) => row.status).join(", ")}`)
     for (const [index, text] of script.turns.entries()) console.log(`      «${text}» → ${replies[index]}`)
+    // Lo que propuso Sofi y cómo terminó: sin el «sí» ejecutado, la conversación no gestionó ninguna cita.
+    const proposals = await ownerDb.select({ action: agentProposal.action, status: agentProposal.status, result: agentProposal.result }).from(agentProposal)
+      .where(and(eq(agentProposal.conversationId, conversationId), gte(agentProposal.createdAt, since)))
+      .orderBy(asc(agentProposal.createdAt))
+    if (proposals.length) console.log(`    Propuestas: ${proposals.map((row) => `${row.action} ${row.status}${row.status === "fallida" ? ` (${JSON.stringify(row.result)})` : ""}`).join(" · ")}`)
     if (modelCalls[opener]) openers.push(modelCalls[opener])
     console.log("    Paso a paso:")
     for (const line of detail) console.log(line)

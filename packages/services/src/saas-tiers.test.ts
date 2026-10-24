@@ -215,6 +215,9 @@ describe("Sofi, según lo que pasó en la agenda", () => {
       basePriceMicros: 500_000,
       priceMicros: 450_000,
       discountBps: 1000,
+      // Cuándo subió y lo que valía antes: el presupuesto cuenta la diferencia en ese momento.
+      tierChangedAt: new Date(start.getTime() + HOUR),
+      previousPriceMicros: 100_000,
     })
     expect(upgraded?.detail).toContain("gestionó una cita")
   })

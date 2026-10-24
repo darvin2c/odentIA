@@ -7,7 +7,7 @@ import { orgFk } from "./crm.js"
  * Lo que resultó de cada pregunta a Argos sobre Reportes (ADR 0070). No guarda
  * lo escrito: solo la cifra y la agrupación que eligió y cómo terminó, para
  * sumar las más pedidas y las que no sabe sin leer lo que escribe el equipo.
- * Las que pasaron por el modelo cuentan para el tope diario de la clínica.
+ * Las que pasaron por el modelo cuentan para las preguntas del mes (ADR 0085).
  */
 export const REPORT_QUESTION_OUTCOMES = ["respondida", "pregunta", "no_sabe", "clinico", "accion", "otro", "no_pudo"] as const
 
@@ -34,8 +34,8 @@ export const reportQuestion = pgTable("report_question", {
   plan: jsonb("plan"),
   /**
    * La pregunta pasó por un modelo que se paga (el de decisión o el que escribe
-   * la consulta): solo esas cuentan para el tope diario, salvo las que no
-   * pudieron (D6). Tocar una opción o el modelo de demostración no cuentan.
+   * la consulta): solo esas cuentan para las preguntas del mes (ADR 0085),
+   * salvo las que no pudieron (D6). Tocar una opción o el modelo de demostración no cuentan.
    */
   usedModel: boolean("used_model").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
