@@ -102,6 +102,17 @@ export const dentalUi: ProductUi = {
     // Un hallazgo dictado al que le falta lo que pide la norma (issue 109).
     SuggestionChoices: (props) =>
       props.item.kind === "odontograma" ? <FindingChoices {...props} /> : null,
+    examples: [
+      { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
+      { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
+      { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
+      { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
+      { block: "Control", say: "«Control en un mes»" },
+      { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
+    ],
+    placeholder: "En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…",
+    practice:
+      "Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal. Control en seis meses.",
   },
   // Lo dental del país: `dentalProfileFor` (ADR 0036 y 0079).
   country: {

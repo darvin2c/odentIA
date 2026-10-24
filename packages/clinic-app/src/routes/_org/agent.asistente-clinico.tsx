@@ -9,13 +9,14 @@ import { CLINICAL_NAME, clinicalNameReason, useReceptionName } from "../../lib/a
 import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { productUi } from "../../product/product-ui"
+import { DICTATION_KIND_LABEL, type DictationKind } from "../../components/patient/dictation-session"
 
 export const Route = createFileRoute("/_org/agent/asistente-clinico")({
   component: ClinicalAssistantPage,
 })
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
-const KIND_LABEL: Record<string, string> = { nota: "Consulta", diagnostico: "Diagnóstico", plan: "Plan de tratamiento", control: "Controles" }
 
 interface PracticeSuggestion {
   kind: string
@@ -203,7 +204,7 @@ function ClinicalAssistantPage() {
                     maxLength={12_000}
                     value={practice}
                     onChange={(event) => setPractice(event.target.value)}
-                    placeholder="Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal. Control en seis meses."
+                    placeholder={productUi().dictation?.practice}
                   />
                   <FieldDescription>Usa nombres de tus propios servicios para ver cómo los reconoce.</FieldDescription>
                 </Field>
@@ -233,7 +234,7 @@ function ClinicalAssistantPage() {
                           // biome-ignore lint/suspicious/noArrayIndexKey: resultado de una práctica; la lista se reemplaza entera.
                           <li key={`${item.kind}-${index}`} className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
                             <p className="flex flex-wrap items-center gap-2">
-                              <span className="font-semibold">{KIND_LABEL[item.kind] ?? item.kind}</span>
+                              <span className="font-semibold">{DICTATION_KIND_LABEL[item.kind as DictationKind] ?? item.kind}</span>
                               <Badge variant={item.status === "lista" ? "secondary" : "default"}>{item.status === "lista" ? "Sugerido" : "Por revisar"}</Badge>
                             </p>
                             <p className="whitespace-pre-wrap">{item.summary}</p>

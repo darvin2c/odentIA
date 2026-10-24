@@ -1,0 +1,144 @@
+{
+  "descripcion": "Dictados de práctica de un consultorio de atención primaria para medir a Clío médica (issue 229, entrega 10). Escritos como habla un médico al atender; ninguno es de un paciente real. Se corre con `pnpm --filter @odentia/agent eval:dictado-medico` antes de abrir consultorios y cada vez que cambie el prompt o el esquema.",
+  "servicios": [
+    "Consulta de medicina general",
+    "Consulta pediátrica",
+    "Control prenatal",
+    "Ecografía obstétrica",
+    "Ecografía abdominal",
+    "Nebulización",
+    "Inyectable intramuscular",
+    "Electrocardiograma",
+    "Papanicolaou"
+  ],
+  "dictados": [
+    {
+      "id": "m01-amigdalitis-completa",
+      "texto": "Viene por fiebre y dolor de garganta hace tres días, sin tos. Presión ciento dieciocho con setenta y seis, temperatura treinta y ocho y medio, pulso noventa y seis, saturando noventa y ocho. Amígdalas aumentadas con placas blanquecinas, adenopatías submandibulares dolorosas, pulmones limpios. Parece una amigdalitis bacteriana. Amoxicilina de quinientos, una cápsula cada ocho horas por diez días. Control en una semana si no mejora. Le doy descanso de tres días.",
+      "espera": {
+        "nota": true,
+        "signos": { "presionSistolica": 118, "presionDiastolica": 76, "temperatura": 38.5, "frecuenciaCardiaca": 96, "saturacionOxigeno": 98 },
+        "examen": [
+          { "sistema": "bocaGarganta", "estado": "con_hallazgos" },
+          { "sistema": "cabezaCuello", "estado": "con_hallazgos" },
+          { "sistema": "toraxPulmones", "estado": "sin_alteraciones" }
+        ],
+        "diagnosticos": ["J03"],
+        "recetas": [{ "dci": "amoxicilina", "concentracion": "500", "duracion": "10" }],
+        "controles": 1,
+        "descanso": 3
+      }
+    },
+    {
+      "id": "m02-control-de-presion",
+      "texto": "Control de presión. Trae su registro de casa, dice que ha estado bien. Presión ciento treinta y ocho con ochenta y ocho, pulso setenta y dos, pesa ochenta y dos kilos. Ruidos cardiacos rítmicos, sin soplos. Hipertensión esencial, todavía no controlada. Losartán de cien, una tableta cada mañana por treinta días. Control en tres meses.",
+      "espera": {
+        "nota": true,
+        "signos": { "presionSistolica": 138, "presionDiastolica": 88, "frecuenciaCardiaca": 72, "peso": 82 },
+        "examen": [{ "sistema": "corazon", "estado": "sin_alteraciones" }],
+        "diagnosticos": ["I10"],
+        "recetas": [{ "dci": "losartan", "concentracion": "100", "duracion": "30" }],
+        "controles": 1
+      }
+    },
+    {
+      "id": "m03-nino-con-crisis-de-asma",
+      "texto": "Mateo, cuatro años, viene con su mamá por tos y silbido en el pecho desde anoche. Pesa dieciséis kilos y medio, temperatura treinta y seis ocho, frecuencia respiratoria treinta y dos, saturación noventa y cuatro. Sibilantes en ambos campos pulmonares, sin tiraje. Crisis de asma leve. Le hacemos una nebulización ahora. Salbutamol inhalador, dos puff cada cuatro horas por cinco días. Control en dos días.",
+      "espera": {
+        "nota": true,
+        "signos": { "peso": 16.5, "temperatura": 36.8, "frecuenciaRespiratoria": 32, "saturacionOxigeno": 94 },
+        "examen": [{ "sistema": "toraxPulmones", "estado": "con_hallazgos" }],
+        "diagnosticos": ["J45"],
+        "indicaciones": ["nebuliz"],
+        "recetas": [{ "dci": "salbutamol", "concentracion": "", "duracion": "5" }],
+        "controles": 1
+      }
+    },
+    {
+      "id": "m04-control-prenatal",
+      "texto": "Control prenatal, veinticuatro semanas. Presión ciento diez con setenta, pesa sesenta y cuatro kilos. Altura uterina veintitrés centímetros, latidos fetales presentes. Gestación de veinticuatro semanas sin complicaciones. Le pedimos una ecografía obstétrica y control en cuatro semanas.",
+      "espera": {
+        "nota": true,
+        "signos": { "presionSistolica": 110, "presionDiastolica": 70, "peso": 64 },
+        "diagnosticos": ["Z3"],
+        "indicaciones": ["ecografia obstetrica"],
+        "controles": 1
+      }
+    },
+    {
+      "id": "m05-corrige-la-temperatura",
+      "pendientes": ["Signos vitales: PA 118/76 mmHg · T 38.5 °C"],
+      "contexto": "Presión ciento dieciocho con setenta y seis, temperatura treinta y ocho y medio.",
+      "texto": "No, perdón, la temperatura es treinta y ocho cuatro.",
+      "espera": { "correcciones": 1, "corrige": "38.4", "nuevos": 0 }
+    },
+    {
+      "id": "m06-quita-un-medicamento",
+      "pendientes": ["Receta: amoxicilina 500 mg por 10 días", "Receta: ibuprofeno 400 mg por 3 días"],
+      "texto": "Quita el ibuprofeno, es alérgica a los antiinflamatorios.",
+      "espera": { "quitar": 1, "nuevos": 0 }
+    },
+    {
+      "id": "m07-cambia-un-medicamento",
+      "pendientes": ["Receta: ibuprofeno 400 mg por 3 días"],
+      "texto": "Mejor paracetamol de quinientos en vez del ibuprofeno.",
+      "espera": { "correcciones": 1, "corrige": "paracetamol", "nuevos": 0 }
+    },
+    {
+      "id": "m08-examen-normal",
+      "texto": "Piel sin lesiones, pulmones limpios, ruidos cardiacos rítmicos sin soplos, abdomen blando, depresible, no doloroso.",
+      "espera": {
+        "examen": [
+          { "sistema": "piel", "estado": "sin_alteraciones" },
+          { "sistema": "toraxPulmones", "estado": "sin_alteraciones" },
+          { "sistema": "corazon", "estado": "sin_alteraciones" },
+          { "sistema": "abdomen", "estado": "sin_alteraciones" }
+        ]
+      }
+    },
+    {
+      "id": "m09-diabetes-con-glucosa",
+      "texto": "Paciente diabética en control. Glucosa capilar ciento ochenta y cinco en ayunas. Pesa setenta y uno. Diabetes tipo dos no controlada. Metformina de ochocientos cincuenta, una tableta cada doce horas por treinta días. Control en un mes con hemoglobina glicosilada.",
+      "espera": {
+        "nota": true,
+        "signos": { "glucosaCapilar": 185, "peso": 71 },
+        "diagnosticos": ["E11"],
+        "recetas": [{ "dci": "metformina", "concentracion": "850", "duracion": "30" }],
+        "controles": 1
+      }
+    },
+    {
+      "id": "m10-infeccion-urinaria-con-descanso",
+      "texto": "Viene por ardor al orinar hace dos días. Temperatura treinta y siete dos. Abdomen blando, con dolor leve en el hipogastrio. Infección urinaria baja. Nitrofurantoína de cien cada seis horas por siete días. Descanso médico de dos días.",
+      "espera": {
+        "nota": true,
+        "signos": { "temperatura": 37.2 },
+        "examen": [{ "sistema": "abdomen", "estado": "con_hallazgos" }],
+        "diagnosticos": ["N3"],
+        "recetas": [{ "dci": "nitrofurantoina", "concentracion": "100", "duracion": "7" }],
+        "descanso": 2
+      }
+    },
+    {
+      "id": "m11-pausa-de-charla",
+      "texto": "A ver, siéntese por favor. ¿Cómo le ha ido con el tratamiento? Ya, ya. Bueno, vamos a ver.",
+      "espera": { "nuevos": 0 }
+    },
+    {
+      "id": "m12-la-tercera-sin-tercera",
+      "pendientes": ["Signos vitales: PA 120/80 mmHg", "Diagnóstico: J02.9 Faringitis aguda, no especificada"],
+      "texto": "La tercera ponla como definitiva.",
+      "espera": { "nuevos": 0 }
+    },
+    {
+      "id": "m13-lumbalgia-descanso-desde-manana",
+      "texto": "Viene por dolor lumbar después de cargar peso, hace dos días. Dolor a la palpación en la región lumbar derecha, Lasègue negativo. Lumbalgia mecánica. Naproxeno de quinientos cada doce horas por cinco días. Descanso de cinco días desde mañana.",
+      "espera": {
+        "nota": true,
+        "diagnosticos": ["M54"],
+        "recetas": [{ "dci": "naproxeno", "concentracion": "500", "duracion": "5" }],
+        "descanso": 5
+      }
+    }
+  ]
+}

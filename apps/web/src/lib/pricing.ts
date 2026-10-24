@@ -4,11 +4,13 @@
 
 // Este archivo también lo importan las islas (por `money` y los tipos): nada de lo que lee la
 // configuración del servidor se evalúa al cargarlo.
+import { DEFAULT_DOMAIN } from "./product"
+
 const FRESH_MS = 30_000
 
 /** Dentro del stack la web llama a la API por la red interna; en local, por su dirección pública. Solo en el servidor. */
 function apiBase(): string {
-  const domain = import.meta.env.VITE_BASE_DOMAIN || "odentia.localhost"
+  const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
   const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
   return (process.env.ODENTIA_API_INTERNAL_URL || `https://api.${domain}${port}`).replace(/\/+$/, "")
 }

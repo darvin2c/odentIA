@@ -1,5 +1,6 @@
 import { ADMIN_LINES, say } from "./admin-lines.js"
 import { AGENT_NAME_REASONS, AGENT_NAMES, AGENT_ROLE_WORDS } from "./agent-names.js"
+import { type ProductAgentTexts, productName } from "./product-agent.js"
 
 /**
  * Ficha de cada agente: su manual de funciones. Es la fuente única de lo que
@@ -236,23 +237,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     available: true,
     switchable: true,
     // Sus funciones son las líneas de `ADMIN_LINES`: se prenden una por una en su página.
-    functions: [
-      ...ADMIN_LINES.map((line) => ({
-        id: line.key,
-        label: line.name,
-        // La ficha es una sola para los dos productos: dice los meses de odentIA
-        // (la página del Administrador de cada clínica dice los suyos).
-        description: `${line.trigger(line.defaultDays, 6)}: ${line.agent ? `${AGENT_NAMES.recepcion} ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
-        fixed: false,
-        tools: [],
-      })),
-      { id: "recomendar", label: "Recomendar qué prender", description: "Las líneas apagadas que hoy tienen casos, con su lista. A lo sumo tres a la vez.", fixed: true, tools: [] },
-      { id: "avisar", label: "Avisar cuando no puede", description: "Si Sofi no puede escribirle a alguien, dice por qué y cómo habilitarlo. No se apaga.", fixed: true, tools: [] },
-      { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda y lo que pasó con cada persona.", fixed: true, tools: [] },
-      { id: "pedir", label: "Entender lo que le pides con palabras", description: "Arma el cambio con las líneas que el sistema ya sabe hacer y lo deja como borrador, con su flujo, una prueba con tus últimos 30 días y lo que revisó. Tú lo prendes, lo guardas o lo descartas.", fixed: true, tools: [] },
-      { id: "proponer", label: "Proponer cambiar o apagar", description: "Cuando una línea prendida no está sirviendo lo dice con su cifra. No la cambia.", fixed: true, tools: [] },
-      { id: "ya_aviso", label: "No escribir encima de lo que la persona ya dijo", description: "Antes de que Sofi escriba por un seguimiento, mira si esa persona ya avisó algo sobre eso. Si es así, no le escribe.", fixed: true, tools: [] },
-    ],
+    // Con los meses de odentIA; cada clínica ve los de su producto (`agentRolesFor`).
+    functions: adminFunctions(6),
     always: [],
     sees: "Agenda, pendientes y cifras, según los permisos de quien lee. Los números salen de la base de datos, no de un modelo. El modelo recibe dos cosas: el texto de lo que le pides con palabras y, antes de un mensaje de seguimiento, los últimos mensajes que escribió esa persona.",
     notSees: "Historia clínica, caja ni el resto de las conversaciones. Al entender un pedido el modelo no recibe nombres ni datos de la clínica. Quien escribe a las personas es Sofi.",
@@ -263,11 +249,36 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     testedWith: "Con lo que haría hoy con tus datos antes de prender cada línea y, al pedirle algo con palabras, con lo que pasó en tus últimos 30 días. La prueba no envía nada.",
     learningOwner: "Es solo del administrador de esta clínica: no cambia a los otros agentes.",
   },
-  ayuda: {
+  // Con el nombre de odentIA; cada clínica ve el de su producto (`agentRolesFor`).
+  ayuda: helpRole("odentIA"),
+}
+
+/** Las funciones del Administrador: las líneas, con los meses de «invitar a volver» del producto, y lo fijo. */
+function adminFunctions(recallMonths: number): AgentFunction[] {
+  return [
+      ...ADMIN_LINES.map((line) => ({
+        id: line.key,
+        label: line.name,
+        description: `${line.trigger(line.defaultDays, recallMonths)}: ${line.agent ? `${AGENT_NAMES.recepcion} ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
+        fixed: false,
+        tools: [],
+      })),
+      { id: "recomendar", label: "Recomendar qué prender", description: "Las líneas apagadas que hoy tienen casos, con su lista. A lo sumo tres a la vez.", fixed: true, tools: [] },
+      { id: "avisar", label: "Avisar cuando no puede", description: "Si Sofi no puede escribirle a alguien, dice por qué y cómo habilitarlo. No se apaga.", fixed: true, tools: [] },
+      { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda y lo que pasó con cada persona.", fixed: true, tools: [] },
+      { id: "pedir", label: "Entender lo que le pides con palabras", description: "Arma el cambio con las líneas que el sistema ya sabe hacer y lo deja como borrador, con su flujo, una prueba con tus últimos 30 días y lo que revisó. Tú lo prendes, lo guardas o lo descartas.", fixed: true, tools: [] },
+      { id: "proponer", label: "Proponer cambiar o apagar", description: "Cuando una línea prendida no está sirviendo lo dice con su cifra. No la cambia.", fixed: true, tools: [] },
+      { id: "ya_aviso", label: "No escribir encima de lo que la persona ya dijo", description: "Antes de que Sofi escriba por un seguimiento, mira si esa persona ya avisó algo sobre eso. Si es así, no le escribe.", fixed: true, tools: [] },
+  ]
+}
+
+/** La Ayuda, con el nombre del producto: enseña a usar el sistema de la clínica y le envía lo que no sabe. */
+function helpRole(name: string): AgentRole {
+  return {
     id: "ayuda",
     name: "Ayuda",
     audience: "Para todo el equipo, en todas las pantallas",
-    role: "Ayuda a usar odentIA: dónde está cada cosa, qué se puede hacer y por qué algo no se puede.",
+    role: `Ayuda a usar ${name}: dónde está cada cosa, qué se puede hacer y por qué algo no se puede.`,
     available: true,
     switchable: false,
     functions: [
@@ -275,15 +286,30 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       { id: "se_puede", label: "Se puede", description: "Sí y dónde; no; o tu rol no puede y quién sí.", fixed: true, tools: [] },
       { id: "por_que_no", label: "Por qué no puedo", description: "Qué falta en lo que tienes abierto.", fixed: true, tools: [] },
       { id: "que_significa", label: "Qué significa", description: "Los términos del sistema.", fixed: true, tools: [] },
-      { id: "enviar", label: "Enviar a odentIA", description: "Lo que no supo responder, o un problema.", fixed: true, tools: [] },
+      { id: "enviar", label: `Enviar a ${name}`, description: "Lo que no supo responder, o un problema.", fixed: true, tools: [] },
     ],
     always: [],
     sees: "El mapa del sistema. La pantalla donde estás y su estado. Tu rol. Lo que tu clínica ya configuró.",
     notSees: "Conversaciones, historia clínica ni montos.",
     never: "Cambiar datos. Inventar una función que no existe.",
     confirms: "Nadie: no cambia nada.",
-    learnsFrom: "odentIA. La clínica no le sube ni le enseña nada.",
-  },
+    learnsFrom: `${name}. La clínica no le sube ni le enseña nada.`,
+  }
+}
+
+/**
+ * Las fichas con las palabras del producto de la clínica (issue 229): su nombre
+ * en la Ayuda, los meses de «invitar a volver» del Administrador y lo que dicen
+ * Sofi y Clío de su profesional (latidIA: el médico). En odentIA son `AGENT_ROLES`.
+ */
+export function agentRolesFor(texts: ProductAgentTexts): Record<AgentRoleId, AgentRole> {
+  return {
+    ...AGENT_ROLES,
+    recepcion: { ...AGENT_ROLES.recepcion, ...texts.roles?.recepcion },
+    asistente_clinico: { ...AGENT_ROLES.asistente_clinico, ...texts.roles?.asistente_clinico },
+    administrador: { ...AGENT_ROLES.administrador, functions: adminFunctions(texts.recallMonths) },
+    ayuda: helpRole(productName(texts)),
+  }
 }
 
 /** Funciones que la clínica puede apagar en un agente. */

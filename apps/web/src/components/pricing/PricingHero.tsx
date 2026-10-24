@@ -3,6 +3,7 @@
 // corchetes en 2D con CSS para no cargar una escena 3D.
 import { type PointerEvent, useEffect, useRef, useState } from "react"
 import { usd, type ValuePrices } from "../../lib/pricing"
+import { MEDICAL } from "../../lib/product"
 import "./pricing-hero.css"
 
 type Pair = [string, string]
@@ -19,7 +20,7 @@ type Task = {
 }
 
 /** Ejemplo de un día. Los textos «M» son los del teléfono, más cortos. */
-const TASKS: Task[] = [
+const DENTAL_TASKS: Task[] = [
   {
     time: "23:40",
     in: ["WhatsApp · Andrea", "«¿Tienen cita para mañana? Me duele una muela.»"],
@@ -72,6 +73,24 @@ const TASKS: Task[] = [
     price: "gestiona",
   },
 ]
+
+/** El mismo día en un consultorio de latidIA (issue 229): lo que cambia es lo que se dice. */
+const MEDICAL_TASKS: Task[] = DENTAL_TASKS.map((task) =>
+  task.time === "23:40"
+    ? { ...task, in: ["WhatsApp · Andrea", "«¿Tienen cita para mañana? Tengo fiebre desde ayer.»"] }
+    : task.time === "09:40"
+      ? { ...task, in: ["Consulta · Carlos", "«Presión 118 con 76, amígdalas con placas…»"], inM: ["Consulta · Carlos", "«Presión 118 con 76…»"] }
+      : task.time === "16:05"
+        ? { ...task, in: ["Faltó a su cita · Rosa", "No llegó ayer a su control de presión."] }
+        : task,
+)
+
+const TASKS = MEDICAL ? MEDICAL_TASKS : DENTAL_TASKS
+
+/** El color de los corchetes de metal: el celeste de odentIA o el lila de latidIA (en RGB de 0 a 1). */
+const TINT: { shadow: string; light: string; rim: string; glow: string; left: [number, number, number]; right: [number, number, number] } = MEDICAL
+  ? { shadow: "0.05,0.02,0.1", light: "0.83,0.76,0.97", rim: "0.93,0.88,1.0", glow: "0.72,0.61,0.94", left: [0.55, 0.42, 0.86], right: [0.66, 0.53, 0.92] }
+  : { shadow: "0.02,0.07,0.09", light: "0.62,0.9,0.96", rim: "0.8,0.97,1.0", glow: "0.31,0.76,0.84", left: [0.36, 0.78, 0.88], right: [0.45, 0.86, 0.92] }
 const ALL_DONE = [5, 4, 3, 2, 1, 0]
 const NARROW = "(max-width: 720px)"
 
@@ -103,7 +122,7 @@ function startScene(
   const vs =
     "attribute vec3 aP;attribute vec3 aN;uniform mat4 uPV;uniform mat3 uR;uniform vec3 uS;uniform vec3 uT;varying vec3 vN;varying vec3 vW;void main(){vec3 p=uR*(aP*uS)+uT;vN=normalize(uR*(aN/uS));vW=p;gl_Position=uPV*vec4(p,1.0);}"
   const fs =
-    "precision mediump float;varying vec3 vN;varying vec3 vW;uniform vec3 uC;uniform vec3 uB;uniform float uG;void main(){vec3 n=normalize(vN);vec3 v=normalize(uC-vW);vec3 r=reflect(-v,n);float strip=smoothstep(0.75,0.98,1.0-abs(r.x-0.35))*smoothstep(0.0,0.6,r.y+0.3);vec3 env=mix(vec3(0.02,0.07,0.09),vec3(0.62,0.9,0.96),smoothstep(-0.2,0.85,r.y))+vec3(1.0)*strip*0.9;vec3 l1=normalize(vec3(-0.45,0.85,0.6));float d1=max(dot(n,l1),0.0);vec3 h=normalize(l1+v);float sp=pow(max(dot(n,h),0.0),120.0);float fr=pow(1.0-max(dot(n,v),0.0),3.0);vec3 col=uB*(0.1+0.3*d1)+env*uB*0.85+vec3(0.8,0.97,1.0)*fr*0.35+vec3(1.0)*sp*0.9;col+=vec3(0.31,0.76,0.84)*uG*0.35;gl_FragColor=vec4(col,1.0);}"
+    `precision mediump float;varying vec3 vN;varying vec3 vW;uniform vec3 uC;uniform vec3 uB;uniform float uG;void main(){vec3 n=normalize(vN);vec3 v=normalize(uC-vW);vec3 r=reflect(-v,n);float strip=smoothstep(0.75,0.98,1.0-abs(r.x-0.35))*smoothstep(0.0,0.6,r.y+0.3);vec3 env=mix(vec3(${TINT.shadow}),vec3(${TINT.light}),smoothstep(-0.2,0.85,r.y))+vec3(1.0)*strip*0.9;vec3 l1=normalize(vec3(-0.45,0.85,0.6));float d1=max(dot(n,l1),0.0);vec3 h=normalize(l1+v);float sp=pow(max(dot(n,h),0.0),120.0);float fr=pow(1.0-max(dot(n,v),0.0),3.0);vec3 col=uB*(0.1+0.3*d1)+env*uB*0.85+vec3(${TINT.rim})*fr*0.35+vec3(1.0)*sp*0.9;col+=vec3(${TINT.glow})*uG*0.35;gl_FragColor=vec4(col,1.0);}`
   const sh = (t: number, src: string) => {
     const o = g.createShader(t)!
     g.shaderSource(o, src)
@@ -274,7 +293,7 @@ function startScene(
         { p: [side * (gap - 0.28), -1.165, 0], s: [0.365, 0.085, 0.13] },
       ]
       g.uniformMatrix3fv(U.uR!, false, new Float32Array(G))
-      g.uniform3f(U.uB!, side < 0 ? 0.36 : 0.45, side < 0 ? 0.78 : 0.86, side < 0 ? 0.88 : 0.92)
+      g.uniform3f(U.uB!, ...(side < 0 ? TINT.left : TINT.right))
       g.uniform1f(U.uG!, glow)
       for (const q of parts) {
         const w = ap(G, q.p)

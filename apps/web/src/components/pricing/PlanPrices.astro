@@ -4,6 +4,7 @@
 // Fundadores se publica, la tarjeta es la del Fundador: sin cuota, con el regalo y cada precio con el
 // de lista tachado.
 import { businessDays, hours, money, shownPlan } from "../../lib/pricing"
+import { MEDICAL, WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -37,13 +38,14 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
       {
         name: "Clío",
         does: "Documenta",
-        when: "Una vez por atención, cuando el odontólogo confirma.",
+        when: `Una vez por atención, cuando el ${WORDS.clinician} confirma.`,
         href: "/agentes/asistente-clinico",
         rows: [
           // ADR 0085: simple es una sola parte; estándar, un diagnóstico, el odontograma o dos partes o más.
+          // En latidIA, lo que lo hace estándar es más de una parte (el examen, el diagnóstico) y completa, dejar indicado lo que sigue.
           { label: "Una nota, receta o control", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
-          { label: "Diagnóstico, odontograma o más de una parte", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
-          { label: "Armó el presupuesto", price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
+          { label: MEDICAL ? "Nota con examen o diagnóstico" : "Diagnóstico, odontograma o más de una parte", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
+          { label: MEDICAL ? "Dejó indicado lo que sigue" : "Armó el presupuesto", price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
         ],
       },
       {
@@ -87,7 +89,7 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
         )}
         <ul class="feats">
           {founder?.guaranteeMonths ? <li>Estas condiciones se mantienen {founder.guaranteeMonths} meses desde que entras.</li> : null}
-          <li>El sistema completo, igual para todas las clínicas, sin límite de odontólogos, sedes ni usuarios.</li>
+          <li>El sistema completo, igual para todas las clínicas, sin límite de {WORDS.clinicians}, sedes ni usuarios.</li>
           {plan.argos || plan.storage ? (
             <li>
               {[plan.argos ? `${plan.argos.included} preguntas a Argos al mes` : null, plan.storage ? `${plan.storage.includedGb} GB` : null].filter(Boolean).join(" y ")} incluidos.
@@ -119,7 +121,8 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
                 </div>
               ))}
             </dl>
-            <a class="ag" href={agent.href}>Lo que hace {agent.name} →</a>
+            {/* latidIA aún no tiene una página por agente: su inicio los cuenta. */}
+            {MEDICAL ? null : <a class="ag" href={agent.href}>Lo que hace {agent.name} →</a>}
           </div>
         ))}
         <p class="mono nt">Precios en {plan.currency === "USD" ? "dólares" : plan.currency} más impuestos.{plan.storage ? ` Desde el GB ${plan.storage.includedGb + 1}, ${money(plan.storage.perGb, plan.currency)} por GB al mes.` : ""}</p>

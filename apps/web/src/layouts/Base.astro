@@ -1,7 +1,9 @@
 ---
 // Documento de cada página: título y descripción propios, datos estructurados, cabecera y pie.
+import latidiaFavicon from "../../../../assets/brand/latidia/favicon.svg?url"
 import Footer from "../components/Footer.astro"
 import Header from "../components/Header.astro"
+import { MEDICAL, WORDS } from "../lib/product"
 import "../styles/web.css"
 
 interface Props {
@@ -18,18 +20,18 @@ const { title, description, jsonLd, header = "dark", noindex = false } = Astro.p
 // Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
 // la del mapa del sitio y los enlaces, va sin .html.
 const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
-const fullTitle = title.includes("odentIA") ? title : `${title} · odentIA`
+const fullTitle = title.includes(WORDS.name) ? title : `${title} · ${WORDS.name}`
 const org = {
   "@context": "https://schema.org",
   "@type": "Organization",
-  name: "odentIA",
+  name: WORDS.name,
   url: Astro.site?.toString(),
-  logo: new URL("/favicon.svg", Astro.site).toString(),
+  logo: new URL(MEDICAL ? latidiaFavicon : "/favicon.svg", Astro.site).toString(),
 }
 const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
 ---
 <!doctype html>
-<html lang="es">
+<html lang="es" data-brand={MEDICAL ? "latidia" : undefined}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -42,9 +44,15 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta name="theme-color" content="#0a2129" />
-    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content={WORDS.themeColor} />
+    {MEDICAL ? (
+      <link rel="icon" href={latidiaFavicon} type="image/svg+xml" />
+    ) : (
+      <>
+        <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+      </>
+    )}
     <link rel="sitemap" href="/sitemap-index.xml" />
     {ld.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>

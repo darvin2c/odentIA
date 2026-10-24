@@ -1,12 +1,13 @@
 ---
 // Pie: el mapa completo de la web y las páginas legales.
+import { WORDS } from "../lib/product"
 import { footerGroups, legalLinks } from "../lib/site"
 ---
 <footer class="foot">
   <div class="wrap grid">
     <div class="brand">
-      <span class="name">odentIA</span>
-      <span>Omnicanal y agéntica, para clínicas dentales de habla hispana.</span>
+      <span class="name">{WORDS.name}</span>
+      <span>Omnicanal y agéntica, para {WORDS.audience} de habla hispana.</span>
     </div>
     {footerGroups.map((g) => (
       <nav aria-label={g.title}>

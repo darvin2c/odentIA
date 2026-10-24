@@ -2,6 +2,7 @@ import {
   CORE_VITAL_KEYS,
   DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
+  type DiagnosisSystemKey,
   type ImagingType,
   type MedicationCatalog,
   type RegistrationAnswers,
@@ -10,6 +11,7 @@ import {
   type VitalSignKey,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
@@ -248,6 +250,52 @@ export const DENTAL_PRESCRIBING: ProductPrescribing = {
   review: async () => ({ errors: [], warnings: [] }),
 }
 
+/** Una sugerencia de Clío ya revisada: lista para confirmar, o por revisar con su motivo. */
+export interface DictationPrepared {
+  payload: Record<string, unknown>
+  status: "lista" | "por_revisar"
+  note: string | null
+}
+
+/**
+ * Lo que Clío dicta de cada producto (ADR 0012 y 0079). Lo común ordena,
+ * corrige, confirma y descarta las sugerencias de la atención (la consulta,
+ * los diagnósticos, el plan, la receta y los controles); el producto dice qué
+ * clases propias suma (odentIA: los hallazgos del odontograma), cómo se dice su
+ * «dónde» y qué operación ejecuta cada una al confirmarse.
+ */
+export interface ProductDictation {
+  /** Las clases de sugerencia propias del producto, además de las comunes. */
+  kinds: readonly DictationKind[]
+  /** Lo del producto que va en la parte fija de las instrucciones (odentIA: los hallazgos que se dictan). */
+  catalogText(): string
+  /** Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la variante del hallazgo). */
+  context(tx: Db, orgId: string): Promise<unknown>
+  /** El «dónde» dictado de un diagnóstico o una indicación, en los valores del sistema; `invalid`: por qué no vale. */
+  normalizeSite(payload: Record<string, unknown>): { payload: Record<string, unknown>; invalid: string | null }
+  /** El «dónde» en palabras («Pieza 16 · cara oclusal»); vacío sin sitio. */
+  siteWords(payload: Record<string, unknown>): string
+  /** Una indicación ajustada al ámbito de su servicio: lo que no lleva se quita y lo que le falta la deja por revisar. */
+  fitToScope(payload: Record<string, unknown>, scope: string | null): DictationPrepared
+  /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
+  prepare(
+    tx: Db,
+    kind: DictationKind,
+    payload: Record<string, unknown>,
+    context: { diagnosisSystem: DiagnosisSystemKey; product: unknown },
+  ): Promise<DictationPrepared>
+  /** Lo que entraría a la historia, en pocas palabras, de una clase propia. */
+  summarize(kind: DictationKind, payload: Record<string, unknown>): string
+  /** Cómo se le nombra al asistente una sugerencia pendiente de una clase propia, después de su clase. */
+  modelLabel(kind: DictationKind, payload: Record<string, unknown>): string
+  /** Qué decía un campo del producto antes de una corrección por voz («pieza 16»); null si el campo no es suyo. */
+  describeField(key: string, before: Record<string, unknown>): string | null
+  /** Lo que hace iguales dos sugerencias pendientes de una clase (odentIA: pieza, hallazgo y caras); null si no se comparan. */
+  sameKey(kind: DictationKind, payload: Record<string, unknown>): string | null
+  /** Confirma una sugerencia de una clase propia con la operación de siempre; devuelve lo que creó. */
+  confirm(tx: Db, moment: EncounterMoment, kind: DictationKind, payload: Record<string, unknown>): Promise<string | null>
+}
+
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
@@ -265,8 +313,8 @@ export interface ProductHooks {
   vitals: readonly VitalSignKey[]
   /** Los tipos de tratamiento de su biblioteca y las especialidades de cada país. */
   catalog: ProductCatalog
-  /** Si Clío dicta en sus clínicas (odentIA sí; la app médica, cuando tenga su dictado). */
-  dictates: boolean
+  /** Lo que Clío dicta en sus clínicas; null si no dicta (la app médica, hasta tener su dictado). */
+  dictation: ProductDictation | null
   /**
    * Si lo indicado espera la respuesta a un presupuesto (odentIA) o queda
    * aceptado al indicarlo (latidIA, decisión 15 del issue 229). Sin él, el
@@ -367,7 +415,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   examination: NO_EXAMINATION,
   vitals: CORE_VITAL_KEYS,
   catalog: NO_CATALOG,
-  dictates: false,
+  dictation: null,
   budgetRequired: true,
   recallMonths: 6,
   closingParts: async () => ({}),

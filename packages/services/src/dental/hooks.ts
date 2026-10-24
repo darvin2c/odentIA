@@ -42,6 +42,7 @@ import {
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { dentalCatalog } from "./catalog.js"
+import { DENTAL_DICTATION } from "./dictation.js"
 import { dentalExamination } from "./examination.js"
 import { dentalInterview } from "./interview.js"
 import { dentalProductSite, siteColumns } from "./site.js"
@@ -178,7 +179,7 @@ export const dentalHooks: ProductHooks = {
   examination: dentalExamination,
   vitals: CORE_VITAL_KEYS,
   catalog: dentalCatalog,
-  dictates: true,
+  dictation: DENTAL_DICTATION,
   budgetRequired: true,
   recallMonths: 6,
 

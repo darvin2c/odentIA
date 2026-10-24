@@ -1,3 +1,5 @@
+import type { AgentRole } from "./agent-roles.js"
+
 /**
  * Lo que el modelo lee del producto (ADR 0079, entrega 6): los agentes tienen
  * una parte común y un bloque de su producto. Aquí van solo las palabras que
@@ -24,6 +26,17 @@ export interface ProductAgentTexts {
   visit: { word: string; offer: string }
   /** Quien atiende, en singular (odentIA: «odontólogo»; latidIA: «médico»). */
   clinician: string
+  /**
+   * Lo que cambia en las fichas de los agentes en otro producto (latidIA: Clío
+   * para el médico, Sofi sin piezas ni odontograma); sin ello, las de odentIA.
+   * No lo lee el modelo: son las páginas de los agentes.
+   */
+  roles?: Partial<
+    Record<
+      "recepcion" | "asistente_clinico",
+      Partial<Pick<AgentRole, "nameReason" | "audience" | "role" | "functions" | "sees" | "notSees" | "never" | "confirms" | "behaves" | "learningOwner" | "later" | "learnsLater">>
+    >
+  >
   /**
    * Señales de alarma propias del producto, además de las comunes de
    * `agent/src/alarm.ts` (ADR 0084). Se prueban sobre el texto sin tildes y en

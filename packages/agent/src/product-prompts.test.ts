@@ -81,7 +81,7 @@ describe("prompts de odentIA, iguales a los de antes", () => {
   })
 
   it("Clío", async () => {
-    await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", findings: dictationFindingsText() })).toMatchFileSnapshot(
+    await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", catalog: dictationFindingsText() })).toMatchFileSnapshot(
       golden("clio.txt"),
     )
     await expect(json(z.toJSONSchema(extraction))).toMatchFileSnapshot(golden("clio-esquema.json"))

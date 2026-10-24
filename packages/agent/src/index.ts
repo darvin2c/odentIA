@@ -69,3 +69,12 @@ export {
   showArgosAnswer,
   ARGOS_MAX_TURNS,
 } from "./argos.js"
+export {
+  askDictationModel,
+  type DictationAsk,
+  type DictationExtraction,
+  type DictationPending,
+  type DictationProfile,
+  groundSource,
+} from "./dictation.js"
+export { extractDictation } from "./extract-dictation.js"

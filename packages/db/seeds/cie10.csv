@@ -123,3 +123,44 @@ K14.6,Glosodinia
 K14.8,Otras enfermedades de la lengua
 K14.9,Enfermedad de la lengua no especificada
 Z01.2,Examen dental
+A09,Otras gastroenteritis y colitis de origen infeccioso y no especificado
+A09.0,Otras gastroenteritis y colitis de origen infeccioso
+A09.9,Gastroenteritis y colitis de origen no especificado
+B34,Infección viral de sitio no especificado
+B34.9,"Infección viral, no especificada"
+E11,Diabetes mellitus no insulinodependiente
+E11.9,"Diabetes mellitus no insulinodependiente, sin mención de complicación"
+E78,Trastornos del metabolismo de las lipoproteínas y otras lipidemias
+E78.5,Hiperlipidemia no especificada
+H10,Conjuntivitis
+H10.9,"Conjuntivitis, no especificada"
+H66,Otitis media supurativa y la no especificada
+H66.9,"Otitis media, no especificada"
+I10,Hipertensión esencial (primaria)
+J00,Rinofaringitis aguda [resfriado común]
+J02,Faringitis aguda
+J02.9,"Faringitis aguda, no especificada"
+J03,Amigdalitis aguda
+J03.9,"Amigdalitis aguda, no especificada"
+J06,"Infecciones agudas de las vías respiratorias superiores, de sitios múltiples o no especificados"
+J06.9,"Infección aguda de las vías respiratorias superiores, no especificada"
+J20,Bronquitis aguda
+J20.9,"Bronquitis aguda, no especificada"
+J45,Asma
+J45.9,"Asma, no especificada"
+K29,Gastritis y duodenitis
+K29.7,"Gastritis, no especificada"
+L20,Dermatitis atópica
+L20.9,"Dermatitis atópica, no especificada"
+M54,Dorsalgia
+M54.5,Lumbago no especificado
+N30,Cistitis
+N30.0,Cistitis aguda
+N39,Otros trastornos del sistema urinario
+N39.0,"Infección de vías urinarias, sitio no especificado"
+R50,Fiebre de otro origen y de origen desconocido
+R50.9,"Fiebre, no especificada"
+Z00,Examen general e investigación de personas sin quejas o sin diagnóstico informado
+Z00.0,Examen médico general
+Z34,Supervisión de embarazo normal
+Z34.9,Supervisión de embarazo normal no especificado

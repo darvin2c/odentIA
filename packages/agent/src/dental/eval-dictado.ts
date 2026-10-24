@@ -16,7 +16,8 @@ import { resolve } from "node:path"
 import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/dental"
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
-import { askDictationModel } from "./dictation.js"
+import { askDictationModel } from "../dictation.js"
+import { DENTAL_DICTATION_PROFILE } from "./dictation.js"
 
 interface ExpectedFinding {
   pieza: number
@@ -81,13 +82,13 @@ for (const dictation of bank.dictados) {
     provider: spec.provider,
     services: bank.servicios,
     diagnosisList: "CIE-10 (OMS)",
-    findings: dictationFindingsText(),
+    catalog: dictationFindingsText(),
     zone: { locale: "es-PE", timezone: "America/Lima" },
     now,
     transcript: dictation.texto,
     context: dictation.contexto ?? "",
     pending,
-  })
+  }, DENTAL_DICTATION_PROFILE)
   const meta = (reply.usage_metadata ?? {}) as { input_tokens?: number; output_tokens?: number; input_token_details?: { cache_read?: number; cache_creation?: number } }
   const cost = costMicrosOf({
     model: spec.modelName,

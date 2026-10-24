@@ -1,0 +1,451 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "nota": {
+      "description": "Los textos de la consulta que se dictaron. Omite los que no se dijeron.",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Por qué vino el paciente, en sus palabras.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "presentIllness": {
+          "description": "El relato de lo que le pasa: cómo empezó y cómo ha seguido.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "illnessDuration": {
+          "description": "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "evolution": {
+          "description": "Lo que se hizo en esta atención y cómo respondió el paciente.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 10000
+        },
+        "indications": {
+          "description": "Lo que se le indica al paciente para después de la atención.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "prognosis": {
+          "description": "El pronóstico que dijo el médico.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "additionalProperties": false
+    },
+    "signos": {
+      "description": "Los signos vitales que dijo, en una sola entrada. Omite las medidas que no dijo.",
+      "type": "object",
+      "properties": {
+        "presionSistolica": {
+          "description": "La presión arterial sistólica en mmHg: el primer número («ciento dieciocho con setenta y seis» = 118).",
+          "type": "number",
+          "minimum": 50,
+          "maximum": 260
+        },
+        "presionDiastolica": {
+          "description": "La presión arterial diastólica en mmHg: el segundo número («ciento dieciocho con setenta y seis» = 76).",
+          "type": "number",
+          "minimum": 30,
+          "maximum": 160
+        },
+        "frecuenciaCardiaca": {
+          "description": "El pulso o la frecuencia cardiaca, en latidos por minuto.",
+          "type": "number",
+          "minimum": 20,
+          "maximum": 250
+        },
+        "frecuenciaRespiratoria": {
+          "description": "La frecuencia respiratoria, en respiraciones por minuto.",
+          "type": "number",
+          "minimum": 5,
+          "maximum": 80
+        },
+        "temperatura": {
+          "description": "La temperatura en °C, con su decimal si lo dijo («treinta y ocho y medio» = 38.5).",
+          "type": "number",
+          "minimum": 30,
+          "maximum": 45
+        },
+        "saturacionOxigeno": {
+          "description": "La saturación de oxígeno en % («satura noventa y ocho» = 98).",
+          "type": "number",
+          "minimum": 50,
+          "maximum": 100
+        },
+        "peso": {
+          "description": "El peso en kg.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 400
+        },
+        "talla": {
+          "description": "La talla en cm («uno sesenta y dos» = 162).",
+          "type": "number",
+          "minimum": 30,
+          "maximum": 250
+        },
+        "perimetroCefalico": {
+          "description": "El perímetro cefálico en cm, en niños.",
+          "type": "number",
+          "minimum": 20,
+          "maximum": 70
+        },
+        "glucosaCapilar": {
+          "description": "La glucosa capilar en mg/dL.",
+          "type": "number",
+          "minimum": 20,
+          "maximum": 600
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "additionalProperties": false
+    },
+    "examen": {
+      "default": [],
+      "description": "Un elemento por cada sistema del examen físico que nombró, de la lista de sistemas.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "system": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "La clave del sistema examinado, de la lista de sistemas que se te da (por ejemplo, toraxPulmones)."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "sin_alteraciones",
+              "con_hallazgos"
+            ],
+            "description": "sin_alteraciones si lo dijo normal («pulmones limpios»); con_hallazgos si describió algo anormal."
+          },
+          "finding": {
+            "description": "Lo que encontró, con la parte del cuerpo y con sus palabras («amígdalas aumentadas, con placas blanquecinas»). Vacío si está sin alteraciones.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 1000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "system",
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "diagnosticos": {
+      "default": [],
+      "description": "Un elemento por cada diagnóstico que nombró el médico.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "diagnosisCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10,
+            "description": "El código del diagnóstico que nombró el médico, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno."
+          },
+          "diagnosisType": {
+            "type": "string",
+            "enum": [
+              "provisional",
+              "confirmed"
+            ],
+            "description": "provisional si el médico aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques."
+          },
+          "note": {
+            "description": "Una precisión que dijo el médico sobre el diagnóstico.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "diagnosisCode",
+          "diagnosisType"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "indicaciones": {
+      "default": [],
+      "description": "Un elemento por cada prestación del consultorio que indicó.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "La prestación del consultorio tal como la nombró el médico (por ejemplo, «nebulización» o «ecografía abdominal»). El sistema la busca en los servicios de la clínica."
+          },
+          "detail": {
+            "description": "Una precisión sobre la indicación.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "recetas": {
+      "default": [],
+      "description": "Un elemento por cada medicamento que recetó.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "genericName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "El medicamento por su Denominación Común Internacional, en minúsculas (amoxicilina, ibuprofeno), aunque lo nombre por su marca."
+          },
+          "strength": {
+            "description": "La concentración con su unidad, como la dijo («de quinientos» = 500 mg).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 60
+          },
+          "dosageForm": {
+            "description": "cápsula, tableta, jarabe, suspensión, gel, enjuague… solo si la dijo o se deduce de la dosis («una cápsula»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 60
+          },
+          "dose": {
+            "description": "Cuánto en cada toma («1 cápsula», «10 mL»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "route": {
+            "description": "La vía, solo si la dijo (oral, sublingual, tópica…).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "frequency": {
+            "description": "Cada cuánto, como la dijo («cada 8 horas», «cada 8 horas si hay dolor»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "duration": {
+            "description": "Por cuánto tiempo («7 días»). Vacío si no lo dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "quantity": {
+            "description": "Cuántas unidades en total, solo si la dijo; si no, la calcula el sistema.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9999
+          },
+          "instructions": {
+            "description": "Una indicación que dijo para ese medicamento («después de las comidas»).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "genericName"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "controles": {
+      "default": [],
+      "description": "Un elemento por cada control que pidió.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "De qué es el control (por ejemplo, «Control en 6 meses»)."
+          },
+          "dueAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "La fecha aproximada del control, en ISO 8601 con zona, contada desde la fecha de hoy que se te da."
+          },
+          "instructions": {
+            "description": "Qué revisar o hacer en ese control.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "title",
+          "dueAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "descanso": {
+      "description": "El descanso médico, solo si lo indicó.",
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "description": "Cuántos días de descanso indicó."
+        },
+        "startsOn": {
+          "description": "El primer día del descanso en AAAA-MM-DD, contado desde la fecha de hoy que se te da. Vacío si es desde hoy.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 10
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "required": [
+        "days"
+      ],
+      "additionalProperties": false
+    },
+    "correcciones": {
+      "default": [],
+      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sugerencia": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "El número de la sugerencia pendiente que corrige."
+          },
+          "cambios": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Solo los campos que cambian, con los mismos nombres que al registrarla (por ejemplo, temperatura)."
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "sugerencia",
+          "cambios"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "quitar": {
+      "default": [],
+      "description": "Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna.",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sugerencia": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "El número de la sugerencia pendiente que pidió quitar."
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "sugerencia"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "examen",
+    "diagnosticos",
+    "indicaciones",
+    "recetas",
+    "controles",
+    "correcciones",
+    "quitar"
+  ],
+  "additionalProperties": false
+}

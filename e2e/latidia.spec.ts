@@ -19,6 +19,7 @@ import { surface } from "./surface"
  * por sistemas y los signos vitales en el tiempo. Lo indicado queda aceptado
  * sin presupuesto, Reportes cuenta la consulta cobrada y un control puede
  * repetirse (entrega 7). Su catálogo es el de un consultorio (entrega 8).
+ * Clío dicta la consulta de un médico (entrega 10).
  */
 
 /** Una llamada a la API desde la página, con la sesión de su dominio. */
@@ -648,5 +649,139 @@ test("latidIA: la biblioteca de un consultorio con su código CPMS, sus cinco es
   const rules = page.getByRole("group", { name: "Normas de Perú" })
   await expect(rules).toContainText("CPMS, obligatoria (RM 550-2023-MINSA)")
   await expect(rules).toContainText("Lista general de latidIA")
+  await context.close()
+})
+
+test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el descanso, que se emite con su firma", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(240_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  // El descanso se firma con el perfil profesional.
+  expect(
+    (
+      await request(page, api, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+        professionalTitle: "Médico cirujano",
+        registrationBody: "CMP",
+        registrationNumber: "045678",
+      })
+    ).status,
+  ).toBe(200)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "40221133", birthDate: "1991-05-02" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, { reason: "Consulta" })
+  expect(opened.status).toBe(201)
+  const encounterId = opened.body.data.id
+  const DICTATION =
+    "Viene por fiebre y dolor de garganta hace tres días. Presión 118 con 76, temperatura 38,5, pulso 96. Amígdalas aumentadas con placas blanquecinas, pulmones limpios. Parece una amigdalitis. Descanso de tres días."
+
+  // La ficha de Clío habla del médico, y su práctica ordena una consulta de un consultorio.
+  await gotoHydrated(page, latidiaUrl(slug, "/agent/asistente-clinico"))
+  await expect(page.getByRole("heading", { level: 1, name: "Clío, tu agente clínico" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Qué sabe" })).toContainText("Lo que el médico dicta en esa atención.")
+  expect(await page.locator("main").innerText()).not.toMatch(/odont|pieza/i)
+  const practice = page.getByRole("region", { name: "Cómo se prueba" })
+  await practice.getByLabel("Dictado de ejemplo").fill(DICTATION)
+  await practice.getByRole("button", { name: "Ver qué sugeriría" }).click()
+  await expect(practice.getByRole("listitem").filter({ hasText: "Signos vitales" })).toContainText("PA 118/76 mmHg")
+  await shot("clio-ficha")
+  await page.getByRole("switch", { name: "Encender a Clío" }).click()
+  await expect(page.getByRole("switch", { name: "Apagar a Clío" })).toBeChecked()
+
+  // En la atención: lo dictado va a cada bloque, también al examen físico y a los documentos.
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${encounterId}`))
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const review = page.getByRole("region", { name: "Sugerencias por revisar" })
+  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
+  const write = async (text: string, from = idle) => {
+    await from.getByRole("button", { name: "Escribir lo dictado" }).click()
+    await from.getByLabel("Escribe lo dictado").fill(text)
+    await from.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  }
+  await write(DICTATION)
+  await expect(review).toContainText("Dictado terminado: 6 sugerencias")
+  await expect(suggested("Signos vitales")).toContainText("PA 118/76 mmHg · FC 96 lpm · T 38.5 °C")
+  await expect(suggested("Examen físico")).toContainText("Boca y garganta · con hallazgos")
+  await expect(suggested("Examen físico")).toContainText("Tórax y pulmones · sin alteraciones")
+  await expect(suggested("Diagnóstico")).toContainText("J03.9 · Amigdalitis aguda, no especificada")
+  await expect(review).toContainText("5 listas")
+  await expect(suggested("Descanso médico")).toContainText("Descanso médico · 3 días desde hoy")
+  await shot("clio-sugerencias")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("clio-sugerencias-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("clio-sugerencias-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // «No, la temperatura es 38,4»: se corrige la medida y se ve qué decía antes.
+  await write("No, la temperatura es 38,4.", review)
+  await expect(suggested("Signos vitales")).toContainText("T 38.4 °C")
+  await expect(suggested("Signos vitales")).toContainText("corregido por voz, antes T 38.5 °C")
+
+  // Confirmar las listas: los signos y el examen entran a la atención; el descanso espera su firma.
+  await review.getByRole("button", { name: /^Confirmar las \d+ listas$/ }).click()
+  await expect
+    .poll(async () => {
+      const detail = await request<{ data: { encounter: { examination: unknown; vitals: unknown } } }>(
+        page,
+        api,
+        "GET",
+        `/api/patients/${patientId}/encounters/${encounterId}`,
+        slug,
+      )
+      return detail.body.data.encounter
+    })
+    .toMatchObject({
+      vitals: { presionSistolica: 118, presionDiastolica: 76, temperatura: 38.4, frecuenciaCardiaca: 96 },
+      examination: {
+        sistemas: {
+          bocaGarganta: { estado: "con_hallazgos", hallazgo: "Amígdalas aumentadas con placas blanquecinas" },
+          toraxPulmones: { estado: "sin_alteraciones" },
+        },
+      },
+    })
+  await expect(suggested("Signos vitales")).toHaveCount(0)
+  const diagnoses = await request<{ data: { diagnoses: Array<{ diagnosisCode: string; diagnosisType: string }> } }>(
+    page,
+    api,
+    "GET",
+    `/api/patients/${patientId}/encounters/${encounterId}`,
+    slug,
+  )
+  expect(diagnoses.body.data.diagnoses).toEqual([expect.objectContaining({ diagnosisCode: "J03.9", diagnosisType: "provisional" })])
+
+  // El descanso se emite en su formulario, ya lleno con los días dictados; el diagnóstico solo si la persona lo autoriza.
+  await suggested("Descanso médico").getByRole("button", { name: "Emitir descanso" }).click()
+  const leave = page.getByRole("dialog", { name: "Emitir descanso médico" })
+  await expect(leave.getByLabel("Días")).toHaveValue("3")
+  await shot("clio-descanso")
+  await leave.getByRole("button", { name: "Emitir descanso médico" }).click()
+  await expect(leave).toBeHidden()
+  await expect(suggested("Descanso médico")).toHaveCount(0)
+  const leaves = await request<{ data: Array<{ days: number; showDiagnosis: boolean; encounterId: string | null }> }>(
+    page,
+    api,
+    "GET",
+    `/api/patients/${patientId}/medical-leaves`,
+    slug,
+  )
+  expect(leaves.body.data).toEqual([expect.objectContaining({ days: 3, showDiagnosis: false, encounterId })])
+  await shot("clio-confirmado")
   await context.close()
 })
