@@ -7,9 +7,9 @@
 import type { AgentConfig, OrgLocale } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { agentTextsFor } from "@odentia/services"
+import { agentTextsFor, argosCatalogText, argosFiguresText, compileArgosFigure } from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
-import { argosRouteQuestion, argosRules, argosSchemas } from "./argos"
+import { argosRouteQuestion, argosRules, argosSchemas, figureWords } from "./argos"
 import { knowledgeQuestion } from "./decision/knowledge"
 import { triageQuestions } from "./decision/points"
 import { extraction, systemPrompt } from "./dental/dictation"
@@ -68,6 +68,18 @@ describe("prompts de odentIA, iguales a los de antes", () => {
     await expect(json(schemas)).toMatchFileSnapshot(golden("argos-esquemas.json"))
   })
 
+  it("el catálogo y las cifras de Argos", async () => {
+    for (const key of ["gestion", "recepcion", "clinico", "caja"] as const) {
+      await expect(argosCatalogText(key, DENTAL)).toMatchFileSnapshot(golden(`argos-catalogo-${key}.txt`))
+      await expect(argosFiguresText(key, figureWords(DENTAL))).toMatchFileSnapshot(golden(`argos-cifras-${key}.txt`))
+    }
+    const compiled = ["sin_venir", "reactivados"].map((cifra) => {
+      const out = compileArgosFigure({ cifra }, { key: "gestion", compare: false, names: null, words: figureWords(DENTAL) })
+      return "problem" in out ? out : { sql: out.sql, name: out.figure.name, describes: out.figure.describes, how: out.how }
+    })
+    await expect(json(compiled)).toMatchFileSnapshot(golden("argos-cifras-sin-venir.json"))
+  })
+
   it("Clío", async () => {
     await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", findings: dictationFindingsText() })).toMatchFileSnapshot(
       golden("clio.txt"),
@@ -76,20 +88,42 @@ describe("prompts de odentIA, iguales a los de antes", () => {
   })
 })
 
-describe("sin textos de un producto, nada dental", () => {
-  const DENTAL_WORDS = /\b(dental|dientes?|boca|odont\w*|tomograf\w*|ortodon\w*|frenillos?|piezas?|teeth|mouth)\b/i
+describe("latidIA: lo que lee el modelo, sin nada dental ni de odentIA", () => {
+  const DENTAL_WORDS = /\b(dental|dientes?|boca|odont\w*|tomograf\w*|ortodon\w*|frenillos?|piezas?|teeth|mouth|exodoncia|endodoncia)\b/i
+  const MEDICAL = agentTextsFor("medical")
+  const tools = makeAgentTools({ texts: MEDICAL } as AgentToolCtx)
+  const latidia = (name: string) => golden(`latidia/${name}`)
+
   it("Sofi, sus herramientas, las preguntas de decisión y Argos", () => {
-    const none = agentTextsFor("medical")
-    const tools = makeAgentTools({ texts: none } as AgentToolCtx)
     const read = [
-      receptionPrompt(zone, config, { tools: new Set(tools.map((tool) => tool.name)), services: "lista" }, none),
-      ...tools.map((tool) => tool.description),
-      JSON.stringify(triageQuestions(none)),
-      JSON.stringify(knowledgeQuestion([], none)),
-      argosRules(none),
-      JSON.stringify(argosRouteQuestion(none)),
-      JSON.stringify(Object.values(argosSchemas(none)).map((schema) => z.toJSONSchema(schema))),
+      receptionPrompt(zone, config, { tools: new Set(tools.map((tool) => tool.name)), services: "lista" }, MEDICAL),
+      ...tools.map((tool) => `${tool.description}\n${JSON.stringify(z.toJSONSchema(tool.schema as z.ZodType))}`),
+      JSON.stringify(triageQuestions(MEDICAL)),
+      JSON.stringify(knowledgeQuestion([], MEDICAL)),
+      argosRules(MEDICAL),
+      JSON.stringify(argosRouteQuestion(MEDICAL)),
+      JSON.stringify(Object.values(argosSchemas(MEDICAL)).map((schema) => z.toJSONSchema(schema))),
+      ...(["gestion", "recepcion", "clinico", "caja"] as const).flatMap((key) => [
+        argosCatalogText(key, MEDICAL),
+        argosFiguresText(key, figureWords(MEDICAL)),
+      ]),
     ]
-    for (const text of read) expect(text).not.toMatch(DENTAL_WORDS)
+    for (const text of read) {
+      expect(text).not.toMatch(DENTAL_WORDS)
+      expect(text).not.toContain("odentIA")
+      // «Sin venir» y «reactivados» son de 12 meses en latidIA (decisión 16).
+      expect(text).not.toMatch(/\b6 (meses|months)\b/)
+    }
+  })
+
+  it("lo que lee, como queda (se mide antes de abrir consultorios)", async () => {
+    await expect(receptionPrompt(zone, config, { tools: new Set(tools.map((tool) => tool.name)), services: "lista" }, MEDICAL)).toMatchFileSnapshot(
+      latidia("sofi-lista.txt"),
+    )
+    await expect(argosRules(MEDICAL)).toMatchFileSnapshot(latidia("argos-reglas.txt"))
+    await expect(argosCatalogText("gestion", MEDICAL)).toMatchFileSnapshot(latidia("argos-catalogo-gestion.txt"))
+    await expect(argosFiguresText("gestion", figureWords(MEDICAL))).toMatchFileSnapshot(latidia("argos-cifras-gestion.txt"))
+    const sinVenir = compileArgosFigure({ cifra: "sin_venir" }, { key: "gestion", compare: false, names: null, words: figureWords(MEDICAL) })
+    expect("problem" in sinVenir ? sinVenir.problem : sinVenir.sql).toContain("interval '12 months'")
   })
 })

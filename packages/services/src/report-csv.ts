@@ -11,7 +11,8 @@ import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { answerFor, type ReportAskOptions, type ReportAskQuery } from "./report-ask.js"
 import { getReportCommissions } from "./report-finance.js"
-import { channelWords, reportFigureOf } from "./report-figures.js"
+import { channelWords, reportFigureOf, withFigureWords } from "./report-figures.js"
+import { productAgentTexts } from "./products.js"
 import { getPatientReportList, isPatientReportList } from "./report-patients.js"
 import { type ReportQuery, reportScope } from "./report-scope.js"
 import { getReportProfessionals } from "./report-summary.js"
@@ -225,7 +226,8 @@ const GROUP_COLUMN: Partial<Record<string, string>> = {
 export async function reportAnswerCsv(tx: Db, orgId: string, query: ReportAskQuery, options: ReportAskOptions): Promise<CsvFile> {
   const answer = await answerFor(tx, orgId, query, options)
   const chart = answer.chart
-  const name = reportFigureOf(answer.query.figure)?.name ?? answer.title
+  const official = reportFigureOf(answer.query.figure)
+  const name = official ? withFigureWords(official, await productAgentTexts(tx, orgId)).name : answer.title
   // La cifra como número que una hoja de cálculo puede sumar: importes sin miles, horas en horas, porcentajes enteros.
   const number = (value: number | null): CsvCell =>
     value === null

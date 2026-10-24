@@ -13,6 +13,8 @@
 import { reportPin, reportQuestion, REPORT_PIN_LIMIT } from "@odentia/db/schema/reports"
 import type { Db } from "@odentia/db"
 import { and, count, eq, gte, isNotNull, sql } from "drizzle-orm"
+import type { ProductAgentTexts } from "./product-agent.js"
+import { productAgentTexts } from "./products.js"
 import { getAdminSettings } from "./agent-admin.js"
 import { adminLineOf } from "./admin-lines.js"
 import { LINE_WORDS } from "./admin-request.js"
@@ -29,6 +31,7 @@ import {
   groupsOf,
   previousPeriodKey,
   reportFigureOf,
+  withFigureWords,
   scopeWords,
   type Sentence,
   sentenceOf,
@@ -136,9 +139,14 @@ export async function recordReportQuestionFailure(tx: Db, orgId: string, userId:
   return { kind: "sin_modelo", message: REPORT_ASK_WORDS.sinModelo }
 }
 
-function optionOf(candidate: { figure: string }, base: Omit<ReportAskQuery, "figure">): { label: string; query: ReportAskQuery } | null {
-  const figure = reportFigureOf(candidate.figure)
-  if (!figure) return null
+function optionOf(
+  candidate: { figure: string },
+  base: Omit<ReportAskQuery, "figure">,
+  texts: ProductAgentTexts,
+): { label: string; query: ReportAskQuery } | null {
+  const official = reportFigureOf(candidate.figure)
+  if (!official) return null
+  const figure = withFigureWords(official, texts)
   const group = groupsOf(figure).includes(base.group) ? base.group : (figure.defaultGroup ?? "total")
   const label = group === "total" || group === figure.defaultGroup ? figure.name : `${figure.name}, ${FIGURE_GROUP_WORDS[group].toLowerCase()}`
   return { label, query: { ...base, figure: figure.key, group } }
@@ -184,11 +192,12 @@ export async function resolveReportQuestion(
   }
   if (interpretation.kind === "no_sabe") {
     await record(tx, orgId, userId, "no_sabe", usedModel, interpretation.closest[0]?.figure ?? null)
-    return { kind: "no_sabe", message: REPORT_ASK_WORDS.noSabe, closest: closestOptions(interpretation.closest, screen) }
+    return { kind: "no_sabe", message: REPORT_ASK_WORDS.noSabe, closest: closestOptions(interpretation.closest, screen, await productAgentTexts(tx, orgId)) }
   }
   if (interpretation.kind === "pregunta") {
     const base = { ...screenOf(interpretation, screen), group: interpretation.group }
-    const offered = interpretation.candidates.map((candidate) => optionOf(candidate, base)).filter((option) => option !== null)
+    const texts = await productAgentTexts(tx, orgId)
+    const offered = interpretation.candidates.map((candidate) => optionOf(candidate, base, texts)).filter((option) => option !== null)
     await record(tx, orgId, userId, "pregunta", usedModel, interpretation.candidates[0]?.figure ?? null, interpretation.group)
     if (offered.length === 0) return { kind: "no_sabe", message: REPORT_ASK_WORDS.noSabe, closest: [] }
     return { kind: "pregunta", message: interpretation.group === "sede" ? REPORT_ASK_WORDS.preguntaSedes : REPORT_ASK_WORDS.pregunta, options: offered }
@@ -199,8 +208,8 @@ export async function resolveReportQuestion(
   return { kind: "respuesta", answer }
 }
 
-function closestOptions(closest: ReportCandidate[], screen: ReportQuery): Array<{ label: string; query: ReportAskQuery }> {
-  return closest.map((candidate) => optionOf(candidate, { ...screen, group: "total" })).filter((option) => option !== null)
+function closestOptions(closest: ReportCandidate[], screen: ReportQuery, texts: ProductAgentTexts): Array<{ label: string; query: ReportAskQuery }> {
+  return closest.map((candidate) => optionOf(candidate, { ...screen, group: "total" }, texts)).filter((option) => option !== null)
 }
 
 /** «Escríbeles a los que no vinieron»: qué línea de Argos lo haría, por palabras. */

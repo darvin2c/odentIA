@@ -334,10 +334,11 @@ async function attendAgentRun(
         .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
         .limit(1)
       if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
+      const texts = await productAgentTexts(tx, orgId)
       // Una señal de alarma («me duele el pecho», «no puedo respirar») no espera
       // a nadie (ADR 0084): se atiende aunque una persona del equipo esté
       // conversando o la persona cite su mensaje.
-      alarm = screenMode !== "recheck" && hasAlarmSignal(trigger.body)
+      alarm = screenMode !== "recheck" && hasAlarmSignal(trigger.body, texts.alarmSignals)
       // Una persona del equipo conversa en vivo (ADR 0050): el agente espera
       // hasta 15 minutos después de su último mensaje y entonces vuelve; si
       // para entonces ella ya respondió, la corrida no tiene nada que hacer.
@@ -448,7 +449,7 @@ async function attendAgentRun(
       coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
       burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
       // La alarma puede venir en cualquier mensaje de la ráfaga, no solo en el último.
-      alarm = alarm || (screenMode !== "recheck" && burst.some((item) => hasAlarmSignal(item.body)))
+      alarm = alarm || (screenMode !== "recheck" && burst.some((item) => hasAlarmSignal(item.body, texts.alarmSignals)))
       // A quien está en Spam primero lo mira Jev: una palabra de derivación no la saca sola.
       const keyword = screenMode === "recheck" ? undefined : burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
       if (keyword) {
@@ -473,7 +474,7 @@ async function attendAgentRun(
         toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
           excludedTools: await orgToolExclusions(tx, orgId, cfg),
-          texts: await productAgentTexts(tx, orgId),
+          texts,
         }),
         spec,
         cfg,

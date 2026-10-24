@@ -12,9 +12,9 @@
  * preguntar entre dos o tres, o si no está en la lista.
  */
 import type { AdminAnswer, AdminDecider, AdminQuestion } from "./admin-request.js"
-import { FIGURE_AREAS, type FigureArea, type FigureGroup, groupsOf, type ReportFigure, reportFigureOf, visibleFigures } from "./report-figures.js"
+import { FIGURE_AREAS, type FigureArea, type FigureGroup, groupsOf, type ReportFigure, reportFigureOf, visibleFigures, withFigureWords } from "./report-figures.js"
 import { addDays, currentMonthIn, REPORT_PERIOD_PATTERN, reportDayOf } from "./report-periods.js"
-import { clinicWord, type ProductAgentTexts } from "./product-agent.js"
+import { clinicWord, type ProductAgentTexts, productName } from "./product-agent.js"
 
 /** De qué trata la pregunta: solo `cifra` se responde. */
 export const REPORT_QUESTION_TOPICS = ["cifra", "clinico", "accion", "otro"] as const
@@ -42,12 +42,12 @@ const CLINICAL_RE = /\b(diabet\w*|hipertens\w*|alergi\w*|alergic\w*|caries|diagn
 
 const NONE = "ninguna"
 
-const AREA_WORDS: Record<FigureArea, string> = {
+const areaWords = (texts: ProductAgentTexts): Record<FigureArea, string> => ({
   dinero: "Dinero: lo cobrado, los gastos, lo que queda, las deudas, las comisiones, lo que se debe pagar.",
   pacientes: "Pacientes: los nuevos, los que nos buscaron, los presupuestos aceptados, cómo nos conocieron, los que vuelven o dejaron de venir, los controles.",
   agenda: "Agenda: las citas atendidas, las inasistencias, las canceladas, qué tan llena está la agenda, las horas libres, la espera en sala.",
-  agente: "Los agentes de odentIA: lo que hizo y trajo el agente, las conversaciones que atendió, las citas que agendó o recuperó, lo que cuesta, cuánto se tarda en responder, y las consultas dictadas con Clío.",
-}
+  agente: `Los agentes de ${productName(texts)}: lo que hizo y trajo el agente, las conversaciones que atendió, las citas que agendó o recuperó, lo que cuesta, cuánto se tarda en responder, y las consultas dictadas con Clío.`,
+})
 
 const groupOptions = (texts: ProductAgentTexts): Array<{ value: FigureGroup; description: string }> => [
   { value: "total", description: "Una sola cifra, sin separarla: «¿cuánto…?», «¿cuántos…?»." },
@@ -86,7 +86,7 @@ export function reportQuestions(texts: ProductAgentTexts, figures: ReportFigure[
       id: "area",
       kind: "choice",
       instructions: "Si pide una cifra, ¿de qué parte de la clínica es?",
-      options: FIGURE_AREAS.map((area) => ({ value: area, description: AREA_WORDS[area] })),
+      options: FIGURE_AREAS.map((area) => ({ value: area, description: areaWords(texts)[area] })),
     },
     ...FIGURE_AREAS.map(
       (area): AdminQuestion => ({
@@ -94,7 +94,10 @@ export function reportQuestions(texts: ProductAgentTexts, figures: ReportFigure[
         kind: "choice",
         instructions: `Si la pregunta es de ${area === "agente" ? "el agente" : area}, ¿cuál de estas cifras pide? Elige «${NONE}» si no pide ninguna de ellas.`,
         options: [
-          ...figures.filter((figure) => figure.area === area).map((figure) => ({ value: figure.key, description: `${figure.name}: ${figure.describes}` })),
+          ...figures
+            .filter((figure) => figure.area === area)
+            .map((official) => withFigureWords(official, texts))
+            .map((figure) => ({ value: figure.key, description: `${figure.name}: ${figure.describes}` })),
           { value: NONE, description: "Pide otra cifra que no está aquí." },
         ],
       }),

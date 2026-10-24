@@ -8,6 +8,7 @@
  *   pnpm -s eval:argos-cifras -- [--org=seed-org-dental-smile]
  */
 import { createAppDb, withOrgContext } from "@odentia/db"
+import { figureWords } from "../argos"
 import {
   ARGOS_FIGURES,
   argosFigure,
@@ -18,6 +19,7 @@ import {
   getOrgLocale,
   listArgosBranches,
   listArgosNames,
+  productAgentTexts,
   reportScope,
   resolveArgosPeriod,
   runArgosQuery,
@@ -32,10 +34,12 @@ const db = createAppDb(url)
 const now = new Date()
 const PERIODS = ["este_mes", "mes_pasado", "ultimos_3_meses", "este_ano"]
 
-const { zone, branches, names } = await withOrgContext(db, ORG, async (tx) => ({
+const { zone, branches, names, texts } = await withOrgContext(db, ORG, async (tx) => ({
   zone: await getOrgLocale(tx, ORG),
   branches: await listArgosBranches(tx, ORG),
   names: await listArgosNames(tx, ORG, "gestion"),
+  // Los meses sin venir del producto de la clínica (latidIA: 12), como Reportes.
+  texts: await productAgentTexts(tx, ORG),
 }))
 
 /** Una cifra de Argos con su periodo y su sede: el valor de la primera fila. */
@@ -49,7 +53,7 @@ async function argosValue(
   if (!figure) return { problem: "no existe" }
   const compiled = compileArgosFigure(
     { cifra: key, ...ask },
-    { key: "gestion", compare: false, names },
+    { key: "gestion", compare: false, names, words: figureWords(texts) },
   )
   if ("problem" in compiled) return compiled
   const resolved = resolveArgosPeriod(

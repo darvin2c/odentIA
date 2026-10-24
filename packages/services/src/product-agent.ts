@@ -9,6 +9,27 @@
  * propósito, se mide el agente antes de aceptarla.
  */
 export interface ProductAgentTexts {
+  /** El nombre del producto, como se presenta un agente («Argos, de odentIA»); vacío: «el sistema». */
+  name: string
+  /**
+   * Los meses sin venir de «Invitar a volver» y de «Sin venir» (los de
+   * `ProductHooks.recallMonths`: 6 en odentIA, 12 en latidIA).
+   */
+  recallMonths: number
+  /**
+   * La primera visita que ofrece Sofi cuando un precio no es final o pasó el
+   * tope de precios (odentIA: «la evaluación», «una evaluación, donde le dan
+   * un presupuesto a su medida»).
+   */
+  visit: { word: string; offer: string }
+  /** Quien atiende, en singular (odentIA: «odontólogo»; latidIA: «médico»). */
+  clinician: string
+  /**
+   * Señales de alarma propias del producto, además de las comunes de
+   * `agent/src/alarm.ts` (ADR 0084). Se prueban sobre el texto sin tildes y en
+   * minúsculas; solo frases fuertes. odentIA no suma ninguna.
+   */
+  alarmSignals: readonly RegExp[]
   /** Qué es la clínica, en español y en inglés («clínica dental», «dental clinic»); vacío: «clínica». */
   clinic: { es: string; en: string }
   /** El recurso que se reserva con la sede y el profesional (odentIA: «unidad dental»). */
@@ -36,6 +57,20 @@ export interface ProductAgentTexts {
     specialtyExample: string
     /** «ortodoncia» */
     searchExample: string
+    /** Especialidades de ejemplo en el catálogo («'Endodoncia', 'Cirugía oral', 'Odontología general'»). */
+    specialtyExamples: string
+    /** Las fases del plan, como valores de la columna «fase». */
+    phases: string
+    /** Qué es «pago» en el embudo («aceptó y pagó algo»). */
+    paid: string
+    /** Quienes atienden pacientes, dicho en el catálogo del equipo («los odontólogos, los profesionales»). */
+    clinicians: string
+    /** El rol de quien atiende, como lo trae la vista del equipo («odontología»). */
+    clinicianRole: string
+    /** Lo de la historia clínica que Argos no lee, además de diagnósticos y notas («odontogramas, periodontogramas»). */
+    clinicalCharts: string
+    /** Un nombre de la calle y lo que es en la clínica, para «buscar_nombres» («extracciones» son los servicios de exodoncia). */
+    streetName: string
   }
   /** Reportes: cómo se nombra al profesional, sus tratamientos y lo clínico de un paciente. */
   reports: {
@@ -52,6 +87,11 @@ export interface ProductAgentTexts {
 
 /** Un producto sin textos propios: las frases comunes, sin agregados. */
 export const NO_AGENT_TEXTS: ProductAgentTexts = {
+  name: "",
+  recallMonths: 6,
+  visit: { word: "la consulta", offer: "una consulta" },
+  clinician: "profesional",
+  alarmSignals: [],
   clinic: { es: "", en: "" },
   room: "",
   site: "",
@@ -59,9 +99,22 @@ export const NO_AGENT_TEXTS: ProductAgentTexts = {
   tagExample: "",
   searchExamples: "",
   care: { scope: "", topics: "", body: "" },
-  argos: { specialtyExample: "", searchExample: "" },
+  argos: {
+    specialtyExample: "",
+    searchExample: "",
+    specialtyExamples: "",
+    phases: "",
+    paid: "pagó algo",
+    clinicians: "los profesionales",
+    clinicianRole: "profesional",
+    clinicalCharts: "",
+    streetName: "",
+  },
   reports: { professional: "", eachProfessional: "", treatments: "", clinicalRecord: "" },
 }
+
+/** «odentIA», «latidIA» o, sin texto del producto, «el sistema». */
+export const productName = (texts: ProductAgentTexts): string => texts.name || "el sistema"
 
 /** «clínica dental» o, sin texto del producto, «clínica». */
 export const clinicWord = (texts: ProductAgentTexts, lang: "es" | "en" = "es"): string =>

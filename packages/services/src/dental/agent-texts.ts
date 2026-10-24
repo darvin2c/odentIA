@@ -1,10 +1,16 @@
 import type { ProductAgentTexts } from "../product-agent.js"
+import { dentalHooks } from "./hooks.js"
 
 /**
  * Las palabras de odentIA en lo que lee el modelo (ADR 0079, entrega 6): las
  * mismas de antes de separar lo común de lo dental, carácter por carácter.
  */
 export const DENTAL_AGENT_TEXTS: ProductAgentTexts = {
+  name: "odentIA",
+  recallMonths: dentalHooks.recallMonths,
+  visit: { word: "la evaluación", offer: "una evaluación, donde le dan un presupuesto a su medida" },
+  clinician: "odontólogo",
+  alarmSignals: [],
   clinic: { es: "clínica dental", en: "dental clinic" },
   room: "unidad dental",
   site: "pieza",
@@ -19,7 +25,17 @@ export const DENTAL_AGENT_TEXTS: ProductAgentTexts = {
     topics: "teeth, the mouth, eating or care after a dental procedure",
     body: "teeth, the mouth",
   },
-  argos: { specialtyExample: "Ortodoncia y Ortopedia Maxilar", searchExample: "ortodoncia" },
+  argos: {
+    specialtyExample: "Ortodoncia y Ortopedia Maxilar",
+    searchExample: "ortodoncia",
+    specialtyExamples: "'Endodoncia', 'Cirugía oral', 'Odontología general'",
+    phases: "'urgencia'|'basica'|'quirurgica'|'rehabilitadora'|'mantenimiento'",
+    paid: "aceptó y pagó algo",
+    clinicians: "los odontólogos, los profesionales",
+    clinicianRole: "odontología",
+    clinicalCharts: "odontogramas, periodontogramas",
+    streetName: "«extracciones» son los servicios de exodoncia, «ortodoncia» es la especialidad que la nombra",
+  },
   reports: {
     professional: "doctor u odontólogo",
     eachProfessional: "de cada dentista",

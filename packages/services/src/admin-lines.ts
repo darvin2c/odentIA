@@ -49,7 +49,8 @@ export interface AdminLine {
   /** Rótulo del área de la clínica. */
   area: string
   /** Lo que pasa, con el plazo cuando la línea lo tiene. */
-  trigger: (days: number | null) => string
+  /** Cuándo se activa; `recallMonths` son los meses sin venir del producto (`ProductHooks.recallMonths`). */
+  trigger: (days: number | null, recallMonths: number) => string
   /** Paso de espera del flujo; null si actúa en el momento. */
   wait: (days: number | null, timing?: LineTiming) => string | null
   /** Quién lo hace con la línea entera: el agente o una persona del equipo. */
@@ -256,7 +257,9 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     key: "invitar_a_volver",
     name: "Invitar a volver",
     area: "Pacientes",
-    trigger: () => "Seis meses sin venir, sin cita ni pendientes",
+    // Los meses del producto: seis en odentIA, un año en latidIA (decisión 16 del issue 229).
+    trigger: (_, months) =>
+      `${months === 6 ? "Seis meses" : months === 12 ? "Un año" : `${months} meses`} sin venir, sin cita ni pendientes`,
     wait: () => null,
     actor: "agente",
     agent: {
@@ -463,12 +466,12 @@ export interface LineFlow {
 export function flowOf(
   line: AdminLine,
   state: { agentPart: boolean; teamPart: boolean },
-  options: { days: number | null; all?: boolean; timing?: LineTiming },
+  options: { days: number | null; all?: boolean; timing?: LineTiming; recallMonths: number },
 ): LineFlow {
   const agentOn = !!line.agent && (options.all || state.agentPart)
   const teamOn = options.all || state.teamPart
   const team = TASK_AREA_LABELS[line.team.area]
-  const start: FlowStep = { id: "inicio", kind: "inicio", label: line.trigger(options.days), actor: null, actorLabel: null, part: null, always: false }
+  const start: FlowStep = { id: "inicio", kind: "inicio", label: line.trigger(options.days, options.recallMonths), actor: null, actorLabel: null, part: null, always: false }
   const wait = line.wait(options.days, options.timing)
   const waitStep: FlowStep[] = wait
     ? [{ id: "espera", kind: "paso", label: wait, actor: "administrador", actorLabel: `${AGENT_NAMES.administrador} · agente`, part: null, always: false }]
