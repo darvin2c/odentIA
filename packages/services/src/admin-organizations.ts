@@ -1,3 +1,4 @@
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
 import { ROLE_LABELS } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
@@ -277,6 +278,8 @@ export interface PendingInvitation {
   role: string | null
   roleLabel: string
   expiresAt: Date
+  /** El producto de la clínica: su dirección va en su dominio (decisión 9 del issue 229). */
+  product: ClinicalProduct
   provisioning: { hasProfile: boolean; hasBranch: boolean }
 }
 
@@ -292,6 +295,8 @@ export interface MyOrganization {
   roleLabel: string
   /** false cuando es la única propietaria (el servidor también lo rechaza). */
   canLeave: boolean
+  /** El producto de la clínica: su dirección va en su dominio (decisión 9 del issue 229). */
+  product: ClinicalProduct
   provisioning: { hasProfile: boolean; hasBranch: boolean }
 }
 
@@ -1328,7 +1333,7 @@ export async function listMyInvitations(tx: Db, email: string): Promise<PendingI
   const out: PendingInvitation[] = []
   for (const row of live) {
     const [profile] = await tx
-      .select({ id: orgProfile.organizationId })
+      .select({ id: orgProfile.organizationId, product: orgProfile.product })
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, row.organizationId))
       .limit(1)
@@ -1345,6 +1350,7 @@ export async function listMyInvitations(tx: Db, email: string): Promise<PendingI
       role: row.role,
       roleLabel: roleLabelOf(row.role),
       expiresAt: row.expiresAt,
+      product: isClinicalProduct(profile?.product) ? profile.product : "dental",
       provisioning: { hasProfile: Boolean(profile), hasBranch: Boolean(sede) },
     })
   }
@@ -1367,7 +1373,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
   const out: MyOrganization[] = []
   for (const row of rows) {
     const [profile] = await tx
-      .select({ id: orgProfile.organizationId })
+      .select({ id: orgProfile.organizationId, product: orgProfile.product })
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, row.organizationId))
       .limit(1)
@@ -1385,6 +1391,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       role: row.role,
       roleLabel: roleLabelOf(row.role),
       canLeave: await canLeaveOrganization(tx, userId, row.organizationId, row.role),
+      product: isClinicalProduct(profile?.product) ? profile.product : "dental",
       provisioning: { hasProfile: Boolean(profile), hasBranch: sedes.length > 0 },
     })
   }

@@ -73,6 +73,7 @@ import { apiFetch } from "../lib/api"
 import { legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
+import { productUi } from "../product/product-ui"
 import { useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
@@ -89,6 +90,8 @@ interface OrgRegion {
   locale: string | undefined
   timeZone: string | undefined
   country: string | undefined
+  /** El producto de la clínica: si no es el de esta app, se abre en su dominio. */
+  product?: string | undefined
 }
 let orgRegionLoaded: OrgRegion | null = null
 async function loadOrgRegion(): Promise<OrgRegion> {
@@ -99,6 +102,7 @@ async function loadOrgRegion(): Promise<OrgRegion> {
       locale: profile?.locale?.trim() || undefined,
       timeZone: profile?.timezone?.trim() || undefined,
       country: profile?.countryCode?.trim() || undefined,
+      product: profile?.product,
     }
     if (typeof window !== "undefined") {
       orgRegionLoaded = region
@@ -130,7 +134,12 @@ export const Route = createFileRoute("/_org")({
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
     if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
-    return { session, org: data, region: await loadOrgRegion() }
+    const region = await loadOrgRegion()
+    // Una clínica de otro producto se abre en su dominio, con su app (decisión 9 del issue 229).
+    if (region.product && region.product !== productUi().product) {
+      throw redirect({ href: tenantUrl(slug, location.href, region.product) })
+    }
+    return { session, org: data, region }
   },
   component: OrgLayout,
 })
@@ -192,16 +201,20 @@ function OrgSwitcher() {
   const navigate = useNavigate()
   const role = org.members.find((member) => member.userId === session.userId)?.role ?? "member"
   const billing = seesBilling(role)
+  // Las clínicas de la cuenta, con su producto: cada una abre en su dominio.
   const { data: orgs } = useQuery({
-    queryKey: ["orgs"],
-    queryFn: async () => (await authClient.organization.list()).data ?? [],
+    queryKey: ["account", "organizations"],
+    queryFn: async () =>
+      (await apiFetch<{ data: Array<{ organizationId: string; organizationName: string; slug: string; product: string }> }>(
+        "/api/account/organizations",
+      )).data,
   })
   // Lo de cobro que pide actuar marca el nombre de la clínica (ADR 0065).
   const notices = useClinicNotices()
   const billingNotice = billing
     ? notices.data?.find((notice) => (notice.topic === "cobro" || notice.topic === "tope") && notice.tone !== "aviso")
     : undefined
-  const others = (orgs ?? []).filter((item) => item.id !== org.id)
+  const others = (orgs ?? []).filter((item) => item.organizationId !== org.id)
   const initial = org.name.trim().charAt(0).toUpperCase() || "C"
 
   return (
@@ -246,8 +259,11 @@ function OrgSwitcher() {
           <>
             {billing ? <DropdownMenuSeparator /> : null}
             {others.map((item) => (
-              <DropdownMenuItem key={item.id} onClick={() => window.location.assign(tenantUrl(item.slug, "/home"))}>
-                {item.name}
+              <DropdownMenuItem
+                key={item.organizationId}
+                onClick={() => window.location.assign(tenantUrl(item.slug, "/home", item.product))}
+              >
+                {item.organizationName}
               </DropdownMenuItem>
             ))}
           </>

@@ -9,9 +9,16 @@ const envSchema = z.object({
   /** Los de la API: el enlace «Verificar mi correo» del recordatorio lo firma y lo canjea Better Auth. */
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url(),
-  /** Origen público de la plataforma para confirmaciones y bajas. */
+  /** El panel; con él, el esquema y el puerto de la dirección de cada clínica. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
+  /** El dominio de latidIA, el de la API (decisión 9 del issue 229): sus clínicas van en él. Vacío: un solo dominio. */
+  MEDICAL_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
+    .default(""),
   /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
   META_GRAPH_VERSION: z
     .string()

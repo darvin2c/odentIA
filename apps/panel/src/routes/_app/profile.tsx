@@ -688,6 +688,7 @@ const accountOrgsSchema = z.object({
       role: z.string(),
       roleLabel: z.string(),
       canLeave: z.boolean(),
+      product: z.string(),
       provisioning: z.object({ hasProfile: z.boolean(), hasBranch: z.boolean() }),
     }),
   ),
@@ -788,7 +789,7 @@ function MyClinicsCard() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => window.location.assign(tenantUrl(org.slug, "/home"))}
+                      onClick={() => window.location.assign(tenantUrl(org.slug, "/home", org.product))}
                     >
                       Abrir
                     </Button>

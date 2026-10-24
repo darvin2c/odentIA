@@ -44,6 +44,9 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:?}
         VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:?}
+        # Dónde abre una clínica de cada producto (decisión 9 del issue 229); vacíos, en VITE_BASE_DOMAIN.
+        VITE_DENTAL_DOMAIN: ${VITE_DENTAL_DOMAIN:-}
+        VITE_MEDICAL_DOMAIN: ${VITE_MEDICAL_DOMAIN:-}
     # Después de migrar carga las listas de diagnósticos oficiales del repositorio
     # (la CIE-11 de la OMS) y la biblioteca de servicios con la lista de cada país
     # (la CPMS del Perú, ADR 0069): sin ella una clínica del Perú no puede crear

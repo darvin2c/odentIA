@@ -10,7 +10,7 @@ import { adminAccessQuery } from "../../lib/admin-access"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
 import { storedInvitation } from "../../lib/founders"
-import { adminUrl, BASE_DOMAIN, tenantUrl, webUrl } from "../../lib/host"
+import { adminUrl, domainOf, tenantUrl, webUrl } from "../../lib/host"
 
 const appRouteApi = getRouteApi("/_app")
 
@@ -221,7 +221,7 @@ function OrgsPage() {
     return lista.filter((org) =>
       org.organizationName.toLowerCase().includes(consulta)
       || org.slug.toLowerCase().includes(consulta)
-      || `${org.slug}.${BASE_DOMAIN}`.toLowerCase().includes(consulta),
+      || `${org.slug}.${domainOf(org.product)}`.toLowerCase().includes(consulta),
     )
   }, [todas, ultima, texto])
 
@@ -240,7 +240,7 @@ function OrgsPage() {
     if (!puertasListas) return
     autoIdo.current = true
     recordarClinica(session.userId, unicaLista.organizationId)
-    window.location.replace(tenantUrl(unicaLista.slug, "/home"))
+    window.location.replace(tenantUrl(unicaLista.slug, "/home", unicaLista.product))
   }, [search.cambiar, bloquearAuto, unicaLista, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, puertasListas, session.userId])
 
   const pendientes = invitations.data ?? []
@@ -313,7 +313,7 @@ function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrg
   const acciones: RowActionItem[] = org.canLeave
     ? [{ key: "salir", label: "Salir de esta clínica", tone: "danger", icon: <LogOut className="size-4" aria-hidden />, onSelect: onLeave }]
     : []
-  const linea = [`${org.slug}.${BASE_DOMAIN}`, org.roleLabel, sedesTexto(org.branches), abiertaEl !== undefined ? abriste(abiertaEl) : null]
+  const linea = [`${org.slug}.${domainOf(org.product)}`, org.roleLabel, sedesTexto(org.branches), abiertaEl !== undefined ? abriste(abiertaEl) : null]
     .filter(Boolean)
     .join(" · ")
   const enlace = "font-medium break-words before:absolute before:inset-0 before:rounded-xl focus-visible:outline-none"
@@ -328,7 +328,7 @@ function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrg
         <div className="flex flex-wrap items-center gap-2">
           {incomplete && !canManage ? <span className={enlace}>{org.organizationName}</span>
             : incomplete ? <Link to="/onboarding" search={{ continue: org.organizationId }} onClick={() => recordarClinica(userId, org.organizationId)} aria-label={`Terminar el alta de ${org.organizationName}`} className={enlace}>{org.organizationName}</Link>
-            : <a href={tenantUrl(org.slug, "/home")} onClick={() => recordarClinica(userId, org.organizationId)} aria-label={`Entrar a ${org.organizationName}`} className={enlace}>{org.organizationName}</a>
+            : <a href={tenantUrl(org.slug, "/home", org.product)} onClick={() => recordarClinica(userId, org.organizationId)} aria-label={`Entrar a ${org.organizationName}`} className={enlace}>{org.organizationName}</a>
           }
           {incomplete ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${TONO_CLASE.neutro}`}>Falta terminar el alta</span>
             : insignia ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${insignia.clase}`}>{insignia.texto}</span> : null}
@@ -345,7 +345,7 @@ function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrg
             Terminar el alta
           </Button>
         ) : accionPlan ? (
-          <Button variant="outline" className={boton} render={<a href={tenantUrl(org.slug, "/settings/plan")} onClick={() => recordarClinica(userId, org.organizationId)} />}>
+          <Button variant="outline" className={boton} render={<a href={tenantUrl(org.slug, "/settings/plan", org.product)} onClick={() => recordarClinica(userId, org.organizationId)} />}>
             {accionPlan.kind === "pagar" ? "Pagar" : accionPlan.label}
           </Button>
         ) : null}
@@ -378,7 +378,7 @@ function InvitationItem({ invitation, onRespond }: { invitation: AccountInvitati
     onError: (error) => toast.error(error.message),
   })
   return <li className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-card p-4">
-    <div><p className="font-medium">{invitation.organizationName}</p><p className="text-sm text-muted-foreground">{invitation.slug}.{BASE_DOMAIN} · Te invitaron como {invitation.roleLabel}</p></div>
+    <div><p className="font-medium">{invitation.organizationName}</p><p className="text-sm text-muted-foreground">{invitation.slug}.{domainOf(invitation.product)} · Te invitaron como {invitation.roleLabel}</p></div>
     <div className="flex gap-2"><Button variant="ghost" disabled={response.isPending} onClick={() => setRejecting(true)}>Rechazar</Button><Button disabled={response.isPending} onClick={() => response.mutate(true)}>{response.isPending ? "Guardando…" : "Aceptar"}</Button></div>
     <ConfirmDialog open={rejecting} title="Rechazar invitación" description={`No entrarás a ${invitation.organizationName}. Si cambias de opinión, tendrán que invitarte de nuevo.`} confirmLabel="Rechazar invitación" pending={response.isPending} onClose={() => setRejecting(false)} onConfirm={() => response.mutate(false)} />
   </li>

@@ -5,7 +5,7 @@ import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, secretsKeyFromEnv } from "@odentia/services"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -27,20 +27,37 @@ const mailer = createMailer({
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
 })
-const auth = createAuth({
+const authOptions = {
   db,
   ownerDb,
   mailer,
   secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.BETTER_AUTH_URL,
-  webURL: env.WEB_URL,
-  cookieDomain: env.COOKIE_DOMAIN,
-  trustedOrigins: env.trustedOrigins,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
   passwordBreachCheck: env.PASSWORD_BREACH_CHECK !== "false",
   clientIpHeader: env.CLIENT_IP_HEADER,
+}
+const auth = createAuth({
+  ...authOptions,
+  baseURL: env.BETTER_AUTH_URL,
+  webURL: env.WEB_URL,
+  cookieDomain: env.COOKIE_DOMAIN,
+  trustedOrigins: env.trustedOrigins,
 })
+// latidIA en su dominio (decisión 9 del issue 229): misma base y mismo secreto,
+// su propia cookie. Quien trabaja en los dos productos entra una vez en cada uno.
+const productAuth = env.MEDICAL_DOMAIN
+  ? {
+      medical: createAuth({
+        ...authOptions,
+        appName: "latidIA",
+        baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
+        webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
+        cookieDomain: env.MEDICAL_DOMAIN,
+        trustedOrigins: trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN, [new URL(env.ADMIN_URL).origin]),
+      }),
+    }
+  : {}
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }
@@ -63,6 +80,8 @@ const app = createApp({
   }),
   trustedOrigins: env.trustedOrigins,
   cookieDomain: env.COOKIE_DOMAIN,
+  productDomains: env.productDomains,
+  productAuth,
   webURL: env.WEB_URL,
   adminURL: env.ADMIN_URL,
   mailer,

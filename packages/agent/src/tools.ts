@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import type { AgentCaseNote, AnswerBasisItem, AnswerCheck, AnswerTraceOutcome, ProposalAction } from "@odentia/db/schema/agent"
@@ -80,8 +79,10 @@ import {
   agentTextsFor,
   emergencyAdviceFor,
   type ProductAgentTexts,
+  clinicAddressOf,
+  clinicOrigin,
 } from "@odentia/services"
-import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder, Storage } from "@odentia/services"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import { type AgentRoute, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
@@ -244,7 +245,7 @@ export interface AgentToolCtx {
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
    */
-  publicUrl?: { webURL: string; cookieDomain: string }
+  publicUrl?: PublicLinkConfig
   /**
    * Quien vectoriza para buscar por significado. Sin él, la búsqueda es solo por
    * palabras. Solo ordena: los datos se leen de la base al responder.
@@ -1240,19 +1241,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const publicUrl = ctx.publicUrl
       if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
       try {
-        const { link, slug } = await inOrg(async (tx) => {
-          const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, ctx.orgId)).limit(1)
-          return {
-            link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
-            slug: org?.slug ?? null,
-          }
-        })
-        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
-        const url = new URL(publicUrl.webURL)
-        url.hostname = `${slug}.${publicUrl.cookieDomain.replace(/^\./, "")}`
-        url.pathname = "/reserva"
-        url.search = ""
-        url.hash = ""
+        const { link, clinic } = await inOrg(async (tx) => ({
+          link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
+          clinic: await clinicAddressOf(tx, ctx.orgId),
+        }))
+        // En el dominio de su producto (odentIA o latidIA; decisión 9 del issue 229).
+        const origin = clinic ? clinicOrigin(clinic.slug, clinic.product, publicUrl) : null
+        if (!origin) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
+        const url = new URL("/reserva", origin)
         url.searchParams.set("token", link.token)
         const who = link.patientName ?? "la persona"
         const data = link.needsRegistration ? " Como aún no es paciente, la página le pedirá sus datos antes de reservar: díselo." : ""

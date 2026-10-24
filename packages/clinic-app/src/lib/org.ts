@@ -1,5 +1,6 @@
 import {
   type ClinicalCountryProfile,
+  type ClinicalProduct,
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
   type DiagnosisSystemInfo,
@@ -42,6 +43,8 @@ export interface OrgProfile {
   diagnosisSystem: string | null
   /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
   logo?: string | null
+  /** El producto de la clínica (ADR 0079): cada app abre solo las suyas. */
+  product?: ClinicalProduct
   /** Teléfono para urgencias (E.164); null si no lo registró. */
   emergencyPhone?: string | null
   /** El nombre del agente de recepción en esta clínica (Sofi si no eligió otro). */

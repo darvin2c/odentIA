@@ -19,7 +19,7 @@ import { renderEmail, type MailTemplate } from "@odentia/mail"
 import { and, eq, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminSettings } from "./agent-admin.js"
 import { collectedNetMany } from "./finance.js"
-import { clinicOrigin } from "./public-links.js"
+import { clinicOriginOf } from "./public-links.js"
 import { agentBookedMany } from "./report-agent.js"
 import { appointmentsByProfessional } from "./report-agenda.js"
 import { type FigureContext, formatFigure, type FigureValue, reportFigureOf } from "./report-figures.js"
@@ -247,7 +247,7 @@ export async function composeReportDigest(
     if (first) blocks.push({ title: "Argos te recomienda", text: `${first.title}. Con «${first.name}» prendida: ${first.description}` })
   }
 
-  const origin = clinicOrigin(person.slug)
+  const origin = await clinicOriginOf(tx, orgId)
   const mail = reportDigestEmail({
     firstName: person.name.split(/\s+/)[0] ?? person.name,
     clinic: person.clinic,

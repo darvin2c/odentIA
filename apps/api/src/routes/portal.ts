@@ -1,7 +1,7 @@
 import { withOrgContext } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import {
   changePortalAccess,
+  clinicAddressOf,
   getPortalAccessSummary,
   getPortalPolicy,
   givePortalAccess,
@@ -10,7 +10,6 @@ import {
   revokePortalGrant,
   upsertPortalPolicy,
 } from "@odentia/services"
-import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -61,9 +60,10 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; 
   }
 
   async function linkUrl(orgId: string): Promise<((token: string) => string) | null> {
-    const [org] = await deps.db.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-    if (!org?.slug) return null
-    const base = portalOrigin(deps, org.slug)
+    // Con la clínica en contexto: su producto vive en su perfil (con RLS).
+    const clinic = await withOrgContext(deps.db, orgId, (tx) => clinicAddressOf(tx, orgId))
+    if (!clinic) return null
+    const base = portalOrigin(deps, clinic)
     return (token: string) => `${base}/portal?token=${token}`
   }
 

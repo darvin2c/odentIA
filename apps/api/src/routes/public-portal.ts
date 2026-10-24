@@ -1,3 +1,4 @@
+import type { ClinicalProduct } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   cancelPortalAppointment,
@@ -160,9 +161,9 @@ export function createPublicPortalRoute(deps: {
       ? c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429) : null
   }
 
-  function rpFor(org: { slug: string | null; name: string }) {
+  function rpFor(org: { slug: string | null; name: string; product: ClinicalProduct }) {
     if (!org.slug) throw new ServiceError("NOT_FOUND", 404, "Organización no disponible")
-    const expectedOrigin = portalOrigin(deps, org.slug)
+    const expectedOrigin = portalOrigin(deps, { slug: org.slug, product: org.product })
     return { rpID: new URL(expectedOrigin).hostname, rpName: org.name, expectedOrigin }
   }
 

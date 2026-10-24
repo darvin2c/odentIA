@@ -49,10 +49,11 @@ interface SignupConfig {
 }
 
 /** La página de WhatsApp de la clínica; `conectado` le dice que muestre lo que se acaba de conectar. */
-const whatsappPage = (slug: string, connectedId?: string) =>
+const whatsappPage = (clinic: { slug: string; product: string }, connectedId?: string) =>
   tenantUrl(
-    slug,
+    clinic.slug,
     `/settings/integrations/whatsapp${connectedId ? `?conectado=${encodeURIComponent(connectedId)}` : ""}`,
+    clinic.product,
   )
 
 function WhatsAppConnectPage() {
@@ -83,7 +84,7 @@ function WhatsAppConnectPage() {
     <Button
       variant="ghost"
       className="h-auto min-h-11 whitespace-normal text-left sm:min-h-9"
-      render={<a href={whatsappPage(clinic.slug)} />}
+      render={<a href={whatsappPage(clinic)} />}
     >
       Volver a {clinic.organizationName}
     </Button>
@@ -174,7 +175,7 @@ function WhatsAppConnectPage() {
             {...(reconectar ? { reconnectConnectionId: reconectar } : {})}
             onConnected={(connection) => {
               setConnected(connection)
-              window.location.assign(whatsappPage(clinic.slug, connection.id))
+              window.location.assign(whatsappPage(clinic, connection.id))
             }}
           />
         </>
