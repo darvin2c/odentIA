@@ -58,8 +58,8 @@ function refreshSearchInBackground(deps: AutomationWorkerDeps, embedder: SearchE
  * parado no se acumulan escaneos duplicados), ejecuta un único tick con la
  * hora de la DB (idempotencia) y devuelve si hubo trabajo.
  * QueueDef { name: "automation_ticks", poll } sin readOne/ack propios.
- * `publicBaseUrl` lo aporta el padre desde WEB_URL (origen de plataforma;
- * nunca el origen webhook/API) para los enlaces /c/ y /baja/.
+ * Los enlaces /c/ y /baja/ van en la página de la clínica (`configurePublicLinks`);
+ * `publicBaseUrl` (WEB_URL, nunca el origen webhook/API) queda solo por si no hay.
  */
 export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boolean> {
   const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold, embedder, storage } = deps

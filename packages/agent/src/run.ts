@@ -41,6 +41,7 @@ import {
   toolsDisabledBy,
   type ProductAgentTexts,
   productAgentTexts,
+  type PublicLinkConfig,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
@@ -90,7 +91,7 @@ export interface AgentRuntime {
    */
   burst?: { quietMs: number; maxWaitMs: number }
   /** Dirección pública de la plataforma, para los enlaces que el agente entrega (reservar una cita). */
-  publicUrl?: { webURL: string; cookieDomain: string }
+  publicUrl?: PublicLinkConfig
   /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
   embedder?: SearchEmbedder
   /**

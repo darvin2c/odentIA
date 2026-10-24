@@ -24,7 +24,7 @@ import { updateContact } from "./contacts.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
-import { clinicOrigin } from "./public-links.js"
+import { clinicOriginOf } from "./public-links.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { webchatCanNotify, webchatReplyRoutes } from "./webchat-reply.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -172,8 +172,7 @@ async function clinicWebchatView(
     .leftJoin(user, eq(user.id, webchatSite.decidedByUserId))
     .where(and(eq(webchatSite.organizationId, orgId), eq(webchatSite.connectionId, row.id)))
     .orderBy(asc(webchatSite.firstSeenAt), asc(webchatSite.id))
-  const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-  const origin = org ? clinicOrigin(org.slug) : null
+  const origin = await clinicOriginOf(tx, orgId)
   const views = sites.map(({ site, decidedByName }, index) => ({
     id: site.id,
     origin: site.origin,

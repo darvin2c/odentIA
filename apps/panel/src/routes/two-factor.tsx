@@ -5,7 +5,7 @@ import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-r
 import { z } from "zod"
 import { authClient } from "../lib/auth-client"
 import { AuthLegal, RecoverAside, WelcomeAside } from "../lib/auth-screens"
-import { BASE_DOMAIN } from "../lib/host"
+import { KNOWN_DOMAINS } from "../lib/host"
 
 export const Route = createFileRoute("/two-factor")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -26,7 +26,7 @@ function safeNext(next: string | undefined): string | null {
       return url.href
     }
     if (url.protocol !== "https:") return null
-    if (host !== BASE_DOMAIN && !host.endsWith(`.${BASE_DOMAIN}`)) return null
+    if (!KNOWN_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return null
     return url.href
   } catch {
     return null

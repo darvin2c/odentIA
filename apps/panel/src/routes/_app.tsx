@@ -158,7 +158,7 @@ function AppLayout() {
       {pathname !== "/" ? (
         <nav aria-label="Volver" className="px-4 sm:px-6">
           {clinicaOrigen ? (
-            <a href={tenantUrl(clinicaOrigen.slug, "/home")} className={volver}>
+            <a href={tenantUrl(clinicaOrigen.slug, "/home", clinicaOrigen.product)} className={volver}>
               <ChevronLeft className="size-4" aria-hidden />
               {clinicaOrigen.organizationName}
             </a>

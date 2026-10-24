@@ -1,12 +1,12 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
-import { TAX_CATEGORIES } from "@odentia/clinical"
+import { type ClinicalProduct, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { configurePublicLinks, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configurePublicLinks, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -94,6 +94,13 @@ export interface AppDeps {
   webhookBaseUrl: string
   trustedOrigins: string[]
   cookieDomain: string
+  /**
+   * El dominio de cada otro producto (latidIA: `MEDICAL_DOMAIN`; decisión 9 del
+   * issue 229). Sin él, todo va en el de odentIA (`cookieDomain`).
+   */
+  productDomains?: Partial<Record<ClinicalProduct, string>>
+  /** La sesión de cada otro producto: la instancia de Better Auth de su dominio. */
+  productAuth?: Partial<Record<ClinicalProduct, Auth>>
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -219,12 +226,27 @@ export function createApp(deps: AppDeps) {
   const { auth, db } = deps
   // «Su enlace» de cada persona vive en el subdominio de su clínica: los
   // mensajes y las plantillas de WhatsApp que lo llevan leen esta dirección.
-  configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain })
+  configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain, productDomains: deps.productDomains ?? {} })
+  // Cada producto en su dominio: odentIA en `cookieDomain` y latidIA en el suyo.
+  const domains: Partial<Record<ClinicalProduct, string>> = { dental: deps.cookieDomain, ...deps.productDomains }
+  const adminOrigin = new URL(deps.adminURL).origin
+  // Los orígenes de confianza de odentIA y, llevados a su dominio, los de cada otro producto (sin la administración).
+  const trustedOrigins = [
+    ...deps.trustedOrigins,
+    ...Object.values(deps.productDomains ?? {}).flatMap((domain) =>
+      domain ? trustedOriginsOn(deps.trustedOrigins, deps.cookieDomain, domain, [adminOrigin]) : [],
+    ),
+  ]
   // El puerto es opcional: prod sirve en 443 (sin puerto en Origin) y el
   // harness e2e expone el proxy en :4463.
-  const tenantOrigin = new RegExp(
-    `^https://[a-z0-9-]+\\.${deps.cookieDomain.replaceAll(".", "\\.")}(:\\d+)?$`,
+  const tenantOrigins = Object.values(domains).flatMap((domain) =>
+    domain ? [new RegExp(`^https://[a-z0-9-]+\\.${domain.replace(/^\./, "").replaceAll(".", "\\.")}(:\\d+)?$`)] : [],
   )
+  /** La sesión del dominio de la petición: el inicio, el registro y la salida ponen la cookie en el suyo. */
+  const authOf = (c: Context): Auth => {
+    const product = productOfHost(new URL(c.req.url).hostname, domains)
+    return (product && deps.productAuth?.[product]) || auth
+  }
 
   const app = new Hono()
 
@@ -233,7 +255,7 @@ export function createApp(deps: AppDeps) {
     "*",
     cors({
       origin: (origin) =>
-        deps.trustedOrigins.includes(origin) || tenantOrigin.test(origin) ? origin : "",
+        trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)) ? origin : "",
       credentials: true,
       // El nombre de un archivo que se descarga (un CSV de Reportes, un papel en PDF) lo dice el servidor.
       exposeHeaders: ["Content-Disposition"],
@@ -242,7 +264,6 @@ export function createApp(deps: AppDeps) {
 
   // Una página de una clínica no puede usar la cookie compartida para operar
   // el backoffice. SSR solo reenvía cookies para lecturas sin Origin.
-  const adminOrigin = new URL(deps.adminURL).origin
   app.use("/api/admin/*", async (c, next) => {
     const origin = c.req.header("origin")
     const readOnly = c.req.method === "GET" || c.req.method === "HEAD"
@@ -284,7 +305,7 @@ export function createApp(deps: AppDeps) {
   app.use("/api/auth/*", createAdminFactorBoundary(deps))
 
   // Better Auth: montado ANTES de los guards.
-  app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+  app.on(["GET", "POST"], "/api/auth/*", (c) => authOf(c).handler(c.req.raw))
 
   app.use("/api/admin/*", requireAdminContext(deps))
   app.route("/api/admin/access", createAdminCoreRoute(deps))

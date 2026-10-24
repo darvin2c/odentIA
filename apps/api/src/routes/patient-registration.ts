@@ -1,8 +1,8 @@
 import { registrationConfigSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
 import {
+  clinicOriginOf,
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
@@ -55,14 +55,11 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     c.header("Cache-Control", "no-store")
     c.header("Referrer-Policy", "no-referrer")
     return runService(c, 201, () => withOrgContext(deps.db, orgId, async tx => {
-      const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-      if (!org?.slug) throw new Error("La organización no tiene dirección pública")
+      // En la clínica, en el dominio de su producto (decisión 9 del issue 229).
+      const origin = await clinicOriginOf(tx, orgId)
+      if (!origin) throw new Error("La organización no tiene dirección pública")
       const link = await createPatientRegistrationLink(tx, orgId, userId, { contactId: c.req.param("id"), conversationId: parsed.data.conversationId })
-      const url = new URL(deps.webURL)
-      url.hostname = `${org.slug}.${deps.cookieDomain.replace(/^\./, "")}`
-      url.pathname = "/registro"
-      url.search = ""
-      url.hash = ""
+      const url = new URL("/registro", origin)
       url.searchParams.set("token", link.token)
       return { url: url.toString(), expiresAt: link.expiresAt.toISOString() }
     }))

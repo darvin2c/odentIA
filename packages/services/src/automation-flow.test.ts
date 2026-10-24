@@ -69,7 +69,8 @@ import { agentTextsFor } from "./products.js"
  */
 setupTestDb()
 // Los mensajes con «Su enlace» llevan un botón con la dirección de la clínica.
-configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+// latidIA en su propio dominio (decisión 9 del lienzo del issue 229).
+configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test", productDomains: { medical: "latidia.test" } })
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -408,13 +409,29 @@ describe("por dónde le llega a cada persona", () => {
     // A Jorge le faltan datos: por correo sale el texto de la clínica con una línea más, la de su enlace.
     expect(sent.body).toMatch(/Completar mis datos: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toContain("Hola, Jorge. Te recordamos la cita en Clínica Sonríe, sede Centro: mañana, miércoles 7 de octubre")
-    expect(sent.body).toMatch(/Para confirmar: https:\/\/clinica\.test\/c\/\S+\nSi no podrás ir: https:\/\/clinica\.test\/c\/\S+/)
+    // «Confirmar», «Cancelar» y la baja van a la página de la clínica, que es donde viven.
+    expect(sent.body).toMatch(/Para confirmar: https:\/\/auto-\S+\.odentia\.test\/c\/\S+\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     // Al pie, su página «Tus mensajes»; la baja de un toque va en la cabecera del correo (ADR 0040).
     expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}#mensajes$/)
-    expect(sent.listUnsubscribe).toMatch(/^https:\/\/clinica\.test\/baja\/\S+$/)
+    expect(sent.listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
     expect(sent.replyButtons).toBeNull()
     const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, sent.conversationId))
     expect(thread?.externalThreadId).toBe("mail:jorge@example.com")
+  })
+
+  it("en un consultorio de latidIA los enlaces del correo van a su dominio", async () => {
+    const c = await clinic({ email: true })
+    await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, c.orgId))
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Jorge Salas", { whatsapp: false, email: "jorge@example.com", consent: ["recordatorio"] })
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    await deliver(c)
+    const [job] = await jobsOf(c)
+    const sent = await messageOf(job!.sentMessageId)
+    expect(sent.body).toMatch(/Para confirmar: https:\/\/auto-\S+\.latidia\.test\/c\/\S+/)
+    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.latidia\.test\/reserva\?/)
+    expect(sent.listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.latidia\.test\/baja\/\S+$/)
   })
 
   it("mientras WhatsApp no aprueba el mensaje usa el correo de quien lo tiene", async () => {
@@ -728,9 +745,9 @@ describe("los enlaces del correo pasan por la agenda", () => {
     const [job] = await jobsOf(c)
     const sent = await messageOf(job!.sentMessageId)
     const body = sent.body ?? ""
-    const [confirmToken, cancelToken] = [...body.matchAll(/https:\/\/clinica\.test\/c\/(\S+)/g)].map((match) => match[1]!)
+    const [confirmToken, cancelToken] = [...body.matchAll(/https:\/\/auto-\S+\.odentia\.test\/c\/(\S+)/g)].map((match) => match[1]!)
     // La baja de un toque va en la cabecera `List-Unsubscribe` (RFC 2369).
-    const bajaToken = /https:\/\/clinica\.test\/baja\/(\S+)/.exec(sent.listUnsubscribe ?? "")![1]!
+    const bajaToken = /https:\/\/auto-\S+\.odentia\.test\/baja\/(\S+)/.exec(sent.listUnsubscribe ?? "")![1]!
     return { c, p, appointmentId, confirmToken: confirmToken!, cancelToken: cancelToken!, bajaToken }
   }
 
@@ -1524,7 +1541,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect(body.split("\n")[0]).toBe("¿Seguimos conversando? · Clínica Sonríe")
     expect(body).toContain("Hola, Jorge. Te escribimos de Clínica Sonríe sobre tu consulta de «Blanqueamiento». ¿Seguimos conversando?")
     expect(body).toMatch(/Elegir mis mensajes: \S+#mensajes$/)
-    expect((await messageOf(job!.sentMessageId)).listUnsubscribe).toMatch(/^https:\/\/clinica\.test\/baja\/\S+$/)
+    expect((await messageOf(job!.sentMessageId)).listUnsubscribe).toMatch(/^https:\/\/auto-\S+\.odentia\.test\/baja\/\S+$/)
   })
 
   it("con su baja: cierra el caso con su causa y la misma tarea queda para quien lleva la oportunidad, sin otra", async () => {

@@ -33,7 +33,7 @@ export interface SupportNoticeTickResult {
 
 /** El enlace del botón: Soporte en el back-office, o Ayuda en «Tus casos con soporte». */
 export function supportNoticeLink(
-  notice: Pick<ClaimedSupportNotice, "kind" | "caseId" | "clinicSlug">,
+  notice: Pick<ClaimedSupportNotice, "kind" | "caseId" | "clinicSlug" | "clinicProduct">,
   urls: { adminUrl: string; webUrl: string },
 ): string | null {
   const caso = encodeURIComponent(notice.caseId)
@@ -41,7 +41,7 @@ export function supportNoticeLink(
     return `${urls.adminUrl.replace(/\/+$/, "")}/support?caso=${caso}`
   }
   if (!notice.clinicSlug) return `${urls.webUrl.replace(/\/+$/, "")}/support?caso=${caso}`
-  const origin = clinicOrigin(notice.clinicSlug)
+  const origin = clinicOrigin(notice.clinicSlug, notice.clinicProduct ?? "dental")
   return origin ? `${origin}/home?ayuda=casos&caso=${caso}` : null
 }
 

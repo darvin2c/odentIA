@@ -78,7 +78,7 @@ import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
+import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { NOT_RECOVERY_KINDS } from "./saas-actions.js"
@@ -1673,7 +1673,10 @@ export interface DeliverDeps {
   secretsKey: Buffer
   /** Para adjuntar la invitación de calendario a los avisos de cita por correo; sin él, va solo el texto. */
   storage?: Storage
-  /** Origen público de la plataforma, para los enlaces que van en el correo. */
+  /**
+   * Origen de los enlaces del correo cuando no hay dirección pública de la
+   * clínica configurada (`configurePublicLinks`); con ella, van en la clínica.
+   */
   publicBaseUrl?: string
   /**
    * Antes de escribirle a alguien por un seguimiento, lee lo último que esa
@@ -2401,8 +2404,10 @@ export async function deliverJob(
         optOut: null,
         choose: await messageChoicesUrl(tx, orgId, contactId, job.patientId, deps),
       }
-      if (deps.publicBaseUrl) {
-        const base = deps.publicBaseUrl
+      // «Confirmar», «Cancelar» y la baja viven en la página de la clínica
+      // (`/c/` y `/baja/`), en el dominio de su producto; el panel no las tiene.
+      const base = (await clinicOriginOf(tx, orgId)) ?? deps.publicBaseUrl
+      if (base) {
         if (job.kind === "recordatorio_cita") {
           for (const item of group) {
             if (!item.appointmentId) continue

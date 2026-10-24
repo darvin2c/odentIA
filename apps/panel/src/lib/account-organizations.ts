@@ -7,10 +7,13 @@ const organizationSchema = z.object({
   organizationId: z.string(), organizationName: z.string(), slug: z.string(),
   logo: z.string().nullable(), branches: z.array(z.string()),
   role: z.string(), roleLabel: z.string(), canLeave: z.boolean(), provisioning: provisioningSchema,
+  // El producto de la clínica: abre en su dominio (decisión 9 del issue 229).
+  product: z.string(),
 })
 const invitationSchema = z.object({
   id: z.string(), organizationId: z.string(), organizationName: z.string(), slug: z.string(),
   role: z.string().nullable(), roleLabel: z.string(), expiresAt: z.string(), provisioning: provisioningSchema,
+  product: z.string(),
 })
 export type AccountOrganization = z.infer<typeof organizationSchema>
 export type AccountInvitation = z.infer<typeof invitationSchema>

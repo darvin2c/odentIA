@@ -36,6 +36,11 @@ export interface CreateAuthOptions {
   passwordBreachCheck?: boolean
   /** Cabecera con la IP de quien pide; vacía, ninguna (ver `clientIpAddress`). */
   clientIpHeader?: string
+  /**
+   * El producto en cuyo dominio va la sesión (odentIA o latidIA; decisión 9 del
+   * issue 229): una instancia por dominio, con la misma base y el mismo secreto.
+   */
+  appName?: string
 }
 
 /**
@@ -81,9 +86,10 @@ export function createAuth({
   ownerDb,
   passwordBreachCheck: breachCheck = true,
   clientIpHeader,
+  appName = "odentIA",
 }: CreateAuthOptions) {
   return betterAuth({
-    appName: "odentIA",
+    appName,
     secret,
     baseURL,
     database: drizzleAdapter(db, { provider: "pg" }),

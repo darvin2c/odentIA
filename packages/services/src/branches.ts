@@ -7,12 +7,11 @@ import {
   type PostalAddress,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
-import { clinicOrigin } from "./public-links.js"
+import { clinicOriginOf } from "./public-links.js"
 
 export type BranchRow = typeof branch.$inferSelect
 
@@ -66,8 +65,7 @@ export async function branchDirectionsWriter(
  * Sedes. Nulo sin dirección pública configurada.
  */
 export async function branchShortLinkWriter(tx: Db, orgId: string): Promise<(branchSlug: string) => string | null> {
-  const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-  const origin = clinicOrigin(org?.slug ?? "")
+  const origin = await clinicOriginOf(tx, orgId)
   return (branchSlug) => (origin ? `${origin}/llegar/${encodeURIComponent(branchSlug)}` : null)
 }
 

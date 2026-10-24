@@ -1,6 +1,8 @@
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
+import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
 
@@ -148,6 +150,8 @@ export interface ClaimedSupportNotice {
   organizationId: string | null
   clinicName: string | null
   clinicSlug: string | null
+  /** El producto de la clínica: su dirección va en su dominio. */
+  clinicProduct: ClinicalProduct | null
   caseKind: "pregunta" | "problema" | "acceso" | "cobro"
   /** «Automatizaciones › Recordar la cita», o la ruta si la guía no la conoce. */
   screen: string
@@ -175,10 +179,12 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
       kase: supportCase,
       clinicName: organization.name,
       clinicSlug: organization.slug,
+      clinicProduct: orgProfile.product,
       openerName: user.name,
     })
     .from(supportCase)
     .leftJoin(organization, eq(organization.id, supportCase.organizationId))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
     // Sin autor: el caso automático de odentIA («Modelo sin responder»).
     .leftJoin(user, eq(user.id, supportCase.openedBy))
     .where(eq(supportCase.id, notice.caseId))
@@ -225,6 +231,7 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     // El automático no es de una clínica: su título la nombra («Modelo sin responder · Clínica Smile»).
     clinicName: row.clinicName ?? (kase.openedBy === null ? kase.question.split(" · ").slice(1).join(" · ") || null : null),
     clinicSlug: row.clinicSlug,
+    clinicProduct: isClinicalProduct(row.clinicProduct) ? row.clinicProduct : null,
     caseKind,
     screen: topic ? helpTopicLabel(topic) : kase.screen,
     topic: topic?.title ?? kase.screen,

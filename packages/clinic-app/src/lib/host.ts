@@ -25,8 +25,22 @@ export function orgSlugFromHostname(hostname: string): string | null {
   return slug && !slug.includes(".") && !["app", "admin", "api", "www", "storage"].includes(slug) ? slug : null
 }
 
-export const tenantUrl = (slug: string, path = "/") =>
-  `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
+/**
+ * El dominio de cada producto (decisión 9 del issue 229): esta app vive en
+ * `VITE_BASE_DOMAIN`; una clínica de odentIA abre en `VITE_DENTAL_DOMAIN` y
+ * una de latidIA en `VITE_MEDICAL_DOMAIN`. Sin ellos, todo en este.
+ */
+const PRODUCT_DOMAINS: Record<string, string | undefined> = {
+  dental: import.meta.env.VITE_DENTAL_DOMAIN || undefined,
+  medical: import.meta.env.VITE_MEDICAL_DOMAIN || undefined,
+}
+
+/** El dominio de las clínicas de un producto; sin decir cuál, el de esta app. */
+export const domainOf = (product?: string | null): string => (product && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
+
+/** La dirección de una clínica, en el dominio de su producto. */
+export const tenantUrl = (slug: string, path = "/", product?: string | null) =>
+  `https://${slug}.${domainOf(product)}${BASE_PORT}${path}`
 
 export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
 

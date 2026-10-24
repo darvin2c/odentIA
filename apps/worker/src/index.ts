@@ -25,7 +25,13 @@ const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 // «Su enlace» va en el aviso de la cita y en las plantillas de WhatsApp: con la dirección pública de cada clínica.
-configurePublicLinks({ webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN })
+// Cada clínica en el dominio de su producto (decisión 9 del issue 229).
+const publicLinks = {
+  webURL: env.WEB_URL,
+  cookieDomain: env.COOKIE_DOMAIN,
+  productDomains: env.MEDICAL_DOMAIN ? { medical: env.MEDICAL_DOMAIN } : {},
+}
+configurePublicLinks(publicLinks)
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
@@ -56,7 +62,7 @@ if (decisionKeyProblem) console.error(`worker: ${decisionKeyProblem}`)
 const agentRuntime: AgentRuntime = {
   // Un modelo que no responde abre el caso automático en Soporte de odentIA.
   ownerDb,
-  publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  publicUrl: publicLinks,
   // Reenviar un presupuesto lleva su PDF.
   storage,
   ...(embedder ? { embedder } : {}),

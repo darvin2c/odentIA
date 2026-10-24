@@ -22,7 +22,7 @@ const acceptSchema = z.object({
 
 const myOrgsSchema = z.object({
   data: z.array(
-    z.object({ organizationId: z.string(), slug: z.string(), role: z.string() }),
+    z.object({ organizationId: z.string(), slug: z.string(), role: z.string(), product: z.string() }),
   ),
 })
 
@@ -56,10 +56,13 @@ function AcceptInvitationPage() {
       const organizationId = accepted.success ? accepted.data.member?.organizationId : undefined
       // Alta asistida: si la clínica aún no tiene perfil y quien entra puede
       // terminarla (owner/admin), reanuda el alta sin crear otra clínica.
+      // El producto de la clínica: se entra en su dominio (decisión 9 del issue 229).
+      let product: string | undefined
       if (organizationId) {
         try {
           const orgs = myOrgsSchema.parse(await apiFetch<unknown>("/api/account/organizations"))
           const mine = orgs.data.find((org) => org.organizationId === organizationId)
+          product = mine?.product
           if (mine && (mine.role === "owner" || mine.role === "admin")) {
             const profile = profileSchema.parse(await apiFetch<unknown>("/api/org-profile"))
             if (profile.data === null) {
@@ -74,7 +77,7 @@ function AcceptInvitationPage() {
       const { data: orgs } = await authClient.organization.list()
       const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined
       if (slug) {
-        window.location.assign(tenantUrl(slug, "/home"))
+        window.location.assign(tenantUrl(slug, "/home", product))
         return
       }
       await navigate({ to: "/" })

@@ -13,13 +13,15 @@ import { tenantUrl } from "../lib/host"
 export function PlanRedirect({ organizationId, path }: { organizationId: string; path: string }) {
   const organizations = useQuery(accountOrganizationsQuery)
   const navigate = useNavigate()
-  const slug = organizations.data?.find((org) => org.organizationId === organizationId)?.slug ?? null
+  const clinic = organizations.data?.find((org) => org.organizationId === organizationId)
+  const slug = clinic?.slug ?? null
+  const product = clinic?.product ?? null
   const missing = organizations.isSuccess && slug === null
 
   useEffect(() => {
-    if (slug) window.location.replace(tenantUrl(slug, path))
+    if (slug) window.location.replace(tenantUrl(slug, path, product))
     else if (missing) void navigate({ to: "/", search: { cambiar: 1 }, replace: true })
-  }, [slug, missing, path, navigate])
+  }, [slug, product, missing, path, navigate])
 
   return (
     <PageShell>

@@ -18,7 +18,7 @@ import { createHash, createHmac } from "node:crypto"
 import { canAccess } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
-import { member, organization } from "@odentia/db/schema/auth"
+import { member } from "@odentia/db/schema/auth"
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
@@ -30,7 +30,7 @@ import { notFound, ServiceError } from "./errors.js"
 import { calendarFeedFile, type CalendarEvent } from "./icalendar.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { clinicOrigin } from "./public-links.js"
+import { clinicOriginOf } from "./public-links.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /** Quien atiende pacientes: el mismo permiso que abre la Agenda en su columna. */
@@ -476,8 +476,7 @@ async function feedEvents(
     )
     .orderBy(asc(appointment.startsAt))
     .limit(options.limit ?? 2000)
-  const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-  const origin = clinicOrigin(org?.slug ?? "")
+  const origin = await clinicOriginOf(tx, orgId)
   const clinic = (await clinicDisplayName(tx, orgId)) || "la clínica"
   const addressText = await branchAddressWriter(tx, orgId)
   return rows.map((row) => {

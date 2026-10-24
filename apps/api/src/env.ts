@@ -11,6 +11,17 @@ const envSchema = z.object({
   COOKIE_DOMAIN: z.string().min(1),
   TRUSTED_ORIGINS: z.string().min(1),
   /**
+   * El dominio de latidIA (decisión 9 del issue 229): sus clínicas, su panel y
+   * su API van en él (`<slug>.`, `app.`, `api.`), con el esquema y el puerto
+   * de los de odentIA, y con su propia sesión. Vacío: un solo dominio.
+   */
+  MEDICAL_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
+    .default(""),
+  /**
    * Cabecera con la IP de quien pide, para el límite de intentos de Better Auth
    * (`clientIpAddress`). Solo una que reescriba siempre quien está delante. Con
    * Cloudflare Tunnel, `cf-connecting-ip`: Cloudflare la reescribe y el túnel es la
@@ -134,7 +145,11 @@ function loadEnv() {
     process.exit(1)
   }
   const { TRUSTED_ORIGINS, ...rest } = parsed.data
-  return { ...rest, trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()) }
+  return {
+    ...rest,
+    trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()),
+    productDomains: rest.MEDICAL_DOMAIN ? { medical: rest.MEDICAL_DOMAIN } : {},
+  }
 }
 
 export const env = loadEnv()

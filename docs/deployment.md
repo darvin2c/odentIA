@@ -104,6 +104,35 @@ debe recibir la página «Service not found» de OpenShip. Vuelta atrás: quitar
 rutas y el CNAME `*`, volver a exponer los dominios en OpenShip y
 `CLIENT_IP_HEADER=x-real-ip`.
 
+### latidIA en su dominio
+
+La misma instalación sirve latidIA en su dominio (`latidia72.com`; decisión 9 del
+issue 229): una base, una API y una administración; cada clínica abre en el dominio
+de su producto. Con `MEDICAL_DOMAIN=latidia72.com` en la API y el worker:
+
+- La API responde también en `api.latidia72.com` con la sesión de ese dominio (una
+  instancia de Better Auth por dominio, misma base y mismo secreto). Quien trabaja
+  en clínicas de los dos productos entra una vez en cada dominio.
+- CORS acepta `latidia72.com`, `app.latidia72.com` y `*.latidia72.com`: los
+  orígenes de `TRUSTED_ORIGINS` llevados a ese dominio, sin la administración.
+- Los enlaces de una clínica de latidIA («Su enlace», los del correo, el registro,
+  el portal y su passkey, el calendario, el chat y «Cómo llegar») van en
+  `<clínica>.latidia72.com`.
+- Panel y clínica abren cada clínica en su dominio con `VITE_DENTAL_DOMAIN` y
+  `VITE_MEDICAL_DOMAIN` (argumentos de build).
+
+Pendiente fuera del código, en la cuenta de cada servicio:
+
+1. Cloudflare: la zona `latidia72.com` y, en el mismo túnel si la cuenta lo
+   permite, las rutas `api.`, `app.` y `*.` (más el CNAME `*` a mano).
+2. Google OAuth: la dirección de vuelta `https://api.latidia72.com/api/auth/callback/google`.
+3. Meta: el dominio `https://app.latidia72.com/` en la app de «Conectar con Facebook».
+4. R2: `https://*.latidia72.com` en el CORS del bucket de adjuntos.
+5. Correo: `hola@` y `privacidad@latidia72.com` (Email Routing) y el remitente de los correos.
+
+El panel de `app.latidia72.com` y la app de sus clínicas son otro build, con
+`VITE_BASE_DOMAIN=latidia72.com`: llegan con la app médica (entrega 4 del plan).
+
 ## Variables: una sola fuente
 
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.
