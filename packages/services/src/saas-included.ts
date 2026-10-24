@@ -11,7 +11,9 @@ import {
   priceFor,
   STORAGE_GB_BYTES,
 } from "./saas-actions.js"
+import { findOrgLocale } from "./locale.js"
 import { moneyText } from "./saas-emails.js"
+import { getAgentSpendGate } from "./saas-terms.js"
 
 /* ---------- Argos: preguntas incluidas y paquetes (ADR 0085) ---------- */
 
@@ -134,38 +136,32 @@ export async function getArgosAllowance(
   }
 }
 
+/** El último día del mes de la clínica, como lo dice el panel: «10 de noviembre». */
+async function lastDayText(tx: Db, orgId: string, periodEnd: Date): Promise<string> {
+  const { locale, timezone } = await findOrgLocale(tx, orgId)
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", timeZone: timezone }).format(new Date(periodEnd.getTime() - 1))
+}
+
+const BUDGET_REACHED_TEXT = "Llegaste al presupuesto del mes, así que no puedo sumar más preguntas. Súbelo en Plan y pagos y sigo respondiendo."
+
 /**
  * Suma un paquete de preguntas a Argos en el mes de la clínica (ADR 0085):
  * con el permiso de quien administra la clínica o, si encendió «Sumar
- * solas», sin preguntar. Se cobra en la factura del mes, como todo.
+ * solas», sin preguntar. Se cobra en la factura del mes, como todo. Con el
+ * presupuesto del mes alcanzado no se suma: el presupuesto es el límite.
  */
-export async function addArgosPack(
-  tx: Db,
-  orgId: string,
-  input: { automatic: boolean; now?: Date },
-): Promise<ArgosAllowance> {
+export async function addArgosPack(tx: Db, orgId: string, input: { automatic: boolean; now?: Date }): Promise<ArgosAllowance> {
   const now = input.now ?? new Date()
   const before = await getArgosAllowance(tx, orgId, now)
-  if (!before.limited)
-    throw new ServiceError(
-      "ARGOS_PACK_UNAVAILABLE",
-      409,
-      "Tu plan no tiene paquetes de preguntas a Argos",
-    )
+  if (!before.limited) throw new ServiceError("ARGOS_PACK_UNAVAILABLE", 409, "Tu plan no tiene paquetes de preguntas a Argos")
+  if ((await getAgentSpendGate(tx, orgId, now)).capReached) throw new ServiceError("ARGOS_BUDGET_REACHED", 409, BUDGET_REACHED_TEXT)
   const period = await currentSaasPeriod(tx, orgId, now)
   // Dos compras a la vez no suman dos paquetes por el mismo agotamiento.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`argos-pack:${orgId}`}, 0))`)
   const [count] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(saasAction)
-    .where(
-      and(
-        eq(saasAction.organizationId, orgId),
-        eq(saasAction.kind, "preguntas"),
-        gte(saasAction.occurredAt, period.start),
-        lt(saasAction.occurredAt, period.end),
-      ),
-    )
+    .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.kind, "preguntas"), gte(saasAction.occurredAt, period.start), lt(saasAction.occurredAt, period.end)))
   await insertAction(tx, orgId, "preguntas", {
     units: before.packQuestions,
     occurredAt: now,
@@ -177,23 +173,35 @@ export async function addArgosPack(
   return getArgosAllowance(tx, orgId, now)
 }
 
+/** Lo que dice Argos al sumar un paquete: con el permiso de quien administra o solo. */
+export async function argosPackAddedText(tx: Db, orgId: string, allowance: ArgosAllowance, automatic: boolean): Promise<string> {
+  const price = moneyText(allowance.currency ?? "USD", microsToCents(allowance.packPriceMicros ?? 0))
+  return automatic
+    ? `Sumé ${allowance.packQuestions} preguntas por ${price}, como pediste en Plan y pagos. Te quedan ${allowance.remaining}.`
+    : `Listo: sumé ${allowance.packQuestions} preguntas por ${price}. Te quedan ${allowance.remaining} hasta el ${await lastDayText(tx, orgId, allowance.periodEnd)}.`
+}
+
 /**
  * Antes de una pregunta que pasa por el modelo: si quedan preguntas, sigue;
- * si no, suma un paquete solo si la clínica lo pidió, o pide permiso con
- * `ARGOS_QUESTIONS_USED` (lo que dice el panel de Argos).
+ * si no, suma un paquete solo si la clínica lo pidió (y lo dice), o pide
+ * permiso con `ARGOS_QUESTIONS_USED` (lo que dice el panel de Argos). Con el
+ * presupuesto del mes alcanzado responde lo incluido y no suma
+ * (`ARGOS_BUDGET_REACHED`).
  */
-export async function ensureArgosQuestion(tx: Db, orgId: string, now = new Date()): Promise<void> {
+export async function ensureArgosQuestion(tx: Db, orgId: string, now = new Date()): Promise<{ added: string | null }> {
   const allowance = await getArgosAllowance(tx, orgId, now)
-  if (!allowance.limited || allowance.remaining > 0) return
+  if (!allowance.limited || allowance.remaining > 0) return { added: null }
+  if ((await getAgentSpendGate(tx, orgId, now)).capReached) throw new ServiceError("ARGOS_BUDGET_REACHED", 409, BUDGET_REACHED_TEXT)
   if (allowance.autoPack) {
-    await addArgosPack(tx, orgId, { automatic: true, now })
-    return
+    const after = await addArgosPack(tx, orgId, { automatic: true, now })
+    return { added: await argosPackAddedText(tx, orgId, after, true) }
   }
   const total = allowance.included + allowance.added
+  const price = moneyText(allowance.currency ?? "USD", microsToCents(allowance.packPriceMicros ?? 0))
   throw new ServiceError(
     "ARGOS_QUESTIONS_USED",
     409,
-    `Usaste las ${total} preguntas de este mes. ¿Sumo ${allowance.packQuestions} más por ${moneyText(allowance.currency ?? "USD", microsToCents(allowance.packPriceMicros ?? 0))}?`,
+    `Usaste las ${total} preguntas de este mes. ¿Sumo ${allowance.packQuestions} más por ${price}? Las uso para responder esta pregunta y las que vengan hasta el ${await lastDayText(tx, orgId, allowance.periodEnd)}.`,
   )
 }
 

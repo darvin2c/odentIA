@@ -88,19 +88,17 @@ export function FunctionNoteDrawer({
 
 interface LimitsDraft {
   keywords: string
-  dailyRunLimit: string
   closeAfterHours: string
 }
 
 /** Qué parte de los límites se abre: cada fila de la página lleva a la suya; en teléfono, a todas. */
-export type LimitsSection = "todo" | "pasa" | "tope" | "cierre"
+export type LimitsSection = "todo" | "pasa" | "cierre"
 
 /** El título de cada parte, con el nombre del agente de recepción de la clínica. */
 function limitsTitle(section: LimitsSection, receptionName: string): string {
   const titles: Record<LimitsSection, string> = {
     todo: `Límites de ${receptionName}`,
     pasa: "Pasa a una persona cuando",
-    tope: `Tope diario de ${receptionName}`,
     cierre: "Cerrar si el paciente no responde",
   }
   return titles[section]
@@ -109,15 +107,14 @@ function limitsTitle(section: LimitsSection, receptionName: string): string {
 function toLimits(config: AgentConfig): LimitsDraft {
   return {
     keywords: config.handoffKeywords.join(", "),
-    dailyRunLimit: String(config.dailyRunLimit),
     closeAfterHours: String(config.closeAfterHours),
   }
 }
 
 /**
- * Límites de Sofi: cuándo pasa siempre a una persona, cuántas respuestas da al
- * día y cuándo cierra. Responde siempre, a toda hora y en todos los canales
- * (ADR 0084): no hay horario ni canales que elegir. `section` enseña solo la
+ * Límites de Sofi: cuándo pasa siempre a una persona y cuándo cierra.
+ * Responde siempre, a toda hora y en todos los canales (ADR 0084), sin tope de
+ * respuestas: el único límite es el presupuesto del mes (ADR 0085). `section` enseña solo la
  * parte que se pidió; se guarda solo lo que se ve.
  */
 export function LimitsDrawer({
@@ -148,12 +145,7 @@ export function LimitsDrawer({
   }, [open, config])
   const save = useSaveConfig(onClose)
 
-  const limit = /^[0-9]+$/.test(draft.dailyRunLimit.trim()) ? Number(draft.dailyRunLimit.trim()) : Number.NaN
-  const issue = has("tope") && !(limit >= 1 && limit <= 100_000)
-    ? "El tope diario va de 1 a 100 000 respuestas."
-    : has("cierre")
-      ? closeAfterHoursIssue(draft.closeAfterHours)
-      : null
+  const issue = has("cierre") ? closeAfterHoursIssue(draft.closeAfterHours) : null
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -167,7 +159,6 @@ export function LimitsDrawer({
               .filter(Boolean),
           }
         : {}),
-      ...(has("tope") ? { dailyRunLimit: limit } : {}),
       ...(has("cierre") ? { closeAfterHours: Number(draft.closeAfterHours.trim()) } : {}),
     })
   }
@@ -185,7 +176,7 @@ export function LimitsDrawer({
           ? "Además de cuando duda, no tiene el dato o le piden hablar con alguien."
           : shown === "cierre"
             ? `Si el paciente deja de responder, ${receptionName} se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez.`
-            : "Al llegar al tope, la conversación pasa a tu equipo con un aviso para el paciente."
+            : "Cuándo pasa a una persona y cuándo cierra la conversación."
       }
       onSubmit={submit}
       isSubmitting={save.isPending}
@@ -209,20 +200,6 @@ export function LimitsDrawer({
       </Field>
       ) : null}
 
-      {has("tope") ? (
-      <Field>
-        <FieldLabel htmlFor="limites-tope">Tope diario de respuestas</FieldLabel>
-        <Input
-          id="limites-tope"
-          inputMode="numeric"
-          value={draft.dailyRunLimit}
-          onChange={(event) => setDraft({ ...draft, dailyRunLimit: event.target.value })}
-        />
-        <FieldDescription>
-          Cada mensaje que atiende con el modelo cuenta una. Al llegar al tope deja de responder ese día y pasa los casos a tu equipo.
-        </FieldDescription>
-      </Field>
-      ) : null}
       {has("cierre") ? (
       <Field>
         <FieldLabel htmlFor="limites-cierre">Cerrar la conversación si el paciente no responde</FieldLabel>
