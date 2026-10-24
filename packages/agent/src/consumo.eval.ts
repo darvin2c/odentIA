@@ -30,12 +30,13 @@ import { whatsappCloudApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { appointment } from "@odentia/db/schema/agenda"
-import { agentDecisionLog, agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
+import { saasAction } from "@odentia/db/schema/saas-billing"
 import {
   ADMIN_LINES,
   adminLineOf,
@@ -48,6 +49,7 @@ import {
   CUSTOM_LINES,
   ingestInbound,
   replyId,
+  SAAS_WORST_COST_MICROS,
   secretsKeyFromEnv,
   setAppointmentStatus,
   setKnowledgeStatus,
@@ -610,7 +612,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
 
   // ------------------------------ 3. una persona de cada línea responde con texto ---
   console.log("\n3. Cuando la persona responde con texto, Sofi sigue la conversación (modelo que escribe)")
-  const measured = new Map<string, { llm: number; decision: number; turns: number; label: string }>()
+  const measured = new Map<string, { llm: number; decision: number; turns: number; label: string; costMicros: number; unpriced: number; tier: string | null }>()
   /** La primera llamada de cada conversación: con ellas se mide cuánto del sistema es igual entre personas distintas. */
   const openers: ModelCall[] = []
   let sequence = 0
@@ -686,9 +688,19 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     const cached = runs.reduce((sum, row) => sum + (row.cachedInputTokens ?? 0), 0)
     const calls = runs.reduce((sum, row) => sum + (row.llmCalls ?? 0), 0)
     const decision = decisionsUsed.reduce((sum, row) => sum + (row.inputTokens ?? 0) + (row.outputTokens ?? 0), 0)
+    // Lo que costó de verdad y el tipo con que se cobró (ADR 0085): el gasto que anotó la corrida y la acción de esa persona.
+    const [spent] = await ownerDb
+      .select({ micros: sql<number>`coalesce(sum(${aiUsage.costMicros}), 0)::float8`, unpriced: sql<number>`count(*) filter (where ${aiUsage.costMicros} is null)::int` })
+      .from(aiUsage)
+      .where(and(eq(aiUsage.conversationId, conversationId), gte(aiUsage.createdAt, since)))
+    const [charged] = await ownerDb.select({ tier: saasAction.tier }).from(saasAction)
+      .where(and(eq(saasAction.organizationId, ORG), eq(saasAction.contactId, person.contactId), eq(saasAction.kind, "conversacion"), gte(saasAction.occurredAt, since)))
+      .orderBy(desc(saasAction.occurredAt))
+      .limit(1)
+    const costMicros = Number(spent?.micros ?? 0)
     const key = `${script.kind}:${script.label}`
-    measured.set(key, { llm, decision, turns: script.turns.length, label: script.label })
-    console.log(`  ${adminLineOf(script.kind)?.name ?? script.kind} · ${script.label}: ${script.turns.length} mensajes de la persona → ${llm} tokens del modelo que escribe (${llmIn} de entrada y ${llmOut} de salida; ${calls} llamadas, ${cached} de entrada desde caché) y ${decision} del de decisión. Corridas: ${runs.map((row) => row.status).join(", ")}`)
+    measured.set(key, { llm, decision, turns: script.turns.length, label: script.label, costMicros, unpriced: Number(spent?.unpriced ?? 0), tier: charged?.tier ?? null })
+    console.log(`  ${adminLineOf(script.kind)?.name ?? script.kind} · ${script.label}: ${script.turns.length} mensajes de la persona → ${llm} tokens del modelo que escribe (${llmIn} de entrada y ${llmOut} de salida; ${calls} llamadas, ${cached} de entrada desde caché) y ${decision} del de decisión; costó USD ${(costMicros / 1_000_000).toFixed(4)} y se cobra como ${charged?.tier ?? "nada"}. Corridas: ${runs.map((row) => row.status).join(", ")}`)
     for (const [index, text] of script.turns.entries()) console.log(`      «${text}» → ${replies[index]}`)
     if (modelCalls[opener]) openers.push(modelCalls[opener])
     console.log("    Paso a paso:")
@@ -821,5 +833,16 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     console.log(`    → modelo que escribe: ${result.llm} tokens al mes`)
     console.log(`    → modelo de decisión: ${result.decision} tokens al mes («¿ya avisó?» ${result.toldTokens}, conversaciones de Sofi ${result.decision - result.toldTokens - REQUESTS_PER_MONTH * REQUEST_TOKENS}, ${REQUESTS_PER_MONTH} pedidos con palabras ${REQUESTS_PER_MONTH * REQUEST_TOKENS})`)
   }
-  console.log("  Las líneas que solo dejan tareas al equipo y los botones «Confirmar» y «No enviar más» no gastan tokens.\n")
+  console.log("  Las líneas que solo dejan tareas al equipo y los botones «Confirmar» y «No enviar más» no gastan tokens.")
+
+  // ------------------------------- 5. el costo de cada conversación contra su peor costo ---
+  // Si una conversación pasa el peor costo de su tipo, la comprobación del plan (el doble) usa un número viejo: se actualiza `SAAS_WORST_COST_MICROS`.
+  console.log("\n5. Lo que costó cada conversación frente al peor costo de su tipo (`SAAS_WORST_COST_MICROS`, ADR 0085)")
+  const worstOf = SAAS_WORST_COST_MICROS as Record<string, number>
+  for (const item of measured.values()) {
+    const worst = item.tier ? worstOf[item.tier] : undefined
+    const verdict = item.unpriced > 0 ? ` · ${item.unpriced} llamadas sin precio: el costo está incompleto` : worst !== undefined && item.costMicros > worst ? " · PASA EL PEOR: actualizarlo" : ""
+    console.log(`  ${item.label.padEnd(36)} ${(item.tier ?? "sin cobro").padEnd(9)} USD ${(item.costMicros / 1_000_000).toFixed(4)} · peor ${worst === undefined ? "—" : (worst / 1_000_000).toFixed(3)}${verdict}`)
+  }
+  console.log("")
 }, 3_600_000)

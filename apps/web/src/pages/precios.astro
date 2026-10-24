@@ -28,7 +28,7 @@ const range = plan ? `desde ${m(plan.tiers.informa)} una respuesta hasta ${m(pla
 const description = !plan
   ? "Software para clínicas dentales: pagas por lo que hacen tus agentes, no por el software. Lo simple cuesta poco y lo que te trae pacientes cuesta más."
   : founder
-    ? `Software para clínicas dentales. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? `, con ${founder.discountPercent} % menos` : ""}.`
+    ? `Software para clínicas dentales. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
     : `Software para clínicas dentales con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
 const lead = !plan
   ? "Pagas por lo que hacen tus agentes, no por el software. Cada cobro es un trabajo que ves: lo simple cuesta poco y lo que te trae pacientes cuesta más."
@@ -93,7 +93,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Y WhatsApp?",
-    a: "WhatsApp lo cobra Meta directamente a tu clínica, según sus propias tarifas: las revisas en tu cuenta de Meta. Responder a quien te escribió, dentro de las 24 horas, no tiene costo de Meta.",
+    a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
   },
   {
     q: "¿Y si mi clínica tiene mucho movimiento?",

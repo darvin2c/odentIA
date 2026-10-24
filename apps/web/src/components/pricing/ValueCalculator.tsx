@@ -6,6 +6,12 @@ import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../.
 import SizePicker from "../SizePicker"
 import "./value-calculator.css"
 
+/** El promedio por tipo con sus milésimas (USD 0,425): redondeado a centavos, la cuenta de la fila no daría. */
+const average = (value: number) => {
+  const exact = (Math.round(value * 10_000) / 10_000).toFixed(4).replace(/0{1,2}$/, "")
+  return `USD ${exact.replace(".", ",")}`
+}
+
 type Key = keyof ValueInput
 
 export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
@@ -40,9 +46,9 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
         lNew: `${r.lost} pacientes que escribieron y se fueron`,
         lNoShow: `${r.recovered} que faltaron y no volvieron`,
         lTime: `${v.teamHours} horas de tu equipo`,
-        lConv: `${v.writers} conversaciones × ${usd(CONVERSATION)} en promedio`,
+        lConv: `${v.writers} conversaciones × ${average(CONVERSATION)} en promedio`,
         lRec: `${r.recovered} citas recuperadas × ${usd(RECOVERED)}`,
-        lCons: `${v.consultations} consultas × ${usd(CONSULTATION)} en promedio`,
+        lCons: `${v.consultations} consultas × ${average(CONSULTATION)} en promedio`,
         bill: "Tu mes, más impuestos",
         tryIt: "Prueba con tus números",
       }
@@ -50,9 +56,9 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
         lNew: `${r.lost} pacientes que escribieron, no recibieron respuesta a tiempo y se fueron`,
         lNoShow: `${r.recovered} pacientes que faltaron y nadie les ofreció otra cita`,
         lTime: `${v.teamHours} horas de tu equipo en mensajes y notas`,
-        lConv: `${v.writers} conversaciones atendidas × ${usd(CONVERSATION)} en promedio`,
+        lConv: `${v.writers} conversaciones atendidas × ${average(CONVERSATION)} en promedio`,
         lRec: `${r.recovered} citas recuperadas × ${usd(RECOVERED)}, solo si asisten`,
-        lCons: `${v.consultations} consultas confirmadas × ${usd(CONSULTATION)} en promedio`,
+        lCons: `${v.consultations} consultas confirmadas × ${average(CONSULTATION)} en promedio`,
         bill: "Tu mes, más los impuestos de tu país",
         tryIt: "Prueba con los números de tu clínica",
       }

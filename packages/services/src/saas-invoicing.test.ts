@@ -96,7 +96,8 @@ describe("cargo del tramo", () => {
     const start = new Date("2026-08-10T15:00:00Z")
     const end = new Date("2026-09-10T15:00:00Z")
     const orgId = await clinic({ activatedAt: start, currentPeriodStart: start, currentPeriodEnd: end })
-    // 66 conversaciones a USD 0,45 (10 % negociado): USD 29,70; el crédito cubre 64 (USD 28,80).
+    // 66 conversaciones a USD 0,45 (10 % negociado): USD 29,70; el crédito cubre 64 (USD 28,80) y
+    // USD 0,20 de la 65: se cobra solo lo que pasó, USD 0,70 (el crédito vuelve íntegro, ADR 0031).
     for (let index = 0; index < 66; index++) await action(orgId, new Date(start.getTime() + (index + 1) * 3_600_000), 450_000)
     // Una acción del tramo siguiente no entra.
     await action(orgId, new Date(end.getTime() + 3_600_000), 450_000)
@@ -106,13 +107,15 @@ describe("cargo del tramo", () => {
     const lines = await linesOf(charge!.id)
     expect(lines.map((line) => [line.kind, line.quantity, line.amountCents])).toEqual([
       ["cuota", 1, 2900],
-      ["conversacion", 2, 90],
+      ["conversacion", 2, 70],
       ["credito", 64, 0],
       // La clínica de prueba es de Perú: IGV de 18 %.
-      ["impuesto", 1, Math.round((2900 + 90) * 0.18)],
+      ["impuesto", 1, Math.round((2900 + 70) * 0.18)],
     ])
-    expect(lines[1]).toMatchObject({ unitBaseMicros: 500_000, unitPriceMicros: 450_000 })
-    expect(charge).toMatchObject({ subtotalCents: 2990, taxCents: 538, amountCents: 3528, taxLabel: "IGV", currency: "USD" })
+    // Con parte de una acción cubierta, la línea dice solo su total.
+    expect(lines[1]).toMatchObject({ unitBaseMicros: null, unitPriceMicros: null })
+    expect(lines[2]?.description).toContain("y parte de otra por el crédito del mes (29.00 USD)")
+    expect(charge).toMatchObject({ subtotalCents: 2970, taxCents: 535, amountCents: 3505, taxLabel: "IGV", currency: "USD" })
     // Abre el mes siguiente, el mismo día.
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub).toMatchObject({ currentPeriodStart: end, currentPeriodEnd: new Date("2026-10-10T15:00:00Z") })

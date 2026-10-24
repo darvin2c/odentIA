@@ -35,6 +35,27 @@ async function conversationWindowMs(tx: Db, at: Date): Promise<number> {
  * control sí puede recuperar: lo decide si la persona ya tenía su cita.
  */
 export const NOT_RECOVERY_KINDS: readonly string[] = ["recordatorio_cita", "cobranza_vencida", ...APPOINTMENT_NOTICE_KEYS]
+/**
+ * ¿El paciente ya tiene su cita (ADR 0085)? Una cita por venir o un
+ * tratamiento aceptado sin terminar: lo que Argos le escriba entonces es
+ * servicio, no recuperación; sigue al llegar al presupuesto y no se cobra
+ * como cita recuperada (la misma regla de `recoveredSql`, mirada ahora).
+ */
+export async function patientHasItsAppointment(tx: Db, orgId: string, patientId: string, now: Date): Promise<boolean> {
+  const [row] = (await tx.execute(sql`
+    select (
+      exists (
+        select 1 from appointment o
+        where o.organization_id = ${orgId} and o.patient_id = ${patientId}
+          and o.status in ('programada', 'confirmada') and o.starts_at >= ${now.toISOString()}::timestamptz)
+      or exists (
+        select 1 from treatment_plan_item i
+        where i.organization_id = ${orgId} and i.patient_id = ${patientId}
+          and i.decision_status = 'aceptado' and i.completed_at is null
+          and i.status not in ('cancelado', 'reemplazado'))
+    ) as has`)) as unknown as Array<{ has: boolean }>
+  return row?.has === true
+}
 /** Por dónde reservó el agente: en su conversación o desde su enlace. La que agenda el equipo no cuenta. */
 export const AGENT_SOURCES = ["agent", "enlace"]
 /** Lo que hizo Sofi en la agenda y cambia el tipo de la conversación a «Gestiona» (ADR 0085). */
@@ -210,6 +231,35 @@ export async function insertAction(
 
 /* ---------- Sofi: según lo que pasó en la agenda (ADR 0085) ---------- */
 
+/**
+ * Quién conversó por cada cita: la persona de su conversación, quien abrió el
+ * enlace y el propio paciente. La madre que reserva para su hijo es quien
+ * conversó, no el hijo.
+ */
+async function appointmentBookers(tx: Db, orgId: string, appointmentIds: string[]): Promise<Map<string, Set<string>>> {
+  const result = new Map<string, Set<string>>()
+  if (!appointmentIds.length) return result
+  const rows = (await tx.execute(sql`
+    select a.id as appointment_id, b.contact_id
+    from appointment a
+    cross join lateral (
+      select cv.contact_id from conversation cv where cv.organization_id = a.organization_id and cv.id = a.conversation_id
+      union
+      select l.contact_id from appointment_booking_link l where l.organization_id = a.organization_id and l.appointment_id = a.id
+      union
+      select pc.contact_id from patient_contact pc
+      where pc.organization_id = a.organization_id and pc.patient_id = a.patient_id and pc.relationship = 'self'
+    ) b
+    where a.organization_id = ${orgId}
+      and a.id in (${sql.join(appointmentIds.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{ appointment_id: string; contact_id: string }>
+  for (const row of rows) {
+    const set = result.get(row.appointment_id) ?? new Set<string>()
+    set.add(row.contact_id)
+    result.set(row.appointment_id, set)
+  }
+  return result
+}
+
 export const SOFI_DETAIL: Record<"informa" | "gestiona", string> = {
   informa: "Atendió una conversación",
   gestiona: "Atendió una conversación y gestionó una cita",
@@ -241,28 +291,20 @@ export async function conversationTierOf(
     )
     .limit(1)
   if (proposal) return "gestiona"
-  const [booked] = await tx
+  const links = await tx
     .select({ id: appointment.id })
     .from(appointment)
-    .innerJoin(
-      patientContact,
-      and(
-        eq(patientContact.organizationId, appointment.organizationId),
-        eq(patientContact.patientId, appointment.patientId),
-        eq(patientContact.relationship, "self"),
-      ),
-    )
     .where(
       and(
         eq(appointment.organizationId, orgId),
-        eq(patientContact.contactId, input.contactId),
         eq(appointment.source, "enlace"),
         gte(appointment.createdAt, input.from),
         lt(appointment.createdAt, input.to),
       ),
     )
-    .limit(1)
-  return booked ? "gestiona" : "informa"
+  // Reservó desde el enlace quien conversó: la propia persona o quien habla por ella.
+  const bookers = await appointmentBookers(tx, orgId, links.map((row) => row.id))
+  return [...bookers.values()].some((contacts) => contacts.has(input.contactId)) ? "gestiona" : "informa"
 }
 
 /**
@@ -378,20 +420,17 @@ export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: s
     .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.kind, "cita"), eq(saasAction.appointmentId, appointmentId)))
     .limit(1)
   if (recovered) return false
-  const [self] = await tx
-    .select({ contactId: patientContact.contactId })
-    .from(patientContact)
-    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, appt.patientId), eq(patientContact.relationship, "self")))
-    .limit(1)
-  if (!self) return false
+  // La conversación que la reservó es de quien conversó: la madre que reservó para su hijo, no el hijo.
+  const bookers = [...((await appointmentBookers(tx, orgId, [appointmentId])).get(appointmentId) ?? [])]
+  if (!bookers.length) return false
   const windowMs = await conversationWindowMs(tx, appt.createdAt)
   const [booking] = await tx
-    .select({ id: saasAction.id, conversationId: saasAction.conversationId, channel: saasAction.channel, discountBps: saasAction.discountBps })
+    .select({ id: saasAction.id, contactId: saasAction.contactId, conversationId: saasAction.conversationId, channel: saasAction.channel, discountBps: saasAction.discountBps })
     .from(saasAction)
     .where(
       and(
         eq(saasAction.organizationId, orgId),
-        eq(saasAction.contactId, self.contactId),
+        inArray(saasAction.contactId, bookers),
         eq(saasAction.kind, "conversacion"),
         eq(saasAction.tier, "gestiona"),
         lte(saasAction.occurredAt, appt.createdAt),
@@ -412,7 +451,7 @@ export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: s
       kind: "conversacion",
       tier: "agenda",
       occurredAt: at,
-      contactId: self.contactId,
+      contactId: booking.contactId,
       conversationId: booking.conversationId,
       appointmentId,
       channel: booking.channel,
@@ -522,16 +561,17 @@ interface RecoveredRow {
 function recoveredSql(orgId: string, where: ReturnType<typeof sql>) {
   return sql`
     select a.id as appointment_id, a.status, a.source, a.created_at, a.starts_at, a.conversation_id,
-           pc.contact_id, j.kind as line_kind, j.sent_at
+           coalesce(j.contact_id, pc.contact_id) as contact_id, j.kind as line_kind, j.sent_at
     from appointment a
     join patient_contact pc
       on pc.organization_id = a.organization_id and pc.patient_id = a.patient_id and pc.relationship = 'self'
     join lateral (
-      select j.kind, coalesce(m.created_at, j.updated_at) as sent_at
+      select j.kind, j.contact_id, coalesce(m.created_at, j.updated_at) as sent_at
       from automation_job j
       left join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
       where j.organization_id = a.organization_id
-        and j.contact_id = pc.contact_id
+        -- A la persona o a quien habla por ella: Argos escribe a su contacto preferido (la madre de un niño).
+        and (j.contact_id = pc.contact_id or j.patient_id = a.patient_id)
         and j.status = 'enviado'
         and j.kind not in (${sql.join(NOT_RECOVERY_KINDS.map((kind) => sql`${kind}`), sql`, `)})
         and coalesce(m.created_at, j.updated_at) <= a.created_at
@@ -640,6 +680,11 @@ export interface SaasActionRow {
   refunds: SaasRefund[]
   /** La revisión que pidió la clínica, si pidió (ADR 0054). */
   review: SaasReviewView | null
+  /**
+   * De la acción con que se pasó del crédito, la parte que el crédito cubrió:
+   * se cobra solo lo que pasó (el crédito vuelve íntegro, ADR 0031). 0 en las demás.
+   */
+  creditPartMicros?: number
 }
 
 export interface SaasRefund {
@@ -760,6 +805,7 @@ export async function listPeriodActions(
   const creditMicros = period.creditCents * 10_000
   return rows.map((row) => {
     let state: SaasActionState
+    let creditPartMicros = 0
     const own = refunds.get(row.id) ?? []
     const review = reviews.get(row.id) ?? null
     if (needsVisit(row) && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
@@ -769,8 +815,11 @@ export async function listPeriodActions(
     else if (row.chargeId === null && insideCita(row)) state = "dentro_de_cita"
     else if (row.priceMicros === null) state = "sin_precio"
     else {
+      const before = usedMicros
       usedMicros += netMicros({ priceMicros: row.priceMicros, refunds: own })
       state = period.credit === "prueba" ? "prueba" : usedMicros <= creditMicros ? "credito" : "sobre_credito"
+      // La que cruza el crédito usa lo que quedaba de él: se cobra solo lo que pasó.
+      if (state === "sobre_credito" && before < creditMicros) creditPartMicros = creditMicros - before
     }
     return {
       refunds: state === "anulada" ? [] : own,
@@ -791,6 +840,7 @@ export async function listPeriodActions(
       discountBps: row.discountBps,
       state,
       chargeId: row.chargeId,
+      ...(creditPartMicros > 0 ? { creditPartMicros } : {}),
       review:
         review && review.status === "devuelta" && row.chargeId !== null
           ? { ...review, coveredByCredit: state === "credito" || state === "prueba" }
@@ -808,22 +858,42 @@ export async function agendaPendingOf(tx: Db, orgId: string, rows: SaasActionRow
   const result = new Map<string, number | null>()
   const candidates = rows.filter((row) => row.kind === "conversacion" && row.tier === "gestiona" && row.contactId)
   if (!candidates.length) return result
-  const contacts = [...new Set(candidates.map((row) => row.contactId as string))]
-  const booked = (await tx.execute(sql`
-    select pc.contact_id, a.created_at from appointment a
-    join patient_contact pc on pc.organization_id = a.organization_id and pc.patient_id = a.patient_id and pc.relationship = 'self'
-    where a.organization_id = ${orgId}
-      and a.source in (${sql.join(AGENT_SOURCES.map((source) => sql`${source}`), sql`, `)})
-      and a.status in ('programada', 'confirmada') and a.starts_at > now()
-      and pc.contact_id in (${sql.join(contacts.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{ contact_id: string; created_at: Date | string }>
-  if (!booked.length) return result
-  const windowMs = await conversationWindowMs(tx, new Date())
   const upgrade = agendaUpgradePrice(await getActionPricing(tx, orgId)).priceMicros
+  // Sin diferencia (un plan con un solo precio) no hay nada que subir, como en `countAgendaUpgrade`.
+  if (upgrade !== null && upgrade <= 0) return result
+  const windowMs = await conversationWindowMs(tx, new Date())
+  const firstFrom = Math.min(...candidates.map((row) => row.occurredAt.getTime()))
+  const lastTo = Math.max(...candidates.map((row) => row.occurredAt.getTime())) + windowMs
+  const upcoming = await tx
+    .select({ id: appointment.id, createdAt: appointment.createdAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        inArray(appointment.source, AGENT_SOURCES),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gt(appointment.startsAt, new Date()),
+        gte(appointment.createdAt, new Date(firstFrom)),
+        lt(appointment.createdAt, new Date(lastTo)),
+      ),
+    )
+  if (!upcoming.length) return result
+  // La que se cobrará como cita recuperada no sube a «Agenda»: la conversación va dentro de ella.
+  const ids = upcoming.map((row) => row.id)
+  const recovering = new Set(
+    ((await tx.execute(recoveredSql(orgId, sql`a.id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`))) as unknown as RecoveredRow[]).map((row) => row.appointment_id),
+  )
+  const bookers = await appointmentBookers(tx, orgId, ids)
   for (const row of candidates) {
     const from = row.occurredAt.getTime()
-    if (booked.some((item) => item.contact_id === row.contactId && asDate(item.created_at).getTime() >= from && asDate(item.created_at).getTime() < from + windowMs)) {
-      result.set(row.id, upgrade)
-    }
+    const booked = upcoming.some(
+      (item) =>
+        !recovering.has(item.id) &&
+        bookers.get(item.id)?.has(row.contactId as string) &&
+        item.createdAt.getTime() >= from &&
+        item.createdAt.getTime() < from + windowMs,
+    )
+    if (booked) result.set(row.id, upgrade)
   }
   return result
 }

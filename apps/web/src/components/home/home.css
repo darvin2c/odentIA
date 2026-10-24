@@ -2001,6 +2001,12 @@
   letter-spacing: -0.045em;
   line-height: 1;
 }
+.home .pfrom {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #b9cfd5;
+}
 .home .pdesc {
   font-size: 16px;
   line-height: 1.55;
@@ -2795,6 +2801,9 @@
   }
   .home .pamt {
     font-size: 26px;
+  }
+  .home .pfrom {
+    font-size: 13px;
   }
   .home .pdesc {
     display: none;

@@ -13,11 +13,13 @@ const prices = valuePricesOf(plan)
 const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
 const was = (own: number | null, base: number | null | undefined) =>
   founder && own !== null && base != null && base !== own ? money(base, plan!.currency) : null
-const cards = plan
+// Cada agente cobra por lo que hizo (ADR 0085): la tarjeta dice desde cuánto y la descripción, cada tipo.
+const t = plan?.tiers
+const cards = plan && t
   ? [
-      { tag: "Conversación atendida", price: plan.conversation, before: was(plan.conversation, list?.conversation), desc: `Todo lo que Sofi habla con una persona en ${hours(pricing.terms.conversationWindowHours)}, aunque sean veinte mensajes.` },
-      { tag: "Consulta documentada", price: plan.consultation, before: was(plan.consultation, list?.consultation), desc: "Cuando el odontólogo confirma la nota que dictó. Si la descarta, no se cobra." },
-      { tag: "Cita recuperada", price: plan.recovered, before: was(plan.recovered, list?.recovered), desc: "Un paciente que vuelve por un mensaje del agente y asiste. Si no asiste, no se cobra.", hi: true },
+      { tag: "Una conversación de Sofi", from: true, price: t.informa, before: was(t.informa, list?.tiers.informa), desc: `${m(t.informa)} si responde, ${m(t.gestiona)} si reserva, mueve o cancela una cita y ${m(t.agenda)} si el paciente viene. Una por persona cada ${hours(pricing.terms.conversationWindowHours)}, aunque sean veinte mensajes.` },
+      { tag: "Una consulta dictada", from: true, price: t.simple, before: was(t.simple, list?.tiers.simple), desc: `${m(t.simple)} una nota o una receta, ${m(t.estandar)} con diagnóstico u odontograma y ${m(t.completa)} si arma el presupuesto. Solo cuando el odontólogo confirma.` },
+      { tag: "Cita recuperada", from: false, price: plan.recovered, before: was(plan.recovered, list?.recovered), desc: "Un paciente sin cita que vuelve por un mensaje de Argos y asiste. Si no asiste, no se cobra.", hi: true },
     ]
   : []
 ---
@@ -46,7 +48,7 @@ const cards = plan
       {cards.filter((card) => card.price !== null).map((card) => (
         <div class:list={["pcard", { hi: card.hi }]}>
           <span class="tag tag-d">{card.tag}</span>
-          <span class="pamt">{m(card.price)}{card.before ? <s class="pwas"> {card.before}</s> : null}</span>
+          <span class="pamt">{card.from ? <small class="pfrom">desde </small> : null}{m(card.price)}{card.before ? <s class="pwas"> {card.before}</s> : null}</span>
           <span class="pdesc">{card.desc}</span>
         </div>
       ))}

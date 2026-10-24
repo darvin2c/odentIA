@@ -1,4 +1,4 @@
-// 05 · «Así se ve un día en tu cuenta»: cada cosa que hicieron los agentes, fila por fila, con su precio.
+// 05 · «Así se ve un día en tu cuenta»: cada cosa que hicieron los agentes, fila por fila, con el precio de su tipo (ADR 0085).
 import { useState } from "react"
 import { hours, usd, type ValuePrices } from "../../lib/pricing"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
@@ -16,15 +16,15 @@ const DAY = [
     agent: "Sofi",
     what: "Miguel escribió por un dolor de muela y quedó agendado a las 10:30.",
     /** La ventana de las condiciones comerciales: llega de la administración. */
-    why: (conversationHours: number) => `Una conversación: todo lo que habló con Miguel en ${hours(conversationHours)}.`,
-    price: "conversation" as const,
+    why: (conversationHours: number) => `Una conversación que gestionó su cita: todo lo que habló con Miguel en ${hours(conversationHours)}.`,
+    price: "gestiona" as const,
   },
   {
     time: "09:40",
     agent: "Clío",
     what: "La Dra. Paredes dictó la consulta de Carlos y confirmó la nota.",
-    why: "Se cobra cuando la doctora confirma.",
-    price: "consultation" as const,
+    why: "Una consulta simple: se cobra cuando la doctora confirma.",
+    price: "simple" as const,
   },
   {
     time: "11:05",
@@ -37,8 +37,8 @@ const DAY = [
     time: "13:20",
     agent: "Sofi",
     what: "Jorge preguntó cuánto cuesta la ortodoncia, recibió el precio y agendó su evaluación.",
-    why: "Una conversación.",
-    price: "conversation" as const,
+    why: "Una conversación que gestionó su cita.",
+    price: "gestiona" as const,
   },
   {
     time: "16:05",
@@ -52,13 +52,13 @@ const DAY = [
     time: "22:47",
     agent: "Sofi",
     what: "Alguien preguntó si atienden los sábados y recibió el horario.",
-    why: "Una conversación, aunque no termine en cita.",
-    price: "conversation" as const,
+    why: "Una conversación que solo informa: la más barata.",
+    price: "informa" as const,
   },
 ]
 
 export default function DayRows({ prices, conversationHours }: { prices: ValuePrices; conversationHours: number }) {
-  const cost = (key: "conversation" | "consultation" | null) => (key ? prices[key] : 0)
+  const cost = (key: keyof ValuePrices["tiers"] | null) => (key ? prices.tiers[key] : 0)
   const moving = useMoving()
   const [day, setDay] = useState(7)
   useInterval(() => {

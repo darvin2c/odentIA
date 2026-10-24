@@ -112,17 +112,20 @@ async function issueCycleCharge(
   for (const kind of kinds) {
     const rows = over.filter((row) => row.kind === kind)
     if (!rows.length) continue
-    const amount = microsToCents(rows.reduce((sum, row) => sum + (row.priceMicros ?? 0), 0))
+    // La acción con que se pasó del crédito se cobra solo por lo que pasó: el crédito vuelve íntegro (ADR 0031).
+    const creditPart = rows.reduce((sum, row) => sum + (row.creditPartMicros ?? 0), 0)
+    const amount = microsToCents(rows.reduce((sum, row) => sum + (row.priceMicros ?? 0), 0) - creditPart)
     const prices = new Set(rows.map((row) => row.priceMicros))
     const bases = new Set(rows.map((row) => row.basePriceMicros))
     lines.push({
       kind,
       description: KIND_LINE[kind](rows),
       quantity: kind === "almacenamiento" ? rows.reduce((sum, row) => sum + (row.units ?? 0), 0) : rows.length,
-      // Un precio por línea solo si todas las acciones lo comparten (un cambio de precio a mitad de mes deja varios).
+      // Un precio por línea solo si todas las acciones lo comparten (un cambio de precio a mitad de mes deja varios)
+      // y la cuenta da: con parte de una acción cubierta por el crédito, va solo el total.
       // El almacenamiento se cuenta en GB y su fila ya trae el total: sin precio por unidad.
-      unitBaseMicros: kind !== "almacenamiento" && bases.size === 1 ? (rows[0]?.basePriceMicros ?? null) : null,
-      unitPriceMicros: kind !== "almacenamiento" && prices.size === 1 ? (rows[0]?.priceMicros ?? null) : null,
+      unitBaseMicros: kind !== "almacenamiento" && bases.size === 1 && creditPart === 0 ? (rows[0]?.basePriceMicros ?? null) : null,
+      unitPriceMicros: kind !== "almacenamiento" && prices.size === 1 && creditPart === 0 ? (rows[0]?.priceMicros ?? null) : null,
       amountCents: amount,
       sortOrder: sort++,
     })
@@ -162,11 +165,13 @@ async function issueCycleCharge(
       })
     }
   }
-  if (covered.length) {
-    const value = microsToCents(covered.reduce((sum, row) => sum + netMicros(row), 0))
+  const creditPart = over.reduce((sum, row) => sum + (row.creditPartMicros ?? 0), 0)
+  if (covered.length || creditPart > 0) {
+    const value = microsToCents(covered.reduce((sum, row) => sum + netMicros(row), 0) + creditPart)
+    const what = `${covered.length} ${covered.length === 1 ? "acción cubierta" : "acciones cubiertas"}`
     lines.push({
       kind: "credito",
-      description: `${covered.length} ${covered.length === 1 ? "acción cubierta" : "acciones cubiertas"} por el crédito del mes (${(value / 100).toFixed(2)} ${plan.currency}): sin cargo`,
+      description: `${creditPart > 0 ? `${what} y parte de otra` : what} por el crédito del mes (${(value / 100).toFixed(2)} ${plan.currency}): sin cargo`,
       quantity: covered.length,
       amountCents: 0,
       sortOrder: sort++,

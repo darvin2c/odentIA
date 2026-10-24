@@ -3,7 +3,7 @@ import { UsageMeter } from "./usage-meter.js"
 
 /**
  * Medidor de consumo de Plan y pagos: el crédito del mes, el saldo de la
- * prueba y el tope de gasto. Cada nivel también se dice en palabras; verlo en
+ * prueba y el presupuesto del mes. Cada nivel también se dice en palabras; verlo en
  * tema oscuro y en ancho de teléfono.
  */
 const meta = {

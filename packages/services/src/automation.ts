@@ -81,7 +81,7 @@ import { personalLinkRef } from "./personal-link-token.js"
 import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
-import { NOT_RECOVERY_KINDS } from "./saas-actions.js"
+import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
 import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
@@ -2177,9 +2177,14 @@ export async function deliverJob(
     return { jobId: job.id, outcome: "cancelado", detail: "Sofi no atiende" }
   }
   // Al llegar al presupuesto del mes, Argos no escribe para recuperar (ADR 0085): el mensaje
-  // espera a que la clínica lo suba o empiece otro mes. Los recordatorios, los avisos de cita y
-  // el saldo vencido siguen: no recuperan a nadie.
-  if (runtime.recoveryPaused && !NOT_RECOVERY_KINDS.includes(job.kind)) {
+  // espera a que la clínica lo suba o empiece otro mes. Los recordatorios, los avisos de cita,
+  // el saldo vencido y lo de quien ya tiene su cita (un control con cita, un presupuesto de
+  // alguien que vuelve la semana que viene) siguen: no recuperan a nadie.
+  if (
+    runtime.recoveryPaused &&
+    !NOT_RECOVERY_KINDS.includes(job.kind) &&
+    !(job.patientId && (await patientHasItsAppointment(tx, orgId, job.patientId, now)))
+  ) {
     await tx
       .update(automationJob)
       .set({ scheduledFor: new Date(now.getTime() + BUDGET_HOLD_MS), lastError: BUDGET_HOLD, updatedAt: now })

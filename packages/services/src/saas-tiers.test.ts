@@ -229,6 +229,26 @@ describe("Sofi, según lo que pasó en la agenda", () => {
     expect(row).toMatchObject({ tier: "gestiona" })
   })
 
+  it("la madre reservó desde el enlace para su hijo: su conversación pasa a «Gestiona»", async () => {
+    const conv = await inbound("tg:madre-enlace")
+    const start = new Date(Date.now() - 2 * HOUR)
+    await ran(conv, start)
+    const [mother] = await ownerDb.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conv))
+    const fx = await clinicalFixture()
+    const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
+    const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental" }).returning()
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    // La cita es del hijo; el enlace lo abrió la madre desde su conversación.
+    await ownerDb.insert(appointment).values({
+      organizationId: ORG, branchId: site!.id, roomId: room!.id, professionalUserId: fx.actor, patientId: fx.patient.id,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada", source: "enlace",
+      conversationId: conv, createdAt: new Date(start.getTime() + HOUR),
+    })
+    await run((tx) => refreshConversationTier(tx, ORG, { contactId: mother!.contactId, at: new Date(start.getTime() + HOUR) }))
+    const [row] = (await actionsOf("conversacion")).filter((item) => item.conversationId === conv)
+    expect(row).toMatchObject({ tier: "gestiona", contactId: mother!.contactId })
+  })
+
   it("lo cobrado no cambia de tipo ni de precio: la base lo impide", async () => {
     const conv = await inbound("tg:cobrada")
     const start = new Date(Date.now() - 4 * HOUR)
@@ -258,6 +278,8 @@ describe("la cita que reservó Sofi", () => {
     source: string
     adminMessageDaysAgo?: number
     adminKind?: string
+    /** Quien conversa y recibe los mensajes es otra persona: la madre que reserva para su hijo. */
+    byGuardian?: boolean
   }) {
     const fx = await clinicalFixture()
     const [self] = await ownerDb
@@ -266,7 +288,16 @@ describe("la cita que reservó Sofi", () => {
       .where(
         and(eq(patientContact.patientId, fx.patient.id), eq(patientContact.relationship, "self")),
       )
-    const contactId = self!.contactId
+    let contactId = self!.contactId
+    let conversationId: string | null = null
+    if (input.byGuardian) {
+      conversationId = await inbound(`tg:madre-${randomUUID().slice(0, 8)}`)
+      const [conv] = await ownerDb
+        .select({ contactId: conversation.contactId })
+        .from(conversation)
+        .where(eq(conversation.id, conversationId))
+      contactId = conv!.contactId
+    }
     const [site] = await ownerDb
       .insert(branch)
       .values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}` })
@@ -284,6 +315,8 @@ describe("la cita que reservó Sofi", () => {
         dedupeKey: randomUUID(),
         scheduledFor: bookedAt,
         contactId,
+        // El mensaje es por el paciente, aunque lo reciba quien habla por él.
+        patientId: fx.patient.id,
         updatedAt: new Date(Date.now() - input.adminMessageDaysAgo * DAY),
       })
     }
@@ -296,6 +329,7 @@ describe("la cita que reservó Sofi", () => {
         tier: "gestiona",
         occurredAt: new Date(bookedAt.getTime() - HOUR),
         contactId,
+        conversationId,
         channel: "telegram",
         detail: "Atendió una conversación y gestionó una cita por Telegram",
         currency: "USD",
@@ -319,6 +353,7 @@ describe("la cita que reservó Sofi", () => {
         durationMin: 30,
         status: "programada",
         source: input.source,
+        conversationId,
         createdAt: bookedAt,
       })
       .returning()
@@ -369,6 +404,24 @@ describe("la cita que reservó Sofi", () => {
       listPeriodActions(tx, ORG, await currentSaasPeriod(tx, ORG)),
     )
     expect(period.find((row) => row.id === rows[0]!.id)?.state).not.toBe("anulada")
+  })
+
+  it("la madre reservó para su hijo: si el hijo viene, sube a «Agenda» la conversación de la madre", async () => {
+    const item = await scene({ source: "agent", byGuardian: true })
+    await attend(item)
+    const rows = await ofAppointment(item.appointmentId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: "conversacion", tier: "agenda", contactId: item.contactId })
+  })
+
+  it("la madre recibió el mensaje de Argos por su hijo: la cita recuperada cuenta y su conversación va dentro", async () => {
+    const item = await scene({ source: "agent", adminMessageDaysAgo: 3, byGuardian: true })
+    await attend(item)
+    const rows = await ofAppointment(item.appointmentId)
+    expect(rows.map((row) => row.kind)).toEqual(["cita"])
+    expect(rows[0]).toMatchObject({ contactId: item.contactId })
+    const period = await run(async (tx) => listPeriodActions(tx, ORG, await currentSaasPeriod(tx, ORG)))
+    expect(period.find((row) => row.id === item.conversationActionId)?.state).toBe("dentro_de_cita")
   })
 
   it("la que agendó el equipo no sube: no la reservó Sofi", async () => {
@@ -548,7 +601,10 @@ describe("Argos: preguntas incluidas y paquetes", () => {
       /^Usaste las 3 preguntas de \p{L}+\. ¿Sumo 2 más por USD 3\? Las uso para responder esta pregunta y las que vengan hasta el \d+ de \p{L}+\.$/u,
     )
     const after = await run((tx) => addArgosPack(tx, ORG, { automatic: false }))
-    expect(after).toMatchObject({ added: 2, remaining: 2 })
+    expect(after).toMatchObject({ added: 2, remaining: 2, packAdded: true })
+    // Un doble clic (o dos preguntas a la vez con «Sumar solas») no suma otro paquete por el mismo agotamiento.
+    expect(await run((tx) => addArgosPack(tx, ORG, { automatic: false }))).toMatchObject({ added: 2, remaining: 2, packAdded: false })
+    expect(await actionsOf("preguntas")).toHaveLength(1)
     const [pack] = await actionsOf("preguntas")
     expect(pack).toMatchObject({
       units: 2,
