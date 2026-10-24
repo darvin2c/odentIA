@@ -666,6 +666,13 @@
       "when": 1792821939536,
       "tag": "0094_sin_topes",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792825091733,
+      "tag": "0095_sin_tarifas_de_whatsapp",
+      "breakpoints": true
     }
   ]
 }

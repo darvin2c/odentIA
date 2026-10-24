@@ -1,12 +1,14 @@
 /**
- * Hoy › cobro (ADR 0031, tablero O3): las pruebas por vencer o sin saldo, con
- * lo que hicieron los agentes como argumento de la llamada, y las clínicas
- * con margen bajo dos meses seguidos. Solo la administración las ve.
+ * Hoy › cobro (ADR 0031 y 0085, tablero O3): las pruebas por vencer o sin
+ * saldo, con lo que hicieron los agentes como argumento de la llamada, y el
+ * costo y margen de cada clínica con lo que hay que revisar. Solo la
+ * administración las ve.
  */
 import { Button } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { api } from "../lib/api"
+import { CostMarginOverviewSection } from "./cost-margin"
 
 interface TrialRow {
   organizationId: string
@@ -17,13 +19,6 @@ interface TrialRow {
   daysLeft: number | null
   did: { conversacion: number; consulta: number; cita: number }
   sellerName: string | null
-}
-
-interface MarginRow {
-  organizationId: string
-  organizationName: string
-  currency: string
-  months: Array<{ label: string; revenueCents: number; costCents: number; marginPct: number }>
 }
 
 const money = (cents: number, currency: string) => new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(cents / 100)
@@ -40,11 +35,6 @@ export function TodayBilling() {
   const trials = useQuery({
     queryKey: ["admin", "billing", "trial-watch"],
     queryFn: () => api<TrialRow[]>("/api/admin/billing/trial-watch"),
-    retry: false,
-  })
-  const margin = useQuery({
-    queryKey: ["admin", "billing", "low-margin"],
-    queryFn: () => api<MarginRow[]>("/api/admin/billing/low-margin"),
     retry: false,
   })
   // Soporte no ve importes: sin acceso, la sección no aparece.
@@ -74,31 +64,8 @@ export function TodayBilling() {
           </ul>
         </section>
       ) : null}
-      {margin.data && margin.data.length > 0 ? (
-        <section aria-labelledby="margen" className="flex flex-col gap-2">
-          <h2 id="margen" className="text-base font-semibold">
-            Margen bajo dos meses seguidos
-          </h2>
-          <p className="text-sm text-muted-foreground">Menos de 50 %: revisa el plan, un uso fuera de lo normal o el precio negociado.</p>
-          <ul className="divide-y rounded-xl border bg-card">
-            {margin.data.map((row) => (
-              <li key={row.organizationId} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4 text-sm">
-                <div className="min-w-0 flex-1 basis-60">
-                  <p className="font-medium">{row.organizationName}</p>
-                  <p className="text-muted-foreground">
-                    {row.months
-                      .map((month) => `${month.label}: cobrado ${money(month.revenueCents, row.currency)}, costo real ${money(month.costCents, row.currency)}, ${month.marginPct} %`)
-                      .join(" · ")}
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" render={<Link to="/organizations" search={{ org: row.organizationId }} />}>
-                  Ver ficha
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {/* Costo y margen de todas las clínicas, con la alarma y la Fundadora sin uso (ADR 0085, tablero O3). */}
+      <CostMarginOverviewSection />
     </>
   )
 }

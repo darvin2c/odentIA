@@ -33,6 +33,7 @@ import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { platformUrl } from "../../lib/host"
+import { ClinicCostMarginSection } from "../../components/cost-margin"
 import { OrgBillingSection } from "../../components/org-billing"
 
 export const Route = createFileRoute("/_app/organizations")({
@@ -133,43 +134,10 @@ const orgDetailSchema = z.object({
     z.object({ action: z.string(), actorRole: z.string().nullable(), createdAt: z.string() }),
   ),
   billing: billingSchema,
-  aiCost: z
-    .object({
-      periodLabel: z.string(),
-      totalMicros: z.number().nullable(),
-      unpricedCalls: z.number(),
-      byOrigin: z.array(
-        z.object({ origin: z.string(), calls: z.number(), costMicros: z.number().nullable(), unpricedCalls: z.number() }),
-      ),
-    })
-    .nullable(),
 })
 
 type OrgDetail = z.infer<typeof orgDetailSchema>
 
-/** De dónde sale cada gasto de IA, en palabras (`AI_USAGE_ORIGINS`). */
-const AI_ORIGIN_LABEL: Record<string, string> = {
-  recepcion: "Sofi: conversaciones",
-  probar: "Probar",
-  simulacion: "Simulación desde el registro",
-  vista_previa: "Vista previa de lecciones",
-  dictado: "Clío: dictado clínico",
-  practica_dictado: "Práctica de dictado",
-  administrador: "Pedidos a Argos",
-  ya_aviso: "«¿Ya avisó algo?» antes de un seguimiento",
-  vectores: "Índice de búsqueda",
-  transcripcion: "Notas de voz",
-}
-
-/** Millonésimas de USD con hasta cuatro decimales: una llamada cuesta fracciones de centavo. */
-function formatUsdMicros(micros: number): string {
-  return new Intl.NumberFormat("es-PE", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(micros / 1_000_000)
-}
 
 const assistedSchema = z.object({
   orgName: z.string().trim().min(2, "Nombre de la organización"),
@@ -541,40 +509,8 @@ function OrganizationsPage() {
                   </div>
                 </div>
                 <OrgBillingSection organizationId={detail.id} />
-                {detail.aiCost ? (
-                  <div>
-                    <h3 className="text-sm font-medium">Costo real de IA · {detail.aiCost.periodLabel}</h3>
-                    {detail.aiCost.byOrigin.length === 0 ? (
-                      <p className="mt-1 text-sm text-muted-foreground">Este mes la clínica no usó IA.</p>
-                    ) : (
-                      <>
-                        <p className="mt-1 text-sm">
-                          {detail.aiCost.totalMicros !== null ? formatUsdMicros(detail.aiCost.totalMicros) : "Sin precio conocido"}
-                          <span className="text-muted-foreground"> sin impuestos, lo que odentIA paga a los proveedores</span>
-                        </p>
-                        <ul className="mt-1 flex flex-col gap-1 text-sm">
-                          {detail.aiCost.byOrigin.map((item) => (
-                            <li key={item.origin} className="flex items-baseline justify-between gap-2">
-                              <span className="min-w-0 truncate">
-                                {AI_ORIGIN_LABEL[item.origin] ?? item.origin}
-                                <span className="text-muted-foreground"> · {item.calls} llamadas</span>
-                              </span>
-                              <span className="shrink-0 tabular-nums">
-                                {item.costMicros !== null ? formatUsdMicros(item.costMicros) : "—"}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                        {detail.aiCost.unpricedCalls > 0 ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {detail.aiCost.unpricedCalls} llamadas sin costo: su modelo no tiene precio cargado o el
-                            proveedor no informó el uso. No están en el total.
-                          </p>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ) : null}
+                {/* Lo cobrado frente a lo que nos costó, por agente y tipo (ADR 0085, tablero O2). */}
+                <ClinicCostMarginSection organizationId={detail.id} />
                 <div>
                   <h3 className="text-sm font-medium">Miembros</h3>
                   <ul className="mt-1 flex flex-col gap-1 text-sm">

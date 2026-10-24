@@ -1,8 +1,8 @@
 /**
- * Plan y precios por acción (ADR 0031, tablero O1). La cuota vuelve como
- * crédito; cada acción tiene su precio base y hasta dónde se negocia. La
- * comprobación contra el peor costo se ve antes de guardar; el servidor la
- * exige igual.
+ * Plan y precios por acción (ADR 0031 y 0085, tablero O1). La cuota vuelve
+ * como crédito; cada tipo de acción tiene su precio base, si se negocia y
+ * hasta dónde. La comprobación contra el peor costo, tipo por tipo, se ve
+ * antes de guardar; el servidor la exige igual.
  */
 import { Checkbox, Input, Label } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
@@ -21,9 +21,21 @@ export interface AdminPlan {
   billingPeriod: string
   isActive: boolean
   creditCents: number
+  /** Gestiona y Completa (ADR 0085). */
   conversationMicros: number | null
   consultationMicros: number | null
   recoveryMicros: number | null
+  conversationInformMicros: number | null
+  conversationAgendaMicros: number | null
+  consultationSimpleMicros: number | null
+  consultationStandardMicros: number | null
+  argosIncludedQuestions: number
+  argosPackQuestions: number
+  argosPackMicros: number | null
+  storageIncludedGb: number
+  storageGbMicros: number | null
+  /** Lo que no admite descuento negociado. */
+  fixedPriceTiers: string[]
   maxDiscountBps: number
   sellerDiscountBps: number
   trialCreditCents: number
@@ -42,22 +54,47 @@ interface PriceCheck {
   kind: string
   baseMicros: number | null
   minimumMicros: number | null
+  worstMicros?: number | null
   baseMultiple: number | null
   minimumMultiple: number | null
+  fixed?: boolean
   ok: boolean
+  /** Fijo por debajo del doble: se guarda igual (D6). */
+  watch?: boolean
 }
 
 const KIND_WORDS: Record<string, string> = {
-  informa: "Conversación que informa",
-  gestiona: "Conversación que gestiona una cita",
-  agenda: "Conversación cuya cita se dio",
-  simple: "Consulta simple",
-  estandar: "Consulta estándar",
-  completa: "Consulta completa",
+  informa: "Informa",
+  gestiona: "Gestiona",
+  agenda: "Agenda",
+  simple: "Simple",
+  estandar: "Estándar",
+  completa: "Completa",
   cita: "Cita recuperada",
-  preguntas: "Paquete de preguntas a Argos",
+  preguntas: "Paquete de preguntas",
   almacenamiento: "GB extra",
 }
+
+/** Los precios del plan, por tipo (ADR 0085): el campo de la API y lo que dice el formulario. */
+const PRICE_FIELDS = [
+  { key: "informa", field: "conversationInformMicros", label: "Informa" },
+  { key: "gestiona", field: "conversationMicros", label: "Gestiona" },
+  { key: "agenda", field: "conversationAgendaMicros", label: "Agenda (si viene)", hint: "Se cobra la diferencia con Gestiona" },
+  { key: "simple", field: "consultationSimpleMicros", label: "Simple" },
+  { key: "estandar", field: "consultationStandardMicros", label: "Estándar" },
+  { key: "completa", field: "consultationMicros", label: "Completa (presupuesto)" },
+  { key: "cita", field: "recoveryMicros", label: "Cita recuperada" },
+  { key: "preguntas", field: "argosPackMicros", label: "Paquete de preguntas" },
+  { key: "almacenamiento", field: "storageGbMicros", label: "Cada GB extra al mes" },
+] as const
+type PriceKey = (typeof PRICE_FIELDS)[number]["key"]
+type PriceField = (typeof PRICE_FIELDS)[number]["field"]
+const GROUPS: Array<{ title: string; keys: PriceKey[] }> = [
+  { title: "Sofi · según lo que pasó en la agenda", keys: ["informa", "gestiona", "agenda"] },
+  { title: "Clío · según lo que dejó hecho", keys: ["simple", "estandar", "completa"] },
+  { title: "Argos", keys: ["cita", "preguntas"] },
+  { title: "Almacenamiento", keys: ["almacenamiento"] },
+]
 
 /** «0.50» → 500000 millonésimas; null si está vacío o no es un importe. */
 function toMicros(text: string): number | null {
@@ -105,9 +142,13 @@ export function PlanDrawer({
   const [currency, setCurrency] = useState(plan?.currency ?? "USD")
   const [price, setPrice] = useState(plan ? centsToMajor(plan.priceCents, plan.currency) : "")
   const [credit, setCredit] = useState(plan ? centsToMajor(plan.creditCents, plan.currency) : "")
-  const [conversation, setConversation] = useState(fromMicros(plan?.conversationMicros ?? null))
-  const [consultation, setConsultation] = useState(fromMicros(plan?.consultationMicros ?? null))
-  const [recovery, setRecovery] = useState(fromMicros(plan?.recoveryMicros ?? null))
+  const [prices, setPrices] = useState<Record<PriceKey, string>>(
+    () => Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(plan?.[item.field] ?? null)])) as Record<PriceKey, string>,
+  )
+  const [fixed, setFixed] = useState<ReadonlySet<string>>(() => new Set(plan?.fixedPriceTiers ?? ["informa", "simple", "estandar", "preguntas", "almacenamiento"]))
+  const [included, setIncluded] = useState(String(plan?.argosIncludedQuestions ?? 300))
+  const [packQuestions, setPackQuestions] = useState(String(plan?.argosPackQuestions ?? 100))
+  const [includedGb, setIncludedGb] = useState(String(plan?.storageIncludedGb ?? 20))
   const [maxDiscount, setMaxDiscount] = useState(String((plan?.maxDiscountBps ?? 6000) / 100))
   const [sellerDiscount, setSellerDiscount] = useState(String((plan?.sellerDiscountBps ?? 1000) / 100))
   const [trialCredit, setTrialCredit] = useState(plan ? centsToMajor(plan.trialCreditCents, plan.currency) : "")
@@ -126,9 +167,8 @@ export function PlanDrawer({
     currency: currency.trim().toUpperCase(),
     priceCents: majorToCents(price, currency) ?? 0,
     creditCents: majorToCents(credit || "0", currency) ?? 0,
-    conversationMicros: toMicros(conversation),
-    consultationMicros: toMicros(consultation),
-    recoveryMicros: toMicros(recovery),
+    ...(Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, toMicros(prices[item.key])])) as Record<PriceField, number | null>),
+    fixedPriceTiers: PRICE_FIELDS.map((item) => item.key).filter((key) => fixed.has(key)),
     maxDiscountBps: toBps(maxDiscount) ?? 0,
   }
   // La comprobación sigue a lo que se escribe, con una pausa para no pedirla en cada tecla.
@@ -164,9 +204,11 @@ export function PlanDrawer({
         currency: currency.trim().toUpperCase(),
         priceCents,
         creditCents: terms.creditCents,
-        conversationMicros: terms.conversationMicros,
-        consultationMicros: terms.consultationMicros,
-        recoveryMicros: terms.recoveryMicros,
+        ...Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, terms[item.field]])),
+        fixedPriceTiers: terms.fixedPriceTiers,
+        argosIncludedQuestions: Number(included),
+        argosPackQuestions: Number(packQuestions),
+        storageIncludedGb: Number(includedGb),
         maxDiscountBps: terms.maxDiscountBps,
         sellerDiscountBps: toBps(sellerDiscount) ?? 0,
         trialCreditCents: majorToCents(trialCredit || "0", currency) ?? 0,
@@ -179,6 +221,9 @@ export function PlanDrawer({
         guaranteeMonths: optionalInt(guaranteeMonths),
       }
       if (Number.isNaN(body.seatLimit) || Number.isNaN(body.guaranteeMonths)) throw new Error("Lugares y meses van como números enteros, o vacíos")
+      if (![body.argosIncludedQuestions, body.argosPackQuestions, body.storageIncludedGb].every((value) => Number.isInteger(value) && value >= 0)) {
+        throw new Error("Las preguntas y los GB van como números enteros")
+      }
       return plan
         ? api(`/api/admin/billing/plans/${plan.id}`, { method: "PATCH", body: JSON.stringify(body) })
         : api("/api/admin/billing/plans", { method: "POST", body: JSON.stringify(body) })
@@ -226,20 +271,62 @@ export function PlanDrawer({
         {field("plan-credit", "Crédito para los agentes", credit, setCredit, "Lo que vuelve de la cuota cada mes; igual a la cuota en el plan de la ADR 0031.")}
       </div>
 
-      <fieldset className="flex flex-col gap-2 rounded-lg border p-3">
-        <legend className="px-1 text-sm font-medium">Precio base por acción ({currency})</legend>
-        <div className="grid grid-cols-3 gap-3">
-          {field("plan-conversation", "Conversación", conversation, setConversation, againstList(toMicros(conversation), compareTo?.conversationMicros))}
-          {field("plan-consultation", "Consulta", consultation, setConsultation, againstList(toMicros(consultation), compareTo?.consultationMicros))}
-          {field("plan-recovery", "Cita recuperada", recovery, setRecovery, againstList(toMicros(recovery), compareTo?.recoveryMicros))}
-        </div>
-        <p className="text-xs text-muted-foreground">Vacío: el plan no cobra esa acción.</p>
-      </fieldset>
+      {GROUPS.map((group) => (
+        <fieldset key={group.title} className="flex flex-col gap-2 rounded-lg border p-3">
+          <legend className="px-1 text-sm font-medium">
+            {group.title} ({currency})
+          </legend>
+          <div className="grid grid-cols-2 gap-3">
+            {group.keys.map((key) => {
+              const item = PRICE_FIELDS.find((entry) => entry.key === key)!
+              return (
+                <div key={key} className="flex flex-col gap-1">
+                  <Label htmlFor={`plan-${key}`}>{item.label}</Label>
+                  <Input
+                    id={`plan-${key}`}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={prices[key]}
+                    onChange={(event) => setPrices({ ...prices, [key]: event.target.value })}
+                  />
+                  {"hint" in item ? <p className="text-xs text-muted-foreground">{item.hint}</p> : null}
+                  {againstList(toMicros(prices[key]), compareTo?.[item.field]) ? (
+                    <p className="text-xs text-muted-foreground">{againstList(toMicros(prices[key]), compareTo?.[item.field])}</p>
+                  ) : null}
+                  <div className="flex items-center gap-1.5">
+                    <Checkbox
+                      id={`plan-${key}-fijo`}
+                      checked={fixed.has(key)}
+                      onCheckedChange={(value) => {
+                        const next = new Set(fixed)
+                        if (value === true) next.add(key)
+                        else next.delete(key)
+                        setFixed(next)
+                      }}
+                    />
+                    <Label htmlFor={`plan-${key}-fijo`} className="text-xs font-normal">
+                      No se negocia
+                    </Label>
+                  </div>
+                </div>
+              )
+            })}
+            {group.keys.includes("preguntas") ? (
+              <>
+                {field("plan-included", "Preguntas incluidas al mes", included, setIncluded, undefined, "numeric")}
+                {field("plan-pack", "Preguntas por paquete", packQuestions, setPackQuestions, undefined, "numeric")}
+              </>
+            ) : null}
+            {group.keys.includes("almacenamiento") ? field("plan-gb", "GB incluidos", includedGb, setIncludedGb, undefined, "numeric") : null}
+          </div>
+        </fieldset>
+      ))}
+      <p className="-mt-2 text-xs text-muted-foreground">Vacío: el plan no cobra ese tipo. Lo que no se negocia queda siempre a su precio base.</p>
 
       <fieldset className="grid grid-cols-2 gap-3 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">Quién puede negociar</legend>
         {field("plan-seller", "El vendedor, sin pedir aprobación (%)", sellerDiscount, setSellerDiscount)}
-        {field("plan-max", "La administración, hasta (%)", maxDiscount, setMaxDiscount, "Es el precio mínimo. La cuota no admite descuento.")}
+        {field("plan-max", "La administración, hasta (%)", maxDiscount, setMaxDiscount, "Solo en lo que se negocia. La cuota no admite descuento.")}
       </fieldset>
 
       <fieldset className="grid grid-cols-2 gap-3 rounded-lg border p-3">
@@ -292,26 +379,63 @@ export function PlanDrawer({
         ) : check.isError || !check.data ? (
           <p className="text-muted-foreground">No se pudo comprobar ahora; el servidor lo comprobará igual al guardar.</p>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {check.data.checks
-              .filter((item) => item.baseMicros !== null)
-              .map((item) => (
-                <li key={item.kind} className={item.ok ? "" : "text-destructive"}>
-                  <span aria-hidden="true">{item.ok ? "✓ " : "✕ "}</span>
-                  {item.baseMultiple === null
-                    ? `${KIND_WORDS[item.kind]}: sin peor costo en ${currency} para comparar.`
-                    : `${KIND_WORDS[item.kind]} a ${money(item.baseMicros ?? 0, currency)}: ${item.baseMultiple} veces su peor costo. Al mínimo, ${money(item.minimumMicros ?? 0, currency)}: ${item.minimumMultiple} veces.`}
-                  {item.ok ? null : " Debe valer al menos el doble de su peor costo."}
-                </li>
-              ))}
+          <>
+            <table className="w-full text-xs">
+              <thead className="text-muted-foreground">
+                <tr>
+                  <th scope="col" className="py-1 text-left font-medium">
+                    Acción
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Precio
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Al mínimo
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Peor costo
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Veces
+                  </th>
+                  <th scope="col" className="py-1 pl-2 text-left font-medium">
+                    <span className="sr-only">Estado</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {check.data.checks
+                  .filter((item) => item.baseMicros !== null)
+                  .map((item) => (
+                    <tr key={item.kind} className={item.ok ? "" : "text-destructive"}>
+                      <td className="py-1">{KIND_WORDS[item.kind] ?? item.kind}</td>
+                      <td className="py-1 text-right tabular-nums">{money(item.baseMicros ?? 0, currency)}</td>
+                      <td className="py-1 text-right tabular-nums">{money(item.minimumMicros ?? 0, currency)}</td>
+                      <td className="py-1 text-right tabular-nums">{item.worstMicros != null ? money(item.worstMicros, currency) : "—"}</td>
+                      <td className="py-1 text-right tabular-nums">{item.minimumMultiple ?? "—"}</td>
+                      <td className="py-1 pl-2">
+                        {!item.ok ? "Menos del doble" : item.watch ? <span className="font-medium text-warning">Atento</span> : "Bien"}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {check.data.checks.some((item) => item.watch) ? (
+              <p className="text-xs text-muted-foreground">
+                «Atento»: un precio que no se negocia y vale menos del doble de su peor costo, que es un caso extremo (una atención de 60 pausas que deja
+                una sola receta). Se guarda igual y deja ganancia.
+              </p>
+            ) : null}
+            {check.data.checks.some((item) => !item.ok) ? (
+              <p className="text-xs text-destructive">Lo que se negocia debe valer, al descuento máximo, al menos el doble de su peor costo.</p>
+            ) : null}
             {check.data.margin.atBase !== null ? (
-              <li>
-                <span aria-hidden="true">✓ </span>
+              <p className="text-xs">
                 Si una clínica gasta todo su crédito en el peor caso: margen de {check.data.margin.atBase} %; negociada al mínimo,{" "}
                 {check.data.margin.atMinimum} %.
-              </li>
+              </p>
             ) : null}
-          </ul>
+          </>
         )}
       </section>
     </FormDrawer>

@@ -198,21 +198,33 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await shot("admin-facturacion")
   const planRow = page.getByRole("listitem").filter({ hasText: plan!.code })
   await planRow.getByRole("button", { name: "Editar" }).click()
-  // Exacto: la nota de las condiciones comerciales también nombra esta comprobación.
+  // Exacto: la nota de las condiciones comerciales también nombra esta comprobación (tablero O1).
   await expect(page.getByText("Comprobación antes de guardar", { exact: true })).toBeVisible()
-  // Gestiona a USD 0,50 frente a su peor costo de USD 0,06 (ADR 0085).
-  await expect(page.getByText("8.3 veces su peor costo", { exact: false })).toBeVisible()
-  await expect(page.getByText(/margen de \d+ %/)).toBeVisible()
+  const checks = page.getByRole("region", { name: "Comprobación antes de guardar" })
+  // Gestiona a USD 0,50, al mínimo (40 % menos) USD 0,30, frente a su peor costo de USD 0,06: 5 veces.
+  await expect(checks.getByRole("row").filter({ hasText: "Gestiona" })).toContainText("5")
+  // Simple no se negocia y vale menos del doble en el caso extremo: «Atento», y se guarda igual.
+  await expect(checks.getByRole("row").filter({ hasText: "Simple" })).toContainText("Atento")
+  await expect(page.getByLabel("Informa")).toHaveValue("0.1")
   await shot("admin-plan")
   await page.keyboard.press("Escape")
 
+  // La ficha: costo y margen de la clínica, por agente y tipo (tablero O2).
   await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
   await expect(page.getByText("Cobro y consumo")).toBeVisible()
-  await expect(page.getByText("Costo real de IA", { exact: false })).toBeVisible()
+  const costMargin = page.getByRole("region", { name: /Costo y margen/ })
+  await expect(costMargin).toBeVisible()
+  await expect(costMargin.getByRole("columnheader", { name: "Nos costó" })).toBeVisible()
+  await expect(costMargin.getByRole("row").filter({ hasText: "Sofi · Gestiona" })).toContainText("52")
+  await expect(costMargin.getByText("Jev · decide cada mensaje")).toBeVisible()
   await shot("admin-ficha")
 
+  // Hoy: las pruebas por vencer y el costo y margen de todas las clínicas (tablero O3).
   await gotoHydrated(page, hostUrl("admin", "/"))
   await expect(page.getByRole("heading", { name: "Pruebas por vencer o sin saldo" })).toBeVisible()
   await expect(page.getByRole("listitem").filter({ hasText: trial.org.name })).toBeVisible()
+  const overview = page.getByRole("region", { name: "Costo y margen" })
+  await expect(overview).toBeVisible()
+  await expect(overview.getByRole("row").filter({ hasText: org.name })).toBeVisible()
   await shot("admin-hoy")
 })
