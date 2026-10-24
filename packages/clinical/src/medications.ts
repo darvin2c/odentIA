@@ -29,6 +29,11 @@ export type MedicationGroup =
   | "antifungicos"
   | "antivirales"
   | "antisepticos"
+  // Los que suma la medicina general (latidIA, issue 229): grupos con alergia propia.
+  | "quinolonas"
+  | "tetraciclinas"
+  /** Sin grupo de alergia: solo avisa la misma sustancia. */
+  | "otros"
 
 export const MEDICATION_GROUP_LABELS: Record<MedicationGroup, string> = {
   penicilinas: "penicilinas (ATC J01C)",
@@ -48,6 +53,9 @@ export const MEDICATION_GROUP_LABELS: Record<MedicationGroup, string> = {
   antifungicos: "antifúngicos",
   antivirales: "antivirales (ATC J05AB)",
   antisepticos: "antisépticos bucales (ATC A01AB)",
+  quinolonas: "fluoroquinolonas (ATC J01MA)",
+  tetraciclinas: "tetraciclinas (ATC J01AA)",
+  otros: "otros medicamentos",
 }
 
 export const DENTAL_MEDICATIONS: readonly MedicationEntry[] = [
@@ -128,16 +136,21 @@ export function normalizeDrugText(text: string): string {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim()
 }
 
-export function findMedication(dci: string): MedicationEntry | null {
+/** La DCI en la lista de la receta (la dental por omisión; cada producto da la suya). */
+export function findMedication(
+  dci: string,
+  medications: readonly MedicationEntry[] = DENTAL_MEDICATIONS,
+): MedicationEntry | null {
   const key = normalizeDrugText(dci)
-  return DENTAL_MEDICATIONS.find((m) => normalizeDrugText(m.dci) === key) ?? null
+  return medications.find((m) => normalizeDrugText(m.dci) === key) ?? null
 }
 
 /** Grupos que nombra una alergia registrada: por DCI conocida o por palabra de grupo. */
-function groupsOfAllergy(substance: string): MedicationGroup[] {
+function groupsOfAllergy(substance: string, medications: readonly MedicationEntry[]): MedicationGroup[] {
   const text = normalizeDrugText(substance)
   const groups = new Set<MedicationGroup>()
-  for (const med of DENTAL_MEDICATIONS) {
+  for (const med of medications) {
+    if (med.group === "otros") continue
     const base = normalizeDrugText(med.dci).split(" + ")
     if (base.some((part) => text.includes(part))) groups.add(med.group)
   }
@@ -156,10 +169,14 @@ export interface AllergyConflict {
  * Alergias registradas que chocan con la DCI a prescribir: la misma sustancia,
  * el mismo grupo ATC o un grupo con reactividad cruzada conocida.
  */
-export function allergyConflicts(dci: string, allergySubstances: string[]): AllergyConflict[] {
+export function allergyConflicts(
+  dci: string,
+  allergySubstances: string[],
+  medications: readonly MedicationEntry[] = DENTAL_MEDICATIONS,
+): AllergyConflict[] {
   const name = normalizeDrugText(dci)
   if (!name) return []
-  const med = findMedication(dci)
+  const med = findMedication(dci, medications)
   const parts = name.split(" + ")
   const conflicts: AllergyConflict[] = []
   for (const substance of allergySubstances) {
@@ -169,8 +186,8 @@ export function allergyConflicts(dci: string, allergySubstances: string[]): Alle
       conflicts.push({ substance, reason: "misma sustancia" })
       continue
     }
-    if (!med) continue
-    const groups = groupsOfAllergy(substance)
+    if (!med || med.group === "otros") continue
+    const groups = groupsOfAllergy(substance, medications)
     if (groups.includes(med.group)) {
       conflicts.push({ substance, reason: `mismo grupo: ${MEDICATION_GROUP_LABELS[med.group]}` })
       continue

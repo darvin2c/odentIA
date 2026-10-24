@@ -8,6 +8,7 @@ import {
   ComboboxList,
 } from "@odentia/ui"
 import { useMemo, useState } from "react"
+import { productUi } from "../../product/product-ui"
 
 type Item = { key: string; dci: string; detail: string }
 
@@ -30,12 +31,14 @@ export function MedicationPicker({
   const [typed, setTyped] = useState<string | null>(null)
   const items = useMemo<Item[]>(() => {
     const text = (typed ?? "").trim()
-    const found = searchHabitualMedications(text, 8).map((entry) => ({
+    // La del producto de la clínica (latidIA suma la medicina general, issue 229).
+    const habitual = productUi().prescribing.catalog.habitual
+    const found = searchHabitualMedications(text, 8, habitual).map((entry) => ({
       key: entry.atc + entry.dci,
       dci: entry.dci,
       detail: `ATC ${entry.atc}`,
     }))
-    if (text && !findHabitualMedication(text))
+    if (text && !findHabitualMedication(text, habitual))
       found.push({ key: `texto:${text}`, dci: text, detail: "Escrito tal cual, sin código" })
     return found
   }, [typed])

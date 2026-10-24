@@ -37,6 +37,8 @@ const createInput = z
     validUntil: z.iso.date().nullish(),
     acknowledgeAllergies: z.boolean().optional(),
     allergyOverrideReason: z.string().max(500).nullish(),
+    /** El peso (kg) con que se receta; latidIA lo pide a un menor de 12 años (issue 229). */
+    patientWeightKg: z.number().min(0.5).max(400).nullish(),
     items: z.array(item).min(1).max(20),
   })
   .strict()

@@ -13,6 +13,7 @@ import {
   ComboboxList,
 } from "@odentia/ui"
 import { useMemo, useState } from "react"
+import { productUi } from "../../product/product-ui"
 
 /** Lo elegido: una sustancia de la lista o, a propósito, lo escrito sin codificar. */
 export type AllergenChoice =
@@ -66,9 +67,11 @@ export function AllergenPicker({
     typed ?? (value ? (value.kind === "entry" ? value.entry.label : value.text) : "")
   const items = useMemo<Item[]>(() => {
     const text = (typed ?? "").trim()
-    const found = searchAllergens(text, 8).map((entry) => itemOf({ kind: "entry", entry }))
+    // La lista del producto de la clínica (latidIA suma la medicina general, issue 229).
+    const allergens = productUi().prescribing.catalog.allergens
+    const found = searchAllergens(text, 8, allergens).map((entry) => itemOf({ kind: "entry", entry }))
     // Lo escrito que no es exactamente una de la lista se puede guardar tal cual.
-    if (allowText && text && !codeAllergySubstance(text)) found.push(itemOf({ kind: "text", text }))
+    if (allowText && text && !codeAllergySubstance(text, allergens)) found.push(itemOf({ kind: "text", text }))
     return found
   }, [typed, allowText])
 

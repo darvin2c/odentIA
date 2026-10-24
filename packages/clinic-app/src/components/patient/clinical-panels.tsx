@@ -9,14 +9,13 @@
 import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
-  DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
@@ -45,6 +44,7 @@ import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 import { HealthDocumentSendDrawer } from "./health-document-send"
+import { productUi } from "../../product/product-ui"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -812,6 +812,10 @@ export function RecetasPanel({
     setCreateOpenState(open)
     onCreateOpenChange?.(open)
   }
+  // La lista y las reglas de la receta son las del producto (latidIA: controlados, embarazo, peso; issue 229).
+  const prescribing = productUi().prescribing
+  const rules = prescribing.useRules(patientId, canRead && createOpen)
+  const [weight, setWeight] = useState("")
   const [medications, setMedications] = useState<MedicationDraft[]>(() =>
     initialMedications?.length ? initialMedications.map((medication) => ({ ...emptyMedication(), ...medication })) : [emptyMedication()],
   )
@@ -826,9 +830,18 @@ export function RecetasPanel({
     (allergy) => allergy.isActive,
   )
   const conflictsByMedication = medications.map((medication) =>
-    allergyWarnings(medication.genericName, activeAllergies),
+    allergyWarnings(medication.genericName, activeAllergies, prescribing.catalog),
   )
-  const conflicts = conflictsByMedication.flat()
+  const weightKg = weight.trim() ? Number(weight.replace(",", ".")) : null
+  const ruleCheck = rules.check(medications, weightKg !== null && Number.isFinite(weightKg) ? weightKg : null)
+  // Lo contraindicado en el embarazo va como una alergia: se cambia o se receta con motivo.
+  const conflicts = [...conflictsByMedication.flat(), ...ruleCheck.warnings]
+  const onlyAllergies = ruleCheck.warnings.length === 0
+  // El peso del último registro se propone una vez; quien receta lo corrige.
+  useEffect(() => {
+    if (rules.weight.required && rules.weight.suggested !== null && weight === "")
+      setWeight(String(rules.weight.suggested))
+  }, [rules.weight.required, rules.weight.suggested, weight])
   const acknowledged = overriding && overrideReason.trim() !== ""
   const [error, setError] = useState<string | null>(null)
   const createMutation = useMutation({
@@ -842,6 +855,7 @@ export function RecetasPanel({
         validUntil: validUntil || null,
         acknowledgeAllergies: conflicts.length > 0 && acknowledged,
         allergyOverrideReason: conflicts.length > 0 && acknowledged ? overrideReason.trim() : null,
+        patientWeightKg: rules.weight.required && weightKg !== null && Number.isFinite(weightKg) ? weightKg : null,
         items: medications.map((medication) => ({
           genericName: medication.genericName.trim(),
           brandName: medication.brandName.trim() || null,
@@ -863,6 +877,7 @@ export function RecetasPanel({
       setValidUntil("")
       setOverriding(false)
       setOverrideReason("")
+      setWeight("")
       setCreateOpen(false)
       setError(null)
       toast.success("Receta emitida.")
@@ -901,11 +916,17 @@ export function RecetasPanel({
             )
             return
           }
+          if (ruleCheck.errors.length > 0) {
+            setError(ruleCheck.errors.join(" "))
+            return
+          }
           if (conflicts.length > 0 && !acknowledged) {
             setError(
               overriding
                 ? "Escribe por qué la recetas igual."
-                : "Hay un aviso de alergia: cambia el medicamento o recétalo igual con un motivo.",
+                : onlyAllergies
+                  ? "Hay un aviso de alergia: cambia el medicamento o recétalo igual con un motivo."
+                  : "Hay un aviso: cambia el medicamento o recétalo igual con un motivo.",
             )
             return
           }
@@ -1085,16 +1106,50 @@ export function RecetasPanel({
             ) : null}
           </div>
           <datalist id={`${uid}-dci`}>
-            {DENTAL_MEDICATIONS.map((medication) => (
+            {prescribing.catalog.medications.map((medication) => (
               <option key={medication.dci} value={medication.dci} />
             ))}
           </datalist>
+          {rules.weight.required ? (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-rx-weight`}>Peso (kg)</FieldLabel>
+              <Input
+                id={`${uid}-rx-weight`}
+                className="w-32"
+                inputMode="decimal"
+                maxLength={5}
+                value={weight}
+                onChange={(event) => setWeight(event.target.value.replace(/[^\d.,]/g, ""))}
+              />
+              <FieldDescription>
+                Es menor de 12 años: la receta va con su peso.
+                {rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}
+              </FieldDescription>
+            </Field>
+          ) : null}
+          {ruleCheck.errors.length > 0 ? (
+            <div role="alert" className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium">No se puede emitir así</p>
+              <ul className="list-disc pl-5">
+                {ruleCheck.errors.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {ruleCheck.reminders.length > 0 ? (
+            <div role="note" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+              {ruleCheck.reminders.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          ) : null}
           {conflicts.length > 0 ? (
             <div
               role="alert"
               className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
             >
-              <p className="font-medium">Aviso de alergia</p>
+              <p className="font-medium">{onlyAllergies ? "Aviso de alergia" : "Aviso"}</p>
               <ul className="list-disc pl-5">
                 {conflicts.map((line) => (
                   <li key={line}>{line}</li>
@@ -1121,7 +1176,8 @@ export function RecetasPanel({
                   variant="outline"
                   onClick={() => {
                     // Lleva al primer medicamento que choca para cambiarlo.
-                    const index = conflictsByMedication.findIndex((lines) => lines.length > 0)
+                    const allergyIndex = conflictsByMedication.findIndex((lines) => lines.length > 0)
+                    const index = allergyIndex >= 0 ? allergyIndex : 0
                     const field = document.getElementById(`${uid}-med-${medications[index]?.key}`)
                     if (field instanceof HTMLInputElement) {
                       field.focus()

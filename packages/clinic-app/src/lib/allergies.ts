@@ -1,4 +1,5 @@
 import { allergenByCode, allergenDetail, allergenName, type AllergenEntry } from "@odentia/clinical"
+import { productUi } from "../product/product-ui"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import type { Allergy } from "./patients"
 
@@ -36,7 +37,8 @@ export function sinceWords(iso: string, now: Date = new Date()): string {
 export function allergyEntry(
   allergy: Pick<Allergy, "substanceSystem" | "substanceCode">,
 ): AllergenEntry | null {
-  return allergenByCode(allergy.substanceSystem, allergy.substanceCode)
+  // La lista del producto de la clínica: latidIA suma la medicina general (issue 229).
+  return allergenByCode(allergy.substanceSystem, allergy.substanceCode, productUi().prescribing.catalog.allergens)
 }
 
 /** «Penicilinas», «Látex», o «amoxi» tal cual se escribió. */

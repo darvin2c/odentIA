@@ -28,7 +28,7 @@ import {
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
 import type { TimelineItem } from "../patient-history.js"
-import type { DiagnosisCandidate, ProductHooks } from "../product-hooks.js"
+import { DENTAL_PRESCRIBING, type DiagnosisCandidate, type ProductHooks } from "../product-hooks.js"
 import {
   type ClosingOdontogram,
   closingOdontogramOf,
@@ -169,6 +169,7 @@ export interface DentalEncounterDetailParts {
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
+  prescribing: DENTAL_PRESCRIBING,
   interview: dentalInterview,
   examination: dentalExamination,
   vitals: CORE_VITAL_KEYS,

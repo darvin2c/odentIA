@@ -5,6 +5,7 @@ import { clinicToday } from "../inventory-stock.js"
 import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { medicalExamination } from "./examination.js"
 import { medicalInterview } from "./interview.js"
+import { medicalPrescribing } from "./prescribing.js"
 
 /**
  * Lo que latidIA hace en los momentos de lo común (ADR 0079). Sin «dónde»
@@ -14,6 +15,7 @@ import { medicalInterview } from "./interview.js"
  */
 export const medicalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
+  prescribing: medicalPrescribing,
   interview: medicalInterview,
   examination: medicalExamination,
   vitals: MEDICAL_VITAL_KEYS,

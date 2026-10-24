@@ -17,6 +17,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
+import { productHooks } from "./products.js"
 
 /**
  * Medicamento de la receta con los datos de la Guía de la buena prescripción
@@ -51,6 +52,8 @@ export interface CreatePrescriptionInput {
   acknowledgeAllergies?: boolean
   /** Con aviso de alergia, por qué se receta igual (decisión 10): obligatorio y queda en la receta. */
   allergyOverrideReason?: string | null
+  /** El peso (kg) con que se receta: latidIA lo pide a un menor de 12 años (issue 229). */
+  patientWeightKg?: number | null
   items: PrescriptionMedicationInput[]
 }
 function field(value: string | null | undefined, name: string, max = 200) {
@@ -115,6 +118,14 @@ export async function createPrescription(
     code: optional(input.diagnosisCode, "El diagnóstico", 10),
     system: input.diagnosisSystem,
   })
+  // La lista y las reglas de la receta son las del producto de la clínica (issue 229).
+  const prescribing = (await productHooks(tx, orgId)).prescribing
+  let weightKg: number | null = null
+  if (input.patientWeightKg != null) {
+    if (typeof input.patientWeightKg !== "number" || !(input.patientWeightKg >= 0.5 && input.patientWeightKg <= 400))
+      throw validation("El peso va en kilos, de 0,5 a 400")
+    weightKg = Math.round(input.patientWeightKg * 10) / 10
+  }
   let validUntil: string | null = null
   if (input.validUntil) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.validUntil) || Number.isNaN(Date.parse(input.validUntil)))
@@ -140,7 +151,7 @@ export async function createPrescription(
       brandName: optional(item.brandName, "El nombre comercial"),
       strength,
       dosageForm,
-      atcCode: findMedication(genericName)?.atc ?? null,
+      atcCode: findMedication(genericName, prescribing.catalog.medications)?.atc ?? null,
       medicationName: `${genericName} ${strength} ${dosageForm}`,
       dose: field(item.dose, "La dosis"),
       route,
@@ -169,13 +180,20 @@ export async function createPrescription(
         eq(patientAllergy.isActive, true),
       ),
     )
-  const conflicts = items.flatMap((item) => allergyWarnings(item.genericName, allergies))
+  // Lo que impide emitir (un controlado, el peso de un niño) va antes que los avisos.
+  const review = await prescribing.review(tx, { orgId, patientId, items, weightKg })
+  if (review.errors.length > 0) throw new ServiceError("PRESCRIPTION_BLOCKED", 400, review.errors.join(" "))
+  // Lo contraindicado en el embarazo se receta como una alergia: con motivo.
+  const conflicts = [
+    ...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)),
+    ...review.warnings,
+  ]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
   if (conflicts.length > 0 && (!input.acknowledgeAllergies || !overrideReason))
     throw new ServiceError(
       "ALLERGY_CONFLICT",
       409,
-      `Aviso de alergia: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`,
+      `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`,
     )
   if (overrideReason && overrideReason.length > 500)
     throw validation("El motivo para recetar igual debe tener hasta 500 caracteres")
@@ -199,6 +217,7 @@ export async function createPrescription(
       ...diagnosis,
       validUntil,
       allergyOverrideReason: overrideReason,
+      patientWeightKg: weightKg === null ? null : String(weightKg),
       prescriberName: signer.name,
       prescriberTitle: signer.title,
       prescriberRegistration: signer.registration,
