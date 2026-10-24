@@ -1,5 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer"
-import { logoAttachments, type MailTemplate, renderEmail } from "./layout.js"
+import { logoAttachments, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
 
 export {
   configureMailLinks,
@@ -9,6 +9,8 @@ export {
   escapeHtml,
   LOGO_CIDS,
   logoAttachments,
+  type MailBrand,
+  mailBrandName,
   type MailTemplate,
   renderEmail,
   resetMailLinks,
@@ -21,6 +23,11 @@ export interface MailerEnv {
   user?: string
   pass?: string
   from: string
+  /**
+   * El remitente de cada otra marca (latidIA: `MEDICAL_SMTP_FROM`). Sin él, la
+   * misma dirección de `from` con el nombre de la marca.
+   */
+  fromByBrand?: Partial<Record<MailBrand, string>>
 }
 
 export interface MailMessage {
@@ -30,6 +37,15 @@ export interface MailMessage {
   text: string
   /** Buzón que recibe las respuestas; sin él responden a `from`, que no lee nadie. */
   replyTo?: string
+  /** La marca del correo: decide el remitente. Sin ella, odentIA. */
+  brand?: MailBrand
+}
+
+/** «odentIA <no-reply@…>» con el nombre de otra marca: «latidIA <no-reply@…>». */
+export function senderFor(from: string, brand: MailBrand): string {
+  if (brand === "odentia") return from
+  const address = from.match(/<([^>]+)>/)?.[1] ?? from.trim()
+  return `${mailBrandName(brand)} <${address}>`
 }
 
 export interface Mailer {
@@ -46,9 +62,9 @@ export function createMailer(env: MailerEnv): Mailer {
     auth: env.user ? { user: env.user, pass: env.pass ?? "" } : undefined,
   })
   return {
-    async send({ to, subject, html, text, replyTo }) {
+    async send({ to, subject, html, text, replyTo, brand = "odentia" }) {
       await transporter.sendMail({
-        from: env.from,
+        from: env.fromByBrand?.[brand] ?? senderFor(env.from, brand),
         to,
         subject,
         html,
@@ -64,40 +80,53 @@ export function createMailer(env: MailerEnv): Mailer {
 
 const hello = (firstName?: string) => (firstName ? `Hola, ${firstName}. ` : "Hola. ")
 
-export function verifyEmailTemplate({ url }: { url: string }): MailTemplate {
+/** La marca del correo de una cuenta: la del dominio por el que se pidió (issue 229). */
+type Branded = { brand?: MailBrand | undefined }
+
+export function verifyEmailTemplate({ url, brand }: { url: string } & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
+    brand,
     subject: "Verifica tu correo",
-    preview: "Un clic y tu cuenta de odentIA queda activa.",
+    preview: `Un clic y tu cuenta de ${name} queda activa.`,
     title: "Verifica tu correo",
-    paragraphs: ["Gracias por registrarte en odentIA. Confirma tu correo para activar tu cuenta."],
+    paragraphs: [`Gracias por registrarte en ${name}. Confirma tu correo para activar tu cuenta.`],
     action: { label: "Verificar mi correo", url },
     note: "Si no creaste esta cuenta, ignora este correo.",
-    reason: "Te escribimos porque se creó una cuenta de odentIA con este correo.",
+    reason: `Te escribimos porque se creó una cuenta de ${name} con este correo.`,
   })
 }
 
-export function changeEmailVerificationTemplate({ url }: { url: string }): MailTemplate {
+export function changeEmailVerificationTemplate({ url, brand }: { url: string } & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
+    brand,
     subject: "Confirma tu nuevo correo",
     preview: "Confirma esta dirección para terminar el cambio.",
     title: "Confirma tu nuevo correo",
-    paragraphs: ["Pediste usar esta dirección en tu cuenta de odentIA. Confírmala para terminar el cambio."],
+    paragraphs: [`Pediste usar esta dirección en tu cuenta de ${name}. Confírmala para terminar el cambio.`],
     action: { label: "Confirmar correo", url },
     note: "Si no fuiste tú, ignora este correo: tu cuenta no cambia.",
-    reason: "Te escribimos porque alguien pidió usar este correo en una cuenta de odentIA.",
+    reason: `Te escribimos porque alguien pidió usar este correo en una cuenta de ${name}.`,
   })
 }
 
-export function changeEmailConfirmationTemplate({ newEmail, url }: { newEmail: string; url: string }): MailTemplate {
+export function changeEmailConfirmationTemplate({
+  newEmail,
+  url,
+  brand,
+}: { newEmail: string; url: string } & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
+    brand,
     subject: "Autoriza el cambio de correo",
     preview: `Tu cuenta pasaría a usar ${newEmail}.`,
     title: "Autoriza el cambio de correo",
-    paragraphs: ["Recibimos una solicitud para cambiar el correo de tu cuenta de odentIA."],
+    paragraphs: [`Recibimos una solicitud para cambiar el correo de tu cuenta de ${name}.`],
     facts: [{ label: "Correo nuevo", value: newEmail }],
     action: { label: "Autorizar cambio", url },
     note: "Si no fuiste tú, ignora este correo y tu cuenta seguirá protegida.",
-    reason: "Te escribimos porque se pidió cambiar el correo de tu cuenta de odentIA.",
+    reason: `Te escribimos porque se pidió cambiar el correo de tu cuenta de ${name}.`,
   })
 }
 
@@ -111,20 +140,23 @@ export function accessLinkTemplate({
   firstName,
   url,
   expiresText,
+  brand,
 }: {
   firstName?: string | undefined
   url: string
   expiresText?: string | undefined
-}): MailTemplate {
+} & Branded): MailTemplate {
   const expires = expiresText ? `vence a las ${expiresText}` : "vence en 30 minutos"
+  const name = mailBrandName(brand)
   return renderEmail({
-    subject: "Tu enlace para entrar a odentIA",
+    brand,
+    subject: `Tu enlace para entrar a ${name}`,
     preview: `Sirve una sola vez y ${expires}.`,
     title: "Tu enlace para entrar",
     paragraphs: [`${hello(firstName)}Pediste entrar sin tu contraseña. Con este botón entras a tu clínica y eliges una nueva.`],
-    action: { label: "Entrar a odentIA", url },
+    action: { label: `Entrar a ${name}`, url },
     note: `Sirve una sola vez y ${expires}. Si no lo pediste, ignora este correo: tu contraseña sigue igual.`,
-    reason: "Te escribimos porque alguien pidió entrar a tu cuenta de odentIA sin contraseña.",
+    reason: `Te escribimos porque alguien pidió entrar a tu cuenta de ${name} sin contraseña.`,
   })
 }
 
@@ -137,24 +169,27 @@ export function passwordChangedTemplate({
   whenText,
   deviceText,
   url,
+  brand,
 }: {
   firstName?: string | undefined
   whenText: string
   deviceText?: string | undefined
   url: string
-}): MailTemplate {
+} & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
-    subject: "Tu contraseña de odentIA cambió",
+    brand,
+    subject: `Tu contraseña de ${name} cambió`,
     preview: `Se cambió hoy a las ${whenText}. Si no fuiste tú, recupérala ahora.`,
     title: "Tu contraseña cambió",
-    paragraphs: [`${hello(firstName)}Se cambió la contraseña de tu cuenta de odentIA y cerramos tu sesión en los demás equipos.`],
+    paragraphs: [`${hello(firstName)}Se cambió la contraseña de tu cuenta de ${name} y cerramos tu sesión en los demás equipos.`],
     facts: [
       { label: "Cuándo", value: `Hoy, ${whenText}` },
       ...(deviceText ? [{ label: "Desde", value: deviceText }] : []),
     ],
     action: { label: "No fui yo: recuperar mi cuenta", url },
     note: "Si fuiste tú, no tienes que hacer nada.",
-    reason: "Te escribimos porque cambió la contraseña de tu cuenta de odentIA.",
+    reason: `Te escribimos porque cambió la contraseña de tu cuenta de ${name}.`,
   })
 }
 
@@ -169,15 +204,18 @@ export function legalUpdateTemplate({
   changes,
   url,
   replyTo,
+  brand,
 }: {
   firstName?: string | undefined
   effectiveText: string
   changes: readonly string[]
   url: string
   replyTo?: string | undefined
-}): MailTemplate {
+} & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
-    subject: "Actualizamos los términos de odentIA",
+    brand,
+    subject: `Actualizamos los términos de ${name}`,
     preview: `Rigen desde el ${effectiveText}. Te contamos qué cambió.`,
     title: "Actualizamos los términos",
     paragraphs: [
@@ -186,8 +224,8 @@ export function legalUpdateTemplate({
     list: changes,
     action: { label: "Leer los cambios", url },
     note: `La próxima vez que entres te pediremos aceptarlos. Si no estás de acuerdo, ${replyTo ? "responde este correo" : "escríbenos desde Ayuda"} antes de esa fecha.`,
-    reason: "Te escribimos porque tienes una cuenta en odentIA y aceptaste la versión anterior.",
-    ...(replyTo ? { replyTo, replies: "Si respondes, tu mensaje llega al equipo de odentIA." } : {}),
+    reason: `Te escribimos porque tienes una cuenta en ${name} y aceptaste la versión anterior.`,
+    ...(replyTo ? { replyTo, replies: `Si respondes, tu mensaje llega al equipo de ${name}.` } : {}),
   })
 }
 
@@ -195,19 +233,22 @@ export function invitationTemplate({
   organizationName,
   inviterName,
   url,
+  brand,
 }: {
   organizationName: string
   inviterName: string
   url: string
-}): MailTemplate {
+} & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   return renderEmail({
+    brand,
     subject: `Te invitaron a ${organizationName}`,
-    preview: `${inviterName} te invitó a unirte al equipo en odentIA.`,
+    preview: `${inviterName} te invitó a unirte al equipo en ${name}.`,
     title: `Te invitaron a ${organizationName}`,
-    paragraphs: [`Hola. ${inviterName} te invitó a unirte al equipo de ${organizationName} en odentIA.`],
+    paragraphs: [`Hola. ${inviterName} te invitó a unirte al equipo de ${organizationName} en ${name}.`],
     action: { label: "Aceptar invitación", url },
     note: "Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.",
-    reason: `Te escribimos porque ${inviterName} te invitó desde odentIA.`,
+    reason: `Te escribimos porque ${inviterName} te invitó desde ${name}.`,
   })
 }
 
@@ -229,30 +270,34 @@ export function staffInvitationTemplate({ url }: { url: string }): MailTemplate 
  * borra a los 30) o verificada y sin clínica. Informativos, no publicidad.
  */
 export function accountReminderTemplate(
-  input: { kind: "sin_verificar"; url: string; days: number } | { kind: "sin_clinica"; url: string },
+  input: ({ kind: "sin_verificar"; url: string; days: number } | { kind: "sin_clinica"; url: string }) & Branded,
 ): MailTemplate {
+  const brand = input.brand
+  const name = mailBrandName(brand)
   if (input.kind === "sin_verificar") {
     return renderEmail({
-      subject: "Completa tu cuenta de odentIA",
+    brand,
+      subject: `Completa tu cuenta de ${name}`,
       preview: "Verifícala o, si no la necesitas, se eliminará a los 30 días.",
       title: "Completa tu cuenta",
       paragraphs: [
-        "Hola. Creaste una cuenta en odentIA, pero aún no la verificaste ni pertenece a ninguna clínica.",
+        `Hola. Creaste una cuenta en ${name}, pero aún no la verificaste ni pertenece a ninguna clínica.`,
         `Si quieres usarla, verifica tu correo con este botón. Sirve durante ${input.days} días; después, entra con tu correo y pide otro enlace.`,
       ],
       action: { label: "Verificar mi correo", url: input.url },
       note: "Si no la necesitas, no hagas nada: la cuenta se eliminará automáticamente a los 30 días.",
-      reason: "Te escribimos porque se creó una cuenta de odentIA con este correo. Es un aviso informativo, no publicidad.",
+      reason: `Te escribimos porque se creó una cuenta de ${name} con este correo. Es un aviso informativo, no publicidad.`,
     })
   }
   return renderEmail({
-    subject: "Tu cuenta de odentIA está verificada: crea o acepta tu clínica",
+    brand,
+    subject: `Tu cuenta de ${name} está verificada: crea o acepta tu clínica`,
     preview: "Crea tu clínica o acepta la invitación que te enviaron.",
     title: "Crea o acepta tu clínica",
     paragraphs: ["Hola. Tu cuenta ya está verificada, pero aún no pertenece a ninguna clínica."],
     action: { label: "Crear mi clínica", url: input.url },
     note: "Si te invitaron a una clínica, acepta la invitación desde el correo que te enviaron.",
-    reason: "Te escribimos porque tu cuenta de odentIA aún no tiene clínica. Es un aviso informativo, no publicidad.",
+    reason: `Te escribimos porque tu cuenta de ${name} aún no tiene clínica. Es un aviso informativo, no publicidad.`,
   })
 }
 
@@ -315,26 +360,29 @@ export function supportReplyNoticeTemplate({
   caseKind,
   topic,
   url,
+  brand,
 }: {
   kind: "respuesta" | "necesita_algo"
   caseKind: SupportCaseKindLabel
   /** El nombre corto de la pantalla del caso: «Automatizaciones». */
   topic: string
   url: string
-}): MailTemplate {
+} & Branded): MailTemplate {
+  const name = mailBrandName(brand)
   const about = `«${SUPPORT_KIND_LABEL[caseKind]} · ${topic}»`
   const subject =
-    kind === "necesita_algo" ? "Soporte de odentIA necesita algo de ti" : "Soporte de odentIA respondió tu caso"
+    kind === "necesita_algo" ? `Soporte de ${name} necesita algo de ti` : `Soporte de ${name} respondió tu caso`
   const first =
     kind === "necesita_algo"
       ? `Soporte necesita un dato o un permiso tuyo sobre ${about}.`
       : `Tienes una respuesta sobre ${about}.`
   return renderEmail({
+    brand,
     subject,
     preview: first,
     title: kind === "necesita_algo" ? "Soporte necesita algo de ti" : "Soporte respondió tu caso",
-    paragraphs: [`Hola. ${first} Responde desde odentIA: ahí está todo el caso.`],
-    action: { label: kind === "necesita_algo" ? "Responder en odentIA" : "Ver la respuesta", url },
-    reason: "Te escribimos porque abriste un caso con soporte de odentIA y aún no viste la respuesta.",
+    paragraphs: [`Hola. ${first} Responde desde ${name}: ahí está todo el caso.`],
+    action: { label: kind === "necesita_algo" ? `Responder en ${name}` : "Ver la respuesta", url },
+    reason: `Te escribimos porque abriste un caso con soporte de ${name} y aún no viste la respuesta.`,
   })
 }

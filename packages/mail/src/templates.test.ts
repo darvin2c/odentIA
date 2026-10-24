@@ -13,6 +13,7 @@ import {
   passwordChangedTemplate,
   renderEmail,
   resetMailLinks,
+  senderFor,
   staffInvitationTemplate,
   supportInboxNoticeTemplate,
   supportReplyNoticeTemplate,
@@ -183,14 +184,37 @@ describe("variantes", () => {
 })
 
 describe("adjuntos", () => {
-  it("adjunta solo las imágenes que el HTML nombra, en PNG", () => {
-    const files = logoAttachments(verifyEmailTemplate({ url: URL }).html)
-    expect(files.map((file) => file.cid).sort()).toEqual(Object.values(LOGO_CIDS).sort())
-    for (const file of files) {
-      expect(file.contentType).toBe("image/png")
-      // Firma PNG.
-      expect([...file.content.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+  it("adjunta solo las imágenes que el HTML nombra, en PNG: las de su marca", () => {
+    for (const brand of ["odentia", "latidia"] as const) {
+      const files = logoAttachments(verifyEmailTemplate({ url: URL, brand }).html)
+      const own = Object.values(LOGO_CIDS).filter((cid) => cid.endsWith(`@${brand}`))
+      expect(own).toHaveLength(4)
+      expect(files.map((file) => file.cid).sort()).toEqual(own.sort())
+      for (const file of files) {
+        expect(file.contentType).toBe("image/png")
+        // Firma PNG.
+        expect([...file.content.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+      }
     }
     expect(logoAttachments("<p>sin logotipo</p>")).toEqual([])
+  })
+
+  it("latidIA (issue 229): su nombre, su morado, su remitente y su web en el pie", () => {
+    configureMailLinks("https://app.odentia32.com", { latidia: "latidia72.com" })
+    try {
+      const mail = verifyEmailTemplate({ url: URL, brand: "latidia" })
+      expect(mail.brand).toBe("latidia")
+      expect(mail.html).toContain("Gracias por registrarte en latidIA.")
+      expect(mail.html).toContain("#6d3fc0")
+      expect(mail.html).not.toContain("odentIA")
+      expect(mail.text).toContain("latidIA · latidia72.com")
+      expect(senderFor("odentIA <no-reply@odentia32.com>", "latidia")).toBe("latidIA <no-reply@odentia32.com>")
+      // odentIA, como siempre.
+      const dental = verifyEmailTemplate({ url: URL })
+      expect(dental.brand).toBeUndefined()
+      expect(dental.text).toContain("odentIA · odentia32.com")
+    } finally {
+      resetMailLinks()
+    }
   })
 })

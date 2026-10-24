@@ -15,6 +15,8 @@ export interface MailTemplate {
   text: string
   /** Buzón que recibe las respuestas; sin él, el correo dice que no se responde. */
   replyTo?: string
+  /** La marca, si no es odentIA: el envío la usa para el remitente. */
+  brand?: MailBrand
 }
 
 export interface EmailFact {
@@ -65,31 +67,74 @@ export interface EmailContent {
   replyTo?: string
   /** Qué pasa si responde; por defecto, que el correo no recibe respuestas. */
   replies?: string
+  /** La marca del correo: el logo, el color y la firma (issue 229). Sin decirla, odentIA. */
+  brand?: MailBrand
+}
+
+/* ---------- Marcas ---------- */
+
+/** Las marcas de la plataforma: odentIA, el producto dental, y latidIA, el médico. */
+export type MailBrand = "odentia" | "latidia"
+
+/** Lo que cambia de una marca a otra; el resto del correo es el mismo molde. */
+const MAIL_BRANDS: Record<
+  MailBrand,
+  { name: string; marca: string; marcaTinta: string; oscuro: { boton: string; botonTinta: string; enlace: string } }
+> = {
+  odentia: {
+    name: "odentIA",
+    marca: "#0e7490",
+    marcaTinta: "#0b5568",
+    oscuro: { boton: "#4fc3d7", botonTinta: "#03252e", enlace: "#8ad8e6" },
+  },
+  latidia: {
+    name: "latidIA",
+    marca: "#6d3fc0",
+    marcaTinta: "#4c2a8a",
+    oscuro: { boton: "#b79cf0", botonTinta: "#1e0b3d", enlace: "#d6c6f7" },
+  },
+}
+
+/** El nombre de la marca, como se escribe: para los textos de cada plantilla. */
+export function mailBrandName(brand: MailBrand = "odentia"): string {
+  return MAIL_BRANDS[brand].name
 }
 
 /* ---------- Enlaces del pie ---------- */
 
-let siteUrl: string | null = null
+let siteUrls: Partial<Record<MailBrand, string>> = {}
+
+/** La web de una marca: el dominio raíz del panel y, en local, `www.` (la misma regla que `apps/web/astro.config.mjs`). */
+function siteOf(panel: URL): string {
+  const url = new URL(panel)
+  const root = url.hostname.replace(/^app\./, "")
+  url.hostname = root.endsWith(".localhost") ? `www.${root}` : root
+  return url.origin
+}
 
 /**
  * Cada proceso que envía correos lo llama al arrancar con `WEB_URL` (el panel,
- * `app.`). La web de marketing ocupa el dominio raíz y, en local, `www.` (la
- * misma regla que `apps/web/astro.config.mjs`). Sin configurar, el pie no lleva
- * Términos, Privacidad ni Ayuda.
+ * `app.`) y, si latidIA tiene su dominio (`MEDICAL_DOMAIN`), con él: el pie de
+ * cada marca lleva su web. Sin configurar, el pie no lleva Términos,
+ * Privacidad ni Ayuda.
  */
-export function configureMailLinks(webUrl: string): void {
-  const url = new URL(webUrl)
-  const root = url.hostname.replace(/^app\./, "")
-  url.hostname = root.endsWith(".localhost") ? `www.${root}` : root
-  siteUrl = url.origin
+export function configureMailLinks(webUrl: string, domains: { latidia?: string | undefined } = {}): void {
+  const panel = new URL(webUrl)
+  siteUrls = { odentia: siteOf(panel) }
+  if (domains.latidia) {
+    const latidia = new URL(panel)
+    latidia.hostname = `app.${domains.latidia.replace(/^\./, "")}`
+    siteUrls.latidia = siteOf(latidia)
+  }
 }
 
 /** Solo para pruebas: deja el pie como si nadie hubiera configurado los enlaces. */
 export function resetMailLinks(): void {
-  siteUrl = null
+  siteUrls = {}
 }
 
-function footerLinks(): { domain: string; links: { label: string; url: string }[] } | null {
+function footerLinks(brand: MailBrand): { domain: string; links: { label: string; url: string }[] } | null {
+  const siteUrl = siteUrls[brand]
   if (!siteUrl) return null
   return {
     domain: new URL(siteUrl).hostname.replace(/^www\./, ""),
@@ -103,12 +148,22 @@ function footerLinks(): { domain: string; links: { label: string; url: string }[
 
 /* ---------- Imágenes adjuntas ---------- */
 
-export const LOGO_CIDS = {
+/** Cada imagen de `LOGOS` con su `cid`: el de odentIA conserva el de siempre (hay correos guardados que lo nombran). */
+export const LOGO_CIDS: Record<keyof typeof LOGOS, string> = {
   logotipoClaro: "logotipo-claro@odentia",
   logotipoOscuro: "logotipo-oscuro@odentia",
   isotipoClaro: "isotipo-claro@odentia",
   isotipoOscuro: "isotipo-oscuro@odentia",
-} as const
+  latidiaLogotipoClaro: "logotipo-claro@latidia",
+  latidiaLogotipoOscuro: "logotipo-oscuro@latidia",
+  latidiaIsotipoClaro: "isotipo-claro@latidia",
+  latidiaIsotipoOscuro: "isotipo-oscuro@latidia",
+}
+
+/** La imagen de una marca en `LOGOS`: «logotipoClaro» o «latidiaLogotipoClaro». */
+function logoKey(brand: MailBrand, kind: "logotipo" | "isotipo", tone: "Claro" | "Oscuro"): keyof typeof LOGOS {
+  return brand === "latidia" ? `latidia${kind === "logotipo" ? "Logotipo" : "Isotipo"}${tone}` : `${kind}${tone}`
+}
 
 /**
  * Las imágenes que el HTML nombra por `cid:`, listas para Nodemailer. Se
@@ -116,7 +171,7 @@ export const LOGO_CIDS = {
  * también sale con su logotipo.
  */
 export function logoAttachments(html: string): { filename: string; content: Buffer; cid: string; contentType: string }[] {
-  return (Object.keys(LOGO_CIDS) as (keyof typeof LOGO_CIDS)[])
+  return (Object.keys(LOGO_CIDS) as (keyof typeof LOGOS)[])
     .filter((name) => html.includes(`cid:${LOGO_CIDS[name]}`))
     .map((name) => ({
       filename: `${LOGO_CIDS[name].split("@")[0]}.png`,
@@ -150,8 +205,6 @@ const C = {
   cuerpo: "#1e293b",
   nota: "#334155",
   suave: "#475569",
-  marca: "#0e7490",
-  marcaTinta: "#0b5568",
 }
 const BANDS = {
   plazo: { fondo: "#fdf3df", borde: "#f0d9a8", tinta: "#7a4a00" },
@@ -162,7 +215,7 @@ const BANDS = {
  * Modo oscuro para quien lo respeta (Apple Mail, Outlook nuevo) y ajuste al
  * teléfono. Gmail oscurece por su cuenta: por eso el molde no depende de esto.
  */
-const STYLE = `
+const style = (brand: (typeof MAIL_BRANDS)[MailBrand]) => `
 .oscuro{display:none}
 @media (max-width:620px){
 .tarjeta{width:100%!important}
@@ -182,19 +235,21 @@ body,.fondo{background-color:#0c1118!important}
 .t3{color:#94a3b8!important}
 .claro{display:none!important}
 .oscuro{display:block!important}
-.boton td{background-color:#4fc3d7!important}
-.boton a{color:#03252e!important}
-a.enlace{color:#8ad8e6!important}
+.boton td{background-color:${brand.oscuro.boton}!important}
+.boton a{color:${brand.oscuro.botonTinta}!important}
+a.enlace{color:${brand.oscuro.enlace}!important}
 }`
 
 /** La versión clara y, oculta, la oscura: el modo oscuro la cambia; Outlook de escritorio ni la ve. */
-function logo(kind: "logotipo" | "isotipo", alt: string): string {
-  const { width, height } = LOGOS[`${kind}Claro`]
+function logo(brand: MailBrand, kind: "logotipo" | "isotipo", alt: string): string {
+  const light = logoKey(brand, kind, "Claro")
+  const dark = logoKey(brand, kind, "Oscuro")
+  const { width, height } = LOGOS[light]
   const size = `width="${width}" height="${height}"`
   const base = `display:block;border:0;outline:none;text-decoration:none;width:${width}px;height:${height}px;`
   return (
-    `<img class="claro" src="cid:${LOGO_CIDS[`${kind}Claro`]}" alt="${alt}" ${size} style="${base}">` +
-    `<!--[if !mso]><!--><img class="oscuro" src="cid:${LOGO_CIDS[`${kind}Oscuro`]}" alt="${alt}" ${size} style="${base}display:none;mso-hide:all;"><!--<![endif]-->`
+    `<img class="claro" src="cid:${LOGO_CIDS[light]}" alt="${alt}" ${size} style="${base}">` +
+    `<!--[if !mso]><!--><img class="oscuro" src="cid:${LOGO_CIDS[dark]}" alt="${alt}" ${size} style="${base}display:none;mso-hide:all;"><!--<![endif]-->`
   )
 }
 
@@ -202,11 +257,11 @@ function row(content: string, padding: string, extra = ""): string {
   return `<tr><td class="px" style="padding:${padding};${FONT}${extra}">${content}</td></tr>`
 }
 
-function button(action: { label: string; url: string }): string {
+function button(action: { label: string; url: string }, marca: string): string {
   const url = escapeHtml(action.url)
   return (
     `<table role="presentation" class="boton" cellpadding="0" cellspacing="0" border="0"><tr>` +
-    `<td bgcolor="${C.marca}" style="border-radius:6px;background-color:${C.marca};">` +
+    `<td bgcolor="${marca}" style="border-radius:6px;background-color:${marca};">` +
     `<a href="${url}" target="_blank" style="display:inline-block;padding:12px 24px;${FONT}font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">${escapeHtml(action.label)}</a>` +
     `</td></tr></table>`
   )
@@ -250,9 +305,11 @@ function sectionsHtml(sections: readonly EmailSection[]): string {
 
 /** El correo en HTML y en texto plano, de las mismas piezas: nunca dicen cosas distintas. */
 export function renderEmail(content: EmailContent): MailTemplate {
-  const links = content.internal ? null : footerLinks()
+  const brand = content.brand ?? "odentia"
+  const B = MAIL_BRANDS[brand]
+  const links = content.internal ? null : footerLinks(brand)
   const replies =
-    content.replies ?? "Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA."
+    content.replies ?? `Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de ${B.name}.`
   const reasonText = content.internal ? content.reason : `${content.reason} ${replies}`
   const p = (text: string, style: string, cls = "t2") => `<p class="${cls}" style="margin:0;${FONT}${style}">${lines(text)}</p>`
 
@@ -264,7 +321,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
     : ""
   body.push(
     `<tr><td class="px linea" style="padding:24px 32px;border-bottom:1px solid ${C.borde};">` +
-      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle">${logo("logotipo", "odentIA")}</td>${label}</tr></table>` +
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td valign="middle">${logo(brand, "logotipo", B.name)}</td>${label}</tr></table>` +
       `</td></tr>`,
   )
 
@@ -277,7 +334,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
 
   const head =
     (content.eyebrow
-      ? `<p style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${C.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
+      ? `<p style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
       : "") +
     `<h1 class="t1" style="margin:0;${FONT}font-size:22px;line-height:28px;font-weight:bold;color:${C.tinta};">${escapeHtml(content.title)}</h1>` +
     content.paragraphs
@@ -312,7 +369,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
     )
   }
   if (content.sections?.length) body.push(row(sectionsHtml(content.sections), "24px 32px 0 32px"))
-  if (content.action) body.push(row(button(content.action), "24px 32px 0 32px"))
+  if (content.action) body.push(row(button(content.action, B.marca), "24px 32px 0 32px"))
   if (content.note) body.push(row(p(content.note, `font-size:14px;line-height:22px;color:${C.nota};`), "20px 32px 0 32px"))
   if (content.notices?.length) {
     body.push(
@@ -330,7 +387,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
     const url = escapeHtml(content.action.url)
     body.push(
       row(
-        `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:19px;color:${C.suave};">Si el botón no funciona, copia este enlace en tu navegador:<br><a class="enlace" href="${url}" target="_blank" style="color:${C.marca};word-break:break-all;">${url}</a></p>`,
+        `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:19px;color:${C.suave};">Si el botón no funciona, copia este enlace en tu navegador:<br><a class="enlace" href="${url}" target="_blank" style="color:${B.marca};word-break:break-all;">${url}</a></p>`,
         "20px 32px 0 32px",
       ),
     )
@@ -339,14 +396,14 @@ export function renderEmail(content: EmailContent): MailTemplate {
   // Pie: por qué lo recibes, la firma y, salvo en los internos, Términos, Privacidad, Ayuda y el ©.
   const signature =
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>` +
-    `<td valign="middle" style="padding:0 12px 0 0;">${logo("isotipo", "")}</td>` +
-    `<td valign="middle" style="${FONT}"><p class="t1" style="margin:0;${FONT}font-size:14px;line-height:18px;font-weight:bold;color:${C.tinta};">odentIA</p>` +
+    `<td valign="middle" style="padding:0 12px 0 0;">${logo(brand, "isotipo", "")}</td>` +
+    `<td valign="middle" style="${FONT}"><p class="t1" style="margin:0;${FONT}font-size:14px;line-height:18px;font-weight:bold;color:${C.tinta};">${B.name}</p>` +
     (links ? `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:18px;color:${C.suave};">${escapeHtml(links.domain)}</p>` : "") +
     `</td></tr></table>`
   const linkCell = links
     ? `<td class="enlaces" align="right" valign="middle" style="padding:16px 0 0 0;${FONT}font-size:12px;line-height:18px;">` +
       links.links
-        .map((link, index) => `<a class="enlace" href="${escapeHtml(link.url)}" target="_blank" style="color:${C.marca};text-decoration:underline;${index ? "margin-left:14px;" : ""}">${link.label}</a>`)
+        .map((link, index) => `<a class="enlace" href="${escapeHtml(link.url)}" target="_blank" style="color:${B.marca};text-decoration:underline;${index ? "margin-left:14px;" : ""}">${link.label}</a>`)
         .join("") +
       `</td>`
     : ""
@@ -355,14 +412,14 @@ export function renderEmail(content: EmailContent): MailTemplate {
       `<tr><td class="px pie linea" style="padding:20px 32px;background-color:${C.pie};border-top:1px solid ${C.borde};border-radius:0 0 8px 8px;">` +
       `<p class="t3" style="margin:0;${FONT}font-size:12px;line-height:18px;color:${C.suave};">${escapeHtml(reasonText)}${
         content.unsubscribe
-          ? ` <a class="enlace" href="${escapeHtml(content.unsubscribe.url)}" target="_blank" style="color:${C.marca};text-decoration:underline;">${escapeHtml(content.unsubscribe.label)}</a>`
+          ? ` <a class="enlace" href="${escapeHtml(content.unsubscribe.url)}" target="_blank" style="color:${B.marca};text-decoration:underline;">${escapeHtml(content.unsubscribe.label)}</a>`
           : ""
       }</p>` +
       `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="linea" style="margin:16px 0 0 0;border-top:1px solid ${C.borde};"><tr>` +
       `<td valign="middle" style="padding:16px 0 0 0;">${signature}</td>` +
       linkCell +
       `</tr></table>` +
-      (links ? `<p class="t3" style="margin:16px 0 0 0;${FONT}font-size:12px;line-height:18px;color:${C.suave};">© ${new Date().getUTCFullYear()} odentIA</p>` : "") +
+      (links ? `<p class="t3" style="margin:16px 0 0 0;${FONT}font-size:12px;line-height:18px;color:${C.suave};">© ${new Date().getUTCFullYear()} ${B.name}</p>` : "") +
       `</td></tr>`,
   )
 
@@ -375,7 +432,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <title>${escapeHtml(content.subject)}</title>
-<style>${STYLE}
+<style>${style(B)}
 </style>
 </head>
 <body class="fondo" style="margin:0;padding:0;background-color:${C.fondo};">
@@ -412,7 +469,7 @@ ${body.join("\n")}
   if (content.notices?.length) text.push(...content.notices, "")
   text.push("--", reasonText)
   if (content.unsubscribe) text.push(`${content.unsubscribe.label}: ${content.unsubscribe.url}`)
-  text.push(links ? `odentIA · ${links.domain}` : "odentIA")
+  text.push(links ? `${B.name} · ${links.domain}` : B.name)
   if (links) text.push(links.links.map((link) => `${link.label}: ${link.url}`).join(" · "))
 
   return {
@@ -420,5 +477,6 @@ ${body.join("\n")}
     html,
     text: `${text.join("\n")}\n`,
     ...(content.replyTo ? { replyTo: content.replyTo } : {}),
+    ...(brand !== "odentia" ? { brand } : {}),
   }
 }
