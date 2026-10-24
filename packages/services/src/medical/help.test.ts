@@ -7,13 +7,25 @@ describe("la guía de latidIA", () => {
   const text = JSON.stringify(MEDICAL_HELP_TOPICS)
 
   it("no habla de lo que un consultorio no tiene", () => {
-    for (const word of [/odontograma/i, /odontólog/i, /odentIA/i, /\bpiezas?\b/i, /sillones/i, /unidad dental/i, /odontolog/i, /ortodoncia|endodoncia/i, /caries/i]) {
+    for (const word of [
+      /odontograma/i,
+      /odontólog/i,
+      /odentIA/i,
+      /\bpiezas?\b/i,
+      /sillones/i,
+      /unidad dental/i,
+      /odontolog/i,
+      /ortodoncia|endodoncia/i,
+      /caries/i,
+    ]) {
       expect(text).not.toMatch(word)
     }
   })
 
   it("lleva las mismas pantallas y responde lo suyo", () => {
-    expect(MEDICAL_HELP_TOPICS.map((topic) => topic.id)).toEqual(HELP_TOPICS.map((topic) => topic.id))
+    expect(MEDICAL_HELP_TOPICS.map((topic) => topic.id)).toEqual(
+      HELP_TOPICS.map((topic) => topic.id),
+    )
     expect(helpTopicForScreen("/patients/123", MEDICAL_HELP_TOPICS)?.id).toBe("pacientes")
     const [vitals] = matchHelpTopics("¿Dónde registro los signos vitales?", MEDICAL_HELP_TOPICS)
     expect(vitals?.faq?.a).toContain("Examen físico")

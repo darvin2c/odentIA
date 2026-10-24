@@ -19,7 +19,8 @@ const WORDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/unidad dental/g, "sala"],
 ]
 
-const say = (text: string) => WORDS.reduce((out, [word, replacement]) => out.replace(word, replacement), text)
+const say = (text: string) =>
+  WORDS.reduce((out, [word, replacement]) => out.replace(word, replacement), text)
 
 type Faq = NonNullable<HelpTopic["faqs"]>[number]
 
@@ -27,10 +28,25 @@ type Faq = NonNullable<HelpTopic["faqs"]>[number]
 const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
   pacientes: (topic) => ({
     ...topic,
-    terms: [...topic.terms.filter((term) => term !== "odontograma"), "signos vitales", "examen físico", "descanso médico"],
+    terms: [
+      ...topic.terms.filter((term) => term !== "odontograma"),
+      "signos vitales",
+      "examen físico",
+      "descanso médico",
+    ],
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
-      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q)) return []
-      if (faq.q === "¿Dónde quedaron los contactos?") return [{ ...faq, a: faq.a.replace("Caja y odontología solo ven a los pacientes.", "Caja y los médicos solo ven a los pacientes.") }]
+      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
+        return []
+      if (faq.q === "¿Dónde quedaron los contactos?")
+        return [
+          {
+            ...faq,
+            a: faq.a.replace(
+              "Caja y odontología solo ven a los pacientes.",
+              "Caja y los médicos solo ven a los pacientes.",
+            ),
+          },
+        ]
       if (faq.q === "¿Dónde quedaron Atenciones, Recetas u Órdenes?") {
         return [
           {
@@ -52,8 +68,14 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
           {
             ...faq,
             a: faq.a
-              .replace("receta, consentimiento, orden, formulario o imagen", "receta, descanso médico, consentimiento, orden, formulario o imagen")
-              .replace("(pieza, diagnóstico, procedimiento y quien atiende)", "(diagnóstico, procedimiento y quien atiende)"),
+              .replace(
+                "receta, consentimiento, orden, formulario o imagen",
+                "receta, descanso médico, consentimiento, orden, formulario o imagen",
+              )
+              .replace(
+                "(pieza, diagnóstico, procedimiento y quien atiende)",
+                "(diagnóstico, procedimiento y quien atiende)",
+              ),
           },
         ]
       }
@@ -76,10 +98,17 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         : faq,
     ),
   }),
-  disponibilidad: (topic) => ({ ...topic, terms: topic.terms.filter((term) => term !== "sillones") }),
+  disponibilidad: (topic) => ({
+    ...topic,
+    terms: topic.terms.filter((term) => term !== "sillones"),
+  }),
   especialidades: (topic) => ({
     ...topic,
-    terms: ["medicina general", "pediatría", ...topic.terms.filter((term) => term !== "ortodoncia" && term !== "endodoncia")],
+    terms: [
+      "medicina general",
+      "pediatría",
+      ...topic.terms.filter((term) => term !== "ortodoncia" && term !== "endodoncia"),
+    ],
   }),
 }
 
