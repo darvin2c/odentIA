@@ -383,8 +383,8 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
  * Clínicas de Ana con los avisos de cobro de la franja (ADR 0065), para ver el
  * selector «Elige tu clínica», el menú de la clínica y la franja con datos:
  * un cargo que vence pasado mañana, una clínica en solo lectura y otra en su
- * tope de gasto. Luis entra como odontólogo a la de solo lectura y a la del
- * tope, para ver el texto del resto del equipo. Sin correos. Idempotente: si
+ * presupuesto del mes. Luis entra como odontólogo a la de solo lectura y a la
+ * del presupuesto, para ver el texto del resto del equipo. Sin correos. Idempotente: si
  * la clínica ya existe, vuelve a poner las fechas relativas a hoy y, como
  * `seed-dev` borra y recrea a Ana y a Luis, su membresía y la aceptación del
  * contrato (que se van con ellos).
@@ -442,7 +442,7 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
     .set({ status: "restringida", restrictReason: "gracia_vencida", graceEndsAt: new Date(now.getTime() - 3 * day), updatedAt: now })
     .where(eq(saasSubscription.organizationId, "seed-aviso-solo-lectura"))
 
-  // En el tope: 120 conversaciones de USD 0,50 este mes, por encima del crédito, con un tope de USD 5.
+  // En el presupuesto: 120 conversaciones de USD 0,50 este mes, por encima del crédito, con un presupuesto de USD 5.
   await db.update(saasSubscription).set({ spendCapCents: 500, updatedAt: now }).where(eq(saasSubscription.organizationId, "seed-aviso-tope"))
   await db.delete(saasAction).where(and(eq(saasAction.organizationId, "seed-aviso-tope"), inArray(saasAction.kind, ["conversacion"])))
   await db.insert(saasAction).values(

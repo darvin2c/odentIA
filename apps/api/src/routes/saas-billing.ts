@@ -1035,7 +1035,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
   })
 
   // Las condiciones comerciales que la clínica lee en Plan y pagos, «Pedir
-  // revisión», el tope de gasto y Reportes (ADR 0074): las que rigen hoy.
+  // revisión», el presupuesto del mes y Reportes (ADR 0074): las que rigen hoy.
   app.get("/terms", async (c) => {
     const orgId = c.req.query("orgId")
     if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
@@ -1066,7 +1066,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getSaasAlerts(tx, orgId)))
   })
 
-  // C5: tope de gasto por encima del crédito.
+  // C5: el presupuesto del mes, por encima del crédito (ADR 0085).
   app.post("/spend-cap", async (c) => {
     const parsed = z
       .object({ orgId: z.string().min(1), capCents: cents.nullable() })
