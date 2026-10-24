@@ -127,7 +127,10 @@ describe("quién dice que sí: fijo para todas las clínicas", () => {
 describe("voz, funciones y límites de la clínica", () => {
   it("guarda la voz y devuelve los valores por defecto donde no se dijo nada", async () => {
     const before = await run((tx) => getAgentConfig(tx, ORG))
-    expect(before).toMatchObject({ personaName: "Sofi", tone: "cercano", emojis: "no", disabledFunctions: [], channels: null })
+    expect(before).toMatchObject({ personaName: "Sofi", tone: "cercano", emojis: "no", disabledFunctions: [] })
+    // Sofi responde siempre, a toda hora y en todos los canales (ADR 0084): no hay límites que guardar.
+    expect(before).not.toHaveProperty("channels")
+    expect(before).not.toHaveProperty("activeFromMin")
     const saved = await run((tx) =>
       upsertAgentConfig(tx, ORG, { personaName: "  Vale ", treatment: "usted", tone: "formal", emojis: "pocos", about: "Clínica familiar." }, { actorUserId: OWNER }),
     )
@@ -150,23 +153,6 @@ describe("voz, funciones y límites de la clínica", () => {
       upsertAgentConfig(tx, ORG, { functionNotes: { agendar: "  Ofrece primero las mañanas. ", informar: "   " } }),
     )
     expect(saved.functionNotes).toEqual({ agendar: "Ofrece primero las mañanas." })
-  })
-
-  it("el horario pide inicio y fin distintos, o ninguno", async () => {
-    await expect(run((tx) => upsertAgentConfig(tx, ORG, { activeFromMin: 480 }))).rejects.toThrow(/horario/)
-    await expect(run((tx) => upsertAgentConfig(tx, ORG, { activeFromMin: 480, activeUntilMin: 480 }))).rejects.toThrow(/horario/)
-    // Una franja que cruza la medianoche es válida.
-    const night = await run((tx) => upsertAgentConfig(tx, ORG, { activeFromMin: 1200, activeUntilMin: 480 }))
-    expect(night).toMatchObject({ activeFromMin: 1200, activeUntilMin: 480 })
-    const always = await run((tx) => upsertAgentConfig(tx, ORG, { activeFromMin: null, activeUntilMin: null }))
-    expect(always).toMatchObject({ activeFromMin: null, activeUntilMin: null })
-  })
-
-  it("una lista de canales vacía vuelve a «todos»", async () => {
-    const some = await run((tx) => upsertAgentConfig(tx, ORG, { channels: ["whatsapp", "whatsapp"] }))
-    expect(some.channels).toEqual(["whatsapp"])
-    const all = await run((tx) => upsertAgentConfig(tx, ORG, { channels: [] }))
-    expect(all.channels).toBeNull()
   })
 })
 

@@ -1,6 +1,5 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
-import { getAgentConfig } from "./agentConfig.js"
 import type { ConversationCloseReason } from "./conversation-close.js"
 import {
   agentAttendingSql,
@@ -14,8 +13,6 @@ import { countPersonViews, listPersonRows, personChannels } from "./inbox-person
 import { TOPIC_KINDS, type TopicKind, topicIsUrgent } from "./topic-urgency.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { lateReplyOf } from "./held-replies.js"
-import { findOrgLocale } from "./locale.js"
-import { insideAgentHours } from "./opportune-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import { webchatReplyRoutes } from "./webchat-reply.js"
 
@@ -46,8 +43,6 @@ export interface ConversationAttention {
   awaitingPatientSince: string | null
   /** El agente ya insistió en esta atención, y cuándo. */
   nudgedAt: string | null
-  /** Hay un entrante sin responder fuera del horario del agente: la respuesta sale cuando abra. */
-  outOfHours: boolean
   /** Quién tiene la conversación asignada, si alguien. */
   assignedName: string | null
   /** Una persona del equipo conversa en vivo: el agente espera (ADR 0050). */
@@ -111,7 +106,6 @@ const NO_ATTENTION: ConversationAttention = {
   unanswered: false,
   awaitingPatientSince: null,
   nudgedAt: null,
-  outOfHours: false,
   assignedName: null,
   teamLive: false,
   topics: [],
@@ -160,11 +154,6 @@ async function conversationAttention(
     left join "user" ua on ua.id = c.assigned_user_id
     left join "user" uc on uc.id = c.closed_by_user_id
     where c.organization_id = ${orgId} and c.id in (${list})`)
-  // Fuera del horario del agente lo que entra espera a que abra; se dice con la hora de la clínica.
-  const cfg = await getAgentConfig(tx, orgId)
-  const agentHours =
-    cfg.activeFromMin !== null && cfg.activeUntilMin !== null ? { fromMin: cfg.activeFromMin, untilMin: cfg.activeUntilMin } : null
-  const closedNow = agentHours ? !insideAgentHours(now, (await findOrgLocale(tx, orgId)).timezone, agentHours) : false
   for (const row of rows) {
     attention.set(row.id, {
       agentAttending: row.agent_attending === true,
@@ -173,7 +162,6 @@ async function conversationAttention(
       unanswered: row.unanswered === true,
       awaitingPatientSince: iso(row.awaiting_since),
       nudgedAt: iso(row.nudged_at),
-      outOfHours: row.agent_attending === true && row.unanswered === true && closedNow,
       assignedName: row.assigned_name,
       teamLive: row.team_live === true,
       topics: [],

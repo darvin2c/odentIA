@@ -76,14 +76,13 @@ export function teamLiveSql(conv: SQL): SQL {
 }
 
 /**
- * La atiende el agente: abierta, encendido en el hilo, Recepción encendida en
- * la organización y atendiendo el canal del hilo.
+ * La atiende el agente: abierta, encendido en el hilo y Recepción encendida en
+ * la organización; atiende todos los canales (ADR 0084).
  */
 export function agentAttendingSql(conv: SQL): SQL {
   return sql`(${conv}.status = 'open' and ${conv}.agent_status = 'on' and exists (
-    select 1 from agent_config ac_on join channel_connection cc_on on cc_on.id = ${conv}.channel_connection_id
-    where ac_on.organization_id = ${conv}.organization_id and ac_on.enabled
-      and (ac_on.channels is null or cc_on.channel = any(ac_on.channels))))`
+    select 1 from agent_config ac_on
+    where ac_on.organization_id = ${conv}.organization_id and ac_on.enabled))`
 }
 
 /** Con el equipo: un tema sin resolver o una persona a cargo. */

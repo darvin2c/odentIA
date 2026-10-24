@@ -1,5 +1,5 @@
 /**
- * «Horario para escribir» (decisión 18 v3): cuándo odentIA escribe por su
+ * «Horario de recontacto» (decisión 18 v3): cuándo odentIA escribe por su
  * cuenta. Lo entrega `/api/agent/writing-hours` por día de la semana
  * (0 = domingo) con sus tramos en minutos; aquí solo se dice en palabras.
  */

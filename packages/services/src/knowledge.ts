@@ -1,4 +1,4 @@
-import { clinicalProfileFor, postalAddressText } from "@odentia/clinical"
+import { clinicalProfileFor, emergencyNumberFor, postalAddressText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   agentKnowledgeEntry,
@@ -608,6 +608,8 @@ export interface ClinicInfoSnapshot {
   clinicName: string
   /** Teléfono para urgencias de la clínica (E.164); nulo si no lo registró. */
   emergencyPhone?: string | null
+  /** Número de emergencias médicas del país de la clínica (ADR 0084); nulo si no hay uno comprobado. */
+  emergencyNumber?: string | null
   timezone: string
   /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
   locale: string
@@ -676,6 +678,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
     emergencyPhone: profile?.emergencyPhone ?? null,
+    emergencyNumber: emergencyNumberFor(profile?.countryCode),
     timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
     locale: profile?.locale || NEUTRAL_LOCALE,
     branches: branchRows.map((b) => ({
@@ -805,11 +808,13 @@ export function formatKnowledgeForPrompt(
       lines.push(parts)
     }
   }
+  // Ante una emergencia, a dónde llamar (ADR 0084): el número del país y el teléfono de la clínica.
   lines.push(
-    snapshot.emergencyPhone
-      ? `Teléfono para urgencias de la clínica (también fuera de horario): ${snapshot.emergencyPhone}.`
-      : "La clínica no registró un teléfono para urgencias: ante una urgencia, que acuda al servicio de emergencias más cercano.",
+    snapshot.emergencyNumber
+      ? `Número de emergencias del país (ambulancia): ${snapshot.emergencyNumber}. Solo si su vida puede estar en peligro, que llame ahora a ese número o vaya a la emergencia más cercana.`
+      : "Si su vida puede estar en peligro, que vaya ahora a la emergencia más cercana.",
   )
+  if (snapshot.emergencyPhone) lines.push(`Teléfono para urgencias de la clínica (también fuera de horario): ${snapshot.emergencyPhone}.`)
   lines.push(...clinicLines)
   // Los medios activos de caja, en una línea: viajan en cada turno para que
   // «¿aceptan …?» se responda con el dato del sistema y no con un texto escrito.

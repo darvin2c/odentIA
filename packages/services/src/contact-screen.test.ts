@@ -154,14 +154,14 @@ it("«No es spam» la devuelve, la protege y el agente le responde si la atiende
 
   // Con el agente encendido y sin ventana (Telegram): el agente le responde ya.
   await run((tx) => sendToSpam(tx, ORG, { contactId: last.screen.contactId, userId: USER }))
-  await run((tx) => upsertAgentConfig(tx, ORG, { enabled: true, channels: null }))
+  await run((tx) => upsertAgentConfig(tx, ORG, { enabled: true }))
   try {
     const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from pgmq.q_agent_runs`)
     expect(await run((tx) => takeOutOfSpam(tx, ORG, { contactId: last.screen.contactId, userId: USER }))).toEqual({ agentReplies: true, topic: false })
     const after = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from pgmq.q_agent_runs`)
     expect((after[0]?.n ?? 0) - (before[0]?.n ?? 0)).toBe(1)
   } finally {
-    await run((tx) => upsertAgentConfig(tx, ORG, { enabled: false, channels: null }))
+    await run((tx) => upsertAgentConfig(tx, ORG, { enabled: false }))
   }
 })
 

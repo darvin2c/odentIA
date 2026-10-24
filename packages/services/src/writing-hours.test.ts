@@ -10,7 +10,7 @@ import {
 } from "./writing-hours.js"
 
 /**
- * «Horario para escribir» (decisión 18 v3, ADR 0042), con el horario que viene:
+ * «Horario de recontacto» (decisión 18 v3, ADR 0042), con el horario que viene:
  * lunes a viernes de 8:00 a 20:00, sábado de 8:00 a 14:00, domingo sin
  * mensajes. Lima es UTC−5 todo el año; el 12 de octubre de 2026 es lunes.
  */
@@ -18,7 +18,7 @@ const LIMA = "America/Lima"
 const at = (iso: string) => new Date(iso)
 const schedule = writingSchedule(DEFAULT_WRITING_HOURS, LIMA)
 
-describe("horario para escribir", () => {
+describe("horario de recontacto", () => {
   it("viene de lunes a viernes de 8:00 a 20:00, el sábado hasta las 14:00 y el domingo nada", () => {
     expect(isWritingTime(at("2026-10-12T13:00:00Z"), schedule)).toBe(true) // lunes 8:00
     expect(isWritingTime(at("2026-10-13T00:59:00Z"), schedule)).toBe(true) // lunes 19:59

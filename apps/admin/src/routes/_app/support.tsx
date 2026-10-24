@@ -108,9 +108,6 @@ const diagnosticPayload = z.object({
       decisionRoutingEnabled: z.boolean(),
       clinicalAssistantEnabled: z.boolean(),
       dailyRunLimit: z.number(),
-      activeFromMin: z.number().nullable(),
-      activeUntilMin: z.number().nullable(),
-      channels: z.array(z.string()).nullable(),
     })
     .nullable(),
   channels: z.array(

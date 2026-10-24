@@ -3,7 +3,7 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
-import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
+import { conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   AGENT_MODEL_LABEL,
@@ -30,8 +30,6 @@ import {
   ServiceError,
   assertAgentTestBudget,
   isSaasSendBlocked,
-  getOrgLocale,
-  nextAgentOpening,
   notifyAgentProviderProblem,
   type RecordRunInput,
   reportModelOutage,
@@ -54,6 +52,7 @@ import { offTopicReply, readRoute, ROUTE_SPAM, routeHandoff, routeQuestions } fr
 import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
+import { hasAlarmSignal } from "./alarm.js"
 import { compileAgentGraph } from "./graph.js"
 import { noteAskedInterest } from "./interest.js"
 import {
@@ -176,43 +175,6 @@ async function publicClinicName(db: Db, orgId: string): Promise<string> {
   return row?.name ?? "la clínica"
 }
 
-/** Motivos en el libro de una corrida que el sistema no deja empezar por un límite de la clínica. */
-const OUT_OF_CHANNEL = "canal-no-atendido"
-const OUT_OF_HOURS = "fuera-de-horario"
-
-/**
- * Límites que aplica el sistema antes de llamar al modelo: canales donde el
- * agente atiende y franja del día en que responde (en la zona de la clínica;
- * una franja puede cruzar la medianoche). Fuera de ellos el hilo queda para
- * el equipo, como cuando el agente está apagado.
- */
-async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId: string, at: Date): Promise<string | null> {
-  if (cfg.channels) {
-    const [connection] = await tx
-      .select({ channel: channelConnection.channel })
-      .from(channelConnection)
-      .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.id, connectionId)))
-      .limit(1)
-    if (!connection || !cfg.channels.includes(connection.channel)) return OUT_OF_CHANNEL
-  }
-  if (cfg.activeFromMin !== null && cfg.activeUntilMin !== null) {
-    const zone = await getOrgLocale(tx, orgId)
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: zone.timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(at)
-    const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
-    const now = pick("hour") * 60 + pick("minute")
-    const from = cfg.activeFromMin
-    const until = cfg.activeUntilMin
-    const inside = from < until ? now >= from && now < until : now >= from || now < until
-    if (!inside) return OUT_OF_HOURS
-  }
-  return null
-}
-
 function baseToolCtx(
   db: Db,
   orgId: string,
@@ -330,6 +292,9 @@ async function attendAgentRun(
   // Spam (ADR 0054): `recheck` si ya está en Spam y escribió algo nuevo;
   // `eligible` si puede ir solo a Spam; `none` si nunca va solo.
   let screenMode = "none" as "recheck" | "eligible" | "none"
+  // Lo que escribió trae una señal de alarma (ADR 0084): pasa al equipo con
+  // prioridad alta y el aviso dice a dónde llamar.
+  let alarm = false
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
@@ -366,33 +331,35 @@ async function attendAgentRun(
       }
       const cfg = await getAgentConfig(tx, orgId)
       if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
+      // Sofi responde siempre, a toda hora y en todos los canales (ADR 0084): no
+      // hay horario ni canales que la hagan esperar.
       const now = clock()
-      const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId, now)
-      if (limit === OUT_OF_HOURS && cfg.activeFromMin !== null && cfg.activeUntilMin !== null) {
-        // Fuera del horario del agente lo que escribió no se pierde: la misma
-        // corrida vuelve a la cola para cuando abra y entonces atiende todo lo
-        // que quedó sin responder (ADR 0024).
-        const zone = await getOrgLocale(tx, orgId)
-        const opensAt = nextAgentOpening(now, zone.timezone, { fromMin: cfg.activeFromMin, untilMin: cfg.activeUntilMin })
-        const delaySeconds = Math.max(1, Math.ceil((opensAt.getTime() - now.getTime()) / 1000))
-        await sendAgentRun(tx, { ...inboundJob, deferred: true }, { delaySeconds })
-        return { skip: { reason: OUT_OF_HOURS, model: effectiveModel, silent: true } }
-      }
-      if (limit) return { skip: { reason: limit, model: effectiveModel } }
+      const [trigger] = await tx
+        .select()
+        .from(message)
+        .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
+        .limit(1)
+      if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
+      // Una señal de alarma («me duele el pecho», «no puedo respirar») no espera
+      // a nadie (ADR 0084): se atiende aunque una persona del equipo esté
+      // conversando o la persona cite su mensaje.
+      alarm = screenMode !== "recheck" && hasAlarmSignal(trigger.body)
       // Una persona del equipo conversa en vivo (ADR 0050): el agente espera
       // hasta 15 minutos después de su último mensaje y entonces vuelve; si
       // para entonces ella ya respondió, la corrida no tiene nada que hacer.
-      const [team] = await tx
-        .select({ at: sql<Date | null>`max(${message.createdAt})` })
-        .from(message)
-        .where(
-          and(
-            eq(message.organizationId, orgId),
-            eq(message.conversationId, conversationId),
-            eq(message.direction, "out"),
-            eq(message.senderKind, "user"),
-          ),
-        )
+      const [team] = alarm
+        ? [null]
+        : await tx
+            .select({ at: sql<Date | null>`max(${message.createdAt})` })
+            .from(message)
+            .where(
+              and(
+                eq(message.organizationId, orgId),
+                eq(message.conversationId, conversationId),
+                eq(message.direction, "out"),
+                eq(message.senderKind, "user"),
+              ),
+            )
       const teamAt = team?.at ? new Date(team.at) : null
       const liveUntil = teamAt ? teamAt.getTime() + TEAM_LIVE_MINUTES * 60_000 : 0
       if (liveUntil > now.getTime()) {
@@ -400,15 +367,9 @@ async function attendAgentRun(
         await sendAgentRun(tx, { ...inboundJob, deferred: true }, { delaySeconds })
         return { skip: { reason: "team-live", model: effectiveModel, silent: true } }
       }
-      const [trigger] = await tx
-        .select()
-        .from(message)
-        .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
-        .limit(1)
-      if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
       // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
-      if (trigger.replyToMessageId && screenMode !== "recheck") {
+      if (trigger.replyToMessageId && screenMode !== "recheck" && !alarm) {
         const [quoted] = await tx
           .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
           .from(message)
@@ -458,8 +419,8 @@ async function attendAgentRun(
         .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
         .orderBy(desc(message.createdAt), desc(message.id))
         .limit(20)
-      // Una corrida pospuesta hasta la apertura del horario atiende todo lo que
-      // quedó sin responder, aunque pase de la ventana de ráfaga.
+      // Una corrida pospuesta (el equipo conversaba) atiende todo lo que quedó
+      // sin responder, aunque pase de la ventana de ráfaga.
       const horizon = inboundJob.deferred ? Number.NEGATIVE_INFINITY : now.getTime() - BURST_HORIZON_MS
       const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
       for (const item of recent) {
@@ -492,13 +453,21 @@ async function attendAgentRun(
       inboundMessageId = latestId
       coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
       burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
+      // La alarma puede venir en cualquier mensaje de la ráfaga, no solo en el último.
+      alarm = alarm || (screenMode !== "recheck" && burst.some((item) => hasAlarmSignal(item.body)))
       // A quien está en Spam primero lo mira Jev: una palabra de derivación no la saca sola.
       const keyword = screenMode === "recheck" ? undefined : burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
       if (keyword) {
         const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
         })
-        await performHandoff(toolCtx, `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`)
+        toolCtx.alarm = alarm
+        await performHandoff(
+          toolCtx,
+          alarm ? "Posible urgencia" : `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`,
+          undefined,
+          alarm ? "alta" : "media",
+        )
         // Derivar siempre avisa: la persona recibe el aviso fijo, sin modelo.
         toolCtx.treatment = cfg.treatment
         await noticeAfterHandoff(toolCtx)
@@ -557,6 +526,7 @@ async function attendAgentRun(
     }
     const { toolCtx, spec, cfg } = prepared
     effectiveModel = spec.modelName
+    toolCtx.alarm = alarm
     toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
     toolCtx.modelProvider = spec.provider
@@ -604,8 +574,14 @@ async function attendAgentRun(
       return handedOff ? ("silencio" as const) : ("derivar" as const)
     })
     if (contactLimit && screenMode === "recheck") return stayInSpam()
-    if (contactLimit === "derivar") {
-      await performHandoff(toolCtx, `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`)
+    // Una alarma no se calla por el tope: pasa otra vez al equipo con su aviso (ADR 0084).
+    if (contactLimit === "derivar" || (contactLimit === "silencio" && alarm)) {
+      await performHandoff(
+        toolCtx,
+        alarm ? "Posible urgencia" : `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`,
+        undefined,
+        alarm ? "alta" : "media",
+      )
       await noticeAfterHandoff(toolCtx)
     }
     if (contactLimit) {
@@ -673,6 +649,19 @@ async function attendAgentRun(
         triggerMessageId: inboundMessageId,
         ...(screenMode === "recheck" ? { alone: true } : {}),
       })
+    }
+    // Una señal de alarma pasa siempre al equipo con prioridad alta, decida lo
+    // que decida el modelo de decisión, y el aviso dice a dónde llamar (ADR 0084).
+    if (alarm) {
+      const decided = toolCtx.route
+      toolCtx.route = {
+        path: "derivar",
+        intent: decided?.intent === "complaint" ? "complaint" : "clinical_question",
+        handoff: 1,
+        confidence: decided?.confidence ?? null,
+        urgency: Math.max(decided?.urgency ?? 0, 2),
+        spam: null,
+      }
     }
     // Spam (ADR 0054): con Jev muy seguro, a quien puede ir solo a Spam no se le
     // responde ni se cobra. A quien ya está, se lo saca solo si lo nuevo no es

@@ -33,13 +33,11 @@ import {
   type AgentOverview,
   type AgentRoles,
   type LearningOverview,
-  minutesToClock,
   namedAgentRoles,
   voicePreview,
 } from "../../lib/agent"
 import { AGENT_NAME_REASONS, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -351,12 +349,6 @@ function ReceptionPage() {
   }
 
   const disabled = toggleFunction.isPending && toggleFunction.variables ? toggleFunction.variables : config.disabledFunctions
-  const hours =
-    config.activeFromMin !== null && config.activeUntilMin !== null
-      ? `De ${minutesToClock(config.activeFromMin)} a ${minutesToClock(config.activeUntilMin)}`
-      : "A toda hora"
-  const channels = config.channels ?? overview.readiness.channels
-  const channelsText = channels.length > 0 ? channels.map((channel) => channelLabel(channel)).join(", ") : "Sin canal conectado"
   const dailyLimit = count(config.dailyRunLimit, "respuesta", "respuestas")
   const closeAfter = `A las ${count(config.closeAfterHours, "hora", "horas")} sin respuesta`
   const voice = [
@@ -444,11 +436,11 @@ function ReceptionPage() {
         </p>
       ) : null}
 
-      {/* Sin teléfono para urgencias Sofi remite a emergencias: se dice con su acción (ADR 0050). */}
+      {/* Sin teléfono para urgencias Sofi solo da el número de emergencias del país: se dice con su acción (ADR 0050 y 0084). */}
       {orgProfile.data && !orgProfile.data.emergencyPhone ? (
         <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm ${besideTest}`}>
           <span className="font-semibold">Sin teléfono para urgencias.</span>
-          <span className="min-w-0 flex-1">Ante una urgencia, {receptionName} dice que acuda al servicio de emergencias más cercano.</span>
+          <span className="min-w-0 flex-1">Ante una urgencia, {receptionName} solo puede decir a qué número de emergencias llamar o que vaya a la emergencia más cercana.</span>
           {canEditClinic ? (
             <Link to="/settings" className="inline-flex min-h-11 items-center font-semibold text-primary underline-offset-2 hover:underline sm:min-h-0">
               Agregarlo en Datos de la clínica
@@ -545,12 +537,6 @@ function ReceptionPage() {
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-semibold">Límites que aplica el sistema</h3>
                 <ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
-                  <li>
-                    <EntryRow label="Horario" value={hours} onClick={canWrite ? () => setLimits("horario") : undefined} />
-                  </li>
-                  <li>
-                    <EntryRow label="Canales" value={channelsText} onClick={canWrite ? () => setLimits("canales") : undefined} />
-                  </li>
                   <li>
                     <EntryRow label="Tope diario" value={dailyLimit} onClick={canWrite ? () => setLimits("tope") : undefined} />
                   </li>
@@ -681,7 +667,7 @@ function ReceptionPage() {
       ) : null}
 
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
-      <LimitsDrawer section={limits} onClose={() => setLimits(null)} config={config} connectedChannels={overview.readiness.channels} />
+      <LimitsDrawer section={limits} onClose={() => setLimits(null)} config={config} />
       <AgentBaseDrawer
         open={baseOpen}
         onClose={() => setBaseOpen(false)}

@@ -31,11 +31,6 @@ export interface AgentConfig {
   disabledFunctions: string[]
   /** Indicación de la clínica por función. */
   functionNotes: Record<string, string>
-  /** Franja en que responde, en minutos desde medianoche de la clínica; nulos = a toda hora. */
-  activeFromMin: number | null
-  activeUntilMin: number | null
-  /** Canales donde atiende; nulo = todos los conectados. */
-  channels: string[] | null
   /** Horas de silencio del paciente tras las que el agente se despide y cierra (6 a 23; ADR 0024). */
   closeAfterHours: number
 }
@@ -79,9 +74,6 @@ const DEFAULTS = {
   about: "",
   disabledFunctions: [] as string[],
   functionNotes: {} as Record<string, string>,
-  activeFromMin: null as number | null,
-  activeUntilMin: null as number | null,
-  channels: null as string[] | null,
   closeAfterHours: 22,
 }
 
@@ -105,9 +97,6 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     about: row.about,
     disabledFunctions: row.disabledFunctions,
     functionNotes: row.functionNotes,
-    activeFromMin: row.activeFromMin,
-    activeUntilMin: row.activeUntilMin,
-    channels: row.channels,
     closeAfterHours: row.closeAfterHours,
   }
 }
@@ -138,10 +127,6 @@ export interface UpsertAgentConfigInput {
   about?: string
   disabledFunctions?: string[]
   functionNotes?: Record<string, string>
-  /** Ambos o ninguno: `null` en los dos = a toda hora. */
-  activeFromMin?: number | null
-  activeUntilMin?: number | null
-  channels?: string[] | null
   /** Entero de 6 a 23: después de 24 horas WhatsApp ya no deja despedirse sin mensaje aprobado. */
   closeAfterHours?: number
 }
@@ -235,25 +220,6 @@ export async function upsertAgentConfig(
       throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a odentIA.")
     }
   }
-  if (input.activeFromMin !== undefined || input.activeUntilMin !== undefined) {
-    const from = input.activeFromMin === undefined ? (current?.activeFromMin ?? null) : input.activeFromMin
-    const until = input.activeUntilMin === undefined ? (current?.activeUntilMin ?? null) : input.activeUntilMin
-    const valid =
-      (from === null && until === null) ||
-      (from !== null &&
-        until !== null &&
-        Number.isInteger(from) &&
-        Number.isInteger(until) &&
-        from >= 0 &&
-        from <= 1439 &&
-        until >= 1 &&
-        until <= 1440 &&
-        from !== until)
-    if (!valid) throw validation("El horario necesita una hora de inicio y una de fin distintas, o ninguna")
-  }
-  if (input.channels !== undefined && input.channels !== null && input.channels.some((c) => typeof c !== "string" || !c.trim())) {
-    throw validation("channels debe ser una lista de canales")
-  }
   const patch: Partial<typeof agentConfig.$inferInsert> = { ...input }
   if (input.personaName !== undefined) patch.personaName = input.personaName?.trim() || null
   if (input.about !== undefined) patch.about = input.about.trim()
@@ -265,7 +231,6 @@ export async function upsertAgentConfig(
         .filter(([, note]) => note !== ""),
     )
   }
-  if (input.channels !== undefined) patch.channels = input.channels && input.channels.length > 0 ? [...new Set(input.channels)] : null
 
   const [row] = await tx
     .insert(agentConfig)
@@ -312,9 +277,6 @@ export async function upsertAgentConfig(
     "about",
     "disabledFunctions",
     "functionNotes",
-    "activeFromMin",
-    "activeUntilMin",
-    "channels",
     "closeAfterHours",
   ] as const) {
     if (patch[field] !== undefined && JSON.stringify(patch[field]) !== JSON.stringify(current?.[field] ?? DEFAULTS[field])) {

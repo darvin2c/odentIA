@@ -84,12 +84,12 @@ export async function takeOutOfSpam(tx: Db, orgId: string, input: { contactId: s
     .limit(1)
   if (!row) return { agentReplies: false, topic: false }
   const [cfg] = await tx
-    .select({ enabled: agentConfig.enabled, channels: agentConfig.channels })
+    .select({ enabled: agentConfig.enabled })
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
-  const attends =
-    row.status === "open" && row.agentStatus === "on" && Boolean(cfg?.enabled) && (!cfg?.channels || cfg.channels.includes(row.channel))
+  // Sofi atiende todos los canales (ADR 0084).
+  const attends = row.status === "open" && row.agentStatus === "on" && Boolean(cfg?.enabled)
   if (!attends) return { agentReplies: false, topic: false }
   const canReply = !WINDOWED_PROVIDERS.includes(row.provider) || windowOpen(last.at)
   if (canReply) {

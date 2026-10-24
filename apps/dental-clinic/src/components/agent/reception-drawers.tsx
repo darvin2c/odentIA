@@ -1,11 +1,10 @@
-import { Checkbox, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { FormDrawer, TimeSelect } from "@odentia/ui-patterns"
+import { Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
-import { type AgentFunction, clockToMinutes, minutesToClock } from "../../lib/agent"
+import type { AgentFunction } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { channelLabel } from "../../lib/channels"
 import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } from "../../lib/conversation-state"
 import type { AgentConfig } from "../../lib/crm"
 import { sameDraft } from "../../lib/page-draft-guard"
@@ -89,25 +88,18 @@ export function FunctionNoteDrawer({
 
 interface LimitsDraft {
   keywords: string
-  allChannels: boolean
-  channels: string[]
-  allDay: boolean
-  from: string
-  until: string
   dailyRunLimit: string
   closeAfterHours: string
 }
 
 /** Qué parte de los límites se abre: cada fila de la página lleva a la suya; en teléfono, a todas. */
-export type LimitsSection = "todo" | "pasa" | "horario" | "canales" | "tope" | "cierre"
+export type LimitsSection = "todo" | "pasa" | "tope" | "cierre"
 
 /** El título de cada parte, con el nombre del agente de recepción de la clínica. */
 function limitsTitle(section: LimitsSection, receptionName: string): string {
   const titles: Record<LimitsSection, string> = {
     todo: `Límites de ${receptionName}`,
     pasa: "Pasa a una persona cuando",
-    horario: `Horario de ${receptionName}`,
-    canales: `Canales de ${receptionName}`,
     tope: `Tope diario de ${receptionName}`,
     cierre: "Cerrar si el paciente no responde",
   }
@@ -115,36 +107,28 @@ function limitsTitle(section: LimitsSection, receptionName: string): string {
 }
 
 function toLimits(config: AgentConfig): LimitsDraft {
-  const hasHours = config.activeFromMin !== null && config.activeUntilMin !== null
   return {
     keywords: config.handoffKeywords.join(", "),
-    allChannels: config.channels === null,
-    channels: config.channels ?? [],
-    allDay: !hasHours,
-    from: hasHours ? minutesToClock(config.activeFromMin ?? 0) : "08:00",
-    until: hasHours ? minutesToClock(config.activeUntilMin ?? 0) : "20:00",
     dailyRunLimit: String(config.dailyRunLimit),
     closeAfterHours: String(config.closeAfterHours),
   }
 }
 
 /**
- * Límites de Sofi: cuándo pasa siempre a una persona, en qué canales
- * responde, a qué horas y cuántas respuestas da al día. Fuera de ellos el hilo
- * queda para el equipo. `section` enseña solo la parte que se pidió; se guarda
- * solo lo que se ve.
+ * Límites de Sofi: cuándo pasa siempre a una persona, cuántas respuestas da al
+ * día y cuándo cierra. Responde siempre, a toda hora y en todos los canales
+ * (ADR 0084): no hay horario ni canales que elegir. `section` enseña solo la
+ * parte que se pidió; se guarda solo lo que se ve.
  */
 export function LimitsDrawer({
   section,
   onClose,
   config,
-  connectedChannels,
 }: {
   /** La parte que se edita; null = cerrado. */
   section: LimitsSection | null
   onClose: () => void
   config: AgentConfig
-  connectedChannels: string[]
 }) {
   const open = section !== null
   const receptionName = useReceptionName()
@@ -164,21 +148,12 @@ export function LimitsDrawer({
   }, [open, config])
   const save = useSaveConfig(onClose)
 
-  // Un canal elegido que ya no está conectado sigue visible para poder quitarlo.
-  const options = [...new Set([...connectedChannels, ...draft.channels])]
-  const from = clockToMinutes(draft.from)
-  // «00:00» como fin significa el final del día.
-  const until = clockToMinutes(draft.until) || 1440
   const limit = /^[0-9]+$/.test(draft.dailyRunLimit.trim()) ? Number(draft.dailyRunLimit.trim()) : Number.NaN
-  const issue = has("canales") && !draft.allChannels && draft.channels.length === 0
-    ? "Elige al menos un canal, o deja que responda en todos."
-    : has("horario") && !draft.allDay && (from === null || from === until)
-      ? "Indica una hora de inicio y una de fin distintas."
-      : has("tope") && !(limit >= 1 && limit <= 100_000)
-        ? "El tope diario va de 1 a 100 000 respuestas."
-        : has("cierre")
-          ? closeAfterHoursIssue(draft.closeAfterHours)
-          : null
+  const issue = has("tope") && !(limit >= 1 && limit <= 100_000)
+    ? "El tope diario va de 1 a 100 000 respuestas."
+    : has("cierre")
+      ? closeAfterHoursIssue(draft.closeAfterHours)
+      : null
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -192,8 +167,6 @@ export function LimitsDrawer({
               .filter(Boolean),
           }
         : {}),
-      ...(has("canales") ? { channels: draft.allChannels ? null : draft.channels } : {}),
-      ...(has("horario") ? { activeFromMin: draft.allDay ? null : from, activeUntilMin: draft.allDay ? null : until } : {}),
       ...(has("tope") ? { dailyRunLimit: limit } : {}),
       ...(has("cierre") ? { closeAfterHours: Number(draft.closeAfterHours.trim()) } : {}),
     })
@@ -212,7 +185,7 @@ export function LimitsDrawer({
           ? "Además de cuando duda, no tiene el dato o le piden hablar con alguien."
           : shown === "cierre"
             ? `Si el paciente deja de responder, ${receptionName} se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez.`
-            : "Fuera de estos límites no responde: la conversación queda para tu equipo."
+            : "Al llegar al tope, la conversación pasa a tu equipo con un aviso para el paciente."
       }
       onSubmit={submit}
       isSubmitting={save.isPending}
@@ -234,84 +207,6 @@ export function LimitsDrawer({
         />
         <FieldDescription>Palabras separadas por coma. Además pasa el caso cuando duda o se lo piden.</FieldDescription>
       </Field>
-      ) : null}
-
-      {has("canales") ? (
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 text-sm font-medium">En qué canales responde</legend>
-        <label htmlFor="limites-todos-canales" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-8">
-          <Checkbox
-            id="limites-todos-canales"
-            checked={draft.allChannels}
-            onCheckedChange={(value) => setDraft({ ...draft, allChannels: value === true })}
-          />
-          En todos los canales conectados
-        </label>
-        {draft.allChannels ? null : options.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay ningún canal conectado.</p>
-        ) : (
-          options.map((channel) => (
-            <label
-              key={channel}
-              htmlFor={`limites-canal-${channel}`}
-              className="flex min-h-11 cursor-pointer items-center gap-2 pl-6 text-sm sm:min-h-8"
-            >
-              <Checkbox
-                id={`limites-canal-${channel}`}
-                checked={draft.channels.includes(channel)}
-                onCheckedChange={(value) =>
-                  setDraft({
-                    ...draft,
-                    channels:
-                      value === true
-                        ? [...draft.channels, channel]
-                        : draft.channels.filter((item) => item !== channel),
-                  })
-                }
-              />
-              {channelLabel(channel)}
-              {connectedChannels.includes(channel) ? null : <span className="text-muted-foreground">(sin conectar)</span>}
-            </label>
-          ))
-        )}
-      </fieldset>
-      ) : null}
-
-      {has("horario") ? (
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 text-sm font-medium">A qué horas responde</legend>
-        <label htmlFor="limites-todo-el-dia" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-8">
-          <Checkbox
-            id="limites-todo-el-dia"
-            checked={draft.allDay}
-            onCheckedChange={(value) => setDraft({ ...draft, allDay: value === true })}
-          />
-          A toda hora
-        </label>
-        {draft.allDay ? null : (
-          <div className="grid grid-cols-2 gap-3 pl-6">
-            <Field>
-              <FieldLabel htmlFor="limites-desde">Desde</FieldLabel>
-              <TimeSelect
-                id="limites-desde"
-                className="w-full"
-                value={draft.from}
-                onChange={(from) => setDraft({ ...draft, from })}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="limites-hasta">Hasta</FieldLabel>
-              <TimeSelect
-                id="limites-hasta"
-                className="w-full"
-                value={draft.until}
-                onChange={(until) => setDraft({ ...draft, until })}
-              />
-            </Field>
-          </div>
-        )}
-        <FieldDescription>En la hora de tu clínica. Puede cruzar la medianoche (por ejemplo, de 20:00 a 08:00).</FieldDescription>
-      </fieldset>
       ) : null}
 
       {has("tope") ? (
@@ -347,7 +242,7 @@ export function LimitsDrawer({
           <span className="text-sm text-muted-foreground">horas</span>
         </div>
         <FieldDescription id="limites-cierre-ayuda">
-          Entre 6 y 23 horas. Antes de cerrar, {receptionName} se despide dentro del horario para escribir. Más de 23 no se puede: WhatsApp ya no deja escribirle.
+          Entre 6 y 23 horas. Antes de cerrar, {receptionName} se despide dentro del horario de recontacto. Más de 23 no se puede: WhatsApp ya no deja escribirle.
         </FieldDescription>
       </Field>
       ) : null}

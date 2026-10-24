@@ -156,7 +156,7 @@ describe("R1: responder pasadas las 24 horas de WhatsApp", () => {
     expect(await c.run((tx) => deliverHeldReplies(tx, c.orgId, conv))).toBe(0)
   })
 
-  it("sin «Ver respuesta» aprobado la respuesta espera; el ciclo lo envía cuando Meta lo aprueba y dentro del horario para escribir", async () => {
+  it("sin «Ver respuesta» aprobado la respuesta espera; el ciclo lo envía cuando Meta lo aprueba y dentro del horario de recontacto", async () => {
     const c = await clinic()
     const lucia = await c.person("Lucía Fernández")
     const conv = await c.thread(lucia, c.whatsappId, { lastInboundAt: hoursAgo(40) })
@@ -257,7 +257,7 @@ describe("R3 y decisión 3: responder un tema desde Inicio", () => {
 
 describe("decisión 5: Sofi se ofrece al día siguiente", () => {
   // El ejemplo del lienzo: el sábado a las 18:30 la clínica ya cerró; el lunes
-  // a las 8:30 de Lima es la primera hora del horario para escribir.
+  // a las 8:30 de Lima es la primera hora del horario de recontacto.
   const SATURDAY_EVENING = new Date("2026-10-10T23:30:00Z")
   const OPENING = new Date("2026-10-12T13:30:00Z")
 

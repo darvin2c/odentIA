@@ -27,7 +27,6 @@ const open = (patch: Partial<ConversationAttention>) => ({
     handoffPriority: null,
     awaitingPatientSince: null,
     nudgedAt: null,
-    outOfHours: false,
     assignedName: null,
     ...patch,
   } satisfies ConversationAttention,
@@ -62,7 +61,6 @@ describe("en qué está una conversación abierta", () => {
   it("sin responder y sin el agente pide a una persona; con el agente, lo atiende él", () => {
     expect(conversationWords(open({ unanswered: true }))).toEqual({ text: "Por responder · Sofi no la atiende", tone: "team" })
     expect(conversationWords(open({ unanswered: true, agentAttending: true }))).toEqual({ text: "La atiende Sofi", tone: "agent" })
-    expect(conversationWords(open({ unanswered: true, agentAttending: true, outOfHours: true }))?.text).toBe("La atiende Sofi · responde al abrir")
     expect(conversationWords(open({ agentAttending: true, teamLive: true }))?.text).toBe("Conversa alguien del equipo · Sofi espera")
   })
 

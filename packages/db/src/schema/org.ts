@@ -54,8 +54,9 @@ export const orgProfile = pgTable("org_profile", {
   sheetSize: text("sheet_size").notNull().default("A4"),
   // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
   ticketFooter: text("ticket_footer").notNull().default("Recibo interno. No es un documento fiscal."),
-  // Teléfono para urgencias de la clínica (fuera de horario también): lo da el
-  // agente ante una urgencia. Nulo: el agente remite a emergencias.
+  // Teléfono para urgencias de la clínica (también cuando está cerrada): lo da
+  // el agente ante una urgencia, junto con el número de emergencias del país
+  // (ADR 0084). Nulo: el agente da solo ese número.
   emergencyPhone: text("emergency_phone"),
   // Impuestos de lo que cobra la clínica (ADR 0083): vale lo que propone su
   // país (`resolveOrgTaxes` de @odentia/clinical); aquí solo queda lo que la

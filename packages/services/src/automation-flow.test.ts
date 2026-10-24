@@ -70,7 +70,7 @@ configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odenti
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
-// 15:00Z son las 10:00 en Lima de un martes: dentro del «Horario para escribir».
+// 15:00Z son las 10:00 en Lima de un martes: dentro del «Horario de recontacto».
 const NOW = new Date("2026-10-06T15:00:00.000Z")
 const all = () => true
 
@@ -572,7 +572,7 @@ describe("como mucho un mensaje al día por persona", () => {
     expect(jobs.find((job) => job.kind === "recordatorio_cita")?.status).toBe("enviado")
     const followUp = jobs.find((job) => job.kind === "seguimiento_presupuesto")!
     expect(followUp.status).toBe("pendiente")
-    // Mañana a las 8:00 de Lima, cuando empieza el horario para escribir.
+    // Mañana a las 8:00 de Lima, cuando empieza el horario de recontacto.
     expect(followUp.scheduledFor.toISOString()).toBe("2026-10-07T13:00:00.000Z")
   })
 })
@@ -1653,7 +1653,7 @@ describe("una puerta para escribirle a alguien (ADR 0042)", () => {
   })
 })
 
-describe("el horario para escribir", () => {
+describe("el horario de recontacto", () => {
   // Domingo 11 de octubre, 8:00 en Lima: el domingo no se escribe (el horario que viene).
   const SUNDAY = new Date("2026-10-11T13:00:00.000Z")
 
@@ -1679,7 +1679,7 @@ describe("el horario para escribir", () => {
     expect(job!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
     // Si vence igual en domingo (el horario cambió después), el envío lo pospone.
     await ownerDb.update(automationJob).set({ scheduledFor: SUNDAY }).where(eq(automationJob.id, job!.id))
-    expect(await deliver(c, SUNDAY)).toMatchObject([{ outcome: "pospuesto", detail: "Fuera del horario para escribir" }])
+    expect(await deliver(c, SUNDAY)).toMatchObject([{ outcome: "pospuesto", detail: "Fuera del horario de recontacto" }])
     expect((await jobsOf(c))[0]!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
     // Con el domingo abierto para escribir, sale.
     await run(c, (tx) => setWritingHours(tx, c.orgId, c.ownerId, Array.from({ length: 7 }, (): Array<[number, number]> => [[480, 1200]])))

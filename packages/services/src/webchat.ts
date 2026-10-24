@@ -354,7 +354,7 @@ export interface WebchatAppearance {
 
 export async function webchatAppearance(tx: Db, orgId: string, found: PublicWebchat): Promise<WebchatAppearance> {
   const cfg = await getAgentConfig(tx, orgId)
-  const attends = cfg.enabled && (cfg.channels === null || cfg.channels.includes(WEBCHAT_CHANNEL))
+  const attends = cfg.enabled
   const clinicName = (await findClinicName(tx, orgId)) ?? "La clínica"
   return {
     clinicName,
@@ -609,7 +609,7 @@ export async function pollWebchatVisitor(
     )
   }
   const last = rows.at(-1)
-  const attends = cfg.enabled && conv.agentStatus === "on" && (cfg.channels === null || cfg.channels.includes(WEBCHAT_CHANNEL))
+  const attends = cfg.enabled && conv.agentStatus === "on"
   const [topic] = await tx
     .select({ id: sql<string>`h.id` })
     .from(sql`agent_handoff h`)

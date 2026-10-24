@@ -85,10 +85,10 @@ export interface IngestDeps {
 
 /**
  * ¿El agente leerá lo que entra en este hilo? Encendido en la conversación y
- * en la clínica, y atendiendo ese canal. El horario no cuenta: fuera de él lo
- * lee al abrir. A quien está en Spam o bloqueado no lo lee (ADR 0054).
+ * en la clínica: atiende todos los canales a toda hora (ADR 0084). A quien
+ * está en Spam o bloqueado no lo lee (ADR 0054).
  */
-async function agentReadsThread(tx: Db, orgId: string, conversationId: string, channel: string): Promise<boolean> {
+async function agentReadsThread(tx: Db, orgId: string, conversationId: string): Promise<boolean> {
   const [conv] = await tx
     .select({ agentStatus: conversation.agentStatus, screen: contact.screen })
     .from(conversation)
@@ -97,11 +97,12 @@ async function agentReadsThread(tx: Db, orgId: string, conversationId: string, c
     .limit(1)
   if (conv?.agentStatus !== "on" || conv.screen !== null) return false
   const [cfg] = await tx
-    .select({ enabled: agentConfig.enabled, channels: agentConfig.channels })
+    .select({ enabled: agentConfig.enabled })
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
-  return Boolean(cfg?.enabled) && (!cfg?.channels || cfg.channels.includes(channel))
+  // Sofi atiende todos los canales (ADR 0084).
+  return Boolean(cfg?.enabled)
 }
 
 export type TranscribeFn = (input: {
@@ -446,7 +447,7 @@ export async function ingestInbound(
     contentType === "audio" &&
     body === null &&
     deps.transcribe &&
-    (await agentReadsThread(tx, orgId, conversationId, channel))
+    (await agentReadsThread(tx, orgId, conversationId))
   ) {
     try {
       body = await deps.transcribe(mediaDownload)

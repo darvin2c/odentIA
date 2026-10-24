@@ -924,7 +924,7 @@ export async function timezoneOf(tx: Db, orgId: string, branchId?: string | null
 }
 
 /** Lo que queda anotado cuando un recordatorio ya no tiene momento para salir dentro del horario. */
-const OUTSIDE_WRITING_HOURS_LATE = "Fuera del horario para escribir y ya sin una hora de margen antes de la cita"
+const OUTSIDE_WRITING_HOURS_LATE = "Fuera del horario de recontacto y ya sin una hora de margen antes de la cita"
 
 /** Cuándo empieza la cita de un trabajo, para no recordarla con menos de una hora de margen. */
 async function appointmentStartOf(tx: Db, orgId: string, appointmentId: string | null): Promise<Date | null> {
@@ -1023,7 +1023,7 @@ export async function syncAppointmentReminders(
       omitidos++
       continue
     }
-    // El «Horario para escribir» se mide con la hora de la sede de la cita.
+    // El «Horario de recontacto» se mide con la hora de la sede de la cita.
     const timeZone = await timezoneOf(tx, orgId, appt.branchId)
     const schedule = await writingScheduleOf(tx, orgId, timeZone)
     for (const h of hoursList) {
@@ -2197,7 +2197,7 @@ export async function deliverJob(
   }
   // El tipo es el del mensaje: un aviso de cita es un aviso aunque sea de «Recordar la cita» (ADR 0040).
   const purpose = purposeOfKind(job.kind)
-  // La hora (ADR 0042): fuera del «Horario para escribir» espera al primer
+  // La hora (ADR 0042): fuera del «Horario de recontacto» espera al primer
   // momento permitido; un recordatorio que ya no llega con una hora de margen
   // antes de la cita no sale. Los avisos de lo que pasó salen al momento.
   const timing = await writingTimeFor(tx, orgId, {
@@ -2215,7 +2215,7 @@ export async function deliverJob(
       .update(automationJob)
       .set({ scheduledFor: timing.later, updatedAt: now })
       .where(eq(automationJob.id, job.id))
-    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario para escribir" }
+    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario de recontacto" }
   }
   if (!job.contactId) return cannot("Sin persona a quien escribirle", "sin_destino")
   const contactId = job.contactId
@@ -2672,7 +2672,7 @@ export async function rescheduleAppointmentReminders(
     const hours = Number(job.dedupeKey.split(":").at(-1))
     if (!Number.isFinite(hours)) continue
     const target = new Date(startsAt.getTime() - hours * 3_600_000)
-    // La misma regla que al programarlo: dentro del «Horario para escribir».
+    // La misma regla que al programarlo: dentro del «Horario de recontacto».
     const schedule = await writingScheduleOf(tx, orgId, jobPayloadOf(job.payload).timeZone)
     const at = target.getTime() < now.getTime() ? null : sendTimeFor(target, now, schedule, startsAt)
     await tx

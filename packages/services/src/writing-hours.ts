@@ -15,13 +15,13 @@ import {
 } from "./opportune-hours.js"
 
 /**
- * «Horario para escribir» (decisión 18 v3 de la fase 4; ADR 0042): cuándo
+ * «Horario de recontacto» (decisión 18 v3 de la fase 4; ADR 0042): cuándo
  * odentIA le escribe a alguien por su cuenta (recordatorios, controles,
  * seguimientos, novedades, lo que inicia el agente, insistir y despedirse).
  * Se configura por día en Agente, con el mismo editor semanal de las sedes, y
- * se lee con la hora de cada sede. No depende del horario de atención ni de
- * «A qué horas responde» el agente, que van aparte. Los avisos de lo que pasó
- * (una cita cancelada) salen al momento.
+ * se lee con la hora de cada sede. No depende del horario de atención y es el
+ * único horario: cuando la persona escribe, se le responde siempre (ADR 0084).
+ * Los avisos de lo que pasó (una cita cancelada) salen al momento.
  */
 
 /** Por día de la semana (0 = domingo), sus tramos en minutos locales; vacío = ese día no se escribe. */
@@ -44,7 +44,7 @@ export const DEFAULT_WRITING_HOURS: WritingWeek = [
 
 /** Valida y ordena una semana; lanza un error de validación con lo que está mal. */
 export function normalizeWritingWeek(value: unknown): WritingWeek {
-  if (!Array.isArray(value) || value.length !== 7) throw validation("El horario para escribir va por los siete días de la semana")
+  if (!Array.isArray(value) || value.length !== 7) throw validation("El horario de recontacto va por los siete días de la semana")
   return value.map((day, weekday) => {
     if (!Array.isArray(day)) throw validation("Cada día del horario es una lista de tramos")
     if (day.length > MAX_RANGES_PER_DAY) throw validation(`Como mucho ${MAX_RANGES_PER_DAY} tramos por día`)
@@ -81,7 +81,7 @@ export async function getWritingHours(tx: Db, orgId: string): Promise<WritingWee
   return readWeek(row?.writingHours ?? DEFAULT_WRITING_HOURS)
 }
 
-/** Guarda el horario para escribir; queda auditado con quién y qué. */
+/** Guarda el horario de recontacto; queda auditado con quién y qué. */
 export async function setWritingHours(tx: Db, orgId: string, actorUserId: string | null, week: unknown): Promise<WritingWeek> {
   const next = normalizeWritingWeek(week)
   const now = new Date()
@@ -100,9 +100,9 @@ export async function setWritingHours(tx: Db, orgId: string, actorUserId: string
   return next
 }
 
-/** El horario para escribir de la clínica, leído con la hora de una sede (o la de la clínica). */
+/** El horario de recontacto de la clínica, leído con la hora de una sede (o la de la clínica). */
 export function writingSchedule(week: WritingWeek, timeZone: string): OpportuneSchedule {
-  return { timeZone, week, agent: null }
+  return { timeZone, week }
 }
 
 export async function writingScheduleOf(tx: Db, orgId: string, timeZone?: string): Promise<OpportuneSchedule> {

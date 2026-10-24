@@ -68,14 +68,12 @@ export interface ConversationAttention {
   awaitingPatientSince: string | null
   /** El agente ya le recordó en esta atención. */
   nudgedAt: string | null
-  /** Escribió fuera del horario del agente y la respuesta quedó para cuando abra. */
-  outOfHours: boolean
   /** Nombre de quien tiene la conversación, si alguien la tiene. */
   assignedName: string | null
   /**
    * Hay un entrante posterior al último saliente aceptado (la vista
    * «Esperan respuesta»). Fuera del contrato de cierre: mientras el servidor
-   * no lo entregue, la fila no dice «Espera respuesta» salvo fuera de horario.
+   * no lo entregue, la fila no dice «Espera respuesta».
    */
   unanswered?: boolean
 }
@@ -653,10 +651,6 @@ export interface AgentConfig {
   /** Funciones de Recepción apagadas e indicación de la clínica por función. */
   disabledFunctions: string[]
   functionNotes: Record<string, string>
-  /** Límites: franja en minutos del día (nulos = a toda hora) y canales (nulo = todos). */
-  activeFromMin: number | null
-  activeUntilMin: number | null
-  channels: string[] | null
   /** Horas sin respuesta del paciente tras las que el agente se despide y cierra (6 a 23). */
   closeAfterHours: number
 }

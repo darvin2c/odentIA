@@ -1,6 +1,6 @@
 # 0024 · Ninguna conversación queda abierta
 
-Fecha: 2026-10-15 · Estado: aceptada · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) y a [0023](0023-el-administrador-detecta-y-recepcion-habla.md)
+Fecha: 2026-10-15 · Estado: aceptada; «fuera de horario se responde al abrir» la reemplaza [0084](0084-sofi-responde-siempre.md): Sofi responde siempre y el único horario es el de recontacto · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) y a [0023](0023-el-administrador-detecta-y-recepcion-habla.md)
 
 ## Problema
 

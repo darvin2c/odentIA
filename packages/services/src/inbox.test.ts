@@ -86,7 +86,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, outOfHours: false, assignedName: null, teamLive: false, topics: [], unreachable: false }
+  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false }
   expect(of(waiting.id)).toEqual({ ...base, agentAttending: true, unanswered: true })
   expect(of(answered.id)).toEqual({ ...base, agentAttending: true, awaitingPatientSince: outAt.toISOString(), nudgedAt: "2026-10-15T12:00:00.000Z" })
   // Sus dos temas, el urgente primero; sin mensajes no hay mensaje citado.
@@ -137,15 +137,6 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   const waitingRow = home.waiting.find((row) => row.kind === "conversations")
   // Sin contar las que tienen un tema abierto: esas son su propia fila.
   expect(waitingRow?.kind === "conversations" ? waitingRow.waiting : 0).toBe(1)
-
-  // Fuera del horario del agente lo que espera respuesta queda para cuando abra
-  // (de 10:00 a 11:00 en Lima; a las 03:00 está cerrado).
-  await ownerDb.update(agentConfig).set({ activeFromMin: 600, activeUntilMin: 660 }).where(eq(agentConfig.organizationId, orgId))
-  const night = (await list({ now: new Date("2026-10-15T08:00:00Z") })).items
-  expect(night.find((item) => item.id === waiting.id)?.attention.outOfHours).toBe(true)
-  expect(night.find((item) => item.id === answered.id)?.attention.outOfHours).toBe(false)
-  const morning = (await list({ now: new Date("2026-10-15T15:30:00Z") })).items
-  expect(morning.find((item) => item.id === waiting.id)?.attention.outOfHours).toBe(false)
 
   // Con el agente desactivado en la organización nadie está «con el agente».
   await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, orgId))

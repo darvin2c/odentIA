@@ -38,7 +38,7 @@ import { updateTask } from "./tasks.js"
 export const CONVERSATION_CLOSE_REASONS = ["resuelta", "sin_respuesta", "equipo", "manual"] as const
 export type ConversationCloseReason = (typeof CONVERSATION_CLOSE_REASONS)[number]
 
-/** Retraso del ciclo tras el que ya no se da por puntual: pasado esto, una despedida espera al «Horario para escribir». */
+/** Retraso del ciclo tras el que ya no se da por puntual: pasado esto, una despedida espera al «Horario de recontacto». */
 const CARE_LATE_MS = 15 * 60 * 1000
 
 /** Horas desde el último mensaje del agente tras las que insiste, una sola vez por atención. */
@@ -527,7 +527,7 @@ export interface ConversationCareSummary {
 /**
  * Cuándo cerrar por silencio: a `closeAfterHours` desde que la persona calló
  * (su último entrante, o el inicio de la atención si fue después) o, si esa
- * hora cae fuera del «Horario para escribir», en el último momento permitido
+ * hora cae fuera del «Horario de recontacto», en el último momento permitido
  * antes; nunca antes del mínimo ni antes de una hora después de insistir.
  */
 export function silenceCloseAt(input: {
@@ -643,15 +643,14 @@ export async function tickConversationCare(
     // Un tema que el equipo ya respondió y por el que la persona no volvió a
     // preguntar se da por resuelto con la misma regla de silencio (ADR 0050).
     if (row.handoffOpen && !(await settleAnsweredTopics(inner, row))) return null
-    const attended = cfg.channels === null || cfg.channels.includes(row.channel)
     // Con una persona a cargo no se cierra sola: la muestra «Te espera».
-    if (row.assignedUserId !== null || row.agentStatus === "off" || !attended) return null
+    if (row.assignedUserId !== null || row.agentStatus === "off") return null
     if (row.unanswered || !row.hasAcceptedOut) return null
     const silenceFrom = new Date(Math.max(row.lastInboundAt?.getTime() ?? 0, row.attentionStartedAt.getTime()))
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
     if (now.getTime() >= closeAt.getTime()) {
-      // La despedida nunca sale fuera del «Horario para escribir». `closeAt` ya
+      // La despedida nunca sale fuera del «Horario de recontacto». `closeAt` ya
       // cae en él (a veces en su último minuto); si el ciclo llega tarde y el
       // horario cerró, espera a que abra (si para entonces ya no se puede
       // escribir, cierra sin despedida, como cualquier ventana vencida).

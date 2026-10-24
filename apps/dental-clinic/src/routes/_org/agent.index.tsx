@@ -269,7 +269,7 @@ function AgentSummaryPage() {
                     : role.id === "administrador"
                       ? adminOn
                       : config?.clinicalAssistantEnabled === true
-                const channels = config?.channels?.length ? config.channels : overview.readiness.channels
+                const channels = overview.readiness.channels
                 return (
                   <li key={role.id} className="px-4 sm:px-6">
                     {/* Teléfono: una fila que lleva a la página del agente; ahí se prueba, se configura y se enciende. */}

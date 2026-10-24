@@ -70,7 +70,7 @@ async function clinic(options: { approved?: string[]; email?: boolean } = {}): P
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
-  // Con el horario para escribir a toda hora: estas pruebas usan el reloj real.
+  // Con el horario de recontacto a toda hora: estas pruebas usan el reloj real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: true,
@@ -335,14 +335,14 @@ describe("el agente no elige plantillas: retoma el sistema", () => {
     })
   })
 
-  it("fuera del «Horario para escribir» el sistema no retoma: dice desde cuándo puede escribirle", async () => {
+  it("fuera del «Horario de recontacto» el sistema no retoma: dice desde cuándo puede escribirle", async () => {
     const c = await clinic({ approved: [RESUME_MESSAGE.template] })
     const p = await person(c, "Lucía Paredes", { wroteHoursAgo: 60 })
     await run(c, (tx) => setWritingHours(tx, c.orgId, c.ownerId, [[], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 840]]]))
     // Domingo 11 de octubre a las 10:00 en Lima: el domingo no se escribe.
     const outcome = await run(c, (tx) => resumeConversationBySystem(tx, c.orgId, KEY, p.conversationId, new Date("2026-10-11T15:00:00Z")))
     expect(outcome).toMatchObject({ sent: false })
-    expect(outcome.sent === false && outcome.waiting).toMatch(/^Es fuera del horario para escribir: el agente puede escribirle a Lucía desde el lunes a las 08:00/)
+    expect(outcome.sent === false && outcome.waiting).toMatch(/^Es fuera del horario de recontacto: el agente puede escribirle a Lucía desde el lunes a las 08:00/)
     expect(await lastOut(p.conversationId)).toBeUndefined()
   })
 

@@ -489,7 +489,7 @@ function ProfileForm({
                 onChange={(next) => field.handleChange(next ?? "")}
               />
               <FieldDescription id="org-emergency-phone-hint">
-                {receptionName} lo da ante una urgencia, también fuera de horario. Si lo dejas vacío, dice que acuda al servicio de emergencias más cercano.
+                {receptionName} lo da ante una urgencia, junto con el número de emergencias del país. Si lo dejas vacío, solo da ese número o dice que vaya a la emergencia más cercana.
               </FieldDescription>
             </Field>
           )}

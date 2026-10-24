@@ -236,7 +236,7 @@ test("agente: Límites guarda cuántas horas espera antes de cerrar por silencio
   const form = surface(page, { name: "Cerrar si el paciente no responde", exact: true })
   const hours = form.getByLabel("Cerrar la conversación si el paciente no responde")
   await expect(hours).toHaveValue("22")
-  await expect(form).toContainText("Entre 6 y 23 horas. Antes de cerrar, Sofi se despide dentro del horario para escribir.")
+  await expect(form).toContainText("Entre 6 y 23 horas. Antes de cerrar, Sofi se despide dentro del horario de recontacto.")
   const save = form.getByRole("button", { name: "Guardar" })
   for (const wrong of ["5", "24"]) {
     await hours.fill(wrong)

@@ -99,7 +99,7 @@ export async function getAdminSettings(tx: Db, orgId: string): Promise<AdminSett
 
 /**
  * Enciende o apaga a Argos. Encenderlo no prende ninguna línea. A qué
- * hora escribe ya no es un ajuste suyo: es el «Horario para escribir» de
+ * hora escribe ya no es un ajuste suyo: es el «Horario de recontacto» de
  * Agente (`writing-hours.ts`, decisión 18 v3), el mismo para todo.
  */
 export async function updateAdminSettings(
@@ -919,7 +919,7 @@ function linesOf(rules: Map<string, RuleRow>): AdminLine[] {
 
 export interface AdminPage {
   enabled: boolean
-  /** El «Horario para escribir» de Agente: lo respeta todo lo que escribe el agente por su cuenta. */
+  /** El «Horario de recontacto» de Agente: lo respeta todo lo que escribe el agente por su cuenta. */
   writingHours: WritingWeek
   /** Sofi es quien escribe: apagada, las líneas que escriben quedan en pausa. */
   receptionOn: boolean
@@ -1450,7 +1450,7 @@ export async function tickAutomations(
     // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
     await apart(orgId, "pruebas del chat web", 0, () => withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now)))
     // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver
-    // respuesta» sale cuando Meta lo aprueba, dentro del «Horario para escribir».
+    // respuesta» sale cuando Meta lo aprueba, dentro del «Horario de recontacto».
     summary.respuestasOfrecidas += await apart(orgId, "«Ver respuesta»", 0, () =>
       withOrgContext(appDb, orgId, (tx) => offerPendingHeldReplies(tx, orgId, now)),
     )

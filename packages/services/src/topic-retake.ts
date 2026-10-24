@@ -14,7 +14,7 @@ import type { TopicKind } from "./topic-urgency.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 
-/** «A la hora de apertura»: la primera hora del «Horario para escribir» de ese día. */
+/** «A la hora de apertura»: la primera hora del «Horario de recontacto» de ese día. */
 const OPENING_MS = 60 * 60_000
 /** Por ciclo, para no escribirle a muchas personas de golpe; lo demás, en el siguiente. */
 const RETAKE_LIMIT = 20
@@ -79,7 +79,6 @@ export async function retakeForgottenTopics(
       and conv.status = 'open' and conv.agent_status = 'on' and c.screen is null
       -- El chat web no tiene a nadie mirando al día siguiente: la respuesta va por donde dejó (forwardWebchatReply), no aquí.
       and conn.provider <> 'web_chat' and not conv.is_test
-      ${cfg.channels !== null ? sql`and conn.channel in (${sql.join([...cfg.channels, ""].map((channel) => sql`${channel}`), sql`, `)})` : sql``}
       -- Instagram y Messenger cerrados no admiten «Retomar»: no ocupan lugar en la fila.
       and not (conn.provider in ('instagram', 'messenger') and (conv.last_inbound_at is null or conv.last_inbound_at < ${now.toISOString()}::timestamptz - interval '24 hours'))
       -- Uno que no pudo salir hoy no se vuelve a intentar hasta mañana.

@@ -514,7 +514,7 @@ export async function reviewAdminLine(tx: Db, orgId: string, line: AdminLine, ne
   }
   checks.push({
     ok: true,
-    text: "Respeta el permiso de cada persona y el «Horario para escribir» de Agente, con la hora de cada sede.",
+    text: "Respeta el permiso de cada persona y el «Horario de recontacto» de Agente, con la hora de cada sede.",
   })
   if (!runtime.receptionOn) checks.push({ ok: false, text: "Sofi no está atendiendo: mientras siga así, esta línea no le escribe a nadie." })
   const spec = automationMessageOf(line.key)
