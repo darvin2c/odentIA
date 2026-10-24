@@ -1,4 +1,5 @@
-// Términos y condiciones del servicio odentIA (contrato entre odentIA y la clínica).
+// Términos y condiciones del servicio (contrato entre odentIA y la clínica). Un solo contrato para
+// sus dos marcas, odentIA y latidIA (issue 229, decisión 19): las dos webs muestran el mismo texto.
 // Las cifras son las del plan de lista publicado y las condiciones comerciales (la administración),
 // las mismas de la página Precios.
 import { days, hours, money, type Pricing } from "../pricing"
@@ -19,33 +20,33 @@ export function terminosFor(pricing: Pricing): LegalDoc {
   path: "/terminos",
   title: "Términos y condiciones del servicio",
   description:
-    "Condiciones de uso de odentIA para clínicas dentales: cuenta, prueba gratuita, plan y cobro por acción, uso de los agentes de IA, datos, cancelación y ley aplicable.",
+    "Condiciones de uso de odentIA y latidIA para clínicas dentales y consultorios médicos: cuenta, prueba gratuita, plan y cobro por acción, uso de los agentes de IA, datos, cancelación y ley aplicable.",
   intro: [
-    "Estos términos regulan el uso de odentIA, una plataforma en la nube para la gestión de clínicas dentales que incluye agentes de inteligencia artificial. Al crear una cuenta o usar el servicio, la clínica acepta estos términos.",
-    "El servicio se presta entre empresas: está dirigido a clínicas y profesionales de la odontología, no a pacientes ni a consumidores finales.",
+    "Estos términos regulan el uso de una plataforma en la nube para la gestión de clínicas y consultorios que incluye agentes de inteligencia artificial y se ofrece con dos marcas: odentIA, para clínicas dentales, y latidIA, para consultorios médicos. Al crear una cuenta o usar el servicio con cualquiera de las dos, la clínica acepta estos términos.",
+    "El servicio se presta entre empresas: está dirigido a clínicas, consultorios y profesionales de la odontología y de la medicina, no a pacientes ni a consumidores finales.",
   ],
   sections: [
     {
       id: "partes",
       title: "Partes",
       blocks: [
-        `El servicio lo presta ${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú (en adelante, «odentIA»).`,
-        "La otra parte es la persona jurídica o el profesional independiente que crea la cuenta y contrata el servicio (en adelante, «la Clínica»). Las personas que la Clínica invita a su cuenta (recepción, odontólogos, caja, administración) son «Usuarios» y actúan por cuenta de la Clínica.",
+        `El servicio lo presta ${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú (en adelante, «odentIA»), que ofrece el servicio con dos marcas: odentIA y latidIA.`,
+        "La otra parte es la persona jurídica o el profesional independiente que crea la cuenta y contrata el servicio con cualquiera de las dos marcas (en adelante, «la Clínica», también cuando es un consultorio). Las personas que la Clínica invita a su cuenta (recepción, odontólogos o médicos, caja, administración) son «Usuarios» y actúan por cuenta de la Clínica.",
       ],
     },
     {
       id: "objeto",
       title: "Objeto del servicio",
       blocks: [
-        "odentIA pone a disposición de la Clínica, mediante suscripción, un software para coordinar la atención de sus pacientes: agenda, historia clínica y odontograma, presupuestos, caja, comunicaciones por varios canales, reportes y tres agentes de inteligencia artificial: Sofi (agente de recepción), Clío (agente clínico) y Argos (agente administrador).",
-        "odentIA no presta servicios de salud, no diagnostica ni trata pacientes y no sustituye el criterio profesional del odontólogo. La atención clínica es responsabilidad exclusiva de la Clínica y de sus profesionales.",
+        "odentIA pone a disposición de la Clínica, mediante suscripción, un software para coordinar la atención de sus pacientes: agenda, historia clínica (con el odontograma en odentIA y el examen físico y los signos vitales en latidIA), presupuestos, caja, comunicaciones por varios canales, reportes y tres agentes de inteligencia artificial: Sofi (agente de recepción), Clío (agente clínico) y Argos (agente administrador).",
+        "odentIA no presta servicios de salud, no diagnostica ni trata pacientes y no sustituye el criterio profesional del odontólogo ni del médico. La atención clínica es responsabilidad exclusiva de la Clínica y de sus profesionales.",
       ],
     },
     {
       id: "cuenta",
       title: "Cuenta y registro",
       blocks: [
-        "Pueden contratar el servicio las clínicas dentales y los profesionales de la odontología. Quien crea la cuenta declara ser mayor de edad y tener facultades suficientes para obligar a la Clínica.",
+        "Pueden contratar el servicio las clínicas dentales, los consultorios médicos y los profesionales de la odontología y de la medicina. Quien crea la cuenta declara ser mayor de edad y tener facultades suficientes para obligar a la Clínica.",
         "La Clínica debe proporcionar información veraz al registrarse y mantenerla actualizada. Es responsable de lo que se haga desde su cuenta, de asignar a cada Usuario el rol que corresponda a su función y de retirar el acceso a quien deje de trabajar con ella.",
         "Las credenciales son personales. La Clínica y sus Usuarios deben custodiarlas y avisar a odentIA en cuanto sospechen un acceso no autorizado.",
       ],
@@ -95,17 +96,17 @@ export function terminosFor(pricing: Pricing): LegalDoc {
               [
                 "Consulta de Clío simple",
                 price(TIERS?.simple),
-                "Una vez por atención, cuando el odontólogo confirma un solo registro propuesto por Clío: una receta, una nota o un control.",
+                "Una vez por atención, cuando el profesional confirma un solo registro propuesto por Clío: una receta, una nota, un control o, en latidIA, los signos vitales.",
               ],
               [
                 "Consulta de Clío estándar",
                 price(TIERS?.estandar),
-                "Una vez por atención, cuando el odontólogo confirma un diagnóstico, el odontograma o dos registros o más.",
+                "Una vez por atención, cuando el profesional confirma un diagnóstico, el odontograma (en latidIA, el examen físico) o dos registros o más.",
               ],
               [
                 "Consulta de Clío completa",
                 price(TIERS?.completa),
-                "Una vez por atención, cuando el odontólogo confirma el presupuesto que armó Clío.",
+                "Una vez por atención, cuando el profesional confirma el presupuesto que armó Clío (en latidIA, lo que sigue que dejó indicado).",
               ],
               [
                 "Cita recuperada",
@@ -136,7 +137,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         { h: "Qué no se cobra" },
         {
           list: [
-            "Las propuestas de Clío que el odontólogo no confirma.",
+            "Las propuestas de Clío que el profesional no confirma.",
             "Las citas recuperadas a las que el paciente no asiste.",
             "El spam, los mensajes ajenos a la Clínica y los recordatorios y avisos de cita.",
             "Lo que ocupa en la base de datos la información de la Clínica (fichas, citas, mensajes).",
@@ -172,7 +173,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         {
           list: [
             "Sofi responde por los canales que la Clínica conecta (WhatsApp, Instagram, Messenger, Telegram, chat web y correo electrónico). Siempre se presenta como asistente virtual y deriva la conversación a una persona del equipo cuando corresponde o cuando el interlocutor lo pide.",
-            "Clío propone notas, diagnósticos y planes de tratamiento a partir del dictado del odontólogo. Nada entra en la historia clínica sin la confirmación expresa del odontólogo, que es responsable de su contenido.",
+            "Clío propone notas, diagnósticos y planes de tratamiento a partir del dictado del profesional. Nada entra en la historia clínica sin la confirmación expresa del profesional, que es responsable de su contenido.",
             "Argos envía recordatorios, avisos de controles y seguimiento de presupuestos según lo que la Clínica configure.",
           ],
         },
@@ -188,7 +189,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         "La Clínica se obliga a:",
         {
           list: [
-            "Cargar y tratar en odentIA solo datos obtenidos de forma lícita y contar con las autorizaciones o consentimientos de sus pacientes que exija la ley, incluidos los necesarios para tratar datos de salud y para enviar comunicaciones promocionales.",
+            "Cargar y tratar en el servicio solo datos obtenidos de forma lícita y contar con las autorizaciones o consentimientos de sus pacientes que exija la ley, incluidos los necesarios para tratar datos de salud y para enviar comunicaciones promocionales.",
             "Enviar promociones solo a los pacientes que hayan dado su consentimiento. Los mensajes de atención (citas, controles y presupuestos) forman parte del servicio que la Clínica presta a sus pacientes.",
             "Usar cada canal conectado conforme a las políticas de su proveedor (Meta para WhatsApp, Instagram y Messenger; Telegram; Google; Microsoft) y mantener vigentes las cuentas y autorizaciones necesarias.",
             "Mantener su historia clínica conforme a la normativa sanitaria aplicable. En Perú, la Clínica es la responsable de la historia clínica de sus pacientes según la Ley 30024 y la norma técnica de salud de historia clínica vigente.",
@@ -201,7 +202,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "uso-aceptable",
       title: "Uso aceptable",
       blocks: [
-        "No está permitido usar odentIA para:",
+        "No está permitido usar el servicio para:",
         {
           list: [
             "Enviar mensajes no solicitados masivos (spam) o contenido engañoso, ilícito, ofensivo o discriminatorio.",
@@ -218,8 +219,8 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "propiedad-intelectual",
       title: "Propiedad intelectual",
       blocks: [
-        "El software, la marca odentIA, los diseños y la documentación son propiedad de odentIA o de sus licenciantes. La suscripción concede a la Clínica un derecho de uso no exclusivo, intransferible y limitado a la duración del contrato.",
-        "Los datos y contenidos que la Clínica carga en odentIA son de la Clínica (o de sus pacientes, según corresponda). odentIA solo los usa para prestar el servicio, conforme al [encargo de tratamiento](/encargo-de-tratamiento).",
+        "El software, las marcas odentIA y latidIA, los diseños y la documentación son propiedad de odentIA o de sus licenciantes. La suscripción concede a la Clínica un derecho de uso no exclusivo, intransferible y limitado a la duración del contrato.",
+        "Los datos y contenidos que la Clínica carga en el servicio son de la Clínica (o de sus pacientes, según corresponda). odentIA solo los usa para prestar el servicio, conforme al [encargo de tratamiento](/encargo-de-tratamiento).",
         "Si la Clínica envía sugerencias de mejora, odentIA puede usarlas libremente sin obligación de compensación.",
       ],
     },
@@ -248,7 +249,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         "odentIA responde por los daños que cause por dolo o culpa inexcusable, de acuerdo con la ley peruana. Fuera de esos casos, y en la medida en que la ley lo permita:",
         {
           list: [
-            "odentIA no responde por decisiones clínicas, diagnósticos o tratamientos, ni por el contenido que el odontólogo confirma en la historia clínica.",
+            "odentIA no responde por decisiones clínicas, diagnósticos o tratamientos, ni por el contenido que el profesional confirma en la historia clínica.",
             "odentIA no responde por las respuestas de los agentes que la Clínica no haya supervisado conforme a estos términos, ni por fallos de los proveedores de canales o de modelos de inteligencia artificial que no dependan de odentIA.",
             "odentIA no responde por lucro cesante, pérdida de oportunidades ni daños indirectos.",
             "La responsabilidad total de odentIA frente a la Clínica se limita al importe pagado por la Clínica en los doce meses anteriores al hecho que la origina.",

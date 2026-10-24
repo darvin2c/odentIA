@@ -512,6 +512,9 @@ describe("Clío, según lo que dejó hecho", () => {
     expect(tier("control")).toBe("simple")
     expect(tier("diagnostico")).toBe("estandar")
     expect(tier("odontograma")).toBe("estandar")
+    // latidIA: el examen físico ordena la consulta como el odontograma; los signos solos, no.
+    expect(tier("examen")).toBe("estandar")
+    expect(tier("signos")).toBe("simple")
     expect(tier("nota", "receta")).toBe("estandar")
     expect(tier("plan")).toBe("completa")
     expect(tier("plan", "nota", "odontograma")).toBe("completa")

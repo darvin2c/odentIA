@@ -6,9 +6,9 @@ export const AVISO_LEGAL: LegalDoc = {
   path: "/aviso-legal",
   title: "Aviso legal",
   description:
-    "Titular de la web de odentIA, condiciones de uso del sitio, propiedad intelectual, enlaces, ejemplos y ley aplicable.",
+    "Titular de las webs de odentIA y latidIA, condiciones de uso del sitio, propiedad intelectual, enlaces, ejemplos y ley aplicable.",
   intro: [
-    "Este aviso regula el acceso y el uso de la web de odentIA. Al navegar por ella, usted acepta estas condiciones.",
+    "Este aviso regula el acceso y el uso de las webs de odentIA y de latidIA, las dos marcas del mismo servicio. Al navegar por ella, usted acepta estas condiciones.",
   ],
   sections: [
     {
@@ -34,7 +34,7 @@ export const AVISO_LEGAL: LegalDoc = {
       id: "objeto",
       title: "Objeto de la web",
       blocks: [
-        "Esta web informa sobre odentIA, una plataforma para clínicas dentales con agentes de inteligencia artificial, y permite registrarse para probarla. La contratación del servicio se rige por los [términos y condiciones](/terminos).",
+        "Esta web informa sobre una plataforma con agentes de inteligencia artificial que se ofrece con dos marcas, odentIA para clínicas dentales y latidIA para consultorios médicos, y permite registrarse para probarla. La contratación del servicio se rige por los [términos y condiciones](/terminos).",
         "La información de la web es general y puede cambiar. Los precios vigentes son los publicados en la página [Precios](/precios).",
       ],
     },
@@ -42,7 +42,7 @@ export const AVISO_LEGAL: LegalDoc = {
       id: "propiedad-intelectual",
       title: "Propiedad intelectual e industrial",
       blocks: [
-        "Los textos, diseños, imágenes, logotipos, código y demás contenidos de esta web, así como las marcas odentIA y Odentia32, son propiedad del titular o de terceros que han autorizado su uso [Por confirmar: registro de las marcas ante INDECOPI].",
+        "Los textos, diseños, imágenes, logotipos, código y demás contenidos de esta web, así como las marcas odentIA, Odentia32, latidIA y Latidia72, son propiedad del titular o de terceros que han autorizado su uso [Por confirmar: registro de las marcas ante INDECOPI].",
         "No se permite reproducir, distribuir, transformar ni comunicar públicamente esos contenidos sin autorización escrita del titular, salvo para uso personal y no comercial o cuando la ley lo permita.",
         "Las marcas de terceros que aparecen en la web (por ejemplo, WhatsApp, Instagram, Messenger, Telegram o ChatGPT) pertenecen a sus respectivos titulares y se mencionan solo para describir integraciones o compatibilidades.",
       ],
@@ -59,7 +59,7 @@ export const AVISO_LEGAL: LegalDoc = {
       id: "ejemplos",
       title: "Ejemplos y resultados",
       blocks: [
-        "Los ejemplos de esta web, como conversaciones, pacientes, clínicas, cifras y cálculos, usan datos inventados para ilustrar cómo funciona odentIA. No corresponden a personas reales y no son promesas de resultados: lo que obtenga cada clínica depende de su actividad, de sus pacientes y de cómo configure el servicio.",
+        "Los ejemplos de esta web, como conversaciones, pacientes, clínicas, cifras y cálculos, usan datos inventados para ilustrar cómo funciona el servicio. No corresponden a personas reales y no son promesas de resultados: lo que obtenga cada clínica depende de su actividad, de sus pacientes y de cómo configure el servicio.",
       ],
     },
     {

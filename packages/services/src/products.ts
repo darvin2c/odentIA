@@ -3,8 +3,10 @@ import type { Db } from "@odentia/db"
 import { DENTAL_AGENT_TEXTS } from "./dental/agent-texts.js"
 import { dentalHooks } from "./dental/hooks.js"
 import { ServiceError } from "./errors.js"
+import { HELP_TOPICS, type HelpTopic } from "./help-guide.js"
 import { orgProduct } from "./locale.js"
 import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
+import { MEDICAL_HELP_TOPICS } from "./medical/help.js"
 import { medicalHooks } from "./medical/hooks.js"
 import type { ProductAgentTexts } from "./product-agent.js"
 import type { ProductDictation, ProductHooks } from "./product-hooks.js"
@@ -52,6 +54,13 @@ export function agentTextsFor(product: ClinicalProduct): ProductAgentTexts {
 /** Las palabras del producto de esta clínica en lo que lee el modelo. */
 export async function productAgentTexts(tx: Db, orgId: string): Promise<ProductAgentTexts> {
   return agentTextsFor(await orgProduct(tx, orgId))
+}
+
+const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = { dental: HELP_TOPICS, medical: MEDICAL_HELP_TOPICS }
+
+/** La guía de la Ayuda del producto de esta clínica: sus pantallas con sus palabras. */
+export async function productHelpTopics(tx: Db, orgId: string): Promise<readonly HelpTopic[]> {
+  return HELP[await orgProduct(tx, orgId)]
 }
 
 /**
