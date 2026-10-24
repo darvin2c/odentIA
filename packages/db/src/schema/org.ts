@@ -143,7 +143,11 @@ export const branch = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("branch_org_slug_uidx").on(table.organizationId, table.slug)],
+  (table) => [
+    uniqueIndex("branch_org_slug_uidx").on(table.organizationId, table.slug),
+    // Destino de las claves compuestas que impiden apuntar a otra clínica.
+    uniqueIndex("branch_org_id_finance_uidx").on(table.organizationId, table.id),
+  ],
 )
 
 /**

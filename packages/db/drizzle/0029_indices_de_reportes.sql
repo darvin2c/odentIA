@@ -1,3 +1,0 @@
-CREATE INDEX "conversation_org_contact_idx" ON "conversation" USING btree ("organization_id","contact_id");--> statement-breakpoint
-CREATE INDEX "message_org_created_idx" ON "message" USING btree ("organization_id","created_at");--> statement-breakpoint
-CREATE INDEX "stock_movement_org_purchase_idx" ON "stock_movement" USING btree ("organization_id","purchase_order_id") WHERE "stock_movement"."purchase_order_id" is not null;

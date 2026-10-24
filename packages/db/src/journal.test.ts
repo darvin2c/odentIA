@@ -6,7 +6,7 @@ import { expect, it } from "vitest"
 // El migrador de drizzle aplica solo las migraciones cuyo `when` es mayor que
 // el de la última aplicada y salta las demás en silencio. Una rama que quede
 // con una fecha anterior a la de `main` no falla: su migración nunca corre.
-// Esta prueba lo atrapa antes del merge, sin base de datos (ADR 0045).
+// Esta prueba lo atrapa antes del merge, sin base de datos (ADR 0045 y 0088).
 const folder = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle")
 
 interface JournalEntry {

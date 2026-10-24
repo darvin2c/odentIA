@@ -1,6 +1,6 @@
 # 0045 · La historia de migraciones empieza en la base del 2026-10-16; las anteriores están en git
 
-Fecha: 2026-10-16 · Estado: aceptada
+Fecha: 2026-10-16 · Estado: sustituida por [0088](0088-la-historia-de-migraciones-empieza-en-la-base-del-2026-10-24.md)
 
 ## Problema
 

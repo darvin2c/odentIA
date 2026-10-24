@@ -1,2 +1,0 @@
-ALTER TABLE "message" ADD COLUMN "held" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-CREATE INDEX "message_held_idx" ON "message" USING btree ("organization_id","conversation_id") WHERE "status" = 'held';

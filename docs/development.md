@@ -35,12 +35,12 @@ cuenta externa. Cambiar el código no crea los buzones ni acredita su entrega.
 
 ### Migraciones
 
-La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, colas y cron). Las 108 migraciones anteriores están en git hasta el commit `405b732`.
+La historia de migraciones empieza en la base del 2026-10-24 (ADR 0088): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, vistas de Argos, colas y cron). Las 106 migraciones anteriores están en git hasta el commit `5aa7b2cc`, y las 108 de antes, hasta `405b732` (ADR 0045).
 
 - Un cambio de tablas se hace en `schema/*.ts` y se genera con `pnpm db:generate`; una regla a mano va en un archivo nuevo con el número siguiente.
 - Cada entrada nueva de `meta/_journal.json` lleva un `when` mayor que la anterior: el migrador salta en silencio las fechas anteriores a la última aplicada. `packages/db/src/journal.test.ts` lo comprueba sin base de datos.
 
-**Una base creada antes del 2026-10-16 no se puede migrar a la nueva**: el migrador la daría por al día o intentaría crear tablas que ya existen. Hay que recrear el volumen, porque el rol de la aplicación y las extensiones los crea el init de la imagen solo sobre un volumen vacío. No hay datos reales; la semilla rehace la demo:
+**Una base creada antes del 2026-10-24 no se puede migrar a la nueva**: el migrador la daría por al día o intentaría crear tablas que ya existen. Hay que recrear el volumen, porque el rol de la aplicación y las extensiones los crea el init de la imagen solo sobre un volumen vacío. No hay datos reales; la semilla rehace la demo:
 
 ```sh
 podman compose -f infra/dev/compose.yaml down

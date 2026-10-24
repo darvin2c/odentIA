@@ -1,2 +1,0 @@
-ALTER TABLE "admin"."saas_waitlist_request" ADD COLUMN "product" text DEFAULT 'dental' NOT NULL;--> statement-breakpoint
-ALTER TABLE "admin"."saas_waitlist_request" ADD CONSTRAINT "saas_waitlist_request_product_check" CHECK ("admin"."saas_waitlist_request"."product" IN ('dental','medical'));

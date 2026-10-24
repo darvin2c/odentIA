@@ -1,5 +1,0 @@
-ALTER TABLE "clinical_follow_up" ADD COLUMN "repeat_every_months" smallint;--> statement-breakpoint
-ALTER TABLE "clinical_follow_up" ADD COLUMN "repeats_from_id" uuid;--> statement-breakpoint
-ALTER TABLE "clinical_follow_up" ADD CONSTRAINT "clinical_follow_up_repeats_from_id_clinical_follow_up_id_fk" FOREIGN KEY ("repeats_from_id") REFERENCES "public"."clinical_follow_up"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "clinical_follow_up_repeats_from_idx" ON "clinical_follow_up" USING btree ("repeats_from_id") WHERE "clinical_follow_up"."repeats_from_id" IS NOT NULL;--> statement-breakpoint
-ALTER TABLE "clinical_follow_up" ADD CONSTRAINT "clinical_follow_up_repeat_check" CHECK ("clinical_follow_up"."repeat_every_months" IS NULL OR "clinical_follow_up"."repeat_every_months" IN (1, 3, 6, 12));
