@@ -160,7 +160,8 @@ services:
       PORT: "3000"
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3013:3000"
+      # 3013 es de la web: con el mismo puerto latidIA no arrancaba en producción.
+      - "127.0.0.1:3015:3000"
     depends_on:
       - api
 
