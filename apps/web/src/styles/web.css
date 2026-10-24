@@ -128,8 +128,9 @@ fieldset {
 .tag-d {
   color: var(--sky-2);
 }
+/* El de las portadas interiores: sus títulos son frases largas para los buscadores; a 80 px llegaban a 7 líneas. */
 .h1 {
-  font-size: clamp(44px, 5.6vw, 80px);
+  font-size: clamp(40px, 3.9vw, 56px);
   line-height: 0.98;
   letter-spacing: -0.045em;
   font-weight: 800;

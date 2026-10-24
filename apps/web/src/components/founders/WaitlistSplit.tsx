@@ -182,7 +182,15 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
           </div>
         ) : (
           <form className="wl-card" onSubmit={submit} noValidate={false}>
-            <h2 className="wl-h">Pide tus {gift ? <span className="gift-light">{gift}</span> : "invitación"}</h2>
+            <h2 className="wl-h">
+              {gift ? (
+                <>
+                  Pide tus <span className="gift-light">{gift}</span>
+                </>
+              ) : (
+                "Pide tu invitación"
+              )}
+            </h2>
             <p className="wl-note">Mientras dure el programa, se entra por invitación. Te respondemos en {businessDays(answerDays)}.</p>
             <div className="wl-grid">
               <div className="wl-field">

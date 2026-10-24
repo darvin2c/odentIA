@@ -30,7 +30,7 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
         href: "/agentes/recepcion",
         rows: [
           { label: "Respondió o confirmó", price: plan.tiers.informa, before: struck(plan.tiers.informa, list?.tiers.informa) },
-          { label: "Movió o reservó una cita", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
+          { label: "Reservó, movió o canceló una cita", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
           { label: "El paciente vino", price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
         ],
       },
@@ -40,15 +40,16 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
         when: "Una vez por atención, cuando el odontólogo confirma.",
         href: "/agentes/asistente-clinico",
         rows: [
-          { label: "Una receta o nota", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
-          { label: "Nota, diagnóstico u odontograma", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
+          // ADR 0085: simple es una sola parte; estándar, un diagnóstico, el odontograma o dos partes o más.
+          { label: "Una nota, receta o control", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
+          { label: "Diagnóstico, odontograma o más de una parte", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
           { label: "Armó el presupuesto", price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
         ],
       },
       {
         name: "Argos",
         does: "Recupera",
-        when: "Cuando el paciente que no tenía cita vuelve y viene.",
+        when: "Cuando el paciente que no tenía cita ni tratamiento en curso vuelve y viene.",
         href: "/agentes/administrador",
         rows: [
           { label: "Cita recuperada", price: plan.recovered, before: struck(plan.recovered, list?.recovered) },
@@ -125,7 +126,7 @@ const agents: Array<{ name: string; does: string; when: string; href: string; ro
       </div>
     </div>
   ) : (
-    <p class="lead">Los precios se publican en un momento. Escríbenos y te los contamos.</p>
+    <p class="lead">Los precios se publican en un momento. <a href="/contacto">Escríbenos</a> y te los contamos.</p>
   )}
 </section>
 

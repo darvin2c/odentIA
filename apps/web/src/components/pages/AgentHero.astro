@@ -45,7 +45,9 @@ const { tag, title, accent, accentColor = "var(--sky-2)", meaning, lead, focus =
   .ah-col .lead { max-width: 540px; }
   .ah-meaning { max-width: 540px; margin: -8px 0 0; padding-left: 14px; border-left: 2px solid var(--mc); font-size: 15px; line-height: 1.5; font-style: italic; color: #cfe2e7; }
   .ah-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
-  .ah-scene { position: absolute; z-index: 1; top: 96px; right: 0; width: min(800px, calc(100% - 640px)); }
+  /* La escena empieza a la derecha de la columna de texto, nunca encima: el borde del contenedor
+     (centrado, hasta --wrap, con 32 px de margen), los 560 px de la columna y 24 px de aire. */
+  .ah-scene { position: absolute; z-index: 1; top: 96px; right: 0; width: min(800px, calc((100% + min(100%, var(--wrap))) / 2 - 616px)); }
 
   /* La escena del tablero, escalada desde 800 × 680 al ancho disponible. */
   .ah :global(.b2) { --s: 1; }

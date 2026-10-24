@@ -23,8 +23,8 @@ import { addPeruBusinessDays, limaDate, peruBusinessDaysBetween } from "./peru-b
  * datos reales, los marcadores se ven tal cual.
  */
 export const CONSUMER_COMPLAINT_PROVIDER = {
-  legalName: "[Por completar: razón social]",
-  ruc: "[Por completar: RUC]",
+  legalName: "SALLCA GROUP E.I.R.L.",
+  ruc: "20603338741",
   address: "[Por completar: domicilio]",
 } as const
 

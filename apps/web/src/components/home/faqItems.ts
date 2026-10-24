@@ -2,8 +2,11 @@
 import type { FaqItem } from "../../lib/faq"
 import { hours, type PlanPrices, type Terms } from "../../lib/pricing"
 
-/** Las preguntas con los días de prueba del plan que se muestra y las condiciones comerciales (no van fijos en el código). */
-export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pending?: boolean })[] => {
+/**
+ * Las preguntas con los días de prueba del plan que se muestra y las condiciones comerciales (no van fijos en el código).
+ * `founder`: el plan que se muestra es el de Fundadores, sin cuota y por invitación, como en Precios.
+ */
+export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false): (FaqItem & { pending?: boolean })[] => {
   const days = plan ? `${plan.trialDays} días` : "la prueba"
   return [
   {
@@ -12,7 +15,12 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pen
   },
   {
     q: "¿Cuánto voy a pagar al mes?",
-    a: "La cuota del plan, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito. Lo calculas con tus números en la página de precios y puedes poner un presupuesto del mes: te avisamos antes de llegar.",
+    // ADR 0085: también se suman los paquetes de preguntas a Argos y el espacio que pasa de lo incluido.
+    a: `${
+      founder
+        ? "Como Fundador no pagas cuota: pagas lo que hacen tus agentes"
+        : "La cuota del plan, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito"
+    }, los paquetes de preguntas a Argos que sumes y el espacio que pase de lo incluido. Lo calculas con tus números en la página de precios y puedes poner un presupuesto del mes: te avisamos antes de llegar.`,
   },
   {
     q: "¿Qué cuenta como una conversación?",
@@ -46,7 +54,9 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pen
   },
   {
     q: "¿La prueba pide tarjeta?",
-    a: `No. Te registras, conectas tus canales y tus agentes trabajan ${days} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
+    a: founder
+      ? "No. Pides tu invitación, abres tu clínica y tus agentes empiezan con el crédito de regalo. La tarjeta no se pide."
+      : `No. Te registras, conectas tus canales y tus agentes trabajan ${days} con el crédito de prueba. La tarjeta solo se pide si decides activar el plan.`,
   },
 ]
 }

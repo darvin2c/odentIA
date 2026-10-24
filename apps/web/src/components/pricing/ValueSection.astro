@@ -5,6 +5,8 @@ import ValueCalculator from "./ValueCalculator"
 
 const prices = valuePricesOf(shownPlan(Astro.locals.pricing))
 ---
+{/* Sin precios publicados no hay calculadora: la sección no se dibuja en vez de quedar vacía. */}
+{prices ? (
 <section id="calcula" class="night sec">
   <div class="grain" aria-hidden="true"></div>
   <div class="wrap in">
@@ -13,9 +15,10 @@ const prices = valuePricesOf(shownPlan(Astro.locals.pricing))
       <h2 class="h2">Lo que pagas y lo que recuperas.</h2>
       <p class="lead lead-d">Pon los números de tu clínica y compara lo que hoy pierdes sin agentes con lo que pagarías con odentIA.</p>
     </div>
-    {prices ? <ValueCalculator client:visible prices={prices} /> : null}
+    <ValueCalculator client:visible prices={prices} />
   </div>
 </section>
+) : null}
 
 <style>
   .sec { padding: 112px 0; scroll-margin-top: 16px; }

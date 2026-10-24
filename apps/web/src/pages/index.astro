@@ -25,7 +25,7 @@ const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
-const HOME_FAQ = homeFaq(plan, pricing.terms)
+const HOME_FAQ = homeFaq(plan, pricing.terms, plan !== null && plan === pricing.founders)
 const answer = businessDays(pricing.terms.waitlistAnswerDays)
 // Mientras se entra por invitación, la nota de la portada dice el regalo y cómo se entra.
 const note =

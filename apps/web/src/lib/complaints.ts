@@ -11,8 +11,8 @@
  * Mientras tengan marcadores, la página va sin indexar.
  */
 export const COMPLAINTS_PROVIDER = {
-  legalName: "[Por completar: razón social]",
-  ruc: "[Por completar: RUC]",
+  legalName: "SALLCA GROUP E.I.R.L.",
+  ruc: "20603338741",
   address: "[Por completar: domicilio]",
 } as const
 

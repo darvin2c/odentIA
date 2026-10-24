@@ -42,7 +42,7 @@ const CASE = [
     when: "Seis meses después",
     ch: "WhatsApp",
     a: 2,
-    text: "Le escribe a Carmen, Lucía reserva y vuelve: cita recuperada.",
+    text: "Le escribe a Carmen, y Lucía reserva su control y vuelve.",
   },
 ]
 
