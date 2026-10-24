@@ -168,6 +168,7 @@ describe("franja de avisos: el tope y el crédito", () => {
       Array.from({ length: 62 }, (_, index) => ({
         organizationId: orgId,
         kind: "conversacion",
+        tier: "gestiona",
         occurredAt: new Date(Date.now() - (index + 1) * 60_000),
         contactId: randomUUID(),
         detail: "Atendió una conversación por WhatsApp",
@@ -236,6 +237,7 @@ describe("correos de cobro (ADR 0065)", () => {
       Array.from({ length: 46 }, (_, index) => ({
         organizationId: orgId,
         kind: "conversacion",
+        tier: "gestiona",
         occurredAt: new Date(Date.now() - (index + 1) * 60_000),
         contactId: randomUUID(),
         detail: "Atendió una conversación por WhatsApp",

@@ -83,10 +83,29 @@ export const saasPlan = adminSchema.table(
      * los agentes cada mes, en la unidad menor de `currency`.
      */
     creditCents: integer("credit_cents").notNull().default(0),
-    /** Precio base de cada acción en millonésimas de `currency`; null = el plan no cobra esa acción. */
+    /**
+     * Precio base de cada acción en millonésimas de `currency`; null = el plan
+     * no cobra esa acción. Por tipo (ADR 0085): la conversación de Sofi según
+     * lo que pasó en la agenda (`conversation_micros` es «Gestiona») y la
+     * consulta de Clío según lo que dejó hecho (`consultation_micros` es
+     * «Completa»).
+     */
     conversationMicros: bigint("conversation_micros", { mode: "number" }),
+    conversationInformMicros: bigint("conversation_inform_micros", { mode: "number" }),
+    conversationAgendaMicros: bigint("conversation_agenda_micros", { mode: "number" }),
     consultationMicros: bigint("consultation_micros", { mode: "number" }),
+    consultationSimpleMicros: bigint("consultation_simple_micros", { mode: "number" }),
+    consultationStandardMicros: bigint("consultation_standard_micros", { mode: "number" }),
     recoveryMicros: bigint("recovery_micros", { mode: "number" }),
+    /** Preguntas a Argos incluidas cada mes y el paquete que se suma al acabarlas (ADR 0085). */
+    argosIncludedQuestions: integer("argos_included_questions").notNull().default(0),
+    argosPackQuestions: integer("argos_pack_questions").notNull().default(100),
+    argosPackMicros: bigint("argos_pack_micros", { mode: "number" }),
+    /** Almacenamiento incluido y el precio de cada GB extra al mes (ADR 0085). */
+    storageIncludedGb: integer("storage_included_gb").notNull().default(0),
+    storageGbMicros: bigint("storage_gb_micros", { mode: "number" }),
+    /** Tipos que no admiten descuento negociado: siempre a su precio base (ADR 0085). */
+    fixedPriceTiers: text("fixed_price_tiers").array().notNull().default(sql`'{}'::text[]`),
     /** Descuento máximo sobre el precio base (precio mínimo) y lo que el vendedor da sin aprobación. */
     maxDiscountBps: integer("max_discount_bps").notNull().default(6000),
     sellerDiscountBps: integer("seller_discount_bps").notNull().default(1000),
@@ -115,6 +134,14 @@ export const saasPlan = adminSchema.table(
     check(
       "saas_plan_action_check",
       sql`${table.creditCents} >= 0 AND coalesce(${table.conversationMicros}, 0) >= 0 AND coalesce(${table.consultationMicros}, 0) >= 0 AND coalesce(${table.recoveryMicros}, 0) >= 0`,
+    ),
+    check(
+      "saas_plan_tier_check",
+      sql`coalesce(${table.conversationInformMicros}, 0) >= 0 AND coalesce(${table.conversationAgendaMicros}, 0) >= 0 AND coalesce(${table.consultationSimpleMicros}, 0) >= 0 AND coalesce(${table.consultationStandardMicros}, 0) >= 0 AND coalesce(${table.argosPackMicros}, 0) >= 0 AND coalesce(${table.storageGbMicros}, 0) >= 0 AND ${table.argosIncludedQuestions} >= 0 AND ${table.argosPackQuestions} BETWEEN 1 AND 10000 AND ${table.storageIncludedGb} >= 0`,
+    ),
+    check(
+      "saas_plan_fixed_tiers_check",
+      sql`${table.fixedPriceTiers} <@ ARRAY['informa','gestiona','agenda','simple','estandar','completa','cita','preguntas','almacenamiento']::text[]`,
     ),
     check(
       "saas_plan_discount_check",
@@ -216,6 +243,8 @@ export const saasSubscription = pgTable(
     spendCapCents: integer("spend_cap_cents"),
     /** Cada cuánto se factura lo que pasa del crédito: `mensual` o `quincenal`. */
     billingCycle: text("billing_cycle").notNull().default("mensual"),
+    /** Al acabar las preguntas a Argos del mes, se suma un paquete sin preguntar (ADR 0085); apagado al empezar. */
+    argosAutoPack: boolean("argos_auto_pack").notNull().default(false),
     /** Día en que la clínica activó el plan: su mes empieza ese día. */
     activatedAt: timestamp("activated_at", { withTimezone: true }),
     ...timestamps,
@@ -588,7 +617,7 @@ export const saasChargeLine = pgTable(
     }),
     check(
       "saas_charge_line_kind_check",
-      sql`${table.kind} IN ('cuota','conversacion','consulta','cita','devolucion','revision','credito','impuesto')`,
+      sql`${table.kind} IN ('cuota','conversacion','consulta','cita','preguntas','almacenamiento','devolucion','revision','credito','impuesto')`,
     ),
     // Solo las devoluciones restan: la conversación ya cobrada que llevó a una cita
     // recuperada y lo que odentIA devolvió al revisar un cobro ya facturado (ADR 0054).
@@ -599,8 +628,18 @@ export const saasChargeLine = pgTable(
   ],
 )
 
-export const SAAS_ACTION_KINDS = ["conversacion", "consulta", "cita"] as const
+export const SAAS_ACTION_KINDS = ["conversacion", "consulta", "cita", "preguntas", "almacenamiento"] as const
 export type SaasActionKind = (typeof SAAS_ACTION_KINDS)[number]
+
+/**
+ * El tipo de una acción (ADR 0085): la conversación de Sofi según lo que pasó
+ * en la agenda (`informa`, `gestiona`; `agenda` es la subida cuando el
+ * paciente viene) y la consulta de Clío según lo que dejó hecho (`simple`,
+ * `estandar`, `completa`). La cita recuperada, el paquete de preguntas y el
+ * almacenamiento no tienen tipo.
+ */
+export const SAAS_ACTION_TIERS = ["informa", "gestiona", "agenda", "simple", "estandar", "completa"] as const
+export type SaasActionTier = (typeof SAAS_ACTION_TIERS)[number]
 
 /**
  * Lo que hicieron los agentes y se cobra por acción (ADR 0031): una
@@ -616,6 +655,10 @@ export const saasAction = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     kind: text("kind").notNull(),
+    /** Su tipo (`SAAS_ACTION_TIERS`); null en la cita recuperada, las preguntas y el almacenamiento. */
+    tier: text("tier"),
+    /** Cuántas unidades cobra: las preguntas de un paquete o los GB extra del mes; null en lo demás. */
+    units: integer("units"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     contactId: uuid("contact_id"),
     conversationId: uuid("conversation_id"),
@@ -642,11 +685,37 @@ export const saasAction = pgTable(
     index("saas_action_org_occurred_idx").on(table.organizationId, table.occurredAt),
     index("saas_action_org_charge_idx").on(table.organizationId, table.chargeId),
     index("saas_action_org_contact_idx").on(table.organizationId, table.contactId, table.kind, table.occurredAt),
-    check("saas_action_kind_check", sql`${table.kind} IN ('conversacion','consulta','cita')`),
+    check("saas_action_kind_check", sql`${table.kind} IN ('conversacion','consulta','cita','preguntas','almacenamiento')`),
+    check(
+      "saas_action_tier_check",
+      sql`coalesce(CASE ${table.kind} WHEN 'conversacion' THEN ${table.tier} IN ('informa','gestiona','agenda') WHEN 'consulta' THEN ${table.tier} IN ('simple','estandar','completa') ELSE ${table.tier} IS NULL END, false) AND (${table.units} IS NULL OR ${table.units} > 0)`,
+    ),
     check(
       "saas_action_price_check",
       sql`(${table.basePriceMicros} IS NULL) = (${table.priceMicros} IS NULL) AND coalesce(${table.priceMicros}, 0) >= 0 AND ${table.discountBps} BETWEEN 0 AND 9000`,
     ),
+  ],
+)
+
+/**
+ * Lo que la clínica tiene guardado cada día (ADR 0085): archivos de
+ * pacientes, tomografías y adjuntos de conversaciones. El GB extra del mes
+ * sale del promedio de sus días, como cobra el proveedor: lo que se sube y se
+ * borra el mismo día casi no cuenta. Una fila por día; la escribe el reloj
+ * SaaS (con owner) y la clínica la lee.
+ */
+export const storageUsageDay = pgTable(
+  "storage_usage_day",
+  {
+    organizationId: orgFk("organization_id"),
+    /** Día UTC de la medición. */
+    day: text("day").notNull(),
+    bytes: bigint("bytes", { mode: "number" }).notNull(),
+    measuredAt: timestamp("measured_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("storage_usage_day_org_day_uidx").on(table.organizationId, table.day),
+    check("storage_usage_day_check", sql`${table.bytes} >= 0 AND ${table.day} ~ '^\\d{4}-\\d{2}-\\d{2}$'`),
   ],
 )
 

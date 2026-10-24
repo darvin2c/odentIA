@@ -53,6 +53,8 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   const action = (kind: "conversacion" | "consulta" | "cita", minutesAgo: number, base: number, detail: string, channel: string | null) => ({
     organizationId: org.id,
     kind,
+    // Con el único precio de antes de los tipos (ADR 0085): Gestiona y Completa.
+    tier: kind === "conversacion" ? "gestiona" : kind === "consulta" ? "completa" : null,
     occurredAt: new Date(now - minutesAgo * 60_000),
     contactId: randomUUID(),
     channel,
@@ -122,6 +124,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
     Array.from({ length: 92 }, (_, index) => ({
       organizationId: trial.org.id,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: new Date(now - (index + 1) * 3_600_000),
       contactId: randomUUID(),
       detail: "Atendió una conversación por WhatsApp",

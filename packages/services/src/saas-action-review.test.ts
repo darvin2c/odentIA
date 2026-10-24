@@ -76,6 +76,7 @@ async function conversationAction(orgId: string, at: Date, micros = 500_000, thr
     .values({
       organizationId: orgId,
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: at,
       contactId: person!.id,
       conversationId,

@@ -24,7 +24,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNull } from "drizzle-orm"
 import {
   confirmSaasPayment,
   createSaasCharge,
@@ -63,10 +63,39 @@ const FICTIONAL_METHODS = [
   },
 ] as const
 
+/** Los precios por tipo de la ADR 0085, por un factor (Fundadores: la mitad). */
+function tierPlan(factor: number) {
+  const price = (usd: number) => Math.round(usd * factor * 1_000_000)
+  return {
+    conversationInformMicros: price(0.1),
+    conversationMicros: price(0.5),
+    conversationAgendaMicros: price(1),
+    consultationSimpleMicros: price(0.1),
+    consultationStandardMicros: price(0.2),
+    consultationMicros: price(0.5),
+    recoveryMicros: price(2),
+    argosIncludedQuestions: 300,
+    argosPackQuestions: 100,
+    argosPackMicros: price(3),
+    storageIncludedGb: 20,
+    storageGbMicros: price(0.2),
+    // Lo barato no se negocia (ADR 0085).
+    fixedPriceTiers: ["informa", "simple", "estandar", "preguntas"],
+  }
+}
+
+/** Los precios de un plan de la semilla anterior a la ADR 0085: se ponen al día si nadie los cambió. */
+const PRE_TIER_PRICES: Record<string, { conversationMicros: number; consultationMicros: number; recoveryMicros: number }> = {
+  "odentia-ficticio": { conversationMicros: 500_000, consultationMicros: 400_000, recoveryMicros: 4_000_000 },
+  "fundadores-ficticio": { conversationMicros: 300_000, consultationMicros: 240_000, recoveryMicros: 2_400_000 },
+}
+
 /**
- * El plan de la ADR 0031 para probar el cobro por acción: USD 29 que vuelven
- * en crédito, precio base por acción y prueba de USD 100 y 30 días. Es el plan
- * por defecto de la semilla; en producción lo configura administración.
+ * El plan de las ADR 0031 y 0085 para probar el cobro por acción: USD 29 que
+ * vuelven en crédito, el precio de cada tipo (Sofi 0,10 / 0,50 / 1,00, Clío
+ * 0,10 / 0,20 / 0,50, cita recuperada 2), 300 preguntas a Argos y paquetes de
+ * 100 por 3, 20 GB y 0,20 por GB extra, y prueba de USD 100 y 30 días. Es el
+ * plan por defecto de la semilla; en producción lo configura administración.
  */
 const ACTION_PLAN = {
   code: "odentia-ficticio",
@@ -77,9 +106,7 @@ const ACTION_PLAN = {
   billingPeriod: "mensual",
   sortOrder: 0,
   creditCents: 2900,
-  conversationMicros: 500_000,
-  consultationMicros: 400_000,
-  recoveryMicros: 4_000_000,
+  ...tierPlan(1),
   maxDiscountBps: 6000,
   sellerDiscountBps: 1000,
   trialCreditCents: 10000,
@@ -91,8 +118,8 @@ const ACTION_PLAN = {
 } as const
 
 /**
- * El plan por invitación de Fundadores (issue 165): sin cuota, USD 100 de
- * regalo hasta 90 días, cada acción con 40 % menos, 20 lugares y 12 meses
+ * El plan por invitación de Fundadores (issue 165, ADR 0085): sin cuota, USD
+ * 100 de regalo hasta 90 días, todo con 50 % menos, 20 lugares y 12 meses
  * garantizados; sin negociación encima. Se publica en la web.
  */
 const FOUNDERS_PLAN = {
@@ -104,9 +131,7 @@ const FOUNDERS_PLAN = {
   billingPeriod: "mensual",
   sortOrder: 0,
   creditCents: 0,
-  conversationMicros: 300_000,
-  consultationMicros: 240_000,
-  recoveryMicros: 2_400_000,
+  ...tierPlan(0.5),
   maxDiscountBps: 0,
   sellerDiscountBps: 0,
   trialCreditCents: 10000,
@@ -122,6 +147,23 @@ const FOUNDERS_PLAN = {
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
   await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
   await db.insert(saasPlan).values(FOUNDERS_PLAN).onConflictDoNothing({ target: saasPlan.code })
+  // Una base de antes de los tipos (ADR 0085): pone sus precios solo si siguen siendo los de la semilla.
+  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN]) {
+    const before = PRE_TIER_PRICES[plan.code]
+    if (!before) continue
+    await db
+      .update(saasPlan)
+      .set({ ...plan, updatedAt: new Date() })
+      .where(
+        and(
+          eq(saasPlan.code, plan.code),
+          isNull(saasPlan.conversationInformMicros),
+          eq(saasPlan.conversationMicros, before.conversationMicros),
+          eq(saasPlan.consultationMicros, before.consultationMicros),
+          eq(saasPlan.recoveryMicros, before.recoveryMicros),
+        ),
+      )
+  }
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
   // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración
   // 0051 ya deja la primera versión; esto solo la repone en una base sin ella.
@@ -407,6 +449,7 @@ export async function seedClinicNoticesDemo(db: Db, input: { ownerUserId: string
     Array.from({ length: 120 }, (_, index) => ({
       organizationId: "seed-aviso-tope",
       kind: "conversacion",
+      tier: "gestiona",
       occurredAt: new Date(now.getTime() - (index + 1) * 1_800_000),
       detail: "Atendió una conversación por WhatsApp (demo)",
       channel: "whatsapp",

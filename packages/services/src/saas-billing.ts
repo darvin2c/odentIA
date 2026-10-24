@@ -28,6 +28,7 @@ import {
   saasSeller,
   saasSellerCommission,
   saasSubscription,
+  storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -48,6 +49,7 @@ import {
   saasTrialEndedEmail,
 } from "./saas-emails.js"
 import { clearExpiredDiscounts, endFounderGuarantees } from "./saas-founders.js"
+import { recordStorageUsage, storageDayOf } from "./saas-included.js"
 import { addMonth, closeSaasPeriods, overdueChargeOrgs } from "./saas-invoicing.js"
 
 /** Lo que se guarda en el aviso: el buzón de respuesta no aplica a Plan y pagos. */
@@ -314,6 +316,17 @@ export interface SaasPlanInput {
   conversationMicros?: number | null
   consultationMicros?: number | null
   recoveryMicros?: number | null
+  /** Precios por tipo, preguntas a Argos y almacenamiento (ADR 0085). */
+  conversationInformMicros?: number | null
+  conversationAgendaMicros?: number | null
+  consultationSimpleMicros?: number | null
+  consultationStandardMicros?: number | null
+  argosIncludedQuestions?: number
+  argosPackQuestions?: number
+  argosPackMicros?: number | null
+  storageIncludedGb?: number
+  storageGbMicros?: number | null
+  fixedPriceTiers?: string[]
   maxDiscountBps?: number
   sellerDiscountBps?: number
   trialCreditCents?: number
@@ -343,6 +356,16 @@ export interface SaasPlanRow {
   conversationMicros: number | null
   consultationMicros: number | null
   recoveryMicros: number | null
+  conversationInformMicros: number | null
+  conversationAgendaMicros: number | null
+  consultationSimpleMicros: number | null
+  consultationStandardMicros: number | null
+  argosIncludedQuestions: number
+  argosPackQuestions: number
+  argosPackMicros: number | null
+  storageIncludedGb: number
+  storageGbMicros: number | null
+  fixedPriceTiers: string[]
   maxDiscountBps: number
   sellerDiscountBps: number
   trialCreditCents: number
@@ -372,6 +395,16 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     conversationMicros: row.conversationMicros,
     consultationMicros: row.consultationMicros,
     recoveryMicros: row.recoveryMicros,
+    conversationInformMicros: row.conversationInformMicros,
+    conversationAgendaMicros: row.conversationAgendaMicros,
+    consultationSimpleMicros: row.consultationSimpleMicros,
+    consultationStandardMicros: row.consultationStandardMicros,
+    argosIncludedQuestions: row.argosIncludedQuestions,
+    argosPackQuestions: row.argosPackQuestions,
+    argosPackMicros: row.argosPackMicros,
+    storageIncludedGb: row.storageIncludedGb,
+    storageGbMicros: row.storageGbMicros,
+    fixedPriceTiers: row.fixedPriceTiers,
     maxDiscountBps: row.maxDiscountBps,
     sellerDiscountBps: row.sellerDiscountBps,
     trialCreditCents: row.trialCreditCents,
@@ -405,6 +438,20 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   if (value.conversationMicros !== undefined) terms.conversationMicros = micros(value.conversationMicros, "El precio de la conversación")
   if (value.consultationMicros !== undefined) terms.consultationMicros = micros(value.consultationMicros, "El precio de la consulta")
   if (value.recoveryMicros !== undefined) terms.recoveryMicros = micros(value.recoveryMicros, "El precio de la cita recuperada")
+  if (value.conversationInformMicros !== undefined) terms.conversationInformMicros = micros(value.conversationInformMicros, "El precio de la conversación que informa")
+  if (value.conversationAgendaMicros !== undefined) terms.conversationAgendaMicros = micros(value.conversationAgendaMicros, "El precio de la conversación cuya cita se dio")
+  if (value.consultationSimpleMicros !== undefined) terms.consultationSimpleMicros = micros(value.consultationSimpleMicros, "El precio de la consulta simple")
+  if (value.consultationStandardMicros !== undefined) terms.consultationStandardMicros = micros(value.consultationStandardMicros, "El precio de la consulta estándar")
+  if (value.argosPackMicros !== undefined) terms.argosPackMicros = micros(value.argosPackMicros, "El precio del paquete de preguntas")
+  if (value.storageGbMicros !== undefined) terms.storageGbMicros = micros(value.storageGbMicros, "El precio del GB extra")
+  if (value.argosIncludedQuestions !== undefined) terms.argosIncludedQuestions = count(value.argosIncludedQuestions, "Las preguntas incluidas", 0, 100_000)
+  if (value.argosPackQuestions !== undefined) terms.argosPackQuestions = count(value.argosPackQuestions, "Las preguntas de un paquete", 1, 10_000)
+  if (value.storageIncludedGb !== undefined) terms.storageIncludedGb = count(value.storageIncludedGb, "Los GB incluidos", 0, 100_000)
+  if (value.fixedPriceTiers !== undefined) {
+    const unknown = value.fixedPriceTiers.filter((tier) => !FIXED_PRICE_KEYS.includes(tier))
+    if (unknown.length) throw validation(`No se puede fijar el precio de «${unknown[0]}»`)
+    terms.fixedPriceTiers = [...new Set(value.fixedPriceTiers)]
+  }
   if (value.maxDiscountBps !== undefined) terms.maxDiscountBps = bps(value.maxDiscountBps, "El descuento máximo")
   if (value.sellerDiscountBps !== undefined) terms.sellerDiscountBps = bps(value.sellerDiscountBps, "Lo que da el vendedor")
   if (value.trialCreditCents !== undefined) terms.trialCreditCents = assertCents(value.trialCreditCents, "El saldo de prueba", false)
@@ -426,11 +473,26 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   return terms
 }
 
+/** Lo que puede quedar sin descuento negociado (ADR 0085). */
+const FIXED_PRICE_KEYS = ["informa", "gestiona", "agenda", "simple", "estandar", "completa", "cita", "preguntas", "almacenamiento"]
+
+function count(value: number, field: string, min: number, max: number): number {
+  if (!Number.isInteger(value) || value < min || value > max) throw validation(`${field} deben estar entre ${min} y ${max}`)
+  return value
+}
+
 const PLAN_TERM_DEFAULTS = {
   creditCents: 0,
   conversationMicros: null,
   consultationMicros: null,
   recoveryMicros: null,
+  conversationInformMicros: null,
+  conversationAgendaMicros: null,
+  consultationSimpleMicros: null,
+  consultationStandardMicros: null,
+  argosPackMicros: null,
+  storageGbMicros: null,
+  fixedPriceTiers: [] as string[],
   maxDiscountBps: 6000,
   sellerDiscountBps: 1000,
   trialCreditCents: 0,
@@ -3030,12 +3092,17 @@ export async function tickSaasBilling(
     )
   }
 
-  // 4. Cobro por acción (ADR 0031): al cerrar cada tramo, el cargo con sus
+  // 4. Lo guardado por cada clínica, una vez por día (ADR 0085): el GB extra
+  // del mes sale del promedio de sus días, antes de cerrar el tramo.
+  const [measured] = await tx.select({ day: storageUsageDay.day }).from(storageUsageDay).where(eq(storageUsageDay.day, storageDayOf(now))).limit(1)
+  if (!measured) await recordStorageUsage(tx, now)
+
+  // 5. Cobro por acción (ADR 0031): al cerrar cada tramo, el cargo con sus
   // líneas; con ciclo quincenal, también a mitad de tramo. La cobranza sigue
   // siendo manual con comprobante.
   const { issued: chargesEnsured } = await closeSaasPeriods(tx, now)
 
-  // 5. Cargo vencido sin pagar → los días de gracia que rigen, antes de restringir.
+  // 6. Cargo vencido sin pagar → los días de gracia que rigen, antes de restringir.
   for (const orgId of await overdueChargeOrgs(tx, now)) {
     const graceEndsAt = addDays(now, terms.at(now).graceDays)
     await tx
