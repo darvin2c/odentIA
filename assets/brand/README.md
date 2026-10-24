@@ -1,6 +1,6 @@
 # Odentia32 · Identidad aprobada
 
-Firma: Odentia[32], IBM Plex Mono Regular, separación ajustada. Isotipo [32] sin modificaciones.
+Firma: odentIA[32], IBM Plex Mono Regular, separación ajustada. «odent» en la tinta e «IA» en el color del isotipo, para que el nombre diga que trae inteligencia (decidido el 2026-10-24; antes decía «Odentia»). Isotipo [32] sin modificaciones. latidIA usa la misma construcción: «latid» en la tinta, «IA» y el [72] en su morado (`latidia/`).
 
 Esta carpeta es la ubicación canónica de la única marca vigente. Las variantes claro, oscuro, negro y blanco son aplicaciones de la misma identidad, no propuestas alternativas. No se conservan exploraciones anteriores.
 
