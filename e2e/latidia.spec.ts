@@ -445,7 +445,7 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
     submissionId: randomUUID(),
     answers: {
-      demographics: { displayName: "Mateo Ríos", docType: "DNI", docNumber: "71234567", birthDate: "2019-05-02" },
+      demographics: { displayName: "Mateo Ríos", docType: "DNI", docNumber: "71234567", birthDate: "1990-05-02" },
       respondent: "staff",
       privacyAccepted: false,
     },
