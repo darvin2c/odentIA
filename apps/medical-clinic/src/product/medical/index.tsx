@@ -1,4 +1,5 @@
 import { bareProduct, type ProductUi } from "@odentia/clinic-app/product/product-ui"
+import { MEDICAL_CATEGORY_LABELS, MEDICAL_IMAGING_TYPES } from "@odentia/medical"
 import { medicalExamination } from "./examination"
 import { medicalHealth } from "./health"
 import { medicalPrescribing } from "./prescribing"
@@ -31,4 +32,10 @@ export const medicalUi: ProductUi = {
   health: medicalHealth,
   summary: { ClinicalCards: (props) => <ProblemsCard {...props} /> },
   prescribing: medicalPrescribing,
+  documents: {
+    ...bare.documents,
+    imaging: { types: MEDICAL_IMAGING_TYPES, categoryLabels: MEDICAL_CATEGORY_LABELS },
+    // El descanso médico, junto a la receta (decisión 8).
+    medicalLeave: true,
+  },
 }

@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import { bareProduct, declareProduct } from "../product/product-ui"
 import { conversationStatusLabel, humanize, label } from "./glossary"
+
+// Los nombres de las categorías de documentos son del producto (issue 229).
+beforeAll(() => declareProduct(bareProduct("dental")))
 
 describe("glosario", () => {
   it("traduce códigos conocidos de cada dominio", () => {

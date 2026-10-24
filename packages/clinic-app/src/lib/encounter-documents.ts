@@ -60,7 +60,7 @@ export function saveConsentTemplateServices(templateId: string, serviceIds: stri
 
 // --- Papeles de salud ------------------------------------------------------------
 
-export type HealthDocumentType = "prescription" | "order" | "consent"
+export type HealthDocumentType = "prescription" | "order" | "consent" | "medical_leave"
 
 export interface HealthDocumentRecipient {
   contactId: string

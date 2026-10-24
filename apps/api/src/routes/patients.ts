@@ -4,7 +4,6 @@ import {
   DOC_TYPES,
   DOCUMENT_FORMATS,
   demographicsSchema,
-  IMAGE_TYPES,
   REPORT_STATUSES,
   registrationAnswersSchema,
   registrationContactInputSchema,
@@ -102,6 +101,7 @@ import type { PlatformLlm } from "@odentia/agent"
 import { patientProductRoutes } from "./products.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientMedicalLeavesRoute } from "./patient-medical-leaves.js"
 import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientDataRequestsRoute } from "./patient-data-requests.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
@@ -433,14 +433,15 @@ const documentLinkInput = z.object({
 
 /** Metadatos de imagen en la subida (multipart). */
 const documentImageInput = z.object({
-  imageType: z.enum(IMAGE_TYPES).optional(),
+  // El tipo es del producto de la clínica (issue 229); el servicio lo valida.
+  imageType: z.string().max(40).optional(),
   capturedAt: z.iso.datetime({ offset: true }).optional(),
   source: z.string().trim().min(1).max(120).optional(),
 })
 
 const documentListQuery = z.object({
   category: z.string().max(40).optional(),
-  imageType: z.enum(IMAGE_TYPES).optional(),
+  imageType: z.string().max(40).optional(),
   tooth: z.coerce.number().int().optional(),
   planItemId: z.uuid().optional(),
   from: z.iso.date().optional(),
@@ -457,6 +458,8 @@ const CLINICAL_SUBPATHS = [
   "/plan",
   "/treatments",
   "/prescriptions",
+  // El descanso médico (issue 229).
+  "/medical-leaves",
   "/follow-ups",
   "/documents",
   "/imaging/studies",
@@ -517,6 +520,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/treatments", "tratamientos"],
   ["/follow-ups", "controles"],
   ["/prescriptions", "recetas"],
+  ["/medical-leaves", "descansos"],
   ["/documents", "documentos"],
   ["/imaging/studies", "documentos"],
   ["/record", "descarga"],
@@ -1585,6 +1589,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // Lo que agrega el producto (odentIA: odontograma, periodontograma y el dictado de Clío).
   app.route("/", patientProductRoutes(deps))
   app.route("/", createPatientPrescriptionsRoute(deps))
+  app.route("/", createPatientMedicalLeavesRoute(deps))
   app.route("/", createPatientDataRequestsRoute(deps))
   app.route("/", createPatientPaymentsRoute(deps))
   app.route("/", createPatientResponsibilitiesRoute(deps))

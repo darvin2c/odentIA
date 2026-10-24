@@ -170,6 +170,11 @@ function PrescriptionPrintPage() {
               <span className="font-medium">Edad:</span> {age} años
             </p>
           ) : null}
+          {prescription.patientWeightKg ? (
+            <p>
+              <span className="font-medium">Peso:</span> {Number(prescription.patientWeightKg)} kg
+            </p>
+          ) : null}
           {prescription.diagnosisCode ? (
             <p className="sm:col-span-2">
               <span className="font-medium">Diagnóstico:</span>{" "}

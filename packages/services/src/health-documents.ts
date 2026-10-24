@@ -1,6 +1,7 @@
 /**
- * Papeles de salud de la atención para la persona: receta, orden y
- * consentimiento firmado (ADR 0033; decisión 3 de la fase 3).
+ * Papeles de salud de la atención para la persona: receta, orden,
+ * consentimiento firmado y descanso médico (ADR 0033; decisión 3 de la fase 3;
+ * issue 229, decisión 8).
  *
  * - Solo a la propia persona (si es mayor de edad) o a su representante legal
  *   vigente, nunca a otro número ni a un responsable económico: es información
@@ -32,16 +33,18 @@ import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
+import { getMedicalLeavePrint } from "./medical-leaves.js"
+import { medicalLeaveWords } from "@odentia/clinical"
 import type { Storage } from "./storage.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
-export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent"] as const
+export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent", "medical_leave"] as const
 export type HealthDocumentType = (typeof HEALTH_DOCUMENT_TYPES)[number]
 
 function assertHealthType(value: string): HealthDocumentType {
   if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value)) return value as HealthDocumentType
-  throw validation("Documento inválido: receta, orden o consentimiento")
+  throw validation("Documento inválido: receta, orden, consentimiento o descanso médico")
 }
 
 export type HealthDocumentRecipient = DecisionRecipient
@@ -107,6 +110,15 @@ async function loadHealthMeta(
     const print = await getPrescriptionPrint(tx, orgId, patientId, documentId)
     if (print.prescription.status !== "emitida") throw validation("La receta está anulada: no se envía")
     return { label: `Receta N.º ${print.prescription.prescriptionNumber}`, own: "tu receta", other: "la receta" }
+  }
+  if (type === "medical_leave") {
+    const print = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
+    if (print.leave.status !== "emitido") throw validation("El descanso médico está anulado: no se envía")
+    return {
+      label: `Descanso médico N.º ${print.leave.leaveNumber}`,
+      own: "tu descanso médico",
+      other: "el descanso médico",
+    }
   }
   if (type === "order") {
     const print = await getOrderPrint(tx, orgId, documentId)
@@ -333,6 +345,40 @@ export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPri
 }
 
 /**
+ * PDF del descanso médico: lo mismo que su hoja impresa. Un documento propio,
+ * sin el formato oficial de ningún país (issue 229, decisión 8); el
+ * diagnóstico va solo si la persona lo autorizó.
+ */
+export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getMedicalLeavePrint>>) {
+  const { leave, patient: person, establishment } = data
+  const zone = zoneOf(establishment)
+  const { pdf, w } = await newWriter(`Descanso médico ${leave.leaveNumber}`)
+  header(w, establishment)
+  w.text("DESCANSO MÉDICO", { size: 9, bold: true, color: MUTED })
+  w.text(`Constancia N.º ${leave.leaveNumber}`, { size: 15, bold: true })
+  w.text(`Emitida ${when(leave.issuedAt, zone)}`, { size: 8, color: MUTED })
+  w.gap()
+  w.text(patientLine(person))
+  w.gap(6)
+  w.text(`Se indican ${medicalLeaveWords(leave.startsOn, leave.days)}.`, { bold: true })
+  if (leave.showDiagnosis && leave.diagnosisCode)
+    w.text(`Diagnóstico: ${leave.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
+  if (leave.notes) {
+    w.heading("Indicaciones")
+    w.text(leave.notes)
+  }
+  w.gap(14)
+  w.text(
+    `${leave.signerName ?? "-"}${leave.signerTitle ? ` · ${leave.signerTitle}` : ""}${
+      leave.signerRegistration ? ` · ${leave.signerRegistration}` : ""
+    }`,
+    { size: 9, bold: true },
+  )
+  w.text("Firma con su perfil profesional.", { size: 8, color: MUTED })
+  return pdf.save({ useObjectStreams: false })
+}
+
+/**
  * El PDF de un papel de salud, para enviarlo; imprimir usa su hoja en
  * pantalla. Receta y orden se generan; el consentimiento es el guardado.
  */
@@ -351,6 +397,14 @@ export async function renderHealthDocumentPdf(
       bytes: await renderPrescriptionPdf(data),
       filename: `Receta-${data.prescription.prescriptionNumber}.pdf`,
       label: `Receta N.º ${data.prescription.prescriptionNumber}`,
+    }
+  }
+  if (type === "medical_leave") {
+    const data = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
+    return {
+      bytes: await renderMedicalLeavePdf(data),
+      filename: `Descanso-medico-${data.leave.leaveNumber}.pdf`,
+      label: `Descanso médico N.º ${data.leave.leaveNumber}`,
     }
   }
   if (type === "order") {

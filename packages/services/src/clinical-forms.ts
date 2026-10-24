@@ -5,7 +5,6 @@ import {
   consentSectionsToText,
   normalizeDrugText,
   parseConsentSections,
-  SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import {
   diagnosisCatalog,
@@ -1686,7 +1685,8 @@ export async function createSuggestedConsentTemplates(
     .where(eq(consentTemplate.organizationId, orgId))
   const known = new Set(existing.map((row) => row.key))
   const created: ConsentTemplateRow[] = []
-  for (const suggestion of SUGGESTED_CONSENT_TEMPLATES) {
+  // Las del producto de la clínica (issue 229: latidIA sugiere los de un consultorio).
+  for (const suggestion of (await productHooks(tx, orgId)).consentSuggestions) {
     if (known.has(suggestion.key)) continue
     created.push(
       await createConsentTemplate(tx, orgId, actorUserId, {

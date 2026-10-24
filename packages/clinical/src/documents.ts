@@ -37,6 +37,24 @@ export function imageTypeCategory(type: ImageType): "radiografia" | "foto_clinic
   return (RADIOGRAPH_TYPES as readonly string[]).includes(type) ? "radiografia" : "foto_clinica"
 }
 
+/**
+ * Un tipo de imagen que se elige al subirla, con la categoría documental a la
+ * que pertenece. Cada producto da los suyos (issue 229): odentIA, los de la
+ * boca; latidIA, los de la medicina general.
+ */
+export interface ImagingType {
+  value: string
+  label: string
+  category: "radiografia" | "foto_clinica"
+}
+
+/** Los de odentIA: radiografías dentales, tomografía de haz cónico y fotos intra y extraorales. */
+export const DENTAL_IMAGING_TYPES: readonly ImagingType[] = IMAGE_TYPES.map((value) => ({
+  value,
+  label: IMAGE_TYPE_LABELS[value],
+  category: imageTypeCategory(value),
+}))
+
 export function isImageType(value: unknown): value is ImageType {
   return typeof value === "string" && (IMAGE_TYPES as readonly string[]).includes(value)
 }

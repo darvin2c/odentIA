@@ -78,6 +78,7 @@ import { Route as SettingsDotplanDotindexRouteImport } from './../../../packages
 import { Route as SettingsDotplanDotaccionesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.plan.acciones'
 import { Route as PatientsDotpatientIdDotencountersDotencounterIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.encounters.$encounterId'
 import { Route as PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.medical-leaves.$leaveId.print'
 import { Route as PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.orders.$orderId.print'
 import { Route as PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
 
@@ -470,6 +471,12 @@ const PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute =
     path: '/consents/$consentId/print',
     getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
+const PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute =
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport.update({
+    id: '/medical-leaves/$leaveId/print',
+    path: '/medical-leaves/$leaveId/print',
+    getParentRoute: () => PatientsDotpatientIdRoute,
+  } as any)
 const PatientsDotpatientIdDotordersDotorderIdDotprintRoute =
   PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport.update({
     id: '/orders/$orderId/print',
@@ -554,6 +561,7 @@ export interface FileRoutesByFullPath {
   '/settings/plan/': typeof SettingsDotplanDotindexRoute
   '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
@@ -624,6 +632,7 @@ export interface FileRoutesByTo {
   '/settings/plan': typeof SettingsDotplanDotindexRoute
   '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
@@ -698,6 +707,7 @@ export interface FileRoutesById {
   '/_org/settings/plan/': typeof SettingsDotplanDotindexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/_org/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/_org/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
@@ -772,6 +782,7 @@ export interface FileRouteTypes {
     | '/settings/plan/'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/medical-leaves/$leaveId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesByTo: FileRoutesByTo
@@ -842,6 +853,7 @@ export interface FileRouteTypes {
     | '/settings/plan'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/medical-leaves/$leaveId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   id:
@@ -915,6 +927,7 @@ export interface FileRouteTypes {
     | '/_org/settings/plan/'
     | '/_org/patients/$patientId/encounters/$encounterId'
     | '/_org/patients/$patientId/consents/$consentId/print'
+    | '/_org/patients/$patientId/medical-leaves/$leaveId/print'
     | '/_org/patients/$patientId/orders/$orderId/print'
     | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesById: FileRoutesById
@@ -1418,6 +1431,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport
       parentRoute: typeof PatientsDotpatientIdRoute
     }
+    '/_org/patients/$patientId/medical-leaves/$leaveId/print': {
+      id: '/_org/patients/$patientId/medical-leaves/$leaveId/print'
+      path: '/medical-leaves/$leaveId/print'
+      fullPath: '/patients/$patientId/medical-leaves/$leaveId/print'
+      preLoaderRoute: typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
+    }
     '/_org/patients/$patientId/orders/$orderId/print': {
       id: '/_org/patients/$patientId/orders/$orderId/print'
       path: '/orders/$orderId/print'
@@ -1510,6 +1530,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 interface PatientsDotpatientIdRouteChildren {
   PatientsDotpatientIdDotencountersDotencounterIdRoute: typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute: typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   PatientsDotpatientIdDotordersDotorderIdDotprintRoute: typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute: typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
@@ -1519,6 +1540,8 @@ const PatientsDotpatientIdRouteChildren: PatientsDotpatientIdRouteChildren = {
     PatientsDotpatientIdDotencountersDotencounterIdRoute,
   PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute:
     PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute,
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute:
+    PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute,
   PatientsDotpatientIdDotordersDotorderIdDotprintRoute:
     PatientsDotpatientIdDotordersDotorderIdDotprintRoute,
   PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute:

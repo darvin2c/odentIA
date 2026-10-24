@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -503,6 +504,62 @@ export const clinicalOrder = pgTable(
   ],
 )
 
+/**
+ * Descanso médico (issue 229, decisión 8): la constancia de reposo, numerada
+ * por clínica y firmada con el perfil profesional de quien la emite (copia
+ * del perfil, como la receta). El diagnóstico solo se guarda si la persona
+ * autoriza que figure: el empleador no lo necesita. No se borra: se anula
+ * con motivo.
+ */
+export const medicalLeave = pgTable(
+  "medical_leave",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    encounterId: uuid("encounter_id").references(() => encounter.id),
+    leaveNumber: integer("leave_number").notNull(),
+    status: text("status").notNull().default("emitido"),
+    startsOn: date("starts_on").notNull(),
+    days: integer("days").notNull(),
+    endsOn: date("ends_on").notNull(),
+    /** La persona autorizó que el diagnóstico figure en la constancia. */
+    showDiagnosis: boolean("show_diagnosis").notNull().default(false),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
+    /** Indicaciones del reposo («reposo relativo, sin esfuerzo físico»). */
+    notes: text("notes"),
+    signerName: text("signer_name"),
+    signerTitle: text("signer_title"),
+    signerRegistration: text("signer_registration"),
+    issuedBy: text("issued_by").references(() => user.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: text("cancelled_by").references(() => user.id),
+    cancelReason: text("cancel_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    ...diagnosisCodeRef("medical_leave", table),
+    uniqueIndex("medical_leave_org_number_uidx").on(table.organizationId, table.leaveNumber),
+    index("medical_leave_org_patient_idx").on(table.organizationId, table.patientId),
+    index("medical_leave_encounter_idx").on(table.organizationId, table.encounterId),
+    check("medical_leave_status_check", sql`${table.status} in ('emitido','anulado')`),
+    check("medical_leave_days_check", sql`${table.days} BETWEEN 1 AND 365`),
+    check("medical_leave_dates_check", sql`${table.endsOn} >= ${table.startsOn}`),
+    check(
+      "medical_leave_diagnosis_check",
+      sql`${table.diagnosisCode} IS NULL OR ${table.showDiagnosis}`,
+    ),
+    check(
+      "medical_leave_cancel_check",
+      sql`(${table.cancelledAt} IS NULL) = (${table.cancelReason} IS NULL) AND (${table.cancelledAt} IS NULL) = (${table.status} = 'emitido') AND (${table.cancelReason} IS NULL OR char_length(${table.cancelReason}) BETWEEN 1 AND 2000)`,
+    ),
+  ],
+)
+
 export type OrgSpecialtyRow = typeof orgSpecialty.$inferSelect
 export type ClinicalFormTemplateRow = typeof clinicalFormTemplate.$inferSelect
 export type ClinicalFormResponseRow = typeof clinicalFormResponse.$inferSelect
@@ -510,6 +567,7 @@ export type ConsentTemplateRow = typeof consentTemplate.$inferSelect
 export type ConsentDocumentRow = typeof consentDocument.$inferSelect
 export type ConsentTemplateServiceRow = typeof consentTemplateService.$inferSelect
 export type ClinicalOrderRow = typeof clinicalOrder.$inferSelect
+export type MedicalLeaveRow = typeof medicalLeave.$inferSelect
 
 // Referencia para que el barrel del padre no rompa si aún no re-exporta este archivo.
 export const CLINICAL_FORMS_TABLES = [
@@ -523,4 +581,5 @@ export const CLINICAL_FORMS_TABLES = [
   "consent_document",
   "consent_event",
   "clinical_order",
+  "medical_leave",
 ] as const

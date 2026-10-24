@@ -1,4 +1,10 @@
-import { medicalHistoryLines, MEDICAL_VITAL_KEYS, readMedicalHistory } from "@odentia/medical"
+import {
+  MEDICAL_CONSENT_TEMPLATES,
+  MEDICAL_IMAGING_TYPES,
+  MEDICAL_VITAL_KEYS,
+  medicalHistoryLines,
+  readMedicalHistory,
+} from "@odentia/medical"
 import { patientAnamnesis } from "@odentia/db/schema/clinical"
 import { and, desc, eq } from "drizzle-orm"
 import { clinicToday } from "../inventory-stock.js"
@@ -16,6 +22,8 @@ import { medicalPrescribing } from "./prescribing.js"
 export const medicalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
   prescribing: medicalPrescribing,
+  imaging: MEDICAL_IMAGING_TYPES,
+  consentSuggestions: MEDICAL_CONSENT_TEMPLATES,
   interview: medicalInterview,
   examination: medicalExamination,
   vitals: MEDICAL_VITAL_KEYS,

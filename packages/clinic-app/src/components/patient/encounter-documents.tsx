@@ -40,12 +40,15 @@ import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
+import { MedicalLeaveEntry, NewMedicalLeaveDrawer } from "./medical-leave"
+import { fetchMedicalLeaves } from "../../lib/medical-leaves"
+import { productUi } from "../../product/product-ui"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 
 const errorMessage = (e: unknown, fallback: string) =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : fallback
 
-export type NewDocumentKind = "receta" | "consentimiento" | "orden" | "formulario" | "archivo"
+export type NewDocumentKind = "receta" | "descanso" | "consentimiento" | "orden" | "formulario" | "archivo"
 
 const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
   { kind: "receta", label: "Receta" },
@@ -54,6 +57,14 @@ const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
   { kind: "formulario", label: "Formulario" },
   { kind: "archivo", label: "Imagen o archivo" },
 ]
+
+/** Lo que se crea desde «Nuevo»: con el descanso médico, junto a la receta, si el producto lo emite. */
+export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: string }> {
+  if (!productUi().documents.medicalLeave) return NEW_DOCUMENT_OPTIONS
+  return NEW_DOCUMENT_OPTIONS.flatMap((option) =>
+    option.kind === "receta" ? [option, { kind: "descanso" as const, label: "Descanso médico" }] : [option],
+  )
+}
 
 /**
  * Todo lo que la atención emite o adjunta, en un solo lugar (ADR 0033): lo
@@ -88,6 +99,11 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
     queryFn: () => fetchFormResponses({ patientId }),
     enabled: canRead,
   })
+  const leaves = useQuery({
+    queryKey: ["medical-leaves", patientId],
+    queryFn: () => fetchMedicalLeaves(patientId),
+    enabled: canRead && productUi().documents.medicalLeave,
+  })
   const ownConsents = (consents.data?.data ?? []).filter(
     (doc) => doc.encounterId === encounterId && (doc.status === "pendiente" || doc.status === "firmado"),
   )
@@ -104,6 +120,9 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
   const ownForms = (forms.data?.data ?? []).filter(
     (form) => form.encounterId === encounterId && form.status !== "descartado",
   )
+  const ownLeaves = (leaves.data?.data ?? []).filter(
+    (leave) => leave.encounterId === encounterId && leave.status === "emitido",
+  )
   const needList = needs.data?.data ?? []
   const pendingSignatures = ownConsents.filter((doc) => doc.status === "pendiente")
   return {
@@ -115,8 +134,10 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
     orders: ownOrders,
     prescriptions: ownPrescriptions,
     forms: ownForms,
+    leaves: ownLeaves,
     files,
-    total: ownConsents.length + ownOrders.length + ownPrescriptions.length + ownForms.length + files.length,
+    total:
+      ownConsents.length + ownOrders.length + ownPrescriptions.length + ownLeaves.length + ownForms.length + files.length,
     isLoading: needs.isPending || consents.isPending,
   }
 }
@@ -193,6 +214,7 @@ export function EncounterDocumentsBlock({
         ["consents", patientId],
         ["clinical-orders", patientId],
         ["prescriptions", patientId],
+        ["medical-leaves", patientId],
         ["form-responses", patientId],
         ["encounter-closing", patientId, encounterId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
@@ -253,7 +275,7 @@ export function EncounterDocumentsBlock({
               }
             />
             <DropdownMenuContent align="end">
-              {NEW_DOCUMENT_OPTIONS.map((option) => (
+              {newDocumentOptions().map((option) => (
                 <DropdownMenuItem key={option.kind} onClick={() => startNew(option.kind)}>
                   {option.label}
                 </DropdownMenuItem>
@@ -399,6 +421,12 @@ export function EncounterDocumentsBlock({
             onSend={() => setSending({ type: "prescription", id: rx.id })}
           />
         ))}
+        {docs.leaves.map((leave) => (
+          <li key={leave.id} className="flex flex-col gap-2 p-3">
+            <span className="text-sm font-medium">Descanso médico N.º {leave.leaveNumber}</span>
+            <MedicalLeaveEntry patientId={patientId} leave={leave} />
+          </li>
+        ))}
         {docs.forms.map((form) => (
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
@@ -442,6 +470,20 @@ export function EncounterDocumentsBlock({
               setCreating(null)
               void refresh()
             }
+          }}
+        />
+      ) : null}
+      {creating === "descanso" ? (
+        <NewMedicalLeaveDrawer
+          open
+          patientId={patientId}
+          encounterId={encounterId}
+          defaultDiagnosisCode={firstDiagnosis}
+          defaultDiagnosisSystem={firstDiagnosisSystem}
+          onClose={() => setCreating(null)}
+          onCreated={() => {
+            setCreating(null)
+            void refresh()
           }}
         />
       ) : null}

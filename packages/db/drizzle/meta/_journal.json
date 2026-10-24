@@ -687,6 +687,20 @@
       "when": 1792837575112,
       "tag": "0097_receta_peso",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792839085336,
+      "tag": "0098_descanso_medico",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792839086336,
+      "tag": "0099_descanso_medico_reglas",
+      "breakpoints": true
     }
   ]
 }

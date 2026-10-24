@@ -11,10 +11,7 @@ import {
   MEDICATION_FREQUENCIES,
   MEDICATION_FREQUENCY_LABELS,
   type MedicationFrequency,
-  IMAGE_TYPE_LABELS,
-  type ImageType,
-  imageTypeCategory,
-  isImageType,
+  type ImagingType,
   normalizeDrugText,
   normalizeTags,
   type RegistrationAnswers,
@@ -1603,15 +1600,14 @@ export interface DocumentImageInput {
   reportStatus?: string | null
 }
 
-function normalizeImageInput(category: string, input: DocumentImageInput) {
-  let imageType: ImageType | null = null
+function normalizeImageInput(category: string, input: DocumentImageInput, imaging: readonly ImagingType[]) {
+  let imageType: string | null = null
   if (input.imageType) {
-    if (!isImageType(input.imageType)) throw validation(`Tipo de imagen no reconocido: ${input.imageType}`)
-    if (imageTypeCategory(input.imageType) !== category)
-      throw validation(
-        `${IMAGE_TYPE_LABELS[input.imageType]} no corresponde a la categoría ${category}`,
-      )
-    imageType = input.imageType
+    // Los tipos son los del producto de la clínica (issue 229: latidIA sube ecografías, tomografías…).
+    const type = imaging.find((item) => item.value === input.imageType)
+    if (!type) throw validation(`Tipo de imagen no reconocido: ${input.imageType}`)
+    if (type.category !== category) throw validation(`${type.label} no corresponde a la categoría ${category}`)
+    imageType = type.value
   }
   let capturedAt: Date | null = null
   if (input.capturedAt) {
@@ -1655,7 +1651,7 @@ export async function registerPatientDocument(
     throw validation("category inválida")
   const label = input.label?.trim() ?? ""
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres")
-  const image = normalizeImageInput(input.category, input)
+  const image = normalizeImageInput(input.category, input, (await productHooks(tx, orgId)).imaging)
   if (!input.storageKey) throw validation("storageKey es obligatorio")
   const site = await siteOf(tx, orgId)
   const toothNumbers = normalizeDocumentTeeth(site, input.toothNumbers)
