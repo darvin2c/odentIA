@@ -1,0 +1,2 @@
+ALTER TABLE "prescription" ADD COLUMN "patient_weight_kg" numeric(5, 1);--> statement-breakpoint
+ALTER TABLE "prescription" ADD CONSTRAINT "prescription_patient_weight_check" CHECK ("prescription"."patient_weight_kg" IS NULL OR "prescription"."patient_weight_kg" BETWEEN 0.5 AND 400);

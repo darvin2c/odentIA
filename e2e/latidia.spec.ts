@@ -7,9 +7,10 @@ import { orgProfile } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { hostUrl, latidiaUrl, tenant } from "./env"
-import { expect, PASSWORD, test } from "./fixtures"
+import { chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
+import { surface } from "./surface"
 
 /**
  * latidIA abre (entregas 3 y 4 del issue 229): la misma instalación sirve su
@@ -365,5 +366,37 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
   await shot("resumen-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // La receta (entrega 6a): con el embarazo registrado, lo recuerda y lo contraindicado va con motivo;
+  // un controlado no sale en la receta común.
+  expect(
+    (
+      await request(page, api, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+        professionalTitle: "Médico cirujano",
+        registrationBody: "CMP",
+        registrationNumber: "045678",
+      })
+    ).status,
+  ).toBe(200)
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${personId}?tab=documentos`))
+  await page.getByRole("button", { name: "Nuevo", exact: true }).first().click()
+  await page.getByRole("menuitem", { name: "Receta", exact: true }).click()
+  const prescription = surface(page, { name: "Emitir receta" })
+  const dci = prescription.getByLabel("DCI (denominación común)", { exact: true })
+  await dci.fill("enalapril")
+  await expect(prescription.getByText(/^Está embarazada, 10 semanas \(registrado el/)).toBeVisible()
+  await expect(prescription.getByText(/^Enalapril: está embarazada \(10 semanas\) y los IECA están contraindicados/)).toBeVisible()
+  await shot("receta-embarazo")
+  await dci.fill("clonazepam")
+  await expect(prescription.getByText(/^Clonazepam es una benzodiazepina, un medicamento controlado/)).toBeVisible()
+  await dci.fill("paracetamol")
+  await prescription.getByLabel("Concentración", { exact: true }).fill("500 mg")
+  await chooseOption(prescription.getByLabel("Forma farmacéutica", { exact: true }), "tableta")
+  await prescription.getByLabel("Dosis", { exact: true }).fill("1 tableta")
+  await prescription.getByLabel("Frecuencia", { exact: true }).fill("Cada 8 horas")
+  await prescription.getByLabel("Duración", { exact: true }).fill("3 días")
+  await prescription.getByRole("button", { name: "Emitir receta", exact: true }).click()
+  await expect(page.getByText(/Receta N.º 1/).first()).toBeVisible()
   await context.close()
 })

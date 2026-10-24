@@ -281,6 +281,8 @@ export interface Prescription {
   cancelReason: string | null
   /** Por qué se recetó pese al aviso de alergia (decisión 10). */
   allergyOverrideReason?: string | null
+  /** El peso (kg) con que se recetó: latidIA, a un menor de 12 años (issue 229). */
+  patientWeightKg?: string | null
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
@@ -354,6 +356,8 @@ export function createPrescriptionApi(
     acknowledgeAllergies?: boolean
     /** Con aviso de alergia, por qué se receta igual: queda en la receta. */
     allergyOverrideReason?: string | null
+    /** El peso (kg) con que se receta, si la receta lo lleva. */
+    patientWeightKg?: number | null
     items: PrescriptionMedicationBody[]
   },
 ): Promise<{ data: Prescription }> {

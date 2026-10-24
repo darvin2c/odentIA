@@ -260,6 +260,8 @@ export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getP
   w.text(`Emitida ${when(rx.issuedAt, zone)}`, { size: 8, color: MUTED })
   w.gap()
   w.text(patientLine(person))
+  // El peso con que se recetó (latidIA, a un menor de 12 años).
+  if (rx.patientWeightKg) w.text(`Peso: ${Number(rx.patientWeightKg)} kg`)
   if (rx.diagnosisCode) w.text(`Diagnóstico: ${rx.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
   w.heading("Medicamentos")
   for (const item of rx.items) {

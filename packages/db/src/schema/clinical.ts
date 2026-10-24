@@ -1981,6 +1981,11 @@ export const prescription = pgTable(
      * quien prescribe y queda en la receta. Sin aviso, vacío.
      */
     allergyOverrideReason: text("allergy_override_reason"),
+    /**
+     * El peso con que se recetó (kg), que la receta de un menor de 12 años
+     * lleva en latidIA (issue 229, decisión 12). Sin él, vacío.
+     */
+    patientWeightKg: numeric("patient_weight_kg", { precision: 5, scale: 1 }),
     /** Instantánea de quien prescribe (perfil profesional al emitir). */
     prescriberName: text("prescriber_name"),
     prescriberTitle: text("prescriber_title"),
@@ -1999,6 +2004,10 @@ export const prescription = pgTable(
     index("prescription_encounter_idx").on(table.organizationId, table.encounterId),
     index("prescription_item_idx").on(table.organizationId, table.planItemId),
     check("prescription_status_check", sql`${table.status} IN ('emitida','anulada')`),
+    check(
+      "prescription_patient_weight_check",
+      sql`${table.patientWeightKg} IS NULL OR ${table.patientWeightKg} BETWEEN 0.5 AND 400`,
+    ),
   ],
 )
 

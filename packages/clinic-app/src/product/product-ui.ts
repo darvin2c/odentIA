@@ -1,4 +1,11 @@
-import { type ClinicalProduct, CORE_VITAL_KEYS, type VitalSignKey, type Vitals } from "@odentia/clinical"
+import {
+  type ClinicalProduct,
+  CORE_VITAL_KEYS,
+  DENTAL_MEDICATION_CATALOG,
+  type MedicationCatalog,
+  type VitalSignKey,
+  type Vitals,
+} from "@odentia/clinical"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import type {
@@ -49,6 +56,32 @@ export interface ProductUi {
   health: ProductHealthUi
   /** El resumen de la persona: lo del producto junto a las alertas clínicas. */
   summary: ProductSummaryUi
+  /** La receta: su lista y lo que revisa además de las alergias. */
+  prescribing: ProductPrescribingUi
+}
+
+/**
+ * La receta del producto (issue 229, decisión 12). Lo mismo que
+ * `ProductPrescribing` en el servidor, que vuelve a revisarlo al emitir.
+ */
+export interface ProductPrescribingUi {
+  /** Lo que receta, las alergias que se eligen y la medicación habitual que se sugiere. */
+  catalog: MedicationCatalog
+  /**
+   * Sus reglas para esta persona (latidIA: controlados, embarazo y lactancia,
+   * el peso de un niño). Es un hook: lee lo que necesita de la persona.
+   */
+  useRules(patientId: string, enabled: boolean): PrescribingRulesUi
+}
+
+export interface PrescribingRulesUi {
+  /** Lo que impide emitir, lo que va con motivo (como una alergia) y lo que solo se recuerda. */
+  check(
+    items: ReadonlyArray<{ genericName: string }>,
+    weightKg: number | null,
+  ): { errors: string[]; warnings: string[]; reminders: string[] }
+  /** Si la receta lleva el peso y el último que se registró, para proponerlo. */
+  weight: { required: boolean; suggested: number | null }
 }
 
 /**
@@ -350,6 +383,10 @@ export interface SitePickerProps {
 const NO_FINDINGS: SiteFinding[] = []
 const NO_PAPERS: ProductPapers = { query: null, queryKey: [], papers: [] }
 const NO_BLOCKS: ProductEncounterBlocks = { blocks: [], overlay: null }
+const NO_RULES: PrescribingRulesUi = {
+  check: () => ({ errors: [], warnings: [], reminders: [] }),
+  weight: { required: false, suggested: null },
+}
 
 /**
  * Un producto sin partes propias, como `NO_PRODUCT_HOOKS` en el servidor: sin
@@ -377,6 +414,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     documents: { kind: null, usePapers: () => NO_PAPERS },
     health: { asksPregnancy: true, InterviewSections: () => null, Summary: () => null },
     summary: { ClinicalCards: () => null },
+    prescribing: { catalog: DENTAL_MEDICATION_CATALOG, useRules: () => NO_RULES },
     encounter: {
       examination: {
         title: "Examen clínico",

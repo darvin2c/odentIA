@@ -1,4 +1,10 @@
-import { CORE_VITAL_KEYS, type RegistrationAnswers, type VitalSignKey } from "@odentia/clinical"
+import {
+  CORE_VITAL_KEYS,
+  DENTAL_MEDICATION_CATALOG,
+  type MedicationCatalog,
+  type RegistrationAnswers,
+  type VitalSignKey,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
@@ -207,9 +213,42 @@ export const COMMON_INTERVIEW: ProductInterview = {
   },
 }
 
+/** Lo que el producto revisa al emitir una receta, además de las alergias. */
+export interface PrescribingReview {
+  /** Lo que impide emitir (latidIA: un controlado, el peso de un niño). */
+  errors: string[]
+  /** Lo que se receta solo con motivo, como una alergia (latidIA: contraindicado en el embarazo). */
+  warnings: string[]
+}
+
+/**
+ * La receta del producto (issue 229, decisión 12): qué receta y reconoce como
+ * alergia, y qué más revisa al emitir.
+ */
+export interface ProductPrescribing {
+  catalog: MedicationCatalog
+  review(
+    tx: Db,
+    moment: {
+      orgId: string
+      patientId: string
+      items: ReadonlyArray<{ genericName: string }>
+      weightKg: number | null
+    },
+  ): Promise<PrescribingReview>
+}
+
+/** La receta de siempre: la lista dental y solo las alergias. */
+export const DENTAL_PRESCRIBING: ProductPrescribing = {
+  catalog: DENTAL_MEDICATION_CATALOG,
+  review: async () => ({ errors: [], warnings: [] }),
+}
+
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
+  /** La receta: su lista y lo que revisa al emitir. */
+  prescribing: ProductPrescribing
   /** La «Entrevista de salud»: lo del producto. */
   interview: ProductInterview
   /** El examen físico de la atención. */
@@ -301,6 +340,7 @@ export interface ProductHooks {
 /** Un producto que no agrega nada en ningún momento. */
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
+  prescribing: DENTAL_PRESCRIBING,
   interview: COMMON_INTERVIEW,
   examination: NO_EXAMINATION,
   vitals: CORE_VITAL_KEYS,

@@ -5,6 +5,7 @@ import {
   DENTAL_MEDICATIONS,
   findMedication,
   MEDICATION_GROUP_LABELS,
+  type MedicationEntry,
   type MedicationGroup,
   normalizeDrugText,
 } from "./medications.js"
@@ -45,7 +46,7 @@ export interface AllergenEntry {
  * Grupos ATC que suelen registrarse como alergia: la persona dice «soy alérgica
  * a la penicilina», no a la amoxicilina.
  */
-const ATC_GROUPS: readonly AllergenEntry[] = [
+export const ATC_GROUP_ALLERGENS: readonly AllergenEntry[] = [
   {
     system: "atc",
     code: "J01C",
@@ -141,8 +142,12 @@ const MEDICATION_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   lidocaína: ["xilocaina"],
 }
 
-const MEDICATIONS: readonly AllergenEntry[] = [
-  ...DENTAL_MEDICATIONS.map(
+/** Cada medicamento de una lista de receta como sustancia de alergia, con su código ATC. */
+export function medicationAllergens(
+  medications: readonly MedicationEntry[],
+  synonyms: Partial<Record<string, readonly string[]>> = {},
+): AllergenEntry[] {
+  return medications.map(
     (medication): AllergenEntry => ({
       system: "atc",
       code: medication.atc,
@@ -151,9 +156,13 @@ const MEDICATIONS: readonly AllergenEntry[] = [
         medication.group === "anestesicos_amida" || medication.group === "anestesicos_ester"
           ? "anestesico"
           : "medicamento",
-      synonyms: MEDICATION_SYNONYMS[medication.dci],
+      synonyms: synonyms[medication.dci] ?? MEDICATION_SYNONYMS[medication.dci],
     }),
-  ),
+  )
+}
+
+const MEDICATIONS: readonly AllergenEntry[] = [
+  ...medicationAllergens(DENTAL_MEDICATIONS),
   // La penicilina de depósito, que suele nombrarse así en una alergia.
   {
     system: "atc",
@@ -165,7 +174,7 @@ const MEDICATIONS: readonly AllergenEntry[] = [
 ]
 
 /** La lista propia: lo que no es medicamento y importa en una consulta dental. */
-const OWN_LIST: readonly AllergenEntry[] = [
+export const NON_DRUG_ALLERGENS: readonly AllergenEntry[] = [
   {
     system: "odentia",
     code: "latex",
@@ -235,7 +244,7 @@ const OWN_LIST: readonly AllergenEntry[] = [
 ]
 
 /** Todas las sustancias que se pueden elegir, los grupos primero. */
-export const ALLERGENS: readonly AllergenEntry[] = [...ATC_GROUPS, ...MEDICATIONS, ...OWN_LIST]
+export const ALLERGENS: readonly AllergenEntry[] = [...ATC_GROUP_ALLERGENS, ...MEDICATIONS, ...NON_DRUG_ALLERGENS]
 
 const CATEGORY_WORDS: Record<AllergenCategory, string> = {
   medicamento: "medicamento",
@@ -263,9 +272,10 @@ export function allergenName(entry: AllergenEntry): string {
 export function allergenByCode(
   system: string | null | undefined,
   code: string | null | undefined,
+  allergens: readonly AllergenEntry[] = ALLERGENS,
 ): AllergenEntry | null {
   if (!system || !code) return null
-  return ALLERGENS.find((entry) => entry.system === system && entry.code === code) ?? null
+  return allergens.find((entry) => entry.system === system && entry.code === code) ?? null
 }
 
 function keysOf(entry: AllergenEntry): string[] {
@@ -279,18 +289,25 @@ function keysOf(entry: AllergenEntry): string[] {
  * «AMOXICILINA», «látex»), o null si no es exactamente una de la lista. No
  * adivina: «amoxi» queda sin codificar y se elige después de la lista.
  */
-export function codeAllergySubstance(text: string): AllergenEntry | null {
+export function codeAllergySubstance(
+  text: string,
+  allergens: readonly AllergenEntry[] = ALLERGENS,
+): AllergenEntry | null {
   const key = normalizeDrugText(text)
   if (!key) return null
-  return ALLERGENS.find((entry) => keysOf(entry).includes(key)) ?? null
+  return allergens.find((entry) => keysOf(entry).includes(key)) ?? null
 }
 
 /** Lo que coincide con lo escrito, en orden: igual, empieza igual, lo contiene. */
-export function searchAllergens(query: string, limit = 8): AllergenEntry[] {
+export function searchAllergens(
+  query: string,
+  limit = 8,
+  allergens: readonly AllergenEntry[] = ALLERGENS,
+): AllergenEntry[] {
   const needle = normalizeDrugText(query)
-  if (!needle) return ATC_GROUPS.slice(0, limit)
+  if (!needle) return allergens.filter((entry) => entry.group).slice(0, limit)
   const scored: Array<[number, number, AllergenEntry]> = []
-  ALLERGENS.forEach((entry, index) => {
+  allergens.forEach((entry, index) => {
     const keys = keysOf(entry)
     const rank = keys.some((key) => key === needle)
       ? 0
@@ -327,6 +344,8 @@ const GROUP_ATC: Partial<Record<MedicationGroup, string>> = {
   corticoides: "H02AB",
   antivirales: "J05AB",
   antisepticos: "A01AB",
+  quinolonas: "J01MA",
+  tetraciclinas: "J01AA",
 }
 
 /** El grupo de un código ATC, por el prefijo más largo que coincide. */
@@ -392,23 +411,49 @@ export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   ...DENTAL_MEDICATIONS.map(({ dci, atc }) => ({ dci, atc })),
 ]
 
-export function findHabitualMedication(dci: string): HabitualMedicationEntry | null {
+export function findHabitualMedication(
+  dci: string,
+  entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
+): HabitualMedicationEntry | null {
   const key = normalizeDrugText(dci)
-  return HABITUAL_MEDICATIONS.find((entry) => normalizeDrugText(entry.dci) === key) ?? null
+  return entries.find((entry) => normalizeDrugText(entry.dci) === key) ?? null
 }
 
 /** Medicamentos que coinciden con lo escrito, para elegir la DCI. */
-export function searchHabitualMedications(query: string, limit = 8): HabitualMedicationEntry[] {
+export function searchHabitualMedications(
+  query: string,
+  limit = 8,
+  entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
+): HabitualMedicationEntry[] {
   const needle = normalizeDrugText(query)
   if (!needle) return []
   const starts: HabitualMedicationEntry[] = []
   const contains: HabitualMedicationEntry[] = []
-  for (const entry of HABITUAL_MEDICATIONS) {
+  for (const entry of entries) {
     const key = normalizeDrugText(entry.dci)
     if (key.startsWith(needle)) starts.push(entry)
     else if (key.includes(needle)) contains.push(entry)
   }
   return [...starts, ...contains].slice(0, limit)
+}
+
+/**
+ * Lo que un producto receta y reconoce como alergia (issue 229): su lista de
+ * la receta, las sustancias de alergia que se eligen y la medicación habitual
+ * que se sugiere en los antecedentes. odentIA usa la dental; latidIA, la de
+ * medicina general (`@odentia/medical`).
+ */
+export interface MedicationCatalog {
+  medications: readonly MedicationEntry[]
+  allergens: readonly AllergenEntry[]
+  habitual: readonly HabitualMedicationEntry[]
+}
+
+/** El de odentIA: la lista dental, como siempre. */
+export const DENTAL_MEDICATION_CATALOG: MedicationCatalog = {
+  medications: DENTAL_MEDICATIONS,
+  allergens: ALLERGENS,
+  habitual: HABITUAL_MEDICATIONS,
 }
 
 /** Alergia de los antecedentes que se compara con lo que se receta. */
@@ -445,16 +490,20 @@ function severityWord(severity: string | null | undefined): string {
  * Sin codificar, por el texto, como antes. Todas avisan igual: no hay alergias
  * «por confirmar» (tablero 7, versión 4).
  */
-export function allergyWarnings(dci: string, allergies: AllergyOnRecord[]): string[] {
+export function allergyWarnings(
+  dci: string,
+  allergies: AllergyOnRecord[],
+  catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
+): string[] {
   const name = dci.trim()
   if (!name) return []
   const title = capitalized(name)
-  const medication = findMedication(name)
+  const medication = findMedication(name, catalog.medications)
   const lines: string[] = []
   for (const allergy of allergies) {
     if (allergy.verification === "descartada") continue
     const sev = severityWord(allergy.severity)
-    const entry = allergenByCode(allergy.substanceSystem, allergy.substanceCode)
+    const entry = allergenByCode(allergy.substanceSystem, allergy.substanceCode, catalog.allergens)
     if (entry) {
       // Lo que no es medicamento (látex, alimentos) no choca con una receta.
       if (entry.system !== "atc") continue
@@ -466,25 +515,27 @@ export function allergyWarnings(dci: string, allergies: AllergyOnRecord[]): stri
         continue
       }
       const allergyGroup = medicationGroupOfAtc(entry.code)
+      // Sin grupo de alergia («otros»), solo avisa la misma sustancia.
+      const ownGroup = medication.group === "otros" ? null : medication.group
       if (!entry.group && entry.code === medication.atc) {
         lines.push(
           `${title}: alergia${sev} a ${what}, el mismo medicamento (ATC ${medication.atc}).`,
         )
       } else if (
         (entry.group && medication.atc.startsWith(entry.code)) ||
-        (!entry.group && allergyGroup === medication.group)
+        (!entry.group && ownGroup !== null && allergyGroup === ownGroup)
       ) {
         lines.push(
           `${title}: alergia${sev} a ${what}. Es del mismo grupo, ${groupWords(medication.group)} (ATC ${medication.atc}).`,
         )
-      } else if (allergyGroup && crossReacts(medication.group, allergyGroup)) {
+      } else if (allergyGroup && ownGroup && crossReacts(ownGroup, allergyGroup)) {
         lines.push(
           `${title}: alergia${sev} a ${what}. Puede dar reacción cruzada: ${groupWords(medication.group)} y ${groupWords(allergyGroup)} (ATC ${medication.atc}).`,
         )
       }
       continue
     }
-    for (const conflict of allergyConflicts(name, [allergy.substance])) {
+    for (const conflict of allergyConflicts(name, [allergy.substance], catalog.medications)) {
       lines.push(`${title}: alergia${sev} a «${conflict.substance}» (${conflict.reason}).`)
     }
   }

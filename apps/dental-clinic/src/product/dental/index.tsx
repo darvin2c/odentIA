@@ -1,3 +1,4 @@
+import { DENTAL_MEDICATION_CATALOG } from "@odentia/clinical"
 import {
   conditionLabel,
   dentalProfileFor,
@@ -21,7 +22,7 @@ import { PeriodontogramaTab } from "../../components/dental/periodontal/periodon
 import { ToothSelector } from "../../components/dental/tooth-selector"
 import { ToothSiteSelector } from "../../components/dental/tooth-site-selector"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
-import type { ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
+import type { PrescribingRulesUi, ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { dentalEncounter } from "./encounter"
 import { dentalHealth } from "./health"
 
@@ -50,6 +51,12 @@ const PHASE_HINTS: Record<TreatmentPhase, string> = {
   quirurgica: "Exodoncias, cirugía e implantes",
   rehabilitadora: "Prótesis, coronas, ortodoncia",
   mantenimiento: "Controles periódicos",
+}
+
+/** La receta de odentIA no tiene reglas propias: solo las alergias, que son comunes. */
+const NO_PRESCRIBING_RULES: PrescribingRulesUi = {
+  check: () => ({ errors: [], warnings: [], reminders: [] }),
+  weight: { required: false, suggested: null },
 }
 
 /**
@@ -145,4 +152,6 @@ export const dentalUi: ProductUi = {
   encounter: dentalEncounter,
   health: dentalHealth,
   summary: { ClinicalCards: () => null },
+  // La receta de siempre: la lista dental y solo las alergias.
+  prescribing: { catalog: DENTAL_MEDICATION_CATALOG, useRules: () => NO_PRESCRIBING_RULES },
 }

@@ -1,6 +1,7 @@
 import { bareProduct, type ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { medicalExamination } from "./examination"
 import { medicalHealth } from "./health"
+import { medicalPrescribing } from "./prescribing"
 import { ProblemsCard } from "./problems-card"
 import { VitalsSection } from "./vitals-section"
 
@@ -11,7 +12,8 @@ const bare = bareProduct("medical")
  * escribe en el texto (decisión 4 del issue 229) y Clío aún no dicta. La
  * ficha tiene «Signos vitales» en el lugar del Odontograma, los antecedentes
  * médicos y la lista de problemas; la atención, el examen físico por sistemas
- * (entrega 5). La receta y el catálogo llegan en las entregas 6 a 8 del plan.
+ * (entrega 5); la receta, la lista de medicina general y sus reglas (entrega
+ * 6). El catálogo llega en la entrega 8.
  */
 export const medicalUi: ProductUi = {
   ...bare,
@@ -28,4 +30,5 @@ export const medicalUi: ProductUi = {
   encounter: { ...bare.encounter, examination: medicalExamination },
   health: medicalHealth,
   summary: { ClinicalCards: (props) => <ProblemsCard {...props} /> },
+  prescribing: medicalPrescribing,
 }
