@@ -60,6 +60,7 @@
       "espera": {
         "nota": true,
         "signos": { "presionSistolica": 110, "presionDiastolica": 70, "peso": 64 },
+        "examen": [{ "sistema": "abdomen", "estado": "con_hallazgos" }],
         "diagnosticos": ["Z3"],
         "indicaciones": ["ecografia obstetrica"],
         "controles": 1
@@ -135,6 +136,7 @@
       "texto": "Viene por dolor lumbar después de cargar peso, hace dos días. Dolor a la palpación en la región lumbar derecha, Lasègue negativo. Lumbalgia mecánica. Naproxeno de quinientos cada doce horas por cinco días. Descanso de cinco días desde mañana.",
       "espera": {
         "nota": true,
+        "examen": [{ "sistema": "neurologico", "estado": "sin_alteraciones" }],
         "diagnosticos": ["M54"],
         "recetas": [{ "dci": "naproxeno", "concentracion": "500", "duracion": "5" }],
         "descanso": 5
