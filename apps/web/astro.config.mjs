@@ -9,7 +9,7 @@ import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
 const LEGAL_EN_PREPARACION =
-  /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal|pe\/libro-de-reclamaciones)$/
+  /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal)$/
 
 const domain = process.env.VITE_BASE_DOMAIN || "odentia.localhost"
 const port = process.env.VITE_BASE_PORT ? `:${process.env.VITE_BASE_PORT}` : ""

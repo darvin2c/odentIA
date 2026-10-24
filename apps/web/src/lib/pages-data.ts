@@ -1909,7 +1909,7 @@ export const LEGAL = {
   libro: {
     path: "/pe/libro-de-reclamaciones",
     title: "Libro de reclamaciones",
-    description: "Libro de reclamaciones de odentIA para Perú. Texto en preparación.",
+    description: "Libro de reclamaciones virtual de odentIA para Perú: deja tu reclamo o queja y recibe la copia en tu correo.",
     covers:
       "Solo para Perú: dónde dejar un reclamo o una queja. Un abogado confirma si aplica a un servicio entre empresas.",
   },

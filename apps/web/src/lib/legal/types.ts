@@ -41,7 +41,7 @@ export const LEGAL_UPDATED_ISO = "2026-10-24"
 export const TITULAR = {
   razonSocial: "SALLCA GROUP E.I.R.L.",
   ruc: "20603338741",
-  domicilio: "[Por completar: domicilio fiscal]",
+  domicilio: "Av. Mariscal Andrés de Santa Cruz 176, Urb. Fundo Oyague, Jesús María, Lima",
   correoPrivacidad: privacyEmail,
 } as const
 
