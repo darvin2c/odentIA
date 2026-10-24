@@ -15,6 +15,86 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
     offer: "una consulta, donde el médico ve qué necesita y cuánto costará",
   },
   clinician: "médico",
+  roles: {
+    // Lo que ve Sofi, sin piezas ni odontograma.
+    recepcion: {
+      sees: "La conversación y lo acordado. Agenda, servicios, precios y los medios de pago que acepta la clínica. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; sus presupuestos ya entregados, como los recibe ella (tratamientos y precios); su saldo solo si la clínica lo autoriza.",
+      notSees:
+        "Historia clínica (diagnósticos, notas ni signos vitales) ni caja. Lo que lleva un presupuesto que tu clínica aún prepara.",
+    },
+    // La ficha de Clío para el médico (entrega 10): lo que dicta un consultorio.
+    asistente_clinico: {
+      nameReason: "La musa de la historia: escribe la historia clínica mientras el médico atiende.",
+      audience: "Para el médico, dentro de la atención",
+      role: "Convierte lo que el médico dicta en el borrador de la atención, para que revise y firme sin escribir.",
+      functions: [
+        {
+          id: "nota",
+          label: "Consulta y evolución",
+          description: "Motivo, enfermedad actual, evolución, indicaciones y pronóstico.",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "examen",
+          label: "Signos vitales y examen físico",
+          description:
+            "Las medidas dichas («presión 118 con 76, temperatura 38 y medio») y cada sistema que nombra, normal o con lo que encontró. Lo que no dicta queda «No examinado».",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "diagnostico",
+          label: "Diagnóstico",
+          description:
+            "Registra el código de la lista de la clínica que nombró el médico, presuntivo o definitivo.",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "plan",
+          label: "Indicaciones",
+          description:
+            "Busca cada prestación dictada en los servicios del consultorio; si no hay una sola, la elige el médico.",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "receta",
+          label: "Receta",
+          description:
+            "Prepara la receta con lo dictado (medicamento, dosis, frecuencia y duración), calcula la cantidad y avisa si choca con una alergia. El médico la emite con su colegiatura.",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "controles",
+          label: "Controles",
+          description: "Deja sugerido el próximo control.",
+          fixed: true,
+          tools: [],
+        },
+        {
+          id: "descanso",
+          label: "Descanso médico",
+          description:
+            "Lo deja listo con los días dictados. El médico lo emite con su firma, y la persona decide si su diagnóstico figura.",
+          fixed: true,
+          tools: [],
+        },
+      ],
+      sees: "Lo que el médico dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Los servicios de la clínica y la lista de diagnósticos, para reconocer lo dictado.",
+      notSees:
+        "El resto de la historia clínica ni las atenciones anteriores. Conversaciones ni caja.",
+      never:
+        "Guardar sin que el médico confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el médico pulse «Dictar». Tocar atenciones de otros profesionales.",
+      confirms: "El médico que lleva la atención: confirma cada sugerencia y firma.",
+      behaves:
+        "Registra solo lo que el médico dijo, sin completar lo que falta. Si se corrige al dictar, vale lo último. Una prestación que no encuentra, o que coincide con varias, queda «Por revisar» para que el médico elija.",
+      learningOwner: "No guarda nada de un médico ni de la clínica.",
+      learnsLater: "Recordar los términos de cada médico, como algo suyo.",
+    },
+  },
   // Las urgencias de un consultorio que no están entre las comunes: el
   // embarazo que sangra o el bebé que deja de moverse, la piel morada, quien
   // no reacciona, el peor dolor de cabeza, vomitar sangre y tomar de más.

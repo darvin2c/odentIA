@@ -16,6 +16,7 @@ import {
   productDictation,
   requireClinicalAssistant,
   saveDictationSegment,
+  settleDictationMedicalLeave,
   settleDictationPrescription,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
@@ -207,6 +208,21 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => settleDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId, parsed.data.prescriptionId)),
+    )
+  })
+
+  /**
+   * El descanso médico dictado se emitió con el formulario de siempre (latidIA, issue 229): su
+   * sugerencia queda con ese descanso.
+   */
+  app.post(`${base}/medical-leave/settle`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = z.object({ medicalLeaveId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => settleDictationMedicalLeave(tx, orgId, userId, at.data.id, at.data.encounterId, parsed.data.medicalLeaveId)),
     )
   })
 

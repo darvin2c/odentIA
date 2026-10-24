@@ -59,8 +59,9 @@ export const BUNDLED_DIAGNOSIS_LISTS: readonly DiagnosisListLoad[] = [
 
 /**
  * Semilla mínima de desarrollo, NO oficial: los 124 códigos de la CIE-10 de la
- * cavidad bucal y Z01.2, sin fuente verificada ni permiso de la OPS. Nunca en
- * producción.
+ * cavidad bucal y Z01.2, y 41 de la atención primaria para latidIA (issue 229:
+ * amigdalitis, hipertensión, diabetes, asma…), sin fuente verificada ni permiso
+ * de la OPS. Nunca en producción.
  */
 export const DEV_DIAGNOSIS_LISTS: readonly DiagnosisListLoad[] = [
   {

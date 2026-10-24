@@ -119,10 +119,12 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   consulta: { kinds: ["nota"] },
   // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
+  // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
+  examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
   plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
-  // La receta dictada se emite desde su bloque, con «Emitir receta» (issue 109, fase 2).
-  documentos: { kinds: ["receta"], onlySuggested: "Sin documentos" },
+  // La receta dictada se emite desde su bloque, con «Emitir receta» (issue 109, fase 2); el descanso, con «Emitir descanso».
+  documentos: { kinds: ["receta", "descanso"], onlySuggested: "Sin documentos" },
 }
 
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
@@ -609,6 +611,12 @@ export function EncounterEditor({
         if (value !== null) editNote(key, value)
       }
     }
+    // Los signos y el examen confirmados pasan por los mismos editores, para que el borrador local no los pise.
+    if (item.kind === "signos") {
+      for (const [key, value] of Object.entries(item.payload)) if (typeof value === "number") editVital(key, String(value))
+      void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
+    }
+    if (item.kind === "examen" && exam.withDictated) editExamination(exam.withDictated(valuesRef.current.examination, item.payload))
     void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })

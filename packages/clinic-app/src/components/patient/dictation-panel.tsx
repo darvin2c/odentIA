@@ -7,6 +7,7 @@ import { useState } from "react"
 import { PLAN_PATH } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
 import { dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -16,22 +17,13 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
 
 /**
- * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109). Solo lo
- * que de verdad hace: lo que llega después va en «Más adelante».
+ * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109): los
+ * del producto (`productUi().dictation`), solo lo que de verdad hace.
  */
-const EXAMPLES: Array<{ block: string; say: string }> = [
-  { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
-  { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
-  { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
-  { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
-  { block: "Control", say: "«Control en un mes»" },
-  { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
-]
-
 function DictationExamples() {
   return (
     <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
-      {EXAMPLES.map((example) => (
+      {(productUi().dictation?.examples ?? []).map((example) => (
         <div key={example.block} className="contents">
           <dt className="font-semibold text-muted-foreground">{example.block}</dt>
           <dd className="m-0 [overflow-wrap:anywhere]">{example.say}</dd>
@@ -262,7 +254,7 @@ export function DictationPanel({
               maxLength={12_000}
               value={typed}
               onChange={(event) => setTyped(event.target.value)}
-              placeholder="En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…"
+              placeholder={productUi().dictation?.placeholder}
             />
             <FieldDescription>
               {session.canListen

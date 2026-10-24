@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso"
 
 export interface DictationSuggestion {
   id: string
@@ -26,6 +26,9 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   control: "Controles",
   odontograma: "Odontograma",
   receta: "Receta",
+  signos: "Signos vitales",
+  examen: "Examen físico",
+  descanso: "Descanso médico",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -37,8 +40,9 @@ const CONTEXT_CHARS = 600
 /**
  * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
+ * El descanso médico tampoco (latidIA, issue 229).
  */
-export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta"
+export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso"
 
 /** Espera antes del único reintento automático de un tramo que no se pudo ordenar. */
 const RETRY_MS = 3000
@@ -441,6 +445,13 @@ export function useDictationSession({
     mutationFn: (prescriptionId: string) => apiFetch(`${base}/prescription/settle`, { method: "POST", body: JSON.stringify({ prescriptionId }) }),
     onSettled: () => void refresh(),
   })
+  /** El descanso dictado se emitió con su formulario, ya lleno: su sugerencia queda con ese descanso. */
+  const settleMedicalLeave = useMutation({
+    retry: false,
+    mutationFn: (medicalLeaveId: string) => apiFetch(`${base}/medical-leave/settle`, { method: "POST", body: JSON.stringify({ medicalLeaveId }) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["medical-leaves", patientId] }),
+    onSettled: () => void refresh(),
+  })
 
   const ready = suggestions.filter(confirmable).length
   const dictating = mode !== "off"
@@ -485,6 +496,7 @@ export function useDictationSession({
     confirmReady,
     issuePrescription,
     settlePrescription,
+    settleMedicalLeave,
     patientId,
     encounterId,
     editing: suggestions.find((item) => item.id === editingId) ?? null,
@@ -505,6 +517,7 @@ export function suggestionText(item: DictationSuggestion): { title: string; deta
 /** Qué le falta a una sugerencia para poder entrar a la historia, en pocas palabras. */
 export function suggestionMissing(item: DictationSuggestion): string {
   if (item.kind === "receta") return item.status === "lista" ? "falta emitirla" : "falta completarla"
+  if (item.kind === "descanso") return "falta emitirlo"
   if (item.status === "lista") return "falta confirmarla"
   if (item.kind === "plan" && typeof item.payload["serviceId"] !== "string") return "falta elegir la prestación"
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"

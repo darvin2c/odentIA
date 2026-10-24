@@ -4,12 +4,13 @@ import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLE_IDS,
-  AGENT_ROLES,
+  agentRolesFor,
   getAgentConfig,
   getAgentOverview,
   getWritingHours,
   setWritingHours,
   operationFillsOf,
+  productAgentTexts,
   upsertAgentConfig,
 } from "@odentia/services"
 import { createClioPracticeRoute } from "./clio-practice.js"
@@ -115,15 +116,17 @@ export function createAgentRoute(deps: AgentRouteDeps) {
    * agente al ejecutarse, para que la pantalla no describa otra cosa.
    */
   app.get("/roles", async (c) => {
-    const { memberRole } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    // Con las palabras del producto de la clínica: su nombre, sus meses y su profesional (issue 229).
+    const roles = await withOrgContext(deps.db, orgId, async (tx) => agentRolesFor(await productAgentTexts(tx, orgId)))
     return c.json({
       data: {
         principles: AGENT_BASE_PRINCIPLES,
         // «Qué puede llenar» sale de la misma declaración que valida la ruta y la herramienta.
         roles: AGENT_ROLE_IDS.map((id) => ({
-          ...AGENT_ROLES[id],
-          functions: AGENT_ROLES[id].functions.map((fn) => ({ ...fn, fills: operationFillsOf(fn.tools) })),
+          ...roles[id],
+          functions: roles[id].functions.map((fn) => ({ ...fn, fills: operationFillsOf(fn.tools) })),
         })),
       },
     })

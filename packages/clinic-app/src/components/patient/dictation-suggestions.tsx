@@ -1,4 +1,4 @@
-import { formatMoney } from "@odentia/clinical"
+import { formatMoney, VITAL_SIGNS } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { Check, CircleAlert, Mic, X } from "lucide-react"
@@ -17,6 +17,7 @@ import {
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
 import { RecetasPanel } from "./clinical-panels"
+import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { ServicePicker } from "./service-picker"
 
 /**
@@ -51,6 +52,8 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
   if (!session.enabled || items.length + removed.length === 0) return null
   // La receta dictada es una sola receta con sus medicamentos (issue 109, fase 2).
   if (kind === "receta") return <PrescriptionSuggestion session={session} items={items} />
+  // El descanso dictado se emite con su formulario, ya lleno (latidIA, issue 229).
+  if (kind === "descanso") return <MedicalLeaveSuggestion session={session} items={items} />
   const acting = (item: DictationSuggestion) => session.act.isPending && session.act.variables?.item.id === item.id
   // Lo que el producto agrega a una sugerencia sin terminar (odentIA: lo que la norma pide de un hallazgo).
   const Choices = productUi().dictation?.SuggestionChoices
@@ -391,8 +394,81 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
   )
 }
 
-/** Campos que el odontólogo corrige a mano en una sugerencia que no es del plan, con su rótulo. */
-const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; label: string; long?: boolean; number?: boolean }>> = {
+/**
+ * El descanso médico dictado (latidIA, issue 229): «Emitir descanso» abre el
+ * formulario de siempre ya lleno con los días y desde cuándo, porque emitirlo
+ * es firmarlo y ahí la persona decide si su diagnóstico figura. Nunca se emite
+ * con «Confirmar las N listas».
+ */
+function MedicalLeaveSuggestion({ session, items }: { session: DictationSession; items: DictationSuggestion[] }) {
+  const [open, setOpen] = useState(false)
+  const item = items[0]
+  if (!item) return null
+  const { title, detail } = suggestionText(item)
+  const busy = session.act.isPending || session.settleMedicalLeave.isPending || session.dictating
+  const days = typeof item.payload["days"] === "number" ? item.payload["days"] : null
+  const startsOn = typeof item.payload["startsOn"] === "string" ? item.payload["startsOn"] : null
+  const ready = item.status === "lista"
+  return (
+    <div className="flex basis-full flex-col gap-2">
+      <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: Descanso médico`} className="flex flex-col gap-2">
+        <li className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            {ready ? (
+              <AgentMark size="sm" />
+            ) : (
+              <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-warning-soft text-warning">
+                <CircleAlert className="size-3.5" />
+              </span>
+            )}
+            <div className="min-w-0 flex-1 basis-40 px-2">
+              <p className="font-medium">Descanso médico · {title}</p>
+              <p className="text-muted-foreground">{ready ? (detail || "Listo para emitir con tu firma.") : (item.note ?? detail)}</p>
+            </div>
+            {!ready ? <Badge>Por revisar</Badge> : null}
+            <Button type="button" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setOpen(true)}>
+              Emitir descanso
+            </Button>
+            <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-8" aria-label={`Descartar: Descanso médico · ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "discard" })}>
+              <X className="size-4" aria-hidden />
+            </Button>
+          </div>
+        </li>
+      </ul>
+      {session.settleMedicalLeave.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {dictationErrorText(session.settleMedicalLeave.error, "El descanso se emitió, pero no pude marcar la sugerencia. Descártala.")}
+        </p>
+      ) : null}
+      {open ? (
+        <NewMedicalLeaveDrawer
+          open
+          patientId={session.patientId}
+          encounterId={session.encounterId}
+          {...(days ? { defaultDays: days } : {})}
+          {...(startsOn ? { defaultStartsOn: startsOn } : {})}
+          onClose={() => setOpen(false)}
+          onCreated={(leave) => {
+            setOpen(false)
+            session.settleMedicalLeave.mutate(leave.id)
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+interface EditableField {
+  key: string
+  label: string
+  long?: boolean
+  number?: boolean
+  /** Una medida con decimales (la temperatura, el peso). */
+  decimal?: boolean
+}
+
+/** Campos que el profesional corrige a mano en una sugerencia que no es del plan, con su rótulo. */
+const EDITABLE: Record<Exclude<DictationKind, "plan">, EditableField[]> = {
   nota: [
     { key: "reason", label: "Motivo de consulta", long: true },
     { key: "presentIllness", label: "Enfermedad actual", long: true },
@@ -417,6 +493,25 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; labe
   ],
   // La receta se completa en el formulario de siempre, «Emitir receta», ya lleno.
   receta: [],
+  // Los signos vitales dictados, cada uno con su unidad (latidIA, issue 229).
+  signos: VITAL_SIGNS.map((sign) => ({ key: sign.key, label: `${sign.label} (${sign.suffix})`, decimal: true })),
+  // El sistema se ve en el título; aquí, lo que se encontró. Sin texto queda «Sin alteraciones».
+  examen: [{ key: "finding", label: "Hallazgo", long: true }],
+  // El descanso se completa en su formulario, «Emitir descanso», ya lleno.
+  descanso: [],
+}
+
+/** Lo que se corrige de una sugerencia: lo que trae y, de la presión, las dos partes. */
+function fieldsOf(item: DictationSuggestion): EditableField[] {
+  if (item.kind === "plan") return []
+  const all = EDITABLE[item.kind]
+  if (item.kind === "nota") return all.filter((field) => item.payload[field.key] !== undefined)
+  if (item.kind === "signos") {
+    const pressure = item.payload["presionSistolica"] !== undefined || item.payload["presionDiastolica"] !== undefined
+    return all.filter((field) => item.payload[field.key] !== undefined || (pressure && field.key.startsWith("presion")))
+  }
+  // Sin «dónde» (latidIA) no hay pieza que corregir.
+  return all.filter((field) => field.key !== "toothNumber" || Boolean(productUi().site))
 }
 
 /**
@@ -433,7 +528,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
   const payload = item.payload
   const kind = item.kind
   const plan = kind === "plan"
-  const fields = kind === "plan" ? [] : EDITABLE[kind].filter((field) => kind !== "nota" || payload[field.key] !== undefined)
+  const fields = fieldsOf(item)
   const [draft, setDraft] = useState<Record<string, string>>(() =>
     Object.fromEntries([...fields.map((field) => field.key), "toothNumber", "detail"].map((key) => [key, payload[key] == null ? "" : String(payload[key])])),
   )
@@ -459,8 +554,9 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
   // Las caras son las de esa pieza, con los nombres del odontograma: una pieza anterior no tiene oclusal.
   const available = validTooth ? (site?.partsOf(tooth) ?? []) : []
   const scope = service?.scope ?? null
-  const bySite = scope === null || scope === "tooth" || scope === "surfaces"
-  const withSurfaces = scope === "surfaces" || (scope === null && surfaces.length > 0)
+  // Sin «dónde» en el producto (latidIA), una indicación no lleva pieza ni caras.
+  const bySite = Boolean(site) && (scope === null || scope === "tooth" || scope === "surfaces")
+  const withSurfaces = Boolean(site) && (scope === "surfaces" || (scope === null && surfaces.length > 0))
   const candidates = candidatesOf(item)
   const pick = (chosen: Candidate | ServiceCatalogItem) => setService({ id: chosen.id, name: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, scope: chosen.scope ?? null })
 
@@ -479,8 +575,10 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
     } else {
       for (const field of fields) {
         const value = (draft[field.key] ?? "").trim()
-        patch[field.key] = value === "" ? null : field.number ? Number(value) : value
+        patch[field.key] = value === "" ? null : field.number || field.decimal ? Number(value) : value
       }
+      // Con un hallazgo escrito, el sistema queda con hallazgos; sin texto, sin alteraciones.
+      if (kind === "examen") patch["state"] = patch["finding"] ? "con_hallazgos" : "sin_alteraciones"
     }
     session.save.mutate(
       { item, patch, confirm: true },
@@ -555,9 +653,9 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
                 />
                 <FieldDescription>Número FDI, por ejemplo 16.</FieldDescription>
               </Field>
-            ) : (
+            ) : site ? (
               <p className="text-sm text-muted-foreground">Esta prestación no se indica por pieza.</p>
-            )}
+            ) : null}
             {withSurfaces ? (
               <div className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium">Superficies</span>
@@ -599,9 +697,18 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
               ) : (
                 <Input
                   id={`dictado-${item.id}-${field.key}`}
-                  inputMode={field.number ? "numeric" : undefined}
+                  inputMode={field.number ? "numeric" : field.decimal ? "decimal" : undefined}
                   value={draft[field.key] ?? ""}
-                  onChange={(event) => setDraft({ ...draft, [field.key]: field.number ? event.target.value.replace(/\D/g, "").slice(0, 2) : event.target.value })}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      [field.key]: field.number
+                        ? event.target.value.replace(/\D/g, "").slice(0, 2)
+                        : field.decimal
+                          ? event.target.value.replace(",", ".").replace(/[^\d.]/g, "").slice(0, 6)
+                          : event.target.value,
+                    })
+                  }
                 />
               )}
             </Field>
