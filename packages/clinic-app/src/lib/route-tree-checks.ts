@@ -60,7 +60,7 @@ export function parentsWithoutOutlet(
   return [...parents].filter((id) => {
     const file = routes.find((route) => route.id === id)?.file
     const text = file ? read(file) : null
-    return !text || !text.includes("<Outlet")
+    return !text?.includes("<Outlet")
   })
 }
 
