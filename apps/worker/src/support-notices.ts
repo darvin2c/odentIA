@@ -1,3 +1,4 @@
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { supportInboxNoticeTemplate, supportReplyNoticeTemplate } from "@odentia/mail"
 import {
@@ -80,7 +81,14 @@ export async function runSupportNoticesTick(deps: SupportNoticeWorkerDeps): Prom
               role: claimed.role,
               url,
             })
-          : supportReplyNoticeTemplate({ kind: claimed.kind, caseKind: claimed.caseKind, topic: claimed.topic, url })
+          : supportReplyNoticeTemplate({
+              kind: claimed.kind,
+              caseKind: claimed.caseKind,
+              topic: claimed.topic,
+              url,
+              // La marca de la clínica del caso (issue 229).
+              brand: productWords(claimed.clinicProduct ?? "dental").brand,
+            })
       const to = claimed.to ?? deps.supportInbox
       await deps.mailer.send({ to, ...mail })
       await completeSupportNotice(deps.ownerDb, claimed.id, true)

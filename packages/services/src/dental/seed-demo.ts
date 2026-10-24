@@ -200,6 +200,7 @@ import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing
 import { createService, quickAddServices, updateService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
 import type { DentalFinalizeParts } from "./hooks.js"
+import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
 import { createStorage } from "../storage.js"
 import {
   countWhereIn,
@@ -276,7 +277,8 @@ const db = createOwnerDb(databaseUrl)
 
 const ORG_A = "seed-org-dental-smile"
 const ORG_B = "seed-org-clinica-norte"
-const SEED_ORGS = [ORG_A, ORG_B]
+// El consultorio de latidIA (`../medical/seed-demo.ts`) se borra y se crea con la demo.
+const SEED_ORGS = [ORG_A, ORG_B, MEDICAL_DEMO_ORG]
 const ANA_ID = "seed-user-ana"
 const LUIS_ID = "seed-user-luis"
 const CORA_ID = "seed-user-cora"
@@ -287,6 +289,8 @@ const SALAS_ID = "seed-user-salas"
 /** Caja de Dental Smile: responde desde Inicio los temas de pagos que le pasa Sofi (decisión 3 del pulido de la Bandeja). */
 const CAJA_ID = "seed-user-caja"
 const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID]
+/** Las cuentas que se borran: las de odentIA y la Dra. Vela del consultorio de latidIA. */
+const WIPED_USERS = [...SEED_USERS, VELA_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -308,7 +312,7 @@ async function wipeSeed(): Promise<void> {
   // los productos; el concepto se borra después con los cobros.
   await db.execute(
     sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
-      where organization_id in (${ORG_A}, ${ORG_B}) and product_id is not null`,
+      where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG}) and product_id is not null`,
   )
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
@@ -410,7 +414,7 @@ async function wipeSeed(): Promise<void> {
     "report_digest",
   ]) {
     await db.execute(
-      sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`,
+      sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`,
     )
   }
   // Finanzas, recetas, controles y responsabilidades: antes que sus padres
@@ -422,12 +426,12 @@ async function wipeSeed(): Promise<void> {
     .delete(patientPaymentRefund)
     .where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
   // Las devoluciones (ADR 0068) después de lo que las nombra y antes de sus tickets.
-  await db.execute(sql`delete from payment_return where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from payment_return where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
   await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
   await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
-  await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B})`)
-  await db.execute(sql`delete from ticket_counter where organization_id in (${ORG_A}, ${ORG_B})`)
-  await db.execute(sql`delete from organization_payment_method where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
+  await db.execute(sql`delete from ticket_counter where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
+  await db.execute(sql`delete from organization_payment_method where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
   await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, SEED_ORGS))
   await db.delete(prescription).where(inArray(prescription.organizationId, SEED_ORGS))
   await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, SEED_ORGS))
@@ -510,11 +514,11 @@ async function wipeSeed(): Promise<void> {
   // La atención referencia su cita (ADR 0002): las citas se borran después.
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(scheduleRoom).where(inArray(scheduleRoom.organizationId, SEED_ORGS))
-  await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
-  await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
+  await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
   // Los servicios apuntan a su especialidad: la lista de la clínica va después.
-  await db.execute(sql`delete from org_specialty where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from org_specialty where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
   // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
   // Se borra por organización **y** por actor: una corrida de e2e deja registros
@@ -524,7 +528,7 @@ async function wipeSeed(): Promise<void> {
     .where(
       or(
         inArray(patientRegistration.organizationId, SEED_ORGS),
-        inArray(patientRegistration.actorUserId, SEED_USERS),
+        inArray(patientRegistration.actorUserId, WIPED_USERS),
       ),
     )
   // Persona única: un paciente no existe sin su propia persona, así que sus
@@ -557,11 +561,11 @@ async function wipeSeed(): Promise<void> {
   // la semilla la vuelve a poner junto con su membresía (que se va en cascada).
   await db.execute(
     sql`delete from processing_agreement_acceptance where accepted_by in (${sql.join(
-      SEED_USERS.map((id) => sql`${id}`),
+      WIPED_USERS.map((id) => sql`${id}`),
       sql`, `,
     )})`,
   )
-  await db.delete(user).where(inArray(user.id, SEED_USERS))
+  await db.delete(user).where(inArray(user.id, WIPED_USERS))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const row of previousMessages) {
     if (!Array.isArray(row.attachments)) continue
@@ -4047,6 +4051,9 @@ await db.insert(aiUsage).values([
   { organizationId: ORG_A, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
 ])
 
+// --- latidIA: el consultorio de la demo médica (issue 229) ---
+await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
+
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
   const tables = [
@@ -4075,6 +4082,7 @@ async function summary(orgId: string, label: string): Promise<string> {
 console.log("seed-dev ok")
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
+console.log(await summary(MEDICAL_DEMO_ORG, "consultorio-san-martin (latidIA)"))
 console.log(
   `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones, ${reportsHistory.budgets} presupuestos`,
 )
@@ -4084,5 +4092,5 @@ console.log(
   `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
   `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
-console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
+console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev")
 process.exit(0)

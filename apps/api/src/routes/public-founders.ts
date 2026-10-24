@@ -1,5 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
-import type { ClinicalProduct } from "@odentia/clinical"
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -125,6 +125,7 @@ export function createPublicFoundersRoute(deps: {
             phone: parsed.data.phone,
             answerDays: result.answerDays,
             replyTo: deps.replyTo,
+            brand: productWords(product).brand,
           }),
         })
         await deps.ownerDb.transaction((tx) => markWaitlistConfirmationSent(tx, result.id)).catch(() => undefined)

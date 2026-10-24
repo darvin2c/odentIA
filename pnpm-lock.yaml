@@ -580,6 +580,9 @@ importers:
       '@odentia/channels':
         specifier: workspace:*
         version: link:../../packages/channels
+      '@odentia/clinical':
+        specifier: workspace:*
+        version: link:../../packages/clinical
       '@odentia/db':
         specifier: workspace:*
         version: link:../../packages/db

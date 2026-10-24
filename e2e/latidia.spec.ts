@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { expect, PASSWORD, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { latestLinkFor } from "./mailpit"
 
 /**
  * latidIA abre (entregas 3 y 4 del issue 229): la misma instalación sirve su
@@ -132,6 +133,17 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, created.body.id))
   expect(profile?.product).toBe("medical")
+
+  // La invitación al equipo sale con la marca de latidIA y lleva a su panel (entrega 4b).
+  const invitee = `equipo-${id}@test.dev`
+  const invited = await request(page, api, "POST", "/api/auth/organization/invite-member", undefined, {
+    email: invitee,
+    role: "clinician",
+    organizationId: created.body.id,
+  })
+  expect(invited.status).toBe(200)
+  const link = await latestLinkFor(invitee, "Te invitaron a Consultorio San Martín")
+  expect(link.startsWith(latidiaUrl("app", "/accept-invitation/"))).toBe(true)
 
   // La app de latidIA: el lila, el [72] y «sala» donde odentIA dice «unidad dental».
   await gotoHydrated(page, latidiaUrl(slug, "/agenda"))

@@ -16,6 +16,7 @@
  */
 import { createHash, createHmac } from "node:crypto"
 import { canAccess } from "@odentia/auth/permissions"
+import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
@@ -28,7 +29,7 @@ import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import { clinicDisplayName } from "./clinic-identity.js"
 import { notFound, ServiceError } from "./errors.js"
 import { calendarFeedFile, type CalendarEvent } from "./icalendar.js"
-import { findOrgLocale } from "./locale.js"
+import { findOrgLocale, orgProduct } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { clinicOriginOf } from "./public-links.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -391,11 +392,17 @@ export async function serveCalendarFeed(
   }
   const clinicZone = (await findOrgLocale(tx, orgId)).timezone
   await recordUse(tx, orgId, feed, calendarClientOf(userAgent), todayIn(clinicZone, now), now)
-  return calendarFeedFile(await feedName(tx, orgId), await feedEvents(tx, orgId, feed.userId, clinicZone, now))
+  const platform = productWords(await orgProduct(tx, orgId)).name
+  return calendarFeedFile(
+    await feedName(tx, orgId, platform),
+    await feedEvents(tx, orgId, feed.userId, clinicZone, now),
+    60,
+    platform,
+  )
 }
 
-async function feedName(tx: Db, orgId: string): Promise<string> {
-  return `${(await clinicDisplayName(tx, orgId)) || "odentIA"} · Mis citas`
+async function feedName(tx: Db, orgId: string, platform: string): Promise<string> {
+  return `${(await clinicDisplayName(tx, orgId)) || platform} · Mis citas`
 }
 
 async function recordUse(
@@ -478,6 +485,8 @@ async function feedEvents(
     .limit(options.limit ?? 2000)
   const origin = await clinicOriginOf(tx, orgId)
   const clinic = (await clinicDisplayName(tx, orgId)) || "la clínica"
+  // La plataforma de la clínica: «Ábrela en latidIA» en un consultorio (issue 229).
+  const platform = productWords(await orgProduct(tx, orgId)).name
   const addressText = await branchAddressWriter(tx, orgId)
   return rows.map((row) => {
     const address = addressText(row.branchAddress)
@@ -490,8 +499,8 @@ async function feedEvents(
       summary: `Paciente · ${initialsOf(row)}`,
       location: [[`Sede ${row.branchName}`, row.roomName].filter(Boolean).join(" · "), address].filter(Boolean).join(", "),
       description: origin
-        ? `Cita de ${clinic}. Ábrela en odentIA para ver quién es: ${origin}/agenda?appointmentId=${row.id}`
-        : `Cita de ${clinic}. Ábrela en odentIA para ver quién es.`,
+        ? `Cita de ${clinic}. Ábrela en ${platform} para ver quién es: ${origin}/agenda?appointmentId=${row.id}`
+        : `Cita de ${clinic}. Ábrela en ${platform} para ver quién es.`,
       stamp: now,
     }
   })

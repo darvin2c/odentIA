@@ -1341,6 +1341,20 @@ export async function listMyInvitations(tx: Db, email: string): Promise<PendingI
   return out
 }
 
+/**
+ * El producto de una cuenta, para lo que se le escribe a la persona y no a una
+ * clínica (los avisos de los términos; issue 229): latidIA solo si todas sus
+ * clínicas son de latidIA. Sin clínicas, o con alguna de odentIA, odentIA.
+ */
+export async function accountProduct(tx: Db, userId: string): Promise<ClinicalProduct> {
+  const rows = await tx
+    .select({ product: orgProfile.product })
+    .from(member)
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, member.organizationId))
+    .where(eq(member.userId, userId))
+  return rows.length > 0 && rows.every((row) => row.product === "medical") ? "medical" : "dental"
+}
+
 export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrganization[]> {
   const rows = await tx
     .select({

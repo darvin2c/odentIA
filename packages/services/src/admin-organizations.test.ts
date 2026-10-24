@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import { beforeEach, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import {
+  accountProduct,
   approveRecoveryCase,
   cancelOrganizationInvitation,
   cleanupUnverifiedAccount,
@@ -325,4 +326,19 @@ it("alta asistida de latidIA: la clínica nace médica y la invitación nombra e
   )
   const [own] = await listMyInvitations(ownerDb, "t-odentia@example.test")
   expect(own).toMatchObject({ id: dental.invitationId, product: "dental", roleLabel: "Propietario" })
+})
+
+it("el producto de una cuenta: latidIA solo si todas sus clínicas lo son (entrega 4b del issue 229)", async () => {
+  await seedUser("t-cuenta", "t-cuenta@example.test", true, new Date())
+  expect(await accountProduct(ownerDb, "t-cuenta")).toBe("dental")
+  const medical = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Consultorio Cuenta", slug: "t-cuenta-latidia", email: "t-cuenta-x@example.test", countryCode: "PE", product: "medical" }),
+  )
+  await seedMember(medical.organizationId, "t-cuenta", "owner")
+  expect(await accountProduct(ownerDb, "t-cuenta")).toBe("medical")
+  const dental = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Clínica Cuenta", slug: "t-cuenta-odentia", email: "t-cuenta-y@example.test", countryCode: "PE" }),
+  )
+  await seedMember(dental.organizationId, "t-cuenta", "clinician")
+  expect(await accountProduct(ownerDb, "t-cuenta")).toBe("dental")
 })

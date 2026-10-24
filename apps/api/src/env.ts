@@ -45,6 +45,8 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1),
+  // El remitente de los correos de latidIA (issue 229); vacío, el de SMTP_FROM con su nombre.
+  MEDICAL_SMTP_FROM: z.string().optional(),
   /**
    * Correo de odentIA que recibe el aviso de cada Hoja de Reclamación (Libro de
    * Reclamaciones de la web). Opcional: sin él solo sale la copia al consumidor.

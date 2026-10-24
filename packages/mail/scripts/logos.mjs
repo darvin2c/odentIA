@@ -14,6 +14,11 @@ const IMAGES = [
   { name: "logotipoOscuro", file: "logotipo-oscuro.svg", height: 32 },
   { name: "isotipoClaro", file: "isotipo-claro.svg", height: 32 },
   { name: "isotipoOscuro", file: "isotipo-oscuro.svg", height: 32 },
+  // latidIA (issue 229): la misma construcción con su [72] y su morado.
+  { name: "latidiaLogotipoClaro", file: "latidia-logotipo-claro.svg", height: 32 },
+  { name: "latidiaLogotipoOscuro", file: "latidia-logotipo-oscuro.svg", height: 32 },
+  { name: "latidiaIsotipoClaro", file: "latidia-isotipo-claro.svg", height: 32 },
+  { name: "latidiaIsotipoOscuro", file: "latidia-isotipo-oscuro.svg", height: 32 },
 ]
 
 const entries = []

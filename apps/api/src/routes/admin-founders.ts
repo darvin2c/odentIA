@@ -1,4 +1,4 @@
-import type { ClinicalProduct } from "@odentia/clinical"
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -136,6 +136,7 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
               expiresText: dayText(issued.expiresAt),
               offer: issued.offer,
               replyTo: deps.replyTo,
+              brand: productWords(issued.request.product).brand,
             }),
           })
           emailSent = true

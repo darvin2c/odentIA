@@ -16,6 +16,7 @@
     "@odentia/agent": "workspace:*",
     "@odentia/auth": "workspace:*",
     "@odentia/channels": "workspace:*",
+    "@odentia/clinical": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/mail": "workspace:*",
     "@odentia/services": "workspace:*",

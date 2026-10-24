@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clinicOrigin, productDomainOf } from "./public-links.js"
+import { clinicOrigin, panelOrigin, productDomainOf } from "./public-links.js"
 
 const config = {
   webURL: "https://app.odentia32.com",
@@ -24,5 +24,15 @@ describe("la dirección de cada clínica, en el dominio de su producto (decisió
     )
     expect(clinicOrigin("", "dental", local)).toBeNull()
     expect(clinicOrigin("sonrie", "dental", null)).toBeNull()
+  })
+
+  it("el panel de cada producto: el de odentIA y el de latidIA en su dominio (entrega 4b)", () => {
+    expect(panelOrigin("dental", config)).toBe("https://app.odentia32.com")
+    expect(panelOrigin("medical", config)).toBe("https://app.latidia72.com")
+    // Sin su dominio, latidIA usa el panel de odentIA; sin configurar, ninguno.
+    expect(panelOrigin("medical", { webURL: "https://app.odentia32.com", cookieDomain: "odentia32.com" })).toBe(
+      "https://app.odentia32.com",
+    )
+    expect(panelOrigin("medical", null)).toBeNull()
   })
 })

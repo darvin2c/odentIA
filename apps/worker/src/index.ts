@@ -35,13 +35,15 @@ configurePublicLinks(publicLinks)
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
-configureMailLinks(env.WEB_URL)
+// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
+configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN })
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
+  fromByBrand: env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {},
 })
 const storage: Storage = createStorage({
   endpoint: env.S3_ENDPOINT,

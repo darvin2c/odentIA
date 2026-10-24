@@ -13,7 +13,8 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 // Una sola versión del Graph de Meta: el botón de Facebook, WhatsApp, Messenger e Instagram.
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
-configureMailLinks(env.WEB_URL)
+// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
+configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN })
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
@@ -26,6 +27,7 @@ const mailer = createMailer({
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
+  fromByBrand: env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {},
 })
 const authOptions = {
   db,
@@ -50,7 +52,7 @@ const productAuth = env.MEDICAL_DOMAIN
   ? {
       medical: createAuth({
         ...authOptions,
-        appName: "latidIA",
+        product: "medical",
         baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
         webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, env.MEDICAL_DOMAIN),
         cookieDomain: env.MEDICAL_DOMAIN,
