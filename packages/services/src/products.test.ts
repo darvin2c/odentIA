@@ -130,7 +130,8 @@ it("Clío dicta solo en clínicas de un producto con su dictado: hoy, odentIA", 
   } finally {
     await setProduct("dental")
   }
-  await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toBeUndefined()
+  // En odentIA dicta, con lo suyo: los hallazgos del odontograma.
+  await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toMatchObject({ kinds: ["odontograma"] })
 })
 
 it("el examen y los signos vitales los pone el producto: la boca en odentIA, los sistemas en latidIA (issue 229)", async () => {

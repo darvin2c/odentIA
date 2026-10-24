@@ -33,7 +33,8 @@ import {
   saveDictationSuggestions,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
-} from "./encounter-dictation.js"
+} from "../encounter-dictation.js"
+import { DENTAL_DICTATION } from "./dictation.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
@@ -342,8 +343,8 @@ describe("dictado en la atención", () => {
     expect(plan?.payload).not.toHaveProperty("_meta")
     expect(plan).toMatchObject({ voice: null, payload: { serviceScope: "tooth" } })
     // Al asistente se le nombra sin tarifa.
-    expect(dictationModelLabel(plan!)).toBe("Plan de tratamiento: Pulpotomía de urgencia, Pieza 25")
-    expect(dictationModelLabel(diagnosis!)).toBe("Diagnóstico: K02.1 Caries de la dentina, Pieza 16")
+    expect(dictationModelLabel(plan!, DENTAL_DICTATION)).toBe("Plan de tratamiento: Pulpotomía de urgencia, Pieza 25")
+    expect(dictationModelLabel(diagnosis!, DENTAL_DICTATION)).toBe("Diagnóstico: K02.1 Caries de la dentina, Pieza 16")
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)

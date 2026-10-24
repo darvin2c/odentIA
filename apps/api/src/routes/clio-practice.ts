@@ -1,17 +1,15 @@
-import { isProviderConfigError, meterAiUse } from "@odentia/agent"
-import { extractDictation } from "@odentia/agent/dental"
+import { extractDictation, isProviderConfigError, meterAiUse } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
-import { assertAgentsNotPaused, assertAgentTestBudget, requireDictatingProduct } from "@odentia/services"
-import { previewDictationSuggestions } from "@odentia/services/dental"
+import { assertAgentsNotPaused, assertAgentTestBudget, previewDictationSuggestions, requireDictatingProduct } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { modelProblemResponse } from "../../lib/agent-model.js"
-import { canAccess, orgContextOf } from "../../lib/context.js"
-import { errorBody } from "../../lib/error.js"
-import type { AgentRouteDeps } from "../agent.js"
-import { runService, validationError } from "../helpers.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
+import { errorBody } from "../lib/error.js"
+import type { AgentRouteDeps } from "./agent.js"
+import { runService, validationError } from "./helpers.js"
 
-/** Clío en la configuración del agente (ADR 0079: lo dental del agente). */
+/** Clío en la configuración del agente: practicar el dictado con el producto de la clínica (ADR 0079). */
 export function createClioPracticeRoute(deps: AgentRouteDeps) {
   const app = new Hono()
 

@@ -2,7 +2,7 @@
  * Lo común no depende de lo dental (ADR 0079). Lo dental vive en este paquete,
  * en las carpetas `dental/` de los servicios, el agente, la base y la API, y en
  * la app de odentIA; cada producto se conecta con lo común solo por
- * `products.ts` (servicios y API) y, en las pantallas, por `productUi()` de
+ * `products.ts` (servicios, agente y API) y, en las pantallas, por `productUi()` de
  * `@odentia/clinic-app` (ADR 0086). Ningún código de lo común importa lo dental: solo las pruebas de la
  * lista de abajo, que prueban lo común con odentIA como ejemplo. Un archivo
  * nuevo que lo necesite es una señal de que falta un punto de extensión del
@@ -23,7 +23,6 @@ const IMPORTS_DENTAL =
  * sembrar, Clío): solo pruebas, nunca código que corre (entrega 8).
  */
 const STILL_COUPLED = [
-  "packages/agent/src/agent.test.ts",
   "packages/agent/src/consumo.eval.ts",
   "packages/agent/src/product-prompts.test.ts",
   "apps/api/src/routes/services.test.ts",
@@ -37,7 +36,6 @@ const STILL_COUPLED = [
   "packages/services/src/patient-history.test.ts",
   "packages/services/src/patients.test.ts",
   "packages/services/src/procedure-codings.test.ts",
-  "packages/services/src/saas-actions.test.ts",
   "packages/services/src/service-interest.test.ts",
   "packages/services/src/treatment-journey.test.ts",
   // El visor de tomografías se prueba con el fantasma de odentIA (`generateCbctPhantom`).
@@ -74,6 +72,7 @@ const DENTAL_INSIDE = [
   "apps/api/src/routes/dental/",
   "apps/api/src/routes/products.ts",
   "packages/services/src/products.ts",
+  "packages/agent/src/products.ts",
   // Las bibliotecas de cada producto, sembradas juntas.
   "packages/db/src/products.ts",
 ]

@@ -1,33 +1,31 @@
-import { isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
-import { extractDictation } from "@odentia/agent/dental"
+import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertClioCanListen,
   clioListenBlock,
-  getAgentConfig,
-} from "@odentia/services"
-import {
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationModelLabel,
   dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
+  getAgentConfig,
   issueDictationPrescription,
   listDictationSuggestions,
   listVoiceRemovedDictation,
+  productDictation,
   requireClinicalAssistant,
   saveDictationSegment,
   settleDictationPrescription,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
-} from "@odentia/services/dental"
+} from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../../lib/context.js"
-import { modelProblemResponse } from "../../lib/agent-model.js"
-import { errorBody } from "../../lib/error.js"
-import { type CrmDeps, runService, validationError } from "../helpers.js"
+import { orgContextOf } from "../lib/context.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
+import { errorBody } from "../lib/error.js"
+import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
@@ -50,7 +48,8 @@ export interface EncounterDictationDeps extends CrmDeps {
 }
 
 /**
- * Dictado del asistente clínico dentro de una atención. Cuelga de
+ * Dictado del asistente clínico dentro de una atención, en todo producto que
+ * dicte (ADR 0079: cada uno con su prompt y su formato). Cuelga de
  * `/patients/:id/encounters/…`, así que el permiso clínico y la traza de
  * lectura los pone el guardián de la ruta de pacientes; el servicio exige
  * además que quien dicta lleve esa atención en borrador.
@@ -64,9 +63,10 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const at = params.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
     // La pantalla de la atención pregunta aquí si puede ofrecer el dictado: quien atiende no administra el agente.
+    // En una clínica de un producto que no dicta, Clío no se ofrece aunque esté encendida.
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => ({
-        enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled,
+        enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled && (await productDictation(tx, orgId)) !== null,
         suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
         // Las quitadas por voz, que se pueden devolver hasta firmar.
         removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
@@ -94,13 +94,14 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     try {
       return await runService(c, 201, async () => {
         // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo nuevo.
-        const before = await withOrgContext(deps.db, orgId, async (tx) => {
-          await requireClinicalAssistant(tx, orgId)
+        const ready = await withOrgContext(deps.db, orgId, async (tx) => {
+          const dictation = await requireClinicalAssistant(tx, orgId)
           await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { drafts: [] })
           if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
-          return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
+          const list = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
+          return { list, labels: list.map((item) => ({ label: dictationModelLabel(item, dictation) })) }
         })
-        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
@@ -108,12 +109,12 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           extractDictation(
             deps.db,
             { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context, pending: before.map((item) => ({ label: dictationModelLabel(item) })) },
+            { orgId, transcript, context, pending: ready.labels },
           ),
           { encounterId: at.data.encounterId },
         )
         // El número que usó el modelo es la posición en la lista que se le dio.
-        const target = (index: number) => before[index]?.id
+        const target = (index: number) => ready.list[index]?.id
         const saved = await withOrgContext(deps.db, orgId, (tx) =>
           saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
             drafts: extracted.drafts,

@@ -1,6 +1,12 @@
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, dictationFindingsText } from "@odentia/services/dental"
+import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS } from "@odentia/services"
+import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
-import { type DictationAsk, demoExtraction, demoSegment, dictationMessages, groundSource, readDictation } from "./dictation.js"
+import { type DictationAsk, dictationMessages, groundSource, readDictation as readWith } from "../dictation.js"
+import { DENTAL_DICTATION_PROFILE, demoExtraction, demoSegment } from "./dictation.js"
+
+/** La lectura de una respuesta con las listas de odentIA. */
+const readDictation = (args: unknown, transcript: string, pendingCount: number) =>
+  readWith(args, transcript, pendingCount, DENTAL_DICTATION_PROFILE.parts)
 
 /** Extracción de demostración: reglas simples para ver el recorrido sin proveedor. No mide a ningún modelo. */
 const SERVICES = ["Resina compuesta", "Endodoncia multirradicular", "Profilaxis dental"]
@@ -193,13 +199,13 @@ describe("lo que recibe el modelo en cada pausa", () => {
       provider,
       services: SERVICES,
       diagnosisList: "CIE-10 (OMS)",
-      findings: dictationFindingsText(),
+      catalog: dictationFindingsText(),
       zone: { locale: "es-PE", timezone: "America/Lima" },
       now,
       transcript,
       context: "",
       pending: [],
-    })
+    }, DENTAL_DICTATION_PROFILE)
 
   it("la parte fija es igual en todas las pausas y va marcada para la caché; la fecha va con lo dictado", () => {
     const [first, firstHuman] = ask("openai", NOW, "Viene por dolor.")
