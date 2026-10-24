@@ -652,6 +652,12 @@ export const saasAction = pgTable(
     basePriceMicros: bigint("base_price_micros", { mode: "number" }),
     priceMicros: bigint("price_micros", { mode: "number" }),
     discountBps: integer("discount_bps").notNull().default(0),
+    /**
+     * Conversación que subió de Informa a Gestiona (ADR 0085): cuándo pasó y cuánto valía antes.
+     * El presupuesto del mes cuenta la diferencia en ese momento, no al empezar la conversación.
+     */
+    tierChangedAt: timestamp("tier_changed_at", { withTimezone: true }),
+    previousPriceMicros: bigint("previous_price_micros", { mode: "number" }),
     dedupeKey: text("dedupe_key").notNull(),
     /** Cargo que la cobró (fase 4); null mientras no se cobra. */
     chargeId: uuid("charge_id"),

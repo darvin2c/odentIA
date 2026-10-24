@@ -13,7 +13,7 @@ import { reportQuestion } from "@odentia/db/schema/reports"
 import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { updateAdminSettings } from "./agent-admin.js"
-import { answerFor, listReportPinKeys, listReportPins, pinReportAnswer, prepareReportQuestion, REPORT_DAILY_LIMIT, resolveReportQuestion, unpinReportAnswer } from "./report-ask.js"
+import { answerFor, listReportPinKeys, listReportPins, pinReportAnswer, prepareReportQuestion, resolveReportQuestion, unpinReportAnswer } from "./report-ask.js"
 import { claimReportDigest, composeReportDigest, dueReportDigests, getReportDigest, setReportDigest } from "./report-digest.js"
 import { goalsForMonth, setReportGoal } from "./report-goals.js"
 import { getReportSummary } from "./report-summary.js"
@@ -88,7 +88,7 @@ describe("Argos responde con la consulta de la pestaña", () => {
     await expect(c.run((tx) => answerFor(tx, c.orgId, { period: "2026-09", figure: "agente_pagado", group: "total" }, { ...OPTIONS, billing: false }))).rejects.toThrow(/no está entre/)
   })
 
-  it("cada pregunta deja su fila sin el texto, y las del modelo cuentan para el tope de la clínica", async () => {
+  it("cada pregunta deja su fila sin el texto, y no hay tope diario (ADR 0085)", async () => {
     const c = await clinic()
     const ana = await c.staff("Ana Torres", "owner")
     await c.run((tx) => updateAdminSettings(tx, c.orgId, ana, { enabled: true }))
@@ -101,8 +101,9 @@ describe("Argos responde con la consulta de la pestaña", () => {
 
     const ready = await c.run((tx) => prepareReportQuestion(tx, c.orgId, NOW))
     expect(ready).toMatchObject({ enabled: true, timezone: "America/Lima", branches: [{ name: "Centro" }] })
-    await ownerDb.insert(reportQuestion).values(Array.from({ length: REPORT_DAILY_LIMIT }, () => ({ organizationId: c.orgId, userId: ana, outcome: "respondida", usedModel: true })))
-    expect((await c.run((tx) => prepareReportQuestion(tx, c.orgId))).roomLeft).toBe(0)
+    // Las preguntas del mes las cuenta el cobro (incluidas y paquetes), no un tope por día.
+    await ownerDb.insert(reportQuestion).values(Array.from({ length: 200 }, () => ({ organizationId: c.orgId, userId: ana, outcome: "respondida", usedModel: true })))
+    expect(await c.run((tx) => prepareReportQuestion(tx, c.orgId))).not.toHaveProperty("roomLeft")
   })
 
   it("«escríbeles» no le toca: dice qué línea prender", async () => {

@@ -722,6 +722,20 @@
       "when": 1792848377782,
       "tag": "0102_argos_equipo_por_producto",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1792855107346,
+      "tag": "0103_tipo_cambiado",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1792855723904,
+      "tag": "0104_tipo_cambiado_reglas",
+      "breakpoints": true
     }
   ]
 }

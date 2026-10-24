@@ -6,7 +6,7 @@ import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { getSaasConsumption } from "./saas-actions.js"
+import { centsOfParts, getSaasConsumption } from "./saas-actions.js"
 import { addArgosPack, ensureArgosQuestion } from "./saas-included.js"
 import { assertClioCanListen, getAgentSpendGate, getSaasAlerts } from "./saas-terms.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -184,5 +184,31 @@ describe("Argos", () => {
     expect(await run((tx) => ensureArgosQuestion(tx, ORG))).toEqual({
       added: "Sumé 100 preguntas por USD 3, como pediste en Plan y pagos. Te quedan 100.",
     })
+  })
+})
+
+describe("lo cobrado tras el presupuesto, cuando una conversación cambia de tipo", () => {
+  it("la conversación que subió de Informa a Gestiona cuenta la diferencia cuando Sofi gestionó la cita", async () => {
+    await ownerDb.delete(saasAction).where(eq(saasAction.organizationId, ORG))
+    await ownerDb.update(saasSubscription).set({ spendCapCents: 200 }).where(eq(saasSubscription.organizationId, ORG))
+    const start = Date.now() - 9 * DAY
+    // Ana empezó como Informa (0,10) y Sofi le gestionó la cita 70 horas después: sube a 0,50.
+    await ownerDb.insert(saasAction).values(
+      action({ occurredAt: new Date(start), priceMicros: 500_000, tierChangedAt: new Date(start + 70 * HOUR), previousPriceMicros: 100_000 }),
+    )
+    // 62 conversaciones Gestiona: con lo de Ana al empezar (0,10), el presupuesto llega con la última.
+    await ownerDb.insert(saasAction).values(
+      Array.from({ length: 62 }, (_, index) => action({ occurredAt: new Date(start + (index + 1) * HOUR), priceMicros: 500_000 })),
+    )
+    const { budget } = await run((tx) => getSaasConsumption(tx, ORG))
+    expect(budget.reachedAt).toEqual(new Date(start + 62 * HOUR))
+    // Lo único tras el presupuesto es la diferencia de Ana (0,40), no una conversación de antes.
+    expect(budget.after).toEqual({ count: 1, amountCents: 40, lines: [{ kind: "conversacion", tier: "gestiona", count: 1, amountCents: 40 }] })
+  })
+
+  it("los centavos de cada tipo suman lo de su agente", () => {
+    // Gestiona y Agenda a 0,425 (15 % negociado): 0,43 y 0,42, que suman los 0,85 del total.
+    expect(centsOfParts([425_000, 425_000])).toEqual([43, 42])
+    expect(centsOfParts([100_000, 425_000, 425_000, 0])).toEqual([10, 43, 42, 0])
   })
 })

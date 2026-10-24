@@ -73,6 +73,24 @@ const CHANNEL_NAME: Record<string, string> = {
 /** 1 centavo = 10.000 millonésimas. */
 export const microsToCents = (micros: number): number => Math.round(micros / 10_000)
 
+/**
+ * Reparte en centavos lo de varias partes para que sumen lo mismo que el total
+ * redondeado (mayor resto): Gestiona 0,425 y Agenda 0,425 se dicen 0,43 y 0,42,
+ * no 0,43 y 0,43 junto a un total de 0,85.
+ */
+export function centsOfParts(parts: number[]): number[] {
+  const total = microsToCents(parts.reduce((sum, part) => sum + part, 0))
+  const cents = parts.map((part) => Math.floor(part / 10_000))
+  let left = total - cents.reduce((sum, value) => sum + value, 0)
+  const order = parts.map((part, index) => ({ rest: part / 10_000 - cents[index]!, index })).sort((a, b) => b.rest - a.rest)
+  for (const { index } of order) {
+    if (left <= 0) break
+    cents[index]! += 1
+    left -= 1
+  }
+  return cents
+}
+
 /** 1 GB de almacenamiento, en bytes (el mismo GB del tope de una tomografía). */
 export const STORAGE_GB_BYTES = 1024 ** 3
 
@@ -314,7 +332,7 @@ export async function conversationTierOf(
 export async function refreshConversationTier(tx: Db, orgId: string, input: { contactId: string; at: Date }): Promise<void> {
   const windowMs = await conversationWindowMs(tx, input.at)
   const [row] = await tx
-    .select({ id: saasAction.id, tier: saasAction.tier, occurredAt: saasAction.occurredAt, channel: saasAction.channel })
+    .select({ id: saasAction.id, tier: saasAction.tier, occurredAt: saasAction.occurredAt, channel: saasAction.channel, priceMicros: saasAction.priceMicros })
     .from(saasAction)
     .where(
       and(
@@ -343,6 +361,9 @@ export async function refreshConversationTier(tx: Db, orgId: string, input: { co
       tier,
       detail: `${SOFI_DETAIL[tier]} por ${CHANNEL_NAME[row.channel ?? ""] ?? row.channel ?? "un canal"}`,
       ...priceFor(pricing, tier),
+      // El presupuesto cuenta la diferencia cuando Sofi gestionó la cita, no al empezar la conversación.
+      tierChangedAt: input.at,
+      previousPriceMicros: row.priceMicros,
     })
     .where(and(eq(saasAction.organizationId, orgId), eq(saasAction.id, row.id), isNull(saasAction.chargeId)))
 }
@@ -685,6 +706,9 @@ export interface SaasActionRow {
    * se cobra solo lo que pasó (el crédito vuelve íntegro, ADR 0031). 0 en las demás.
    */
   creditPartMicros?: number
+  /** Subió de Informa a Gestiona (ADR 0085): cuándo, y lo que valía antes. */
+  tierChangedAt?: Date
+  previousPriceMicros?: number | null
 }
 
 export interface SaasRefund {
@@ -758,6 +782,8 @@ export async function listPeriodActions(
       priceMicros: saasAction.priceMicros,
       discountBps: saasAction.discountBps,
       chargeId: saasAction.chargeId,
+      tierChangedAt: saasAction.tierChangedAt,
+      previousPriceMicros: saasAction.previousPriceMicros,
     })
     .from(saasAction)
     .leftJoin(contact, and(eq(contact.id, saasAction.contactId), eq(contact.organizationId, saasAction.organizationId)))
@@ -841,6 +867,7 @@ export async function listPeriodActions(
       state,
       chargeId: row.chargeId,
       ...(creditPartMicros > 0 ? { creditPartMicros } : {}),
+      ...(row.tierChangedAt ? { tierChangedAt: row.tierChangedAt, previousPriceMicros: row.previousPriceMicros } : {}),
       review:
         review && review.status === "devuelta" && row.chargeId !== null
           ? { ...review, coveredByCredit: state === "credito" || state === "prueba" }
@@ -1095,6 +1122,11 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
       0,
     )
     const current = priceFor(pricing, priceKeyOf(kind, null))
+    const tierList = SAAS_TIERS_OF[kind] ?? []
+    const ofTiers = tierList.map((tier) => ofKind.filter((row) => row.tier === tier))
+    // Lo de cada tipo suma lo de su agente: lo que no tiene tipo va aparte y no se muestra.
+    const tierMicros = ofTiers.map((rows) => rows.reduce((sum, row) => sum + netMicros(row), 0))
+    const tierCents = centsOfParts([...tierMicros, price - tierMicros.reduce((sum, value) => sum + value, 0)])
     return {
       kind,
       count: ofKind.length,
@@ -1103,16 +1135,15 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
       priceMicros: current.priceMicros,
       amountCents: microsToCents(price),
       baseAmountCents: microsToCents(base),
-      tiers: (SAAS_TIERS_OF[kind] ?? []).map((tier) => {
-        const ofTier = ofKind.filter((row) => row.tier === tier)
+      tiers: tierList.map((tier, index) => {
         // «Agenda» se cobra aparte por la diferencia: es lo que dice cada fila.
         const own = tier === "agenda" ? agendaUpgradePrice(pricing) : priceFor(pricing, tier)
         return {
           tier,
-          count: ofTier.length,
+          count: ofTiers[index]!.length,
           basePriceMicros: own.basePriceMicros,
           priceMicros: own.priceMicros,
-          amountCents: microsToCents(ofTier.reduce((sum, row) => sum + netMicros(row), 0)),
+          amountCents: tierCents[index]!,
         }
       }),
     }
@@ -1168,32 +1199,42 @@ async function budgetOf(
     .where(eq(saasSubscription.organizationId, orgId))
     .limit(1)
   const capMicros = sub?.capCents && sub.capCents > 0 ? sub.capCents * 10_000 : null
+  // Cada acción cuenta cuando pasó. La conversación que subió de Informa a Gestiona cuenta lo
+  // de antes al empezar y la diferencia cuando Sofi gestionó la cita.
+  const entries = billable
+    .filter((row) => row.priceMicros !== null && row.kind !== "almacenamiento")
+    .flatMap((row) => {
+      const net = netMicros(row)
+      const before = row.previousPriceMicros ?? null
+      if (!row.tierChangedAt || before === null || row.tierChangedAt <= row.occurredAt) return [{ row, micros: net, at: row.occurredAt }]
+      const first = Math.min(before, net)
+      return [{ row, micros: first, at: row.occurredAt }, { row, micros: net - first, at: row.tierChangedAt }]
+    })
+    .sort((a, b) => a.at.getTime() - b.at.getTime())
   let used = 0
   let reachedAt: Date | null = null
-  const after: SaasActionRow[] = []
-  for (const row of billable) {
-    if (row.priceMicros === null || row.kind === "almacenamiento") continue
-    if (reachedAt) after.push(row)
-    used += netMicros(row)
-    if (!reachedAt && capMicros !== null && used - creditMicros >= capMicros) reachedAt = row.occurredAt
+  const after: typeof entries = []
+  for (const entry of entries) {
+    if (reachedAt && entry.micros > 0) after.push(entry)
+    used += entry.micros
+    if (!reachedAt && capMicros !== null && used - creditMicros >= capMicros) reachedAt = entry.at
   }
-  const keys = [...new Set(after.map((row) => `${row.kind}:${row.tier ?? ""}`))]
+  const keys = [...new Set(after.map((entry) => `${entry.row.kind}:${entry.row.tier ?? ""}`))]
+  const ofKey = keys.map((key) => after.filter((entry) => `${entry.row.kind}:${entry.row.tier ?? ""}` === key))
+  const cents = centsOfParts(ofKey.map((group) => group.reduce((sum, entry) => sum + entry.micros, 0)))
   return {
     capCents: sub?.capCents && sub.capCents > 0 ? sub.capCents : null,
     spentCents: microsToCents(Math.max(0, used - creditMicros)),
     reachedAt,
     after: {
-      count: after.length,
-      amountCents: microsToCents(after.reduce((sum, row) => sum + netMicros(row), 0)),
-      lines: keys.map((key) => {
-        const rows = after.filter((row) => `${row.kind}:${row.tier ?? ""}` === key)
-        return {
-          kind: rows[0]!.kind,
-          tier: rows[0]!.tier,
-          count: rows.length,
-          amountCents: microsToCents(rows.reduce((sum, row) => sum + netMicros(row), 0)),
-        }
-      }),
+      count: new Set(after.map((entry) => entry.row.id)).size,
+      amountCents: cents.reduce((sum, value) => sum + value, 0),
+      lines: ofKey.map((group, index) => ({
+        kind: group[0]!.row.kind,
+        tier: group[0]!.row.tier,
+        count: new Set(group.map((entry) => entry.row.id)).size,
+        amountCents: cents[index]!,
+      })),
     },
     storageCents: microsToCents(billable.filter((row) => row.kind === "almacenamiento").reduce((sum, row) => sum + netMicros(row), 0)),
   }
