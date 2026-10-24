@@ -18,7 +18,6 @@ import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
   fetchPatientsReport,
-  FUNNEL_STEPS,
   type FunnelCounts,
   type FunnelStep,
   firstContactChannel,
@@ -54,6 +53,16 @@ const STEP_COPY: Record<FunnelStep, { label: string; short: string; hint: string
   paid: { label: "Pagaron algo", short: "Pagaron algo", hint: "Aceptaron y pagaron algo" },
 }
 
+/** Sin presupuesto que aceptar (latidIA), pagar viene después de venir: la consulta cobrada. */
+function paysAfterComing(steps: readonly FunnelStep[]): boolean {
+  return !steps.includes("accepted")
+}
+
+function stepCopy(step: FunnelStep, steps: readonly FunnelStep[]): { label: string; short: string; hint: string } {
+  if (step === "paid" && paysAfterComing(steps)) return { ...STEP_COPY.paid, hint: "Vinieron y pagaron algo" }
+  return STEP_COPY[step]
+}
+
 /** La lista de quienes llegaron a cada paso y la de quienes se cayeron antes de él. */
 const REACHED_LIST: Record<FunnelStep, ReportListKey> = {
   sought: "funnel_sought",
@@ -77,7 +86,7 @@ function days(count: number): string {
 }
 
 /** Quiénes se cayeron antes de un paso, dicho con palabras. */
-function lostWords(step: FunnelStep, count: number, open: boolean): string {
+function lostWords(step: FunnelStep, count: number, open: boolean, steps: readonly FunnelStep[]): string {
   const one = count === 1
   if (step === "booked") return one ? "1 no agendó" : `${count} no agendaron`
   // Quien canceló sin agendar otra ya no agendó: aquí quedan quienes faltaron o aún esperan su cita.
@@ -87,16 +96,17 @@ function lostWords(step: FunnelStep, count: number, open: boolean): string {
   }
   if (step === "budget") return one ? "1 vino y no recibió presupuesto" : `${count} vinieron y no recibieron presupuesto`
   if (step === "accepted") return one ? "1 aún no responde o lo rechazó" : `${count} aún no responden o lo rechazaron`
+  if (paysAfterComing(steps)) return one ? "1 vino y aún no paga" : `${count} vinieron y aún no pagan`
   return one ? "1 aceptó y aún no paga" : `${count} aceptaron y aún no pagan`
 }
 
 /** El paso donde más personas se cayeron (el que no alcanzaron); nulo si nadie se cayó. */
-function biggestDrop(counts: FunnelCounts): FunnelStep | null {
+function biggestDrop(counts: FunnelCounts, steps: readonly FunnelStep[]): FunnelStep | null {
   let found: FunnelStep | null = null
   let most = 0
-  FUNNEL_STEPS.forEach((step, index) => {
+  steps.forEach((step, index) => {
     if (index === 0) return
-    const lost = counts[FUNNEL_STEPS[index - 1] as FunnelStep] - counts[step]
+    const lost = counts[steps[index - 1] as FunnelStep] - counts[step]
     if (lost > most) {
       most = lost
       found = step
@@ -105,9 +115,9 @@ function biggestDrop(counts: FunnelCounts): FunnelStep | null {
   return found
 }
 
-function previousCount(counts: FunnelCounts, step: FunnelStep): number {
-  const index = FUNNEL_STEPS.indexOf(step)
-  return index === 0 ? counts[step] : counts[FUNNEL_STEPS[index - 1] as FunnelStep]
+function previousCount(counts: FunnelCounts, step: FunnelStep, steps: readonly FunnelStep[]): number {
+  const index = steps.indexOf(step)
+  return index === 0 ? counts[step] : counts[steps[index - 1] as FunnelStep]
 }
 
 /** El periodo anterior en una palabra, para «· agosto 50 %»; un rango, «antes». */
@@ -136,19 +146,20 @@ function useStageNames(): Record<"evaluacion_agendada" | "presupuesto_enviado", 
 }
 
 function funnelRows(
-  funnel: { current: FunnelCounts; previous: FunnelCounts },
+  funnel: { steps: FunnelStep[]; current: FunnelCounts; previous: FunnelCounts },
   locale: string,
   head: Pick<ReportHead, "previous">,
   stageNames: Record<"evaluacion_agendada" | "presupuesto_enviado", string>,
   compact: boolean,
 ): BarListRow[] {
-  const drop = biggestDrop(funnel.current)
+  const { steps } = funnel
+  const drop = biggestDrop(funnel.current, steps)
   const before = previousWord(head, locale)
-  return FUNNEL_STEPS.map((step, index) => {
-    const copy = STEP_COPY[step]
+  return steps.map((step, index) => {
+    const copy = stepCopy(step, steps)
     const moment = STEP_MOMENT[step]
-    const rate = index === 0 ? null : rateOf(funnel.current[step], previousCount(funnel.current, step))
-    const previousRate = index === 0 ? null : rateOf(funnel.previous[step], previousCount(funnel.previous, step))
+    const rate = index === 0 ? null : rateOf(funnel.current[step], previousCount(funnel.current, step, steps))
+    const previousRate = index === 0 ? null : rateOf(funnel.previous[step], previousCount(funnel.previous, step, steps))
     const note =
       rate === null ? undefined : compact || previousRate === null ? `${rate} %` : `${rate} % · ${before} ${previousRate} %`
     return {
@@ -173,22 +184,22 @@ function DropCallout({
   onOpenList,
 }: {
   step: FunnelStep
-  funnel: { current: FunnelCounts; previous: FunnelCounts; open: boolean }
+  funnel: { steps: FunnelStep[]; current: FunnelCounts; previous: FunnelCounts; open: boolean }
   head: Pick<ReportHead, "previous">
   locale: string
   compact: boolean
   onOpenList: (list: ReportListKey) => void
 }) {
-  const from = previousCount(funnel.current, step)
+  const from = previousCount(funnel.current, step, funnel.steps)
   const lost = from - funnel.current[step]
-  const previousRate = rateOf(funnel.previous[step], previousCount(funnel.previous, step))
+  const previousRate = rateOf(funnel.previous[step], previousCount(funnel.previous, step, funnel.steps))
   const list = LOST_LIST[step]
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning", compact ? "" : "my-1 sm:ml-[14.25rem]")}>
       <AlertTriangle aria-hidden className="size-4 shrink-0" strokeWidth={2.25} />
       <span className="min-w-0 flex-1">
         <strong>Aquí se caen más:</strong>{" "}
-        {compact ? `${lost} de cada ${funnel.current.sought} ${lostWords(step, lost, funnel.open).replace(/^\d+ /, "")}` : lostWords(step, lost, funnel.open)}
+        {compact ? `${lost} de cada ${funnel.current.sought} ${lostWords(step, lost, funnel.open, funnel.steps).replace(/^\d+ /, "")}` : lostWords(step, lost, funnel.open, funnel.steps)}
         {!compact && previousRate !== null ? ` · en ${previousWord(head, locale)} pasaba el ${previousRate} %` : ""}
       </span>
       {list ? (
@@ -231,7 +242,7 @@ export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenLi
   const { funnel, locale } = data
   const period = spanLabel(data.period, locale)
   if (funnel.current.sought === 0) return card(<EmptyLine>Nadie nos buscó por primera vez en {period}.</EmptyLine>)
-  const drop = biggestDrop(funnel.current)
+  const drop = biggestDrop(funnel.current, funnel.steps)
   return card(
     <>
       <p className="-mt-1.5 text-sm text-muted-foreground">
@@ -242,7 +253,7 @@ export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenLi
         title={`Embudo de ${period}`}
         size="sm"
         rows={funnelRows(funnel, locale, data, stageNames, true)}
-        onSelect={(index) => onOpenList(REACHED_LIST[FUNNEL_STEPS[index] as FunnelStep])}
+        onSelect={(index) => onOpenList(REACHED_LIST[funnel.steps[index] as FunnelStep])}
         selectLabel="Ver quiénes"
         table={{ label: "Paso", value: "Personas", note: "Del paso anterior" }}
       />
@@ -289,7 +300,9 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
 
   const acceptance = rateOf(data.acceptance.current.accepted, data.acceptance.current.presented)
   const previousAcceptance = rateOf(data.acceptance.previous.accepted, data.acceptance.previous.presented)
-  const drop = biggestDrop(funnel.current)
+  const paidAfterComing = rateOf(funnel.current.paid, funnel.current.came)
+  const previousPaidAfterComing = rateOf(funnel.previous.paid, funnel.previous.came)
+  const drop = biggestDrop(funnel.current, funnel.steps)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -312,20 +325,38 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
         >
           {data.newPatients.current > 0 ? <FooterButton onClick={() => onOpenList("new_patients")}>Ver quiénes</FooterButton> : null}
         </Figure>
-        <Figure
-          title="Aceptaron su presupuesto"
-          value={acceptance === null ? "Sin datos" : `${acceptance} %`}
-          change={acceptance === null ? undefined : absoluteChange(acceptance, previousAcceptance, phrase, locale, POINTS)}
-          better="up"
-          note={[
-            data.acceptance.current.presented === 0
-              ? `No se presentó ningún presupuesto en ${period}`
-              : `${data.acceptance.current.accepted} de ${data.acceptance.current.presented} ${data.acceptance.current.presented === 1 ? "presentado" : "presentados"}`,
-            whole("acceptance"),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        />
+        {paysAfterComing(funnel.steps) ? (
+          // Sin presupuesto que aceptar (latidIA), lo que se mide es la consulta cobrada.
+          <Figure
+            title="Pagaron al venir"
+            value={paidAfterComing === null ? "Sin datos" : `${paidAfterComing} %`}
+            change={paidAfterComing === null ? undefined : absoluteChange(paidAfterComing, previousPaidAfterComing, phrase, locale, POINTS)}
+            better="up"
+            note={[
+              funnel.current.came === 0
+                ? `Nadie que nos buscó en ${period} vino todavía`
+                : `${funnel.current.paid} de ${funnel.current.came} que ${funnel.current.came === 1 ? "vino" : "vinieron"}`,
+              whole("funnel"),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        ) : (
+          <Figure
+            title="Aceptaron su presupuesto"
+            value={acceptance === null ? "Sin datos" : `${acceptance} %`}
+            change={acceptance === null ? undefined : absoluteChange(acceptance, previousAcceptance, phrase, locale, POINTS)}
+            better="up"
+            note={[
+              data.acceptance.current.presented === 0
+                ? `No se presentó ningún presupuesto en ${period}`
+                : `${data.acceptance.current.accepted} de ${data.acceptance.current.presented} ${data.acceptance.current.presented === 1 ? "presentado" : "presentados"}`,
+              whole("acceptance"),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        )}
         <Figure
           title="Pacientes activos"
           value={data.active.current}
@@ -359,12 +390,12 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
           <BarList
             title={`Embudo de ${period}: de las personas que nos buscaron, hasta dónde llegaron`}
             rows={funnelRows(funnel, locale, data, stageNames, false)}
-            onSelect={(index) => onOpenList(REACHED_LIST[FUNNEL_STEPS[index] as FunnelStep])}
+            onSelect={(index) => onOpenList(REACHED_LIST[funnel.steps[index] as FunnelStep])}
             selectLabel="Ver quiénes"
             between={(index) => {
-              const next = FUNNEL_STEPS[index + 1]
+              const next = funnel.steps[index + 1]
               if (!next) return null
-              const lost = funnel.current[FUNNEL_STEPS[index] as FunnelStep] - funnel.current[next]
+              const lost = funnel.current[funnel.steps[index] as FunnelStep] - funnel.current[next]
               if (lost <= 0) return null
               const list = LOST_LIST[next]
               // Quiénes dejaron de escribir son parte de los que no agendaron: su lista se abre ahí, sea o no la caída mayor.
@@ -394,10 +425,10 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
                     <span aria-hidden>↓</span>
                     {list ? (
                       <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-normal text-muted-foreground underline sm:min-h-6" onClick={() => onOpenList(list)}>
-                        {lostWords(next, lost, funnel.open)}
+                        {lostWords(next, lost, funnel.open, funnel.steps)}
                       </Button>
                     ) : (
-                      <span>{lostWords(next, lost, funnel.open)}</span>
+                      <span>{lostWords(next, lost, funnel.open, funnel.steps)}</span>
                     )}
                   </p>
                   {stopped}

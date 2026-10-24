@@ -30,7 +30,7 @@ import { useOrgProfile } from "../../lib/org"
 import { type ServiceCatalogItem } from "../../lib/services"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ServicePicker } from "./service-picker"
-import type { PlaceWithParts } from "../../product/product-ui"
+import { type PlaceWithParts, productUi } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -428,7 +428,11 @@ export function EncounterProcedures({
             open={open}
             onClose={handleClose}
             title="Registrar procedimiento"
-            description="Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
+            description={
+              productUi().plan.budgetRequired
+                ? "Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
+                : "Elige un tratamiento indicado, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
+            }
             onSubmit={(event) => void onSubmit(event)}
             isDirty={isDirty}
             isSubmitting={saving}
@@ -578,7 +582,7 @@ export function EncounterProcedures({
               {!freeMode && (
                 <Field>
                   <FieldLabel htmlFor={`${uid}-plan`}>
-                    Tratamiento aceptado del presupuesto
+                    {productUi().plan.budgetRequired ? "Tratamiento aceptado del presupuesto" : "Tratamiento indicado"}
                   </FieldLabel>
                   {planQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground">Cargando plan…</p>
@@ -605,7 +609,10 @@ export function EncounterProcedures({
                       onValueChange={onPlanChange}
                       disabled={busy}
                     >
-                      <SelectTrigger id={`${uid}-plan`} aria-label="Tratamiento del presupuesto">
+                      <SelectTrigger
+                        id={`${uid}-plan`}
+                        aria-label={productUi().plan.budgetRequired ? "Tratamiento del presupuesto" : "Tratamiento indicado"}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

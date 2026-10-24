@@ -22,6 +22,7 @@ import {
 import { DownloadButton, during } from "./report-parts"
 import { ADMIN_NAME } from "../../lib/agent-names"
 import { downloadReportList } from "../../lib/reports-ask"
+import { productUi } from "../../product/product-ui"
 
 /** Filas a la vista antes de «Mostrar las otras». */
 const PREVIEW = 8
@@ -50,6 +51,11 @@ interface ListCopy {
 /** Las listas del embudo: personas con el canal por el que nos buscaron. */
 function isFunnelList(list: ReportListKey): boolean {
   return list.startsWith("funnel_")
+}
+
+/** Sin presupuesto que aceptar (latidIA, decisión 15 del issue 229), pagar viene después de venir. */
+function paysAfterComing(): boolean {
+  return !productUi().plan.budgetRequired
 }
 
 const LISTS: Record<ReportListKey, ListCopy> = {
@@ -127,7 +133,10 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_paid: {
     title: "Pagaron algo",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo desde entonces.`,
+    how: (period) =>
+      paysAfterComing()
+        ? `De quienes nos buscaron por primera vez en ${period}, los que vinieron y pagaron algo desde entonces: la consulta cobrada.`
+        : `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo desde entonces.`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,
@@ -167,9 +176,14 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     showNext: false,
   },
   funnel_lost_paid: {
-    title: "Aceptaron y aún no pagan",
+    get title() {
+      return paysAfterComing() ? "Vinieron y aún no pagan" : "Aceptaron y aún no pagan"
+    },
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y todavía no pagaron nada.`,
+    how: (period) =>
+      paysAfterComing()
+        ? `De quienes nos buscaron por primera vez en ${period}, los que vinieron y todavía no pagaron nada.`
+        : `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y todavía no pagaron nada.`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,

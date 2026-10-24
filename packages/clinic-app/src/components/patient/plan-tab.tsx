@@ -31,6 +31,7 @@ import { fetchFollowUps } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
+import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "./clinical-panels"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 import { NewEncounterButton } from "./new-encounter-button"
@@ -179,7 +180,14 @@ export function PlanTab({
       ) : null}
 
       {canBudgets ? (
-        <Section title="Presupuesto">
+        <Section
+          title="Presupuesto"
+          description={
+            productUi().plan.budgetRequired
+              ? undefined
+              : "Opcional: lo indicado ya queda aceptado. Prepáralo si la persona quiere saber cuánto costará."
+          }
+        >
           <PlanBudgets
             patientId={patientId}
             planItems={canClinical ? items : null}

@@ -370,21 +370,24 @@ function IndicationForm({
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
-          <Select value={scope} onValueChange={(v) => setScope(v ?? "general")} disabled={blocked}>
-            <SelectTrigger id={`${uid}-scope`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        {/* Sin «dónde» (latidIA, decisión 4 del issue 229) todo es general: no hay ámbito que elegir. */}
+        {site ? (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
+            <Select value={scope} onValueChange={(v) => setScope(v ?? "general")} disabled={blocked}>
+              <SelectTrigger id={`${uid}-scope`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
         {site && (scope === "tooth" || scope === "surfaces") && (
           <Field>
             <FieldLabel>{site.placeLabel}</FieldLabel>
@@ -486,7 +489,7 @@ function IndicationForm({
         <p className="text-sm text-muted-foreground" aria-live="polite">
           Precio de la tarifa:{" "}
           {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
-          {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
+          {site && service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
         </p>
       ) : null}
 
@@ -512,10 +515,17 @@ function IndicationForm({
         >
           {addMutation.isPending ? "Añadiendo…" : "Añadir al plan"}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo indicado
-          se suma al presupuesto por enviar.
-        </p>
+        {productUi().plan.budgetRequired ? (
+          <p className="text-xs text-muted-foreground">
+            Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo indicado
+            se suma al presupuesto por enviar.
+          </p>
+        ) : (
+          // latidIA (decisión 15 del issue 229): sin «dónde» que conservar ni presupuesto que esperar.
+          <p className="text-xs text-muted-foreground">
+            Lo indicado queda aceptado: se puede agendar enseguida, sin presupuesto.
+          </p>
+        )}
       </div>
     </div>
   )

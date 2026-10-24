@@ -73,7 +73,7 @@ export function EncounterHistoryCard({
         {planned.length > 0 ? (
           <div className="flex flex-col gap-1">
             <p className="text-xs font-medium text-muted-foreground">
-              Tratamientos vinculados del presupuesto
+              {productUi().plan.budgetRequired ? "Tratamientos vinculados del presupuesto" : "Tratamientos vinculados"}
             </p>
             <ul className="flex flex-col gap-1 text-sm" aria-label="Tratamientos vinculados">
               {planned.map((link) => (
@@ -96,7 +96,7 @@ export function EncounterHistoryCard({
                 }
                 className={buttonVariants({ variant: "link", size: "sm" })}
               >
-                Ver presupuesto
+                {productUi().plan.budgetRequired ? "Ver presupuesto" : "Ver el plan"}
               </Link>
             </div>
           </div>

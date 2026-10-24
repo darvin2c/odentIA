@@ -31,6 +31,7 @@ import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { deriveNextAction } from "./treatment-journey.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { productHooks } from "./products.js"
 
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
@@ -144,7 +145,10 @@ export async function getPlanNextStep(
       ? decided.status === "aceptado"
         ? "Aceptó todo: falta agendar"
         : `${decided.stateText}: falta agendar`
-      : "Tiene tratamientos aceptados sin cita"
+      : (await productHooks(tx, orgId)).budgetRequired
+        ? "Tiene tratamientos aceptados sin cita"
+        : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
+          "Falta agendar lo indicado"
     return {
       kind: "agendar",
       text,

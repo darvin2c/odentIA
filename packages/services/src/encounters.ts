@@ -647,13 +647,18 @@ async function appointmentItemsToLink(
   patientId: string,
   appointmentId: string,
 ): Promise<string[]> {
+  // Donde lo indicado queda aceptado al indicarlo (latidIA), no se pide presupuesto.
+  const { budgetRequired } = await productHooks(tx, orgId)
+  const budgeted = budgetRequired
+    ? sql`and exists (select 1 from treatment_budget b where b.id = i.budget_id and b.organization_id = i.organization_id
+        and b.status in ('aceptado','parcial'))`
+    : sql``
   const rows = await tx.execute<{ id: string }>(sql`
     select i.id from appointment_plan_item ap
       join treatment_plan_item i on i.id = ap.plan_item_id and i.organization_id = ap.organization_id
-      join treatment_budget b on b.id = i.budget_id and b.organization_id = i.organization_id
     where ap.organization_id = ${orgId} and ap.patient_id = ${patientId} and ap.appointment_id = ${appointmentId}
       and i.decision_status = 'aceptado' and i.status in ('pendiente','programado','en_curso')
-      and b.status in ('aceptado','parcial')
+      ${budgeted}
     order by i.sort_order, i.id`)
   return rows.map((row) => row.id)
 }
@@ -680,7 +685,7 @@ async function assertLinkablePlans(
   patientId: string,
   planItemIds: string[],
 ): Promise<LinkablePlan[]> {
-  const site = await siteOf(tx, orgId)
+  const { site, budgetRequired } = await productHooks(tx, orgId)
   const rows = await tx
     .select()
     .from(treatmentPlanItem)
@@ -731,6 +736,13 @@ async function assertLinkablePlans(
         "ITEM_NOT_READY",
         "Solo se pueden vincular tratamientos pendientes, programados o en curso",
       )
+    }
+    // Donde lo indicado queda aceptado al indicarlo (latidIA), basta la decisión.
+    if (!budgetRequired) {
+      if (plan.decisionStatus !== "aceptado")
+        throw conflict("ITEM_NOT_ACCEPTED", "Solo se pueden vincular tratamientos aceptados")
+      accepted.push({ id: plan.id, toothNumber: plan.siteSystem === site.system ? site.value(plan.siteCode) : null })
+      continue
     }
     if (!plan.budgetId) {
       throw conflict(

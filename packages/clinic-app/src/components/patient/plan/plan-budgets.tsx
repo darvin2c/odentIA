@@ -66,6 +66,7 @@ import {
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 import { appWords } from "../../../lib/product-words"
+import { productUi } from "../../../product/product-ui"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
@@ -154,15 +155,19 @@ export function PlanBudgets({
     )
 
   const canPrepare = canWrite && quotable.length > 0
+  // latidIA (decisión 15 del issue 229): lo indicado ya queda aceptado y el presupuesto es opcional.
+  const budgetRequired = productUi().plan.budgetRequired
   return (
     <div className="flex flex-col gap-3">
       {current.length === 0 ? (
         <EmptyState
-          title="Todavía no tiene presupuesto"
+          title={budgetRequired ? "Todavía no tiene presupuesto" : "Sin presupuesto"}
           description={
-            canPrepare
-              ? "Se arma solo al firmar la atención con lo indicado. También puedes prepararlo ahora con lo que ya está en el plan."
-              : `Se arma solo al firmar la atención con lo que el ${appWords().clinician.one} indicó.`
+            !budgetRequired
+              ? "No hace falta para agendar ni para atender."
+              : canPrepare
+                ? "Se arma solo al firmar la atención con lo indicado. También puedes prepararlo ahora con lo que ya está en el plan."
+                : `Se arma solo al firmar la atención con lo que el ${appWords().clinician.one} indicó.`
           }
           actionLabel={canPrepare ? "Preparar presupuesto" : undefined}
           onAction={canPrepare && !prepare.isPending ? () => prepare.mutate() : undefined}

@@ -418,6 +418,8 @@ export function firstContactChannel(channel: string | null): string {
 /** Resumen › «Dónde se caen los pacientes»: el embudo del periodo y del anterior. */
 export interface ReportFunnel extends ReportHead {
   funnel: {
+    /** Los pasos que se muestran: sin presupuesto que recibir ni aceptar en latidIA. */
+    steps: FunnelStep[]
     current: FunnelCounts
     previous: FunnelCounts
     /** El periodo terminó hace menos de `openDays` días: sus personas aún pueden agendar. */

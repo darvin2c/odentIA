@@ -44,8 +44,13 @@ export interface ProductUi {
   dictation: ProductDictationUi | null
   /** Lo que el país de la clínica pide del producto (odentIA: su odontograma, sus especialidades y el título). */
   country: ProductCountryUi
-  /** El plan de tratamiento: sus fases, en orden (odentIA: de la urgencia al mantenimiento). */
-  plan: { phases: readonly ProductPlanPhase[]; defaultPhase: string }
+  /**
+   * El plan de tratamiento: sus fases, en orden (odentIA: de la urgencia al
+   * mantenimiento), y si lo indicado espera un presupuesto. Sin él (latidIA,
+   * decisión 15 del issue 229) queda aceptado al indicarlo y el presupuesto es
+   * opcional; es el `budgetRequired` del servidor, que lo vuelve a decidir.
+   */
+  plan: { phases: readonly ProductPlanPhase[]; defaultPhase: string; budgetRequired: boolean }
   /** Servicios: lo que el producto agrega al servicio y a su biblioteca. */
   services: ProductServicesUi
   /** La historia: los hechos propios del producto y lo que firmó con una atención. */
@@ -414,6 +419,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     plan: {
       phases: [{ key: "general", label: "General", hint: "Lo indicado" }],
       defaultPhase: "general",
+      budgetRequired: true,
     },
     services: { kinds: [], leaves: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
-import { encounter } from "@odentia/db/schema/clinical"
-import { orgProfile } from "@odentia/db/schema/org"
+import { encounter, patientPayment, serviceCatalog } from "@odentia/db/schema/clinical"
+import { branch, orgProfile } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { hostUrl, latidiaUrl, tenant } from "./env"
@@ -16,7 +16,8 @@ import { surface } from "./surface"
  * latidIA abre (entregas 3 y 4 del issue 229): la misma instalación sirve su
  * dominio con su sesión, su panel y su app; la clínica que nace ahí es médica,
  * se ve con su marca y dice sus palabras. Su ficha (entrega 5) tiene el examen
- * por sistemas y los signos vitales en el tiempo.
+ * por sistemas y los signos vitales en el tiempo. Lo indicado queda aceptado
+ * sin presupuesto y Reportes cuenta la consulta cobrada (entrega 7).
  */
 
 /** Una llamada a la API desde la página, con la sesión de su dominio. */
@@ -412,5 +413,102 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   await expect(leaveOpened.getByText("Sin diagnóstico: la persona no autorizó que figure.")).toBeVisible()
   await expect(page.getByRole("button", { name: "Descansos médicos" })).toBeVisible()
   await shot("descanso")
+  await context.close()
+})
+
+test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes cuenta la consulta cobrada", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(240_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  const views = async (name: string) => {
+    await shot(name)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await shot(`${name}-telefono`)
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.evaluate(() => document.documentElement.classList.add("dark"))
+    await shot(`${name}-oscuro`)
+    await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  }
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug, orgId } = await openConsultorio(page, vela)
+  // El catálogo médico llega en la entrega 8: aquí, un servicio propio con su tarifa.
+  await fixtureDb
+    .insert(serviceCatalog)
+    .values({ organizationId: orgId, name: "Nebulización", scope: "general", source: "custom", priceCents: 4000, currency: "PEN" })
+
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Mateo Ríos", docType: "DNI", docNumber: "71234567", birthDate: "1990-05-02" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, {
+    reason: "Crisis de asma leve",
+  })
+  expect(opened.status).toBe(201)
+
+  // La Dra. Vela indica 3 nebulizaciones: sin «ámbito» dental ni presupuesto que esperar (decisión 15).
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  await page.getByRole("button", { name: "Agregar Plan y controles" }).click()
+  const block = page.getByRole("region", { name: "Plan y controles" })
+  await expect(block.getByText("Lo indicado queda aceptado: se puede agendar enseguida, sin presupuesto.")).toBeVisible()
+  await expect(block.getByLabel("Ámbito", { exact: true })).toHaveCount(0)
+  await block.getByLabel("Tratamiento", { exact: true }).fill("Nebuli")
+  await page.getByRole("option", { name: /Nebulización/ }).click()
+  await block.getByLabel("Detalle", { exact: true }).fill("3 sesiones, una cada 8 horas")
+  await block.getByRole("button", { name: "Añadir al plan" }).click()
+  const indicated = block.getByRole("listitem").filter({ hasText: "Nebulización" })
+  await expect(indicated.getByText("Aceptado", { exact: true })).toBeVisible()
+  await shot("indicar")
+
+  // En el Plan, «Qué sigue» pide agendarlo y el presupuesto queda como opción.
+  const person = await request<{ data: { personId: string } }>(page, api, "GET", `/api/people/by-patient/${patientId}`, slug)
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${person.body.data.personId}?tab=plan`))
+  await expect(page.getByText("Falta agendar lo indicado")).toBeVisible()
+  await expect(page.getByText("Opcional: lo indicado ya queda aceptado. Prepáralo si la persona quiere saber cuánto costará.")).toBeVisible()
+  await expect(page.getByText("No hace falta para agendar ni para atender.")).toBeVisible()
+  await expect(page.getByText("Todavía no tiene presupuesto")).toHaveCount(0)
+  await views("plan-sin-presupuesto")
+  await page.getByRole("button", { name: "Agendar", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/agenda\?.*planItems=/)
+
+  // Mateo vino (su consulta quedó firmada) y la pagó: en Reportes «pagó» es la consulta cobrada.
+  const [site] = await fixtureDb.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId))
+  await fixtureDb.insert(encounter).values({
+    organizationId: orgId,
+    patientId,
+    professionalUserId: vela.id,
+    status: "finalizada",
+    reason: "Crisis de asma leve",
+    finalizedAt: new Date(),
+    finalizedBy: vela.id,
+    signerName: "Elena Vela",
+  })
+  await fixtureDb.insert(patientPayment).values({
+    organizationId: orgId,
+    patientId,
+    branchId: site!.id,
+    amountCents: 4000,
+    currency: "PEN",
+    paidAt: new Date(),
+    methodName: "Efectivo",
+  })
+  await gotoHydrated(page, latidiaUrl(slug, "/reports?tab=pacientes"))
+  await expect(page.getByText("Pagaron al venir")).toBeVisible()
+  await expect(page.getByText("1 de 1 que vino")).toBeVisible()
+  await expect(page.getByText("Vinieron y pagaron algo")).toBeVisible()
+  await expect(page.getByText("Recibieron presupuesto")).toHaveCount(0)
+  await expect(page.getByText("Aceptaron su presupuesto")).toHaveCount(0)
+  await views("reportes-pacientes")
   await context.close()
 })

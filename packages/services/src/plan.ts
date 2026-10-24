@@ -180,6 +180,18 @@ function assertTitle(title: string): string {
 /** Lo que hace el producto de la clínica en el plan (su sitio, sus fases y lo que anota con cada ítem). */
 const hooksOf = (tx: Db, orgId: string): Promise<ProductHooks> => productHooks(tx, orgId)
 
+/**
+ * La decisión con que nace lo indicado: en odentIA espera la respuesta a su
+ * presupuesto; en latidIA queda aceptado al indicarlo (decisión 15 del issue 229).
+ */
+function indicatedDecision(
+  hooks: ProductHooks,
+): Pick<typeof treatmentPlanItem.$inferInsert, "decisionStatus" | "decidedAt"> {
+  return hooks.budgetRequired
+    ? { decisionStatus: "pendiente" }
+    : { decisionStatus: "aceptado", decidedAt: new Date() }
+}
+
 function assertScopeValue(site: ProductSite, scope: string | null | undefined): string {
   if (!scope || !site.scopes.includes(scope)) throw validation("La oferta no tiene un ámbito válido para indicar")
   return scope
@@ -705,6 +717,7 @@ export async function addPlanItem(
       priceCents: service.priceCents,
       currency: service.currency,
       status: "pendiente",
+      ...indicatedDecision(hooks),
       sourceEncounterId: encounterId,
       createdBy: actorUserId,
     })
@@ -722,7 +735,7 @@ export async function addPlanItem(
     priceCents: service.priceCents,
     currency: service.currency,
   })
-  return { ...(await withPlanItemParts(tx, orgId, row)), decision: "pendiente" }
+  return { ...(await withPlanItemParts(tx, orgId, row)), decision: row.decisionStatus as PlanItemDecision }
 }
 
 export interface AddPlanItemsBatchInput {
@@ -797,6 +810,7 @@ export async function addPlanItemsBatch(
         priceCents: service.priceCents,
         currency: service.currency,
         status: "pendiente",
+        ...indicatedDecision(hooks),
         sourceEncounterId: input.sourceEncounterId.trim(),
         createdBy: actorUserId,
       })
@@ -818,7 +832,7 @@ export async function addPlanItemsBatch(
       count: rows.length,
     },
   )
-  return rows.map((row) => ({ ...row, decision: "pendiente" as const }))
+  return rows.map((row) => ({ ...row, decision: row.decisionStatus as PlanItemDecision }))
 }
 
 export async function updatePlanItem(
@@ -1024,7 +1038,8 @@ export async function setPlanItemStatus(
   if (["programado", "en_curso", "realizado"].includes(input.status)) {
     if (current.decisionStatus !== "aceptado")
       throw conflict("ITEM_NOT_ACCEPTED", "El tratamiento no está aceptado")
-    if (!budget || budget.status === "cancelado") {
+    // Donde lo indicado queda aceptado al indicarlo (latidIA), basta la decisión.
+    if ((await hooksOf(tx, orgId)).budgetRequired && (!budget || budget.status === "cancelado")) {
       throw conflict("BUDGET_CLOSED", "El presupuesto del tratamiento está cerrado")
     }
     assertExecutableCodings(current.codings)

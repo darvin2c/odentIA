@@ -45,6 +45,7 @@ import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { setOrgLocale } from "../../lib/locale"
 import { AnswerInput, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 import { appWords } from "../../lib/product-words"
+import { productUi } from "../../product/product-ui"
 
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.
@@ -938,8 +939,13 @@ function AccountBlock({ sessionToken }: { sessionToken: string }) {
                 <dd className="text-right">{formatPortalMoney(row.aFavor, row.currency, account.locale)}</dd>
               </>
             )}
-            <dt className="text-muted-foreground">Tratamiento aceptado</dt>
-            <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency, account.locale)}</dd>
+            {/* Sale de los presupuestos aceptados: en latidIA, sin presupuesto, no dice nada (issue 229, decisión 15). */}
+            {productUi().plan.budgetRequired ? (
+              <>
+                <dt className="text-muted-foreground">Tratamiento aceptado</dt>
+                <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency, account.locale)}</dd>
+              </>
+            ) : null}
             <dt className="text-muted-foreground">Pagado</dt>
             <dd className="text-right">{formatPortalMoney(row.pagado, row.currency, account.locale)}</dd>
           </dl>
