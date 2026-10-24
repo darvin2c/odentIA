@@ -1,0 +1,1 @@
+DROP TABLE "admin"."saas_whatsapp_rate" CASCADE;

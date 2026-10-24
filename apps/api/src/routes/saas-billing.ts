@@ -34,30 +34,28 @@ import {
   decideSaasNegotiation,
   getClinicSaasTerms,
   getSaasAlerts,
-  getSaasLowMargin,
   getSaasTermsView,
   listSaasTermsVersions,
   SAAS_TERM_KEYS,
   setSaasTerms,
   getSaasTrialWatch,
-  getWhatsappEstimate,
   getArgosAllowance,
   getStorageUsage,
   addArgosPack,
   setArgosAutoPack,
   isChargingPeriod,
   listSaasNegotiations,
-  listWhatsappRates,
   planMarginScenario,
   saasTaxOf,
   setSaasSpendCap,
-  upsertWhatsappRate,
   getOrganizationBillingSummary,
   getSaasConsumption,
   listPendingRecoveries,
   listSaasChargeLines,
   listPeriodActions,
   agendaPendingOf,
+  getClinicCostMargin,
+  getCostMarginOverview,
   getSaasReceiptUrl,
   getSaasSubscription,
   getSaasUsage30d,
@@ -426,46 +424,23 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     )
   })
 
-  // Tarifas de Meta para la estimación de WhatsApp que ve la clínica.
-  app.get("/whatsapp-rates", async (c) => {
-    if (!requireAdmin(c)) return forbid(c)
-    return runService(c, 200, () => listWhatsappRates(deps.ownerDb))
-  })
-
-  app.put("/whatsapp-rates", async (c) => {
-    const actor = requireAdmin(c)
-    if (!actor) return forbid(c, "Solo administración carga las tarifas de WhatsApp")
-    const parsed = z
-      .object({
-        countryCode: z.string().regex(/^[A-Za-z]{2}$/),
-        category: z.enum(["marketing", "utility", "authentication"]),
-        currency,
-        priceMicros: z.number().int().min(0).max(1_000_000_000),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runStaffWrite(
-      c,
-      200,
-      actor,
-      { action: "saas.whatsapp_rate_set", metadata: { countryCode: parsed.data.countryCode, category: parsed.data.category } },
-      async (tx) => {
-        await upsertWhatsappRate(tx, actor, parsed.data)
-        return { ok: true }
-      },
-    )
-  })
-
-  // O3: pruebas por vencer o sin saldo, y clínicas con margen bajo.
+  // O3: pruebas por vencer o sin saldo, y el costo y margen de cada clínica (ADR 0085).
   app.get("/trial-watch", async (c) => {
     if (!requireAdmin(c)) return forbid(c)
     return runService(c, 200, () => getSaasTrialWatch(deps.ownerDb))
   })
 
-  app.get("/low-margin", async (c) => {
+  // Costo y margen de todas las clínicas activas, con «Para revisar» arriba (tablero O3).
+  app.get("/cost-margin", async (c) => {
     if (!requireAdmin(c)) return forbid(c)
-    return runService(c, 200, () => getSaasLowMargin(deps.ownerDb))
+    return runService(c, 200, () => getCostMarginOverview(deps.ownerDb))
+  })
+
+  // Costo y margen de una clínica, en su mes o el anterior (tablero O2). Solo lo ve odentIA.
+  app.get("/cost-margin/:orgId", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    const periodo = c.req.query("periodo") === "anterior" ? "anterior" : "actual"
+    return runService(c, 200, () => getClinicCostMargin(deps.ownerDb, c.req.param("orgId"), { which: periodo }))
   })
 
   app.get("/negotiations", async (c) => {
@@ -1053,7 +1028,6 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
           // Preguntas a Argos del mes y lo guardado (ADR 0085).
           argos: await getArgosAllowance(tx, orgId),
           storage: await getStorageUsage(tx, orgId),
-          whatsapp: await getWhatsappEstimate(tx, orgId),
           tax: await saasTaxOf(tx, orgId),
         }
       }),
