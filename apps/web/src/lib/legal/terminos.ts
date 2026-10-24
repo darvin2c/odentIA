@@ -189,7 +189,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         "La Clínica se obliga a:",
         {
           list: [
-            "Cargar y tratar en odentIA solo datos obtenidos de forma lícita y contar con las autorizaciones o consentimientos de sus pacientes que exija la ley, incluidos los necesarios para tratar datos de salud y para enviar comunicaciones promocionales.",
+            "Cargar y tratar en el servicio solo datos obtenidos de forma lícita y contar con las autorizaciones o consentimientos de sus pacientes que exija la ley, incluidos los necesarios para tratar datos de salud y para enviar comunicaciones promocionales.",
             "Enviar promociones solo a los pacientes que hayan dado su consentimiento. Los mensajes de atención (citas, controles y presupuestos) forman parte del servicio que la Clínica presta a sus pacientes.",
             "Usar cada canal conectado conforme a las políticas de su proveedor (Meta para WhatsApp, Instagram y Messenger; Telegram; Google; Microsoft) y mantener vigentes las cuentas y autorizaciones necesarias.",
             "Mantener su historia clínica conforme a la normativa sanitaria aplicable. En Perú, la Clínica es la responsable de la historia clínica de sus pacientes según la Ley 30024 y la norma técnica de salud de historia clínica vigente.",
@@ -202,7 +202,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "uso-aceptable",
       title: "Uso aceptable",
       blocks: [
-        "No está permitido usar odentIA para:",
+        "No está permitido usar el servicio para:",
         {
           list: [
             "Enviar mensajes no solicitados masivos (spam) o contenido engañoso, ilícito, ofensivo o discriminatorio.",
@@ -219,8 +219,8 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "propiedad-intelectual",
       title: "Propiedad intelectual",
       blocks: [
-        "El software, la marca odentIA, los diseños y la documentación son propiedad de odentIA o de sus licenciantes. La suscripción concede a la Clínica un derecho de uso no exclusivo, intransferible y limitado a la duración del contrato.",
-        "Los datos y contenidos que la Clínica carga en odentIA son de la Clínica (o de sus pacientes, según corresponda). odentIA solo los usa para prestar el servicio, conforme al [encargo de tratamiento](/encargo-de-tratamiento).",
+        "El software, las marcas odentIA y latidIA, los diseños y la documentación son propiedad de odentIA o de sus licenciantes. La suscripción concede a la Clínica un derecho de uso no exclusivo, intransferible y limitado a la duración del contrato.",
+        "Los datos y contenidos que la Clínica carga en el servicio son de la Clínica (o de sus pacientes, según corresponda). odentIA solo los usa para prestar el servicio, conforme al [encargo de tratamiento](/encargo-de-tratamiento).",
         "Si la Clínica envía sugerencias de mejora, odentIA puede usarlas libremente sin obligación de compensación.",
       ],
     },
