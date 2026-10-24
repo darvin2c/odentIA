@@ -20,6 +20,7 @@ import {
 import { normalizeForSearch } from "./knowledge.js"
 import { receptionName } from "./agent-names.js"
 import { roomWord } from "./locale.js"
+import { productHelpTopics } from "./products.js"
 
 /* ---------- Ayuda de odentIA: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
@@ -87,10 +88,16 @@ function restrictionFor(topic: HelpTopic, asker: HelpAsker): { path: string | nu
  * comprobaciones del estado real de la clínica, no suposiciones: cada una
  * mira un dato y dice dónde se resuelve.
  */
-async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefined, asker: HelpAsker): Promise<HelpReply["blockers"]> {
+async function screenBlockers(
+  tx: Db,
+  orgId: string,
+  topic: HelpTopic | undefined,
+  asker: HelpAsker,
+  topics: readonly HelpTopic[],
+): Promise<HelpReply["blockers"]> {
   const out: HelpReply["blockers"] = []
   const at = (id: string) => {
-    const target = helpTopic(id)
+    const target = helpTopic(id, topics)
     return target && asker.canOpen(target.path) ? { where: helpTopicLabel(target), path: target.path } : { where: target ? helpTopicLabel(target) : null, path: null }
   }
   if (!topic) return out
@@ -136,15 +143,17 @@ async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<
 }
 
 /**
- * Responde una pregunta sobre cómo usar odentIA. Deja constancia de la
- * pantalla y del tema que respondió, nunca del texto de la pregunta.
+ * Responde una pregunta sobre cómo usar el sistema, con la guía del producto
+ * de la clínica. Deja constancia de la pantalla y del tema que respondió,
+ * nunca del texto de la pregunta.
  */
 export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { question: unknown; screen: unknown }): Promise<HelpReply> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw validation("Escribe tu pregunta")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
   await requireDailyRoom(tx, orgId, asker.userId)
-  const here = helpTopicForScreen(screen)
+  const topics = await productHelpTopics(tx, orgId)
+  const here = helpTopicForScreen(screen, topics)
   const log = async (topicId: string | null) => {
     const [row] = await tx.insert(helpAsk).values({ organizationId: orgId, userId: asker.userId, screen, topicId }).returning({ id: helpAsk.id })
     if (!row) throw new Error("No se pudo registrar la consulta")
@@ -153,7 +162,7 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
 
   // «¿Por qué no puedo…?»: primero lo que falta de verdad en la pantalla donde está.
   if (WHY_NOT.test(normalizeForSearch(question))) {
-    const blockers = await screenBlockers(tx, orgId, here, asker)
+    const blockers = await screenBlockers(tx, orgId, here, asker, topics)
     if (blockers.length > 0) {
       return {
         askId: await log(here?.id ?? null),
@@ -165,7 +174,7 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
     }
   }
 
-  const matches = matchHelpTopics(question)
+  const matches = matchHelpTopics(question, topics)
   if (matches.length === 0) {
     return { askId: await log(null), kind: "nada", answers: [], blockers: [], basedOn: "" }
   }
@@ -199,8 +208,11 @@ export async function rateHelp(tx: Db, orgId: string, userId: string, askId: str
 }
 
 /** Lo que la Ayuda sabe de la pantalla donde está la persona: su nombre y qué suelen preguntar ahí. */
-export function describeHelpScreen(screen: string): { title: string | null; suggestions: string[] } {
-  return { title: helpTopicForScreen(screen)?.title ?? null, suggestions: helpSuggestions(screen) }
+export function describeHelpScreen(
+  screen: string,
+  topics?: readonly HelpTopic[],
+): { title: string | null; suggestions: string[] } {
+  return { title: helpTopicForScreen(screen, topics)?.title ?? null, suggestions: helpSuggestions(screen, topics) }
 }
 
 /* ---------- Enviar a odentIA ---------- */

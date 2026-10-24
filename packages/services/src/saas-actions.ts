@@ -16,6 +16,7 @@ import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, sql } from "drizzle-or
 import { adminLineOf } from "./admin-lines.js"
 import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
+import { orgProduct } from "./locale.js"
 import { SAAS_TERMS_INITIAL, saasTermsAt } from "./saas-commercial-terms.js"
 
 /* ---------- Lo que hicieron los agentes, por acción (ADR 0031 y 0085) ---------- */
@@ -468,14 +469,15 @@ export async function countAgendaUpgrade(tx: Db, orgId: string, appointmentId: s
 /* ---------- Clío: según lo que dejó hecho (ADR 0085) ---------- */
 
 /**
- * El tipo de una atención por lo que Clío dejó hecho y el odontólogo
+ * El tipo de una atención por lo que Clío dejó hecho y el profesional
  * confirmó: «Completa» si armó un presupuesto (una indicación del plan);
- * «Estándar» con un diagnóstico, el odontograma o dos bloques o más;
- * «Simple» con un solo bloque (receta, nota o control).
+ * «Estándar» con un diagnóstico, el odontograma (en latidIA, el examen
+ * físico) o dos bloques o más; «Simple» con un solo bloque (receta, nota,
+ * control o, en latidIA, los signos vitales).
  */
 export function consultationTierOf(kinds: ReadonlySet<string>): "simple" | "estandar" | "completa" {
   if (kinds.has("plan")) return "completa"
-  if (kinds.has("diagnostico") || kinds.has("odontograma") || kinds.size > 1) return "estandar"
+  if (kinds.has("diagnostico") || kinds.has("odontograma") || kinds.has("examen") || kinds.size > 1) return "estandar"
   return "simple"
 }
 
@@ -483,6 +485,11 @@ export const CLIO_DETAIL: Record<"simple" | "estandar" | "completa", string> = {
   simple: "Dejó lista una cosa de la consulta dictada",
   estandar: "Ordenó la consulta dictada",
   completa: "Ordenó la consulta dictada y armó el presupuesto",
+}
+
+/** En latidIA, «Completa» es dejar indicado lo que sigue: un consultorio no arma presupuestos (issue 229). */
+const CLIO_DETAIL_MEDICAL: Partial<typeof CLIO_DETAIL> = {
+  completa: "Ordenó la consulta dictada y dejó indicado lo que sigue",
 }
 
 /**
@@ -525,12 +532,13 @@ export async function countConsultationAction(
       ),
     )
     .limit(1)
+  const did = ((await orgProduct(tx, orgId)) === "medical" && CLIO_DETAIL_MEDICAL[tier]) || CLIO_DETAIL[tier]
   return insertAction(tx, orgId, "consulta", {
     tier,
     occurredAt: input.at,
     contactId: self?.contactId ?? null,
     encounterId: input.encounterId,
-    detail: row?.professional ? `${CLIO_DETAIL[tier]} por ${row.professional}` : CLIO_DETAIL[tier],
+    detail: row?.professional ? `${did} por ${row.professional}` : did,
     dedupeKey: `consulta:${input.encounterId}`,
   })
 }

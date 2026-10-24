@@ -17,7 +17,7 @@ export const ENCARGO: LegalDoc = {
       title: "Partes y definiciones",
       blocks: [
         "«La Clínica» es la titular del banco de datos personales de sus pacientes y la responsable del tratamiento.",
-        `«odentIA» (${TITULAR.razonSocial}, RUC ${TITULAR.ruc}) es el encargado del tratamiento: trata los datos por cuenta de la Clínica, sin decidir sobre su finalidad ni su contenido.`,
+        `«odentIA» (${TITULAR.razonSocial}, RUC ${TITULAR.ruc}) es el encargado del tratamiento con cualquiera de sus dos marcas, odentIA y latidIA: trata los datos por cuenta de la Clínica, sin decidir sobre su finalidad ni su contenido.`,
         "Los términos «datos personales», «datos sensibles», «titular de los datos», «tratamiento», «encargado» y «flujo transfronterizo» tienen el significado que les da la Ley N.º 29733, Ley de Protección de Datos Personales, y su Reglamento, aprobado por Decreto Supremo N.º 016-2024-JUS.",
       ],
     },
@@ -40,7 +40,7 @@ export const ENCARGO: LegalDoc = {
               ],
               [
                 "Tipos de datos",
-                "Identificación y contacto; datos de salud (historia clínica, odontograma, diagnósticos, tratamientos, dictados); presupuestos y pagos; conversaciones y mensajes; archivos adjuntos.",
+                "Identificación y contacto; datos de salud (historia clínica, odontograma o examen físico, diagnósticos, tratamientos, dictados); presupuestos y pagos; conversaciones y mensajes; archivos adjuntos.",
               ],
               [
                 "Operaciones",
