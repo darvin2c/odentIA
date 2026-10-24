@@ -10,6 +10,7 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { businessDays, days, giftOf, money, shownPlan, valuePricesOf } from "../lib/pricing"
+import { WORDS } from "../lib/product"
 import { ctaOf } from "../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -26,10 +27,10 @@ const title = "Precios: pagas por el valor, no por el software"
 // Lo que cobra cada agente, de lo más simple a lo que trae pacientes (ADR 0085).
 const range = plan ? `desde ${m(plan.tiers.informa)} una respuesta hasta ${m(plan.recovered)} una cita recuperada` : null
 const description = !plan
-  ? "Software para clínicas dentales: pagas por lo que hacen tus agentes, no por el software. Lo simple cuesta poco y lo que te trae pacientes cuesta más."
+  ? `Software para ${WORDS.audience}: pagas por lo que hacen tus agentes, no por el software. Lo simple cuesta poco y lo que te trae pacientes cuesta más.`
   : founder
-    ? `Software para clínicas dentales. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
-    : `Software para clínicas dentales con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
+    ? `Software para ${WORDS.audience}. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
+    : `Software para ${WORDS.audience} con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
 const lead = !plan
   ? "Pagas por lo que hacen tus agentes, no por el software. Cada cobro es un trabajo que ves: lo simple cuesta poco y lo que te trae pacientes cuesta más."
   : founder
@@ -60,7 +61,7 @@ const faq: FaqItem[] = [
     a: "Pones un presupuesto del mes. Te avisamos al acercarte y, al llegar, Sofi pasa las conversaciones nuevas a tu equipo con un mensaje fijo, Clío no escucha en las atenciones nuevas y Argos no escribe para recuperar. Lo que ya empezó se termina y ningún paciente se queda sin respuesta.",
   },
   {
-    q: "¿Y si mis tomografías ocupan mucho?",
+    q: `¿Y si mis ${WORDS.heavyImages} ocupan mucho?`,
     a: plan?.storage
       ? `Tienes ${plan.storage.includedGb} GB incluidos. Desde ahí, cada GB cuesta ${m(plan.storage.perGb)} al mes, y nunca dejamos de guardar.`
       : "Lo que guardas no tiene tope: nunca dejamos de guardar.",
@@ -93,7 +94,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Y WhatsApp?",
-    a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
+    a: `WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. ${WORDS.name} no lo cobra ni lo estima.`,
   },
   {
     q: "¿Y si mi clínica tiene mucho movimiento?",
@@ -106,11 +107,11 @@ const product = plan
   ? {
       "@context": "https://schema.org",
       "@type": "Product",
-      name: founder ? "odentIA · Programa Fundadores" : `${plan.name} · odentIA`,
-      description: `Plataforma omnicanal y agéntica para clínicas dentales. ${
+      name: founder ? `${WORDS.name} · Programa Fundadores` : `${plan.name} · ${WORDS.name}`,
+      description: `Plataforma omnicanal y agéntica para ${WORDS.audience}. ${
         founder ? "Sin cuota mensual" : `El plan de ${m(plan.plan)} al mes vuelve completo como crédito para los agentes`
       }; cada agente cobra por lo que hizo, ${range}.`,
-      brand: { "@type": "Brand", name: "odentIA" },
+      brand: { "@type": "Brand", name: WORDS.name },
       url: pageUrl,
       offers: {
         "@type": "Offer",

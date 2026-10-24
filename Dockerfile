@@ -51,7 +51,7 @@ ARG VITE_BASE_DOMAIN
 # Dónde abre una clínica de cada producto (odentIA y latidIA); vacíos, en VITE_BASE_DOMAIN.
 ARG VITE_DENTAL_DOMAIN=""
 ARG VITE_MEDICAL_DOMAIN=""
-# El producto del panel de este artefacto: vacío, odentIA; `medical`, el de latidIA.
+# El producto del panel y de la web de este artefacto: vacío, odentIA; `medical`, el de latidIA.
 ARG VITE_PRODUCT=""
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_BASE_DOMAIN=$VITE_BASE_DOMAIN

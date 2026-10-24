@@ -1,7 +1,8 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
 import { giftOf, type Pricing } from "./pricing"
+import { DEFAULT_DOMAIN, MEDICAL, WORDS } from "./product"
 
-const domain = import.meta.env.VITE_BASE_DOMAIN || "odentia.localhost"
+const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
 const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
 
 /** La cuenta de la clínica vive en el panel; la web solo enlaza a registrarse e ingresar. */
@@ -26,14 +27,32 @@ export function ctaOf(pricing: Pricing): { href: string; label: string } {
 
 export type NavLink = { href: string; label: string }
 
-export const mainNav: NavLink[] = [
-  { href: "/omnicanal", label: "Omnicanal" },
-  { href: "/agentes", label: "Agentes" },
-  { href: "/precios", label: "Precios" },
-  { href: "/seguridad", label: "Seguridad" },
-]
+// latidIA empieza con su web mínima (decisión 18 del issue 229): inicio, precios, invitación y legales.
+export const mainNav: NavLink[] = MEDICAL
+  ? [
+      { href: "/#agentes", label: "Agentes" },
+      { href: "/#sistema", label: "El sistema" },
+      { href: "/precios", label: "Precios" },
+    ]
+  : [
+      { href: "/omnicanal", label: "Omnicanal" },
+      { href: "/agentes", label: "Agentes" },
+      { href: "/precios", label: "Precios" },
+      { href: "/seguridad", label: "Seguridad" },
+    ]
 
-export const footerGroups: { title: string; links: NavLink[] }[] = [
+export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
+  ? [
+      {
+        title: WORDS.name,
+        links: [
+          { href: "/precios", label: "Precios" },
+          { href: "/solicitar-invitacion", label: "Pide tu invitación" },
+          { href: `mailto:${contactEmail}`, label: "Habla con nosotros" },
+        ],
+      },
+    ]
+  : [
   {
     title: "Agentes",
     links: [
@@ -71,6 +90,9 @@ export const footerGroups: { title: string; links: NavLink[] }[] = [
     ],
   },
 ]
+
+/** Dónde se habla con una persona: la página de contacto de odentIA o, en latidIA, el correo. */
+export const contactHref = MEDICAL ? `mailto:${contactEmail}` : "/contacto"
 
 export const legalLinks: NavLink[] = [
   { href: "/terminos", label: "Términos" },

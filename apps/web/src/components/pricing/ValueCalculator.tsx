@@ -2,6 +2,7 @@
 // sin agentes con su cuenta del mes en odentIA. Es un ejemplo, nunca una promesa de resultados.
 import { type ChangeEvent, useEffect, useId, useState } from "react"
 import { usd, type ValuePrices } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
 import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../../lib/value"
 import SizePicker from "../SizePicker"
 import "./value-calculator.css"
@@ -141,7 +142,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
           </details>
         </div>
         <div className="vc-col">
-          <span className="tag vc-amber">Sin odentIA, cada mes</span>
+          <span className="tag vc-amber">Sin {WORDS.name}, cada mes</span>
           <div className="vc-row">
             <span>{L.lNew}</span>
             <strong>{usd(r.lostNew)}</strong>
@@ -156,7 +157,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
           </div>
         </div>
         <div className="vc-col vc-us">
-          <span className="tag tag-d">Con odentIA, tu cuenta del mes</span>
+          <span className="tag tag-d">Con {WORDS.name}, tu cuenta del mes</span>
           <div className="vc-row">
             <span>{L.lConv}</span>
             <strong>{usd(r.conversations)}</strong>
@@ -170,7 +171,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
             <strong>{usd(r.consultations)}</strong>
           </div>
           <div className="vc-row vc-sub">
-            <span>Plan odentIA</span>
+            <span>Plan {WORDS.name}</span>
             <strong>{usd(PLAN)}</strong>
           </div>
           <div className="vc-row vc-sub">
@@ -187,7 +188,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
         <div className="vc-left">
           <div className="vc-bar">
             <div className="vc-bl">
-              <span>Sin odentIA pierdes, cada mes</span>
+              <span>Sin {WORDS.name} pierdes, cada mes</span>
               <strong className="vc-big vc-amber">{usd(r.withoutUs)}</strong>
             </div>
             <div className="vc-track">
@@ -196,7 +197,7 @@ export default function ValueCalculator({ prices }: { prices: ValuePrices }) {
           </div>
           <div className="vc-bar">
             <div className="vc-bl">
-              <span>Con odentIA pagas, cada mes</span>
+              <span>Con {WORDS.name} pagas, cada mes</span>
               <strong className="vc-big vc-sky">{usd(r.withUs)}</strong>
             </div>
             <div className="vc-track">
