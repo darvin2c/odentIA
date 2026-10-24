@@ -3,7 +3,7 @@ import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
-import { SignedOdontogramFact } from "../../components/dental/odontogram-assessments"
+import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
 import { EncounterBreadcrumb } from "../../components/patient/encounter-breadcrumb"
 import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
@@ -26,6 +26,8 @@ export const Route = createFileRoute("/_org/patients/$patientId/encounters/$enco
 function EncounterPage() {
   const { patientId, encounterId } = Route.useParams()
   const queryClient = useQueryClient()
+  // Lo que el producto firmó con la atención (odentIA: el odontograma firmado).
+  const EncounterSigned = productUi().history.EncounterSigned
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
   // Con lo clínico (condiciones, medicación y salud declarada): es una lectura clínica y deja su traza.
@@ -127,7 +129,7 @@ function EncounterPage() {
       {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
       <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Documentos</h2>
-        <SignedOdontogramFact patientId={patientId} encounterId={detail.encounter.id} />
+        <EncounterSigned patientId={patientId} encounterId={detail.encounter.id} />
         <EncounterDocumentsBlock
           patientId={patientId}
           encounterId={detail.encounter.id}

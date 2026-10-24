@@ -52,7 +52,7 @@ import {
 import { TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
-import { ToothSelector } from "../dental/tooth-selector"
+import { PlacesField } from "../../product/site-fields"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -1103,7 +1103,7 @@ function ContextDrawer({
             procedures={procedures}
             onChange={(patch) => setLinks((current) => ({ ...current, ...patch }))}
           />
-          <ToothSelector value={teeth} onChange={setTeeth} label="Piezas" />
+          <PlacesField value={teeth} onChange={setTeeth} />
           <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
         </fieldset>
       </div>

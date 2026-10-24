@@ -9,7 +9,6 @@ import {
   type TaxCategory,
   type TaxRate,
 } from "@odentia/clinical"
-import { type DentalCountryProfile, dentalProfileFor } from "@odentia/dental"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 
@@ -145,15 +144,6 @@ export function useOrgProfile() {
 export function useClinicalProfile(): ClinicalCountryProfile {
   const profile = useOrgProfile()
   return clinicalProfileFor(profile.data?.countryCode)
-}
-
-/**
- * Lo dental del país de esta clínica (ADR 0079): odontograma oficial,
- * especialidades y título profesional. Mientras carga, o sin país, el núcleo.
- */
-export function useDentalProfile(): DentalCountryProfile {
-  const profile = useOrgProfile()
-  return dentalProfileFor(profile.data?.countryCode)
 }
 
 /**

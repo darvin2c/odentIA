@@ -8,9 +8,13 @@ import {
   teethWords,
   visibleDocumentFilters,
 } from "./document-list"
-import { DOCUMENT_FILTERS, type DocumentFilter } from "./patient-areas"
+import { bareProduct, declareProduct } from "../product/product-ui"
+import { type DocumentFilter, documentFilters } from "./patient-areas"
 
-const ORDER = DOCUMENT_FILTERS.map((option) => option.id)
+// Un producto con su propio tipo de papel, como «Odontogramas» en odentIA.
+const product = bareProduct("medical")
+declareProduct({ ...product, documents: { ...product.documents, kind: { filter: "estudios", label: "Estudios", nouns: ["estudio", "estudios"] } } })
+const ORDER = documentFilters().map((option) => option.id)
 
 describe("la lista de Documentos (issue 149)", () => {
   it("cada archivo va con su filtro: imágenes, consentimientos u otros archivos", () => {
@@ -56,7 +60,7 @@ describe("la lista de Documentos (issue 149)", () => {
     expect(
       visibleDocumentFilters(
         ORDER,
-        present("recetas", "ordenes", "consentimientos", "formularios", "imagenes", "odontogramas"),
+        present("recetas", "ordenes", "consentimientos", "formularios", "imagenes", "estudios"),
         4,
         29,
       ),
@@ -67,7 +71,7 @@ describe("la lista de Documentos (issue 149)", () => {
       "consentimientos",
       "formularios",
       "imagenes",
-      "odontogramas",
+      "estudios",
     ])
     // Si todo lo que tiene está pendiente, «Requieren acción» no cambia nada.
     expect(visibleDocumentFilters(ORDER, present("consentimientos"), 1, 1)).toEqual([])
@@ -93,7 +97,9 @@ describe("la lista de Documentos (issue 149)", () => {
   it("dice cuántos hay con el nombre del filtro y la pieza", () => {
     expect(countWords(29)).toBe("29 papeles")
     expect(countWords(1, "imagenes")).toBe("1 imagen")
-    expect(countWords(16, "imagenes", 36)).toBe("16 imágenes de la pieza 36")
+    expect(countWords(16, "imagenes", { place: "pieza 36" })).toBe("16 imágenes de la pieza 36")
+    // El papel del producto se cuenta con sus palabras.
+    expect(countWords(1, "estudios", { nouns: ["estudio", "estudios"] })).toBe("1 estudio")
     expect(countWords(2, "ordenes")).toBe("2 órdenes")
     expect(teethWords([36])).toBe("Pieza 36")
     expect(teethWords([36, 46])).toBe("Piezas 36, 46")

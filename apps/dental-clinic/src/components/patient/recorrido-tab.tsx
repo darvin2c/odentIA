@@ -9,7 +9,6 @@
 
 import { label } from "../../lib/glossary"
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import { surfacesForTooth } from "@odentia/dental"
 import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -33,14 +32,7 @@ import {
   suspendTreatmentApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import type {
-  Encounter,
-  OdontogramEntry,
-  OdontogramState,
-  PatientSummary,
-  PlanItem,
-  TreatmentNextAction,
-} from "../../lib/patients"
+import type { Encounter, PatientSummary, PlanItem, TreatmentNextAction } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
@@ -51,6 +43,7 @@ import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
 import { PlanPhases } from "./plan-fases"
 import { ServicePicker } from "./service-picker"
+import { productUi } from "../../product/product-ui"
 
 const MAX_TEXT = 2000
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const
@@ -131,11 +124,8 @@ export function RecorridoClinicoTab({
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
     enabled: canRead,
   })
-  const odontogramQuery = useQuery({
-    queryKey: ["odontogram", patientId],
-    queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
-    enabled: canRead,
-  })
+  // Lo registrado en cada lugar (odentIA: el odontograma), para los hallazgos de su pieza.
+  const vigentes = productUi().useFindings(patientId, canRead)
 
   const items = itemsQuery.data?.data ?? []
   // Orden de trabajo: primero lo que está en curso, al final lo cerrado. Así el
@@ -181,7 +171,7 @@ export function RecorridoClinicoTab({
   const [diagnosis, setDiagnosis] = useState("")
 
   const reviseTooth = toothNumber.trim() === "" ? null : Number(toothNumber)
-  const surfaceOptions = reviseTooth != null ? surfacesForTooth(reviseTooth) : []
+  const surfaceOptions = reviseTooth != null ? (productUi().site?.partsOf(reviseTooth) ?? []) : []
   const toggleSurface = (surface: string) =>
     setSurfaces((prev) =>
       prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
@@ -294,9 +284,8 @@ export function RecorridoClinicoTab({
   // Caja del tratamiento: el servidor solo la entrega con `finance.read`.
   const finance = journey?.finance ?? null
   const balances = finance ? journeyBalances(finance) : []
-  const activeFindings = (odontogramQuery.data?.data.history ?? []).filter(
-    (entry: OdontogramEntry) =>
-      !entry.voidedAt && item?.toothNumber != null && entry.toothNumber === item.toothNumber,
+  const activeFindings = vigentes.filter(
+    (entry) => item?.toothNumber != null && entry.toothNumber === item.toothNumber,
   )
   const nextAction: TreatmentNextAction | null = journey?.nextAction ?? null
   /** Propuesta vigente del tratamiento: enlace directo desde el recorrido. */

@@ -2,11 +2,6 @@ import {
   diagnosisCodeLabel,
 } from "@odentia/clinical"
 import {
-  TREATMENT_PHASE_LABELS,
-  TREATMENT_PHASES,
-  type TreatmentPhase,
-} from "@odentia/dental"
-import {
   Badge,
   Button,
   Field,
@@ -29,16 +24,9 @@ import { NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
-
-const PHASE_HINTS: Record<TreatmentPhase, string> = {
-  urgencia: "Dolor, infección, trauma",
-  basica: "Control de caries y periodonto",
-  quirurgica: "Exodoncias, cirugía e implantes",
-  rehabilitadora: "Prótesis, coronas, ortodoncia",
-  mantenimiento: "Controles periódicos",
-}
 
 function site(item: PlanItem): string {
   if (item.toothNumber != null) return `Pieza ${item.toothNumber}`
@@ -154,10 +142,12 @@ function PlanPhasesGroup({
   const done = active.filter((item) => item.status === "realizado").length
   const inProgress = active.filter((item) => item.status === "en_curso").length
   const undecided = active.filter((item) => item.decisionStatus === "pendiente").length
-  const byPhase = TREATMENT_PHASES.map((phase) => ({
+  // Las fases del producto, en orden (odentIA: de la urgencia al mantenimiento).
+  const { phases, defaultPhase } = productUi().plan
+  const byPhase = phases.map((phase) => ({
     phase,
     rows: items
-      .filter((item) => (item.phase ?? "basica") === phase)
+      .filter((item) => (item.phase ?? defaultPhase) === phase.key)
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
   }))
   let position = 0
@@ -185,10 +175,10 @@ function PlanPhasesGroup({
       <div className="flex flex-col gap-5">
         {byPhase.map(({ phase, rows }, phaseIndex) =>
           rows.length === 0 ? null : (
-            <div key={phase} className="flex flex-col gap-2">
+            <div key={phase.key} className="flex flex-col gap-2">
               <h3 className="text-sm font-medium">
-                Fase {phaseIndex + 1} · {TREATMENT_PHASE_LABELS[phase]}{" "}
-                <span className="font-normal text-muted-foreground">· {PHASE_HINTS[phase]}</span>
+                Fase {phaseIndex + 1} · {phase.label}{" "}
+                <span className="font-normal text-muted-foreground">· {phase.hint}</span>
               </h3>
               <ol className="flex flex-col divide-y rounded-lg border">
                 {rows.map((item, index) => {
@@ -304,7 +294,8 @@ function PlanningDrawer({
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
-  const [phase, setPhase] = useState<TreatmentPhase>(item.phase ?? "basica")
+  const { phases, defaultPhase } = productUi().plan
+  const [phase, setPhase] = useState<string>(item.phase ?? defaultPhase)
   const [sessions, setSessions] = useState(String(item.plannedSessions ?? 1))
   const done = item.sessionsDone ?? 0
   const sessionsNumber = Number(sessions)
@@ -332,7 +323,7 @@ function PlanningDrawer({
         if (sessionsValid) save.mutate()
       }}
       isSubmitting={save.isPending}
-      isDirty={phase !== (item.phase ?? "basica") || sessions !== String(item.plannedSessions ?? 1)}
+      isDirty={phase !== (item.phase ?? defaultPhase) || sessions !== String(item.plannedSessions ?? 1)}
       submitDisabled={!sessionsValid}
       submitLabel="Guardar planificación"
       error={
@@ -348,18 +339,18 @@ function PlanningDrawer({
           <FieldLabel htmlFor={`${uid}-phase`}>Fase</FieldLabel>
           <Select
             value={phase}
-            items={TREATMENT_PHASE_LABELS}
+            items={Object.fromEntries(phases.map((option) => [option.key, option.label]))}
             onValueChange={(value) => {
-              if (value) setPhase(value as TreatmentPhase)
+              if (value) setPhase(value)
             }}
           >
             <SelectTrigger id={`${uid}-phase`}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TREATMENT_PHASES.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {TREATMENT_PHASE_LABELS[value]}
+              {phases.map((option) => (
+                <SelectItem key={option.key} value={option.key}>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -15,7 +15,7 @@ import { DatePickerButton } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
 import { FirmaPad, FirmaView } from "./firma-pad"
-import { ToothSelector } from "../dental/tooth-selector"
+import { PlacesField } from "../../product/site-fields"
 
 /** ¿Se muestra el campo con las respuestas actuales? (misma regla que el servidor). */
 export function isFieldVisible(field: FormFieldDef, answers: Record<string, unknown>): boolean {
@@ -290,7 +290,7 @@ export function AnswerInput({
     case "pieza":
       return (
         <div className="flex flex-col gap-1">
-          <ToothSelector
+          <PlacesField
             single
             label={`${field.label}${field.required ? " *" : ""}`}
             value={typeof value === "number" ? [value] : []}

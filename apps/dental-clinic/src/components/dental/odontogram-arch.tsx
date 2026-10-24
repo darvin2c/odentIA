@@ -1,6 +1,6 @@
 import { Fragment, type RefObject, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { archLayout, archNeighbor, type ArchRows } from "../../lib/dental/odontogram-arch"
-import type { OdontogramEntry } from "../../lib/patients"
+import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { ToothSVG } from "./tooth-svg"
 
 /** Ancho con el que se dibuja antes de medir el contenedor. */

@@ -6,7 +6,7 @@ import { apiFetch } from "../../lib/api"
 import { timeAgo } from "../../lib/crm"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
-import { SignedOdontogramFact } from "../dental/odontogram-assessments"
+import { productUi } from "../../product/product-ui"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
 
@@ -24,6 +24,8 @@ export function EncounterHistoryCard({
   item: TimelineItem
 }) {
   const [expanded, setExpanded] = useState(false)
+  // Lo que el producto firmó con la atención (odentIA: el odontograma firmado).
+  const EncounterSigned = productUi().history.EncounterSigned
   const detail = useQuery({
     queryKey: ["encounter", patientId, item.refId],
     queryFn: () =>
@@ -119,7 +121,7 @@ export function EncounterHistoryCard({
             </ul>
           </div>
         ) : null}
-        <SignedOdontogramFact patientId={patientId} encounterId={item.refId} />
+        <EncounterSigned patientId={patientId} encounterId={item.refId} />
         {item.periodontal ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span>

@@ -8,7 +8,8 @@ import {
   type ProfessionalProfileInput,
   saveProfessionalProfileApi,
 } from "../lib/encounters"
-import { useDentalProfile } from "../lib/org"
+import { useOrgProfile } from "../lib/org"
+import { productUi } from "../product/product-ui"
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
@@ -35,7 +36,8 @@ export function ProfessionalProfileDrawer({
 }): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
-  const suggested = useDentalProfile().professional
+  // Lo que propone el país para el producto (odentIA: «Cirujano dentista» y el COP en Perú).
+  const suggested = productUi().country.professional(useOrgProfile().data?.countryCode)
   const [values, setValues] = useState<Required<ProfessionalProfileInput>>(() => ({
     signatureName: profile?.signatureName ?? "",
     professionalTitle: profile?.professionalTitle || suggested?.title || "",

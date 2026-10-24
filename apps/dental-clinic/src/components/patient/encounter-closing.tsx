@@ -1,6 +1,4 @@
-import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import {
-  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -16,25 +14,10 @@ import { TimeSelect } from "@odentia/ui-patterns"
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
-import type { ClosingMaterials, ClosingOdontogram, ClosingPeriodontal } from "../../lib/encounters"
+import type { ClosingCheck, ClosingMaterials } from "../../lib/encounters"
 import { activeOrgLocale } from "../../lib/locale"
 import { closingMaterialsWords } from "../../lib/materials"
-
-/** «16, 26 y 36». */
-function teethWords(teeth: number[]): string {
-  if (teeth.length <= 1) return teeth.join("")
-  return `${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
-}
-
-/** «Hallazgos: lesión de caries dental en 16, 26 y 36». */
-function findingsLine(odontogram: ClosingOdontogram): string | null {
-  if (odontogram.findings.length === 0) return null
-  const parts = odontogram.findings.map((group) => {
-    const label = conditionLabel(group.condition)
-    return `${label.charAt(0).toLowerCase()}${label.slice(1)} en ${teethWords(group.teeth)}`
-  })
-  return `Hallazgos: ${parts.join("; ")}`
-}
+import { productUi } from "../../product/product-ui"
 
 /**
  * Entre qué horas puede haber terminado la atención, en la zona de la clínica:
@@ -74,8 +57,8 @@ function consentLine(need: ConsentNeed, who: string): { title: string; detail: s
 
 /**
  * Un solo cierre (decisión 3): con quién se firma, el consentimiento sin firmar
- * (firmarlo ahora o seguir sin él diciendo por qué), en clínicas de Perú el
- * odontograma que queda firmado con su momento (fase 3, paso 5), los
+ * (firmarlo ahora o seguir sin él diciendo por qué), lo que dice el producto
+ * (odentIA: el odontograma que queda firmado y el periodontograma), los
  * materiales que salen de la sede (una línea que informa), la hora de fin y,
  * después de firmar, lo que quedó por cobrar.
  */
@@ -84,10 +67,9 @@ export function EncounterClosingDialog({
   signAs,
   who,
   consents,
-  odontogram = null,
-  periodontal = null,
+  closing = null,
   materials = null,
-  onKeepProbing,
+  onOpenBlock,
   startedAt,
   endTime,
   onEndTime,
@@ -107,17 +89,15 @@ export function EncounterClosingDialog({
   /** Primer nombre de quien firma el consentimiento. */
   who: string
   consents: ConsentNeed[]
-  /** En clínicas de Perú, el odontograma que firmará este cierre. */
-  odontogram?: ClosingOdontogram | null
-  /** El periodontograma de la atención: queda fijo al firmar; a medias se firma como parcial. */
-  periodontal?: ClosingPeriodontal | null
+  /** Lo que el servidor dice del cierre: el producto muestra lo suyo (odentIA: odontograma y periodontograma). */
+  closing?: ClosingCheck | null
   /**
    * Los materiales que se descontarán de la sede al firmar (ADR 0067). Solo
    * informa: no pide confirmar ni bloquea si no alcanzan.
    */
   materials?: ClosingMaterials | null
-  /** «Seguir midiendo»: vuelve a la atención con el periodontograma abierto. */
-  onKeepProbing?: () => void
+  /** Vuelve a la atención con un bloque abierto (odentIA: «Seguir midiendo» el periodontograma). */
+  onOpenBlock: (key: string) => void
   startedAt: string | null | undefined
   /** «HH:MM»; vacío = ahora. */
   endTime: string
@@ -135,6 +115,7 @@ export function EncounterClosingDialog({
   children?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
+  const ProductClosing = productUi().encounter.Closing
   const bounds = endTimeBounds(startedAt)
   const needsReason = consents.length > 0
   const ready = canSign && !pending && (!needsReason || skipReason.trim().length > 0)
@@ -157,42 +138,7 @@ export function EncounterClosingDialog({
             <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
             <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
           </div>
-          {odontogram ? (
-            <div className="flex items-start gap-3 rounded-lg border p-3">
-              <Badge variant="outline">{odontogram.shortName}</Badge>
-              <div className="flex min-w-0 flex-col">
-                <span className="font-medium">
-                  El odontograma queda firmado como «{SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
-                </span>
-                {findingsLine(odontogram) ? (
-                  <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-          {periodontal ? (
-            periodontal.pending ? (
-              <div className="flex flex-col gap-2 rounded-lg border border-warning/50 p-3">
-                <span className="font-medium">Periodontograma sin terminar: falta {periodontal.pending}.</span>
-                <span className="text-xs text-muted-foreground">
-                  Puede pasar en un control, si solo se mide un sector. Los índices se calculan con lo medido y el periodontograma dice «Parcial».
-                </span>
-                {onKeepProbing ? (
-                  <Button type="button" size="sm" variant="outline" className="self-start" disabled={pending} onClick={onKeepProbing}>
-                    Seguir midiendo
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <div className="rounded-lg border p-3">
-                <span className="font-medium">
-                  Periodontograma: {periodontal.teeth} {periodontal.teeth === 1 ? "pieza" : "piezas"}
-                  {periodontal.implants ? ` y ${periodontal.implants} ${periodontal.implants === 1 ? "implante" : "implantes"}` : ""}.
-                </span>{" "}
-                <span className="text-muted-foreground">Queda fijo al firmar.</span>
-              </div>
-            )
-          ) : null}
+          {closing ? <ProductClosing closing={closing} pending={pending} openBlock={onOpenBlock} /> : null}
           {materials && materials.items.length > 0 ? (
             <p className="rounded-lg border p-3">
               <span className="font-medium">Materiales</span>
@@ -259,7 +205,7 @@ export function EncounterClosingDialog({
             Volver
           </Button>
           <Button type="button" disabled={!ready} onClick={onConfirm}>
-            {pending ? "Firmando…" : periodontal?.pending ? "Firmar como parcial" : "Finalizar y firmar"}
+            {pending ? "Firmando…" : (productUi().encounter.signLabel(closing) ?? "Finalizar y firmar")}
           </Button>
         </DialogFooter>
       </DialogContent>

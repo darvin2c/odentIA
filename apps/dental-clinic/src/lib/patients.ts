@@ -3,11 +3,6 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   type MissingPersonDatum,
 } from "@odentia/clinical"
-import {
-  activeFindingsAsOf,
-  type FindingDetails,
-  type SignedOdontogramPurpose,
-} from "@odentia/dental"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 
@@ -351,7 +346,11 @@ export interface PatientDocumentContext {
   createdAt: string
 }
 
-export interface OdontogramEntry {
+/**
+ * Un hallazgo registrado en un lugar, con lo que lee lo común (odentIA: un
+ * hallazgo del odontograma; lo demás está en `OdontogramEntry`, de lo dental).
+ */
+export interface SiteFinding {
   id: string
   toothNumber: number
   surface?: string | null
@@ -361,54 +360,8 @@ export interface OdontogramEntry {
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
   note?: string | null
-  encounterId?: string | null
   createdAt?: string
-  details?: FindingDetails
-  needsReview?: boolean
-  legacyData?: Record<string, unknown> | null
   voidedAt?: string | null
-  voidedBy?: string | null
-  voidReason?: string | null
-  /** Tratado: deja de estar vigente desde entonces (sigue en la evolución). */
-  resolvedAt?: string | null
-  /** Lo tratado queda dibujado: el tratamiento completado que dejó este hallazgo. */
-  leftByPlanItemId?: string | null
-}
-
-export type ToothState = {
-  condition: string
-  status: string
-  surfaces: string[]
-  entries: string[]
-}
-
-export interface OdontogramState {
-  teeth: Record<string, ToothState>
-  history: OdontogramEntry[]
-}
-
-/**
- * Odontograma firmado (solo en clínicas de Perú; ADR 0036): instantánea de los
- * hallazgos con la firma del perfil de quien firmó (sin trazo) y su momento.
- * El que firmó el cierre de una atención la nombra (`encounterId`).
- */
-export interface OdontogramAssessment {
-  id: string
-  patientId: string
-  patientName: string
-  patientNumber: number
-  authorUserId: string
-  createdAt: string
-  purpose: SignedOdontogramPurpose
-  standard: string
-  specifications: string
-  observations: string
-  examinerName: string
-  examinerTitle: string
-  /** Colegio y número, como se imprime: «COP 12345». */
-  registrationNumber: string
-  encounterId: string | null
-  entries: OdontogramEntry[]
 }
 
 /** Atención clínica (borrador editable / finalizada inmutable). Fechas como ISO string. */
@@ -493,7 +446,8 @@ export interface PlanItem {
   /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
   decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado" | "no_elegida"
   /** Fase del plan (urgencia → mantenimiento) y orden de ejecución. */
-  phase?: "urgencia" | "basica" | "quirurgica" | "rehabilitadora" | "mantenimiento"
+  /** La fase del plan, una de las del producto (`productUi().plan`). */
+  phase?: string
   sortOrder?: number
   /** Sesiones previstas y hechas (procedimientos no anulados). */
   plannedSessions?: number
@@ -559,7 +513,8 @@ export interface EncounterDetail {
   diagnoses: EncounterDiagnosis[]
   /** Notas de evolución sin código (kind='evolucion'), orden ascendente. */
   notes: ClinicalNote[]
-  odontogramEntries: OdontogramEntry[]
+  /** Lo que el producto registró en la atención (odentIA: los hallazgos del odontograma). */
+  odontogramEntries: SiteFinding[]
   documents: PatientDocument[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
@@ -935,33 +890,6 @@ export function timelineTypeLabel(type: string): string {
     default:
       return type
   }
-}
-
-/** Proyección por pieza de hallazgos coexistentes; el historial original no se modifica. */
-export function winnersAsOf(history: OdontogramEntry[], iso?: string): OdontogramState {
-  const byTooth = new Map<number, OdontogramEntry[]>()
-  for (const entry of activeFindingsAsOf(history, iso)) {
-    for (const tooth of entry.details?.relatedTeeth?.length
-      ? entry.details.relatedTeeth
-      : [entry.toothNumber]) {
-      const entries = byTooth.get(tooth) ?? []
-      entries.push(entry)
-      byTooth.set(tooth, entries)
-    }
-  }
-  const teeth: Record<string, ToothState> = {}
-  for (const [tooth, entries] of byTooth) {
-    const latest = entries.at(-1)!
-    teeth[String(tooth)] = {
-      condition: latest.condition,
-      status: latest.status,
-      surfaces: [
-        ...new Set(entries.flatMap((entry) => (entry.surface ? [entry.surface] : []))),
-      ].sort(),
-      entries: entries.map((entry) => entry.id),
-    }
-  }
-  return { teeth, history }
 }
 
 /** Agregado de antecedentes + entrevista (revisión optimista). */

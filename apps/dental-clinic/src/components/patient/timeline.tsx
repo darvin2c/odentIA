@@ -1,5 +1,4 @@
 import { budgetAnswerText } from "@odentia/clinical"
-import { conditionLabel, FDI_ADULT, FDI_CHILD, surfaceLabel } from "@odentia/dental"
 import {
   Attachment,
   AttachmentActions,
@@ -18,13 +17,6 @@ import {
   EmptyTitle,
   Field,
   FieldLabel,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
 } from "@odentia/ui"
 import { ViewTabs } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
@@ -37,10 +29,11 @@ import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-ove
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
-import { SignedOdontogramFact } from "../dental/odontogram-assessments"
 import { EncounterHistoryCard } from "./encounter-history-card"
 import { NewEncounterButton } from "./new-encounter-button"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
+import { PlaceSelect } from "../../product/site-fields"
 
 const ALL_TEETH = "all"
 export interface TimelineProps {
@@ -182,9 +175,10 @@ function OdontogramCard({
   onOdontogramSelect: (tooth: number) => void
 }) {
   const tooth = item.toothNumbers[0]
+  const site = productUi().site
   const meta: string[] = []
-  if (item.condition) meta.push(conditionLabel(item.condition))
-  if (item.surface) meta.push(surfaceLabel(item.surface))
+  if (item.condition) meta.push(site?.findingName(item.condition) ?? item.condition)
+  if (item.surface) meta.push(site?.partName(item.surface) ?? item.surface)
   if (item.status) meta.push(statusLabel(item.status))
   return (
     <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
@@ -541,15 +535,8 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
     return [...ordered.entries()]
   }, [items, mode, timezone, locale])
 
-  const toothItems: Record<string, string> = useMemo(
-    () => ({
-      [ALL_TEETH]: "Todas las piezas",
-      ...Object.fromEntries(
-        [...FDI_ADULT, ...FDI_CHILD].map((n) => [String(n), `Pieza ${n}`] as const),
-      ),
-    }),
-    [],
-  )
+  // El filtro por lugar y los hechos propios del producto (odentIA: la pieza y el odontograma firmado).
+  const { site, history } = productUi()
 
   const hasActiveFilter = filter !== "todo" || tooth !== ALL_TEETH || order !== "desc"
 
@@ -571,37 +558,16 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
         </div>
       </div>
 
-      <Field className="max-w-64">
-        <FieldLabel htmlFor={toothId}>Pieza</FieldLabel>
-        <Select
-          items={toothItems}
-          value={toothItems[tooth] ? tooth : ALL_TEETH}
-          onValueChange={(value) => setTooth(value ?? ALL_TEETH)}
-        >
-          <SelectTrigger id={toothId} aria-label="Pieza">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_TEETH}>Todas las piezas</SelectItem>
-            <SelectGroup>
-              <SelectLabel>Permanentes</SelectLabel>
-              {FDI_ADULT.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  Pieza {n}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel>Temporales</SelectLabel>
-              {FDI_CHILD.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  Pieza {n}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </Field>
+      {site ? (
+        <Field className="max-w-64">
+          <FieldLabel htmlFor={toothId}>{site.placeLabel}</FieldLabel>
+          <PlaceSelect
+            id={toothId}
+            value={toothNumber}
+            onChange={(place) => setTooth(place != null ? String(place) : ALL_TEETH)}
+          />
+        </Field>
+      ) : null}
 
       {feed.isPending ? (
         <p className="text-sm text-muted-foreground">Cargando historia clínica…</p>
@@ -679,10 +645,8 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
                 locale={locale}
                 onOdontogramSelect={onOdontogramSelect}
               />
-            ) : item.type === "odontogram_signed" ? (
-              <div key={item.id} className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
-                <SignedOdontogramFact patientId={patientId} assessmentId={item.refId} />
-              </div>
+            ) : history.owns(item.type) ? (
+              <history.Item key={item.id} item={item} patientId={patientId} />
             ) : item.type === "document" ? (
               <DocumentCard key={item.id} patientId={patientId} item={item} />
             ) : item.type === "anamnesis" ? (

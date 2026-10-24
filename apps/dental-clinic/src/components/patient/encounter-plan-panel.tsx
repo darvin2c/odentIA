@@ -10,7 +10,6 @@
  * persona, que se crea solo con la primera indicación.
  */
 import { formatMoney } from "@odentia/clinical"
-import { conditionLabel, surfaceLabel, surfacesForTooth } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -35,7 +34,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import { type OdontogramState, type PlanItem, planStatusLabel } from "../../lib/patients"
+import { type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
@@ -44,7 +43,8 @@ import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
 import { usePlanNextStep } from "./plan/plan-next"
 import { ServicePicker } from "./service-picker"
-import { ToothSelector } from "../dental/tooth-selector"
+import { productUi } from "../../product/product-ui"
+import { partNames } from "../../product/site-fields"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -295,16 +295,10 @@ function IndicationForm({
   const [cie, setCie] = useState("")
   const [error, setError] = useState<string | null>(null)
 
-  const odontogramQuery = useQuery({
-    queryKey: ["odontogram", patientId],
-    queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
-    enabled: canRead,
-  })
+  const vigentes = productUi().useFindings(patientId, canRead)
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
   const tooth = teeth[0] ?? null
-  const findings = (odontogramQuery.data?.data.history ?? []).filter(
-    (entry) => !entry.voidedAt && tooth != null && entry.toothNumber === tooth,
-  )
+  const findings = vigentes.filter((entry) => tooth != null && entry.toothNumber === tooth)
 
   const addMutation = useMutation({
     mutationFn: async () => {
@@ -359,7 +353,9 @@ function IndicationForm({
   })
 
   const blocked = disabled || addMutation.isPending
-  const validSurfaces = tooth != null ? surfacesForTooth(tooth).map(String) : []
+  // El «dónde» del producto (odentIA: la pieza y sus caras).
+  const site = productUi().site
+  const validSurfaces = tooth != null ? (site?.partsOf(tooth) ?? []).map(String) : []
   const toggleSurface = (surface: string): void => {
     setSurfaces((prev) =>
       prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
@@ -389,10 +385,10 @@ function IndicationForm({
             </SelectContent>
           </Select>
         </Field>
-        {(scope === "tooth" || scope === "surfaces") && (
+        {site && (scope === "tooth" || scope === "surfaces") && (
           <Field>
-            <FieldLabel>Pieza</FieldLabel>
-            <ToothSelector
+            <FieldLabel>{site.placeLabel}</FieldLabel>
+            <site.PlacesPicker
               value={teeth.slice(0, 1)}
               onChange={(next) => {
                 setTeeth(next.slice(0, 1))
@@ -417,8 +413,8 @@ function IndicationForm({
               <SelectContent>
                 {findings.map((entry) => (
                   <SelectItem key={entry.id} value={entry.id}>
-                    {conditionLabel(entry.condition)}
-                    {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""}
+                    {site?.findingName(entry.condition) ?? entry.condition}
+                    {entry.surface ? ` · ${partNames([entry.surface])}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -469,7 +465,7 @@ function IndicationForm({
                   disabled={blocked}
                   onCheckedChange={() => toggleSurface(surface)}
                 />
-                {surfaceLabel(surface)}
+                {partNames([surface])}
               </FieldLabel>
             ))}
           </div>

@@ -52,16 +52,9 @@ import {
   takeOverEncounterApi,
   voidEncounterApi,
 } from "../../lib/encounters"
-import {
-  type Encounter,
-  type EncounterDetail,
-  hcLabel,
-  type OdontogramState,
-  type PatientFull,
-} from "../../lib/patients"
+import { type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
-import { OdontogramStudio } from "../dental/odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
 import { useAgentPanelDockBlocker } from "../agent-panel"
@@ -74,18 +67,13 @@ import { ConsentSigningScreen, useSignAs } from "./consent-signing"
 import { EncounterClosingDialog } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
-import {
-  EncounterPeriodontalBlock,
-  PeriodontalCaptureHost,
-  periodontalBlockSummary,
-  useEncounterPeriodontal,
-} from "../dental/periodontal/encounter-periodontal"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
 import { PatientClinicalStrip } from "./patient-header"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -117,25 +105,24 @@ type NoteKey = "presentIllness" | "illnessDuration" | "prognosis"
  * contenido registrado se siguen mostrando al recargar; los agregados vacíos se
  * descartan sin tocar datos.
  */
-type SectionKey =
+type CommonSectionKey =
   | "consulta"
   | "hallazgos"
   | "examen"
-  | "odontograma"
-  | "periodontograma"
   | "procedimientos"
   | "plan"
   | "documentos"
   | "evolucion"
+/** Un bloque común o uno del producto (odentIA: «odontograma» y «periodontograma»), que van después del examen. */
+type SectionKey = CommonSectionKey | (string & {})
 
 /**
  * Bloque donde vive cada clase de sugerencia del dictado, y cómo se resume el
  * bloque cuando solo tiene sugerencias: sugerido no es registrado.
  */
-const SECTION_DICTATION: Partial<Record<SectionKey, { kinds: DictationKind[]; onlySuggested?: string }>> = {
+const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind[]; onlySuggested?: string }>> = {
   consulta: { kinds: ["nota"] },
-  // Lo dictado de una pieza se revisa en su bloque y entra como al tocarla (issue 109).
-  odontograma: { kinds: ["odontograma"], onlySuggested: "Sin hallazgos en esta atención" },
+  // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
   plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
@@ -456,15 +443,6 @@ export function EncounterEditor({
     }
   }, [])
 
-  const dentalQuery = useQuery({
-    queryKey: ["odontogram", patientId],
-    queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
-    enabled: canRead,
-  })
-  // El periodontograma de esta atención, si se empezó (issue 49).
-  const periodontal = useEncounterPeriodontal(patientId, encounterId)
-  // La captura se monta aquí, no en su bloque: sobrevive a que la superficie lateral cambie de forma.
-  const [periodontalCapture, setPeriodontalCapture] = useState<string | null>(null)
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
@@ -735,13 +713,16 @@ export function EncounterEditor({
   })
   // Sugerencias que el odontólogo aún no confirmó ni descartó.
   const dictationPending = dictation.enabled ? dictation.pending : 0
+  /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
+  const dictationOf = (key: SectionKey) =>
+    SECTION_DICTATION[key as CommonSectionKey] ?? product.blocks.find((block) => block.key === key)?.dictation
   const dictationCount = (key: SectionKey): number => {
-    const kinds = SECTION_DICTATION[key]?.kinds ?? []
+    const kinds = dictationOf(key)?.kinds ?? []
     return dictation.enabled ? dictation.suggestions.filter((item) => kinds.includes(item.kind)).length : 0
   }
   /** ¿Tiene el bloque algo quitado por voz que aún se puede deshacer? Entonces se muestra. */
   const dictationRemoved = (key: SectionKey): boolean => {
-    const kinds = SECTION_DICTATION[key]?.kinds ?? []
+    const kinds = dictationOf(key)?.kinds ?? []
     return dictation.enabled && dictation.removedByVoice.some((item) => kinds.includes(item.kind))
   }
 
@@ -928,6 +909,20 @@ export function EncounterEditor({
   const mode = useDetailMode()
 
   const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
+  // Los bloques del producto (odentIA: Odontograma y Periodontograma), después del examen.
+  const product = productUi().encounter.useBlocks({
+    patientId,
+    encounterId,
+    detail,
+    birthDate: patient.patient.birthDate,
+    canRead,
+    canWrite,
+    locked,
+    writable: canWrite && attending && !finalizing && !voiding,
+    flush,
+    onChanged: handleChildChanged,
+    onPendingChange: handlePendingChange,
+  })
 
   const followUps = (followUpsQuery.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
@@ -971,23 +966,7 @@ export function EncounterEditor({
           .join(" · ") || "Sin examen registrado",
       empty: examination === null && Object.values(vitals).every((v) => v.trim() === ""),
     },
-    {
-      key: "odontograma",
-      title: "Odontograma",
-      description: "Hallazgos por pieza sobre el odontograma del paciente.",
-      summary:
-        detail.odontogramEntries.length === 0
-          ? "Sin hallazgos en esta atención"
-          : `${detail.odontogramEntries.length} hallazgo(s) de esta atención`,
-      empty: detail.odontogramEntries.length === 0,
-    },
-    {
-      key: "periodontograma",
-      title: "Periodontograma",
-      description: "Sondaje de seis sitios por pieza, sangrado, placa y la clasificación de 2017. Queda fijo al firmar.",
-      summary: periodontalBlockSummary(periodontal.item),
-      empty: periodontal.item === null,
-    },
+    ...product.blocks.map(({ key, title, description, summary, empty }) => ({ key, title, description, summary, empty })),
     {
       key: "hallazgos",
       title: "Diagnóstico",
@@ -1482,7 +1461,7 @@ export function EncounterEditor({
     </div>
   )
 
-  const sectionBody: Record<SectionKey, React.ReactNode> = {
+  const sectionBody: Record<CommonSectionKey, React.ReactNode> = {
     consulta: consultaBody,
     hallazgos: (
       <EncounterDiagnoses
@@ -1496,45 +1475,6 @@ export function EncounterEditor({
       />
     ),
     examen: examenBody,
-    odontograma: (
-      <div className="flex min-w-0 flex-col gap-3">
-        {dentalQuery.isLoading && (
-          <p className="text-sm text-muted-foreground">Cargando odontograma…</p>
-        )}
-        {dentalQuery.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {dentalQuery.error instanceof ApiError && dentalQuery.error.shape.message
-              ? dentalQuery.error.shape.message
-              : "No se pudo cargar el odontograma."}
-          </p>
-        )}
-        {dentalQuery.data && (
-          <OdontogramStudio
-            patientId={patientId}
-            state={dentalQuery.data.data}
-            compact
-            birthDate={patient.patient.birthDate}
-            encounterId={encounterId}
-            onChanged={handleChildChanged}
-            beforeWrite={flush}
-            onPendingChange={handlePendingChange}
-            disabled={locked}
-            readOnly={!canWrite}
-          />
-        )}
-      </div>
-    ),
-    periodontograma: (
-      <EncounterPeriodontalBlock
-        patientId={patientId}
-        encounterId={encounterId}
-        // No `locked`: la captura abierta no se cierra mientras otro bloque guarda.
-        disabled={!canWrite || !attending || finalizing || voiding}
-        beforeWrite={flush}
-        onChanged={handleChildChanged}
-        onCapture={setPeriodontalCapture}
-      />
-    ),
     procedimientos: (
       <EncounterProcedures
         patientId={patientId}
@@ -1592,7 +1532,8 @@ export function EncounterEditor({
       description: openMeta.description,
       onClose: closeSection,
     }
-    const body = sectionBody[openSection]
+    const body =
+      sectionBody[openSection as CommonSectionKey] ?? product.blocks.find((block) => block.key === openSection)?.content
     if (FORM_SECTIONS.includes(openSection)) {
       // Solo guardado automático: el bloque no lleva botón de guardar.
       const form = {
@@ -1762,7 +1703,7 @@ export function EncounterEditor({
                 <h2 className="font-heading text-base font-medium">{section.title}</h2>
                 <p className="text-sm text-muted-foreground">
                   {dictationCount(section.key) > 0
-                    ? `${(section.empty && SECTION_DICTATION[section.key]?.onlySuggested) || section.summary} · ${dictationCount(section.key)} ${dictationCount(section.key) === 1 ? "sugerencia" : "sugerencias"}`
+                    ? `${(section.empty && dictationOf(section.key)?.onlySuggested) || section.summary} · ${dictationCount(section.key)} ${dictationCount(section.key) === 1 ? "sugerencia" : "sugerencias"}`
                     : section.summary}
                 </p>
               </div>
@@ -1787,7 +1728,7 @@ export function EncounterEditor({
                   </Button>
                 ) : null}
               </div>
-              {(SECTION_DICTATION[section.key]?.kinds ?? []).map((kind) => (
+              {(dictationOf(section.key)?.kinds ?? []).map((kind) => (
                 <DictationBlockSuggestions key={kind} session={dictation} kind={kind} />
               ))}
               {/* Al registrar o indicar un servicio que lo pide, se propone sin abrir el bloque. */}
@@ -2036,13 +1977,12 @@ export function EncounterEditor({
         signAs={signAs.text}
         who={signer}
         consents={unsignedConsents}
-        odontogram={closingQuery.data?.data.odontogram ?? null}
-        periodontal={closingQuery.data?.data.periodontal ?? null}
+        closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}
-        onKeepProbing={() => {
+        onOpenBlock={(key) => {
           setConfirmOpen(false)
           setContextOpen(false)
-          setOpenSection("periodontograma")
+          setOpenSection(key)
         }}
         startedAt={encounter.startedAt}
         endTime={endTime}
@@ -2060,16 +2000,7 @@ export function EncounterEditor({
       >
         <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
       </EncounterClosingDialog>
-      {periodontalCapture ? (
-        <PeriodontalCaptureHost
-          patientId={patientId}
-          chartId={periodontalCapture}
-          onClose={() => {
-            setPeriodontalCapture(null)
-            void handleChildChanged()
-          }}
-        />
-      ) : null}
+      {product.overlay}
       <ConsentSigningScreen
         open={signingDocs !== null}
         documents={signingDocs ?? []}

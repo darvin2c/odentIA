@@ -1,5 +1,4 @@
 import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel } from "@odentia/clinical"
-import { surfaceLabel } from "@odentia/dental"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
@@ -9,7 +8,8 @@ import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { DiagnosisPicker } from "./diagnosis-picker"
-import { type ToothSite, ToothSiteSelector } from "../dental/tooth-site-selector"
+import type { PlaceWithParts } from "../../product/product-ui"
+import { partNames, SiteField } from "../../product/site-fields"
 
 /** Presuntivo o definitivo (FHIR verificationStatus); «ya diagnosticado antes» lo marca el sistema. */
 const TYPES = DIAGNOSIS_VERIFICATION
@@ -22,7 +22,7 @@ function mutationMessage(err: unknown, fallback: string): string {
 /** «36 · Oclusal, Mesial» o «Sin pieza». */
 export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">) {
   if (dx.toothNumber === null) return "Sin pieza"
-  const surfaces = dx.surfaces.map(surfaceLabel).join(", ")
+  const surfaces = partNames(dx.surfaces)
   return surfaces ? `${dx.toothNumber} · ${surfaces}` : String(dx.toothNumber)
 }
 
@@ -60,7 +60,7 @@ export function EncounterDiagnoses({
   const [description, setDescription] = useState("")
   // Sin valor por defecto: afirmar la certeza es una decisión explícita del clínico.
   const [diagnosisType, setDiagnosisType] = useState<string>("")
-  const [site, setSite] = useState<ToothSite>({ toothNumber: null, surfaces: [] })
+  const [site, setSite] = useState<PlaceWithParts>({ toothNumber: null, surfaces: [] })
   const [note, setNote] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -286,7 +286,7 @@ export function EncounterDiagnoses({
                 tenía, el sistema lo anota solo.
               </p>
             </div>
-            <ToothSiteSelector value={site} onChange={setSite} withSurfaces disabled={busy} />
+            <SiteField value={site} onChange={setSite} withSurfaces disabled={busy} />
             <Field>
               <FieldLabel htmlFor={`${typeGroupId}-note`}>
                 Hallazgos que lo sustentan (opcional)

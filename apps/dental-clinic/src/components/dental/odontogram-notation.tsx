@@ -7,7 +7,7 @@ import {
   variantLabel,
 } from "@odentia/dental"
 import { createContext, useContext } from "react"
-import { useDentalProfile } from "../../lib/org"
+import { useDentalProfile } from "../../lib/dental/profile"
 
 /**
  * Cómo se nombra un hallazgo según el país de la clínica (ADR 0036): con

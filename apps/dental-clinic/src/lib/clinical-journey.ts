@@ -11,15 +11,7 @@ import type { FollowUpStatus, ResponsibilityKind } from "@odentia/clinical"
 import type { AppointmentStatus } from "./agenda"
 import { ApiError, apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
-import type {
-  Encounter,
-  OdontogramEntry,
-  PatientDocument,
-  PlanItem,
-  ProcedureItem,
-  TreatmentNextAction,
-  TreatmentPlan,
-} from "./patients"
+import type { Encounter, PatientDocument, PlanItem, ProcedureItem, SiteFinding, TreatmentNextAction, TreatmentPlan } from "./patients"
 import { dayMinutesIn, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
@@ -485,7 +477,7 @@ export interface TreatmentJourney {
   plan: TreatmentPlan
   originEncounter: Encounter | null
   /** Hallazgo del odontograma que motivó la indicación, si se registró. */
-  originFinding: OdontogramEntry | null
+  originFinding: SiteFinding | null
   replacedBy: PlanItem[]
   supersedes: PlanItem | null
   budgetHistory: Array<{ budget: JourneyBudget; line: JourneyBudgetLine }>

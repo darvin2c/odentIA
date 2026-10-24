@@ -1,5 +1,4 @@
 import { ContactScreenBanner } from "../../components/inbox-contact-screen"
-import { FDI_ADULT, FDI_CHILD } from "@odentia/dental"
 import {
   Button,
   ScrollArea,
@@ -35,9 +34,7 @@ import { SectionSideNav } from "../../components/person/section-side-nav"
 import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
 import { DocumentosSection } from "../../components/patient/documentos-panel"
 import { HistoriaTab } from "../../components/patient/historia-tab"
-import { OdontogramaTab } from "../../components/dental/odontograma-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
-import { PeriodontogramaTab } from "../../components/dental/periodontal/periodontograma-tab"
 import { PlanTab } from "../../components/patient/plan-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { PersonChannels } from "../../components/person/person-channels"
@@ -72,6 +69,7 @@ import type { PatientFull, PatientSummary } from "../../lib/patients"
 import { personOfPatientKey, rememberPatientSection, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
+import { productUi } from "../../product/product-ui"
 
 const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
 
@@ -90,6 +88,7 @@ const FILTER_KEYS = [
 export type PersonSearch = {
   /** Sección abierta. La pestaña se deriva de ella (ver `lib/patient-areas`). */
   tab?: PatientSectionId
+  /** El lugar elegido (odentIA: la pieza), si el producto registra dónde. */
   tooth?: number
   planId?: string
   budgetId?: string
@@ -99,7 +98,7 @@ export type PersonSearch = {
   tipo?: DocumentFilter
   /** Viene de registrarlo con «Atender ahora»: abre «Atender sin cita». */
   atender?: boolean
-  /** El periodontograma abierto (desde Historia o el Resumen). */
+  /** Lo abierto dentro de una sección del producto (odentIA: el periodontograma, desde Historia o el Resumen). */
   periodontograma?: string
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
 
@@ -118,7 +117,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
     ...filters,
     ...(tab ? { tab } : {}),
     ...(tipo ? { tipo } : {}),
-    ...(FDI_ADULT.includes(tooth) || FDI_CHILD.includes(tooth) ? { tooth } : {}),
+    ...(productUi().site?.isPlace(tooth) ? { tooth } : {}),
     planId: searchId(search.planId),
     budgetId: searchId(search.budgetId),
     documentId: searchId(search.documentId),
@@ -216,9 +215,6 @@ function PersonPageRoute() {
       },
     })
   }
-  // El recorrido de un tratamiento vive en Plan, al lado de sus fases (ADR 0034).
-  const openItem = (nextItemId: string) => openTab("plan", undefined, nextItemId)
-
   if (!can("patients.read") || (person && section === null))
     return (
       <PageShell>
@@ -324,28 +320,6 @@ function PersonPageRoute() {
             }
           />
         )
-      case "odontograma":
-        return withSubsections(
-          needsPatient((id, full) => (
-            <OdontogramaTab
-              patientId={id}
-              initialTooth={tooth}
-              birthDate={full.patient.birthDate}
-              onOpenItem={openItem}
-              onOpenPlans={() => openTab("plan")}
-            />
-          )),
-        )
-      case "periodontograma":
-        return withSubsections(
-          patientId ? (
-            <PeriodontogramaTab
-              patientId={patientId}
-              initialChartId={periodontograma}
-              onToothHistory={(next) => openTab("historia", next)}
-            />
-          ) : null,
-        )
       case "plan":
         // Una sola sección para todos: cada rol ve lo suyo dentro (ADR 0034).
         return patientId ? (
@@ -393,6 +367,21 @@ function PersonPageRoute() {
       case "pedidos":
         return patientId ? <DataRequestsPanel patientId={patientId} /> : null
     }
+    // Las secciones que agrega el producto (odentIA: Odontograma y Periodontograma).
+    const own = productUi().record.sections.find((item) => item.id === section)
+    if (!own || !patientId) return null
+    const props = {
+      patientId,
+      place: tooth,
+      opened: periodontograma,
+      openSection: (next: string, options?: { place?: number; itemId?: string }) =>
+        openTab(next, options?.place, options?.itemId),
+    }
+    return withSubsections(
+      own.needsRecord
+        ? needsPatient((id, full) => own.render({ ...props, patientId: id, record: full }))
+        : own.render({ ...props, record: patientDetail ?? null }),
+    )
   }
 
   // En móvil las filas de pestañas ocupan media pantalla: un único selector

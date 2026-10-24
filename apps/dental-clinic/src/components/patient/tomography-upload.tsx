@@ -21,7 +21,7 @@ import {
 } from "../../lib/imaging-upload"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
-import { ToothSelector } from "../dental/tooth-selector"
+import { PlacesField } from "../../product/site-fields"
 
 /** Tope por tomografía (decisión 4 del lienzo; lo valida también la API). */
 export const TOMOGRAPHY_MAX_BYTES = 1024 ** 3
@@ -143,7 +143,7 @@ export function TomographyReview({
         <dt className="text-muted-foreground">Tamaño</dt>
         <dd className="font-medium">{formatBytes(candidate.totalBytes)}</dd>
       </dl>
-      <ToothSelector value={teeth} onChange={onTeethChange} label="Piezas (opcional)" />
+      <PlacesField value={teeth} onChange={onTeethChange} optional />
       {tooBig && (
         <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
           Pesa {formatBytes(candidate.totalBytes)} y el máximo por tomografía es 1 GB. Pide al centro
