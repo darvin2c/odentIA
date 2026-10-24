@@ -18,7 +18,7 @@ import { surface } from "./surface"
  * se ve con su marca y dice sus palabras. Su ficha (entrega 5) tiene el examen
  * por sistemas y los signos vitales en el tiempo. Lo indicado queda aceptado
  * sin presupuesto, Reportes cuenta la consulta cobrada y un control puede
- * repetirse (entrega 7).
+ * repetirse (entrega 7). Su catálogo es el de un consultorio (entrega 8).
  */
 
 /** Una llamada a la API desde la página, con la sesión de su dominio. */
@@ -587,5 +587,66 @@ test("latidIA: un control que se repite deja indicado el siguiente al completarl
   await expect(controls.getByText(/^Se repite cada/)).toHaveCount(0)
   await expect(controls.getByRole("button", { name: "Dejar de repetir" })).toHaveCount(0)
   await shot("control-detenido")
+  await context.close()
+})
+
+test("latidIA: la biblioteca de un consultorio con su código CPMS, sus cinco especialidades y un servicio propio", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(240_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { slug } = await openConsultorio(page, vela)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Agregar servicios: solo lo de un consultorio, cada uno con su código CPMS.
+  await gotoHydrated(page, latidiaUrl(slug, "/services/biblioteca?vista=biblioteca"))
+  await expect(page.getByRole("heading", { level: 1, name: "Agregar servicios" })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "Consulta de medicina general" }).first()).toContainText("CPMS 99201")
+  await expect(page.getByText(/Profilaxis|Exodoncia/)).toHaveCount(0)
+  await shot("biblioteca")
+  await gotoHydrated(page, latidiaUrl(slug, "/services/biblioteca?vista=biblioteca&q=electrocardiograma"))
+  await expect(page.getByRole("row").filter({ hasText: "Electrocardiograma" }).first()).toContainText("CPMS 93000")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("biblioteca-telefono")
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("biblioteca-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // Un servicio propio: su especialidad y su código CPMS, sin «Dónde se hace».
+  await page.getByRole("button", { name: "Crear un servicio propio" }).click()
+  const own = surface(page, { name: "Servicio propio", exact: true })
+  await expect(own.getByText("Dónde se hace", { exact: true })).toHaveCount(0)
+  await own.getByLabel("Nombre", { exact: true }).fill("Control de hipertensión")
+  await chooseOption(own.getByLabel("Especialidad", { exact: true }), { label: "Medicina interna" })
+  await own.getByLabel("Precio", { exact: true }).fill("90")
+  await own.getByRole("combobox", { name: "Código CPMS" }).fill("99215")
+  await page.getByRole("option", { name: /^99215 / }).click()
+  await shot("servicio-propio")
+  await own.getByRole("button", { name: "Guardar y activar" }).click()
+  await expect(own).toBeHidden()
+  await expect(page.getByText("«Control de hipertensión» ya está activo entre tus servicios")).toBeVisible()
+
+  // Servicios y precios: sin la columna «Ámbito», que en un consultorio siempre diría «General».
+  await gotoHydrated(page, latidiaUrl(slug, "/services"))
+  await expect(page.getByRole("row").filter({ hasText: "Control de hipertensión" })).toBeVisible()
+  await expect(page.getByRole("columnheader", { name: "Ámbito" })).toHaveCount(0)
+
+  // Nace con las cinco especialidades de latidIA (decisión 3).
+  await gotoHydrated(page, latidiaUrl(slug, "/settings/specialties"))
+  for (const name of ["Medicina general", "Medicina familiar", "Medicina interna", "Pediatría", "Ginecología y obstetricia"]) {
+    await expect(page.getByText(name, { exact: true }).first()).toBeVisible()
+  }
+  await shot("especialidades")
+  await gotoHydrated(page, latidiaUrl(slug, "/settings"))
+  const rules = page.getByRole("group", { name: "Normas de Perú" })
+  await expect(rules).toContainText("CPMS, obligatoria (RM 550-2023-MINSA)")
+  await expect(rules).toContainText("Lista general de latidIA")
   await context.close()
 })

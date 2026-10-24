@@ -1004,25 +1004,28 @@ function OwnServiceDrawer({
         </ChoiceSelect>
         {submitted && specialtyIssue ? <FieldError>{specialtyIssue}</FieldError> : null}
       </Field>
-      <Field>
-        <span id={`${id}-donde`} className="text-sm font-medium">
-          Dónde se hace
-        </span>
-        <RadioChips
-          labelledBy={`${id}-donde`}
-          value={scope}
-          options={SERVICE_PLACE_OPTIONS}
-          onChange={(next) => {
-            setScope(next)
-            // Lo que deja en la pieza depende de dónde se hace.
-            setLeavesCondition("")
-            setLeavesVariant("")
-          }}
-        />
-        <p className="text-xs text-muted-foreground">
-          Así la atención sabe qué pedir al registrarlo.
-        </p>
-      </Field>
+      {/* Sin «dónde» (latidIA, decisión 4 del issue 229), todo servicio es general. */}
+      {productUi().site ? (
+        <Field>
+          <span id={`${id}-donde`} className="text-sm font-medium">
+            Dónde se hace
+          </span>
+          <RadioChips
+            labelledBy={`${id}-donde`}
+            value={scope}
+            options={SERVICE_PLACE_OPTIONS}
+            onChange={(next) => {
+              setScope(next)
+              // Lo que deja en la pieza depende de dónde se hace.
+              setLeavesCondition("")
+              setLeavesVariant("")
+            }}
+          />
+          <p className="text-xs text-muted-foreground">
+            Así la atención sabe qué pedir al registrarlo.
+          </p>
+        </Field>
+      ) : null}
       {leaves ? (
         <leaves.Field
           idPrefix={id}

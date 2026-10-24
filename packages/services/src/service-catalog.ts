@@ -259,11 +259,16 @@ async function assertOwnCode(
   return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
 
-async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
+/** Lo de la biblioteca del producto de la clínica: odentIA no ve lo de latidIA ni al revés (issue 229). */
+async function ofOrgProduct(tx: Db, orgId: string) {
+  return eq(treatmentTemplate.product, await orgProduct(tx, orgId))
+}
+
+async function requireTemplate(tx: Db, orgId: string, templateId: string): Promise<TreatmentTemplateRow> {
   const [row] = await tx
     .select(templateRowColumns())
     .from(treatmentTemplate)
-    .where(eq(treatmentTemplate.id, templateId))
+    .where(and(eq(treatmentTemplate.id, templateId), await ofOrgProduct(tx, orgId)))
     .limit(1)
   if (!row) throw notFound("Prestación de la biblioteca")
   if (!row.isActive)
@@ -416,7 +421,7 @@ export async function listTemplates(
   const release = list ? await currentCatalogRelease(tx, list.system) : null
   // Una lista obligatoria sin edición cargada no deja ofrecer nada.
   if (list?.required && !release) return { data: [], nextCursor: null, total: 0, codeList: { system: list.system, required: true } }
-  const conditions = [eq(treatmentTemplate.isActive, true), offeredHere(list, release)]
+  const conditions = [eq(treatmentTemplate.isActive, true), await ofOrgProduct(tx, orgId), offeredHere(list, release)]
   if (query.kind) conditions.push(eq(treatmentTemplate.kind, await assertKind(tx, orgId, query.kind)))
   const q = query.q?.trim()
   if (q) {
@@ -686,7 +691,7 @@ export async function createService(
   let leaves: ServiceLeaves | null
   const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
-    const tpl = await requireTemplate(tx, input.templateId)
+    const tpl = await requireTemplate(tx, orgId, input.templateId)
     await assertTemplateUsable(tx, list, tpl)
     if (input.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
@@ -828,7 +833,7 @@ export async function updateService(
       )
       fields.push("templateId:null")
     } else {
-      const tpl = await requireTemplate(tx, patch.templateId)
+      const tpl = await requireTemplate(tx, orgId, patch.templateId)
       await assertTemplateUsable(tx, list, tpl)
       if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
       // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
@@ -992,7 +997,7 @@ export async function fromTemplates(
   const templates = await tx
     .select(templateRowColumns())
     .from(treatmentTemplate)
-    .where(inArray(treatmentTemplate.id, ids))
+    .where(and(inArray(treatmentTemplate.id, ids), await ofOrgProduct(tx, orgId)))
   if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
   const list = await orgServiceList(tx, orgId)
   for (const tpl of templates) {
@@ -1193,7 +1198,14 @@ export async function listMostUsedServices(
   const release = list ? await currentCatalogRelease(tx, list.system) : null
   if (list?.required && !release) return []
   const rows = (await libraryQuery(tx, list, release)
-    .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.isCommon, true), offeredHere(list, release)))
+    .where(
+      and(
+        eq(treatmentTemplate.isActive, true),
+        eq(treatmentTemplate.isCommon, true),
+        await ofOrgProduct(tx, orgId),
+        offeredHere(list, release),
+      ),
+    )
     .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))) as LibraryRow[]
   if (rows.length === 0) return []
   const owned = await tx

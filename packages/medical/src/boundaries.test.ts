@@ -39,6 +39,9 @@ const OUTSIDE = [
 const MEDICAL_INSIDE = [
   "packages/services/src/medical/",
   "packages/services/src/products.ts",
+  // La biblioteca de latidIA en la base, y donde se une con la de odentIA.
+  "packages/db/src/medical/",
+  "packages/db/src/products.ts",
   "packages/services/src/dental/seed-demo.ts",
 ]
 

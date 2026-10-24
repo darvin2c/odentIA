@@ -2007,7 +2007,14 @@ const libraryForSeed = await db
   .from(treatmentTemplate)
   // Dental Smile es del Perú: sin las variantes que solo separa la norma de otro
   // país (`coded_only`), que aquí no tienen código CPMS y no se ofrecen.
-  .where(and(eq(treatmentTemplate.isActive, true), eq(treatmentTemplate.codedOnly, false)))
+  // Solo la biblioteca de odentIA: la de latidIA es de su demo.
+  .where(
+    and(
+      eq(treatmentTemplate.isActive, true),
+      eq(treatmentTemplate.codedOnly, false),
+      eq(treatmentTemplate.product, "dental"),
+    ),
+  )
   // Primero los «más usados», como los agregaría una clínica (tablero 7b).
   .orderBy(desc(treatmentTemplate.isCommon), asc(treatmentTemplate.key))
   .limit(140)

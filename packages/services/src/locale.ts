@@ -164,7 +164,7 @@ export async function roomWord(tx: Db, orgId: string): Promise<ProductWords["roo
  * dirección y odontograma. Sin país, el núcleo internacional.
  */
 export async function orgClinicalProfile(tx: Db, orgId: string): Promise<ClinicalCountryProfile> {
-  return clinicalProfileFor(await findOrgCountry(tx, orgId))
+  return clinicalProfileFor(await findOrgCountry(tx, orgId), await orgProduct(tx, orgId))
 }
 
 /**

@@ -894,6 +894,9 @@ importers:
       '@odentia/dental':
         specifier: workspace:*
         version: link:../dental
+      '@odentia/medical':
+        specifier: workspace:*
+        version: link:../medical
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)

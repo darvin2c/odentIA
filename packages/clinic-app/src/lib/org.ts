@@ -11,6 +11,7 @@ import {
   type TaxRate,
 } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
+import { productUi } from "../product/product-ui"
 import { apiFetch } from "./api"
 
 /**
@@ -146,7 +147,8 @@ export function useOrgProfile() {
  */
 export function useClinicalProfile(): ClinicalCountryProfile {
   const profile = useOrgProfile()
-  return clinicalProfileFor(profile.data?.countryCode)
+  // La lista de servicios es la del producto de la app: la misma regla que el servidor.
+  return clinicalProfileFor(profile.data?.countryCode, productUi().product)
 }
 
 /**

@@ -18,6 +18,7 @@
  */
 
 import type { DiagnosisSystemKey } from "./diagnoses.js"
+import type { ClinicalProduct } from "./products.js"
 import type { MaritalStatus } from "./identity.js"
 
 /** Tipos de documento de identidad. Las etiquetas valen en cualquier clínica. */
@@ -156,6 +157,11 @@ export interface ServiceListProfile {
   required: boolean
   /** La norma que la fija, para «Normas de tu país». */
   norm: string
+  /**
+   * Los productos cuyos servicios están en ella; sin él, todos. Una lista
+   * solo odontológica no vale para un consultorio médico (issue 229).
+   */
+  products?: readonly ClinicalProduct[]
 }
 
 export interface DiagnosisProfile {
@@ -360,6 +366,7 @@ const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile }> = {
       listName: "el tarifario del Colegio de Dentistas",
       required: false,
       norm: "tarifas mínimas del Colegio, La Gaceta 19 de 2025",
+      products: ["dental"],
     },
   },
   // Adaptación propia del MINSAL: el mismo número puede ser otro acto que en
@@ -372,6 +379,8 @@ const SERVICES_BY_COUNTRY: Record<string, { services: ServiceListProfile }> = {
       listName: "la lista CIE-9-MC del MINSAL",
       required: false,
       norm: "CIE-9-MC 2024 del MINSAL",
+      // Se cargaron solo los capítulos y rúbricas odontológicos.
+      products: ["dental"],
     },
   },
 }
@@ -385,18 +394,24 @@ export function normalizeCountryCode(country: string | null | undefined): string
 
 /**
  * Lo que vale en las clínicas de un país. Sin país, o sin perfil propio, el
- * núcleo internacional: nunca se asume el de otro país.
+ * núcleo internacional: nunca se asume el de otro país. Con el producto, la
+ * lista de servicios es la que tiene los suyos (la del Colegio de Dentistas
+ * de Costa Rica no vale para un consultorio médico); sin él, la del país.
  */
-export function clinicalProfileFor(country: string | null | undefined): ClinicalCountryProfile {
+export function clinicalProfileFor(
+  country: string | null | undefined,
+  product?: ClinicalProduct,
+): ClinicalCountryProfile {
   const code = normalizeCountryCode(country)
   const base = code && PROFILES[code] ? PROFILES[code] : CORE
   const diagnosis = code && !PROFILES[code] && DIAGNOSIS_BY_COUNTRY[code] ? DIAGNOSIS_BY_COUNTRY[code] : base.diagnosis
   const lists = code && !PROFILES[code] ? SERVICES_BY_COUNTRY[code] : undefined
+  const services = lists ? lists.services : base.services
   return {
     country: code,
     ...base,
     diagnosis,
-    services: lists ? lists.services : base.services,
+    services: services && product && services.products && !services.products.includes(product) ? null : services,
   }
 }
 
