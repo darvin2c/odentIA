@@ -65,7 +65,7 @@ export async function extractDictation(
 
   const model = deps.createModel
     ? await deps.createModel(spec)
-    : await createConfiguredChatModel(spec, { explicitCache: true })
+    : await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
   const { read } = await askDictationModel(
     model,
     spec,
