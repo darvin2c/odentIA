@@ -22,6 +22,7 @@ import {
   type SaasPeriod,
   STORAGE_GB_BYTES,
 } from "./saas-actions.js"
+import { clinicCommissionCutoff } from "./saas-billing.js"
 import { saasTermsAt } from "./saas-commercial-terms.js"
 
 /**
@@ -157,8 +158,13 @@ export async function getClinicCostMargin(
       guaranteedUntil: saasSubscription.guaranteedUntil,
       activatedAt: saasSubscription.activatedAt,
       sellerName: saasSeller.displayName,
-      sellerRateBps: saasSeller.rateBps,
-      sellerActive: saasSeller.isActive,
+      // La comisión con la atribución congelada de la suscripción, como la que se paga (D5).
+      sellerId: saasSubscription.sellerId,
+      sellerRateBps: saasSubscription.sellerRateBps,
+      sellerEndedAt: saasSubscription.sellerEndedAt,
+      isDemo: saasSubscription.isDemo,
+      trialStartedAt: saasSubscription.trialStartedAt,
+      subscriptionCreatedAt: saasSubscription.createdAt,
     })
     .from(organization)
     .leftJoin(saasSubscription, eq(saasSubscription.organizationId, organization.id))
@@ -330,6 +336,14 @@ export async function getClinicCostMargin(
   const gb = (stored?.bytes ?? 0) / STORAGE_GB_BYTES
   const storageMicros = Math.round(gb * SAAS_STORAGE_COST_MICROS_PER_GB)
   const usageOf = (key: string) => bucket.get(key) ?? { micros: 0, calls: 0 }
+  // Las preguntas que pasan de las incluidas se pagaron con paquetes: su parte del costo va en esa fila.
+  const asked = questions?.n ?? 0
+  const included = plan && plan.argosPackMicros !== null ? Math.min(asked, plan.argosIncludedQuestions) : asked
+  const questionMicros = usageOf("preguntas").micros
+  const includedMicros = asked > 0 ? Math.round((questionMicros * included) / asked) : questionMicros
+  const packs = lineOf("argos:paquetes", "argos", "Paquetes de preguntas", of("preguntas"))
+  packs.costMicros = questionMicros - includedMicros
+  packs.marginPct = pct(packs.chargedCents * 10_000, packs.costMicros)
 
   const lines: CostLine[] = [
     ...SOFI_TIERS.map((tier) =>
@@ -339,14 +353,8 @@ export async function getClinicCostMargin(
       lineOf(`clio:${tier}`, "clio", TIER_LABEL[tier], of("consulta", tier), true),
     ),
     lineOf("argos:cita", "argos", "Citas recuperadas", of("cita")),
-    lineOf("argos:paquetes", "argos", "Paquetes de preguntas", of("preguntas")),
-    free(
-      "argos:preguntas",
-      "Argos · Preguntas",
-      questions?.n ?? 0,
-      usageOf("preguntas").micros,
-      "Incluidas en el plan",
-    ),
+    packs,
+    free("argos:preguntas", "Argos · Preguntas", included, includedMicros, "Incluidas en el plan"),
     free(
       "argos:mensajes",
       "Argos · Pedidos, recordatorios y mensajes para recuperar",
@@ -406,11 +414,17 @@ export async function getClinicCostMargin(
   const aiMicros = usage.reduce((sum, row) => sum + (row.costMicros ?? 0), 0)
   const costMicros = aiMicros + storageMicros + SAAS_FIXED_COST_MICROS
   const chargedMicros = chargedCents * 10_000
-  // La comisión del vendedor se calcula sobre lo que paga la clínica, sin impuesto.
-  const commissionCents =
-    sub?.sellerActive && sub.sellerRateBps
-      ? Math.round((chargedCents * sub.sellerRateBps) / 10_000)
-      : 0
+  // La comisión del vendedor se calcula sobre lo que paga la clínica, sin impuesto, con la misma
+  // regla que la que se paga: el % congelado en la suscripción, la atribución abierta y solo los
+  // primeros meses de la clínica (`clinicCommissionCutoff`).
+  const commissionable =
+    !!sub?.sellerId &&
+    sub.sellerRateBps !== null &&
+    !sub.sellerEndedAt &&
+    !sub.isDemo &&
+    sub.subscriptionCreatedAt !== null &&
+    period.end <= (await clinicCommissionCutoff(tx, { trialStartedAt: sub.trialStartedAt, createdAt: sub.subscriptionCreatedAt }))
+  const commissionCents = commissionable ? Math.floor((chargedCents * (sub?.sellerRateBps ?? 0)) / 10_000) : 0
   const aiShareBps = chargedMicros > 0 ? Math.round((aiMicros / chargedMicros) * 10_000) : null
   const founder = plan?.seatLimit !== null && plan?.seatLimit !== undefined
   return {
