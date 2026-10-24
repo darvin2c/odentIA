@@ -97,7 +97,9 @@ const totals = {
 }
 const now = new Date()
 
-for (const dictation of bank.dictados) {
+// `--solo=<id>`: solo ese dictado, y muestra lo que devolvió el modelo para ver por qué falla.
+const solo = arg("solo", "")
+for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo)) {
   const pending = (dictation.pendientes ?? []).map((label) => ({ label }))
   const { read, reply } = await askDictationModel(
     model,
@@ -115,6 +117,7 @@ for (const dictation of bank.dictados) {
     },
     MEDICAL_DICTATION_PROFILE,
   )
+  if (solo) console.log(JSON.stringify(read, null, 2))
   const meta = (reply.usage_metadata ?? {}) as {
     input_tokens?: number
     output_tokens?: number
