@@ -19,6 +19,7 @@ import {
   serviceCatalog,
   treatmentBudgetOption,
 } from "@odentia/db/schema/clinical"
+import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
@@ -64,6 +65,9 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   control: "Controles",
   odontograma: "Odontograma",
   receta: "Receta",
+  signos: "Signos vitales",
+  examen: "Examen físico",
+  descanso: "Descanso médico",
 }
 
 /** Operación de la atención que ejecuta cada clase de sugerencia al confirmarse. */
@@ -74,6 +78,9 @@ export const DICTATION_OPERATION = {
   control: "control.crear",
   odontograma: "odontograma.hallazgo",
   receta: "receta.medicamento",
+  signos: "atencion.signos",
+  examen: "atencion.examen",
+  descanso: "descanso.medico",
 } as const satisfies Record<DictationKind, keyof typeof OPERATIONS>
 
 export interface DictationDraft {
@@ -184,16 +191,24 @@ interface DictationScope {
   dictation: ProductDictation
   /** Lo que el producto leyó para revisar (`ProductDictation.context`). */
   product: unknown
+  /**
+   * Si una indicación puede traer otros caminos para que el paciente elija: son
+   * opciones de su presupuesto, así que solo donde lo indicado lo espera
+   * (odentIA; en latidIA lo indicado queda aceptado, decisión 15 del issue 229).
+   */
+  choices: boolean
 }
 
 async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
   const dictation = await requireDictatingProduct(tx, orgId)
+  const hooks = await productHooks(tx, orgId)
   return {
     services: await activeServices(tx, orgId),
     diagnosisSystem: await orgDiagnosisSystem(tx, orgId),
-    medications: (await productHooks(tx, orgId)).prescribing.catalog,
+    medications: hooks.prescribing.catalog,
     dictation,
     product: await dictation.context(tx, orgId),
+    choices: hooks.budgetRequired,
   }
 }
 
@@ -354,7 +369,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   if (draft.kind === "plan") {
     // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal.
     const { alternatives, ...main } = payload
-    const options = Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
+    const options = scope.choices && Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
     return settlePlan({ ...main, ...(options.length ? { options } : {}) }, services, dictation)
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
@@ -1014,8 +1029,9 @@ export async function confirmDictationSuggestion(
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
-  // Emitir una receta es firmarla: tiene su propio botón (decisión 4 de la fase 2).
+  // Emitir una receta es firmarla: tiene su propio botón (decisión 4 de la fase 2). El descanso médico también.
   if (row.kind === "receta") throw conflict("PRESCRIPTION_NEEDS_ISSUE", "Una receta dictada se emite con «Emitir receta»")
+  if (row.kind === "descanso") throw conflict("MEDICAL_LEAVE_NEEDS_ISSUE", "Un descanso médico dictado se emite con «Emitir descanso»")
   // La operación recibe los campos de la sugerencia, no sus metadatos.
   const payload = splitMeta(row.payload).data
   let entityId: string | null = null
@@ -1183,7 +1199,38 @@ export async function settleDictationPrescription(
   return { settled: rows.length }
 }
 
+/**
+ * El descanso dictado se emitió con el formulario de siempre, ya lleno con los
+ * días dictados: ahí quien atiende firma y la persona decide si su diagnóstico
+ * figura. Su sugerencia queda confirmada con ese descanso, que tiene que ser de
+ * esta atención.
+ */
+export async function settleDictationMedicalLeave(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  medicalLeaveId: string,
+): Promise<{ settled: number }> {
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const [issued] = await tx
+    .select({ id: medicalLeave.id })
+    .from(medicalLeave)
+    .where(and(eq(medicalLeave.organizationId, orgId), eq(medicalLeave.patientId, patientId), eq(medicalLeave.encounterId, encounterId), eq(medicalLeave.id, medicalLeaveId)))
+    .limit(1)
+  if (!issued) throw notFound("Descanso médico")
+  const rows = await pendingRowsOf(tx, orgId, patientId, encounterId, "descanso")
+  await settleRows(tx, actorUserId, rows.map((row) => row.id), issued.id)
+  return { settled: rows.length }
+}
+
 async function pendingPrescriptionRows(tx: Db, orgId: string, patientId: string, encounterId: string) {
+  return pendingRowsOf(tx, orgId, patientId, encounterId, "receta")
+}
+
+/** Las sugerencias de una clase que esperan en esta atención, bloqueadas para decidirlas. */
+async function pendingRowsOf(tx: Db, orgId: string, patientId: string, encounterId: string, kind: DictationKind) {
   return tx
     .select()
     .from(encounterDictationSuggestion)
@@ -1192,7 +1239,7 @@ async function pendingPrescriptionRows(tx: Db, orgId: string, patientId: string,
         eq(encounterDictationSuggestion.organizationId, orgId),
         eq(encounterDictationSuggestion.patientId, patientId),
         eq(encounterDictationSuggestion.encounterId, encounterId),
-        eq(encounterDictationSuggestion.kind, "receta"),
+        eq(encounterDictationSuggestion.kind, kind),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
       ),
     )
@@ -1200,11 +1247,11 @@ async function pendingPrescriptionRows(tx: Db, orgId: string, patientId: string,
     .for("update")
 }
 
-async function settleRows(tx: Db, actorUserId: string, ids: string[], prescriptionId: string) {
+async function settleRows(tx: Db, actorUserId: string, ids: string[], entityId: string) {
   if (!ids.length) return
   await tx
     .update(encounterDictationSuggestion)
-    .set({ status: "confirmada", entityId: prescriptionId, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "confirmada", entityId, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
     .where(inArray(encounterDictationSuggestion.id, ids))
 }
 

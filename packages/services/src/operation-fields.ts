@@ -1,3 +1,4 @@
+import { MEDICAL_LEAVE_MAX_DAYS, VITAL_SIGNS, type VitalSignKey } from "@odentia/clinical"
 import { z } from "zod"
 
 /**
@@ -16,6 +17,8 @@ type FieldKind =
   /** Instante ISO 8601 con zona. */
   | { kind: "instant" }
   | { kind: "int"; min: number; max?: number }
+  /** Un número con decimales: una medida («38,5 °C»). */
+  | { kind: "decimal"; min: number; max: number }
   /**
    * Una opción de una lista. `agentValues`, si está, es la parte de la lista que
    * el agente puede elegir (el equipo usa la lista entera): por ejemplo, el
@@ -60,6 +63,12 @@ export interface OperationSpec {
   /** La ruta rechaza claves que no estén declaradas, en vez de ignorarlas. */
   strict?: true
   fields: Record<string, OperationField>
+}
+
+/** Una medida de los signos vitales, con el nombre y el rango de plausibilidad de `VITAL_SIGNS`. */
+function vital(key: VitalSignKey, description: string) {
+  const sign = VITAL_SIGNS.find((item) => item.key === key)!
+  return { kind: "decimal", min: sign.min, max: sign.max, label: sign.label, description, body: "optional", nullable: true, agent: "fills" } as const
 }
 
 const reason = {
@@ -343,6 +352,42 @@ export const OPERATIONS = {
       encounterId: { kind: "uuid", label: "Atención", description: "La atención en borrador donde se registra.", body: "required", agent: "context" },
     },
   },
+  // Los signos vitales que se dictan (latidIA, issue 229): cada medida con su unidad. Cuáles
+  // registra cada clínica lo dice su producto, que también los comprueba juntos (`parseVitals`).
+  "atencion.signos": {
+    label: "Signos vitales",
+    fields: {
+      presionSistolica: vital("presionSistolica", "La presión arterial sistólica en mmHg: el primer número («ciento dieciocho con setenta y seis» = 118)."),
+      presionDiastolica: vital("presionDiastolica", "La presión arterial diastólica en mmHg: el segundo número («ciento dieciocho con setenta y seis» = 76)."),
+      frecuenciaCardiaca: vital("frecuenciaCardiaca", "El pulso o la frecuencia cardiaca, en latidos por minuto."),
+      frecuenciaRespiratoria: vital("frecuenciaRespiratoria", "La frecuencia respiratoria, en respiraciones por minuto."),
+      temperatura: vital("temperatura", "La temperatura en °C, con su decimal si lo dijo («treinta y ocho y medio» = 38.5)."),
+      saturacionOxigeno: vital("saturacionOxigeno", "La saturación de oxígeno en % («satura noventa y ocho» = 98)."),
+      peso: vital("peso", "El peso en kg."),
+      talla: vital("talla", "La talla en cm («uno sesenta y dos» = 162)."),
+      perimetroCefalico: vital("perimetroCefalico", "El perímetro cefálico en cm, en niños."),
+      glucosaCapilar: vital("glucosaCapilar", "La glucosa capilar en mg/dL."),
+    },
+  },
+  // Un sistema del examen físico que se dicta (latidIA, issue 229). La lista de sistemas es del
+  // producto y no se declara aquí (ADR 0079): el servicio la comprueba.
+  "atencion.examen": {
+    label: "Examen físico",
+    fields: {
+      system: { kind: "text", min: 1, max: 40, label: "Sistema", description: "La clave del sistema examinado, de la lista de sistemas que se te da (por ejemplo, toraxPulmones).", body: "required", agent: "requires" },
+      state: { kind: "enum", values: ["sin_alteraciones", "con_hallazgos"], label: "Estado", description: "sin_alteraciones si lo dijo normal («pulmones limpios»); con_hallazgos si describió algo anormal.", body: "required", agent: "requires" },
+      finding: { kind: "text", max: 1000, label: "Hallazgo", description: "Lo que encontró, con la parte del cuerpo y con sus palabras («amígdalas aumentadas, con placas blanquecinas»). Vacío si está sin alteraciones.", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
+  // El descanso médico que se dicta (latidIA, issue 229): se emite como siempre, firmado y con el
+  // permiso de la persona para mostrar el diagnóstico (`createMedicalLeave`).
+  "descanso.medico": {
+    label: "Descanso médico",
+    fields: {
+      days: { kind: "int", min: 1, max: MEDICAL_LEAVE_MAX_DAYS, label: "Días", description: "Cuántos días de descanso indicó.", body: "required", agent: "requires" },
+      startsOn: { kind: "text", max: 10, label: "Desde", description: "El primer día del descanso en AAAA-MM-DD, contado desde la fecha de hoy que se te da. Vacío si es desde hoy.", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
   "control.crear": {
     label: "Control",
     fields: {
@@ -359,7 +404,7 @@ export type OperationId = keyof typeof OPERATIONS
 
 /* ---------- Tipos de entrada derivados de la declaración ---------- */
 
-type ValueOf<F> = F extends { kind: "int" }
+type ValueOf<F> = F extends { kind: "int" } | { kind: "decimal" }
   ? number
   : F extends { kind: "enum"; values: readonly (infer V)[] }
     ? V
@@ -414,6 +459,8 @@ function fieldSchema(field: OperationField): z.ZodType {
       const int = z.number().int().min(field.min)
       return field.max === undefined ? int : int.max(field.max)
     }
+    case "decimal":
+      return z.number().min(field.min).max(field.max)
     case "enum":
       return z.enum(field.values)
     case "textList":
@@ -470,14 +517,16 @@ export function operationBodyShape(operation: OperationId): Record<string, z.Zod
  */
 export function operationAgentSchema<O extends OperationId>(
   operation: O,
-  words: { room?: string } = {},
+  words: { room?: string; clinician?: string } = {},
 ): z.ZodObject<AgentShape<O>> {
   const shape: Record<string, z.ZodType> = {}
   for (const [name, field] of Object.entries(specOf(operation).fields)) {
     if (field.agent !== "requires" && field.agent !== "fills") continue
     const schema = field.kind === "enum" && field.agentValues ? z.enum(field.agentValues) : fieldSchema(field)
-    // El recurso que se reserva con la palabra del producto (latidIA: «sala»).
-    const description = words.room ? field.description.replaceAll("unidad dental", words.room) : field.description
+    // El recurso que se reserva y quien atiende, con las palabras del producto (latidIA: «sala», «médico»).
+    let description: string = field.description
+    if (words.room) description = description.replaceAll("unidad dental", words.room)
+    if (words.clinician) description = description.replaceAll("odontólogo", words.clinician)
     // La descripción va en el esquema final: el envoltorio opcional no hereda la del interior.
     shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(description)
   }

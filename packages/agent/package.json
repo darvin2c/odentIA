@@ -22,7 +22,8 @@
     "eval:spam": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-spam.ts",
     "eval:month": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts",
     "eval:search": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts src/busqueda.eval.ts",
-    "eval:dictado": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/eval-dictado.ts"
+    "eval:dictado": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/eval-dictado.ts",
+    "eval:dictado-medico": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-dictado.ts"
   },
   "dependencies": {
     "@langchain/core": "1.2.11",

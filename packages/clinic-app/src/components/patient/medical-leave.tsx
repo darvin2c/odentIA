@@ -38,6 +38,8 @@ export function NewMedicalLeaveDrawer({
   encounterId,
   defaultDiagnosisCode,
   defaultDiagnosisSystem,
+  defaultDays,
+  defaultStartsOn,
   onClose,
   onCreated,
 }: {
@@ -47,13 +49,16 @@ export function NewMedicalLeaveDrawer({
   /** El diagnóstico de la atención, ya puesto si la persona autoriza que figure. */
   defaultDiagnosisCode?: string
   defaultDiagnosisSystem?: string
+  /** Lo que dictó el médico (Clío, issue 229): los días y desde cuándo. */
+  defaultDays?: number
+  defaultStartsOn?: string
   onClose: () => void
   onCreated: (leave: MedicalLeave) => void
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
-  const [startsOn, setStartsOn] = useState(() => regionToday())
-  const [days, setDays] = useState("")
+  const [startsOn, setStartsOn] = useState(() => defaultStartsOn ?? regionToday())
+  const [days, setDays] = useState(defaultDays ? String(defaultDays) : "")
   const [notes, setNotes] = useState("")
   const [showDiagnosis, setShowDiagnosis] = useState(false)
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")

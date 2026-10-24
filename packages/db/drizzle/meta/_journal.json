@@ -722,6 +722,13 @@
       "when": 1792848377782,
       "tag": "0102_argos_equipo_por_producto",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1792851199724,
+      "tag": "0103_dictado_medico",
+      "breakpoints": true
     }
   ]
 }

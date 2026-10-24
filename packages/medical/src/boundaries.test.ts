@@ -1,8 +1,9 @@
 /**
  * Lo común no depende de lo médico (ADR 0079), como no depende de lo dental
  * (`packages/dental/src/boundaries.test.ts`). Lo médico vive en este paquete,
- * en `packages/services/src/medical/` y en la app de latidIA; se conecta con
- * lo común solo por `products.ts` y, en las pantallas, por `productUi()`.
+ * en las carpetas `medical/` de los servicios y del agente y en la app de
+ * latidIA; se conecta con lo común solo por `products.ts` y, en las pantallas,
+ * por `productUi()`.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -39,6 +40,9 @@ const OUTSIDE = [
 const MEDICAL_INSIDE = [
   "packages/services/src/medical/",
   "packages/services/src/products.ts",
+  // Cómo dicta Clío en latidIA, y donde el agente elige el dictado de cada producto.
+  "packages/agent/src/medical/",
+  "packages/agent/src/products.ts",
   // La biblioteca de latidIA en la base, y donde se une con la de odentIA.
   "packages/db/src/medical/",
   "packages/db/src/products.ts",

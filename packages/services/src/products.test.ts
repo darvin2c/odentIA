@@ -119,18 +119,14 @@ it("el «dónde» lo dice el producto: odentIA guarda la pieza y una clínica m�
   }
 })
 
-it("Clío dicta solo en clínicas de un producto con su dictado: hoy, odentIA", async () => {
+it("Clío dicta en cada producto con lo suyo: el odontograma en odentIA; los signos, el examen y el descanso en latidIA", async () => {
   const f = await clinicalFixture()
   await setProduct("medical")
   try {
-    await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).rejects.toMatchObject({
-      code: "CLINICAL_ASSISTANT_UNAVAILABLE",
-      message: "Clío aún no dicta en esta clínica",
-    })
+    await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toMatchObject({ kinds: ["signos", "examen", "descanso"] })
   } finally {
     await setProduct("dental")
   }
-  // En odentIA dicta, con lo suyo: los hallazgos del odontograma.
   await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toMatchObject({ kinds: ["odontograma"] })
 })
 

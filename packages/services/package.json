@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./test-patient": "./src/test-patient.ts",
-    "./dental": "./src/dental/index.ts"
+    "./dental": "./src/dental/index.ts",
+    "./medical": "./src/medical/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
