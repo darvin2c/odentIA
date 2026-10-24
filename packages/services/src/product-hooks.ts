@@ -1,3 +1,4 @@
+import { CORE_VITAL_KEYS, type VitalSignKey } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
@@ -140,9 +141,49 @@ export interface TimelineQuery {
   tooth: number | null
 }
 
+/** Una parte del examen como Observation de FHIR (categoría `exam`). */
+export interface ExamObservation {
+  /** Lo que distingue la parte dentro de la atención («piel»), para su id. */
+  key: string
+  /** Qué se examinó, en palabras («Piel»). */
+  text: string
+  /** Lo encontrado; null si no se examinó (data-absent-reason `not-performed`). */
+  value: string | null
+  /** N, sin alteraciones; A, con hallazgos (v3 ObservationInterpretation); null si no se examinó. */
+  interpretation: "N" | "A" | null
+}
+
+/**
+ * El examen físico de la atención (`encounter.examination`): cada producto
+ * dice qué se guarda y cómo se cuenta en la historia (odentIA: el de la boca;
+ * latidIA: por sistemas, issue 229).
+ */
+export interface ProductExamination {
+  /** Lo que llega → lo que se guarda; null si queda vacío. Lanza `validation` si no vale. */
+  parse(input: unknown): Record<string, unknown> | null
+  /** El examen en la copia de la historia, una línea por parte; vacío si no lo lleva. */
+  recordLines(value: unknown): string[]
+  /** El examen en la exportación FHIR de la historia; vacío si no lo exporta. */
+  observations(value: unknown): ExamObservation[]
+}
+
+/** Un producto sin examen propio: la atención no lo guarda. */
+export const NO_EXAMINATION: ProductExamination = {
+  parse: (input) => {
+    if (input !== null && input !== undefined) throw validation("Esta clínica no registra examen")
+    return null
+  },
+  recordLines: () => [],
+  observations: () => [],
+}
+
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
+  /** El examen físico de la atención. */
+  examination: ProductExamination
+  /** Los signos vitales que registra la atención (los ocho de siempre; latidIA suma dos). */
+  vitals: readonly VitalSignKey[]
   /** Los tipos de tratamiento de su biblioteca y las especialidades de cada país. */
   catalog: ProductCatalog
   /** Si Clío dicta en sus clínicas (odentIA sí; la app médica, cuando tenga su dictado). */
@@ -228,6 +269,8 @@ export interface ProductHooks {
 /** Un producto que no agrega nada en ningún momento. */
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
+  examination: NO_EXAMINATION,
+  vitals: CORE_VITAL_KEYS,
   catalog: NO_CATALOG,
   dictates: false,
   closingParts: async () => ({}),

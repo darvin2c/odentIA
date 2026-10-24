@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
+import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
+import { encounter } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
@@ -12,7 +14,8 @@ import { latestLinkFor } from "./mailpit"
 /**
  * latidIA abre (entregas 3 y 4 del issue 229): la misma instalación sirve su
  * dominio con su sesión, su panel y su app; la clínica que nace ahí es médica,
- * se ve con su marca y dice sus palabras.
+ * se ve con su marca y dice sus palabras. Su ficha (entrega 5) tiene el examen
+ * por sistemas y los signos vitales en el tiempo.
  */
 
 /** Una llamada a la API desde la página, con la sesión de su dominio. */
@@ -40,11 +43,8 @@ async function request<T>(
   )
 }
 
-test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus palabras", async ({
-  browser,
-  fixtureDb,
-  passwordHash,
-}, testInfo) => {
+/** La Dra. Vela, con su contraseña de prueba y los términos aceptados. */
+async function createVela(fixtureDb: Db, passwordHash: string): Promise<{ id: string; email: string }> {
   const id = randomUUID()
   const email = `latidia-${id}@test.dev`
   await fixtureDb.transaction(async (tx) => {
@@ -69,19 +69,11 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
       updatedAt: new Date(),
     })
   })
-  const context = await browser.newContext({ ignoreHTTPSErrors: true })
-  const page = await context.newPage()
-  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
+  return { id, email }
+}
 
-  // El acceso de latidIA: su marca, su título y su voz («Entra a tu consultorio»).
-  await gotoHydrated(page, latidiaUrl("app", "/login"))
-  await expect(page.locator("html")).toHaveAttribute("data-brand", "latidia")
-  await expect(page).toHaveTitle("latidIA")
-  await expect(page.getByRole("img", { name: "latidIA" }).first()).toBeVisible()
-  await expect(page.getByText("Qué bueno verte. Entra a tu consultorio.")).toBeVisible()
-  await shot("acceso")
-
-  // La sesión vive en su dominio: entra por la API de latidIA.
+/** Entra por la API de latidIA y abre su consultorio con una sede: nace en su dominio. */
+async function openConsultorio(page: Page, vela: { id: string; email: string }) {
   const api = latidiaUrl("api")
   const signedIn = await request<{ user: { id: string } }>(
     page,
@@ -90,12 +82,12 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
     "/api/auth/sign-in/email",
     undefined,
     {
-      email,
+      email: vela.email,
       password: PASSWORD,
     },
   )
   expect(signedIn.status).toBe(200)
-  const slug = `sanmartin-${id.slice(0, 8)}`
+  const slug = `sanmartin-${vela.id.slice(0, 8)}`
   const created = await request<{ id: string }>(
     page,
     api,
@@ -126,12 +118,36 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   expect(
     (await request(page, api, "POST", "/api/branches", slug, { name: "Sede Central" })).status,
   ).toBe(201)
+  return { api, slug, orgId: created.body.id }
+}
+
+test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus palabras", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const { id, email } = vela
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
+
+  // El acceso de latidIA: su marca, su título y su voz («Entra a tu consultorio»).
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  await expect(page.locator("html")).toHaveAttribute("data-brand", "latidia")
+  await expect(page).toHaveTitle("latidIA")
+  await expect(page.getByRole("img", { name: "latidIA" }).first()).toBeVisible()
+  await expect(page.getByText("Qué bueno verte. Entra a tu consultorio.")).toBeVisible()
+  await shot("acceso")
+
+  // La sesión vive en su dominio: entra por la API de latidIA.
+  const { api, slug, orgId } = await openConsultorio(page, vela)
 
   // Nació en el dominio de latidIA: es un consultorio médico.
   const [profile] = await fixtureDb
     .select({ product: orgProfile.product })
     .from(orgProfile)
-    .where(eq(orgProfile.organizationId, created.body.id))
+    .where(eq(orgProfile.organizationId, orgId))
   expect(profile?.product).toBe("medical")
 
   // La invitación al equipo sale con la marca de latidIA y lleva a su panel (entrega 4b).
@@ -139,7 +155,7 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   const invited = await request(page, api, "POST", "/api/auth/organization/invite-member", undefined, {
     email: invitee,
     role: "clinician",
-    organizationId: created.body.id,
+    organizationId: orgId,
   })
   expect(invited.status).toBe(200)
   const link = await latestLinkFor(invitee, "Te invitaron a Consultorio San Martín")
@@ -177,5 +193,143 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await expect(page).toHaveURL(
     new RegExp(`^${latidiaUrl(slug, "/home").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   )
+  await context.close()
+})
+
+test("latidIA: la ficha médica con el examen por sistemas y los signos vitales en el tiempo", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(180_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug, orgId } = await openConsultorio(page, vela)
+
+  // Rosa, con un control de hace dos meses ya firmado y su consulta de hoy abierta.
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Rosa Paredes", docType: "DNI", docNumber: "40112233", birthDate: "1980-03-14" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const before = new Date(Date.now() - 60 * 86_400_000)
+  await fixtureDb.insert(encounter).values({
+    organizationId: orgId,
+    patientId,
+    professionalUserId: vela.id,
+    status: "finalizada",
+    reason: "Control",
+    vitals: { presionSistolica: 136, presionDiastolica: 88, peso: 64, talla: 160 },
+    startedAt: before,
+    endedAt: before,
+    finalizedAt: before,
+    finalizedBy: vela.id,
+    signerName: "Elena Vela",
+  })
+  const opened = await request<{ data: { id: string } }>(
+    page,
+    api,
+    "POST",
+    `/api/patients/${patientId}/encounters`,
+    slug,
+    { reason: "Fiebre y dolor de garganta" },
+  )
+  expect(opened.status).toBe(201)
+  const encounterId = opened.body.data.id
+
+  // La consulta no habla de piezas: la parte del cuerpo se escribe (decisión 4).
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${encounterId}`))
+  await expect(page.getByText("Piezas vinculadas")).toHaveCount(0)
+
+  // El examen físico: diez signos vitales, el IMC sale solo y se compara con la vez anterior.
+  await page.getByRole("button", { name: "Agregar Examen físico" }).click()
+  await page.getByLabel("PA sistólica (mmHg)").fill("118")
+  await page.getByLabel("PA diastólica (mmHg)").fill("76")
+  await page.getByLabel("Temperatura (°C)").fill("38,4")
+  await page.getByLabel("Peso (kg)").fill("62")
+  await page.getByLabel("Talla (cm)").fill("160")
+  await expect(page.getByLabel("Glucosa capilar (mg/dL)")).toBeVisible()
+  await expect(page.getByText(/IMC 24\.2 · sale del peso y la talla\. La última vez, el .+: PA 136\/88 · peso 64 kg\./)).toBeVisible()
+
+  // Por sistemas: lo no marcado queda «No examinado»; el botón marca solo lo que falta.
+  await expect(page.getByText("0 examinados · 0 con hallazgos · 10 sin examinar")).toBeVisible()
+  await page.getByRole("group", { name: "Cabeza y cuello" }).getByRole("button", { name: "Con hallazgos" }).click()
+  await page.getByLabel("Qué encontraste").fill("Adenopatías submandibulares en ambos lados, dolorosas, de 1 cm.")
+  await page.getByRole("button", { name: "Marcar el resto sin alteraciones" }).click()
+  await expect(page.getByText("10 examinados · 1 con hallazgos · 0 sin examinar")).toBeVisible()
+  // Un toque más sobre lo marcado lo devuelve a «No examinado».
+  await page.getByRole("group", { name: "Abdomen" }).getByRole("button", { name: "Sin alteraciones" }).click()
+  await expect(page.getByText("9 examinados · 1 con hallazgos · 1 sin examinar")).toBeVisible()
+  await expect
+    .poll(async () => {
+      const detail = await request<{ data: { encounter: { examination: unknown; vitals: unknown } } }>(
+        page,
+        api,
+        "GET",
+        `/api/patients/${patientId}/encounters/${encounterId}`,
+        slug,
+      )
+      return detail.body.data.encounter
+    })
+    .toMatchObject({
+      vitals: { presionSistolica: 118, presionDiastolica: 76, temperatura: 38.4, peso: 62, talla: 160 },
+      examination: {
+        sistemas: {
+          cabezaCuello: { estado: "con_hallazgos", hallazgo: "Adenopatías submandibulares en ambos lados, dolorosas, de 1 cm." },
+          piel: { estado: "sin_alteraciones" },
+        },
+      },
+    })
+  const saved = await request<{ data: { encounter: { examination: { sistemas: Record<string, unknown> } } } }>(
+    page,
+    api,
+    "GET",
+    `/api/patients/${patientId}/encounters/${encounterId}`,
+    slug,
+  )
+  expect(saved.body.data.encounter.examination.sistemas).not.toHaveProperty("abdomen")
+  await expect(page.getByText("1 sistema con hallazgos").first()).toBeVisible()
+  await shot("examen")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("examen-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("examen-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // En la ficha, «Signos vitales» va donde odentIA tiene el Odontograma (decisión 6).
+  const person = await request<{ data: { personId: string } }>(
+    page,
+    api,
+    "GET",
+    `/api/people/by-patient/${patientId}`,
+    slug,
+  )
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${person.body.data.personId}?tab=signos-vitales`))
+  await expect(page.getByRole("tab", { name: "Signos vitales" })).toHaveAttribute("aria-selected", "true")
+  const latest = page.getByRole("region", { name: "Última medición" })
+  await expect(latest.getByText("118/76 mmHg")).toBeVisible()
+  await expect(latest.getByText("24.2")).toBeVisible()
+  await expect(page.getByText("2 atenciones con signos vitales")).toBeVisible()
+  await expect(page.getByRole("region", { name: "Presión arterial" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Peso" })).toBeVisible()
+  await shot("signos-vitales")
+  await page.getByRole("button", { name: "Ver como tabla" }).click()
+  await expect(page.getByRole("cell", { name: "136" })).toBeVisible()
+  await shot("signos-vitales-tabla")
+  await page.getByRole("button", { name: "Ver los gráficos" }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("signos-vitales-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("signos-vitales-oscuro")
   await context.close()
 })

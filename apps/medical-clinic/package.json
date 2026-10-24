@@ -21,6 +21,7 @@
     "@odentia/auth": "workspace:*",
     "@odentia/clinic-app": "workspace:*",
     "@odentia/clinical": "workspace:*",
+    "@odentia/medical": "workspace:*",
     "@odentia/ui": "workspace:*",
     "@odentia/ui-patterns": "workspace:*",
     "@simplewebauthn/browser": "14.0.0",

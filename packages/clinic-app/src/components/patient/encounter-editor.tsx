@@ -5,11 +5,6 @@ import {
   Field,
   FieldLabel,
   Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Textarea,
   Dialog,
   DialogContent,
@@ -133,19 +128,6 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
 const FORM_SECTIONS: readonly SectionKey[] = ["consulta", "examen", "evolucion"]
 
-interface ExaminationDraft {
-  extraoral: { atm: string; ganglios: string; labios: string }
-  intraoral: {
-    encias: string
-    lengua: string
-    paladar: string
-    pisoBoca: string
-    carrillos: string
-    orofaringe: string
-  }
-  higieneOral: string
-}
-
 interface DraftValues extends Record<NoteKey, string> {
   /** Signos vitales tal como se escriben; el servidor valida rango y unidad. */
   vitals: Record<string, string>
@@ -153,7 +135,8 @@ interface DraftValues extends Record<NoteKey, string> {
   evolution: string
   indications: string
   teeth: number[]
-  examination: ExaminationDraft | null
+  /** El borrador del examen, con la forma del producto (`ProductExaminationUi`). */
+  examination: unknown
 }
 
 interface DraftPatch extends Partial<Record<NoteKey, string | null>> {
@@ -162,11 +145,7 @@ interface DraftPatch extends Partial<Record<NoteKey, string | null>> {
   evolution?: string | null
   indications?: string | null
   teeth?: number[]
-  examination?: {
-    extraoral?: Record<string, string>
-    intraoral?: Record<string, string>
-    higieneOral?: string
-  } | null
+  examination?: Record<string, unknown> | null
 }
 
 const AUTOSAVE_MS = 800
@@ -182,16 +161,6 @@ function isOffline(err: unknown): boolean {
 function sortTeeth(teeth: number[]): number[] {
   return [...teeth].sort((a, b) => a - b)
 }
-function strMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
-  const out: Record<string, string> = {}
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof raw === "string" && raw.trim() !== "") out[key] = raw
-  }
-  return out
-}
-
-/** Examen persistido a borrador editable (sin copiar exámenes antiguos a consultas nuevas: cada atención parte en null). */
 /** Signos vitales guardados como texto editable. */
 function vitalsDraft(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object") return {}
@@ -200,34 +169,6 @@ function vitalsDraft(raw: unknown): Record<string, string> {
       .filter(([, value]) => typeof value === "number")
       .map(([key, value]) => [key, String(value)]),
   )
-}
-
-function toExaminationDraft(examination: Encounter["examination"]): ExaminationDraft | null {
-  if (!examination || typeof examination !== "object") return null
-  const extraoral = strMap((examination as Record<string, unknown>).extraoral)
-  const intraoral = strMap((examination as Record<string, unknown>).intraoral)
-  const higiene = (examination as Record<string, unknown>).higieneOral
-  const draft: ExaminationDraft = {
-    extraoral: {
-      atm: extraoral.atm ?? "",
-      ganglios: extraoral.ganglios ?? "",
-      labios: extraoral.labios ?? "",
-    },
-    intraoral: {
-      encias: intraoral.encias ?? "",
-      lengua: intraoral.lengua ?? "",
-      paladar: intraoral.paladar ?? "",
-      pisoBoca: intraoral.pisoBoca ?? "",
-      carrillos: intraoral.carrillos ?? "",
-      orofaringe: intraoral.orofaringe ?? "",
-    },
-    higieneOral: typeof higiene === "string" ? higiene : "",
-  }
-  const empty =
-    Object.values(draft.extraoral).every((v) => v === "") &&
-    Object.values(draft.intraoral).every((v) => v === "") &&
-    draft.higieneOral === ""
-  return empty ? null : draft
 }
 
 /** Primer nombre de la persona, como lo dice la pantalla: «falta 1 firma de Lucía». */
@@ -332,15 +273,15 @@ export function EncounterEditor({
     illnessDuration: encounter.illnessDuration ?? "",
     prognosis: encounter.prognosis ?? "",
   }))
+  // El examen y los signos vitales son los del producto (issue 229).
+  const exam = productUi().encounter.examination
   const [vitals, setVitals] = useState<Record<string, string>>(() => vitalsDraft(encounter.vitals))
-  const parsed = parseVitals(vitals)
+  const parsed = parseVitals(vitals, exam.vitals)
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
   const [evolution, setEvolution] = useState(encounter.evolution ?? "")
   const [indications, setIndications] = useState(encounter.indications ?? "")
   const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
-  const [examination, setExamination] = useState<ExaminationDraft | null>(() =>
-    toExaminationDraft(encounter.examination),
-  )
+  const [examination, setExamination] = useState<unknown>(() => exam.draft(encounter.examination))
   // Bloque en edición; `null` colapsa el detalle y deja la lista a todo el ancho.
   const [openSection, setOpenSection] = useState<SectionKey | null>("consulta")
   const [addedSections, setAddedSections] = useState<ReadonlySet<SectionKey>>(() => new Set())
@@ -416,7 +357,7 @@ export function EncounterEditor({
     evolution: encounter.evolution ?? "",
     indications: encounter.indications ?? "",
     teeth: sortTeeth(detail.teeth),
-    examination: toExaminationDraft(encounter.examination),
+    examination: exam.draft(encounter.examination),
   })
   const dirtyRef = useRef<Set<DraftKey>>(new Set())
   const inflightRef = useRef<Set<DraftKey>>(new Set())
@@ -501,7 +442,7 @@ export function EncounterEditor({
           )
           // Incompletos o fuera de rango no se envían: el error se muestra en línea
           // y se guardan al corregirlos.
-          if (!parseVitals(filled).ok) break
+          if (!parseVitals(filled, exam.vitals).ok) break
           body.vitals = Object.keys(filled).length > 0 ? filled : null
           break
         }
@@ -517,27 +458,9 @@ export function EncounterEditor({
         case "teeth":
           body.teeth = [...values.teeth]
           break
-        case "examination": {
-          const exam = values.examination
-          if (!exam) {
-            body.examination = null
-            break
-          }
-          const pick = (group: Record<string, string>): Record<string, string> | undefined => {
-            const cleaned: Record<string, string> = {}
-            for (const [key, raw] of Object.entries(group)) {
-              const trimmed = raw.trim()
-              if (trimmed) cleaned[key] = trimmed
-            }
-            return Object.keys(cleaned).length > 0 ? cleaned : undefined
-          }
-          const extraoral = pick(exam.extraoral)
-          const intraoral = pick(exam.intraoral)
-          const higieneOral = exam.higieneOral === "" ? undefined : exam.higieneOral
-          body.examination =
-            extraoral || intraoral || higieneOral ? { extraoral, intraoral, higieneOral } : null
+        case "examination":
+          body.examination = exam.body(values.examination)
           break
-        }
       }
     }
     return body
@@ -566,6 +489,9 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            // La sección «Signos vitales» y la medición anterior se leen de nuevo.
+            if (sendable.includes("vitals"))
+              void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
           } catch (err) {
             for (const key of sendable) dirtyRef.current.add(key)
             throw err
@@ -658,23 +584,8 @@ export function EncounterEditor({
     markEdited("teeth")
   }
 
-  const blankExamination = (): ExaminationDraft => ({
-    extraoral: { atm: "", ganglios: "", labios: "" },
-    intraoral: { encias: "", lengua: "", paladar: "", pisoBoca: "", carrillos: "", orofaringe: "" },
-    higieneOral: "",
-  })
-
-  const editExamination = (group: "extraoral" | "intraoral", key: string, value: string) => {
-    const prev = valuesRef.current.examination ?? blankExamination()
-    const next: ExaminationDraft = { ...prev, [group]: { ...prev[group], [key]: value } }
-    valuesRef.current.examination = next
-    setExamination(next)
-    markEdited("examination")
-  }
-
-  const editHigieneOral = (value: string) => {
-    const prev = valuesRef.current.examination ?? blankExamination()
-    const next: ExaminationDraft = { ...prev, higieneOral: value }
+  /** El examen lo arma el producto: el borrador entero cambia de una vez. */
+  const editExamination = (next: unknown) => {
     valuesRef.current.examination = next
     setExamination(next)
     markEdited("examination")
@@ -952,16 +863,19 @@ export function EncounterEditor({
     {
       key: "consulta",
       title: "Consulta",
-      description: "Motivo, enfermedad actual, sede y piezas evaluadas.",
+      // Sin «dónde» (latidIA), la parte del cuerpo se escribe en el texto (decisión 4 del issue 229).
+      description: productUi().site
+        ? "Motivo, enfermedad actual, sede y piezas evaluadas."
+        : "Motivo, enfermedad actual y sede.",
       summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
       empty: reason.trim() === "",
     },
     {
       key: "examen",
-      title: "Examen clínico",
-      description: "Signos vitales, examen extraoral, intraoral e higiene oral.",
+      title: exam.title,
+      description: exam.description,
       summary:
-        [formatVitals(parsedVitals), examination ? "Examen registrado" : ""]
+        [formatVitals(parsedVitals), exam.summary(examination)]
           .filter(Boolean)
           .join(" · ") || "Sin examen registrado",
       empty: examination === null && Object.values(vitals).every((v) => v.trim() === ""),
@@ -1259,31 +1173,33 @@ export function EncounterEditor({
           onChange={(event) => editNote("illnessDuration", event.target.value)}
         />
       </Field>
-      <div>
-        <p className="text-xs font-medium text-muted-foreground">
-          Piezas vinculadas ({teeth.length})
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {teeth.map((tooth) => (
-            <Button
-              key={tooth}
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={locked}
-              aria-label={`Quitar pieza ${tooth} de la atención`}
-              onClick={() => editTeeth(teeth.filter((value) => value !== tooth))}
-            >
-              {tooth} ×
-            </Button>
-          ))}
-          {teeth.length === 0 && (
-            <span className="text-xs text-muted-foreground">
-              Evaluación general o localizada en el odontograma.
-            </span>
-          )}
+      {productUi().site ? (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">
+            Piezas vinculadas ({teeth.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {teeth.map((tooth) => (
+              <Button
+                key={tooth}
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={locked}
+                aria-label={`Quitar pieza ${tooth} de la atención`}
+                onClick={() => editTeeth(teeth.filter((value) => value !== tooth))}
+              >
+                {tooth} ×
+              </Button>
+            ))}
+            {teeth.length === 0 && (
+              <span className="text-xs text-muted-foreground">
+                Evaluación general o localizada en el odontograma.
+              </span>
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 
@@ -1292,7 +1208,7 @@ export function EncounterEditor({
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0 sm:col-span-2">
         <legend className="mb-1 text-sm font-medium">Signos vitales</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {VITAL_SIGNS.map((sign) => (
+          {VITAL_SIGNS.filter((sign) => exam.vitals.includes(sign.key)).map((sign) => (
             <Field key={sign.key}>
               <FieldLabel htmlFor={`${uid}-vital-${sign.key}`} className="text-xs">
                 {sign.label} ({sign.suffix})
@@ -1316,106 +1232,14 @@ export function EncounterEditor({
             {parsed.error}. No se guarda hasta corregirlo.
           </p>
         )}
+        <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-atm`}>ATM</FieldLabel>
-        <Input
-          id={`${uid}-ex-atm`}
-          value={examination?.extraoral.atm ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("extraoral", "atm", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-ganglios`}>Ganglios</FieldLabel>
-        <Input
-          id={`${uid}-ex-ganglios`}
-          value={examination?.extraoral.ganglios ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("extraoral", "ganglios", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-labios`}>Labios</FieldLabel>
-        <Input
-          id={`${uid}-ex-labios`}
-          value={examination?.extraoral.labios ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("extraoral", "labios", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-higiene`}>Higiene oral</FieldLabel>
-        <Select
-          value={examination?.higieneOral ?? ""}
-          onValueChange={(v) => editHigieneOral(v ?? "")}
-          disabled={locked}
-        >
-          <SelectTrigger id={`${uid}-ex-higiene`}>
-            <SelectValue placeholder="Sin indicar" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Sin indicar</SelectItem>
-            <SelectItem value="buena">Buena</SelectItem>
-            <SelectItem value="regular">Regular</SelectItem>
-            <SelectItem value="mala">Mala</SelectItem>
-          </SelectContent>
-        </Select>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-encias`}>Encías</FieldLabel>
-        <Input
-          id={`${uid}-ex-encias`}
-          value={examination?.intraoral.encias ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "encias", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-lengua`}>Lengua</FieldLabel>
-        <Input
-          id={`${uid}-ex-lengua`}
-          value={examination?.intraoral.lengua ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "lengua", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-paladar`}>Paladar</FieldLabel>
-        <Input
-          id={`${uid}-ex-paladar`}
-          value={examination?.intraoral.paladar ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "paladar", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-piso`}>Piso de boca</FieldLabel>
-        <Input
-          id={`${uid}-ex-piso`}
-          value={examination?.intraoral.pisoBoca ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "pisoBoca", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-carrillos`}>Carrillos</FieldLabel>
-        <Input
-          id={`${uid}-ex-carrillos`}
-          value={examination?.intraoral.carrillos ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "carrillos", e.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ex-oro`}>Orofaringe</FieldLabel>
-        <Input
-          id={`${uid}-ex-oro`}
-          value={examination?.intraoral.orofaringe ?? ""}
-          disabled={locked}
-          onChange={(e) => editExamination("intraoral", "orofaringe", e.target.value)}
-        />
-      </Field>
+      <exam.Fields
+        idPrefix={uid}
+        draft={examination}
+        onChange={editExamination}
+        disabled={locked}
+      />
     </div>
   )
 
@@ -1885,7 +1709,7 @@ export function EncounterEditor({
           <div className="flex flex-col gap-2 text-sm">
             <p className="text-muted-foreground">
               {activeProcedures} procedimiento(s) · {activeDiagnoses} diagnóstico(s) ·{" "}
-              {detail.odontogramEntries.length} hallazgo(s) de odontograma ·{" "}
+              {detail.odontogramEntries ? `${detail.odontogramEntries.length} hallazgo(s) de odontograma · ` : ""}
               {detail.documents.length} documento(s) · {pendingTreatments} tratamiento(s) por
               ejecutar
             </p>

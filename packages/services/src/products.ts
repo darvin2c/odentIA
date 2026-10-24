@@ -4,16 +4,17 @@ import { DENTAL_AGENT_TEXTS } from "./dental/agent-texts.js"
 import { dentalHooks } from "./dental/hooks.js"
 import { ServiceError } from "./errors.js"
 import { orgProduct } from "./locale.js"
+import { medicalHooks } from "./medical/hooks.js"
 import { NO_AGENT_TEXTS, type ProductAgentTexts } from "./product-agent.js"
-import { NO_PRODUCT_HOOKS, type ProductHooks } from "./product-hooks.js"
+import type { ProductHooks } from "./product-hooks.js"
 
 /**
  * El único lugar de lo común que conoce los productos (ADR 0079): qué hace
- * cada uno en cada momento. La app médica aún no tiene momentos propios.
+ * cada uno en cada momento.
  */
 const HOOKS: Record<ClinicalProduct, ProductHooks> = {
   dental: dentalHooks,
-  medical: NO_PRODUCT_HOOKS,
+  medical: medicalHooks,
 }
 
 /** Lo que hace el producto de esta clínica en cada momento de lo común. */

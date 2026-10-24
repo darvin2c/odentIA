@@ -2,6 +2,7 @@
 import {
   DIAGNOSIS_VERIFICATION_LABELS,
   type MissingPersonDatum,
+  type Vitals,
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
@@ -386,11 +387,8 @@ export interface Encounter {
   evolution: string | null
   indications: string | null
   finalizedAt: string | null
-  examination?: {
-    extraoral?: Record<string, string>
-    intraoral?: Record<string, string>
-    higieneOral?: string
-  } | null
+  /** El examen físico, con la forma del producto (`ProductExaminationUi`). */
+  examination?: Record<string, unknown> | null
   finalizedBy: string | null
   /** Inicio y fin declarados de la atención. */
   startedAt?: string
@@ -513,8 +511,11 @@ export interface EncounterDetail {
   diagnoses: EncounterDiagnosis[]
   /** Notas de evolución sin código (kind='evolucion'), orden ascendente. */
   notes: ClinicalNote[]
-  /** Lo que el producto registró en la atención (odentIA: los hallazgos del odontograma). */
-  odontogramEntries: SiteFinding[]
+  /**
+   * Lo que el producto registró en la atención (odentIA: los hallazgos del
+   * odontograma). Solo lo trae el producto que lo registra: latidIA no.
+   */
+  odontogramEntries?: SiteFinding[]
   documents: PatientDocument[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
@@ -890,6 +891,21 @@ export function timelineTypeLabel(type: string): string {
     default:
       return type
   }
+}
+
+/** Los signos vitales de una atención, con cuándo y quién los tomó. */
+export interface VitalsReading {
+  encounterId: string
+  startedAt: string
+  /** borrador (la atención de hoy) o finalizada. */
+  status: string
+  professionalUserId: string
+  vitals: Vitals
+}
+
+/** Los signos vitales de la persona en el tiempo, de la más antigua a la más reciente (issue 229). */
+export function fetchPatientVitals(patientId: string): Promise<{ data: VitalsReading[] }> {
+  return apiFetch<{ data: VitalsReading[] }>(`/api/patients/${patientId}/vitals`)
 }
 
 /** Agregado de antecedentes + entrevista (revisión optimista). */

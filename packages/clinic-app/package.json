@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./components/choice-buttons": "./src/components/choice-buttons.tsx",
     "./components/patient/diagnosis-picker": "./src/components/patient/diagnosis-picker.tsx",
     "./components/patient/dictation-session": "./src/components/patient/dictation-session.ts",
     "./components/patient/document-labels": "./src/components/patient/document-labels.ts",

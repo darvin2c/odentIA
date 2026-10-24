@@ -343,6 +343,9 @@ importers:
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
+      '@odentia/medical':
+        specifier: workspace:*
+        version: link:../../packages/medical
       '@odentia/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -955,6 +958,19 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
+  packages/medical:
+    dependencies:
+      '@odentia/clinical':
+        specifier: workspace:*
+        version: link:../clinical
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
   packages/services:
     dependencies:
       '@aws-sdk/client-s3':
@@ -981,6 +997,9 @@ importers:
       '@odentia/mail':
         specifier: workspace:*
         version: link:../mail
+      '@odentia/medical':
+        specifier: workspace:*
+        version: link:../medical
       '@pdf-lib/fontkit':
         specifier: 1.1.1
         version: 1.1.1

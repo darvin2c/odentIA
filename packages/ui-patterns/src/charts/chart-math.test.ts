@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { moveInGrid, niceTicks, scaleLevel, sparkPoints, waterfallBars } from "./chart-math.js"
+import { moveInGrid, niceTicks, rangeTicks, scaleLevel, sparkPoints, waterfallBars } from "./chart-math.js"
 
 describe("niceTicks", () => {
   it("cubre el máximo con pasos redondos", () => {
@@ -10,6 +10,18 @@ describe("niceTicks", () => {
 
   it("sin datos devuelve un eje mínimo en vez de dividir por cero", () => {
     expect(niceTicks(0)).toEqual([0, 1])
+  })
+})
+
+describe("rangeTicks", () => {
+  it("cubre los datos con pasos redondos sin empezar en cero", () => {
+    expect(rangeTicks(76, 142)).toEqual([75, 100, 125, 150])
+    expect(rangeTicks(62, 68)).toEqual([62, 64, 66, 68])
+  })
+
+  it("un solo valor queda con aire arriba y abajo", () => {
+    expect(rangeTicks(62, 62)).toEqual([57.5, 60, 62.5, 65, 67.5])
+    expect(rangeTicks(0, 0)).toEqual([0, 1])
   })
 })
 

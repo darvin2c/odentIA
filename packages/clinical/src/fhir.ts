@@ -83,6 +83,11 @@ export const FHIR_CONSENT_CATEGORY = { system: "http://loinc.org", code: "59284-
 export const FHIR_OBSERVATION_CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category"
 export const FHIR_UCUM_SYSTEM = "http://unitsofmeasure.org"
 export const FHIR_LOINC_SYSTEM = "http://loinc.org"
+/** Por qué falta un valor; `not-performed`: no se examinó (issue 229, decisión 5). */
+export const FHIR_DATA_ABSENT_REASON_SYSTEM = "http://terminology.hl7.org/CodeSystem/data-absent-reason"
+/** N, normal; A, anormal: la lectura de una parte del examen. */
+export const FHIR_OBSERVATION_INTERPRETATION_SYSTEM =
+  "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation"
 
 /** Parentesco de una persona vinculada: v3-RoleCode, con «otro» como texto. */
 export const FHIR_ROLE_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"

@@ -26,6 +26,7 @@ COPY packages/clinical/package.json packages/clinical/
 COPY packages/db/package.json packages/db/
 COPY packages/dental/package.json packages/dental/
 COPY packages/mail/package.json packages/mail/
+COPY packages/medical/package.json packages/medical/
 COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 COPY packages/ui-patterns/package.json packages/ui-patterns/

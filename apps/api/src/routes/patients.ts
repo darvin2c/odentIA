@@ -48,6 +48,7 @@ import {
   listDataConsents,
   listEncounters,
   listPatientDiagnoses,
+  listPatientVitals,
   listPatientDocuments,
   listPatients,
   listPlanItems,
@@ -283,14 +284,8 @@ const encounterPatchInput = z.object({
   ...operationBodyShape("atencion.nota"),
   branchId: z.uuid().nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
-  examination: z
-    .object({
-      extraoral: z.record(z.string(), z.string().max(500)).nullish(),
-      intraoral: z.record(z.string(), z.string().max(500)).nullish(),
-      higieneOral: z.enum(["buena", "regular", "mala"]).nullish(),
-    })
-    .strict()
-    .nullish(),
+  /** El examen tiene la forma del producto de la clínica (odentIA: la boca; latidIA: por sistemas); el servicio valida. */
+  examination: z.record(z.string(), z.unknown()).nullish(),
   /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
   vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
 })
@@ -456,6 +451,8 @@ const documentListQuery = z.object({
 /** Subrutas con datos clínicos: exigen `clinical.read`/`.write`. */
 const CLINICAL_SUBPATHS = [
   "/encounters",
+  // Los signos vitales de cada atención, en el tiempo (issue 229).
+  "/vitals",
   "/diagnoses",
   "/plan",
   "/treatments",
@@ -513,6 +510,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/periodontal", "periodontograma"],
   ["/timeline", "historia"],
   ["/encounters", "atenciones"],
+  ["/vitals", "atenciones"],
   ["/diagnoses", "diagnosticos"],
   ["/notes", "notas"],
   ["/plan", "plan"],
@@ -1242,6 +1240,13 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) =>
         createEncounter(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
+    )
+  })
+  // Los signos vitales en el tiempo: la sección «Signos vitales» de latidIA (issue 229).
+  app.get("/:id/vitals", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listPatientVitals(tx, orgId, c.req.param("id"))),
     )
   })
   app.get("/:id/encounters", async (c) => {

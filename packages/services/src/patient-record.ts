@@ -24,8 +24,10 @@ import {
   FHIR_CONDITION_VERIFICATION_SYSTEM,
   FHIR_CONSENT_CATEGORY,
   FHIR_CONSENT_SCOPE,
+  FHIR_DATA_ABSENT_REASON_SYSTEM,
   FHIR_LOINC_SYSTEM,
   FHIR_OBSERVATION_CATEGORY_SYSTEM,
+  FHIR_OBSERVATION_INTERPRETATION_SYSTEM,
   FHIR_UCUM_SYSTEM,
   FHIR_VERSION,
   fhirCode,
@@ -56,7 +58,7 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
-import type { RecordSection, SiteColumns } from "./product-hooks.js"
+import type { ExamObservation, RecordSection, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -102,6 +104,8 @@ export interface PatientRecord {
     row: typeof encounter.$inferSelect
     diagnoses: Array<typeof encounterDiagnosis.$inferSelect & RecordSite & { title: string | null }>
     procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
+    /** El examen como lo cuenta el producto: en líneas para el PDF y como Observations para FHIR. */
+    exam: { lines: string[]; observations: ExamObservation[] }
   }>
   /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente). */
   productSections: RecordSection[]
@@ -179,9 +183,10 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
     .where(and(byPatient(patientDocument), isNull(patientDocument.retiredAt)))
     .orderBy(asc(patientDocument.createdAt))
   const appointments = await tx.select().from(appointment).where(byPatient(appointment)).orderBy(asc(appointment.startsAt))
-  const productSections = await (await productHooks(tx, orgId)).recordSections(tx, { orgId, patientId })
+  const hooks = await productHooks(tx, orgId)
+  const productSections = await hooks.recordSections(tx, { orgId, patientId })
   const planItems = await listPlanItems(tx, orgId, patientId)
-  const site = (await productHooks(tx, orgId)).site
+  const site = hooks.site
   const recordSite = (row: SiteColumns): RecordSite => ({ siteWords: site.words(row), bodySite: site.bodySite(row) })
   return {
     generatedAt: new Date(),
@@ -218,6 +223,10 @@ export async function loadPatientRecord(tx: Db, orgId: string, patientId: string
         .filter((d) => d.encounterId === row.id)
         .map((d) => ({ ...d, ...recordSite(d), title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null })),
       procedures: procedures.filter((p) => p.encounterId === row.id).map((p) => ({ ...p, ...recordSite(p) })),
+      exam: {
+        lines: hooks.examination.recordLines(row.examination),
+        observations: hooks.examination.observations(row.examination),
+      },
     })),
     productSections,
     planItems: planItems.map((item) => ({ title: item.title, status: item.status, siteWords: site.words(item, "short") })),
@@ -316,7 +325,7 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
 
   w.heading(`Atenciones (${record.encounters.length})`)
   if (!record.encounters.length) w.text("Sin atenciones registradas.")
-  for (const { row, diagnoses, procedures } of record.encounters) {
+  for (const { row, diagnoses, procedures, exam } of record.encounters) {
     w.gap(4)
     w.text(`${when(row.startedAt, zone)} · ${ENCOUNTER_WORDS[row.status] ?? row.status}`, { bold: true })
     if (row.reason) w.text(`Motivo: ${row.reason}`)
@@ -326,6 +335,10 @@ export async function renderPatientRecordPdf(record: PatientRecord): Promise<Uin
       .map((v) => `${v.label} ${vitals[v.key]} ${v.suffix}`)
       .join(" · ")
     if (vitalText) w.text(`Signos vitales: ${vitalText}`)
+    if (exam.lines.length) {
+      w.text("Examen físico:")
+      w.list(exam.lines)
+    }
     if (diagnoses.length) w.list(diagnoses.map((d) => `Diagnóstico: ${diagnosisText(d)}${siteText(d)}`))
     if (procedures.length)
       w.list(procedures.map((pr) => `Procedimiento: ${pr.description}${siteText(pr)}`))
@@ -497,7 +510,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       medicationCodeableConcept: { text: m.name },
       ...(m.dose || m.frequency ? { dosage: [{ text: [m.dose, m.frequency].filter(Boolean).join(" · ") }] } : {}),
     })
-  for (const { row, diagnoses, procedures } of record.encounters) {
+  for (const { row, diagnoses, procedures, exam } of record.encounters) {
     const encounterRef = { reference: `Encounter/${row.id}` }
     resources.push({
       resourceType: "Encounter",
@@ -554,6 +567,24 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         valueQuantity: { value, unit: v.suffix, system: FHIR_UCUM_SYSTEM, code: v.unit },
       })
     }
+    // El examen por partes; lo no examinado va sin valor y con su motivo (issue 229, decisión 5).
+    for (const part of exam.observations)
+      resources.push({
+        resourceType: "Observation",
+        id: `${row.id}-examen-${part.key}`,
+        status: "final",
+        category: [{ coding: [{ system: FHIR_OBSERVATION_CATEGORY_SYSTEM, code: "exam" }] }],
+        code: { text: part.text },
+        subject: patientRef,
+        encounter: encounterRef,
+        effectiveDateTime: row.startedAt.toISOString(),
+        ...(part.value === null
+          ? { dataAbsentReason: { coding: [{ system: FHIR_DATA_ABSENT_REASON_SYSTEM, code: "not-performed" }] } }
+          : { valueString: part.value }),
+        ...(part.interpretation
+          ? { interpretation: [{ coding: [{ system: FHIR_OBSERVATION_INTERPRETATION_SYSTEM, code: part.interpretation }] }] }
+          : {}),
+      })
   }
   for (const { row, items } of record.prescriptions)
     for (const item of items)

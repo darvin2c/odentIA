@@ -107,20 +107,14 @@ export interface UpdateEncounterDraftPatch {
   indications?: string | null
   /** Reemplaza el set completo de piezas (vacío = sin piezas). */
   teeth?: number[]
-  /** Examen clínico de la atención (extraoral/intraoral/higieneOral); null lo limpia. */
-  examination?: ExaminationInput | null
+  /** Examen físico de la atención, con la forma del producto (`ProductExamination`); null lo limpia. */
+  examination?: Record<string, unknown> | null
   /** Enfermedad actual: relato y tiempo de enfermedad. */
   presentIllness?: string | null
   illnessDuration?: string | null
   /** Signos vitales (claves de @odentia/clinical); null los limpia. */
   vitals?: Record<string, unknown> | null
   prognosis?: string | null
-}
-
-export interface ExaminationInput {
-  extraoral?: Record<string, string> | null
-  intraoral?: Record<string, string> | null
-  higieneOral?: string | null
 }
 
 export interface AddEncounterProcedureInput {
@@ -948,52 +942,6 @@ export async function listEncounters(
       rows.length > limit && last ? encodeCursor(last.createdAt.toISOString(), last.id) : null,
   }
 }
-const EXAMINATION_EXTRAORAL = ["atm", "ganglios", "labios"] as const
-const EXAMINATION_INTRAORAL = [
-  "encias",
-  "lengua",
-  "paladar",
-  "pisoBoca",
-  "carrillos",
-  "orofaringe",
-] as const
-const EXAMINATION_HYGIENE = ["buena", "regular", "mala"] as const
-/** Examen clínico con la estructura del examenClinico de anamnesis; vacíos se recortan, grupos vacíos se omiten. */
-function assertExamination(input: ExaminationInput): Record<string, unknown> | null {
-  if (!input || typeof input !== "object" || Array.isArray(input))
-    throw validation("examination debe ser un objeto")
-  const out: Record<string, unknown> = {}
-  for (const [group, allowed] of [
-    ["extraoral", EXAMINATION_EXTRAORAL],
-    ["intraoral", EXAMINATION_INTRAORAL],
-  ] as const) {
-    const value = input[group]
-    if (value === undefined || value === null) continue
-    if (typeof value !== "object" || Array.isArray(value))
-      throw validation(`examination.${group} debe ser un objeto`)
-    const cleaned: Record<string, string> = {}
-    for (const [key, raw] of Object.entries(value)) {
-      if (!(allowed as readonly string[]).includes(key))
-        throw validation(`examination.${group}.${key} no es un campo válido`)
-      if (typeof raw !== "string") throw validation(`examination.${group}.${key} debe ser texto`)
-      const trimmed = raw.trim()
-      if (trimmed) {
-        if (trimmed.length > 500)
-          throw validation(`examination.${group}.${key} debe tener hasta 500 caracteres`)
-        cleaned[key] = trimmed
-      }
-    }
-    if (Object.keys(cleaned).length > 0) out[group] = cleaned
-  }
-  if (input.higieneOral !== undefined && input.higieneOral !== null) {
-    if (!(EXAMINATION_HYGIENE as readonly string[]).includes(input.higieneOral)) {
-      throw validation("examination.higieneOral debe ser buena, regular o mala")
-    }
-    out.higieneOral = input.higieneOral
-  }
-  return Object.keys(out).length > 0 ? out : null
-}
-
 export async function updateEncounterDraft(
   tx: Db,
   orgId: string,
@@ -1024,13 +972,14 @@ export async function updateEncounterDraft(
     set.indications = cleanText(patch.indications, "indications", TEXT_LIMITS.indications)
   const site = await siteOf(tx, orgId)
   const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(site, patch.teeth)
-  if (patch.examination !== undefined)
-    set.examination = patch.examination === null ? null : assertExamination(patch.examination)
+  // El examen y los signos vitales son los del producto de la clínica (issue 229).
+  const hooks = await productHooks(tx, orgId)
+  if (patch.examination !== undefined) set.examination = hooks.examination.parse(patch.examination)
   for (const key of ["presentIllness", "illnessDuration", "prognosis"] as const) {
     if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
   }
   if (patch.vitals !== undefined) {
-    const parsed = parseVitals(patch.vitals)
+    const parsed = parseVitals(patch.vitals, hooks.vitals)
     if (!parsed.ok) throw validation(parsed.error)
     set.vitals = parsed.value
   }

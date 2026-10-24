@@ -1,6 +1,6 @@
 /**
- * Gráficos de datos de Reportes: línea pequeña, columnas, cascada, mapa de
- * calor y barra repartida. Son HTML y SVG propios, sin librería, para que cada marca
+ * Gráficos de datos de Reportes y de la ficha: línea pequeña, columnas,
+ * líneas en el tiempo, cascada, mapa de calor y barra repartida. Son HTML y SVG propios, sin librería, para que cada marca
  * sea un control con su nombre: se recorren con el teclado, dicen su detalle
  * al pasar el mouse o al tocarlas y todos ofrecen «Ver como tabla».
  *
@@ -11,7 +11,7 @@
  */
 import { Button, cn, ScrollArea, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { moveInGrid, niceTicks, scaleLevel, sparkPoints, type WaterfallKind, waterfallBars } from "./chart-math.js"
+import { moveInGrid, niceTicks, rangeTicks, scaleLevel, sparkPoints, type WaterfallKind, waterfallBars } from "./chart-math.js"
 
 export type SeriesTone = "series-1" | "series-2" | "series-3" | "muted"
 
@@ -459,6 +459,275 @@ export function ColumnChart({
           <span />
         )}
         <TableToggle asTable={asTable} onToggle={() => setAsTable((value) => !value)} />
+      </div>
+    </figure>
+  )
+}
+
+// --- Líneas --------------------------------------------------------------------------------
+
+export interface LineSeries {
+  key: string
+  label: string
+  tone: SeriesTone
+  /** Un valor por categoría; null donde no se midió (la línea salta el hueco). */
+  values: Array<number | null>
+}
+
+export interface LineChartProps {
+  /** Nombre del gráfico para quien no lo ve; el título visible lo pone la tarjeta. */
+  title: string
+  /** Los puntos en el tiempo (cada atención, cada mes), en orden. */
+  categories: ChartCategory[]
+  /** Hasta tres líneas: con dos o más, la leyenda las nombra. */
+  series: LineSeries[]
+  /** El valor escrito entero (tabla, detalle y nombre de cada punto). */
+  format: (value: number) => string
+  /** El valor del eje, abreviado. */
+  axis?: (value: number) => string
+  /** Lo que dice el detalle de un punto; por defecto, cada línea con su valor. */
+  detail?: (index: number) => ReactNode
+  /** Encabezado de la primera columna de la tabla. */
+  tableHeading?: string
+  /** Sin su «Ver como tabla»: la página ya ofrece una tabla con todo. */
+  withTable?: boolean
+  height?: number
+  className?: string
+}
+
+/**
+ * Una medida en el tiempo (la presión, el peso): líneas con su eje, que no
+ * empieza en cero para que se vea el cambio. Como las columnas, cada punto es
+ * un control: pasar el mouse, tocar o enfocar lo elige y abre su detalle; las
+ * flechas recorren los puntos. «Ver como tabla» da los mismos datos escritos.
+ */
+export function LineChart({
+  title,
+  categories,
+  series,
+  format,
+  axis = format,
+  detail,
+  tableHeading = "Fecha",
+  withTable = true,
+  height = 200,
+  className,
+}: LineChartProps) {
+  const id = useId()
+  const count = categories.length
+  const [active, setActive] = useState(() => Math.max(0, count - 1))
+  const [asTable, setAsTable] = useState(false)
+  const points = useRef<Array<HTMLButtonElement | null>>([])
+  const at = Math.max(0, Math.min(count - 1, active))
+
+  const known = series.flatMap((line) => line.values.filter((value): value is number => value !== null && Number.isFinite(value)))
+  const ticks = known.length > 0 ? rangeTicks(Math.min(...known), Math.max(...known)) : [0, 1]
+  const bottom = ticks[0] ?? 0
+  const top = ticks[ticks.length - 1] ?? 1
+  const percent = (value: number): number => ((value - bottom) / (top - bottom || 1)) * 100
+  const xOf = (index: number): number => ((index + 0.5) / Math.max(1, count)) * 100
+
+  const describe = (index: number): string => {
+    const category = categories[index]
+    if (!category) return ""
+    const parts = series.map((line) => {
+      const value = line.values[index]
+      return `${line.label} ${value === null || value === undefined ? "sin medir" : format(value)}`
+    })
+    return `${category.label}: ${parts.join(", ")}`
+  }
+  const choose = (index: number, focus = false): void => {
+    setActive(index)
+    if (focus) points.current[index]?.focus()
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    const next = moveInGrid({ row: 0, column: index }, event.key, 1, count)
+    if (!next || next.column === index) return
+    event.preventDefault()
+    choose(next.column, true)
+  }
+
+  // Un hueco corta la línea en tramos: no se inventa lo que no se midió.
+  const segmentsOf = (values: Array<number | null>): string[] => {
+    const out: string[] = []
+    let current: string[] = []
+    values.forEach((value, index) => {
+      if (value === null || !Number.isFinite(value)) {
+        if (current.length > 0) out.push(current.join(" "))
+        current = []
+      } else current.push(`${xOf(index)},${100 - percent(value)}`)
+    })
+    if (current.length > 0) out.push(current.join(" "))
+    return out
+  }
+  const activeValues = series.map((line) => line.values[at]).filter((value): value is number => value !== null && value !== undefined)
+  const activeTop = activeValues.length > 0 ? percent(Math.max(...activeValues)) : 0
+  // El detalle va sobre el punto y no se sale del gráfico en los bordes; si el punto está alto, va al costado.
+  const tall = activeTop > 55
+  const tipStyle: CSSProperties = tall
+    ? { left: `${xOf(at)}%`, top: 0, transform: at >= count / 2 ? "translateX(calc(-100% - 16px))" : "translateX(16px)" }
+    : {
+        left: `${xOf(at)}%`,
+        bottom: `calc(${activeTop}% + 14px)`,
+        transform: at <= 0 && count > 2 ? "translateX(-12px)" : at >= count - 1 && count > 2 ? "translateX(calc(-100% + 12px))" : "translateX(-50%)",
+      }
+  const gridColumns = `repeat(${Math.max(1, count)}, minmax(0, 1fr))`
+
+  return (
+    <figure className={cn("flex min-w-0 flex-col gap-2", className)} aria-labelledby={`${id}-title`}>
+      <figcaption id={`${id}-title`} className="sr-only">
+        {title}
+      </figcaption>
+      {asTable ? (
+        <ScrollArea horizontal className="min-w-0 [&_[data-slot=table-container]]:overflow-visible">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">{tableHeading}</TableHead>
+                {series.map((line) => (
+                  <TableHead key={line.key} scope="col" className="text-right">
+                    {line.label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {categories.map((category, index) => (
+                <TableRow key={category.key}>
+                  <TableCell>{category.label}</TableCell>
+                  {series.map((line) => {
+                    const value = line.values[index]
+                    return (
+                      <TableCell key={line.key} className="text-right tabular-nums">
+                        {value === null || value === undefined ? "Sin medir" : format(value)}
+                      </TableCell>
+                    )
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ScrollArea>
+      ) : (
+        <div className="flex min-w-0 gap-2">
+          <div aria-hidden className="relative w-10 shrink-0 text-right text-xs text-muted-foreground" style={{ height }}>
+            {ticks.map((tick) => (
+              <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${percent(tick)}%` }}>
+                {axis(tick)}
+              </span>
+            ))}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="relative border-b border-input" style={{ height }}>
+              {ticks.slice(1).map((tick) => (
+                <div key={tick} aria-hidden className="absolute inset-x-0 border-t border-border" style={{ bottom: `${percent(tick)}%` }} />
+              ))}
+              {count > 0 ? (
+                <div
+                  aria-hidden
+                  className="absolute inset-y-0 border-l border-dashed border-muted-foreground/50"
+                  style={{ left: `${xOf(at)}%` }}
+                />
+              ) : null}
+              <svg aria-hidden className="pointer-events-none absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                {series.flatMap((line) =>
+                  segmentsOf(line.values).map((segment) => (
+                    <polyline
+                      key={`${line.key}-${segment}`}
+                      points={segment}
+                      fill="none"
+                      stroke={TONE_VAR[line.tone]}
+                      strokeWidth={2}
+                      vectorEffect="non-scaling-stroke"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                  )),
+                )}
+              </svg>
+              {/* Los puntos van en HTML: en el SVG estirado dejarían de ser redondos. */}
+              {series.flatMap((line) =>
+                line.values.map((value, index) =>
+                  value === null || value === undefined ? null : (
+                    <span
+                      key={`${line.key}-${categories[index]?.key ?? index}`}
+                      aria-hidden
+                      className={cn(
+                        "pointer-events-none absolute -translate-x-1/2 translate-y-1/2 rounded-full ring-2 ring-card",
+                        index === at ? "size-3" : "size-2.5",
+                      )}
+                      style={{ left: `${xOf(index)}%`, bottom: `${percent(value)}%`, background: TONE_VAR[line.tone] }}
+                    />
+                  ),
+                ),
+              )}
+              <div className="absolute inset-0 grid" style={{ gridTemplateColumns: gridColumns }}>
+                {categories.map((category, index) => (
+                  <button
+                    key={category.key}
+                    ref={(element) => {
+                      points.current[index] = element
+                    }}
+                    type="button"
+                    tabIndex={index === at ? 0 : -1}
+                    aria-label={describe(index)}
+                    aria-pressed={index === at}
+                    onMouseEnter={() => choose(index)}
+                    onFocus={() => choose(index)}
+                    onClick={() => choose(index)}
+                    onKeyDown={(event) => onKeyDown(event, index)}
+                    className="h-full min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                ))}
+              </div>
+              {count > 0 ? (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute z-10 flex flex-col gap-0.5 whitespace-nowrap rounded-lg bg-foreground px-3 py-2 text-xs text-background shadow-lg"
+                  style={tipStyle}
+                >
+                  {detail ? (
+                    detail(at)
+                  ) : (
+                    <>
+                      <strong className="text-[13px]">{categories[at]?.label}</strong>
+                      {series.map((line) => {
+                        const value = line.values[at]
+                        return (
+                          <span key={line.key}>
+                            {line.label}: {value === null || value === undefined ? "sin medir" : format(value)}
+                          </span>
+                        )
+                      })}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div aria-hidden className="grid text-center text-xs text-muted-foreground" style={{ gridTemplateColumns: gridColumns }}>
+              {categories.map((category, index) => (
+                <span key={category.key} className={cn("truncate", index === at && "font-bold text-foreground")}>
+                  {category.short}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        {!asTable && series.length > 1 ? (
+          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+            {series.map((line) => (
+              <li key={line.key} className="flex items-center gap-1.5">
+                <span aria-hidden className="h-0.5 w-4 rounded-full" style={{ background: TONE_VAR[line.tone] }} />
+                {line.label}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span />
+        )}
+        {withTable ? <TableToggle asTable={asTable} onToggle={() => setAsTable((value) => !value)} /> : null}
       </div>
     </figure>
   )

@@ -1,0 +1,21 @@
+{
+  "name": "@odentia/medical",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dominio médico puro de latidIA (ADR 0079): el examen por sistemas y los signos vitales del consultorio.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@odentia/clinical": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "^3.2.7"
+  }
+}

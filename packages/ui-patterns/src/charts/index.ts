@@ -13,6 +13,9 @@ export {
   type HeatmapAxis,
   HeatmapGrid,
   type HeatmapGridProps,
+  LineChart,
+  type LineChartProps,
+  type LineSeries,
   ShareBar,
   type SharePart,
   type SeriesTone,
@@ -22,4 +25,4 @@ export {
   type WaterfallStep,
 } from "./data-charts.js";
 export { BarList, type BarListProps, type BarListRow } from "./bar-list.js";
-export { niceTicks, scaleLevel } from "./chart-math.js";
+export { niceTicks, rangeTicks, scaleLevel } from "./chart-math.js";

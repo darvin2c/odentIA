@@ -1,4 +1,4 @@
-import type { ClinicalProduct } from "@odentia/clinical"
+import { type ClinicalProduct, CORE_VITAL_KEYS, type VitalSignKey, type Vitals } from "@odentia/clinical"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import type {
@@ -48,6 +48,8 @@ export interface ProductUi {
 }
 
 export interface ProductEncounterUi {
+  /** El examen físico: su bloque en el borrador y lo que se lee de él. */
+  examination: ProductExaminationUi
   /**
    * Los bloques del producto en la atención en borrador, después del examen
    * (odentIA: Odontograma y Periodontograma). Es un hook: lo llama el editor.
@@ -66,6 +68,39 @@ export interface ProductEncounterUi {
    * lo registrado, y el periodontograma, al final).
    */
   Detail(props: { patientId: string; detail: EncounterDetail; slot: "recorded" | "end" }): ReactNode
+}
+
+/**
+ * El examen físico de la atención (`encounter.examination`), con la forma del
+ * producto (odentIA: la boca; latidIA: por sistemas, issue 229). Los signos
+ * vitales son comunes: el producto dice cuáles registra y qué va debajo.
+ */
+export interface ProductExaminationUi {
+  /** El nombre del bloque («Examen clínico», «Examen físico») y para qué es. */
+  title: string
+  description: string
+  /** Los signos vitales que registra, en su orden. */
+  vitals: readonly VitalSignKey[]
+  /** Lo guardado → el borrador que se edita; null si no hay nada. */
+  draft(saved: unknown): unknown
+  /** El borrador → lo que se guarda; null si quedó vacío. */
+  body(draft: unknown): Record<string, unknown> | null
+  /** El resumen del bloque («Examen registrado»); vacío si no hay examen. */
+  summary(draft: unknown): string
+  /** Los campos del examen, debajo de los signos vitales. */
+  Fields(props: ExaminationFieldsProps): ReactNode
+  /** Debajo de los signos vitales (latidIA: el IMC y la medición anterior). */
+  VitalsNote(props: { patientId: string; encounterId: string; vitals: Vitals | null }): ReactNode
+  /** Lo guardado, al leer la atención: una línea por parte; vacío si no se muestra. */
+  readLines(saved: unknown): string[]
+}
+
+export interface ExaminationFieldsProps {
+  /** Prefijo único para los `id` de los campos. */
+  idPrefix: string
+  draft: unknown
+  onChange(next: unknown): void
+  disabled: boolean
 }
 
 /** Lo que el editor de la atención le da a los bloques del producto. */
@@ -304,6 +339,17 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },
     documents: { kind: null, usePapers: () => NO_PAPERS },
     encounter: {
+      examination: {
+        title: "Examen clínico",
+        description: "Signos vitales.",
+        vitals: CORE_VITAL_KEYS,
+        draft: () => null,
+        body: () => null,
+        summary: () => "",
+        Fields: () => null,
+        VitalsNote: () => null,
+        readLines: () => [],
+      },
       useBlocks: () => NO_BLOCKS,
       Closing: () => null,
       signLabel: () => null,
