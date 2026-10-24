@@ -30,7 +30,7 @@ import {
 import { SubmitButton } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ApiError } from "../../../lib/api"
+import { ApiError } from "@odentia/clinic-app/lib/api"
 import { type PeriodontalChart as ChartData, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
 import { isUpper, PlaqueTooth } from "./anatomy"
 import {

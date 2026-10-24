@@ -21,7 +21,7 @@ import { PeriodontogramaTab } from "../../components/dental/periodontal/periodon
 import { ToothSelector } from "../../components/dental/tooth-selector"
 import { ToothSiteSelector } from "../../components/dental/tooth-site-selector"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
-import type { ProductSiteUi, ProductUi } from "../product-ui"
+import type { ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { dentalEncounter } from "./encounter"
 
 /** El «dónde» de odentIA: la pieza en FDI (ISO 3950) y sus caras. */

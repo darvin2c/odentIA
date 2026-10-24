@@ -1,30 +1,26 @@
-import { createRequire } from "node:module"
-import path from "node:path"
+import { clinicAppAliases } from "@odentia/clinic-app/vite"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
+import { layout, physical, rootRoute } from "@tanstack/virtual-file-routes"
 import viteReact from "@vitejs/plugin-react"
-import { defineConfig, normalizePath } from "vite"
+import { defineConfig } from "vite"
 
-const require = createRequire(import.meta.url)
+/**
+ * Las páginas comunes viven en @odentia/clinic-app (ADR 0085), una sola vez para
+ * cada producto. La app pone su raíz (nombre, ícono y estilos) y sus propias
+ * páginas dentro de la zona con sesión: las de `src/routes/dental`.
+ */
+const COMMON_ROUTES = "../../../../packages/clinic-app/src/routes"
+const routes = rootRoute("__root.tsx", [
+  physical("", `${COMMON_ROUTES}/public`),
+  layout("_org", `${COMMON_ROUTES}/_org.tsx`, [physical("", `${COMMON_ROUTES}/_org`), physical("", "dental")]),
+])
 
 export default defineConfig({
   server: {
     port: Number(process.env.PORT) || 5173,
     strictPort: Boolean(process.env.PORT),
   },
-  resolve: {
-    alias: [
-      {
-        // El códec JPEG de 12 bits no exporta su `.wasm` (lib/dicom-codecs.ts).
-        find: /^@cornerstonejs\/codec-libjpeg-turbo-12bit\/wasm(\?.*)?$/,
-        replacement: `${normalizePath(
-          path.join(
-            path.dirname(require.resolve("@cornerstonejs/codec-libjpeg-turbo-12bit/wasmjs")),
-            "libjpegturbo12wasm.wasm",
-          ),
-        )}$1`,
-      },
-    ],
-  },
-  plugins: [tailwindcss(), tanstackStart(), viteReact()],
+  resolve: { alias: clinicAppAliases() },
+  plugins: [tailwindcss(), tanstackStart({ router: { virtualRouteConfig: routes } }), viteReact()],
 })

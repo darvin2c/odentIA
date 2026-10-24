@@ -1,8 +1,9 @@
 /**
- * Lo común no depende de lo dental (ADR 0079). Lo dental vive en este paquete
- * y en las carpetas `dental/` de los servicios, el agente, la base y la API;
- * cada producto se conecta con lo común solo por `products.ts` (servicios y
- * API). Ningún código de lo común importa lo dental: solo las pruebas de la
+ * Lo común no depende de lo dental (ADR 0079). Lo dental vive en este paquete,
+ * en las carpetas `dental/` de los servicios, el agente, la base y la API, y en
+ * la app de odentIA; cada producto se conecta con lo común solo por
+ * `products.ts` (servicios y API) y, en las pantallas, por `productUi()` de
+ * `@odentia/clinic-app` (ADR 0085). Ningún código de lo común importa lo dental: solo las pruebas de la
  * lista de abajo, que prueban lo común con odentIA como ejemplo. Un archivo
  * nuevo que lo necesite es una señal de que falta un punto de extensión del
  * producto, no de agregarlo aquí.
@@ -39,6 +40,9 @@ const STILL_COUPLED = [
   "packages/services/src/saas-actions.test.ts",
   "packages/services/src/service-interest.test.ts",
   "packages/services/src/treatment-journey.test.ts",
+  // El visor de tomografías se prueba con el fantasma de odentIA (`generateCbctPhantom`).
+  "packages/clinic-app/src/lib/cbct-arch.test.ts",
+  "packages/clinic-app/src/lib/cbct-volume.test.ts",
 ]
 
 /** Carpetas comunes: ninguno de sus archivos importa lo dental salvo la lista. */
@@ -52,6 +56,7 @@ const COMMON = [
   "packages/mail/src",
   "packages/ui/src",
   "packages/ui-patterns/src",
+  "packages/clinic-app/src",
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",

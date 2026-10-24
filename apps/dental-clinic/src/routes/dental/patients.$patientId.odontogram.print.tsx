@@ -5,11 +5,11 @@ import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { findingWords } from "../../components/dental/odontogram-notation"
-import { formatDate } from "../../lib/clinical-journey"
+import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { fetchOdontogramPrint } from "../../lib/dental/odontogram"
-import { hcLabel } from "../../lib/patients"
+import { hcLabel } from "@odentia/clinic-app/lib/patients"
 import { type OdontogramEntry } from "../../lib/dental/odontogram"
-import { QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/print")({
   component: OdontogramPrintPage,

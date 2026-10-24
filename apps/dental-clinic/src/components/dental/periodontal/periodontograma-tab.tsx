@@ -28,8 +28,8 @@ import {
   visitDay,
   visitName,
 } from "../../../lib/dental/periodontal"
-import { QueryErrorState } from "../../../lib/query-error"
-import { NewEncounterButton } from "../../patient/new-encounter-button"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
+import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 import { PeriodontalChart, PeriodontalLegend } from "./periodontal-chart"
 import { PeriodontalCompare } from "./periodontal-compare"
 import { BleedingSparkline, PeriodontalTiles, PeriodontalToothDetail } from "./periodontal-views"

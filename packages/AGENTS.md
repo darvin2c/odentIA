@@ -14,6 +14,7 @@ Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni dupli
 | `mail` | Correo transaccional de la plataforma; distinto del buzón omnicanal de una organización. |
 | `ui` | Primitivas visuales y accesibles sin negocio. |
 | `ui-patterns` | Composiciones reutilizables, con stories; las apps deciden sus datos y permisos. |
+| `clinic-app` | Las pantallas comunes de la clínica (ADR 0085): componentes, `lib`, páginas y el contrato del producto (`productUi()`). Cada producto lo monta en su app; nunca importa lo de un producto. |
 | `brand-scene` | La escena de las 32 piezas de la portada de la web, compartida por la web y el panel; sin datos de clínicas. |
 
 ## Contratos particulares

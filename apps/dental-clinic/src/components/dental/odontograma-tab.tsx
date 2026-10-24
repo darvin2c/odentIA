@@ -2,12 +2,12 @@ import { Button } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { apiFetch } from "../../lib/api"
-import type { PlanItem } from "../../lib/patients"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import type { PlanItem } from "@odentia/clinic-app/lib/patients"
 import type { OdontogramState } from "../../lib/dental/odontogram"
-import { QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { OdontogramStudio } from "./odontogram-studio"
-import { NewEncounterButton } from "../patient/new-encounter-button"
+import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 
 const CLOSED = new Set(["realizado", "cancelado"])
 const DISCARDED = new Set(["rechazado", "reemplazado"])

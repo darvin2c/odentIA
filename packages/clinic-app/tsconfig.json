@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"]
+  },
+  // Las páginas se tipan con el árbol de rutas de una app (el `Register` de
+  // TanStack Router): para comprobarlas se usa el de odentIA. Es solo para los
+  // tipos; el código del paquete no importa nada de una app (ADR 0085).
+  "include": ["src", "vite.ts", "vitest.config.ts", "../../apps/dental-clinic/src/router.tsx"]
+}

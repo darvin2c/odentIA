@@ -1,5 +1,5 @@
 import { type DentalCountryProfile, dentalProfileFor } from "@odentia/dental"
-import { useOrgProfile } from "../org"
+import { useOrgProfile } from "@odentia/clinic-app/lib/org"
 
 /**
  * Lo dental del país de esta clínica (ADR 0079): odontograma oficial,

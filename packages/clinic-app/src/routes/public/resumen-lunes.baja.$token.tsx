@@ -2,8 +2,8 @@ import { Button } from "@odentia/ui"
 import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ApiError } from "../lib/api"
-import { confirmReportDigestStop, fetchReportDigestStop } from "../lib/public-automations"
+import { ApiError } from "../../lib/api"
+import { confirmReportDigestStop, fetchReportDigestStop } from "../../lib/public-automations"
 
 export const Route = createFileRoute("/resumen-lunes/baja/$token")({
   head: () => ({

@@ -1,6 +1,6 @@
 import { findingDefinition } from "@odentia/dental"
 import { Button } from "@odentia/ui"
-import type { DictationSession, DictationSuggestion } from "../patient/dictation-session"
+import type { DictationSession, DictationSuggestion } from "@odentia/clinic-app/components/patient/dictation-session"
 
 /**
  * Lo que la norma del país pide de un hallazgo dictado y no se dijo (la

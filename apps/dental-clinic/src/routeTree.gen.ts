@@ -9,89 +9,90 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as OrgRouteImport } from './routes/_org'
-import { Route as PortalRouteImport } from './routes/portal'
-import { Route as RegistroRouteImport } from './routes/registro'
-import { Route as ReservaRouteImport } from './routes/reserva'
-import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
-import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
-import { Route as OrgCommissionsRouteImport } from './routes/_org/commissions'
-import { Route as OrgFinanceRouteImport } from './routes/_org/finance'
-import { Route as OrgHomeRouteImport } from './routes/_org/home'
-import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
-import { Route as OrgInventoryRouteImport } from './routes/_org/inventory'
-import { Route as OrgMembersRouteImport } from './routes/_org/members'
-import { Route as OrgPipelineRouteImport } from './routes/_org/pipeline'
-import { Route as OrgReportsRouteImport } from './routes/_org/reports'
-import { Route as OrgServicesRouteImport } from './routes/_org/services'
-import { Route as OrgSettingsRouteImport } from './routes/_org/settings'
-import { Route as OrgTasksRouteImport } from './routes/_org/tasks'
-import { Route as BajaTokenRouteImport } from './routes/baja.$token'
-import { Route as CTokenRouteImport } from './routes/c.$token'
-import { Route as EmbedIndexRouteImport } from './routes/embed.index'
-import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
-import { Route as LlegarBranchRouteImport } from './routes/llegar.$branch'
-import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
-import { Route as OrgAgentAdministradorRouteImport } from './routes/_org/agent.administrador'
-import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.approvals'
-import { Route as OrgAgentAsistenteClinicoRouteImport } from './routes/_org/agent.asistente-clinico'
-import { Route as OrgAgentKnowledgeRouteImport } from './routes/_org/agent.knowledge'
-import { Route as OrgAgentLearnRouteImport } from './routes/_org/agent.learn'
-import { Route as OrgAgentPendientesRouteImport } from './routes/_org/agent.pendientes'
-import { Route as OrgAgentRecepcionRouteImport } from './routes/_org/agent.recepcion'
-import { Route as OrgAgentRegistroRouteImport } from './routes/_org/agent.registro'
-import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
-import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
-import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/inventory_.$productId'
-import { Route as OrgOpportunitiesOpportunityIdRouteImport } from './routes/_org/opportunities.$opportunityId'
-import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.index'
-import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
-import { Route as OrgPeopleIndexRouteImport } from './routes/_org/people.index'
-import { Route as OrgPeoplePersonIdRouteImport } from './routes/_org/people.$personId'
-import { Route as OrgPeopleLockedRouteImport } from './routes/_org/people.locked'
-import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
-import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
-import { Route as OrgServicesPromotionsRouteImport } from './routes/_org/services.promotions'
-import { Route as OrgSettingsIndexRouteImport } from './routes/_org/settings.index'
-import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
-import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.audit'
-import { Route as OrgSettingsAvailabilityRouteImport } from './routes/_org/settings.availability'
-import { Route as OrgSettingsBranchesRouteImport } from './routes/_org/settings.branches'
-import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
-import { Route as OrgSettingsDataProtectionRouteImport } from './routes/_org/settings.data-protection'
-import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
-import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
-import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
-import { Route as OrgSettingsPatientAccessRouteImport } from './routes/_org/settings.patient-access'
-import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_org/settings.patient-registration'
-import { Route as OrgSettingsPaymentMethodsRouteImport } from './routes/_org/settings.payment-methods'
-import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
-import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
-import { Route as OrgSettingsTeamRouteImport } from './routes/_org/settings.team'
-import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
-import { Route as ResumenLunesBajaTokenRouteImport } from './routes/resumen-lunes.baja.$token'
-import { Route as OrgSettingsIntegrationsIndexRouteImport } from './routes/_org/settings.integrations.index'
-import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
-import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
-import { Route as OrgSettingsPlanIndexRouteImport } from './routes/_org/settings.plan.index'
-import { Route as OrgSettingsPlanAccionesRouteImport } from './routes/_org/settings.plan.acciones'
-import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
-import { Route as OrgPatientsPatientIdOdontogramPrintRouteImport } from './routes/_org/patients.$patientId.odontogram.print'
-import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
-import { Route as OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport } from './routes/_org/patients.$patientId.odontogram.$assessmentId.print'
-import { Route as OrgPatientsPatientIdOrdersOrderIdPrintRouteImport } from './routes/_org/patients.$patientId.orders.$orderId.print'
-import { Route as OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport } from './routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
+import { Route as IndexRouteImport } from './../../../packages/clinic-app/src/routes/public/index'
+import { Route as DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport } from './../../../packages/clinic-app/src/routes/_org'
+import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
+import { Route as RegistroRouteImport } from './../../../packages/clinic-app/src/routes/public/registro'
+import { Route as ReservaRouteImport } from './../../../packages/clinic-app/src/routes/public/reserva'
+import { Route as AgendaRouteImport } from './../../../packages/clinic-app/src/routes/_org/agenda'
+import { Route as BranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/branches'
+import { Route as CommissionsRouteImport } from './../../../packages/clinic-app/src/routes/_org/commissions'
+import { Route as FinanceRouteImport } from './../../../packages/clinic-app/src/routes/_org/finance'
+import { Route as HomeRouteImport } from './../../../packages/clinic-app/src/routes/_org/home'
+import { Route as InboxRouteImport } from './../../../packages/clinic-app/src/routes/_org/inbox'
+import { Route as InventoryRouteImport } from './../../../packages/clinic-app/src/routes/_org/inventory'
+import { Route as MembersRouteImport } from './../../../packages/clinic-app/src/routes/_org/members'
+import { Route as PipelineRouteImport } from './../../../packages/clinic-app/src/routes/_org/pipeline'
+import { Route as ReportsRouteImport } from './../../../packages/clinic-app/src/routes/_org/reports'
+import { Route as ServicesRouteImport } from './../../../packages/clinic-app/src/routes/_org/services'
+import { Route as SettingsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings'
+import { Route as TasksRouteImport } from './../../../packages/clinic-app/src/routes/_org/tasks'
+import { Route as BajaDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/baja.$token'
+import { Route as CDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/c.$token'
+import { Route as EmbedDotindexRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.index'
+import { Route as EmbedDotconnectionIdRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.$connectionId'
+import { Route as LlegarDotbranchRouteImport } from './../../../packages/clinic-app/src/routes/public/llegar.$branch'
+import { Route as AgentDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.index'
+import { Route as AgentDotadministradorRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.administrador'
+import { Route as AgentDotapprovalsRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.approvals'
+import { Route as AgentDotasistenteClinicoRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.asistente-clinico'
+import { Route as AgentDotknowledgeRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.knowledge'
+import { Route as AgentDotlearnRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.learn'
+import { Route as AgentDotpendientesRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.pendientes'
+import { Route as AgentDotrecepcionRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.recepcion'
+import { Route as AgentDotregistroRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.registro'
+import { Route as ContactsDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/contacts.index'
+import { Route as ContactsDotcontactIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/contacts.$contactId'
+import { Route as Inventory_DotproductIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/inventory_.$productId'
+import { Route as OpportunitiesDotopportunityIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/opportunities.$opportunityId'
+import { Route as PatientsDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.index'
+import { Route as PatientsDotpatientIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId'
+import { Route as PeopleDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/people.index'
+import { Route as PeopleDotpersonIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/people.$personId'
+import { Route as PeopleDotlockedRouteImport } from './../../../packages/clinic-app/src/routes/_org/people.locked'
+import { Route as ServicesDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/services.index'
+import { Route as ServicesDotbibliotecaRouteImport } from './../../../packages/clinic-app/src/routes/_org/services.biblioteca'
+import { Route as ServicesDotpromotionsRouteImport } from './../../../packages/clinic-app/src/routes/_org/services.promotions'
+import { Route as SettingsDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.index'
+import { Route as SettingsDotagentRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.agent'
+import { Route as SettingsDotauditRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.audit'
+import { Route as SettingsDotavailabilityRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.availability'
+import { Route as SettingsDotbranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.branches'
+import { Route as SettingsDotchannelsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.channels'
+import { Route as SettingsDotdataProtectionRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.data-protection'
+import { Route as SettingsDotfieldsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.fields'
+import { Route as SettingsDotformsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.forms'
+import { Route as SettingsDotmailRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.mail'
+import { Route as SettingsDotpatientAccessRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.patient-access'
+import { Route as SettingsDotpatientRegistrationRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.patient-registration'
+import { Route as SettingsDotpaymentMethodsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.payment-methods'
+import { Route as SettingsDotpipelinesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.pipelines'
+import { Route as SettingsDotspecialtiesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.specialties'
+import { Route as SettingsDotteamRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.team'
+import { Route as SettingsDotwebchatRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.webchat'
+import { Route as ResumenLunesDotbajaDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/resumen-lunes.baja.$token'
+import { Route as SettingsDotintegrationsDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.index'
+import { Route as SettingsDotintegrationsDotwebchatRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.webchat'
+import { Route as SettingsDotintegrationsDotwhatsappRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.whatsapp'
+import { Route as SettingsDotplanDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.plan.index'
+import { Route as SettingsDotplanDotaccionesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.plan.acciones'
+import { Route as PatientsDotpatientIdDotencountersDotencounterIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.encounters.$encounterId'
+import { Route as PatientsDotpatientIdDotodontogramDotprintRouteImport } from './routes/dental/patients.$patientId.odontogram.print'
+import { Route as PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRouteImport } from './routes/dental/patients.$patientId.odontogram.$assessmentId.print'
+import { Route as PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.orders.$orderId.print'
+import { Route as PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OrgRoute = OrgRouteImport.update({
-  id: '/_org',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute =
+  DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport.update({
+    id: '/_org',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/portal',
   path: '/portal',
@@ -107,583 +108,618 @@ const ReservaRoute = ReservaRouteImport.update({
   path: '/reserva',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OrgAgendaRoute = OrgAgendaRouteImport.update({
+const AgendaRoute = AgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgBranchesRoute = OrgBranchesRouteImport.update({
+const BranchesRoute = BranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgCommissionsRoute = OrgCommissionsRouteImport.update({
+const CommissionsRoute = CommissionsRouteImport.update({
   id: '/commissions',
   path: '/commissions',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgFinanceRoute = OrgFinanceRouteImport.update({
+const FinanceRoute = FinanceRouteImport.update({
   id: '/finance',
   path: '/finance',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgHomeRoute = OrgHomeRouteImport.update({
+const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgInboxRoute = OrgInboxRouteImport.update({
+const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgInventoryRoute = OrgInventoryRouteImport.update({
+const InventoryRoute = InventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgMembersRoute = OrgMembersRouteImport.update({
+const MembersRoute = MembersRouteImport.update({
   id: '/members',
   path: '/members',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgPipelineRoute = OrgPipelineRouteImport.update({
+const PipelineRoute = PipelineRouteImport.update({
   id: '/pipeline',
   path: '/pipeline',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgReportsRoute = OrgReportsRouteImport.update({
+const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgServicesRoute = OrgServicesRouteImport.update({
+const ServicesRoute = ServicesRouteImport.update({
   id: '/services',
   path: '/services',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgSettingsRoute = OrgSettingsRouteImport.update({
+const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgTasksRoute = OrgTasksRouteImport.update({
+const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const BajaTokenRoute = BajaTokenRouteImport.update({
+const BajaDottokenRoute = BajaDottokenRouteImport.update({
   id: '/baja/$token',
   path: '/baja/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CTokenRoute = CTokenRouteImport.update({
+const CDottokenRoute = CDottokenRouteImport.update({
   id: '/c/$token',
   path: '/c/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EmbedIndexRoute = EmbedIndexRouteImport.update({
+const EmbedDotindexRoute = EmbedDotindexRouteImport.update({
   id: '/embed/',
   path: '/embed/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EmbedConnectionIdRoute = EmbedConnectionIdRouteImport.update({
+const EmbedDotconnectionIdRoute = EmbedDotconnectionIdRouteImport.update({
   id: '/embed/$connectionId',
   path: '/embed/$connectionId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LlegarBranchRoute = LlegarBranchRouteImport.update({
+const LlegarDotbranchRoute = LlegarDotbranchRouteImport.update({
   id: '/llegar/$branch',
   path: '/llegar/$branch',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OrgAgentIndexRoute = OrgAgentIndexRouteImport.update({
+const AgentDotindexRoute = AgentDotindexRouteImport.update({
   id: '/agent/',
   path: '/agent/',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentAdministradorRoute = OrgAgentAdministradorRouteImport.update({
+const AgentDotadministradorRoute = AgentDotadministradorRouteImport.update({
   id: '/agent/administrador',
   path: '/agent/administrador',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentApprovalsRoute = OrgAgentApprovalsRouteImport.update({
+const AgentDotapprovalsRoute = AgentDotapprovalsRouteImport.update({
   id: '/agent/approvals',
   path: '/agent/approvals',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentAsistenteClinicoRoute =
-  OrgAgentAsistenteClinicoRouteImport.update({
+const AgentDotasistenteClinicoRoute =
+  AgentDotasistenteClinicoRouteImport.update({
     id: '/agent/asistente-clinico',
     path: '/agent/asistente-clinico',
-    getParentRoute: () => OrgRoute,
+    getParentRoute: () =>
+      DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
   } as any)
-const OrgAgentKnowledgeRoute = OrgAgentKnowledgeRouteImport.update({
+const AgentDotknowledgeRoute = AgentDotknowledgeRouteImport.update({
   id: '/agent/knowledge',
   path: '/agent/knowledge',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentLearnRoute = OrgAgentLearnRouteImport.update({
+const AgentDotlearnRoute = AgentDotlearnRouteImport.update({
   id: '/agent/learn',
   path: '/agent/learn',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentPendientesRoute = OrgAgentPendientesRouteImport.update({
+const AgentDotpendientesRoute = AgentDotpendientesRouteImport.update({
   id: '/agent/pendientes',
   path: '/agent/pendientes',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentRecepcionRoute = OrgAgentRecepcionRouteImport.update({
+const AgentDotrecepcionRoute = AgentDotrecepcionRouteImport.update({
   id: '/agent/recepcion',
   path: '/agent/recepcion',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgAgentRegistroRoute = OrgAgentRegistroRouteImport.update({
+const AgentDotregistroRoute = AgentDotregistroRouteImport.update({
   id: '/agent/registro',
   path: '/agent/registro',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgContactsIndexRoute = OrgContactsIndexRouteImport.update({
+const ContactsDotindexRoute = ContactsDotindexRouteImport.update({
   id: '/contacts/',
   path: '/contacts/',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgContactsContactIdRoute = OrgContactsContactIdRouteImport.update({
+const ContactsDotcontactIdRoute = ContactsDotcontactIdRouteImport.update({
   id: '/contacts/$contactId',
   path: '/contacts/$contactId',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgInventoryProductIdRoute = OrgInventoryProductIdRouteImport.update({
+const Inventory_DotproductIdRoute = Inventory_DotproductIdRouteImport.update({
   id: '/inventory_/$productId',
   path: '/inventory/$productId',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgOpportunitiesOpportunityIdRoute =
-  OrgOpportunitiesOpportunityIdRouteImport.update({
+const OpportunitiesDotopportunityIdRoute =
+  OpportunitiesDotopportunityIdRouteImport.update({
     id: '/opportunities/$opportunityId',
     path: '/opportunities/$opportunityId',
-    getParentRoute: () => OrgRoute,
+    getParentRoute: () =>
+      DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
   } as any)
-const OrgPatientsIndexRoute = OrgPatientsIndexRouteImport.update({
+const PatientsDotindexRoute = PatientsDotindexRouteImport.update({
   id: '/patients/',
   path: '/patients/',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgPatientsPatientIdRoute = OrgPatientsPatientIdRouteImport.update({
+const PatientsDotpatientIdRoute = PatientsDotpatientIdRouteImport.update({
   id: '/patients/$patientId',
   path: '/patients/$patientId',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgPeopleIndexRoute = OrgPeopleIndexRouteImport.update({
+const PeopleDotindexRoute = PeopleDotindexRouteImport.update({
   id: '/people/',
   path: '/people/',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgPeoplePersonIdRoute = OrgPeoplePersonIdRouteImport.update({
+const PeopleDotpersonIdRoute = PeopleDotpersonIdRouteImport.update({
   id: '/people/$personId',
   path: '/people/$personId',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgPeopleLockedRoute = OrgPeopleLockedRouteImport.update({
+const PeopleDotlockedRoute = PeopleDotlockedRouteImport.update({
   id: '/people/locked',
   path: '/people/locked',
-  getParentRoute: () => OrgRoute,
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
-const OrgServicesIndexRoute = OrgServicesIndexRouteImport.update({
+const ServicesDotindexRoute = ServicesDotindexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => OrgServicesRoute,
+  getParentRoute: () => ServicesRoute,
 } as any)
-const OrgServicesBibliotecaRoute = OrgServicesBibliotecaRouteImport.update({
+const ServicesDotbibliotecaRoute = ServicesDotbibliotecaRouteImport.update({
   id: '/biblioteca',
   path: '/biblioteca',
-  getParentRoute: () => OrgServicesRoute,
+  getParentRoute: () => ServicesRoute,
 } as any)
-const OrgServicesPromotionsRoute = OrgServicesPromotionsRouteImport.update({
+const ServicesDotpromotionsRoute = ServicesDotpromotionsRouteImport.update({
   id: '/promotions',
   path: '/promotions',
-  getParentRoute: () => OrgServicesRoute,
+  getParentRoute: () => ServicesRoute,
 } as any)
-const OrgSettingsIndexRoute = OrgSettingsIndexRouteImport.update({
+const SettingsDotindexRoute = SettingsDotindexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsAgentRoute = OrgSettingsAgentRouteImport.update({
+const SettingsDotagentRoute = SettingsDotagentRouteImport.update({
   id: '/agent',
   path: '/agent',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsAuditRoute = OrgSettingsAuditRouteImport.update({
+const SettingsDotauditRoute = SettingsDotauditRouteImport.update({
   id: '/audit',
   path: '/audit',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsAvailabilityRoute = OrgSettingsAvailabilityRouteImport.update({
+const SettingsDotavailabilityRoute = SettingsDotavailabilityRouteImport.update({
   id: '/availability',
   path: '/availability',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsBranchesRoute = OrgSettingsBranchesRouteImport.update({
+const SettingsDotbranchesRoute = SettingsDotbranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
+const SettingsDotchannelsRoute = SettingsDotchannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsDataProtectionRoute =
-  OrgSettingsDataProtectionRouteImport.update({
+const SettingsDotdataProtectionRoute =
+  SettingsDotdataProtectionRouteImport.update({
     id: '/data-protection',
     path: '/data-protection',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
+const SettingsDotfieldsRoute = SettingsDotfieldsRouteImport.update({
   id: '/fields',
   path: '/fields',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsFormsRoute = OrgSettingsFormsRouteImport.update({
+const SettingsDotformsRoute = SettingsDotformsRouteImport.update({
   id: '/forms',
   path: '/forms',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsMailRoute = OrgSettingsMailRouteImport.update({
+const SettingsDotmailRoute = SettingsDotmailRouteImport.update({
   id: '/mail',
   path: '/mail',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsPatientAccessRoute =
-  OrgSettingsPatientAccessRouteImport.update({
+const SettingsDotpatientAccessRoute =
+  SettingsDotpatientAccessRouteImport.update({
     id: '/patient-access',
     path: '/patient-access',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsPatientRegistrationRoute =
-  OrgSettingsPatientRegistrationRouteImport.update({
+const SettingsDotpatientRegistrationRoute =
+  SettingsDotpatientRegistrationRouteImport.update({
     id: '/patient-registration',
     path: '/patient-registration',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsPaymentMethodsRoute =
-  OrgSettingsPaymentMethodsRouteImport.update({
+const SettingsDotpaymentMethodsRoute =
+  SettingsDotpaymentMethodsRouteImport.update({
     id: '/payment-methods',
     path: '/payment-methods',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsPipelinesRoute = OrgSettingsPipelinesRouteImport.update({
+const SettingsDotpipelinesRoute = SettingsDotpipelinesRouteImport.update({
   id: '/pipelines',
   path: '/pipelines',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsSpecialtiesRoute = OrgSettingsSpecialtiesRouteImport.update({
+const SettingsDotspecialtiesRoute = SettingsDotspecialtiesRouteImport.update({
   id: '/specialties',
   path: '/specialties',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsTeamRoute = OrgSettingsTeamRouteImport.update({
+const SettingsDotteamRoute = SettingsDotteamRouteImport.update({
   id: '/team',
   path: '/team',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsWebchatRoute = OrgSettingsWebchatRouteImport.update({
+const SettingsDotwebchatRoute = SettingsDotwebchatRouteImport.update({
   id: '/webchat',
   path: '/webchat',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const ResumenLunesBajaTokenRoute = ResumenLunesBajaTokenRouteImport.update({
-  id: '/resumen-lunes/baja/$token',
-  path: '/resumen-lunes/baja/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OrgSettingsIntegrationsIndexRoute =
-  OrgSettingsIntegrationsIndexRouteImport.update({
+const ResumenLunesDotbajaDottokenRoute =
+  ResumenLunesDotbajaDottokenRouteImport.update({
+    id: '/resumen-lunes/baja/$token',
+    path: '/resumen-lunes/baja/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const SettingsDotintegrationsDotindexRoute =
+  SettingsDotintegrationsDotindexRouteImport.update({
     id: '/integrations/',
     path: '/integrations/',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsIntegrationsWebchatRoute =
-  OrgSettingsIntegrationsWebchatRouteImport.update({
+const SettingsDotintegrationsDotwebchatRoute =
+  SettingsDotintegrationsDotwebchatRouteImport.update({
     id: '/integrations/webchat',
     path: '/integrations/webchat',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsIntegrationsWhatsappRoute =
-  OrgSettingsIntegrationsWhatsappRouteImport.update({
+const SettingsDotintegrationsDotwhatsappRoute =
+  SettingsDotintegrationsDotwhatsappRouteImport.update({
     id: '/integrations/whatsapp',
     path: '/integrations/whatsapp',
-    getParentRoute: () => OrgSettingsRoute,
+    getParentRoute: () => SettingsRoute,
   } as any)
-const OrgSettingsPlanIndexRoute = OrgSettingsPlanIndexRouteImport.update({
+const SettingsDotplanDotindexRoute = SettingsDotplanDotindexRouteImport.update({
   id: '/plan/',
   path: '/plan/',
-  getParentRoute: () => OrgSettingsRoute,
+  getParentRoute: () => SettingsRoute,
 } as any)
-const OrgSettingsPlanAccionesRoute = OrgSettingsPlanAccionesRouteImport.update({
-  id: '/plan/acciones',
-  path: '/plan/acciones',
-  getParentRoute: () => OrgSettingsRoute,
-} as any)
-const OrgPatientsPatientIdEncountersEncounterIdRoute =
-  OrgPatientsPatientIdEncountersEncounterIdRouteImport.update({
+const SettingsDotplanDotaccionesRoute =
+  SettingsDotplanDotaccionesRouteImport.update({
+    id: '/plan/acciones',
+    path: '/plan/acciones',
+    getParentRoute: () => SettingsRoute,
+  } as any)
+const PatientsDotpatientIdDotencountersDotencounterIdRoute =
+  PatientsDotpatientIdDotencountersDotencounterIdRouteImport.update({
     id: '/encounters/$encounterId',
     path: '/encounters/$encounterId',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
+    getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
-const OrgPatientsPatientIdOdontogramPrintRoute =
-  OrgPatientsPatientIdOdontogramPrintRouteImport.update({
+const PatientsDotpatientIdDotodontogramDotprintRoute =
+  PatientsDotpatientIdDotodontogramDotprintRouteImport.update({
     id: '/odontogram/print',
     path: '/odontogram/print',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
+    getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
-const OrgPatientsPatientIdConsentsConsentIdPrintRoute =
-  OrgPatientsPatientIdConsentsConsentIdPrintRouteImport.update({
+const PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute =
+  PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport.update({
     id: '/consents/$consentId/print',
     path: '/consents/$consentId/print',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
+    getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
-const OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute =
-  OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport.update({
+const PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute =
+  PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRouteImport.update({
     id: '/odontogram/$assessmentId/print',
     path: '/odontogram/$assessmentId/print',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
+    getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
-const OrgPatientsPatientIdOrdersOrderIdPrintRoute =
-  OrgPatientsPatientIdOrdersOrderIdPrintRouteImport.update({
+const PatientsDotpatientIdDotordersDotorderIdDotprintRoute =
+  PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport.update({
     id: '/orders/$orderId/print',
     path: '/orders/$orderId/print',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
+    getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
-const OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute =
-  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport.update({
-    id: '/prescriptions/$prescriptionId/print',
-    path: '/prescriptions/$prescriptionId/print',
-    getParentRoute: () => OrgPatientsPatientIdRoute,
-  } as any)
+const PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute =
+  PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRouteImport.update(
+    {
+      id: '/prescriptions/$prescriptionId/print',
+      path: '/prescriptions/$prescriptionId/print',
+      getParentRoute: () => PatientsDotpatientIdRoute,
+    } as any,
+  )
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
-  '/agenda': typeof OrgAgendaRoute
-  '/branches': typeof OrgBranchesRoute
-  '/commissions': typeof OrgCommissionsRoute
-  '/finance': typeof OrgFinanceRoute
-  '/home': typeof OrgHomeRoute
-  '/inbox': typeof OrgInboxRoute
-  '/inventory': typeof OrgInventoryRoute
-  '/members': typeof OrgMembersRoute
-  '/pipeline': typeof OrgPipelineRoute
-  '/reports': typeof OrgReportsRoute
-  '/services': typeof OrgServicesRouteWithChildren
-  '/settings': typeof OrgSettingsRouteWithChildren
-  '/tasks': typeof OrgTasksRoute
-  '/baja/$token': typeof BajaTokenRoute
-  '/c/$token': typeof CTokenRoute
-  '/embed/$connectionId': typeof EmbedConnectionIdRoute
-  '/llegar/$branch': typeof LlegarBranchRoute
-  '/embed/': typeof EmbedIndexRoute
-  '/agent/administrador': typeof OrgAgentAdministradorRoute
-  '/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
-  '/agent/knowledge': typeof OrgAgentKnowledgeRoute
-  '/agent/learn': typeof OrgAgentLearnRoute
-  '/agent/pendientes': typeof OrgAgentPendientesRoute
-  '/agent/recepcion': typeof OrgAgentRecepcionRoute
-  '/agent/registro': typeof OrgAgentRegistroRoute
-  '/contacts/$contactId': typeof OrgContactsContactIdRoute
-  '/inventory/$productId': typeof OrgInventoryProductIdRoute
-  '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
-  '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
-  '/people/$personId': typeof OrgPeoplePersonIdRoute
-  '/people/locked': typeof OrgPeopleLockedRoute
-  '/services/biblioteca': typeof OrgServicesBibliotecaRoute
-  '/services/promotions': typeof OrgServicesPromotionsRoute
-  '/settings/agent': typeof OrgSettingsAgentRoute
-  '/settings/audit': typeof OrgSettingsAuditRoute
-  '/settings/availability': typeof OrgSettingsAvailabilityRoute
-  '/settings/branches': typeof OrgSettingsBranchesRoute
-  '/settings/channels': typeof OrgSettingsChannelsRoute
-  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
-  '/settings/fields': typeof OrgSettingsFieldsRoute
-  '/settings/forms': typeof OrgSettingsFormsRoute
-  '/settings/mail': typeof OrgSettingsMailRoute
-  '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
-  '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
-  '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
-  '/settings/pipelines': typeof OrgSettingsPipelinesRoute
-  '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
-  '/settings/team': typeof OrgSettingsTeamRoute
-  '/settings/webchat': typeof OrgSettingsWebchatRoute
-  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
-  '/agent/': typeof OrgAgentIndexRoute
-  '/contacts/': typeof OrgContactsIndexRoute
-  '/patients/': typeof OrgPatientsIndexRoute
-  '/people/': typeof OrgPeopleIndexRoute
-  '/services/': typeof OrgServicesIndexRoute
-  '/settings/': typeof OrgSettingsIndexRoute
-  '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
-  '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
-  '/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
-  '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
-  '/settings/plan/': typeof OrgSettingsPlanIndexRoute
-  '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
-  '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
-  '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
-  '/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
-  '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
-  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
+  '/agenda': typeof AgendaRoute
+  '/branches': typeof BranchesRoute
+  '/commissions': typeof CommissionsRoute
+  '/finance': typeof FinanceRoute
+  '/home': typeof HomeRoute
+  '/inbox': typeof InboxRoute
+  '/inventory': typeof InventoryRoute
+  '/members': typeof MembersRoute
+  '/pipeline': typeof PipelineRoute
+  '/reports': typeof ReportsRoute
+  '/services': typeof ServicesRouteWithChildren
+  '/settings': typeof SettingsRouteWithChildren
+  '/tasks': typeof TasksRoute
+  '/baja/$token': typeof BajaDottokenRoute
+  '/c/$token': typeof CDottokenRoute
+  '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
+  '/llegar/$branch': typeof LlegarDotbranchRoute
+  '/embed/': typeof EmbedDotindexRoute
+  '/agent/administrador': typeof AgentDotadministradorRoute
+  '/agent/approvals': typeof AgentDotapprovalsRoute
+  '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
+  '/agent/knowledge': typeof AgentDotknowledgeRoute
+  '/agent/learn': typeof AgentDotlearnRoute
+  '/agent/pendientes': typeof AgentDotpendientesRoute
+  '/agent/recepcion': typeof AgentDotrecepcionRoute
+  '/agent/registro': typeof AgentDotregistroRoute
+  '/contacts/$contactId': typeof ContactsDotcontactIdRoute
+  '/inventory/$productId': typeof Inventory_DotproductIdRoute
+  '/opportunities/$opportunityId': typeof OpportunitiesDotopportunityIdRoute
+  '/patients/$patientId': typeof PatientsDotpatientIdRouteWithChildren
+  '/people/$personId': typeof PeopleDotpersonIdRoute
+  '/people/locked': typeof PeopleDotlockedRoute
+  '/services/biblioteca': typeof ServicesDotbibliotecaRoute
+  '/services/promotions': typeof ServicesDotpromotionsRoute
+  '/settings/agent': typeof SettingsDotagentRoute
+  '/settings/audit': typeof SettingsDotauditRoute
+  '/settings/availability': typeof SettingsDotavailabilityRoute
+  '/settings/branches': typeof SettingsDotbranchesRoute
+  '/settings/channels': typeof SettingsDotchannelsRoute
+  '/settings/data-protection': typeof SettingsDotdataProtectionRoute
+  '/settings/fields': typeof SettingsDotfieldsRoute
+  '/settings/forms': typeof SettingsDotformsRoute
+  '/settings/mail': typeof SettingsDotmailRoute
+  '/settings/patient-access': typeof SettingsDotpatientAccessRoute
+  '/settings/patient-registration': typeof SettingsDotpatientRegistrationRoute
+  '/settings/payment-methods': typeof SettingsDotpaymentMethodsRoute
+  '/settings/pipelines': typeof SettingsDotpipelinesRoute
+  '/settings/specialties': typeof SettingsDotspecialtiesRoute
+  '/settings/team': typeof SettingsDotteamRoute
+  '/settings/webchat': typeof SettingsDotwebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesDotbajaDottokenRoute
+  '/agent/': typeof AgentDotindexRoute
+  '/contacts/': typeof ContactsDotindexRoute
+  '/patients/': typeof PatientsDotindexRoute
+  '/people/': typeof PeopleDotindexRoute
+  '/services/': typeof ServicesDotindexRoute
+  '/settings/': typeof SettingsDotindexRoute
+  '/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
+  '/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
+  '/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
+  '/settings/integrations/': typeof SettingsDotintegrationsDotindexRoute
+  '/settings/plan/': typeof SettingsDotplanDotindexRoute
+  '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
+  '/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
+  '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
+  '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
+  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
-  '/agenda': typeof OrgAgendaRoute
-  '/branches': typeof OrgBranchesRoute
-  '/commissions': typeof OrgCommissionsRoute
-  '/finance': typeof OrgFinanceRoute
-  '/home': typeof OrgHomeRoute
-  '/inbox': typeof OrgInboxRoute
-  '/inventory': typeof OrgInventoryRoute
-  '/members': typeof OrgMembersRoute
-  '/pipeline': typeof OrgPipelineRoute
-  '/reports': typeof OrgReportsRoute
-  '/tasks': typeof OrgTasksRoute
-  '/baja/$token': typeof BajaTokenRoute
-  '/c/$token': typeof CTokenRoute
-  '/embed/$connectionId': typeof EmbedConnectionIdRoute
-  '/llegar/$branch': typeof LlegarBranchRoute
-  '/embed': typeof EmbedIndexRoute
-  '/agent/administrador': typeof OrgAgentAdministradorRoute
-  '/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
-  '/agent/knowledge': typeof OrgAgentKnowledgeRoute
-  '/agent/learn': typeof OrgAgentLearnRoute
-  '/agent/pendientes': typeof OrgAgentPendientesRoute
-  '/agent/recepcion': typeof OrgAgentRecepcionRoute
-  '/agent/registro': typeof OrgAgentRegistroRoute
-  '/contacts/$contactId': typeof OrgContactsContactIdRoute
-  '/inventory/$productId': typeof OrgInventoryProductIdRoute
-  '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
-  '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
-  '/people/$personId': typeof OrgPeoplePersonIdRoute
-  '/people/locked': typeof OrgPeopleLockedRoute
-  '/services/biblioteca': typeof OrgServicesBibliotecaRoute
-  '/services/promotions': typeof OrgServicesPromotionsRoute
-  '/settings/agent': typeof OrgSettingsAgentRoute
-  '/settings/audit': typeof OrgSettingsAuditRoute
-  '/settings/availability': typeof OrgSettingsAvailabilityRoute
-  '/settings/branches': typeof OrgSettingsBranchesRoute
-  '/settings/channels': typeof OrgSettingsChannelsRoute
-  '/settings/data-protection': typeof OrgSettingsDataProtectionRoute
-  '/settings/fields': typeof OrgSettingsFieldsRoute
-  '/settings/forms': typeof OrgSettingsFormsRoute
-  '/settings/mail': typeof OrgSettingsMailRoute
-  '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
-  '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
-  '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
-  '/settings/pipelines': typeof OrgSettingsPipelinesRoute
-  '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
-  '/settings/team': typeof OrgSettingsTeamRoute
-  '/settings/webchat': typeof OrgSettingsWebchatRoute
-  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
-  '/agent': typeof OrgAgentIndexRoute
-  '/contacts': typeof OrgContactsIndexRoute
-  '/patients': typeof OrgPatientsIndexRoute
-  '/people': typeof OrgPeopleIndexRoute
-  '/services': typeof OrgServicesIndexRoute
-  '/settings': typeof OrgSettingsIndexRoute
-  '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
-  '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
-  '/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
-  '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
-  '/settings/plan': typeof OrgSettingsPlanIndexRoute
-  '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
-  '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
-  '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
-  '/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
-  '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
-  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
+  '/agenda': typeof AgendaRoute
+  '/branches': typeof BranchesRoute
+  '/commissions': typeof CommissionsRoute
+  '/finance': typeof FinanceRoute
+  '/home': typeof HomeRoute
+  '/inbox': typeof InboxRoute
+  '/inventory': typeof InventoryRoute
+  '/members': typeof MembersRoute
+  '/pipeline': typeof PipelineRoute
+  '/reports': typeof ReportsRoute
+  '/tasks': typeof TasksRoute
+  '/baja/$token': typeof BajaDottokenRoute
+  '/c/$token': typeof CDottokenRoute
+  '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
+  '/llegar/$branch': typeof LlegarDotbranchRoute
+  '/embed': typeof EmbedDotindexRoute
+  '/agent/administrador': typeof AgentDotadministradorRoute
+  '/agent/approvals': typeof AgentDotapprovalsRoute
+  '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
+  '/agent/knowledge': typeof AgentDotknowledgeRoute
+  '/agent/learn': typeof AgentDotlearnRoute
+  '/agent/pendientes': typeof AgentDotpendientesRoute
+  '/agent/recepcion': typeof AgentDotrecepcionRoute
+  '/agent/registro': typeof AgentDotregistroRoute
+  '/contacts/$contactId': typeof ContactsDotcontactIdRoute
+  '/inventory/$productId': typeof Inventory_DotproductIdRoute
+  '/opportunities/$opportunityId': typeof OpportunitiesDotopportunityIdRoute
+  '/patients/$patientId': typeof PatientsDotpatientIdRouteWithChildren
+  '/people/$personId': typeof PeopleDotpersonIdRoute
+  '/people/locked': typeof PeopleDotlockedRoute
+  '/services/biblioteca': typeof ServicesDotbibliotecaRoute
+  '/services/promotions': typeof ServicesDotpromotionsRoute
+  '/settings/agent': typeof SettingsDotagentRoute
+  '/settings/audit': typeof SettingsDotauditRoute
+  '/settings/availability': typeof SettingsDotavailabilityRoute
+  '/settings/branches': typeof SettingsDotbranchesRoute
+  '/settings/channels': typeof SettingsDotchannelsRoute
+  '/settings/data-protection': typeof SettingsDotdataProtectionRoute
+  '/settings/fields': typeof SettingsDotfieldsRoute
+  '/settings/forms': typeof SettingsDotformsRoute
+  '/settings/mail': typeof SettingsDotmailRoute
+  '/settings/patient-access': typeof SettingsDotpatientAccessRoute
+  '/settings/patient-registration': typeof SettingsDotpatientRegistrationRoute
+  '/settings/payment-methods': typeof SettingsDotpaymentMethodsRoute
+  '/settings/pipelines': typeof SettingsDotpipelinesRoute
+  '/settings/specialties': typeof SettingsDotspecialtiesRoute
+  '/settings/team': typeof SettingsDotteamRoute
+  '/settings/webchat': typeof SettingsDotwebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesDotbajaDottokenRoute
+  '/agent': typeof AgentDotindexRoute
+  '/contacts': typeof ContactsDotindexRoute
+  '/patients': typeof PatientsDotindexRoute
+  '/people': typeof PeopleDotindexRoute
+  '/services': typeof ServicesDotindexRoute
+  '/settings': typeof SettingsDotindexRoute
+  '/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
+  '/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
+  '/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
+  '/settings/integrations': typeof SettingsDotintegrationsDotindexRoute
+  '/settings/plan': typeof SettingsDotplanDotindexRoute
+  '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
+  '/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
+  '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
+  '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
+  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/_org': typeof OrgRouteWithChildren
+  '/_org': typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
-  '/_org/agenda': typeof OrgAgendaRoute
-  '/_org/branches': typeof OrgBranchesRoute
-  '/_org/commissions': typeof OrgCommissionsRoute
-  '/_org/finance': typeof OrgFinanceRoute
-  '/_org/home': typeof OrgHomeRoute
-  '/_org/inbox': typeof OrgInboxRoute
-  '/_org/inventory': typeof OrgInventoryRoute
-  '/_org/members': typeof OrgMembersRoute
-  '/_org/pipeline': typeof OrgPipelineRoute
-  '/_org/reports': typeof OrgReportsRoute
-  '/_org/services': typeof OrgServicesRouteWithChildren
-  '/_org/settings': typeof OrgSettingsRouteWithChildren
-  '/_org/tasks': typeof OrgTasksRoute
-  '/baja/$token': typeof BajaTokenRoute
-  '/c/$token': typeof CTokenRoute
-  '/embed/$connectionId': typeof EmbedConnectionIdRoute
-  '/llegar/$branch': typeof LlegarBranchRoute
-  '/embed/': typeof EmbedIndexRoute
-  '/_org/agent/administrador': typeof OrgAgentAdministradorRoute
-  '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/_org/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
-  '/_org/agent/knowledge': typeof OrgAgentKnowledgeRoute
-  '/_org/agent/learn': typeof OrgAgentLearnRoute
-  '/_org/agent/pendientes': typeof OrgAgentPendientesRoute
-  '/_org/agent/recepcion': typeof OrgAgentRecepcionRoute
-  '/_org/agent/registro': typeof OrgAgentRegistroRoute
-  '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
-  '/_org/inventory_/$productId': typeof OrgInventoryProductIdRoute
-  '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
-  '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
-  '/_org/people/$personId': typeof OrgPeoplePersonIdRoute
-  '/_org/people/locked': typeof OrgPeopleLockedRoute
-  '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
-  '/_org/services/promotions': typeof OrgServicesPromotionsRoute
-  '/_org/settings/agent': typeof OrgSettingsAgentRoute
-  '/_org/settings/audit': typeof OrgSettingsAuditRoute
-  '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
-  '/_org/settings/branches': typeof OrgSettingsBranchesRoute
-  '/_org/settings/channels': typeof OrgSettingsChannelsRoute
-  '/_org/settings/data-protection': typeof OrgSettingsDataProtectionRoute
-  '/_org/settings/fields': typeof OrgSettingsFieldsRoute
-  '/_org/settings/forms': typeof OrgSettingsFormsRoute
-  '/_org/settings/mail': typeof OrgSettingsMailRoute
-  '/_org/settings/patient-access': typeof OrgSettingsPatientAccessRoute
-  '/_org/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
-  '/_org/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
-  '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
-  '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
-  '/_org/settings/team': typeof OrgSettingsTeamRoute
-  '/_org/settings/webchat': typeof OrgSettingsWebchatRoute
-  '/resumen-lunes/baja/$token': typeof ResumenLunesBajaTokenRoute
-  '/_org/agent/': typeof OrgAgentIndexRoute
-  '/_org/contacts/': typeof OrgContactsIndexRoute
-  '/_org/patients/': typeof OrgPatientsIndexRoute
-  '/_org/people/': typeof OrgPeopleIndexRoute
-  '/_org/services/': typeof OrgServicesIndexRoute
-  '/_org/settings/': typeof OrgSettingsIndexRoute
-  '/_org/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
-  '/_org/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
-  '/_org/settings/plan/acciones': typeof OrgSettingsPlanAccionesRoute
-  '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
-  '/_org/settings/plan/': typeof OrgSettingsPlanIndexRoute
-  '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
-  '/_org/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
-  '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
-  '/_org/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
-  '/_org/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
-  '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
+  '/_org/agenda': typeof AgendaRoute
+  '/_org/branches': typeof BranchesRoute
+  '/_org/commissions': typeof CommissionsRoute
+  '/_org/finance': typeof FinanceRoute
+  '/_org/home': typeof HomeRoute
+  '/_org/inbox': typeof InboxRoute
+  '/_org/inventory': typeof InventoryRoute
+  '/_org/members': typeof MembersRoute
+  '/_org/pipeline': typeof PipelineRoute
+  '/_org/reports': typeof ReportsRoute
+  '/_org/services': typeof ServicesRouteWithChildren
+  '/_org/settings': typeof SettingsRouteWithChildren
+  '/_org/tasks': typeof TasksRoute
+  '/baja/$token': typeof BajaDottokenRoute
+  '/c/$token': typeof CDottokenRoute
+  '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
+  '/llegar/$branch': typeof LlegarDotbranchRoute
+  '/embed/': typeof EmbedDotindexRoute
+  '/_org/agent/administrador': typeof AgentDotadministradorRoute
+  '/_org/agent/approvals': typeof AgentDotapprovalsRoute
+  '/_org/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
+  '/_org/agent/knowledge': typeof AgentDotknowledgeRoute
+  '/_org/agent/learn': typeof AgentDotlearnRoute
+  '/_org/agent/pendientes': typeof AgentDotpendientesRoute
+  '/_org/agent/recepcion': typeof AgentDotrecepcionRoute
+  '/_org/agent/registro': typeof AgentDotregistroRoute
+  '/_org/contacts/$contactId': typeof ContactsDotcontactIdRoute
+  '/_org/inventory_/$productId': typeof Inventory_DotproductIdRoute
+  '/_org/opportunities/$opportunityId': typeof OpportunitiesDotopportunityIdRoute
+  '/_org/patients/$patientId': typeof PatientsDotpatientIdRouteWithChildren
+  '/_org/people/$personId': typeof PeopleDotpersonIdRoute
+  '/_org/people/locked': typeof PeopleDotlockedRoute
+  '/_org/services/biblioteca': typeof ServicesDotbibliotecaRoute
+  '/_org/services/promotions': typeof ServicesDotpromotionsRoute
+  '/_org/settings/agent': typeof SettingsDotagentRoute
+  '/_org/settings/audit': typeof SettingsDotauditRoute
+  '/_org/settings/availability': typeof SettingsDotavailabilityRoute
+  '/_org/settings/branches': typeof SettingsDotbranchesRoute
+  '/_org/settings/channels': typeof SettingsDotchannelsRoute
+  '/_org/settings/data-protection': typeof SettingsDotdataProtectionRoute
+  '/_org/settings/fields': typeof SettingsDotfieldsRoute
+  '/_org/settings/forms': typeof SettingsDotformsRoute
+  '/_org/settings/mail': typeof SettingsDotmailRoute
+  '/_org/settings/patient-access': typeof SettingsDotpatientAccessRoute
+  '/_org/settings/patient-registration': typeof SettingsDotpatientRegistrationRoute
+  '/_org/settings/payment-methods': typeof SettingsDotpaymentMethodsRoute
+  '/_org/settings/pipelines': typeof SettingsDotpipelinesRoute
+  '/_org/settings/specialties': typeof SettingsDotspecialtiesRoute
+  '/_org/settings/team': typeof SettingsDotteamRoute
+  '/_org/settings/webchat': typeof SettingsDotwebchatRoute
+  '/resumen-lunes/baja/$token': typeof ResumenLunesDotbajaDottokenRoute
+  '/_org/agent/': typeof AgentDotindexRoute
+  '/_org/contacts/': typeof ContactsDotindexRoute
+  '/_org/patients/': typeof PatientsDotindexRoute
+  '/_org/people/': typeof PeopleDotindexRoute
+  '/_org/services/': typeof ServicesDotindexRoute
+  '/_org/settings/': typeof SettingsDotindexRoute
+  '/_org/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
+  '/_org/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
+  '/_org/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
+  '/_org/settings/integrations/': typeof SettingsDotintegrationsDotindexRoute
+  '/_org/settings/plan/': typeof SettingsDotplanDotindexRoute
+  '/_org/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
+  '/_org/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
+  '/_org/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/_org/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
+  '/_org/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
+  '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -911,16 +947,16 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  OrgRoute: typeof OrgRouteWithChildren
+  DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren
   PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
   ReservaRoute: typeof ReservaRoute
-  BajaTokenRoute: typeof BajaTokenRoute
-  CTokenRoute: typeof CTokenRoute
-  EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
-  LlegarBranchRoute: typeof LlegarBranchRoute
-  EmbedIndexRoute: typeof EmbedIndexRoute
-  ResumenLunesBajaTokenRoute: typeof ResumenLunesBajaTokenRoute
+  BajaDottokenRoute: typeof BajaDottokenRoute
+  CDottokenRoute: typeof CDottokenRoute
+  EmbedDotconnectionIdRoute: typeof EmbedDotconnectionIdRoute
+  LlegarDotbranchRoute: typeof LlegarDotbranchRoute
+  EmbedDotindexRoute: typeof EmbedDotindexRoute
+  ResumenLunesDotbajaDottokenRoute: typeof ResumenLunesDotbajaDottokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -936,7 +972,7 @@ declare module '@tanstack/react-router' {
       id: '/_org'
       path: ''
       fullPath: '/'
-      preLoaderRoute: typeof OrgRouteImport
+      preLoaderRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/portal': {
@@ -964,660 +1000,667 @@ declare module '@tanstack/react-router' {
       id: '/_org/agenda'
       path: '/agenda'
       fullPath: '/agenda'
-      preLoaderRoute: typeof OrgAgendaRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/branches': {
       id: '/_org/branches'
       path: '/branches'
       fullPath: '/branches'
-      preLoaderRoute: typeof OrgBranchesRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof BranchesRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/commissions': {
       id: '/_org/commissions'
       path: '/commissions'
       fullPath: '/commissions'
-      preLoaderRoute: typeof OrgCommissionsRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof CommissionsRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/finance': {
       id: '/_org/finance'
       path: '/finance'
       fullPath: '/finance'
-      preLoaderRoute: typeof OrgFinanceRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof FinanceRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/home': {
       id: '/_org/home'
       path: '/home'
       fullPath: '/home'
-      preLoaderRoute: typeof OrgHomeRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof HomeRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/inbox': {
       id: '/_org/inbox'
       path: '/inbox'
       fullPath: '/inbox'
-      preLoaderRoute: typeof OrgInboxRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/inventory': {
       id: '/_org/inventory'
       path: '/inventory'
       fullPath: '/inventory'
-      preLoaderRoute: typeof OrgInventoryRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof InventoryRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/members': {
       id: '/_org/members'
       path: '/members'
       fullPath: '/members'
-      preLoaderRoute: typeof OrgMembersRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/pipeline': {
       id: '/_org/pipeline'
       path: '/pipeline'
       fullPath: '/pipeline'
-      preLoaderRoute: typeof OrgPipelineRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PipelineRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/reports': {
       id: '/_org/reports'
       path: '/reports'
       fullPath: '/reports'
-      preLoaderRoute: typeof OrgReportsRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/services': {
       id: '/_org/services'
       path: '/services'
       fullPath: '/services'
-      preLoaderRoute: typeof OrgServicesRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof ServicesRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/settings': {
       id: '/_org/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof OrgSettingsRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/tasks': {
       id: '/_org/tasks'
       path: '/tasks'
       fullPath: '/tasks'
-      preLoaderRoute: typeof OrgTasksRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/baja/$token': {
       id: '/baja/$token'
       path: '/baja/$token'
       fullPath: '/baja/$token'
-      preLoaderRoute: typeof BajaTokenRouteImport
+      preLoaderRoute: typeof BajaDottokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/c/$token': {
       id: '/c/$token'
       path: '/c/$token'
       fullPath: '/c/$token'
-      preLoaderRoute: typeof CTokenRouteImport
+      preLoaderRoute: typeof CDottokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/embed/': {
       id: '/embed/'
       path: '/embed'
       fullPath: '/embed/'
-      preLoaderRoute: typeof EmbedIndexRouteImport
+      preLoaderRoute: typeof EmbedDotindexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/embed/$connectionId': {
       id: '/embed/$connectionId'
       path: '/embed/$connectionId'
       fullPath: '/embed/$connectionId'
-      preLoaderRoute: typeof EmbedConnectionIdRouteImport
+      preLoaderRoute: typeof EmbedDotconnectionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/llegar/$branch': {
       id: '/llegar/$branch'
       path: '/llegar/$branch'
       fullPath: '/llegar/$branch'
-      preLoaderRoute: typeof LlegarBranchRouteImport
+      preLoaderRoute: typeof LlegarDotbranchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/agent/': {
       id: '/_org/agent/'
       path: '/agent'
       fullPath: '/agent/'
-      preLoaderRoute: typeof OrgAgentIndexRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotindexRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/administrador': {
       id: '/_org/agent/administrador'
       path: '/agent/administrador'
       fullPath: '/agent/administrador'
-      preLoaderRoute: typeof OrgAgentAdministradorRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotadministradorRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/approvals': {
       id: '/_org/agent/approvals'
       path: '/agent/approvals'
       fullPath: '/agent/approvals'
-      preLoaderRoute: typeof OrgAgentApprovalsRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotapprovalsRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/asistente-clinico': {
       id: '/_org/agent/asistente-clinico'
       path: '/agent/asistente-clinico'
       fullPath: '/agent/asistente-clinico'
-      preLoaderRoute: typeof OrgAgentAsistenteClinicoRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotasistenteClinicoRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/knowledge': {
       id: '/_org/agent/knowledge'
       path: '/agent/knowledge'
       fullPath: '/agent/knowledge'
-      preLoaderRoute: typeof OrgAgentKnowledgeRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotknowledgeRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/learn': {
       id: '/_org/agent/learn'
       path: '/agent/learn'
       fullPath: '/agent/learn'
-      preLoaderRoute: typeof OrgAgentLearnRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotlearnRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/pendientes': {
       id: '/_org/agent/pendientes'
       path: '/agent/pendientes'
       fullPath: '/agent/pendientes'
-      preLoaderRoute: typeof OrgAgentPendientesRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotpendientesRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/recepcion': {
       id: '/_org/agent/recepcion'
       path: '/agent/recepcion'
       fullPath: '/agent/recepcion'
-      preLoaderRoute: typeof OrgAgentRecepcionRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotrecepcionRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/registro': {
       id: '/_org/agent/registro'
       path: '/agent/registro'
       fullPath: '/agent/registro'
-      preLoaderRoute: typeof OrgAgentRegistroRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof AgentDotregistroRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/contacts/': {
       id: '/_org/contacts/'
       path: '/contacts'
       fullPath: '/contacts/'
-      preLoaderRoute: typeof OrgContactsIndexRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof ContactsDotindexRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/contacts/$contactId': {
       id: '/_org/contacts/$contactId'
       path: '/contacts/$contactId'
       fullPath: '/contacts/$contactId'
-      preLoaderRoute: typeof OrgContactsContactIdRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof ContactsDotcontactIdRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/inventory_/$productId': {
       id: '/_org/inventory_/$productId'
       path: '/inventory/$productId'
       fullPath: '/inventory/$productId'
-      preLoaderRoute: typeof OrgInventoryProductIdRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof Inventory_DotproductIdRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/opportunities/$opportunityId': {
       id: '/_org/opportunities/$opportunityId'
       path: '/opportunities/$opportunityId'
       fullPath: '/opportunities/$opportunityId'
-      preLoaderRoute: typeof OrgOpportunitiesOpportunityIdRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof OpportunitiesDotopportunityIdRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/patients/': {
       id: '/_org/patients/'
       path: '/patients'
       fullPath: '/patients/'
-      preLoaderRoute: typeof OrgPatientsIndexRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PatientsDotindexRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/patients/$patientId': {
       id: '/_org/patients/$patientId'
       path: '/patients/$patientId'
       fullPath: '/patients/$patientId'
-      preLoaderRoute: typeof OrgPatientsPatientIdRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PatientsDotpatientIdRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/people/': {
       id: '/_org/people/'
       path: '/people'
       fullPath: '/people/'
-      preLoaderRoute: typeof OrgPeopleIndexRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PeopleDotindexRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/people/$personId': {
       id: '/_org/people/$personId'
       path: '/people/$personId'
       fullPath: '/people/$personId'
-      preLoaderRoute: typeof OrgPeoplePersonIdRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PeopleDotpersonIdRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/people/locked': {
       id: '/_org/people/locked'
       path: '/people/locked'
       fullPath: '/people/locked'
-      preLoaderRoute: typeof OrgPeopleLockedRouteImport
-      parentRoute: typeof OrgRoute
+      preLoaderRoute: typeof PeopleDotlockedRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/services/': {
       id: '/_org/services/'
       path: '/'
       fullPath: '/services/'
-      preLoaderRoute: typeof OrgServicesIndexRouteImport
-      parentRoute: typeof OrgServicesRoute
+      preLoaderRoute: typeof ServicesDotindexRouteImport
+      parentRoute: typeof ServicesRoute
     }
     '/_org/services/biblioteca': {
       id: '/_org/services/biblioteca'
       path: '/biblioteca'
       fullPath: '/services/biblioteca'
-      preLoaderRoute: typeof OrgServicesBibliotecaRouteImport
-      parentRoute: typeof OrgServicesRoute
+      preLoaderRoute: typeof ServicesDotbibliotecaRouteImport
+      parentRoute: typeof ServicesRoute
     }
     '/_org/services/promotions': {
       id: '/_org/services/promotions'
       path: '/promotions'
       fullPath: '/services/promotions'
-      preLoaderRoute: typeof OrgServicesPromotionsRouteImport
-      parentRoute: typeof OrgServicesRoute
+      preLoaderRoute: typeof ServicesDotpromotionsRouteImport
+      parentRoute: typeof ServicesRoute
     }
     '/_org/settings/': {
       id: '/_org/settings/'
       path: '/'
       fullPath: '/settings/'
-      preLoaderRoute: typeof OrgSettingsIndexRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotindexRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/agent': {
       id: '/_org/settings/agent'
       path: '/agent'
       fullPath: '/settings/agent'
-      preLoaderRoute: typeof OrgSettingsAgentRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotagentRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/audit': {
       id: '/_org/settings/audit'
       path: '/audit'
       fullPath: '/settings/audit'
-      preLoaderRoute: typeof OrgSettingsAuditRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotauditRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/availability': {
       id: '/_org/settings/availability'
       path: '/availability'
       fullPath: '/settings/availability'
-      preLoaderRoute: typeof OrgSettingsAvailabilityRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotavailabilityRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/branches': {
       id: '/_org/settings/branches'
       path: '/branches'
       fullPath: '/settings/branches'
-      preLoaderRoute: typeof OrgSettingsBranchesRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotbranchesRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/channels': {
       id: '/_org/settings/channels'
       path: '/channels'
       fullPath: '/settings/channels'
-      preLoaderRoute: typeof OrgSettingsChannelsRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotchannelsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/data-protection': {
       id: '/_org/settings/data-protection'
       path: '/data-protection'
       fullPath: '/settings/data-protection'
-      preLoaderRoute: typeof OrgSettingsDataProtectionRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotdataProtectionRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/fields': {
       id: '/_org/settings/fields'
       path: '/fields'
       fullPath: '/settings/fields'
-      preLoaderRoute: typeof OrgSettingsFieldsRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotfieldsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/forms': {
       id: '/_org/settings/forms'
       path: '/forms'
       fullPath: '/settings/forms'
-      preLoaderRoute: typeof OrgSettingsFormsRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotformsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/mail': {
       id: '/_org/settings/mail'
       path: '/mail'
       fullPath: '/settings/mail'
-      preLoaderRoute: typeof OrgSettingsMailRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotmailRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/patient-access': {
       id: '/_org/settings/patient-access'
       path: '/patient-access'
       fullPath: '/settings/patient-access'
-      preLoaderRoute: typeof OrgSettingsPatientAccessRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotpatientAccessRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/patient-registration': {
       id: '/_org/settings/patient-registration'
       path: '/patient-registration'
       fullPath: '/settings/patient-registration'
-      preLoaderRoute: typeof OrgSettingsPatientRegistrationRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotpatientRegistrationRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/payment-methods': {
       id: '/_org/settings/payment-methods'
       path: '/payment-methods'
       fullPath: '/settings/payment-methods'
-      preLoaderRoute: typeof OrgSettingsPaymentMethodsRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotpaymentMethodsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/pipelines': {
       id: '/_org/settings/pipelines'
       path: '/pipelines'
       fullPath: '/settings/pipelines'
-      preLoaderRoute: typeof OrgSettingsPipelinesRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotpipelinesRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/specialties': {
       id: '/_org/settings/specialties'
       path: '/specialties'
       fullPath: '/settings/specialties'
-      preLoaderRoute: typeof OrgSettingsSpecialtiesRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotspecialtiesRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/team': {
       id: '/_org/settings/team'
       path: '/team'
       fullPath: '/settings/team'
-      preLoaderRoute: typeof OrgSettingsTeamRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotteamRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/webchat': {
       id: '/_org/settings/webchat'
       path: '/webchat'
       fullPath: '/settings/webchat'
-      preLoaderRoute: typeof OrgSettingsWebchatRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotwebchatRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/resumen-lunes/baja/$token': {
       id: '/resumen-lunes/baja/$token'
       path: '/resumen-lunes/baja/$token'
       fullPath: '/resumen-lunes/baja/$token'
-      preLoaderRoute: typeof ResumenLunesBajaTokenRouteImport
+      preLoaderRoute: typeof ResumenLunesDotbajaDottokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/settings/integrations/': {
       id: '/_org/settings/integrations/'
       path: '/integrations'
       fullPath: '/settings/integrations/'
-      preLoaderRoute: typeof OrgSettingsIntegrationsIndexRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotintegrationsDotindexRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/integrations/webchat': {
       id: '/_org/settings/integrations/webchat'
       path: '/integrations/webchat'
       fullPath: '/settings/integrations/webchat'
-      preLoaderRoute: typeof OrgSettingsIntegrationsWebchatRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotintegrationsDotwebchatRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/integrations/whatsapp': {
       id: '/_org/settings/integrations/whatsapp'
       path: '/integrations/whatsapp'
       fullPath: '/settings/integrations/whatsapp'
-      preLoaderRoute: typeof OrgSettingsIntegrationsWhatsappRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotintegrationsDotwhatsappRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/plan/': {
       id: '/_org/settings/plan/'
       path: '/plan'
       fullPath: '/settings/plan/'
-      preLoaderRoute: typeof OrgSettingsPlanIndexRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotplanDotindexRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/settings/plan/acciones': {
       id: '/_org/settings/plan/acciones'
       path: '/plan/acciones'
       fullPath: '/settings/plan/acciones'
-      preLoaderRoute: typeof OrgSettingsPlanAccionesRouteImport
-      parentRoute: typeof OrgSettingsRoute
+      preLoaderRoute: typeof SettingsDotplanDotaccionesRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/_org/patients/$patientId/encounters/$encounterId': {
       id: '/_org/patients/$patientId/encounters/$encounterId'
       path: '/encounters/$encounterId'
       fullPath: '/patients/$patientId/encounters/$encounterId'
-      preLoaderRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotencountersDotencounterIdRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
     '/_org/patients/$patientId/odontogram/print': {
       id: '/_org/patients/$patientId/odontogram/print'
       path: '/odontogram/print'
       fullPath: '/patients/$patientId/odontogram/print'
-      preLoaderRoute: typeof OrgPatientsPatientIdOdontogramPrintRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotodontogramDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
     '/_org/patients/$patientId/consents/$consentId/print': {
       id: '/_org/patients/$patientId/consents/$consentId/print'
       path: '/consents/$consentId/print'
       fullPath: '/patients/$patientId/consents/$consentId/print'
-      preLoaderRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
     '/_org/patients/$patientId/odontogram/$assessmentId/print': {
       id: '/_org/patients/$patientId/odontogram/$assessmentId/print'
       path: '/odontogram/$assessmentId/print'
       fullPath: '/patients/$patientId/odontogram/$assessmentId/print'
-      preLoaderRoute: typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
     '/_org/patients/$patientId/orders/$orderId/print': {
       id: '/_org/patients/$patientId/orders/$orderId/print'
       path: '/orders/$orderId/print'
       fullPath: '/patients/$patientId/orders/$orderId/print'
-      preLoaderRoute: typeof OrgPatientsPatientIdOrdersOrderIdPrintRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
     '/_org/patients/$patientId/prescriptions/$prescriptionId/print': {
       id: '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
       path: '/prescriptions/$prescriptionId/print'
       fullPath: '/patients/$patientId/prescriptions/$prescriptionId/print'
-      preLoaderRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport
-      parentRoute: typeof OrgPatientsPatientIdRoute
+      preLoaderRoute: typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
     }
   }
 }
 
-interface OrgServicesRouteChildren {
-  OrgServicesBibliotecaRoute: typeof OrgServicesBibliotecaRoute
-  OrgServicesPromotionsRoute: typeof OrgServicesPromotionsRoute
-  OrgServicesIndexRoute: typeof OrgServicesIndexRoute
+interface ServicesRouteChildren {
+  ServicesDotbibliotecaRoute: typeof ServicesDotbibliotecaRoute
+  ServicesDotpromotionsRoute: typeof ServicesDotpromotionsRoute
+  ServicesDotindexRoute: typeof ServicesDotindexRoute
 }
 
-const OrgServicesRouteChildren: OrgServicesRouteChildren = {
-  OrgServicesBibliotecaRoute: OrgServicesBibliotecaRoute,
-  OrgServicesPromotionsRoute: OrgServicesPromotionsRoute,
-  OrgServicesIndexRoute: OrgServicesIndexRoute,
+const ServicesRouteChildren: ServicesRouteChildren = {
+  ServicesDotbibliotecaRoute: ServicesDotbibliotecaRoute,
+  ServicesDotpromotionsRoute: ServicesDotpromotionsRoute,
+  ServicesDotindexRoute: ServicesDotindexRoute,
 }
 
-const OrgServicesRouteWithChildren = OrgServicesRoute._addFileChildren(
-  OrgServicesRouteChildren,
+const ServicesRouteWithChildren = ServicesRoute._addFileChildren(
+  ServicesRouteChildren,
 )
 
-interface OrgSettingsRouteChildren {
-  OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
-  OrgSettingsAuditRoute: typeof OrgSettingsAuditRoute
-  OrgSettingsAvailabilityRoute: typeof OrgSettingsAvailabilityRoute
-  OrgSettingsBranchesRoute: typeof OrgSettingsBranchesRoute
-  OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
-  OrgSettingsDataProtectionRoute: typeof OrgSettingsDataProtectionRoute
-  OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
-  OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
-  OrgSettingsMailRoute: typeof OrgSettingsMailRoute
-  OrgSettingsPatientAccessRoute: typeof OrgSettingsPatientAccessRoute
-  OrgSettingsPatientRegistrationRoute: typeof OrgSettingsPatientRegistrationRoute
-  OrgSettingsPaymentMethodsRoute: typeof OrgSettingsPaymentMethodsRoute
-  OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
-  OrgSettingsSpecialtiesRoute: typeof OrgSettingsSpecialtiesRoute
-  OrgSettingsTeamRoute: typeof OrgSettingsTeamRoute
-  OrgSettingsWebchatRoute: typeof OrgSettingsWebchatRoute
-  OrgSettingsIndexRoute: typeof OrgSettingsIndexRoute
-  OrgSettingsIntegrationsWebchatRoute: typeof OrgSettingsIntegrationsWebchatRoute
-  OrgSettingsIntegrationsWhatsappRoute: typeof OrgSettingsIntegrationsWhatsappRoute
-  OrgSettingsPlanAccionesRoute: typeof OrgSettingsPlanAccionesRoute
-  OrgSettingsIntegrationsIndexRoute: typeof OrgSettingsIntegrationsIndexRoute
-  OrgSettingsPlanIndexRoute: typeof OrgSettingsPlanIndexRoute
+interface SettingsRouteChildren {
+  SettingsDotagentRoute: typeof SettingsDotagentRoute
+  SettingsDotauditRoute: typeof SettingsDotauditRoute
+  SettingsDotavailabilityRoute: typeof SettingsDotavailabilityRoute
+  SettingsDotbranchesRoute: typeof SettingsDotbranchesRoute
+  SettingsDotchannelsRoute: typeof SettingsDotchannelsRoute
+  SettingsDotdataProtectionRoute: typeof SettingsDotdataProtectionRoute
+  SettingsDotfieldsRoute: typeof SettingsDotfieldsRoute
+  SettingsDotformsRoute: typeof SettingsDotformsRoute
+  SettingsDotmailRoute: typeof SettingsDotmailRoute
+  SettingsDotpatientAccessRoute: typeof SettingsDotpatientAccessRoute
+  SettingsDotpatientRegistrationRoute: typeof SettingsDotpatientRegistrationRoute
+  SettingsDotpaymentMethodsRoute: typeof SettingsDotpaymentMethodsRoute
+  SettingsDotpipelinesRoute: typeof SettingsDotpipelinesRoute
+  SettingsDotspecialtiesRoute: typeof SettingsDotspecialtiesRoute
+  SettingsDotteamRoute: typeof SettingsDotteamRoute
+  SettingsDotwebchatRoute: typeof SettingsDotwebchatRoute
+  SettingsDotindexRoute: typeof SettingsDotindexRoute
+  SettingsDotintegrationsDotwebchatRoute: typeof SettingsDotintegrationsDotwebchatRoute
+  SettingsDotintegrationsDotwhatsappRoute: typeof SettingsDotintegrationsDotwhatsappRoute
+  SettingsDotplanDotaccionesRoute: typeof SettingsDotplanDotaccionesRoute
+  SettingsDotintegrationsDotindexRoute: typeof SettingsDotintegrationsDotindexRoute
+  SettingsDotplanDotindexRoute: typeof SettingsDotplanDotindexRoute
 }
 
-const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
-  OrgSettingsAgentRoute: OrgSettingsAgentRoute,
-  OrgSettingsAuditRoute: OrgSettingsAuditRoute,
-  OrgSettingsAvailabilityRoute: OrgSettingsAvailabilityRoute,
-  OrgSettingsBranchesRoute: OrgSettingsBranchesRoute,
-  OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
-  OrgSettingsDataProtectionRoute: OrgSettingsDataProtectionRoute,
-  OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
-  OrgSettingsFormsRoute: OrgSettingsFormsRoute,
-  OrgSettingsMailRoute: OrgSettingsMailRoute,
-  OrgSettingsPatientAccessRoute: OrgSettingsPatientAccessRoute,
-  OrgSettingsPatientRegistrationRoute: OrgSettingsPatientRegistrationRoute,
-  OrgSettingsPaymentMethodsRoute: OrgSettingsPaymentMethodsRoute,
-  OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
-  OrgSettingsSpecialtiesRoute: OrgSettingsSpecialtiesRoute,
-  OrgSettingsTeamRoute: OrgSettingsTeamRoute,
-  OrgSettingsWebchatRoute: OrgSettingsWebchatRoute,
-  OrgSettingsIndexRoute: OrgSettingsIndexRoute,
-  OrgSettingsIntegrationsWebchatRoute: OrgSettingsIntegrationsWebchatRoute,
-  OrgSettingsIntegrationsWhatsappRoute: OrgSettingsIntegrationsWhatsappRoute,
-  OrgSettingsPlanAccionesRoute: OrgSettingsPlanAccionesRoute,
-  OrgSettingsIntegrationsIndexRoute: OrgSettingsIntegrationsIndexRoute,
-  OrgSettingsPlanIndexRoute: OrgSettingsPlanIndexRoute,
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsDotagentRoute: SettingsDotagentRoute,
+  SettingsDotauditRoute: SettingsDotauditRoute,
+  SettingsDotavailabilityRoute: SettingsDotavailabilityRoute,
+  SettingsDotbranchesRoute: SettingsDotbranchesRoute,
+  SettingsDotchannelsRoute: SettingsDotchannelsRoute,
+  SettingsDotdataProtectionRoute: SettingsDotdataProtectionRoute,
+  SettingsDotfieldsRoute: SettingsDotfieldsRoute,
+  SettingsDotformsRoute: SettingsDotformsRoute,
+  SettingsDotmailRoute: SettingsDotmailRoute,
+  SettingsDotpatientAccessRoute: SettingsDotpatientAccessRoute,
+  SettingsDotpatientRegistrationRoute: SettingsDotpatientRegistrationRoute,
+  SettingsDotpaymentMethodsRoute: SettingsDotpaymentMethodsRoute,
+  SettingsDotpipelinesRoute: SettingsDotpipelinesRoute,
+  SettingsDotspecialtiesRoute: SettingsDotspecialtiesRoute,
+  SettingsDotteamRoute: SettingsDotteamRoute,
+  SettingsDotwebchatRoute: SettingsDotwebchatRoute,
+  SettingsDotindexRoute: SettingsDotindexRoute,
+  SettingsDotintegrationsDotwebchatRoute:
+    SettingsDotintegrationsDotwebchatRoute,
+  SettingsDotintegrationsDotwhatsappRoute:
+    SettingsDotintegrationsDotwhatsappRoute,
+  SettingsDotplanDotaccionesRoute: SettingsDotplanDotaccionesRoute,
+  SettingsDotintegrationsDotindexRoute: SettingsDotintegrationsDotindexRoute,
+  SettingsDotplanDotindexRoute: SettingsDotplanDotindexRoute,
 }
 
-const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(
-  OrgSettingsRouteChildren,
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
 )
 
-interface OrgPatientsPatientIdRouteChildren {
-  OrgPatientsPatientIdEncountersEncounterIdRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRoute
-  OrgPatientsPatientIdOdontogramPrintRoute: typeof OrgPatientsPatientIdOdontogramPrintRoute
-  OrgPatientsPatientIdConsentsConsentIdPrintRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
-  OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute: typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
-  OrgPatientsPatientIdOrdersOrderIdPrintRoute: typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
-  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
+interface PatientsDotpatientIdRouteChildren {
+  PatientsDotpatientIdDotencountersDotencounterIdRoute: typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
+  PatientsDotpatientIdDotodontogramDotprintRoute: typeof PatientsDotpatientIdDotodontogramDotprintRoute
+  PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute: typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
+  PatientsDotpatientIdDotordersDotorderIdDotprintRoute: typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
+  PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute: typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
 }
 
-const OrgPatientsPatientIdRouteChildren: OrgPatientsPatientIdRouteChildren = {
-  OrgPatientsPatientIdEncountersEncounterIdRoute:
-    OrgPatientsPatientIdEncountersEncounterIdRoute,
-  OrgPatientsPatientIdOdontogramPrintRoute:
-    OrgPatientsPatientIdOdontogramPrintRoute,
-  OrgPatientsPatientIdConsentsConsentIdPrintRoute:
-    OrgPatientsPatientIdConsentsConsentIdPrintRoute,
-  OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute:
-    OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute,
-  OrgPatientsPatientIdOrdersOrderIdPrintRoute:
-    OrgPatientsPatientIdOrdersOrderIdPrintRoute,
-  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute:
-    OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute,
+const PatientsDotpatientIdRouteChildren: PatientsDotpatientIdRouteChildren = {
+  PatientsDotpatientIdDotencountersDotencounterIdRoute:
+    PatientsDotpatientIdDotencountersDotencounterIdRoute,
+  PatientsDotpatientIdDotodontogramDotprintRoute:
+    PatientsDotpatientIdDotodontogramDotprintRoute,
+  PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute:
+    PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute,
+  PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute:
+    PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute,
+  PatientsDotpatientIdDotordersDotorderIdDotprintRoute:
+    PatientsDotpatientIdDotordersDotorderIdDotprintRoute,
+  PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute:
+    PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute,
 }
 
-const OrgPatientsPatientIdRouteWithChildren =
-  OrgPatientsPatientIdRoute._addFileChildren(OrgPatientsPatientIdRouteChildren)
+const PatientsDotpatientIdRouteWithChildren =
+  PatientsDotpatientIdRoute._addFileChildren(PatientsDotpatientIdRouteChildren)
 
-interface OrgRouteChildren {
-  OrgAgendaRoute: typeof OrgAgendaRoute
-  OrgBranchesRoute: typeof OrgBranchesRoute
-  OrgCommissionsRoute: typeof OrgCommissionsRoute
-  OrgFinanceRoute: typeof OrgFinanceRoute
-  OrgHomeRoute: typeof OrgHomeRoute
-  OrgInboxRoute: typeof OrgInboxRoute
-  OrgInventoryRoute: typeof OrgInventoryRoute
-  OrgMembersRoute: typeof OrgMembersRoute
-  OrgPipelineRoute: typeof OrgPipelineRoute
-  OrgReportsRoute: typeof OrgReportsRoute
-  OrgServicesRoute: typeof OrgServicesRouteWithChildren
-  OrgSettingsRoute: typeof OrgSettingsRouteWithChildren
-  OrgTasksRoute: typeof OrgTasksRoute
-  OrgAgentAdministradorRoute: typeof OrgAgentAdministradorRoute
-  OrgAgentApprovalsRoute: typeof OrgAgentApprovalsRoute
-  OrgAgentAsistenteClinicoRoute: typeof OrgAgentAsistenteClinicoRoute
-  OrgAgentKnowledgeRoute: typeof OrgAgentKnowledgeRoute
-  OrgAgentLearnRoute: typeof OrgAgentLearnRoute
-  OrgAgentPendientesRoute: typeof OrgAgentPendientesRoute
-  OrgAgentRecepcionRoute: typeof OrgAgentRecepcionRoute
-  OrgAgentRegistroRoute: typeof OrgAgentRegistroRoute
-  OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
-  OrgInventoryProductIdRoute: typeof OrgInventoryProductIdRoute
-  OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
-  OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
-  OrgPeoplePersonIdRoute: typeof OrgPeoplePersonIdRoute
-  OrgPeopleLockedRoute: typeof OrgPeopleLockedRoute
-  OrgAgentIndexRoute: typeof OrgAgentIndexRoute
-  OrgContactsIndexRoute: typeof OrgContactsIndexRoute
-  OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
-  OrgPeopleIndexRoute: typeof OrgPeopleIndexRoute
+interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
+  AgendaRoute: typeof AgendaRoute
+  BranchesRoute: typeof BranchesRoute
+  CommissionsRoute: typeof CommissionsRoute
+  FinanceRoute: typeof FinanceRoute
+  HomeRoute: typeof HomeRoute
+  InboxRoute: typeof InboxRoute
+  InventoryRoute: typeof InventoryRoute
+  MembersRoute: typeof MembersRoute
+  PipelineRoute: typeof PipelineRoute
+  ReportsRoute: typeof ReportsRoute
+  ServicesRoute: typeof ServicesRouteWithChildren
+  SettingsRoute: typeof SettingsRouteWithChildren
+  TasksRoute: typeof TasksRoute
+  AgentDotadministradorRoute: typeof AgentDotadministradorRoute
+  AgentDotapprovalsRoute: typeof AgentDotapprovalsRoute
+  AgentDotasistenteClinicoRoute: typeof AgentDotasistenteClinicoRoute
+  AgentDotknowledgeRoute: typeof AgentDotknowledgeRoute
+  AgentDotlearnRoute: typeof AgentDotlearnRoute
+  AgentDotpendientesRoute: typeof AgentDotpendientesRoute
+  AgentDotrecepcionRoute: typeof AgentDotrecepcionRoute
+  AgentDotregistroRoute: typeof AgentDotregistroRoute
+  ContactsDotcontactIdRoute: typeof ContactsDotcontactIdRoute
+  Inventory_DotproductIdRoute: typeof Inventory_DotproductIdRoute
+  OpportunitiesDotopportunityIdRoute: typeof OpportunitiesDotopportunityIdRoute
+  PatientsDotpatientIdRoute: typeof PatientsDotpatientIdRouteWithChildren
+  PeopleDotpersonIdRoute: typeof PeopleDotpersonIdRoute
+  PeopleDotlockedRoute: typeof PeopleDotlockedRoute
+  AgentDotindexRoute: typeof AgentDotindexRoute
+  ContactsDotindexRoute: typeof ContactsDotindexRoute
+  PatientsDotindexRoute: typeof PatientsDotindexRoute
+  PeopleDotindexRoute: typeof PeopleDotindexRoute
 }
 
-const OrgRouteChildren: OrgRouteChildren = {
-  OrgAgendaRoute: OrgAgendaRoute,
-  OrgBranchesRoute: OrgBranchesRoute,
-  OrgCommissionsRoute: OrgCommissionsRoute,
-  OrgFinanceRoute: OrgFinanceRoute,
-  OrgHomeRoute: OrgHomeRoute,
-  OrgInboxRoute: OrgInboxRoute,
-  OrgInventoryRoute: OrgInventoryRoute,
-  OrgMembersRoute: OrgMembersRoute,
-  OrgPipelineRoute: OrgPipelineRoute,
-  OrgReportsRoute: OrgReportsRoute,
-  OrgServicesRoute: OrgServicesRouteWithChildren,
-  OrgSettingsRoute: OrgSettingsRouteWithChildren,
-  OrgTasksRoute: OrgTasksRoute,
-  OrgAgentAdministradorRoute: OrgAgentAdministradorRoute,
-  OrgAgentApprovalsRoute: OrgAgentApprovalsRoute,
-  OrgAgentAsistenteClinicoRoute: OrgAgentAsistenteClinicoRoute,
-  OrgAgentKnowledgeRoute: OrgAgentKnowledgeRoute,
-  OrgAgentLearnRoute: OrgAgentLearnRoute,
-  OrgAgentPendientesRoute: OrgAgentPendientesRoute,
-  OrgAgentRecepcionRoute: OrgAgentRecepcionRoute,
-  OrgAgentRegistroRoute: OrgAgentRegistroRoute,
-  OrgContactsContactIdRoute: OrgContactsContactIdRoute,
-  OrgInventoryProductIdRoute: OrgInventoryProductIdRoute,
-  OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
-  OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
-  OrgPeoplePersonIdRoute: OrgPeoplePersonIdRoute,
-  OrgPeopleLockedRoute: OrgPeopleLockedRoute,
-  OrgAgentIndexRoute: OrgAgentIndexRoute,
-  OrgContactsIndexRoute: OrgContactsIndexRoute,
-  OrgPatientsIndexRoute: OrgPatientsIndexRoute,
-  OrgPeopleIndexRoute: OrgPeopleIndexRoute,
-}
+const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren =
+  {
+    AgendaRoute: AgendaRoute,
+    BranchesRoute: BranchesRoute,
+    CommissionsRoute: CommissionsRoute,
+    FinanceRoute: FinanceRoute,
+    HomeRoute: HomeRoute,
+    InboxRoute: InboxRoute,
+    InventoryRoute: InventoryRoute,
+    MembersRoute: MembersRoute,
+    PipelineRoute: PipelineRoute,
+    ReportsRoute: ReportsRoute,
+    ServicesRoute: ServicesRouteWithChildren,
+    SettingsRoute: SettingsRouteWithChildren,
+    TasksRoute: TasksRoute,
+    AgentDotadministradorRoute: AgentDotadministradorRoute,
+    AgentDotapprovalsRoute: AgentDotapprovalsRoute,
+    AgentDotasistenteClinicoRoute: AgentDotasistenteClinicoRoute,
+    AgentDotknowledgeRoute: AgentDotknowledgeRoute,
+    AgentDotlearnRoute: AgentDotlearnRoute,
+    AgentDotpendientesRoute: AgentDotpendientesRoute,
+    AgentDotrecepcionRoute: AgentDotrecepcionRoute,
+    AgentDotregistroRoute: AgentDotregistroRoute,
+    ContactsDotcontactIdRoute: ContactsDotcontactIdRoute,
+    Inventory_DotproductIdRoute: Inventory_DotproductIdRoute,
+    OpportunitiesDotopportunityIdRoute: OpportunitiesDotopportunityIdRoute,
+    PatientsDotpatientIdRoute: PatientsDotpatientIdRouteWithChildren,
+    PeopleDotpersonIdRoute: PeopleDotpersonIdRoute,
+    PeopleDotlockedRoute: PeopleDotlockedRoute,
+    AgentDotindexRoute: AgentDotindexRoute,
+    ContactsDotindexRoute: ContactsDotindexRoute,
+    PatientsDotindexRoute: PatientsDotindexRoute,
+    PeopleDotindexRoute: PeopleDotindexRoute,
+  }
 
-const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)
+const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren =
+  DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute._addFileChildren(
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren,
+  )
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  OrgRoute: OrgRouteWithChildren,
+  DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute:
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteWithChildren,
   PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
   ReservaRoute: ReservaRoute,
-  BajaTokenRoute: BajaTokenRoute,
-  CTokenRoute: CTokenRoute,
-  EmbedConnectionIdRoute: EmbedConnectionIdRoute,
-  LlegarBranchRoute: LlegarBranchRoute,
-  EmbedIndexRoute: EmbedIndexRoute,
-  ResumenLunesBajaTokenRoute: ResumenLunesBajaTokenRoute,
+  BajaDottokenRoute: BajaDottokenRoute,
+  CDottokenRoute: CDottokenRoute,
+  EmbedDotconnectionIdRoute: EmbedDotconnectionIdRoute,
+  LlegarDotbranchRoute: LlegarDotbranchRoute,
+  EmbedDotindexRoute: EmbedDotindexRoute,
+  ResumenLunesDotbajaDottokenRoute: ResumenLunesDotbajaDottokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -9,7 +9,7 @@ import {
 } from "@odentia/dental"
 import { useId } from "react"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
-import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]

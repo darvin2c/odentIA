@@ -1,3 +1,4 @@
+/// <reference path="../types/dicom-codecs.d.ts" />
 /**
  * Decodificadores de las compresiones DICOM (PS3.5 §8.2 y §A.4): JPEG
  * (baseline de 8 bits, extendido de 12 bits y sin pérdida), JPEG-LS y JPEG

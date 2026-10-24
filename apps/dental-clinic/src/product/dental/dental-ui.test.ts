@@ -1,7 +1,7 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { beforeAll, describe, expect, it } from "vitest"
-import { areaNav, navSectionOf, subsectionNav, visibleSections } from "../../lib/patient-areas"
-import { declareProduct } from "../product-ui"
+import { areaNav, navSectionOf, subsectionNav, visibleSections } from "@odentia/clinic-app/lib/patient-areas"
+import { declareProduct } from "@odentia/clinic-app/product/product-ui"
 import { dentalUi } from "./index"
 
 const as = (role: string) => (permission: string) => canAccess(role, permission)

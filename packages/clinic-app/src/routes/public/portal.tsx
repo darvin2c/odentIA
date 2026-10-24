@@ -5,9 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Fingerprint } from "lucide-react"
 import { useEffect, useState } from "react"
-import { AppointmentBlock } from "../components/public/appointment-block"
-import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
-import { ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
+import { AppointmentBlock } from "../../components/public/appointment-block"
+import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
+import { ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../../components/public/week-slots"
 import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
@@ -39,11 +39,11 @@ import {
   selectPortalGrantApi,
   verifyPasskeyAuthApi,
   verifyPasskeyRegistrationApi,
-} from "../lib/portal"
-import { ApiError } from "../lib/api"
-import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { setOrgLocale } from "../lib/locale"
-import { AnswerInput, isFieldVisible, missingRequired } from "../components/patient/form-fields"
+} from "../../lib/portal"
+import { ApiError } from "../../lib/api"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { setOrgLocale } from "../../lib/locale"
+import { AnswerInput, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.

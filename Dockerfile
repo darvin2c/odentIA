@@ -19,6 +19,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
 COPY packages/channels/package.json packages/channels/
+COPY packages/clinic-app/package.json packages/clinic-app/
 COPY packages/clinical/package.json packages/clinical/
 COPY packages/db/package.json packages/db/
 COPY packages/dental/package.json packages/dental/
