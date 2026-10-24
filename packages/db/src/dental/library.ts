@@ -1,7 +1,8 @@
 import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
-import { inArray, notInArray, sql } from "drizzle-orm"
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
 import { type CatalogLibrary, type ProcedureLists, seedProcedureCodes, splitHead, strictLines } from "../procedure-codes.js"
+import { treatmentTemplate } from "../schema/clinical.js"
 
 /**
  * La biblioteca de odentIA (ADR 0069 y 0079): `seeds/biblioteca.csv`,
@@ -12,6 +13,7 @@ import { type CatalogLibrary, type ProcedureLists, seedProcedureCodes, splitHead
  * `cpms:` de antes); las filas se conservan para los servicios que las usan.
  */
 export const dentalLibrary: CatalogLibrary = {
+  product: "dental",
   prepare(lists: ProcedureLists) {
     const SCOPES: ReadonlySet<string> = new Set(TREATMENT_SCOPES)
     const KINDS: ReadonlySet<string> = new Set(TREATMENT_KIND_KEYS)
@@ -91,6 +93,7 @@ export const dentalLibrary: CatalogLibrary = {
 
     const scopeKeys = templates.map((t) => t.key)
     return {
+      keys: scopeKeys,
       templates: templates.length,
       mappings: (system: string) => mappings.filter((m) => m.systemKey === system).length,
       async seed(tx: Db) {
@@ -136,15 +139,18 @@ export const dentalLibrary: CatalogLibrary = {
         }
         // Lo que ya no está en la biblioteca (las plantillas `cpms:` de antes)
         // queda inactivo; las filas se conservan para los servicios que las usan.
-        await tx.execute(
-          sql`update "treatment_template" set "is_active" = false where ${notInArray(sql`"key"`, scopeKeys)}`,
-        )
+        // Solo lo de odentIA: la biblioteca de latidIA se siembra aparte.
+        await tx
+          .update(treatmentTemplate)
+          .set({ isActive: false })
+          .where(and(eq(treatmentTemplate.product, "dental"), notInArray(treatmentTemplate.key, scopeKeys)))
         // El código de cada tratamiento en cada edición se reemplaza entero: un
         // cambio de código en el CSV no deja el viejo. Otras ediciones no se tocan.
+        const own = sql`(select "id" from "treatment_template" where "product" = 'dental')`
         for (const release of lists.releases) {
           await tx.execute(
             sql`delete from "treatment_template_code"
-              where "system_key" = ${release.systemKey} and "version" = ${release.version}`,
+              where "system_key" = ${release.systemKey} and "version" = ${release.version} and "template_id" in ${own}`,
           )
         }
         for (const m of mappings) {

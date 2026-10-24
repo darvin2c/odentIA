@@ -74,6 +74,8 @@ const DENTAL_INSIDE = [
   "apps/api/src/routes/dental/",
   "apps/api/src/routes/products.ts",
   "packages/services/src/products.ts",
+  // Las bibliotecas de cada producto, sembradas juntas.
+  "packages/db/src/products.ts",
 ]
 
 function filesUnder(dir: string): string[] {

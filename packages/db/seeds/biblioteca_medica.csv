@@ -1,0 +1,39 @@
+key,kind,common,name
+consulta-medicina-general,general,true,Consulta de medicina general
+consulta-de-control,general,true,Consulta de control
+consulta-a-domicilio,general,false,Consulta a domicilio
+consulta-medicina-familiar,familiar,true,Consulta de medicina familiar
+consulta-medicina-interna,interna,true,Consulta de medicina interna
+consulta-pediatria,pediatria,true,Consulta de pediatría
+consulta-ginecologia,ginecologia,true,Consulta de ginecología
+control-nino-sano-menor-1,pediatria,false,Control de niño sano (menor de 1 año)
+control-nino-sano-1-a-4,pediatria,false,Control de niño sano (1 a 4 años)
+control-nino-sano-5-a-11,pediatria,false,Control de niño sano (5 a 11 años)
+chequeo-preventivo-adulto,prevencion,false,Chequeo preventivo del adulto (30 a 59 años)
+chequeo-preventivo-adulto-mayor,prevencion,false,Chequeo preventivo del adulto mayor (60 años o más)
+planificacion-familiar,familiar,false,Atención en planificación familiar
+aplicacion-de-vacuna,prevencion,false,Aplicación de vacuna
+nebulizacion,procedimiento,true,Nebulización
+inyectable-intramuscular,procedimiento,true,Inyectable intramuscular o subcutáneo
+inyectable-endovenoso,procedimiento,false,Inyectable endovenoso
+sutura-simple,procedimiento,false,Sutura de herida simple (hasta 2,5 cm)
+retiro-de-puntos,procedimiento,false,Retiro de puntos
+drenaje-de-absceso,procedimiento,false,Drenaje de absceso simple
+extraccion-de-una,procedimiento,false,Extracción de uña
+extraccion-de-cerumen,procedimiento,false,Extracción de cerumen
+infiltracion-articular,procedimiento,false,Infiltración de articulación mayor
+electrocardiograma,diagnostico,true,Electrocardiograma
+glucosa-capilar,diagnostico,false,Glucosa capilar
+espirometria,diagnostico,false,Espirometría
+toma-de-muestra-de-sangre,diagnostico,false,Toma de muestra de sangre
+ecografia-abdominal,diagnostico,false,Ecografía abdominal
+papanicolaou,ginecologia,true,Toma de Papanicolaou
+colocacion-de-diu,ginecologia,false,Colocación de DIU
+retiro-de-diu,ginecologia,false,Retiro de DIU
+colocacion-de-implante-anticonceptivo,ginecologia,false,Colocación de implante anticonceptivo
+retiro-de-implante-anticonceptivo,ginecologia,false,Retiro de implante anticonceptivo
+control-prenatal-4-a-6,ginecologia,false,Atención prenatal (paquete de 4 a 6 controles)
+control-prenatal-7-o-mas,ginecologia,false,Atención prenatal (paquete de 7 o más controles)
+ecografia-obstetrica,ginecologia,false,Ecografía obstétrica
+ecografia-transvaginal,ginecologia,false,Ecografía transvaginal
+ecografia-pelvica,ginecologia,false,Ecografía pélvica

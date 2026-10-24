@@ -5,7 +5,8 @@
  * la Dra. Elena Vela (propietaria) y Ana Torres, que también dirige Dental
  * Smile y entra una vez en cada dominio; una sede con dos salas y horario, la
  * agenda de hoy y mañana, los controles de presión de Luis con su examen y el
- * próximo, que se repite cada 3 meses, y los antecedentes médicos de los tres.
+ * próximo, que se repite cada 3 meses, los antecedentes médicos de los tres,
+ * y sus cinco especialidades y un tarifario de su biblioteca (entrega 8).
  *
  * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
  */
@@ -14,20 +15,22 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
-import { encounter } from "@odentia/db/schema/clinical"
+import { encounter, orgSpecialty, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
 import { savePatientHealth } from "../clinical.js"
-import { createSpecialty, setProfessionalSpecialties } from "../clinical-forms.js"
+import { setProfessionalSpecialties } from "../clinical-forms.js"
 import { createFollowUp } from "../follow-ups.js"
 import { createContact } from "../contacts.js"
 import { createPatient } from "../patients.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
+import { fromTemplates } from "../service-catalog.js"
+import { ensureClinicSpecialties } from "../specialties.js"
 
 export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
 export const VELA_ID = "seed-user-vela"
@@ -149,12 +152,44 @@ export async function seedMedicalDemo(
     ],
   })
 
-  // La especialidad de quien atiende. Los servicios llegan con el catálogo médico (entrega 8):
-  // en Perú cada uno lleva su código CPMS y los médicos aún no están en la lista de latidIA.
-  const general = await db.transaction((tx) =>
-    createSpecialty(tx, ORG, VELA_ID, { name: "Medicina general" }),
-  )
+  // Nace con las cinco especialidades de latidIA (decisión 3) y un tarifario de
+  // su biblioteca, cada servicio con su código CPMS (entrega 8).
+  await db.transaction((tx) => ensureClinicSpecialties(tx, ORG))
+  const [general] = await db
+    .select({ id: orgSpecialty.id })
+    .from(orgSpecialty)
+    .where(and(eq(orgSpecialty.organizationId, ORG), eq(orgSpecialty.key, "medicina_general")))
+  if (!general) throw new Error("Falta Medicina general: revisa el catálogo de latidIA")
   await db.transaction((tx) => setProfessionalSpecialties(tx, ORG, VELA_ID, VELA_ID, [general.id]))
+  const prices: Record<string, number> = {
+    "consulta-medicina-general": 8000,
+    "consulta-de-control": 5000,
+    "consulta-medicina-familiar": 10000,
+    "consulta-medicina-interna": 12000,
+    "consulta-pediatria": 10000,
+    "consulta-ginecologia": 12000,
+    "control-nino-sano-1-a-4": 7000,
+    nebulizacion: 3000,
+    "inyectable-intramuscular": 1500,
+    electrocardiograma: 6000,
+    "glucosa-capilar": 1000,
+    "ecografia-transvaginal": 12000,
+  }
+  const library = await db
+    .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
+    .from(treatmentTemplate)
+    .where(and(eq(treatmentTemplate.product, "medical"), inArray(treatmentTemplate.key, Object.keys(prices))))
+  if (library.length !== Object.keys(prices).length) {
+    throw new Error("Falta la biblioteca de latidIA: ejecuta seed:procedures")
+  }
+  await db.transaction((tx) =>
+    fromTemplates(
+      tx,
+      ORG,
+      VELA_ID,
+      library.map((row) => ({ templateId: row.id, priceCents: prices[row.key]!, durationMin: 20 })),
+    ),
+  )
 
   const people = [
     {

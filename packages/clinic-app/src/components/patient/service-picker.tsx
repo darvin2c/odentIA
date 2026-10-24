@@ -25,6 +25,7 @@ import { useClinicSpecialties } from "../../lib/clinical-forms"
 import { fetchServices, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
+import { productUi } from "../../product/product-ui"
 
 interface ServicePickerProps {
   value: string
@@ -182,7 +183,8 @@ export function ServicePicker({
                       <span className="font-medium">{item.name}</span>
                       <span className="text-muted-foreground">
                         {item.specialtyName ? `${item.specialtyName} · ` : ""}
-                        {item.scope ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
+                        {/* Sin «dónde» (latidIA) todo es general: no se repite. */}
+                        {item.scope && productUi().site ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
                         {item.code ? `${item.code} · ` : ""}
                         {orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…"}
                         {item.durationMin !== null ? ` · ${item.durationMin} min` : ""}

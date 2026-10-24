@@ -31,7 +31,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
   const url = `postgres://dentalagent:dentalagent@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`
   const db = createOwnerDb(url)
   const seed = () =>
-    exec(process.execPath, ["--import", "tsx", "src/dental/seed-catalog.ts"], {
+    exec(process.execPath, ["--import", "tsx", "src/seed-catalog.ts"], {
       env: { ...process.env, DATABASE_URL: url },
     })
   const snapshot = async () =>
@@ -56,22 +56,34 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
       library: number
       uncoded: number
       dental: number
+      medical: number
+      medical_library: number
+      medical_uncoded: number
     }>(sql`
       select r.expected_count as expected,
         (select count(*)::int from procedure_code_product p
           where p.system_key=r.system_key and p.product='dental') as dental,
         (select count(*)::int from procedure_code c
           where c.system_key=r.system_key and c.version=r.version and c.is_active) as available,
-        (select count(*)::int from treatment_template t where t.is_active and not t.coded_only) as library,
-        (select count(*)::int from treatment_template t where t.is_active and not t.coded_only and not exists (
+        (select count(*)::int from procedure_code_product p
+          where p.system_key=r.system_key and p.product='medical') as medical,
+        (select count(*)::int from treatment_template t where t.product='dental' and t.is_active and not t.coded_only) as library,
+        (select count(*)::int from treatment_template t where t.product='dental' and t.is_active and not t.coded_only and not exists (
           select 1 from treatment_template_code m where m.template_id=t.id
-            and m.system_key=r.system_key and m.version=r.version)) as uncoded
+            and m.system_key=r.system_key and m.version=r.version)) as uncoded,
+        (select count(*)::int from treatment_template t where t.product='medical' and t.is_active) as medical_library,
+        (select count(*)::int from treatment_template t where t.product='medical' and t.is_active and not exists (
+          select 1 from treatment_template_code m where m.template_id=t.id
+            and m.system_key=r.system_key and m.version=r.version)) as medical_uncoded
       from procedure_catalog_release r where r.is_current and r.system_key = 'CPMS'`)
     // La lista oficial entra entera y odentIA usa sus 505 códigos odontológicos
     // (ADR 0079); la biblioteca es la de consultorio y cada tratamiento lleva su
     // código CPMS, salvo las variantes de la norma de otro país (`coded_only`),
     // que en el Perú no se ofrecen (ADR 0069).
     expect(coverage).toMatchObject({ expected: 12002, available: 12002, dental: 505, uncoded: 0 })
+    // latidIA (issue 229, entrega 8): el resto de la CPMS y su biblioteca de 38
+    // servicios, con código CPMS salvo la toma del Papanicolaou.
+    expect(coverage).toMatchObject({ medical: 12002 - 505, medical_library: 38, medical_uncoded: 1 })
     const [section] = await db.execute<{ section: string }>(
       sql`select section from procedure_code where system_key = 'CPMS' and code = 'D2392'`,
     )
@@ -94,7 +106,7 @@ it("el importador real concilia, es idempotente y no reactiva una edición retir
     const [preserved] = await db.execute<{ count: number }>(
       sql`select count(*)::int as count from treatment_template_code where system_key = 'CPMS'`,
     )
-    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")))
+    expect(preserved?.count).toBe(Number(Reflect.get(coverage!, "library")) + 38 - 1)
   } finally {
     await Reflect.get(db, "$client").end()
     await container.stop()

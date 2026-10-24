@@ -9,10 +9,10 @@
  *   (`import:procedures`). Este seed NO lee los archivos oficiales.
  * - Códigos de cada producto: `procedure_code_products.csv` (ADR 0079), los
  *   que ofrece su buscador (odentIA, los odontológicos).
- * - Biblioteca: `seeds/biblioteca.csv`, tratamientos de consultorio con nombre
- *   propio, tipo, ámbito, lo que dejan en la pieza, si van en «Más usados» y
- *   si son la variante de una norma que solo se ofrece donde tiene código;
- *   `seeds/biblioteca_codigos.csv`, el código de cada uno en cada lista.
+ * - Bibliotecas: la de cada producto (`products.ts`), con el código de cada
+ *   tratamiento en cada lista. La de odentIA, `seeds/biblioteca.csv` y
+ *   `seeds/biblioteca_codigos.csv`; la de latidIA, `seeds/biblioteca_medica.csv`
+ *   y `seeds/biblioteca_medica_codigos.csv`. Cada una solo toca lo suyo.
  *
  * Atómico e idempotente: todo corre en una transacción; valida fuente, datos
  * y cobertura (fail closed) y revierte ante cualquier desvío. No reactiva
@@ -179,14 +179,19 @@ export function loadProcedureLists() {
 
 /**
  * La biblioteca de un producto, que se siembra con las listas en la misma
- * transacción (odentIA: `dental/library.ts`, ADR 0069 y 0079).
+ * transacción (odentIA: `dental/library.ts`, ADR 0069 y 0079; latidIA:
+ * `medical/library.ts`, issue 229).
  */
 export interface CatalogLibrary {
+  /** El producto de sus tratamientos (`treatment_template.product`): solo toca los suyos. */
+  product: string
   /** Lee y valida sus CSV contra las listas; fail closed antes de tocar la base. */
   prepare(lists: ProcedureLists): PreparedLibrary
 }
 
 export interface PreparedLibrary {
+  /** Sus claves: no se repiten entre bibliotecas (la clave es única en la tabla). */
+  keys: readonly string[]
   templates: number
   /** Cuántos tratamientos lleva ligados la edición vigente de una lista. */
   mappings(systemKey: string): number
@@ -195,14 +200,22 @@ export interface PreparedLibrary {
 }
 
 /**
- * Siembra idempotente de las listas oficiales sobre una conexión owner y, si
- * se da, de la biblioteca de un producto con sus códigos.
+ * Siembra idempotente de las listas oficiales sobre una conexión owner y de
+ * las bibliotecas que se den, cada una con sus códigos.
  */
-export async function seedProcedureCodes(db: Db, library?: CatalogLibrary): Promise<ProcedureCodesSeedResult> {
+export async function seedProcedureCodes(
+  db: Db,
+  libraries: CatalogLibrary | readonly CatalogLibrary[] = [],
+): Promise<ProcedureCodesSeedResult> {
   const lists = loadProcedureLists()
   const { systems, releases, codesBySystem, products } = lists
-  const prepared = library?.prepare(lists) ?? null
-  const mappingsOf = (system: string) => prepared?.mappings(system) ?? null
+  const given = Array.isArray(libraries) ? libraries : [libraries as CatalogLibrary]
+  const prepared = given.map((library) => ({ product: library.product, ...library.prepare(lists) }))
+  const allKeys = prepared.flatMap((library) => library.keys)
+  if (new Set(allKeys).size !== allKeys.length) throw new Error("Una clave de tratamiento se repite entre bibliotecas")
+  const seededProducts = prepared.map((library) => library.product)
+  const mappingsOf = (system: string) =>
+    prepared.length > 0 ? prepared.reduce((sum, library) => sum + library.mappings(system), 0) : null
 
   await db.transaction(async (tx) => {
     // Lock por lista, en orden fijo: dos seeds concurrentes se serializan.
@@ -299,8 +312,8 @@ export async function seedProcedureCodes(db: Db, library?: CatalogLibrary): Prom
       )
     }
 
-    // La biblioteca del producto, si la hay, con su código en cada lista.
-    if (prepared) await prepared.seed(tx)
+    // Las bibliotecas de los productos, con su código en cada lista.
+    for (const library of prepared) await library.seed(tx)
 
     // Los códigos de cada producto se reemplazan enteros, lista por lista.
     for (const release of releases) {
@@ -322,8 +335,10 @@ export async function seedProcedureCodes(db: Db, library?: CatalogLibrary): Prom
         select
           (select count(*)::int from "procedure_code"
             where "system_key" = ${release.systemKey} and "version" = ${release.version} and "is_active") as codes,
-          (select count(*)::int from "treatment_template_code"
-            where "system_key" = ${release.systemKey} and "version" = ${release.version}) as mappings`)) as unknown as {
+          (select count(*)::int from "treatment_template_code" c
+            join "treatment_template" t on t."id" = c."template_id"
+            where c."system_key" = ${release.systemKey} and c."version" = ${release.version}
+              ${seededProducts.length > 0 ? sql`and t."product" in ${seededProducts}` : sql``}) as mappings`)) as unknown as {
         codes: number
         mappings: number
       }[]
@@ -341,7 +356,7 @@ export async function seedProcedureCodes(db: Db, library?: CatalogLibrary): Prom
   return {
     systems: systems.length,
     codes: [...codesBySystem.values()].reduce((sum, codes) => sum + codes.length, 0),
-    templates: prepared?.templates ?? 0,
+    templates: prepared.reduce((sum, library) => sum + library.templates, 0),
     releases: releases.map((release) => ({
       systemKey: release.systemKey,
       version: release.version,

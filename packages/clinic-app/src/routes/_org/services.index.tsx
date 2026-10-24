@@ -119,6 +119,15 @@ const TARIFARIO_SORT_OPTIONS = [
   { value: "ambito", label: "Ámbito" },
 ]
 
+/**
+ * Si el producto registra dónde se hace un servicio (odentIA: pieza, caras,
+ * cuadrante…). En latidIA todo es general (decisión 4 del issue 229): el
+ * ámbito no se elige ni se muestra.
+ */
+function hasPlaces(): boolean {
+  return productUi().site !== null
+}
+
 const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
   { value: "treatment", label: BILLING_MODE_LABELS.treatment },
   { value: "session", label: BILLING_MODE_LABELS.session },
@@ -395,15 +404,19 @@ function TarifarioPage() {
             } satisfies ColumnDef<ServiceCatalogItem>,
           ]
         : []),
-      {
-        accessorKey: "scope",
-        header: "Ámbito",
-        meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.scope
-            ? (TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope)
-            : "—",
-      },
+      ...(hasPlaces()
+        ? [
+            {
+              accessorKey: "scope",
+              header: "Ámbito",
+              meta: { view: { primary: true } },
+              cell: ({ row }) =>
+                row.original.scope
+                  ? (TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope)
+                  : "—",
+            } satisfies ColumnDef<ServiceCatalogItem>,
+          ]
+        : []),
       {
         accessorKey: "priceCents",
         header: "Precio",
@@ -577,7 +590,7 @@ function TarifarioPage() {
             },
             { key: "estado", label: "Estado", type: "select", options: STATE_OPTIONS },
           ]}
-          sortOptions={TARIFARIO_SORT_OPTIONS}
+          sortOptions={hasPlaces() ? TARIFARIO_SORT_OPTIONS : TARIFARIO_SORT_OPTIONS.filter((option) => option.value !== "ambito")}
           searchPlaceholder="Buscar por nombre o código interno" searchLabel="Buscar en servicios"
         />
 
@@ -783,7 +796,8 @@ const emptyOfferValues: OfferFormValues = {
 
 /** Valores del formulario para una oferta; `null` = alta de una prestación propia. */
 function offerValues(offer: ServiceCatalogItem | null, locale: string): OfferFormValues {
-  if (!offer) return emptyOfferValues
+  // Sin «dónde» (latidIA), todo servicio es general: no hay ámbito que elegir.
+  if (!offer) return hasPlaces() ? emptyOfferValues : { ...emptyOfferValues, scope: "general" }
   return {
     name: offer.name,
     code: offer.code ?? "",
@@ -1323,9 +1337,11 @@ function OfferReadOnly({
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
         <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
-        <DetailField label="Ámbito">
-          {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
-        </DetailField>
+        {hasPlaces() ? (
+          <DetailField label="Ámbito">
+            {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
+          </DetailField>
+        ) : null}
         {leaves ? (
           <DetailField label={leaves.label}>{offer.leavesFinding ? leaves.words(offer.leavesFinding) : null}</DetailField>
         ) : null}
@@ -1363,9 +1379,11 @@ function OfferDetails({
           </DetailField>
           <DetailField label="Moneda">{offer.currency}</DetailField>
           <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
-          <DetailField label="Ámbito">
-            {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
-          </DetailField>
+          {hasPlaces() ? (
+            <DetailField label="Ámbito">
+              {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
+            </DetailField>
+          ) : null}
         </DetailList>
       </CollapsibleContent>
     </Collapsible>
@@ -1412,7 +1430,7 @@ function OfferFields({
       {officialCodeField}
       <div className="grid grid-cols-2 gap-3">
         <OfferSpecialtyField form={form} idPrefix={idPrefix} current={offer} />
-        {allowSpecialtyScope ? (
+        {!hasPlaces() ? null : allowSpecialtyScope ? (
           <form.Field name="scope" validators={{ onChange: offerSchema.shape.scope }}>
             {(field) => (
               <Field>
