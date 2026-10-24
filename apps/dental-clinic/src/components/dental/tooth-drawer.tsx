@@ -33,14 +33,8 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import {
-  DIAGNOSIS_TYPE_LABELS,
-  type OdontogramEntry,
-  type PatientDocument,
-  type PlanItem,
-  planStatusLabel,
-  toothTypeLabel,
-} from "../../lib/patients"
+import { DIAGNOSIS_TYPE_LABELS, type PatientDocument, type PlanItem, planStatusLabel, toothTypeLabel } from "../../lib/patients"
+import { type OdontogramEntry } from "../../lib/dental/odontogram"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"

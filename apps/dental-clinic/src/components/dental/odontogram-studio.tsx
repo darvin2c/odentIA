@@ -43,13 +43,9 @@ import {
   useState,
 } from "react"
 import { usePermission } from "../../lib/crm"
-import { type Dentition, suggestedDentition } from "../../lib/patient-areas"
-import {
-  type OdontogramEntry,
-  type OdontogramState,
-  statusLabel,
-  winnersAsOf,
-} from "../../lib/patients"
+import { type Dentition, suggestedDentition } from "../../lib/dental/dentition"
+import { statusLabel } from "../../lib/patients"
+import { type OdontogramEntry, type OdontogramState, winnersAsOf } from "../../lib/dental/odontogram"
 import { OdontogramArch } from "./odontogram-arch"
 import { SignedOdontograms } from "./odontogram-assessments"
 import { OdontogramDocument } from "./odontogram-document"

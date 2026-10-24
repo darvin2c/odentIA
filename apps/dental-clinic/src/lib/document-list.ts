@@ -113,7 +113,7 @@ export function visibleDocumentFilters(
   return order.filter((id) => shown.has(id))
 }
 
-const NOUNS: Record<DocumentFilter | "todo", [string, string]> = {
+const NOUNS: Record<string, readonly [string, string]> = {
   todo: ["papel", "papeles"],
   requieren: ["papel que requiere acción", "papeles que requieren acción"],
   recetas: ["receta", "recetas"],
@@ -122,11 +122,17 @@ const NOUNS: Record<DocumentFilter | "todo", [string, string]> = {
   formularios: ["formulario", "formularios"],
   imagenes: ["imagen", "imágenes"],
   otros: ["archivo", "archivos"],
-  odontogramas: ["odontograma", "odontogramas"],
 }
 
-/** «29 papeles», «18 imágenes», «16 imágenes de la pieza 36». */
-export function countWords(count: number, filter?: DocumentFilter, tooth?: number): string {
-  const [one, many] = NOUNS[filter ?? "todo"]
-  return `${count} ${count === 1 ? one : many}${tooth != null ? ` de la pieza ${tooth}` : ""}`
+/**
+ * «29 papeles», «18 imágenes», «16 imágenes de la pieza 36». El lugar llega
+ * dicho («pieza 36») y el papel del producto, con sus palabras (`nouns`).
+ */
+export function countWords(
+  count: number,
+  filter?: DocumentFilter,
+  options: { place?: string; nouns?: readonly [string, string] } = {},
+): string {
+  const [one, many] = NOUNS[filter ?? "todo"] ?? options.nouns ?? NOUNS.todo!
+  return `${count} ${count === 1 ? one : many}${options.place ? ` de la ${options.place}` : ""}`
 }

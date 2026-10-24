@@ -4,9 +4,102 @@
  * atención que cambió el gráfico y, para lo judicial, lo personal y el
  * reingreso, «Firmar odontograma». Fuera de Perú se imprime una hoja neutra.
  */
-import type { ManualOdontogramPurpose } from "@odentia/dental"
+import {
+  activeFindingsAsOf,
+  type FindingDetails,
+  type ManualOdontogramPurpose,
+  type SignedOdontogramPurpose,
+} from "@odentia/dental"
 import { apiFetch } from "../api"
-import type { OdontogramAssessment, OdontogramEntry } from "../patients"
+import type { SiteFinding } from "../patients"
+
+/** Un hallazgo del odontograma, con lo propio de odentIA (sus detalles, su revisión, lo que lo dejó). */
+export interface OdontogramEntry extends SiteFinding {
+  id: string
+  toothNumber: number
+  surface?: string | null
+  condition: string
+  status: string
+  diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
+  note?: string | null
+  encounterId?: string | null
+  createdAt?: string
+  details?: FindingDetails
+  needsReview?: boolean
+  legacyData?: Record<string, unknown> | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  /** Tratado: deja de estar vigente desde entonces (sigue en la evolución). */
+  resolvedAt?: string | null
+  /** Lo tratado queda dibujado: el tratamiento completado que dejó este hallazgo. */
+  leftByPlanItemId?: string | null
+}
+
+export type ToothState = {
+  condition: string
+  status: string
+  surfaces: string[]
+  entries: string[]
+}
+
+export interface OdontogramState {
+  teeth: Record<string, ToothState>
+  history: OdontogramEntry[]
+}
+
+/**
+ * Odontograma firmado (solo en clínicas de Perú; ADR 0036): instantánea de los
+ * hallazgos con la firma del perfil de quien firmó (sin trazo) y su momento.
+ * El que firmó el cierre de una atención la nombra (`encounterId`).
+ */
+export interface OdontogramAssessment {
+  id: string
+  patientId: string
+  patientName: string
+  patientNumber: number
+  authorUserId: string
+  createdAt: string
+  purpose: SignedOdontogramPurpose
+  standard: string
+  specifications: string
+  observations: string
+  examinerName: string
+  examinerTitle: string
+  /** Colegio y número, como se imprime: «COP 12345». */
+  registrationNumber: string
+  encounterId: string | null
+  entries: OdontogramEntry[]
+}
+
+/** Proyección por pieza de hallazgos coexistentes; el historial original no se modifica. */
+export function winnersAsOf(history: OdontogramEntry[], iso?: string): OdontogramState {
+  const byTooth = new Map<number, OdontogramEntry[]>()
+  for (const entry of activeFindingsAsOf(history, iso)) {
+    for (const tooth of entry.details?.relatedTeeth?.length
+      ? entry.details.relatedTeeth
+      : [entry.toothNumber]) {
+      const entries = byTooth.get(tooth) ?? []
+      entries.push(entry)
+      byTooth.set(tooth, entries)
+    }
+  }
+  const teeth: Record<string, ToothState> = {}
+  for (const [tooth, entries] of byTooth) {
+    const latest = entries.at(-1)!
+    teeth[String(tooth)] = {
+      condition: latest.condition,
+      status: latest.status,
+      surfaces: [
+        ...new Set(entries.flatMap((entry) => (entry.surface ? [entry.surface] : []))),
+      ].sort(),
+      entries: entries.map((entry) => entry.id),
+    }
+  }
+  return { teeth, history }
+}
 
 /** Quién es la persona en una hoja impresa. */
 export interface PrintPatient {

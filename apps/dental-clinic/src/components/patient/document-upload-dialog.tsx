@@ -46,7 +46,7 @@ import {
   tomographySubmitLabel,
   useTomographyFlow,
 } from "./tomography-upload"
-import { ToothSelector } from "../dental/tooth-selector"
+import { PlacesField } from "../../product/site-fields"
 
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 
@@ -779,11 +779,7 @@ function QueuedRow({
                   </Button>
                 )}
               </Field>
-              <ToothSelector
-                value={row.teeth}
-                onChange={(teeth) => onPatch({ teeth })}
-                label="Piezas (opcional)"
-              />
+              <PlacesField value={row.teeth} onChange={(teeth) => onPatch({ teeth })} optional />
               <DocumentLinkSelects
                 patientId={patientId}
                 idPrefix={`${planChoiceId}-links`}

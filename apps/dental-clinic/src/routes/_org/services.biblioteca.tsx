@@ -1,5 +1,4 @@
 import { formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { TREATMENT_KINDS } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -37,7 +36,7 @@ import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
-import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
+import { productUi } from "../../product/product-ui"
 import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
@@ -242,7 +241,7 @@ function AddServicesPage() {
   // La biblioteca se ordena por tipo de tratamiento (ADR 0069): no son las especialidades de la clínica.
   const libraryFilterOptions = [
     { value: "todos", label: "Todos" },
-    ...TREATMENT_KINDS.map((kind) => ({ value: kind.key, label: kind.name })),
+    ...productUi().services.kinds.map((kind) => ({ value: kind.key, label: kind.name })),
   ]
   /** La lista de servicios del país: el código de cada tratamiento es el suyo; sin lista, ninguno. */
   const codeList = useClinicalProfile().services
@@ -904,6 +903,8 @@ function OwnServiceDrawer({
   // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
   const [leavesCondition, setLeavesCondition] = useState("")
   const [leavesVariant, setLeavesVariant] = useState("")
+  // Lo que el servicio deja al completarse, si el producto lo registra (odentIA: «Deja en la pieza»).
+  const leaves = productUi().services.leaves
   // El código de la lista del país (tablero 3): obligatorio, opcional o sin campo.
   const codeList = useClinicalProfile().services
   const [officialCode, setOfficialCode] = useState<OfficialCoding | null>(null)
@@ -940,7 +941,7 @@ function OwnServiceDrawer({
         priceCents,
         billingMode,
         durationMin: duration.minutes,
-        leavesFinding: leavesFindingBody(leavesCondition, leavesVariant),
+        leavesFinding: leaves?.body(leavesCondition, leavesVariant) ?? null,
         officialCode: officialCode?.code ?? null,
       }),
     onSuccess: async (result) => {
@@ -1022,16 +1023,18 @@ function OwnServiceDrawer({
           Así la atención sabe qué pedir al registrarlo.
         </p>
       </Field>
-      <LeavesFindingField
-        idPrefix={id}
-        scope={scope}
-        condition={leavesCondition}
-        variant={leavesVariant}
-        onChange={(nextCondition, nextVariant) => {
-          setLeavesCondition(nextCondition)
-          setLeavesVariant(nextVariant)
-        }}
-      />
+      {leaves ? (
+        <leaves.Field
+          idPrefix={id}
+          scope={scope}
+          condition={leavesCondition}
+          variant={leavesVariant}
+          onChange={(nextCondition, nextVariant) => {
+            setLeavesCondition(nextCondition)
+            setLeavesVariant(nextVariant)
+          }}
+        />
+      ) : null}
       <Field>
         <span id={`${id}-cobro`} className="text-sm font-medium">
           Cómo se cobra

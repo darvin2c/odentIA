@@ -7,7 +7,7 @@ import {
   toothTypeOf,
 } from "@odentia/dental"
 import { useId, useRef, useState } from "react"
-import type { OdontogramEntry } from "../../lib/patients"
+import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { findingWords, useOdontogramNotation } from "./odontogram-notation"
 
 // Colores clínicos normativos (rojo/azul de la NTS 188). La selección de la UI

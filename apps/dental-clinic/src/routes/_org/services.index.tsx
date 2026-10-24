@@ -46,8 +46,7 @@ import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { conditionLabel, variantLabel } from "@odentia/dental"
-import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
+import { productUi } from "../../product/product-ui"
 import { capitalize, missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
 import {
   ServiceMaterialsCost,
@@ -1020,7 +1019,7 @@ function OfferEditor({
         priceDisclosure: values.priceDisclosure,
         evaluationServiceId: values.evaluationServiceId === "" ? null : values.evaluationServiceId,
         // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
-        leavesFinding: leavesFindingBody(values.leavesCondition, values.leavesVariant),
+        leavesFinding: productUi().services.leaves?.body(values.leavesCondition, values.leavesVariant) ?? null,
       }
       // El código del país lo elige solo un servicio propio; sin lista no viaja, y al
       // editar solo viaja si cambió.
@@ -1309,6 +1308,7 @@ function OfferReadOnly({
   locale: string
 }) {
   const receptionName = useReceptionName()
+  const leaves = productUi().services.leaves
   return (
     <div className="flex flex-col gap-4">
       <DetailList>
@@ -1326,16 +1326,9 @@ function OfferReadOnly({
         <DetailField label="Ámbito">
           {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
         </DetailField>
-        <DetailField label="Deja en la pieza">
-          {offer.leavesFinding
-            ? [
-                conditionLabel(offer.leavesFinding.condition),
-                variantLabel(offer.leavesFinding.condition, offer.leavesFinding.variant),
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : null}
-        </DetailField>
+        {leaves ? (
+          <DetailField label={leaves.label}>{offer.leavesFinding ? leaves.words(offer.leavesFinding) : null}</DetailField>
+        ) : null}
         <DetailField label="Estado">{offer.isActive ? "Activa" : "Inactiva"}</DetailField>
         <OfficialCodeDetail official={official} own={offer.source === "custom"} />
         <DetailField label="Código interno">{offer.code}</DetailField>
@@ -1596,8 +1589,10 @@ function OfferLeavesFinding({
   )
   const condition = useStore(form.store, (state) => state.values.leavesCondition)
   const variant = useStore(form.store, (state) => state.values.leavesVariant)
+  const leaves = productUi().services.leaves
+  if (!leaves) return null
   return (
-    <LeavesFindingField
+    <leaves.Field
       idPrefix={idPrefix}
       scope={scope}
       condition={condition}

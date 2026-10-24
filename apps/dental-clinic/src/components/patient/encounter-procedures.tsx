@@ -1,5 +1,4 @@
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import { surfaceLabel } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -31,11 +30,12 @@ import { useOrgProfile } from "../../lib/org"
 import { type ServiceCatalogItem } from "../../lib/services"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ServicePicker } from "./service-picker"
-import { type ToothSite, ToothSiteSelector } from "../dental/tooth-site-selector"
+import type { PlaceWithParts } from "../../product/product-ui"
+import { partNames, SiteField } from "../../product/site-fields"
 import { activeOrgLocale } from "../../lib/locale"
 
 const NO_PLAN = "__sin-plan__"
-const NO_SITE: ToothSite = { toothNumber: null, surfaces: [] }
+const NO_SITE: PlaceWithParts = { toothNumber: null, surfaces: [] }
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"]
 
 /** «36 · Oclusal», «Cuadrante 2», «Arcada superior» o «General». */
@@ -43,7 +43,7 @@ function procedureSiteLabel(
   proc: Pick<ProcedureItem, "toothNumber" | "surfaces" | "quadrant" | "arch">,
 ) {
   if (proc.toothNumber != null) {
-    const surfaces = proc.surfaces.map(surfaceLabel).join(", ")
+    const surfaces = partNames(proc.surfaces)
     return surfaces ? `Pieza ${proc.toothNumber} · ${surfaces}` : `Pieza ${proc.toothNumber}`
   }
   if (proc.quadrant != null) return `Cuadrante ${proc.quadrant}`
@@ -114,7 +114,7 @@ export function EncounterProcedures({
   const serviceId = service?.id ?? ""
   const [freeMode, setFreeMode] = useState(false)
   const [freeDescription, setFreeDescription] = useState("")
-  const [site, setSite] = useState<ToothSite>(NO_SITE)
+  const [site, setSite] = useState<PlaceWithParts>(NO_SITE)
   const [quadrant, setQuadrant] = useState("")
   const [quantity, setQuantity] = useState("1")
   const [arch, setArch] = useState("")
@@ -493,7 +493,7 @@ export function EncounterProcedures({
                   })}
                 </p>
               ) : freeMode || needsTooth ? (
-                <ToothSiteSelector
+                <SiteField
                   value={site}
                   onChange={setSite}
                   withSurfaces={freeMode || scope === "surfaces"}

@@ -4,7 +4,7 @@ import {
   TREATMENT_RESULT_CONDITIONS,
 } from "@odentia/dental"
 import { Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { useDentalProfile } from "../../lib/org"
+import { useDentalProfile } from "../../lib/dental/profile"
 import { variantFieldLabel } from "./odontogram-notation"
 
 const NOTHING = "nada"

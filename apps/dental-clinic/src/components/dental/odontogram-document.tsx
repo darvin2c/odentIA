@@ -8,7 +8,7 @@ import {
   toothTypeOf,
 } from "@odentia/dental"
 import { useId } from "react"
-import type { OdontogramEntry } from "../../lib/patients"
+import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 export interface OdontogramDocumentProps {

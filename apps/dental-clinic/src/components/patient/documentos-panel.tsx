@@ -1,4 +1,3 @@
-import { FDI_ADULT, FDI_CHILD, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import {
   Badge,
   Button,
@@ -7,13 +6,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
 } from "@odentia/ui"
 import {
   DataRefreshMarker,
@@ -36,7 +28,7 @@ import {
   Pill,
   Signature,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import {
   type ClinicalOrder,
@@ -68,9 +60,7 @@ import {
   visibleDocumentFilters,
 } from "../../lib/document-list"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { fetchSignedOdontograms } from "../../lib/dental/odontogram"
-import { useDentalProfile } from "../../lib/org"
-import { DOCUMENT_FILTERS, type DocumentFilter } from "../../lib/patient-areas"
+import { type DocumentFilter, documentFilters } from "../../lib/patient-areas"
 import {
   ageFrom,
   type Encounter,
@@ -94,17 +84,19 @@ import type { NewDocumentKind } from "./encounter-documents"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { NewOrderDrawer, OrderResultDrawer, OrderRow } from "./ordenes-tab"
 import { imagingFacts, useImagingState } from "./tomography-detail"
+import { productUi } from "../../product/product-ui"
+import { PlaceSelect } from "../../product/site-fields"
 
-type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "odontograma"
+/** «producto»: un papel propio del producto (odentIA: el odontograma firmado). */
+type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "producto"
 type Tone = "success" | "warning" | "outline" | "secondary"
 
 /** El filtro de tipo de cada papel; el de un archivo depende de qué es (`fileFilter`). */
-const FILTER_OF_KIND: Record<Exclude<Kind, "archivo">, DocumentFilter> = {
+const FILTER_OF_KIND: Record<Exclude<Kind, "archivo" | "producto">, DocumentFilter> = {
   receta: "recetas",
   orden: "ordenes",
   formulario: "formularios",
   consentimiento: "consentimientos",
-  odontograma: "odontogramas",
 }
 
 /** El icono de cada clase de papel, en el lugar de la miniatura de una imagen. */
@@ -113,7 +105,7 @@ const ICON_OF_KIND: Record<Exclude<Kind, "archivo">, LucideIcon> = {
   orden: ClipboardList,
   formulario: ListChecks,
   consentimiento: Signature,
-  odontograma: FileText,
+  producto: FileText,
 }
 
 /** «Nuevo ▾»: abre directo el formulario de creación de cada papel. */
@@ -130,7 +122,8 @@ type RowAction =
   | { type: "firmar"; consent: ConsentDocument }
   | { type: "resultado"; order: ClinicalOrder }
   | { type: "imprimir"; prescriptionId: string }
-  | { type: "imprimir-odontograma"; assessmentId: string }
+  /** La que trae un papel del producto (odentIA: «Imprimir» la hoja del odontograma). */
+  | { type: "producto"; node: ReactNode }
   | { type: "completar" }
   | { type: "ver" }
 
@@ -159,7 +152,7 @@ interface Row {
     | { kind: "receta"; prescription: Prescription }
     | { kind: "formulario"; response: FormResponse }
     | { kind: "archivo"; document: PatientDocument }
-    | { kind: "odontograma"; assessmentId: string }
+    | { kind: "producto" }
 }
 
 /** «Octubre de 2026», en el idioma y la zona de la clínica. */
@@ -226,11 +219,12 @@ export function DocumentosSection({
   const listSearch = useListSearch()
   const router = useRouter()
   const canWrite = usePermission("clinical.write")
-  // El odontograma firmado es de las clínicas de Perú (NTS 188; ADR 0036).
-  const signsOdontogram = useDentalProfile().odontogram?.signedOdontogram === true
-  // Fuera de Perú no hay filtro «Odontogramas»: un enlace con él abre todo.
+  // Los papeles propios del producto (odentIA: el odontograma firmado, solo en Perú; ADR 0036).
+  const productKind = productUi().documents.kind
+  const own = productUi().documents.usePapers(patientId)
+  // Sin esos papeles en la clínica no hay su filtro: un enlace con él abre todo.
   const filter =
-    requestedFilter === "odontogramas" && !signsOdontogram ? undefined : requestedFilter
+    productKind && requestedFilter === productKind.filter && !own.query ? undefined : requestedFilter
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<Exclude<NewDocumentKind, "archivo"> | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -265,11 +259,6 @@ export function DocumentosSection({
     queryKey: ["consents", patientId],
     queryFn: () => fetchConsents({ patientId }),
   })
-  const odontograms = useQuery({
-    queryKey: ["odontogram-assessments", patientId],
-    queryFn: () => fetchSignedOdontograms(patientId),
-    enabled: signsOdontogram,
-  })
   // Quién firma un consentimiento pendiente: la persona o, si es menor, su
   // representante legal. Son las mismas consultas que ya hizo la página.
   const patient = useQuery({
@@ -303,7 +292,7 @@ export function DocumentosSection({
         ["clinical-orders", patientId],
         ["form-responses", patientId],
         ["consents", patientId],
-        ["odontogram-assessments", patientId],
+        own.queryKey,
         ["patient-summary", patientId],
         ["timeline", patientId],
         ["encounter", patientId],
@@ -387,7 +376,7 @@ export function DocumentosSection({
     { name: "órdenes", query: orders },
     { name: "formularios", query: forms },
     { name: "consentimientos", query: consents },
-    ...(signsOdontogram ? [{ name: "odontogramas", query: odontograms }] : []),
+    ...(own.query && productKind ? [{ name: productKind.nouns[1], query: own.query }] : []),
   ]
   const allPending = sources.every((source) => source.query.isPending)
   const failed = sources.filter((source) => source.query.isError)
@@ -575,21 +564,21 @@ export function DocumentosSection({
         open: { kind: "consentimiento", consent },
       }
     }),
-    // El odontograma firmado: se ve e imprime con el gráfico de la norma.
-    ...(signsOdontogram ? (odontograms.data?.data ?? []) : []).map(
-      (item): Row => ({
-        key: `odontograma-${item.id}`,
-        kind: "odontograma",
-        filter: FILTER_OF_KIND.odontograma,
+    // Los papeles del producto (odentIA: el odontograma firmado), con su única acción.
+    ...own.papers.map(
+      (paper): Row => ({
+        key: paper.key,
+        kind: "producto",
+        filter: productKind?.filter ?? "otros",
         teeth: [],
         retired: false,
-        title: `Odontograma firmado · ${SIGNED_ODONTOGRAM_PURPOSE_LABELS[item.purpose]}`,
-        detail: `${formatDate(item.createdAt)} · ${item.examinerName} · ${item.registrationNumber}`,
-        date: item.createdAt,
+        title: paper.title,
+        detail: paper.detail,
+        date: paper.date,
         status: null,
         needsAction: false,
-        action: { type: "imprimir-odontograma", assessmentId: item.id },
-        open: { kind: "odontograma", assessmentId: item.id },
+        action: { type: "producto", node: paper.action },
+        open: { kind: "producto" },
       }),
     ),
   ].sort((a, b) => b.date.localeCompare(a.date))
@@ -672,18 +661,8 @@ export function DocumentosSection({
             Imprimir
           </Link>
         )
-      case "imprimir-odontograma":
-        return (
-          <Link
-            to="/patients/$patientId/odontogram/$assessmentId/print"
-            params={{ patientId, assessmentId: action.assessmentId }}
-            target="_blank"
-            aria-label={`Imprimir ${row.title}`}
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
-            Imprimir
-          </Link>
-        )
+      case "producto":
+        return action.node
       case "completar":
         return (
           <Button
@@ -714,7 +693,7 @@ export function DocumentosSection({
 
   // Solo los filtros que filtran algo (decisión 8); sin ninguno, tampoco «Todo».
   const chipIds = visibleDocumentFilters(
-    DOCUMENT_FILTERS.filter((option) => option.id !== "odontogramas" || signsOdontogram).map(
+    documentFilters().filter((option) => option.id !== productKind?.filter || own.query !== null).map(
       (option) => option.id,
     ),
     new Set(current.map((row) => row.filter)),
@@ -722,7 +701,7 @@ export function DocumentosSection({
     current.length,
     filter,
   )
-  const chipOptions = DOCUMENT_FILTERS.filter((option) => chipIds.includes(option.id))
+  const chipOptions = documentFilters().filter((option) => chipIds.includes(option.id))
   // En el teléfono la fila de filtros se desliza: el filtro puesto queda a la
   // vista. Solo se mueve la fila, nunca la página.
   // biome-ignore lint/correctness/useExhaustiveDependencies: se recoloca al cambiar el filtro o al llegar los papeles.
@@ -735,7 +714,7 @@ export function DocumentosSection({
   const filterName = (id: DocumentFilter) =>
     id === "requieren"
       ? "lo que requiere acción"
-      : (DOCUMENT_FILTERS.find((option) => option.id === id)?.label ?? id)
+      : (documentFilters().find((option) => option.id === id)?.label ?? id)
   // Sin resultados se dice qué filtros están puestos: nunca hay uno que no se vea.
   const noResults = [
     query ? `Buscaste «${query}»` : "No hay papeles",
@@ -801,7 +780,8 @@ export function DocumentosSection({
             {current.length > 0 || narrowed || filter ? (
               <>
                 <SearchInput placeholder="Buscar un papel" className="min-w-0 flex-1 basis-56" />
-                <ToothFilter
+                <PlaceSelect
+                  className="w-auto min-w-40"
                   value={tooth}
                   onChange={(next) =>
                     listSearch.setParams({
@@ -818,7 +798,10 @@ export function DocumentosSection({
           {current.length > 0 ? (
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <p aria-live="polite" className="tabular-nums">
-                {countWords(visible.length, filter, tooth)}
+                {countWords(visible.length, filter, {
+                  place: tooth != null ? productUi().site?.placeName(tooth).toLowerCase() : undefined,
+                  nouns: productKind && productKind.filter === filter ? productKind.nouns : undefined,
+                })}
               </p>
               {narrowed ? (
                 <Button type="button" size="sm" variant="link" onClick={clearFilters}>
@@ -900,10 +883,8 @@ export function DocumentosSection({
                           }
                           title={row.title}
                           detail={row.detail}
-                          // El odontograma firmado se ve con su hoja: «Imprimir».
-                          onOpen={
-                            row.open.kind === "odontograma" ? undefined : () => setOpened(row.open)
-                          }
+                          // Un papel del producto se ve con su acción (odentIA: «Imprimir» su hoja).
+                          onOpen={row.open.kind === "producto" ? undefined : () => setOpened(row.open)}
                           status={row.status}
                           action={actionButton(row)}
                         />
@@ -1087,52 +1068,6 @@ function RowShell({
   )
 }
 
-const ALL_TEETH = "todas"
-const TOOTH_ITEMS: Record<string, string> = {
-  [ALL_TEETH]: "Todas las piezas",
-  ...Object.fromEntries([...FDI_ADULT, ...FDI_CHILD].map((n) => [String(n), `Pieza ${n}`])),
-}
-
-/** «Todas las piezas ▾»: el mismo filtro de pieza que Historia (decisión 7). */
-function ToothFilter({
-  value,
-  onChange,
-}: {
-  value: number | undefined
-  onChange: (tooth: number | undefined) => void
-}) {
-  return (
-    <Select
-      items={TOOTH_ITEMS}
-      value={value != null ? String(value) : ALL_TEETH}
-      onValueChange={(next) => onChange(next && next !== ALL_TEETH ? Number(next) : undefined)}
-    >
-      <SelectTrigger aria-label="Pieza" className="w-auto min-w-40">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ALL_TEETH}>Todas las piezas</SelectItem>
-        <SelectGroup>
-          <SelectLabel>Permanentes</SelectLabel>
-          {FDI_ADULT.map((n) => (
-            <SelectItem key={n} value={String(n)}>
-              Pieza {n}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-        <SelectGroup>
-          <SelectLabel>Temporales</SelectLabel>
-          {FDI_CHILD.map((n) => (
-            <SelectItem key={n} value={String(n)}>
-              Pieza {n}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  )
-}
-
 function KindIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -1262,7 +1197,7 @@ function OpenedDocument({
     queryFn: () => fetchOrders({ patientId }),
     enabled: opened?.kind === "orden",
   })
-  if (!opened || opened.kind === "archivo" || opened.kind === "odontograma") return null
+  if (!opened || opened.kind === "archivo" || opened.kind === "producto") return null
   const title =
     opened.kind === "consentimiento"
       ? opened.consent.titleSnapshot

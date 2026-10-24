@@ -1,10 +1,7 @@
 import { label } from "../../lib/glossary"
 import { diagnosisCodeLabel, formatVitals } from "@odentia/clinical"
-import { conditionLabel, surfaceLabel } from "@odentia/dental"
-import { Badge, buttonVariants } from "@odentia/ui"
+import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
-import { periodontalBlockSummary, useEncounterPeriodontal } from "../dental/periodontal/encounter-periodontal"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
@@ -13,12 +10,13 @@ import {
   encounterStatusLabel,
   type PatientDocument,
   planStatusLabel,
-  statusLabel,
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteLabel } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
 import { activeOrgLocale } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
+import { partNames } from "../../product/site-fields"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -141,7 +139,7 @@ export function EncounterDetailView({
 }) {
   const canWrite = usePermission("clinical.write")
   const memberName = useMemberName()
-  const { encounter, teeth, procedures, notes, odontogramEntries, documents, addenda } = detail
+  const { encounter, teeth, procedures, notes, documents, addenda } = detail
   const planTitle = (planItemId: string | null | undefined): string | null =>
     [...detail.plannedItems, ...detail.indicatedItems].find((item) => item.id === planItemId)
       ?.title ?? null
@@ -150,7 +148,8 @@ export function EncounterDetailView({
   const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
   const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
   const activeProcedures = procedures.filter((proc) => !proc.voidedAt)
-  const periodontal = useEncounterPeriodontal(patientId, encounter.id)
+  // Lo del producto en la atención (odentIA: el odontograma vinculado y el periodontograma).
+  const ProductDetail = productUi().encounter.Detail
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -313,7 +312,7 @@ export function EncounterDetailView({
                   {(proc.quantity ?? 1) > 1 ? `× ${proc.quantity} · ` : ""}
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
                   {proc.surfaces.length > 0
-                    ? `${proc.surfaces.map(surfaceLabel).join(", ")} · `
+                    ? `${partNames(proc.surfaces)} · `
                     : ""}
                   {proc.planItemId
                     ? `Tratamiento del plan: ${planTitle(proc.planItemId) ?? "vinculado"} · `
@@ -369,30 +368,7 @@ export function EncounterDetailView({
         )}
       </section>
 
-      <section aria-label="Odontograma vinculado">
-        <h4 className="mb-2 text-sm font-medium">
-          Odontograma vinculado ({odontogramEntries.length})
-        </h4>
-        {odontogramEntries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin hallazgos de odontograma.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {odontogramEntries.map((entry) => (
-              <li key={entry.id} className="border-b pb-2 text-sm last:border-0">
-                <p>
-                  Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
-                  {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""} ·{" "}
-                  {statusLabel(entry.status)}
-                  {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
-                </p>
-                {entry.note ? (
-                  <p className="whitespace-pre-wrap text-xs text-muted-foreground">{entry.note}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <ProductDetail patientId={patientId} detail={detail} slot="recorded" />
 
       <section aria-label="Documentos vinculados">
         <h4 className="mb-2 text-sm font-medium">Documentos vinculados ({documents.length})</h4>
@@ -412,32 +388,7 @@ export function EncounterDetailView({
         )}
       </section>
 
-      {periodontal.item ? (
-        <section aria-label="Periodontograma" className="flex flex-col gap-2 rounded-lg border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-col">
-              <h4 className="text-sm font-medium">Periodontograma</h4>
-              <p className="text-sm text-muted-foreground">
-                {periodontalBlockSummary(periodontal.item)}
-                {encounter.status === "finalizada" ? " · cerrado con la atención" : ""}
-              </p>
-            </div>
-            <Link
-              to="/patients/$patientId"
-              params={{ patientId }}
-              search={{ tab: "periodontograma", periodontograma: periodontal.item.id } as { tab: "periodontograma" }}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              Ver
-            </Link>
-          </div>
-          {encounter.status === "finalizada" ? (
-            <p className="text-xs text-muted-foreground">
-              Quedó fijo al firmar. Si hubo un error, explícalo en una adenda: el próximo periodontograma lo reemplaza.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
+      <ProductDetail patientId={patientId} detail={detail} slot="end" />
 
       {encounter.status === "finalizada" ? (
         <EncounterMaterialsBlock patientId={patientId} encounterId={encounter.id} />

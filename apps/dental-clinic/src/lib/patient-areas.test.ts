@@ -1,5 +1,6 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import { bareProduct, declareProduct, type ProductUi } from "../product/product-ui"
 import {
   areaNav,
   clinicalSummaryFor,
@@ -9,12 +10,26 @@ import {
   resolveSection,
   sectionFromSearch,
   subsectionNav,
-  suggestedDentition,
   visibleAreas,
   visibleSections,
 } from "./patient-areas"
 
 const as = (role: string) => (permission: string) => canAccess(role, permission)
+
+/**
+ * Un producto de prueba con una sección en Clínica y otra debajo, como
+ * Odontograma y Periodontograma en odentIA (`product/dental/dental-ui.test.ts`).
+ */
+const PRODUCT: ProductUi = {
+  ...bareProduct("medical"),
+  record: {
+    sections: [
+      { id: "estudio", label: "Estudio", render: () => null },
+      { id: "detalle", label: "Detalle", parent: "estudio", render: () => null },
+    ],
+  },
+}
+beforeAll(() => declareProduct(PRODUCT))
 
 describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve cada rol»)", () => {
   const ids = (role: string, isPatient = true) =>
@@ -86,7 +101,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(ids("cashier", false)).toEqual(["resumen", "datos"])
     // Caja sin ficha no tiene cobros: entra por el resumen.
     expect(defaultSection(as("cashier"), false)).toBe("resumen")
-    expect(resolveSection("odontograma", as("owner"), false)).toBe("resumen")
+    expect(resolveSection("estudio", as("owner"), false)).toBe("resumen")
   })
 
   it("quien solo es responsable de otros no tiene citas propias", () => {
@@ -98,7 +113,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   })
 
   it("una sección sin permiso cae en la entrada del rol; sin acceso no hay sección", () => {
-    expect(resolveSection("odontograma", as("reception"))).toBe("resumen")
+    expect(resolveSection("estudio", as("reception"))).toBe("resumen")
     expect(resolveSection("cuenta", as("clinician"))).toBe("resumen")
     expect(resolveSection("plan", as("admin"))).toBe("plan")
     expect(resolveSection(undefined, as("member"))).toBeNull()
@@ -107,7 +122,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   it("los enlaces guardados de la ficha anterior abren la sección que hace ese trabajo", () => {
     expect(sectionFromSearch("actividad")).toBe("resumen")
     expect(sectionFromSearch("seguimiento")).toBe("conversaciones")
-    expect(sectionFromSearch("odontograma")).toBe("odontograma")
+    expect(sectionFromSearch("estudio")).toBe("estudio")
     expect(sectionFromSearch("no-existe")).toBeUndefined()
     // Tratamientos, Controles y la coordinación de recepción viven ahora en el Plan.
     expect(sectionFromSearch("recorrido")).toBe("plan")
@@ -115,18 +130,18 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("Clínica en cuatro secciones; el odontólogo ve 12 y el propietario 17 (ADR 0035 y 0080)", () => {
+  it("Clínica con lo del producto después de Antecedentes; el que atiende ve 12 y el propietario 17 (ADR 0035 y 0080)", () => {
     expect(areaNav("clinica", as("clinician")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
-      "Odontograma",
+      "Estudio",
       "Historia",
       "Documentos",
     ])
-    // Periodontograma va debajo de Odontograma (issue 49): no suma una pestaña.
-    expect(subsectionNav("periodontograma", as("clinician")).map((entry) => entry.label)).toEqual(["Odontograma", "Periodontograma"])
-    expect(subsectionNav("odontograma", as("clinician"))).toHaveLength(2)
+    // Lo que va debajo de otra sección no suma una pestaña: se elige dentro de ella.
+    expect(subsectionNav("detalle", as("clinician")).map((entry) => entry.label)).toEqual(["Estudio", "Detalle"])
+    expect(subsectionNav("estudio", as("clinician"))).toHaveLength(2)
     expect(subsectionNav("historia", as("clinician"))).toEqual([])
-    expect(navSectionOf("periodontograma")).toBe("odontograma")
+    expect(navSectionOf("detalle")).toBe("estudio")
     expect(visibleSections(as("clinician"))).toHaveLength(12)
     expect(visibleSections(as("owner"))).toHaveLength(17)
     // Recepción y caja no cambian.
@@ -156,21 +171,5 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     }
     expect(documentFilterFromSearch("documentos", "requieren")).toBe("requieren")
     expect(documentFilterFromSearch("documentos", "otro")).toBeUndefined()
-  })
-})
-
-describe("dentición sugerida por edad", () => {
-  const today = new Date("2026-10-07T12:00:00Z")
-  it("temporal hasta 5, mixta de 6 a 12 y permanente desde 13", () => {
-    expect(suggestedDentition("2022-01-01", today)).toBe("primary")
-    expect(suggestedDentition("2018-03-01", today)).toBe("mixed")
-    expect(suggestedDentition("2014-01-01", today)).toBe("mixed")
-    expect(suggestedDentition("2013-01-01", today)).toBe("adult")
-    expect(suggestedDentition("1972-05-20", today)).toBe("adult")
-  })
-  it("no supone edad sin una fecha válida", () => {
-    expect(suggestedDentition(null, today)).toBeNull()
-    expect(suggestedDentition("no-es-fecha", today)).toBeNull()
-    expect(suggestedDentition("2030-01-01", today)).toBeNull()
   })
 })

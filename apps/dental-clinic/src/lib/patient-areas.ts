@@ -8,6 +8,7 @@
  * permiso que la habilita y si necesita la ficha clínica: es coherencia de
  * navegación, la API autoriza cada bloque por separado.
  */
+import { productUi } from "../product/product-ui"
 
 export const PATIENT_AREAS = [
   { id: "resumen", label: "Resumen" },
@@ -20,7 +21,24 @@ export const PATIENT_AREAS = [
 ] as const
 export type PatientAreaId = (typeof PATIENT_AREAS)[number]["id"]
 
-export const PATIENT_SECTIONS = [
+interface SectionDef {
+  id: string
+  area: PatientAreaId
+  label: string
+  /** Un permiso, cualquiera de varios, o `null`: basta poder ver a las personas. */
+  permission: string | readonly string[] | null
+  /** Permiso que hace redundante la sección: quien lo tiene no la ve. */
+  unless?: string
+  /** Necesita la historia clínica: aparece cuando la persona ya es paciente. */
+  patient: boolean
+  /** Va debajo de otra sección: no suma una pestaña, se elige dentro de ella. */
+  parent?: string
+  /** Título del grupo en el menú lateral de la pestaña y en el selector del celular. */
+  group?: string
+}
+
+/** Las secciones de todo producto; las del producto van en Clínica, después de Antecedentes. */
+const COMMON_SECTIONS = [
   {
     // Para quien lee la clínica (odontólogo, propietario, administrador) el
     // Resumen ya es el clínico: alergias, «Qué sigue», última atención y
@@ -47,7 +65,7 @@ export const PATIENT_SECTIONS = [
     permission: "appointments.read",
     patient: false,
   },
-  // Clínica en cuatro secciones (ADR 0035): Antecedentes, Odontograma,
+  // Clínica (ADR 0035): Antecedentes, lo del producto (odentIA: Odontograma),
   // Historia («qué pasó y cuándo») y Documentos («buscar un papel»).
   {
     id: "antecedentes",
@@ -55,23 +73,6 @@ export const PATIENT_SECTIONS = [
     label: "Antecedentes",
     permission: "clinical.read",
     patient: true,
-  },
-  {
-    id: "odontograma",
-    area: "clinica",
-    label: "Odontograma",
-    permission: "clinical.read",
-    patient: true,
-  },
-  {
-    // Debajo de Odontograma, como parte de esa sección (issue 49, decisión 1):
-    // Clínica sigue con cuatro pestañas y las encías están junto a los dientes.
-    id: "periodontograma",
-    area: "clinica",
-    label: "Periodontograma",
-    permission: "clinical.read",
-    patient: true,
-    parent: "odontograma",
   },
   {
     id: "historia",
@@ -158,25 +159,30 @@ export const PATIENT_SECTIONS = [
     patient: true,
     group: "Sus datos y la ley",
   },
-] as const satisfies ReadonlyArray<{
-  id: string
-  area: PatientAreaId
-  label: string
-  /** Un permiso, cualquiera de varios, o `null`: basta poder ver a las personas. */
-  permission: string | readonly string[] | null
-  /** Permiso que hace redundante la sección: quien lo tiene no la ve. */
-  unless?: string
-  /** Necesita la historia clínica: aparece cuando la persona ya es paciente. */
-  patient: boolean
-  /** Va debajo de otra sección: no suma una pestaña, se elige dentro de ella. */
-  parent?: string
-  /** Título del grupo en el menú lateral de la pestaña y en el selector del celular. */
-  group?: string
-}>
+] as const satisfies ReadonlyArray<SectionDef>
 
-export type PatientSection = (typeof PATIENT_SECTIONS)[number]
-export type PatientSectionId = PatientSection["id"]
+export type PatientSection = SectionDef
+/** Una sección común por su nombre, o una del producto (odentIA: «odontograma»). */
+export type PatientSectionId = (typeof COMMON_SECTIONS)[number]["id"] | (string & {})
 export type Can = (permission: string) => boolean
+
+/**
+ * Las secciones de la página, en el orden de navegación: las comunes y, en
+ * Clínica después de Antecedentes, las que agrega el producto. Son clínicas:
+ * piden leer la historia y aparecen cuando la persona ya es paciente.
+ */
+export function patientSections(): readonly PatientSection[] {
+  const own: PatientSection[] = productUi().record.sections.map((section) => ({
+    id: section.id,
+    area: "clinica",
+    label: section.label,
+    permission: "clinical.read",
+    patient: true,
+    ...(section.parent ? { parent: section.parent } : {}),
+  }))
+  const after = COMMON_SECTIONS.findIndex((section) => section.id === "antecedentes") + 1
+  return [...COMMON_SECTIONS.slice(0, after), ...own, ...COMMON_SECTIONS.slice(after)]
+}
 
 /**
  * Secciones de la ficha anterior que ya no existen: su enlace guardado abre
@@ -203,9 +209,9 @@ const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
 
 /**
  * Filtros de Documentos («buscar un papel»): lo que requiere acción y cada
- * tipo de papel. Van en `?tipo=`; sin filtro se ven todos.
+ * tipo de papel de todo producto. Van en `?tipo=`; sin filtro se ven todos.
  */
-export const DOCUMENT_FILTERS = [
+const COMMON_DOCUMENT_FILTERS = [
   { id: "requieren", label: "Requieren acción" },
   { id: "recetas", label: "Recetas" },
   { id: "ordenes", label: "Órdenes" },
@@ -214,13 +220,18 @@ export const DOCUMENT_FILTERS = [
   { id: "imagenes", label: "Imágenes" },
   // Un informe suelto, una carta: lo subido que no es imagen ni consentimiento.
   { id: "otros", label: "Otros archivos" },
-  // Solo en clínicas de Perú, donde el odontograma se firma (ADR 0036).
-  { id: "odontogramas", label: "Odontogramas" },
 ] as const
-export type DocumentFilter = (typeof DOCUMENT_FILTERS)[number]["id"]
+/** Un tipo de papel común por su nombre, o el del producto (odentIA: «odontogramas»). */
+export type DocumentFilter = (typeof COMMON_DOCUMENT_FILTERS)[number]["id"] | (string & {})
+
+/** Los filtros de Documentos, en su orden: los comunes y, al final, el del producto. */
+export function documentFilters(): ReadonlyArray<{ id: DocumentFilter; label: string }> {
+  const own = productUi().documents.kind
+  return own ? [...COMMON_DOCUMENT_FILTERS, { id: own.filter, label: own.label }] : COMMON_DOCUMENT_FILTERS
+}
 
 export function isDocumentFilter(value: unknown): value is DocumentFilter {
-  return DOCUMENT_FILTERS.some((filter) => filter.id === value)
+  return documentFilters().some((filter) => filter.id === value)
 }
 
 /** La sección de un `?tab=`, también de los enlaces de la ficha anterior. */
@@ -248,24 +259,23 @@ export type PageOf = boolean | "responsable"
 
 /** Secciones que el rol puede abrir para esta persona, en el orden de navegación. */
 export function visibleSections(can: Can, isPatient: PageOf = true): PatientSection[] {
-  return PATIENT_SECTIONS.filter((section) => {
+  return patientSections().filter((section) => {
     if (section.patient && isPatient !== true) return false
     if (isPatient === "responsable" && section.area === "citas") return false
-    const permission: string | readonly string[] | null = section.permission
+    const permission = section.permission
     // Ninguna sección usa hoy `unless`; se conserva la regla para la próxima que lo necesite.
-    const unless = (section as { unless?: string }).unless
-    if (unless && can(unless)) return false
+    if (section.unless && can(section.unless)) return false
     if (permission === null) return can("patients.read")
     return typeof permission === "string" ? can(permission) : permission.some(can)
   })
 }
 
 export function isPatientSectionId(value: unknown): value is PatientSectionId {
-  return PATIENT_SECTIONS.some((section) => section.id === value)
+  return patientSections().some((section) => section.id === value)
 }
 
 export function sectionOf(id: PatientSectionId): PatientSection {
-  const found = PATIENT_SECTIONS.find((section) => section.id === id)
+  const found = patientSections().find((section) => section.id === id)
   if (!found) throw new RangeError(`Sección de ficha desconocida: ${id}`)
   return found
 }
@@ -316,23 +326,19 @@ export const SIDE_NAV_AREAS: ReadonlySet<PatientAreaId> = new Set(["datos"])
 
 /** El título del grupo de una sección, si va en uno. */
 export function sectionGroup(id: PatientSectionId): string | undefined {
-  return (sectionOf(id) as { group?: string }).group
+  return sectionOf(id).group
 }
 
 /** La sección de la que cuelga otra (Periodontograma → Odontograma); ella misma si no cuelga de ninguna. */
 export function navSectionOf(id: PatientSectionId): PatientSectionId {
-  const parent = (sectionOf(id) as { parent?: PatientSectionId }).parent
-  return parent ?? id
+  return sectionOf(id).parent ?? id
 }
 
 /** Entradas de segundo nivel de una pestaña: sus secciones visibles, sin las que cuelgan de otra. */
 export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
   return visibleSections(can, isPatient)
-    .filter((section) => section.area === area && !(section as { parent?: string }).parent)
-    .map((section) => {
-      const group = (section as { group?: string }).group
-      return { value: section.id, label: section.label, ...(group ? { group } : {}) }
-    })
+    .filter((section) => section.area === area && !section.parent)
+    .map((section) => ({ value: section.id, label: section.label, ...(section.group ? { group: section.group } : {}) }))
 }
 
 /**
@@ -342,7 +348,7 @@ export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true)
 export function subsectionNav(id: PatientSectionId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
   const parent = navSectionOf(id)
   const visible = visibleSections(can, isPatient)
-  const children = visible.filter((section) => (section as { parent?: string }).parent === parent)
+  const children = visible.filter((section) => section.parent === parent)
   if (children.length === 0) return []
   const own = visible.find((section) => section.id === parent)
   return [...(own ? [own] : []), ...children].map((section) => ({ value: section.id, label: section.label }))
@@ -361,27 +367,4 @@ export function visibleAreas(
     const target = own.find((section) => section.id === preferred) ?? own[0]
     return [{ id: area.id, label: area.label, target: target.id }]
   })
-}
-
-/** Dentición que corresponde mostrar por edad; el clínico puede cambiarla. */
-export type Dentition = "adult" | "mixed" | "primary"
-
-/**
- * Recambio dentario habitual: temporal hasta los 5 años, mixta de 6 a 12 y
- * permanente desde los 13. Sin fecha de nacimiento no se supone una edad.
- */
-export function suggestedDentition(
-  birthDate: string | null | undefined,
-  today = new Date(),
-): Dentition | null {
-  if (!birthDate) return null
-  const born = new Date(birthDate)
-  if (Number.isNaN(born.getTime())) return null
-  let age = today.getFullYear() - born.getFullYear()
-  const month = today.getMonth() - born.getMonth()
-  if (month < 0 || (month === 0 && today.getDate() < born.getDate())) age -= 1
-  if (age < 0) return null
-  if (age <= 5) return "primary"
-  if (age <= 12) return "mixed"
-  return "adult"
 }
