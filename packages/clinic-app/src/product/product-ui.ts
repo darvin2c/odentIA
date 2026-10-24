@@ -1,7 +1,9 @@
 import {
   type ClinicalProduct,
   CORE_VITAL_KEYS,
+  DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
+  type ImagingType,
   type MedicationCatalog,
   type VitalSignKey,
   type Vitals,
@@ -216,6 +218,10 @@ export interface ProductDocumentsUi {
   kind: { filter: string; label: string; nouns: readonly [one: string, many: string] } | null
   /** Sus papeles de la persona, ya armados (odentIA: los odontogramas firmados, solo en Perú). Es un hook. */
   usePapers(patientId: string): ProductPapers
+  /** Los tipos de imagen que se suben y, si cambia, cómo se nombra cada categoría (latidIA: «Imagen diagnóstica»). */
+  imaging: { types: readonly ImagingType[]; categoryLabels: Readonly<Record<string, string>> }
+  /** Si emite descansos médicos (latidIA, decisión 8 del issue 229): «Nuevo», su filtro y su fila. */
+  medicalLeave: boolean
 }
 
 export interface ProductPapers {
@@ -411,7 +417,12 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     },
     services: { kinds: [], leaves: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },
-    documents: { kind: null, usePapers: () => NO_PAPERS },
+    documents: {
+      kind: null,
+      usePapers: () => NO_PAPERS,
+      imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {} },
+      medicalLeave: false,
+    },
     health: { asksPregnancy: true, InterviewSections: () => null, Summary: () => null },
     summary: { ClinicalCards: () => null },
     prescribing: { catalog: DENTAL_MEDICATION_CATALOG, useRules: () => NO_RULES },

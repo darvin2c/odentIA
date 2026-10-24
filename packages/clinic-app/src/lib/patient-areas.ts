@@ -226,8 +226,14 @@ export type DocumentFilter = (typeof COMMON_DOCUMENT_FILTERS)[number]["id"] | (s
 
 /** Los filtros de Documentos, en su orden: los comunes y, al final, el del producto. */
 export function documentFilters(): ReadonlyArray<{ id: DocumentFilter; label: string }> {
-  const own = productUi().documents.kind
-  return own ? [...COMMON_DOCUMENT_FILTERS, { id: own.filter, label: own.label }] : COMMON_DOCUMENT_FILTERS
+  const { kind: own, medicalLeave } = productUi().documents
+  // Los descansos médicos, después de las recetas, si el producto los emite (latidIA, issue 229).
+  const common: ReadonlyArray<{ id: DocumentFilter; label: string }> = medicalLeave
+    ? COMMON_DOCUMENT_FILTERS.flatMap((filter): Array<{ id: DocumentFilter; label: string }> =>
+        filter.id === "recetas" ? [filter, { id: "descansos", label: "Descansos médicos" }] : [filter],
+      )
+    : COMMON_DOCUMENT_FILTERS
+  return own ? [...common, { id: own.filter, label: own.label }] : common
 }
 
 export function isDocumentFilter(value: unknown): value is DocumentFilter {

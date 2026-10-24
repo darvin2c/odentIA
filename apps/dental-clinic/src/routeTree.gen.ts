@@ -79,6 +79,7 @@ import { Route as SettingsDotplanDotaccionesRouteImport } from './../../../packa
 import { Route as PatientsDotpatientIdDotencountersDotencounterIdRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.encounters.$encounterId'
 import { Route as PatientsDotpatientIdDotodontogramDotprintRouteImport } from './routes/dental/patients.$patientId.odontogram.print'
 import { Route as PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.medical-leaves.$leaveId.print'
 import { Route as PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRouteImport } from './routes/dental/patients.$patientId.odontogram.$assessmentId.print'
 import { Route as PatientsDotpatientIdDotordersDotorderIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.orders.$orderId.print'
 import { Route as PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRouteImport } from './../../../packages/clinic-app/src/routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
@@ -478,6 +479,12 @@ const PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute =
     path: '/consents/$consentId/print',
     getParentRoute: () => PatientsDotpatientIdRoute,
   } as any)
+const PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute =
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport.update({
+    id: '/medical-leaves/$leaveId/print',
+    path: '/medical-leaves/$leaveId/print',
+    getParentRoute: () => PatientsDotpatientIdRoute,
+  } as any)
 const PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute =
   PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRouteImport.update({
     id: '/odontogram/$assessmentId/print',
@@ -569,6 +576,7 @@ export interface FileRoutesByFullPath {
   '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
   '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
   '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
@@ -641,6 +649,7 @@ export interface FileRoutesByTo {
   '/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
   '/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
   '/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
@@ -717,6 +726,7 @@ export interface FileRoutesById {
   '/_org/patients/$patientId/encounters/$encounterId': typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   '/_org/patients/$patientId/odontogram/print': typeof PatientsDotpatientIdDotodontogramDotprintRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  '/_org/patients/$patientId/medical-leaves/$leaveId/print': typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   '/_org/patients/$patientId/odontogram/$assessmentId/print': typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
   '/_org/patients/$patientId/orders/$orderId/print': typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
@@ -793,6 +803,7 @@ export interface FileRouteTypes {
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/medical-leaves/$leaveId/print'
     | '/patients/$patientId/odontogram/$assessmentId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -865,6 +876,7 @@ export interface FileRouteTypes {
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/medical-leaves/$leaveId/print'
     | '/patients/$patientId/odontogram/$assessmentId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -940,6 +952,7 @@ export interface FileRouteTypes {
     | '/_org/patients/$patientId/encounters/$encounterId'
     | '/_org/patients/$patientId/odontogram/print'
     | '/_org/patients/$patientId/consents/$consentId/print'
+    | '/_org/patients/$patientId/medical-leaves/$leaveId/print'
     | '/_org/patients/$patientId/odontogram/$assessmentId/print'
     | '/_org/patients/$patientId/orders/$orderId/print'
     | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -1451,6 +1464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRouteImport
       parentRoute: typeof PatientsDotpatientIdRoute
     }
+    '/_org/patients/$patientId/medical-leaves/$leaveId/print': {
+      id: '/_org/patients/$patientId/medical-leaves/$leaveId/print'
+      path: '/medical-leaves/$leaveId/print'
+      fullPath: '/patients/$patientId/medical-leaves/$leaveId/print'
+      preLoaderRoute: typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRouteImport
+      parentRoute: typeof PatientsDotpatientIdRoute
+    }
     '/_org/patients/$patientId/odontogram/$assessmentId/print': {
       id: '/_org/patients/$patientId/odontogram/$assessmentId/print'
       path: '/odontogram/$assessmentId/print'
@@ -1551,6 +1571,7 @@ interface PatientsDotpatientIdRouteChildren {
   PatientsDotpatientIdDotencountersDotencounterIdRoute: typeof PatientsDotpatientIdDotencountersDotencounterIdRoute
   PatientsDotpatientIdDotodontogramDotprintRoute: typeof PatientsDotpatientIdDotodontogramDotprintRoute
   PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute: typeof PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute: typeof PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute
   PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute: typeof PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute
   PatientsDotpatientIdDotordersDotorderIdDotprintRoute: typeof PatientsDotpatientIdDotordersDotorderIdDotprintRoute
   PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute: typeof PatientsDotpatientIdDotprescriptionsDotprescriptionIdDotprintRoute
@@ -1563,6 +1584,8 @@ const PatientsDotpatientIdRouteChildren: PatientsDotpatientIdRouteChildren = {
     PatientsDotpatientIdDotodontogramDotprintRoute,
   PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute:
     PatientsDotpatientIdDotconsentsDotconsentIdDotprintRoute,
+  PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute:
+    PatientsDotpatientIdDotmedicalLeavesDotleaveIdDotprintRoute,
   PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute:
     PatientsDotpatientIdDotodontogramDotassessmentIdDotprintRoute,
   PatientsDotpatientIdDotordersDotorderIdDotprintRoute:

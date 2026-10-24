@@ -1,4 +1,4 @@
-import { DENTAL_MEDICATION_CATALOG } from "@odentia/clinical"
+import { DENTAL_IMAGING_TYPES, DENTAL_MEDICATION_CATALOG } from "@odentia/clinical"
 import {
   conditionLabel,
   dentalProfileFor,
@@ -148,6 +148,9 @@ export const dentalUi: ProductUi = {
   documents: {
     kind: { filter: "odontogramas", label: "Odontogramas", nouns: ["odontograma", "odontogramas"] },
     usePapers: useSignedOdontogramPapers,
+    // Los de la boca, como siempre.
+    imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {} },
+    medicalLeave: false,
   },
   encounter: dentalEncounter,
   health: dentalHealth,

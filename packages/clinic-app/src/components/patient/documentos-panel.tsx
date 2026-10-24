@@ -26,6 +26,7 @@ import {
   ListChecks,
   type LucideIcon,
   Pill,
+  BedDouble,
   Signature,
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
@@ -80,7 +81,10 @@ import {
   usePatientEncounters,
   useSignedUrl,
 } from "./document-viewer"
-import type { NewDocumentKind } from "./encounter-documents"
+import { type NewDocumentKind, newDocumentOptions } from "./encounter-documents"
+import { MedicalLeaveEntry, NewMedicalLeaveDrawer } from "./medical-leave"
+import { fetchMedicalLeaves, type MedicalLeave } from "../../lib/medical-leaves"
+import { medicalLeaveWords } from "@odentia/clinical"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { NewOrderDrawer, OrderResultDrawer, OrderRow } from "./ordenes-tab"
 import { imagingFacts, useImagingState } from "./tomography-detail"
@@ -88,12 +92,13 @@ import { productUi } from "../../product/product-ui"
 import { PlaceSelect } from "../../product/site-fields"
 
 /** «producto»: un papel propio del producto (odentIA: el odontograma firmado). */
-type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "producto"
+type Kind = "archivo" | "receta" | "descanso" | "orden" | "formulario" | "consentimiento" | "producto"
 type Tone = "success" | "warning" | "outline" | "secondary"
 
 /** El filtro de tipo de cada papel; el de un archivo depende de qué es (`fileFilter`). */
 const FILTER_OF_KIND: Record<Exclude<Kind, "archivo" | "producto">, DocumentFilter> = {
   receta: "recetas",
+  descanso: "descansos",
   orden: "ordenes",
   formulario: "formularios",
   consentimiento: "consentimientos",
@@ -102,26 +107,20 @@ const FILTER_OF_KIND: Record<Exclude<Kind, "archivo" | "producto">, DocumentFilt
 /** El icono de cada clase de papel, en el lugar de la miniatura de una imagen. */
 const ICON_OF_KIND: Record<Exclude<Kind, "archivo">, LucideIcon> = {
   receta: Pill,
+  descanso: BedDouble,
   orden: ClipboardList,
   formulario: ListChecks,
   consentimiento: Signature,
   producto: FileText,
 }
 
-/** «Nuevo ▾»: abre directo el formulario de creación de cada papel. */
-const NEW_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
-  { kind: "receta", label: "Receta" },
-  { kind: "consentimiento", label: "Consentimiento" },
-  { kind: "orden", label: "Orden" },
-  { kind: "formulario", label: "Formulario" },
-  { kind: "archivo", label: "Imagen o archivo" },
-]
 
 /** La acción de una fila: la única que se ofrece a la vista. */
 type RowAction =
   | { type: "firmar"; consent: ConsentDocument }
   | { type: "resultado"; order: ClinicalOrder }
   | { type: "imprimir"; prescriptionId: string }
+  | { type: "imprimir-descanso"; leaveId: string }
   /** La que trae un papel del producto (odentIA: «Imprimir» la hoja del odontograma). */
   | { type: "producto"; node: ReactNode }
   | { type: "completar" }
@@ -150,6 +149,7 @@ interface Row {
     | { kind: "consentimiento"; consent: ConsentDocument }
     | { kind: "orden"; order: ClinicalOrder }
     | { kind: "receta"; prescription: Prescription }
+    | { kind: "descanso"; leave: MedicalLeave }
     | { kind: "formulario"; response: FormResponse }
     | { kind: "archivo"; document: PatientDocument }
     | { kind: "producto" }
@@ -251,6 +251,13 @@ export function DocumentosSection({
     queryKey: ["clinical-orders", patientId, "indice"],
     queryFn: () => fetchOrders({ patientId }),
   })
+  // Los descansos médicos, si el producto los emite (latidIA, issue 229).
+  const issuesLeaves = productUi().documents.medicalLeave
+  const leaves = useQuery({
+    queryKey: ["medical-leaves", patientId],
+    queryFn: () => fetchMedicalLeaves(patientId),
+    enabled: issuesLeaves,
+  })
   const forms = useQuery({
     queryKey: ["form-responses", patientId],
     queryFn: () => fetchFormResponses({ patientId }),
@@ -289,6 +296,7 @@ export function DocumentosSection({
         ["patient-documents", patientId],
         ["patient-document-context", patientId],
         ["prescriptions", patientId],
+        ["medical-leaves", patientId],
         ["clinical-orders", patientId],
         ["form-responses", patientId],
         ["consents", patientId],
@@ -361,7 +369,7 @@ export function DocumentosSection({
         }
       />
       <DropdownMenuContent align="end">
-        {NEW_OPTIONS.map((option) => (
+        {newDocumentOptions().map((option) => (
           <DropdownMenuItem key={option.kind} onClick={() => startNew(option.kind)}>
             {option.label}
           </DropdownMenuItem>
@@ -373,6 +381,7 @@ export function DocumentosSection({
   const sources = [
     { name: "imágenes y archivos", query: files },
     { name: "recetas", query: prescriptions },
+    ...(issuesLeaves ? [{ name: "descansos médicos", query: leaves }] : []),
     { name: "órdenes", query: orders },
     { name: "formularios", query: forms },
     { name: "consentimientos", query: consents },
@@ -473,6 +482,24 @@ export function DocumentosSection({
             ? { type: "ver" }
             : { type: "imprimir", prescriptionId: item.id },
         open: { kind: "receta", prescription: item },
+      }),
+    ),
+    ...(leaves.data?.data ?? []).map(
+      (leave): Row => ({
+        key: `descanso-${leave.id}`,
+        kind: "descanso",
+        filter: FILTER_OF_KIND.descanso,
+        teeth: [],
+        retired: false,
+        title: `Descanso médico N.º ${leave.leaveNumber}`,
+        detail: `${formatDate(leave.issuedAt)} · ${
+          leave.status === "anulado" ? (leave.cancelReason ?? "Anulado") : medicalLeaveWords(leave.startsOn, leave.days)
+        }`,
+        date: leave.issuedAt,
+        status: leave.status === "anulado" ? { label: "Anulado", tone: "outline" } : { label: "Emitido", tone: "success" },
+        needsAction: false,
+        action: leave.status === "anulado" ? { type: "ver" } : { type: "imprimir-descanso", leaveId: leave.id },
+        open: { kind: "descanso", leave },
       }),
     ),
     ...(orders.data?.data ?? []).map((order): Row => {
@@ -654,6 +681,18 @@ export function DocumentosSection({
           <Link
             to="/patients/$patientId/prescriptions/$prescriptionId/print"
             params={{ patientId, prescriptionId: action.prescriptionId }}
+            target="_blank"
+            aria-label={`Imprimir ${row.title}`}
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            Imprimir
+          </Link>
+        )
+      case "imprimir-descanso":
+        return (
+          <Link
+            to="/patients/$patientId/medical-leaves/$leaveId/print"
+            params={{ patientId, leaveId: action.leaveId }}
             target="_blank"
             aria-label={`Imprimir ${row.title}`}
             className={buttonVariants({ size: "sm", variant: "outline" })}
@@ -959,6 +998,19 @@ export function DocumentosSection({
           }}
         />
       ) : null}
+      {creating === "descanso" ? (
+        <NewMedicalLeaveDrawer
+          open
+          patientId={patientId}
+          encounterId={encounterId}
+          onClose={() => setCreating(null)}
+          onCreated={(leave) => {
+            setCreating(null)
+            void refresh()
+            setOpened({ kind: "descanso", leave })
+          }}
+        />
+      ) : null}
       {creating === "consentimiento" ? (
         <NewConsentDrawer
           open
@@ -1197,6 +1249,11 @@ function OpenedDocument({
     queryFn: () => fetchOrders({ patientId }),
     enabled: opened?.kind === "orden",
   })
+  const leaves = useQuery({
+    queryKey: ["medical-leaves", patientId],
+    queryFn: () => fetchMedicalLeaves(patientId),
+    enabled: opened?.kind === "descanso",
+  })
   if (!opened || opened.kind === "archivo" || opened.kind === "producto") return null
   const title =
     opened.kind === "consentimiento"
@@ -1205,7 +1262,9 @@ function OpenedDocument({
         ? opened.order.title
         : opened.kind === "receta"
           ? `Receta N.º ${opened.prescription.prescriptionNumber}`
-          : (opened.response.templateTitle ?? "Formulario")
+          : opened.kind === "descanso"
+            ? `Descanso médico N.º ${opened.leave.leaveNumber}`
+            : (opened.response.templateTitle ?? "Formulario")
   return (
     <DetailDrawer open title={title} onClose={onClose}>
       {opened.kind === "consentimiento" ? (
@@ -1227,6 +1286,11 @@ function OpenedDocument({
         />
       ) : opened.kind === "receta" ? (
         <PrescriptionEntry patientId={patientId} prescription={opened.prescription} defaultOpen />
+      ) : opened.kind === "descanso" ? (
+        <MedicalLeaveEntry
+          patientId={patientId}
+          leave={(leaves.data?.data ?? []).find((row) => row.id === opened.leave.id) ?? opened.leave}
+        />
       ) : (
         <ResponseDetail
           key={opened.response.id}

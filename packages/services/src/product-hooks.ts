@@ -1,8 +1,12 @@
 import {
   CORE_VITAL_KEYS,
+  DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
+  type ImagingType,
   type MedicationCatalog,
   type RegistrationAnswers,
+  SUGGESTED_CONSENT_TEMPLATES,
+  type SuggestedConsentTemplate,
   type VitalSignKey,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -249,6 +253,10 @@ export interface ProductHooks {
   site: ProductSite
   /** La receta: su lista y lo que revisa al emitir. */
   prescribing: ProductPrescribing
+  /** Los tipos de imagen que se suben (odentIA: los de la boca; latidIA: ecografía, tomografía…). */
+  imaging: readonly ImagingType[]
+  /** Los consentimientos que sugiere a la clínica, como borrador (odentIA: anestesia, exodoncia…). */
+  consentSuggestions: readonly SuggestedConsentTemplate[]
   /** La «Entrevista de salud»: lo del producto. */
   interview: ProductInterview
   /** El examen físico de la atención. */
@@ -341,6 +349,8 @@ export interface ProductHooks {
 export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
   prescribing: DENTAL_PRESCRIBING,
+  imaging: DENTAL_IMAGING_TYPES,
+  consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
   interview: COMMON_INTERVIEW,
   examination: NO_EXAMINATION,
   vitals: CORE_VITAL_KEYS,

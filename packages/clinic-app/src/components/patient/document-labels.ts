@@ -2,14 +2,13 @@ import {
   IMAGE_TYPE_LABELS,
   type ImageType,
   type PatientDocumentCategory,
-  PHOTO_TYPES,
-  RADIOGRAPH_TYPES,
   REPORT_STATUS_LABELS,
   type ReportStatus,
 } from "@odentia/clinical"
 import { formatDate } from "../../lib/clinical-journey"
 import { timeAgo } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 
 /** Lo que se sube: la misma lista que la base (`PATIENT_DOCUMENT_CATEGORIES`), en el orden de la pantalla. */
 export const UPLOAD_CATEGORIES = [
@@ -45,19 +44,23 @@ export function isAcceptedFile(file: File): boolean {
 }
 
 export function categoryLabel(category: string): string {
-  return CATEGORY_LABELS[category] ?? category
+  return productUi().documents.imaging.categoryLabels[category] ?? CATEGORY_LABELS[category] ?? category
 }
 
-/** Tipos de imagen que admite cada categoría (vacío: no aplica). */
-export function imageTypesFor(category: string): readonly ImageType[] {
-  if (category === "radiografia") return RADIOGRAPH_TYPES
-  if (category === "foto_clinica") return PHOTO_TYPES
-  return []
+/** Tipos de imagen que admite cada categoría, los del producto (vacío: no aplica). */
+export function imageTypesFor(category: string): readonly string[] {
+  return productUi()
+    .documents.imaging.types.filter((type) => type.category === category)
+    .map((type) => type.value)
 }
 
 export function imageTypeLabel(type: string | null | undefined): string | null {
   if (!type) return null
-  return IMAGE_TYPE_LABELS[type as ImageType] ?? type
+  return (
+    productUi().documents.imaging.types.find((item) => item.value === type)?.label ??
+    IMAGE_TYPE_LABELS[type as ImageType] ??
+    type
+  )
 }
 
 export function reportStatusLabel(status: string | null | undefined): string | null {

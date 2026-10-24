@@ -13,6 +13,8 @@ import {
   bodyMassIndex,
   CORE_VITAL_KEYS,
   formatVitals,
+  medicalLeaveEnd,
+  medicalLeaveWords,
   parseVitals,
   MAX_TAGS,
   normalizeTags,
@@ -160,5 +162,14 @@ describe("identidad estándar", () => {
     ).toBe("Rosa María Quispe Huamán")
     expect(ageLabel("2025-12-15", new Date("2026-10-08T12:00:00Z"))).toBe("9 meses")
     expect(ageLabel("1990-01-01", new Date("2026-10-08T12:00:00Z"))).toBe("36 años")
+  })
+})
+
+describe("descanso médico (issue 229, decisión 8)", () => {
+  it("cuenta el primer día y lo dice con sus fechas", () => {
+    expect(medicalLeaveEnd("2026-10-24", 3)).toBe("2026-10-26")
+    expect(medicalLeaveEnd("2026-12-30", 5)).toBe("2027-01-03")
+    expect(medicalLeaveWords("2026-10-24", 3)).toBe("3 días de descanso, del 24/10/2026 al 26/10/2026")
+    expect(medicalLeaveWords("2026-10-24", 1)).toBe("1 día de descanso, el 24/10/2026")
   })
 })

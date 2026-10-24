@@ -25,6 +25,8 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "tratamientos",
   "controles",
   "recetas",
+  /** Descansos médicos (issue 229). */
+  "descansos",
   "documentos",
   "formularios",
   "consentimientos",

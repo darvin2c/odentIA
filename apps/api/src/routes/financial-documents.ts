@@ -87,7 +87,7 @@ const recipientEmailInput = z
   })
   .strict()
 
-const healthDocumentType = z.enum(["prescription", "order", "consent"])
+const healthDocumentType = z.enum(["prescription", "order", "consent", "medical_leave"])
 
 const healthOptionsQuery = z.object({
   documentType: healthDocumentType,
@@ -110,6 +110,7 @@ const HEALTH_RESOURCE = {
   prescription: "recetas",
   order: "ordenes",
   consent: "consentimientos",
+  medical_leave: "descansos",
 } as const
 
 function forbidClinical(c: Context) {

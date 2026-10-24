@@ -1,5 +1,7 @@
 import {
   CORE_VITAL_KEYS,
+  DENTAL_IMAGING_TYPES,
+  SUGGESTED_CONSENT_TEMPLATES,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   isDiagnosisSystem,
@@ -170,6 +172,8 @@ export interface DentalEncounterDetailParts {
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
   prescribing: DENTAL_PRESCRIBING,
+  imaging: DENTAL_IMAGING_TYPES,
+  consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
   interview: dentalInterview,
   examination: dentalExamination,
   vitals: CORE_VITAL_KEYS,
