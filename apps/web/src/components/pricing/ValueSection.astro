@@ -1,35 +1,29 @@
 ---
-// «Calcula tu mes»: el texto queda en el HTML; la calculadora se hidrata al entrar en pantalla.
+// La tarjeta del plan al lado de «Calcula tu mes»: la calculadora se hidrata al entrar en pantalla y
+// recibe la tarjeta (armada aquí, en el servidor) para ponerla a su lado.
 import { shownPlan, valuePricesOf } from "../../lib/pricing"
-import { WORDS } from "../../lib/product"
+import PlanCard from "./PlanCard.astro"
 import ValueCalculator from "./ValueCalculator"
 
-const prices = valuePricesOf(shownPlan(Astro.locals.pricing))
+const plan = shownPlan(Astro.locals.pricing)
+const prices = valuePricesOf(plan)
 ---
-{/* Sin precios publicados no hay calculadora: la sección no se dibuja en vez de quedar vacía. */}
-{prices ? (
-<section id="calcula" class="night sec">
-  <div class="grain" aria-hidden="true"></div>
-  <div class="wrap in">
-    <div class="head">
-      <span class="tag tag-d">[ Calcula tu mes ]</span>
-      <h2 class="h2">Lo que pagas y lo que recuperas.</h2>
-      <p class="lead lead-d">Pon los números de tu clínica y compara lo que hoy pierdes sin agentes con lo que pagarías con {WORDS.name}.</p>
+{/* Sin plan publicado no hay tarjeta ni cuenta: la sección no se dibuja en vez de quedar vacía. */}
+{plan ? (
+  <section class="section section-white month">
+    <div class="wrap">
+      {prices ? (
+        <ValueCalculator client:visible prices={prices}>
+          <PlanCard />
+        </ValueCalculator>
+      ) : (
+        <PlanCard />
+      )}
     </div>
-    <ValueCalculator client:visible prices={prices} />
-  </div>
-</section>
+  </section>
 ) : null}
 
 <style>
-  .sec { padding: 112px 0; scroll-margin-top: 16px; }
-  .in { position: relative; display: flex; flex-direction: column; gap: 48px; }
-  .head { display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
-  @media (max-width: 720px) {
-    .sec { padding: 56px 0; }
-    .in { gap: 16px; }
-    .head { gap: 16px; }
-    .h2 { font-size: 34px; }
-    .lead { font-size: 16px; }
-  }
+  .month { padding: 96px 0; }
+  @media (max-width: 720px) { .month { padding: 56px 0; } }
 </style>

@@ -1,0 +1,18 @@
+/* El odontograma de la web: las mismas medidas que `OdontogramArch` de la app (aspecto 10:9, hasta 520 px). */
+.oa { width: 100%; max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.oa-arch { position: relative; width: 100%; min-width: 0; aspect-ratio: 10 / 9; color: #0f172a; }
+.oa-under { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; overflow: visible; }
+.oa-side { position: absolute; top: 50%; transform: translate(-50%, -50%); font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
+.oa-slot { position: absolute; }
+.oa-tooth { display: block; width: 100%; padding: 0; border: 0; background: transparent; border-radius: 4px; font: inherit; transition: box-shadow .15s ease; }
+button.oa-tooth { cursor: pointer; }
+button.oa-tooth:hover { box-shadow: 0 0 0 2px var(--teal); }
+/* La pieza elegida, con el anillo violeta de la app: nunca rellena la corona, para no confundirse con un hallazgo. */
+.oa-tooth.on, button.oa-tooth.on:hover { box-shadow: 0 0 0 2px #7c3aed; }
+.oa-tooth:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
+.oa-crown { display: block; width: 100%; height: auto; overflow: visible; }
+.oa-num { position: absolute; transform: translate(-50%, -50%); line-height: 1; color: #64748b; pointer-events: none; }
+.oa-num.on { color: #0f172a; font-weight: 600; }
+.oa-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; font-size: 12px; line-height: 1.4; color: #475569; }
+.oa-legend span { display: flex; align-items: center; gap: 6px; }
+.oa-legend i { flex: none; width: 8px; height: 8px; border-radius: 50%; }

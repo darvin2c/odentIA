@@ -1,0 +1,135 @@
+/* «Tu cuenta · jueves» (isla WorkDayLedger), sobre la portada oscura de Precios. */
+.wd {
+  border-radius: 22px;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--on-night);
+}
+.wd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 10px;
+}
+.wd-title {
+  font-family: var(--agent-font);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--on-night-3);
+}
+.wd-total {
+  font-family: var(--agent-font);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wd-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wd-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px 6px;
+  margin: 0 -6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 0.5s,
+    transform 0.5s,
+    background-color 0.8s;
+}
+.wd-on {
+  opacity: 1;
+  transform: none;
+}
+.wd-new {
+  background: rgba(79, 195, 215, 0.08);
+}
+:root[data-brand="latidia"] .wd-new {
+  background: rgba(183, 156, 240, 0.1);
+}
+.wd-time,
+.wd-price {
+  font-family: var(--agent-font);
+  font-variant-numeric: tabular-nums;
+}
+.wd-time,
+.wd-free {
+  color: var(--on-night-3);
+}
+.wd-price {
+  white-space: nowrap;
+}
+.wd-sofi {
+  color: var(--sky);
+}
+.wd-clio {
+  color: var(--mint);
+}
+.wd-argos {
+  color: var(--amber);
+}
+.wd-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  font-size: 13px;
+  color: var(--on-night-3);
+}
+.wd-replay {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e7f5f8;
+  font: 600 13px var(--font);
+  cursor: pointer;
+}
+.wd-replay:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.wd-replay:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .wd {
+    padding: 16px;
+    border-radius: 18px;
+  }
+  .wd-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 8px;
+    font-size: 13.5px;
+  }
+  .wd-total {
+    font-size: 18px;
+  }
+  .wd-foot {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wd-row {
+    opacity: 1;
+    transform: none;
+  }
+}

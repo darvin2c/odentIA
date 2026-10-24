@@ -1,12 +1,88 @@
-/* Calculadora «Lo que pagas y lo que recuperas» (isla ValueCalculator), sobre fondo noche. */
+/* Calculadora «Lo que pagas y lo que recuperas» (isla ValueCalculator): arriba la tarjeta del plan
+   y la cuenta del mes sobre claro; debajo, los números de la clínica sobre fondo noche. */
 .vc {
   display: flex;
   flex-direction: column;
-  gap: 48px;
+  gap: 20px;
+}
+.vc-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: stretch;
+}
+/* La tarjeta del plan llega dentro de <astro-slot> (display: contents): se mide a ella, no al envoltorio. */
+.vc-top > *,
+.vc-top > astro-slot > * {
+  flex: 1 1 460px;
+  min-width: 0;
+}
+.vc-card {
+  border-radius: 26px;
+  padding: 36px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-margin-top: 24px;
+}
+.vc-h2 {
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.06;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+  text-wrap: balance;
+}
+.vc-lead {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.vc-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--paper);
+  font-family: var(--agent-font);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.vc-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.vc-line b {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.vc-line-sub {
+  color: var(--soft);
+}
+.vc-line-sub b {
+  font-weight: 500;
+}
+.vc-line-total {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.vc-panel {
+  border-radius: 26px;
+  padding: 36px;
+  background: var(--night);
+  color: var(--on-night);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 .vc-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
 }
@@ -79,11 +155,8 @@
   flex-direction: column;
   gap: 4px;
 }
-.vc-col.vc-us {
-  background: rgba(79, 195, 215, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(79, 195, 215, 0.35);
-}
-.vc-amber {
+.vc-amber,
+.tag.vc-amber {
   color: var(--amber);
 }
 .vc-sky {
@@ -103,32 +176,6 @@
 .vc-row strong {
   font-family: var(--mono);
   font-size: 15px;
-  color: #fff;
-  white-space: nowrap;
-}
-.vc-row.vc-sub {
-  color: #9fb8bf;
-  font-size: 14px;
-  padding: 8px 0;
-}
-.vc-row.vc-sub strong {
-  color: #9fd9e4;
-  font-weight: 500;
-}
-.vc-bill {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 16px;
-}
-.vc-bill span {
-  font-size: 14px;
-  color: #9fb8bf;
-}
-.vc-bill strong {
-  font-size: 22px;
   color: #fff;
   white-space: nowrap;
 }
@@ -247,14 +294,6 @@
   color: var(--on-night-3);
 }
 
-@media (max-width: 1100px) {
-  .vc-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .vc-in {
-    grid-column: 1 / -1;
-  }
-}
 @media (max-width: 900px) {
   .vc-res {
     grid-template-columns: 1fr;
@@ -266,8 +305,26 @@
 }
 /* Teléfono: todo en una columna, sin deslizadores, cifras debajo de su etiqueta. */
 @media (max-width: 720px) {
-  .vc {
-    gap: 16px;
+  .vc,
+  .vc-top {
+    gap: 14px;
+  }
+  .vc-card {
+    border-radius: 20px;
+    padding: 22px 20px;
+    gap: 12px;
+  }
+  .vc-lead {
+    font-size: 15.5px;
+  }
+  .vc-sheet {
+    padding: 14px;
+    font-size: 13px;
+  }
+  .vc-panel {
+    border-radius: 20px;
+    padding: 14px;
+    gap: 14px;
   }
   .vc-grid {
     grid-template-columns: 1fr;
@@ -311,18 +368,6 @@
   }
   .vc-row strong {
     font-size: 14px;
-  }
-  .vc-row.vc-sub {
-    font-size: 13px;
-  }
-  .vc-bill {
-    padding-top: 12px;
-  }
-  .vc-bill span {
-    font-size: 13px;
-  }
-  .vc-bill strong {
-    font-size: 20px;
   }
   .vc-res {
     display: flex;

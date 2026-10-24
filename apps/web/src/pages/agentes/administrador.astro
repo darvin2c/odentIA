@@ -1,6 +1,145 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.administrador).
-import InnerPage from "../../components/pages/InnerPage.astro"
+// Argos, el agente administrador (lienzo del paso 3, tablero Argos; decisión 3): el nombre enorme con su
+// frase, el h1 para los buscadores en chico y la pregunta que se escribe sola y se responde; lo que trae
+// de vuelta, «Pregúntale» con la captura real, cuánto cobra con los precios del plan, preguntas y cierre.
+// Título, descripción, migas y las preguntas de siempre salen de PAGES.administrador (lib/pages-data.ts).
+import AgentCharges from "../../components/agents/AgentCharges.astro"
+import ArgosDemo from "../../components/agents/ArgosDemo"
+import FeatureGrid from "../../components/agents/FeatureGrid.astro"
+import SplitHero from "../../components/agents/SplitHero.astro"
+import CtaBand from "../../components/CtaBand.astro"
+import Faq from "../../components/Faq.astro"
+import Base from "../../layouts/Base.astro"
+import { ARGOS_NO_SHOWS, ARGOS_OWED, ARGOS_TOP_SALES } from "../../lib/argos-demo"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
+import { days } from "../../lib/pricing"
+import { AGENT_COLORS, ctaOf } from "../../lib/site"
+
+const page = PAGES.administrador
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const color = AGENT_COLORS.administrador
+// El ámbar de Argos sobre claro (#c98a1c) no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
+const tagColor = "#9a6a12"
+const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.parent] : []), [page.crumb, page.path]]
+
+const faq: FaqItem[] = [
+  ...page.faq,
+  {
+    q: "¿Argos ve los nombres de mis pacientes?",
+    a: "Para responder tus preguntas, no: el modelo nunca ve los nombres de tus pacientes. La lista con nombres la arma tu sistema.",
+  },
+  {
+    q: "¿Cuándo cuenta una cita recuperada?",
+    a: `Cuando vuelve quien no tenía cita ni tratamiento en curso: reserva dentro de ${days(pricing.terms.recoveryWindowDays)} desde el mensaje de Argos y viene. Si no viene, no se cobra.`,
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
-<InnerPage page={PAGES.administrador} />
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <SplitHero
+    tag="Tu agente administrador"
+    color={color.dark}
+    h1="Recordatorios de citas, pacientes que vuelven y respuestas con las cifras de tu clínica dental."
+    meaning="El gigante de los cien ojos: ve lo pendiente y no deja a ningún paciente atrás."
+  >
+    <p class="sh-name">Argos.</p>
+    <p class="sh-phrase">Ve toda tu clínica. Nadie se queda atrás.</p>
+    <Fragment slot="actions">
+      <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+      <a class="btn btn-g" href="/reportes">Ver Reportes</a>
+    </Fragment>
+    <ArgosDemo
+      slot="demo"
+      client:visible
+      questions={[ARGOS_NO_SHOWS, ARGOS_OWED, ARGOS_TOP_SALES]}
+      chips
+      auto
+      caret
+      actions={[{ label: "Fijar en Resumen" }, { label: "Descargar" }]}
+      source="Cifra oficial · la misma de Reportes"
+      note="Demostración con datos de ejemplo. Toca otra pregunta."
+    />
+  </SplitHero>
+
+  <FeatureGrid
+    tag="Trae de vuelta a tus pacientes"
+    tagColor={tagColor}
+    title="Lo pendiente, sin listas ni llamadas de más."
+    lead="Argos ve quién necesita un mensaje y Sofi se lo escribe por su canal. Si no puede escribirle, te deja la tarea con el motivo."
+    items={[
+      { title: "Recuerda cada cita", text: "Un día antes y tres horas antes. No se cobra." },
+      { title: "Avisa los controles", text: "Dos días antes de que le toque, le escribe para buscarle un horario." },
+      { title: "Ofrece otra fecha a quien faltó", text: "Al día siguiente de la inasistencia, con un toque para elegir otro horario." },
+      { title: "Retoma los presupuestos", text: "A los dos días sin respuesta, a quien aceptó recibir novedades." },
+      { title: "Invita a volver", text: "A quien lleva seis meses sin venir." },
+      { title: "Avisa lo que se te pasó", text: "Un presupuesto aceptado sin cita, una atención sin firmar o un saldo vencido." },
+    ]}
+  />
+
+  <section class="ask">
+    <div class="wrap ask-in">
+      <div class="ask-copy">
+        <span class="tag ask-tag" style={`color: ${tagColor}`}>[ Pregúntale ]</span>
+        <h2 class="ask-h2">Le preguntas como a una persona. Responde con tus cifras.</h2>
+        <p>
+          Desde Reportes o el buscador. Usa las mismas cuentas de Reportes, dice cómo lo calculó y lo que no sabe te lo
+          dice. Nunca ve los nombres de tus pacientes para responder.
+        </p>
+        <ul>
+          <li>«¿Cuánto dinero tengo pendiente de cobrar?»</li>
+          <li>«¿Qué pacientes no han regresado en los últimos 6 meses?»</li>
+          <li>«¿Cuántos pacientes llegaron desde Instagram?»</li>
+        </ul>
+      </div>
+      <figure class="ask-shot">
+        <img
+          src="/img/product/argos-answer.jpg"
+          width="374"
+          height="748"
+          loading="lazy"
+          decoding="async"
+          alt="Argos responde «¿Qué profesional tiene más inasistencias?» con la cifra, una barra y «Así lo calculé», y los botones para fijar la respuesta en el Resumen o descargarla."
+        />
+        <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <AgentCharges
+    agent="argos"
+    tag="Cuánto cobra Argos"
+    tagColor={tagColor}
+    title="Recordar no se cobra. Recuperar, sí."
+    text="La cita recuperada cuenta cuando vuelve quien no tenía cita ni tratamiento en curso, y viene."
+  >
+    <a class="more" href="/precios">Todos los precios →</a>
+  </AgentCharges>
+
+  <div class="faqwrap">
+    <Faq items={faq} />
+  </div>
+  <CtaBand title="Que nadie se quede atrás." />
+</Base>
+
+<style>
+  .ask { padding: 96px 0; background: var(--paper); }
+  .ask-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .ask-copy { flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .ask-tag { font-size: 13px; letter-spacing: .12em; }
+  .ask-h2 { margin: 0; font-size: clamp(32px, 3.6vw, 44px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .ask-copy p { margin: 0; font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .ask-copy ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 16px; }
+  .ask-shot { flex: 0 1 340px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+  .ask-shot img { width: 100%; max-width: 340px; height: auto; border-radius: 22px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(10, 33, 41, .4); }
+  .ask-shot figcaption { font-size: 13px; color: var(--soft); }
+  .more { font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; align-self: flex-start; }
+  .more:hover { text-decoration: underline; }
+  .faqwrap { background: var(--paper); }
+  @media (max-width: 720px) {
+    .ask { padding: 64px 0; }
+    .ask-in { gap: 28px; }
+    .ask-shot { flex-basis: 100%; max-width: 300px; }
+  }
+</style>

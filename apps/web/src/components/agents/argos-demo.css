@@ -1,0 +1,53 @@
+/* Demostración de Argos (ArgosDemo.tsx), la misma en /agentes/administrador y /reportes. Todo bajo .ad. */
+.ad { background: #fff; color: var(--ink); border-radius: 26px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.ad-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ad-head b { font-size: 18px; }
+.ad-scope { font-size: 13px; color: var(--muted); background: #f1f5f9; border-radius: 999px; padding: 6px 12px; }
+.ad-field { display: flex; align-items: center; gap: 10px; border-radius: 999px; padding: 6px 6px 6px 18px; }
+.ad-soft { background: #f1f5f9; }
+.ad-amber { border: 1.5px solid var(--amber); }
+.ad-q { flex: 1 1 auto; min-width: 0; font-size: 15px; line-height: 1.4; min-height: 21px; }
+.ad-caret { color: var(--teal); margin-left: 1px; visibility: hidden; }
+.ad-caret[data-on] { visibility: visible; animation: ad-blink 1s steps(1) infinite; }
+.ad-ask { flex: none; font-weight: 700; font-size: 14px; color: #fff; background: var(--teal); border-radius: 999px; padding: 10px 16px; }
+.ad-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.ad-chip { min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 600 13px var(--font); background: #fff; color: var(--ink-2); border: 1px solid #cbd5e1; transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+.ad-chip:hover { border-color: var(--night); }
+.ad-chip[aria-pressed="true"] { background: var(--night); color: #fff; border-color: var(--night); }
+.ad-chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.ad-stage { position: relative; }
+.ad-think { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
+.ad-think span { animation: ad-in .4s ease both; }
+.ad-think span + span { animation-delay: .45s; }
+.ad-answer { border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; opacity: 0; transition: opacity .4s ease; }
+.ad-answer[data-done] { opacity: 1; }
+.ad-text { margin: 0; font-size: 17px; line-height: 1.5; }
+.ad-bars { display: flex; flex-direction: column; gap: 10px; }
+.ad-bar { display: flex; flex-direction: column; gap: 4px; }
+.ad-bar-l { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.ad-track { height: 10px; border-radius: 999px; background: var(--line); display: block; overflow: hidden; }
+.ad-fill { display: block; height: 100%; border-radius: 999px; background: var(--teal); transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+.ad-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; height: 124px; }
+.ad-col { display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; height: 100%; }
+.ad-col-bar { display: block; border-radius: 8px 8px 0 0; background: var(--sky); transition: height .9s cubic-bezier(.2, .8, .2, 1); }
+.ad-col-bar[data-i="1"] { background: var(--teal); }
+.ad-col-bar[data-i="2"] { background: var(--night); }
+.ad-col-l { font-size: 12px; color: var(--muted); text-align: center; }
+.ad-how { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.ad-how > b { color: var(--ink); }
+.ad-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ad-act { font-size: 13px; font-weight: 700; border-radius: 999px; padding: 8px 12px; background: #f1f5f9; }
+.ad-act[data-primary] { color: #fff; background: var(--teal); }
+.ad-source { font-size: 13px; font-weight: 700; padding: 8px 4px; color: var(--teal); }
+.ad-note { font-size: 12px; color: var(--muted); }
+@keyframes ad-blink { 50% { visibility: hidden; } }
+@keyframes ad-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 720px) {
+  .ad { border-radius: 20px; padding: 16px; gap: 12px; }
+  .ad-field { padding-left: 14px; }
+  .ad-q { font-size: 14px; }
+  .ad-ask { padding: 9px 12px; font-size: 13px; }
+  .ad-answer { padding: 14px; }
+  .ad-text { font-size: 16px; }
+}

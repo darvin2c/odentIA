@@ -1,0 +1,66 @@
+---
+// Una sección de tarjetas (lienzo del paso 3): el corchete, el título, una bajada opcional y las
+// tarjetas en una rejilla que se acomoda al ancho. Lo que va en el hueco queda debajo (una captura).
+interface Props {
+  tag: string
+  /** Color del corchete sobre claro. */
+  tagColor?: string
+  title: string
+  lead?: string
+  items: { title: string; text: string }[]
+  /** Ancho mínimo de cada tarjeta. */
+  min?: number
+  /** Fondo de la sección: gris claro o blanco (las tarjetas toman el otro). */
+  white?: boolean
+  /** Tarjetas más chicas (las cinco pestañas de Reportes). */
+  small?: boolean
+  id?: string
+}
+const { tag, tagColor = "var(--teal)", title, lead, items, min = 320, white = false, small = false, id } = Astro.props
+---
+<section class:list={["fg", { white, small }]} id={id}>
+  <div class="wrap fg-in">
+    <div class="fg-head">
+      <span class="tag fg-tag" style={`color: ${tagColor}`}>[ {tag} ]</span>
+      <h2 class="fg-h2">{title}</h2>
+      {lead && <p class="fg-lead">{lead}</p>}
+    </div>
+    <div class="fg-grid" style={`--min: ${min}px`}>
+      {items.map((item) => (
+        <div class="fg-card">
+          <h3>{item.title}</h3>
+          <p>{item.text}</p>
+        </div>
+      ))}
+    </div>
+    <slot />
+  </div>
+</section>
+
+<style>
+  .fg { padding: 96px 0; background: var(--bg); }
+  .fg.white { background: var(--paper); }
+  .fg-in { display: flex; flex-direction: column; gap: 36px; }
+  .fg-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .fg-tag { font-size: 13px; letter-spacing: .12em; }
+  .fg-h2 { margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .fg-lead { margin: 0; font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .fg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(var(--min), 100%), 1fr)); gap: 16px; }
+  .fg-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .white .fg-card { background: var(--bg); }
+  .fg-card h3 { margin: 0; font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+  .fg-card p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .small .fg-grid { gap: 14px; }
+  .small .fg-card { padding: 22px; }
+  .small .fg-card h3 { font-size: 19px; }
+  .small .fg-card p { font-size: 15px; }
+  @media (max-width: 720px) {
+    .fg { padding: 64px 0; }
+    .fg-in { gap: 24px; }
+    .fg-lead { font-size: 16px; }
+    .fg-grid { gap: 12px; }
+    .fg-card { padding: 20px; border-radius: 16px; }
+    .fg-card h3 { font-size: 18px; }
+    .fg-card p { font-size: 15px; }
+  }
+</style>

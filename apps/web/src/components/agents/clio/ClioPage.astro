@@ -1,0 +1,204 @@
+---
+// /agentes/asistente-clinico (lienzo del paso 3, tablero «Clio»): el nombre enorme, la demo del
+// dictado sobre el odontograma real de la app, lo que propone, cuánto cobra (cifras de
+// Astro.locals.pricing, nunca del código), lo que no hace, las preguntas y el cierre.
+// Título, descripción, significado del nombre y preguntas salen de PAGES.asistenteClinico.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../../lib/faq"
+import { PAGES } from "../../../lib/pages-data"
+import { money, shownPlan, type TierPrices } from "../../../lib/pricing"
+import { AGENT_COLORS, contactHref, ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import ClioDemo from "./ClioDemo"
+
+const page = PAGES.asistenteClinico
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const color = AGENT_COLORS.clinico
+const trail: [string, string][] = [["Inicio", "/"], ...(page.parent ? [page.parent] : []), [page.crumb, page.path]]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), ...(page.faq.length ? [faqJsonLd(page.faq)] : [])]
+const meaning = "La musa de la historia: escribe la historia clínica mientras el odontólogo atiende."
+
+const proposes = [
+  { title: "La nota de la consulta", text: "El motivo, lo que encontraste y la evolución, con tus palabras ordenadas." },
+  { title: "El odontograma", text: "«Caries en la 36, la 46 ausente, corona en la 11»: cada hallazgo en su pieza, con lo que pide la norma de tu país." },
+  { title: "El diagnóstico con su código", text: "De la lista que usa tu clínica, CIE-10 o CIE-11: K02.1, caries de la dentina." },
+  { title: "El plan, con opciones", text: "«Resina, o si no una corona» arma un presupuesto con las dos opciones y los precios de tu tarifario." },
+  { title: "La receta", text: "Los medicamentos dictados quedan como receta por emitir, con aviso si el paciente es alérgico." },
+  { title: "Los controles", text: "«Control en seis meses» queda listo, y Argos se lo recuerda cuando se acerque." },
+]
+const doesNot = [
+  { title: "No escribe sin tu sí", text: "Nada entra a la historia hasta que confirmas, corriges o descartas." },
+  { title: "No emite la receta por ti", text: "Emitirla es firmarla: la emites tú, con tu colegiatura." },
+  { title: "No dicta todo el odontograma", text: "Implantes, endodoncias y la movilidad se siguen marcando en la pieza." },
+]
+
+// Cuánto cobra Clío (ADR 0085): el precio de cada tipo del plan que se muestra y, si es el de
+// Fundadores, el de lista tachado (como AgentPrices). Sin plan publicado no hay cifras.
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders
+const cut = (value: number, currency: string) => money(value, currency).replace(`${currency} `, "")
+const tiers: Array<{ key: keyof TierPrices; name: string; text: string }> = [
+  { key: "simple", name: "Simple", text: "Una sola parte: una nota, una receta o un control." },
+  { key: "estandar", name: "Estándar", text: "Un diagnóstico, el odontograma o más de una parte." },
+  { key: "completa", name: "Completa", text: "Armó el presupuesto, con una o varias opciones." },
+]
+const rows = plan
+  ? tiers.flatMap((tier) => {
+      const price = plan.tiers[tier.key]
+      if (price === null) return []
+      const base = founder && list ? list.tiers[tier.key] : null
+      return [{ ...tier, price: cut(price, plan.currency), before: base !== null && base !== price ? cut(base, plan.currency) : null }]
+    })
+  : []
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <section class="hero ch" style={`--c: ${color.dark}; --cl: ${color.light}`}>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap ch-in">
+      <div class="ch-copy">
+        <span class="tag ch-tag rise">[ Tu agente clínico ]</span>
+        <p class="ch-name rise d1">Clío.</p>
+        <p class="ch-say rise d1">Tú atiendes. La historia se escribe sola.</p>
+        <h1 class="ch-h1 rise d2">Dictado de la consulta dental: la nota, el odontograma, el diagnóstico, el plan con sus opciones y la receta, listos para que los confirmes.</h1>
+        {meaning && <p class="ch-meaning rise d2">{meaning}</p>}
+        <div class="ch-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <button type="button" class="btn btn-g" data-clio-replay>Volver a dictar</button>
+        </div>
+      </div>
+      <div class="ch-demo rise d2">
+        <ClioDemo client:visible />
+      </div>
+    </div>
+  </section>
+
+  <section class="section cs" style={`--cl: ${color.light}`}>
+    <div class="wrap cs-in">
+      <div class="cs-head">
+        <span class="tag ag-tag">[ Lo que propone de tu dictado ]</span>
+        <h2 class="cs-h2">Hablas como siempre. Cada cosa cae en su bloque.</h2>
+      </div>
+      <div class="cs-grid">
+        {proposes.map((item) => (
+          <div class="cs-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-white" style={`--cl: ${color.light}`}>
+    <div class="wrap price">
+      <div class="price-copy">
+        <span class="tag ag-tag">[ Cuánto cobra Clío ]</span>
+        <h2 class="cs-h2 small">Una vez por atención, y solo si confirmas.</h2>
+        <p>Si descartas el borrador y escribes tú, no se cobra. Sin tope de pausas ni de minutos.</p>
+      </div>
+      {rows.length && plan ? (
+        <div class="price-box">
+          <dl class="price-rows">
+            {rows.map((row) => (
+              <div class="price-row">
+                <dt><b>{row.name}</b><span>{row.text}</span></dt>
+                <dd>{row.price}{row.before ? <s>{row.before}</s> : null}</dd>
+              </div>
+            ))}
+          </dl>
+          <p class="price-note">
+            Precios en {plan.currency === "USD" ? "dólares" : plan.currency} más impuestos{founder && rows.some((row) => row.before) ? "; tachado, el precio de lista" : ""}. <a href="/precios">Ver todos los precios</a>
+          </p>
+        </div>
+      ) : (
+        <div class="price-box">
+          <p class="price-soon">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <section class="section cs" style={`--cl: ${color.light}`}>
+    <div class="wrap cs-in">
+      <div class="cs-head">
+        <span class="tag ag-tag">[ Lo que no hace ]</span>
+        <h2 class="cs-h2 small">Ayuda a documentar. Decides tú.</h2>
+      </div>
+      <div class="cs-grid three">
+        {doesNot.map((item) => (
+          <div class="cs-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={page.faq} />
+  </div>
+  <CtaBand title="Tu próxima consulta, ya escrita." />
+</Base>
+
+<style>
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 64 de aire, como en el tablero. */
+  .ch { padding: 152px 0 88px; }
+  .ch-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 48px; align-items: center; }
+  .ch-copy { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .ch-tag { color: var(--c); }
+  .ch-name { font-size: clamp(64px, 8vw, 104px); line-height: .9; letter-spacing: -.06em; font-weight: 800; }
+  .ch-say { font-size: clamp(28px, 3vw, 40px); line-height: 1.05; letter-spacing: -.035em; font-weight: 800; color: var(--c); text-wrap: balance; }
+  /* El h1 es para los buscadores: dice qué es, en chico. */
+  .ch-h1 { font-size: 22px; line-height: 1.35; font-weight: 700; color: #e2eef1; text-wrap: pretty; }
+  .ch-meaning { padding-left: 14px; border-left: 2px solid var(--c); font-size: 15px; line-height: 1.5; font-style: italic; color: #cfe2e7; }
+  .ch-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ch-demo { min-width: 0; }
+
+  /* La etiqueta en el verde de Clío, oscurecido para que se lea sobre claro. */
+  .ag-tag { color: color-mix(in srgb, var(--cl) 78%, #000); }
+  .cs { background: var(--bg); }
+  .cs-in { display: flex; flex-direction: column; gap: 36px; }
+  .cs-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .cs-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .cs-h2.small { font-size: clamp(32px, 3.6vw, 44px); }
+  .cs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .cs-grid.three { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+  .cs-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .cs-card h3 { font-size: 20px; line-height: 1.25; }
+  .cs-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+
+  .price { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  .price-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .price-copy p { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .price-box { flex: 1 1 520px; min-width: 0; background: var(--bg); border-radius: 22px; padding: 26px; display: flex; flex-direction: column; gap: 4px; }
+  .price-rows { margin: 0; }
+  .price-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: baseline; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .price-row:last-child { border-bottom: 0; }
+  .price-row dt { display: flex; flex-direction: column; gap: 2px; }
+  .price-row dt span { font-size: 15px; line-height: 1.45; color: var(--muted); }
+  .price-row dd { margin: 0; display: flex; align-items: baseline; gap: 6px; font-size: 24px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; }
+  .price-row s { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
+  .price-note { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--soft); }
+  .price-note a { display: inline-block; padding: 6px 0; }
+  .price-soon { font-size: 17px; line-height: 1.55; color: var(--muted); }
+
+  .faqwrap { background: var(--paper); }
+
+  @media (max-width: 1080px) {
+    .ch-in { grid-template-columns: minmax(0, 1fr); }
+    .ch-copy { max-width: 640px; }
+  }
+  @media (max-width: 720px) {
+    .ch { padding: 104px 0 56px; }
+    .ch-in { gap: 32px; }
+    .ch-h1 { font-size: 19px; }
+    .price { gap: 20px; }
+    .price-copy, .price-box { flex-basis: 100%; }
+    .price-box { padding: 18px; }
+    .price-row dd { font-size: 20px; }
+  }
+</style>

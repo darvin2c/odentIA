@@ -1,0 +1,150 @@
+---
+// «Cada trabajo, con su precio» (ADR 0085): una tarjeta por agente con el precio de cada tipo. Con el
+// plan Fundadores, cada precio lleva al lado el de lista tachado. Sin plan publicado no se dibuja.
+import { hours, money, shownPlan } from "../../lib/pricing"
+import { MEDICAL, WORDS } from "../../lib/product"
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders
+const terms = pricing.terms
+/** «0,50», «29,00»: la cifra sin la moneda y con sus centavos. */
+const currency = plan?.currency ?? ""
+const cut = (value: number) => {
+  const text = money(value, currency).replace(`${currency} `, "")
+  return text.includes(",") ? text : `${text},00`
+}
+const struck = (own: number | null, base: number | null | undefined) =>
+  founder && own !== null && base != null && base !== own ? cut(base) : null
+
+type Row = { label: string; price: number | null; before?: string | null; text?: string }
+type Card = { name: string; does: string; tone: "sofi" | "clio" | "argos"; when: string; href: string; rows: Row[] }
+const cards: Card[] = plan
+  ? [
+      {
+        name: "Sofi",
+        does: "Atiende",
+        tone: "sofi",
+        when: `Una vez por persona cada ${hours(terms.conversationWindowHours)}, según lo que pasó en tu agenda.`,
+        href: "/agentes/recepcion",
+        rows: [
+          { label: "Respondió o confirmó", price: plan.tiers.informa, before: struck(plan.tiers.informa, list?.tiers.informa) },
+          { label: "Reservó, movió o canceló", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
+          { label: "Y el paciente vino", price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
+        ],
+      },
+      {
+        name: "Clío",
+        does: "Documenta",
+        tone: "clio",
+        when: `Una vez por atención, solo cuando el ${WORDS.clinician} confirma.`,
+        href: "/agentes/asistente-clinico",
+        rows: [
+          // ADR 0085: simple es una sola parte; estándar, un diagnóstico, el odontograma o dos partes o más.
+          // En latidIA, lo que lo hace estándar es más de una parte (el examen, el diagnóstico) y completa, dejar indicado lo que sigue.
+          { label: "Una nota, receta o control", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
+          { label: MEDICAL ? "Nota con examen o diagnóstico" : "Diagnóstico, odontograma o más", price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
+          { label: MEDICAL ? "Dejó indicado lo que sigue" : "Armó el presupuesto", price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
+        ],
+      },
+      {
+        name: "Argos",
+        does: plan.argos ? "Recupera y responde" : "Recupera",
+        tone: "argos",
+        when: "La cita, cuando vuelve quien no tenía cita ni tratamiento en curso y viene.",
+        href: "/agentes/administrador",
+        rows: [
+          { label: "Cita recuperada", price: plan.recovered, before: struck(plan.recovered, list?.recovered) },
+          ...(plan.argos
+            ? [
+                { label: `${plan.argos.included} preguntas al mes`, price: null, text: "incluidas" },
+                { label: `${plan.argos.packQuestions} preguntas más`, price: plan.argos.pack, before: struck(plan.argos.pack, list?.argos?.pack) },
+              ]
+            : []),
+        ],
+      },
+    ]
+  : []
+const note = plan
+  ? [
+      `${plan.currency}, más impuestos.`,
+      founder && list ? "Precio de Fundadores con el de lista tachado." : null,
+      plan.storage
+        ? `${plan.storage.includedGb} GB incluidos; desde el GB ${plan.storage.includedGb + 1}, ${cut(plan.storage.perGb)} por GB al mes.`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  : ""
+---
+{plan ? (
+  <section class="section section-white" id="precio">
+    <div class="wrap in">
+      <div class="head">
+        <span class="tag">[ Cada trabajo, con su precio ]</span>
+        <h2 class="h2 t">Tres agentes. Cada uno cobra por lo que hizo.</h2>
+        <p class="lead">Lo ves en tu cuenta, fila por fila, con su fecha. Si algo no cuadra, pides revisión desde esa misma fila.</p>
+      </div>
+      <div class="cards">
+        {cards.map((card) => (
+          <div class:list={["card-a", card.tone]}>
+            <span class="name"><i aria-hidden="true"></i>{card.name} · {card.does}</span>
+            <span class="when">{card.when}</span>
+            <dl class="rows">
+              {card.rows.filter((row) => row.price !== null || row.text).map((row) => (
+                <div class="row">
+                  <dt>{row.label}</dt>
+                  <dd>
+                    {row.price !== null ? cut(row.price) : row.text}
+                    {row.before ? <s class="was"><span class="sr">antes </span>{row.before}</s> : null}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {/* latidIA aún no tiene una página por agente: su inicio los cuenta. */}
+            {MEDICAL ? null : <a class="more" href={card.href}>Lo que hace {card.name} →</a>}
+          </div>
+        ))}
+      </div>
+      <p class="mono nt">{note}</p>
+    </div>
+  </section>
+) : null}
+
+<style>
+  .section { padding: 104px 0; }
+  .in { display: flex; flex-direction: column; gap: 40px; }
+  .head { display: flex; flex-direction: column; gap: 16px; max-width: 820px; }
+  .t { font-size: clamp(34px, 4vw, 48px); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .card-a { border-radius: 22px; background: var(--bg); padding: 26px; display: flex; flex-direction: column; gap: 10px; }
+  .name { display: flex; align-items: center; gap: 8px; font-family: var(--agent-font); font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .name i { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+  .sofi .name { color: var(--teal); }
+  .clio .name { color: #1f7f63; }
+  .argos .name { color: #9a6a12; }
+  .sofi i { background: var(--teal); }
+  .clio i { background: #1f9d7a; }
+  .argos i { background: #c98a1c; }
+  .when { font-size: 15px; line-height: 1.45; color: var(--muted); }
+  .rows { margin: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .row dt { font-size: 16px; line-height: 1.4; }
+  .row dd { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; display: flex; align-items: baseline; gap: 6px; }
+  .was { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .more { align-self: flex-start; font-size: 14px; font-weight: 700; text-decoration: none; padding: 12px 0 0; min-height: 44px; display: inline-flex; align-items: center; color: var(--teal); }
+  .more:hover { text-decoration: underline; }
+  .nt { font-size: 13px; color: var(--soft); line-height: 1.5; }
+  @media (max-width: 720px) {
+    .section { padding: 64px 0; }
+    .in { gap: 24px; }
+    .head { gap: 12px; }
+    .card-a { border-radius: 18px; padding: 18px; gap: 8px; }
+    .when { font-size: 14px; }
+    .row dt { font-size: 15px; }
+    .row dd { font-size: 18px; }
+    .nt { font-size: 12px; }
+  }
+</style>

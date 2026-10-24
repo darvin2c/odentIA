@@ -21,7 +21,8 @@ const {
   <div class="wrap in">
     <span class="tag tag-d">[ Empieza hoy ]</span>
     <h2 class="t">{title}</h2>
-    <p class="lead lead-d">{text}</p>
+    {/* El texto puede llegar armado (slot «text»), por ejemplo con el regalo en ámbar. */}
+    {Astro.slots.has("text") ? <p class="lead lead-d"><slot name="text" /></p> : <p class="lead lead-d">{text}</p>}
     <div class="ctas">
       <a class="btn btn-p" href={cta.href}>{cta.label}</a>
       <a class="btn btn-g" href={contactHref}>Habla con nosotros</a>

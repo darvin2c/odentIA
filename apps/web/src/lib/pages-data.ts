@@ -8,11 +8,8 @@ import { AGENT_COLORS, contactEmail } from "./site"
 export type AgentIndex = 0 | 1 | 2
 export type HeroVisualKind =
   | "agenda"
-  | "odontograma"
-  | "presupuestos"
   | "caja"
   | "enlace"
-  | "reportes"
   | "sedes"
   | "whatsapp"
   | "seguridad"
@@ -57,19 +54,6 @@ export type Block =
       note?: string
     }
   | { kind: "log"; tag: string; title: string; lead?: string; entries: LogEntry[]; note: string }
-  | {
-      kind: "sheet"
-      tag: string
-      title: string
-      lead?: string
-      sheet: {
-        head: string
-        meta: string
-        rows: { label: string; text: string; code?: string }[]
-        done: string
-      }
-      note?: string
-    }
 
 export type PageHeroData =
   | {
@@ -107,6 +91,9 @@ export type PageData = {
   faq: FaqItem[]
   cta?: { title?: string; text?: string }
 }
+
+/** Una página con su propio diseño (paso 3 de la web): de aquí solo toma lo de buscadores y las preguntas. */
+export type OwnPageData = Pick<PageData, "path" | "title" | "description" | "crumb" | "parent" | "faq">
 
 /** Nombres de los tres agentes (issue 183). La web siempre dice «Sofi», aunque cada clínica pueda renombrarla. */
 export const AGENT_NAMES = ["Sofi", "Clío", "Argos"] as const
@@ -472,84 +459,6 @@ export const PAGES = {
       "Sofi, tu agente de recepción, responde el WhatsApp, Instagram, Messenger, Telegram, el chat de la web y el correo de tu clínica dental al momento, de día y de noche, y agenda con el sí del paciente.",
     crumb: "Sofi",
     parent: AGENTS_PARENT,
-    hero: {
-      type: "scene",
-      focus: "recepcion",
-      tag: "Sofi, tu agente de recepción",
-      meaning: "De sophía, sabiduría: sabe todo de la clínica y responde con su tono, a cualquier hora.",
-      title: "Responde el WhatsApp de tu clínica dental,",
-      accent: "automático y a cualquier hora.",
-      accentColor: AGENT_COLORS.recepcion.dark,
-      lead: "Contesta WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Informa precios y horarios, agenda con el sí del paciente y le pasa a tu equipo lo que necesita a una persona.",
-    },
-    blocks: [
-      {
-        kind: "split",
-        tag: "Qué hace",
-        title: "Contesta al momento, de día y de noche.",
-        paragraphs: [
-          "Sofi contesta al momento, de día y de noche, por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Informa precios y horarios, y agenda, mueve o cancela citas siempre con el sí del paciente. Si hace falta una persona, le pasa el caso a tu equipo con un resumen.",
-          "Se llama Sofi, o como tú le pongas, y tiene el tono de tu clínica: cercano, neutro o formal, de tú o de usted. Siempre dice que es un asistente virtual.",
-        ],
-        points: [
-          {
-            title: "Para recepción",
-            text: "Menos mensajes repetidos y ninguna conversación perdida al cambiar de turno.",
-          },
-          {
-            title: "Para tus pacientes",
-            text: "Una respuesta al momento, aunque escriban de noche o en domingo.",
-          },
-        ],
-      },
-      {
-        kind: "chat",
-        tag: "Un ejemplo",
-        title: "La misma conversación, aunque cambie de canal.",
-        lead: "Lucía pregunta por Instagram y su mamá sigue por WhatsApp. Sofi sabe que hablan de la misma paciente.",
-        person: PERSON_LUCIA,
-        messages: CHAT_LUCIA,
-        summary: "Una persona · 3 canales · 1 historia",
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "cards",
-        tag: "Tú decides",
-        title: "Lo que puede hacer, lo prendes o lo apagas.",
-        items: [
-          {
-            agent: 0,
-            title: "Responder mensajes",
-            text: "Prendido: responde al momento, de día y de noche. Apagado: los mensajes esperan a que alguien de tu equipo los vea.",
-          },
-          {
-            agent: 0,
-            title: "Agendar citas",
-            text: "Prendido: agenda en los horarios libres de quien atiende ese servicio, con el sí del paciente. Apagado: envía su enlace para que la persona elija la hora.",
-          },
-          {
-            agent: 0,
-            title: "Pasar el caso a tu equipo",
-            text: "Cuando no sabe o hace falta una persona, se lo dice al paciente y te deja el caso con un resumen de lo que se habló.",
-          },
-        ],
-      },
-      {
-        kind: "log",
-        tag: "Registro",
-        title: "Todo lo que hace queda anotado.",
-        entries: ACTS.filter((a) => a.agent === 0),
-        note: "Ejemplo con datos inventados. En tu clínica ves cada acción con quién la hizo y cuándo.",
-      },
-    ],
-    related: [
-      "/whatsapp-para-clinicas-dentales",
-      "/omnicanal",
-      "/agenda-odontologica",
-      "/portal-del-paciente",
-      "/agentes/administrador",
-      "/precios",
-    ],
     faq: [
       {
         q: "¿Mis pacientes sabrán que hablan con un asistente?",
@@ -578,80 +487,6 @@ export const PAGES = {
       "Dicta la consulta y Clío, tu agente clínico, propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles. Nada entra a la historia clínica sin la confirmación del odontólogo.",
     crumb: "Clío",
     parent: AGENTS_PARENT,
-    hero: {
-      type: "scene",
-      focus: "clinico",
-      tag: "Clío, tu agente clínico",
-      meaning: "La musa de la historia: escribe la historia clínica mientras el odontólogo atiende.",
-      title: "Dictado de notas clínicas para odontólogos:",
-      accent: "la historia se escribe sola.",
-      accentColor: AGENT_COLORS.clinico.dark,
-      lead: "Propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles mientras atiendes. Nada entra a la historia sin tu confirmación.",
-    },
-    blocks: [
-      {
-        kind: "steps",
-        tag: "Cómo funciona",
-        title: "Tú atiendes y dictas. Clío ordena.",
-        steps: [
-          {
-            title: "Dictas mientras atiendes",
-            text: "Hablas como siempre, con tus palabras. No hace falta llenar casillas durante la consulta.",
-          },
-          {
-            title: "Propone lo que va en la historia",
-            // ADR 0012, actualización del 2026-10-23: odontograma, opciones del plan y receta por voz.
-            text: "La nota de la consulta, lo que dices de cada pieza en el odontograma, el diagnóstico con su código, el plan con los tratamientos de tu tarifario (con sus opciones, si dices más de una), la receta y los controles.",
-          },
-          {
-            title: "Tú confirmas, corriges o descartas",
-            text: "Nada entra a la historia hasta que das el sí. Si descartas, no queda nada.",
-          },
-          {
-            title: "Queda en la historia del paciente",
-            text: "Firmada por ti, junto con el resto de sus atenciones, lista para la próxima consulta.",
-          },
-        ],
-      },
-      {
-        kind: "sheet",
-        tag: "Un ejemplo",
-        title: "Sugerencias para la historia.",
-        lead: "Las sugerencias se arman mientras la doctora habla. Nada entra en la historia hasta que ella las confirma, y el precio sale siempre de tu tarifario.",
-        sheet: NOTE_CARLOS,
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "cards",
-        tag: "Lo que no hace",
-        title: "Ayuda a documentar. Decides tú.",
-        items: [
-          {
-            agent: 1,
-            title: "No escribe sin tu sí",
-            text: "Todo lo que propone espera tu confirmación. Lo que no se confirma no entra a la historia ni se cobra.",
-          },
-          {
-            agent: 1,
-            title: "No inventa precios",
-            text: "El plan usa los tratamientos y precios del tarifario de tu clínica.",
-          },
-          {
-            agent: 1,
-            title: "No emite la receta por ti",
-            text: "Los medicamentos que dictas quedan como una receta por emitir. La emites tú, y te avisa si el paciente es alérgico.",
-          },
-        ],
-      },
-    ],
-    related: [
-      "/historia-clinica-y-odontograma",
-      "/presupuestos-dentales",
-      "/agentes/administrador",
-      "/seguridad",
-      "/agentes",
-      "/precios",
-    ],
     faq: [
       {
         q: "¿Lo que dicto entra directo a la historia?",
@@ -679,121 +514,6 @@ export const PAGES = {
       "Argos, tu agente administrador, recuerda cada cita, avisa a quien le toca su control, retoma los presupuestos sin respuesta y ofrece otra fecha a quien faltó, para que tus pacientes vuelvan.",
     crumb: "Argos",
     parent: AGENTS_PARENT,
-    hero: {
-      type: "scene",
-      focus: "administrador",
-      tag: "Argos, tu agente administrador",
-      meaning: "El gigante de los cien ojos: ve toda la clínica y no deja a ningún paciente atrás.",
-      title: "Recordatorios de citas y pacientes que vuelven:",
-      accent: "nadie se olvida de su control.",
-      accentColor: AGENT_COLORS.administrador.dark,
-      lead: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, te deja la tarea con el motivo.",
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué hace",
-        title: "Lo pendiente, sin listas ni llamadas de más.",
-        items: [
-          {
-            agent: 2,
-            title: "Recuerda cada cita",
-            text: "Un día antes y tres horas antes, por el canal donde conversa con el paciente.",
-          },
-          {
-            agent: 2,
-            title: "Avisa los controles",
-            text: "Dos días antes de que a alguien le toque su control, le escribe para buscarle un horario.",
-          },
-          {
-            agent: 2,
-            title: "Retoma los presupuestos",
-            text: "Pregunta por los presupuestos que quedaron sin respuesta.",
-          },
-          {
-            agent: 2,
-            title: "Ofrece otra fecha a quien faltó",
-            text: "Si alguien no llegó a su cita, le escribe para reprogramarla.",
-          },
-          {
-            agent: 2,
-            title: "Deja tareas a tu equipo",
-            text: "Si no puede escribirle a alguien, por ejemplo porque no tiene WhatsApp, le deja la tarea a recepción con el motivo.",
-          },
-          {
-            // ADR 0075 y 0078: se le pregunta desde Reportes y el buscador; en Precios, las preguntas incluidas.
-            agent: 2,
-            title: "Responde tus preguntas",
-            text: "Le preguntas por tu clínica, por ejemplo «¿Cuánto me deben y desde cuándo?», y responde con la cifra y cómo la calculó.",
-            href: "/reportes",
-          },
-        ],
-      },
-      {
-        kind: "steps",
-        tag: "Un ejemplo",
-        title: "Rosa vuelve tras faltar a su cita.",
-        steps: [
-          {
-            when: "Lunes",
-            agent: 2,
-            title: "Rosa Vega no llegó a su limpieza del lunes.",
-            text: "Argos lo ve en la agenda, sin que nadie revise listas.",
-          },
-          {
-            when: "Martes · 10:00",
-            agent: 2,
-            title: "Al día siguiente le escribe por WhatsApp para darle otro horario.",
-            text: "«Hola, Rosa. No pudimos verte en la cita del lunes 20 en Clínica Sonrisa Norte. ¿Te buscamos otro horario?»",
-          },
-          {
-            when: "Martes · 10:20",
-            title: "Rosa toca «Sí, otro horario» y Sofi le reserva el viernes 24 a las 11:00.",
-            text: "La cita aparece en la agenda de la clínica.",
-          },
-          {
-            when: "Viernes · 11:00",
-            title: "Rosa llega y la atienden.",
-            text: "Recién ahora cuenta como cita recuperada.",
-          },
-        ],
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "split",
-        tag: "Lo que cuenta",
-        title: "Que Rosa volvió y la atendieron.",
-        paragraphs: [
-          "Recordar y avisar es parte del servicio. Lo que se mide es la cita a la que el paciente asistió.",
-          "Cada tarea se prende o se apaga. Si apagas una, Argos no escribe y te deja la lista para que tu equipo decida.",
-        ],
-        points: [
-          {
-            agent: 2,
-            title: "Recordar la cita",
-            text: "Un día antes y tres horas antes. Viene prendido.",
-          },
-          {
-            agent: 2,
-            title: "Avisar los controles",
-            text: "Escribe dos días antes de que le toque su control. Apagado: te deja la lista y tu equipo decide a quién llamar.",
-          },
-          {
-            agent: 2,
-            title: "Retomar los presupuestos",
-            text: "Pregunta por los presupuestos que quedaron sin respuesta. Apagado: los presupuestos esperan a tu equipo.",
-          },
-        ],
-      },
-    ],
-    related: [
-      "/agenda-odontologica",
-      "/presupuestos-dentales",
-      "/portal-del-paciente",
-      "/whatsapp-para-clinicas-dentales",
-      "/agentes/recepcion",
-      "/precios",
-    ],
     faq: [
       {
         q: "¿Cuándo envía los recordatorios?",
@@ -1167,78 +887,6 @@ export const PAGES = {
     description:
       "Historia clínica dental con odontograma digital en notación FDI, diagnósticos codificados y cada atención en orden. Clío, tu agente clínico, prepara la nota de tu dictado y tú la confirmas.",
     crumb: "Historia y odontograma",
-    hero: {
-      type: "visual",
-      visual: "odontograma",
-      tag: "Historia y odontograma",
-      title: "Historia clínica dental y odontograma digital,",
-      accent: "en una sola ficha.",
-      lead: "Odontograma con la notación internacional FDI, diagnósticos codificados y cada atención en orden. Clío, tu agente clínico, prepara la nota a partir de tu dictado y tú la confirmas.",
-      secondary: { href: "/agentes/asistente-clinico", label: "Conoce a Clío" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué incluye",
-        title: "Todo lo clínico del paciente, en orden.",
-        items: [
-          {
-            title: "Odontograma FDI",
-            text: "Cada pieza con su número de la notación internacional de dos dígitos, la que usan los odontólogos en todo el mundo.",
-          },
-          {
-            title: "Diagnósticos con su código",
-            text: "Cada diagnóstico queda codificado, para que la historia se lea igual en cualquier sede.",
-          },
-          {
-            title: "Cada atención, en orden",
-            text: "La consulta, la evolución, el plan y los controles de cada visita.",
-          },
-          {
-            title: "Recetas, órdenes y consentimientos",
-            text: "Listos para imprimir y, los consentimientos, para que el paciente los lea y firme desde su enlace.",
-          },
-          {
-            title: "Una historia por persona",
-            text: "Aunque escriba por varios canales o se atienda en varias sedes, el paciente tiene una sola historia.",
-          },
-        ],
-      },
-      {
-        kind: "sheet",
-        tag: "Con Clío",
-        title: "Dictas la consulta. Confirmas la nota.",
-        lead: "Clío propone la nota, el odontograma, el diagnóstico con su código, el plan, la receta y los controles. Nada entra a la historia sin tu sí.",
-        sheet: NOTE_CARLOS,
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "cards",
-        tag: "Quién ve qué",
-        title: "Lo clínico, solo para quien atiende.",
-        items: [
-          { title: "Odontólogos", text: "Atienden con la historia completa del paciente." },
-          {
-            title: "Recepción",
-            text: "Coordina citas y conversaciones sin ver lo que no necesita.",
-          },
-          { title: "Caja", text: "Cobra con lo que necesita para cobrar, nada más." },
-          {
-            title: "Todo queda registrado",
-            text: "Quién escribió o firmó cada cosa y cuándo, sea una persona o un agente.",
-            href: "/seguridad",
-          },
-        ],
-      },
-    ],
-    related: [
-      "/agentes/asistente-clinico",
-      "/presupuestos-dentales",
-      "/agenda-odontologica",
-      "/seguridad",
-      "/portal-del-paciente",
-      "/precios",
-    ],
     faq: [
       {
         q: "¿Qué notación usa el odontograma?",
@@ -1265,72 +913,6 @@ export const PAGES = {
     description:
       "Cómo hacer presupuestos dentales: arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, el administrador, retome los que quedaron sin respuesta.",
     crumb: "Presupuestos",
-    hero: {
-      type: "visual",
-      visual: "presupuestos",
-      tag: "Presupuestos",
-      title: "Cómo hacer presupuestos dentales:",
-      accent: "claros, con hasta tres opciones.",
-      lead: "Arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, tu agente administrador, retome los que quedaron sin respuesta.",
-      secondary: { href: "/agentes/administrador", label: "Conoce a Argos" },
-    },
-    blocks: [
-      {
-        kind: "steps",
-        tag: "Paso a paso",
-        title: "Del diagnóstico a la respuesta del paciente.",
-        steps: [
-          {
-            title: "Partes del plan de tratamiento",
-            text: "Lo que el odontólogo dejó en la historia es el punto de partida.",
-          },
-          {
-            title: "Eliges los tratamientos del tarifario",
-            text: "Los precios salen de tu tarifario: nadie los escribe a mano.",
-          },
-          {
-            title: "Armas hasta tres opciones",
-            text: "Por ejemplo, el tratamiento completo y otro por etapas, para que el paciente compare con calma.",
-          },
-          {
-            title: "El paciente lo ve y responde desde Su enlace",
-            text: "Sin imprimir ni escanear. Si lo pide por un canal, Sofi, tu agente de recepción, se lo reenvía.",
-          },
-          {
-            agent: 2,
-            title: "Si no responde, Argos lo retoma",
-            text: "Pregunta por el presupuesto que quedó sin respuesta, sin que tu equipo lleve la cuenta.",
-          },
-        ],
-      },
-      {
-        kind: "cards",
-        tag: "Por qué ayudan",
-        title: "Presupuestos que se entienden y no se olvidan.",
-        items: [
-          {
-            title: "Opciones claras",
-            text: "Hasta tres opciones, cada una con sus tratamientos, para que el paciente decida sin presión.",
-          },
-          {
-            title: "Precios de tu tarifario",
-            text: "Los agentes nunca inventan ni cambian un precio: usan el de tu clínica.",
-          },
-          {
-            title: "Seguimiento sin listas",
-            text: "Ves qué está aprobado y qué está por aceptar, y Argos retoma lo pendiente.",
-          },
-        ],
-      },
-    ],
-    related: [
-      "/agentes/administrador",
-      "/historia-clinica-y-odontograma",
-      "/portal-del-paciente",
-      "/caja-y-cobros",
-      "/agentes/recepcion",
-      "/precios",
-    ],
     faq: [
       {
         q: "¿Cuántas opciones puedo ofrecer en un presupuesto?",
@@ -1553,61 +1135,6 @@ export const PAGES = {
     description:
       "Los indicadores de tu clínica dental en un lugar: cómo respondieron a quien escribió, citas atendidas, pacientes nuevos, lo que entró, se gastó y falta cobrar.",
     crumb: "Reportes",
-    hero: {
-      type: "visual",
-      visual: "reportes",
-      tag: "Reportes",
-      title: "Los indicadores de tu clínica dental,",
-      accent: "sin armar planillas.",
-      lead: "Cómo respondieron a quien escribió, si los pacientes vinieron y quién los atendió, el trabajo nuevo que entró y cuánto entró, se gastó y falta cobrar.",
-      secondary: { href: "/caja-y-cobros", label: "Ver la caja" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué muestran",
-        title: "Las preguntas de siempre, respondidas con tus datos.",
-        // Las pestañas de Reportes v2 (Resumen · Finanzas · Pacientes · Agenda · Agente) y Argos (ADR 0075).
-        items: [
-          {
-            title: "Resumen",
-            text: "Las cifras del mes comparadas con el anterior, con tus metas y lo que fijaste.",
-          },
-          {
-            title: "Finanzas",
-            text: "Lo cobrado, lo que te deja después de impuestos y comisiones, y quién te debe desde cuándo.",
-            href: "/caja-y-cobros",
-          },
-          {
-            title: "Pacientes",
-            text: "Por dónde llegan, en qué paso se caen y quién no vuelve hace meses.",
-          },
-          { title: "Agenda", text: "Quién vino, quién no y qué tan llena está la agenda de cada profesional." },
-          {
-            title: "Agente",
-            text: "Qué hizo cada agente, cómo respondimos a quien escribió y cuánto pagaste por ellos.",
-            href: "/agentes",
-          },
-          {
-            agent: 2,
-            title: "Pregúntale a Argos",
-            text: "Escribes «¿Qué profesional tiene más inasistencias?» y responde con la cifra y cómo la calculó.",
-            href: "/agentes/administrador",
-          },
-        ],
-      },
-      {
-        kind: "split",
-        tag: "Sin copiar nada",
-        title: "Por periodo y por sede, con lo que ya está en el sistema.",
-        paragraphs: [
-          "La agenda, las conversaciones, la historia y la caja están en el mismo sistema, así que los reportes salen solos. Eliges el periodo y la sede, o miras todas juntas.",
-          "Cada persona ve los reportes que su rol le permite.",
-        ],
-        link: { href: "/varias-sedes", label: "Cómo funciona con varias sedes" },
-      },
-    ],
-    related: ["/caja-y-cobros", "/varias-sedes", "/agenda-odontologica", "/agentes", "/precios"],
     faq: [
       {
         q: "¿Tengo que cargar datos aparte para ver los reportes?",
@@ -1899,7 +1426,7 @@ export const PAGES = {
       title: "¿Lo ves en tu clínica?",
     },
   },
-} satisfies Record<string, PageData>
+} satisfies Record<string, PageData | OwnPageData>
 
 /** Páginas legales que aún no tienen texto propio (la plantilla breve de LegalPage). Las que ya lo tienen
  * viven en src/lib/legal/. */

@@ -1,6 +1,7 @@
 // «Lo que pagas y lo que recuperas»: lo que se pierde sin agentes frente a lo que se paga,
 // con los números que pone cada clínica. Es un ejemplo, nunca una promesa de resultados.
-import type { ValuePrices } from "./pricing"
+import { MIX, type ValuePrices } from "./pricing"
+import { WORDS } from "./product"
 
 export type ValueInput = {
   /** Personas que escriben al mes; cada una cuenta como conversación atendida. */
@@ -47,9 +48,27 @@ export function computeValue(i: ValueInput, prices: ValuePrices) {
   const lostNoShows = recovered * i.appointmentValue
   const lostTime = i.teamHours * i.hourCost
   const withoutUs = lostNew + lostNoShows + lostTime
-  const conversations = i.writers * prices.conversation
+  // Cada fila se cobra por su tipo (ADR 0085), con la mezcla de la clínica mediana: no hay un
+  // «precio promedio» que alguien pague. Se reparten personas enteras, no fracciones.
+  const t = prices.tiers
+  const informa = Math.round(i.writers * MIX.informa)
+  const gestiona = i.writers - informa
+  const agenda = Math.round(gestiona * (MIX.agenda / MIX.gestiona))
+  const simple = Math.round(i.consultations * MIX.simple)
+  const estandar = Math.round(i.consultations * MIX.estandar)
+  const completa = Math.max(0, i.consultations - simple - estandar)
+  const byType = {
+    informa: { count: informa, cost: informa * t.informa },
+    gestiona: { count: gestiona, cost: gestiona * t.gestiona },
+    /** La cita que se dio suma la diferencia hasta «Agenda». */
+    agenda: { count: agenda, cost: agenda * (t.agenda - t.gestiona) },
+    simple: { count: simple, cost: simple * t.simple },
+    estandar: { count: estandar, cost: estandar * t.estandar },
+    completa: { count: completa, cost: completa * t.completa },
+  }
+  const conversations = byType.informa.cost + byType.gestiona.cost + byType.agenda.cost
   const recoveredCost = recovered * prices.recovered
-  const consultations = i.consultations * prices.consultation
+  const consultations = byType.simple.cost + byType.estandar.cost + byType.completa.cost
   const usage = conversations + recoveredCost + consultations
   const coveredByPlan = Math.min(prices.credit, usage)
   const withUs = prices.plan + Math.max(0, usage - prices.credit)
@@ -60,6 +79,7 @@ export function computeValue(i: ValueInput, prices: ValuePrices) {
     lostNoShows,
     lostTime,
     withoutUs,
+    byType,
     conversations,
     recoveredCost,
     consultations,
@@ -79,10 +99,10 @@ export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input:
   {
     id: "pequena",
     label: "Pequeña",
-    hint: "1 o 2 odontólogos",
+    hint: `1 o 2 ${WORDS.clinicians}`,
     input: { ...DEFAULT_VALUE_INPUT, writers: 120, noShows: 25, consultations: 120, teamHours: 25 },
   },
-  { id: "mediana", label: "Mediana", hint: "3 a 6 odontólogos", input: DEFAULT_VALUE_INPUT },
+  { id: "mediana", label: "Mediana", hint: `3 a 6 ${WORDS.clinicians}`, input: DEFAULT_VALUE_INPUT },
   {
     id: "grande",
     label: "Grande",

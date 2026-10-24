@@ -1,0 +1,119 @@
+---
+// «Cuánto cobra Sofi / Argos» (lienzo del paso 3): el texto a la izquierda y, a la derecha, el precio de
+// cada tipo (ADR 0085) del plan que se muestra, con el de lista tachado si es Fundadores, como en
+// Precios (AgentPrices.astro). Ninguna cifra vive aquí: salen de Astro.locals.pricing. Sin plan
+// publicado, la tarjeta dice que los precios se publican pronto.
+import { money, shownPlan } from "../../lib/pricing"
+import { contactHref } from "../../lib/site"
+
+interface Props {
+  agent: "sofi" | "argos"
+  tag: string
+  tagColor: string
+  title: string
+  text: string
+  white?: boolean
+  id?: string
+}
+const { agent, tag, tagColor, title, text, white = false, id } = Astro.props
+
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders
+const currencyCode = plan?.currency ?? ""
+const cut = (value: number) => {
+  const shown = money(value, currencyCode).replace(`${currencyCode} `, "")
+  return shown.includes(",") ? shown : `${shown},00`
+}
+const struck = (own: number | null, base: number | null | undefined) =>
+  founder && own !== null && base !== null && base !== undefined && base !== own ? cut(base) : null
+
+type Row = { label: string; text: string; price: number | null; before?: string | null; word?: string }
+const rows: Row[] = !plan
+  ? []
+  : agent === "sofi"
+    ? [
+        { label: "Informa", text: "Respondió, confirmó, dio la dirección o un precio.", price: plan.tiers.informa, before: struck(plan.tiers.informa, list?.tiers.informa) },
+        { label: "Gestiona", text: "Reservó, movió o canceló una cita, aunque el paciente no venga.", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
+        { label: "Agenda", text: "La cita que reservó se dio: se suma la diferencia.", price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
+      ]
+    : [
+        { label: "Cita recuperada", text: "Solo si el paciente vino. Si no, no se cobra.", price: plan.recovered, before: struck(plan.recovered, list?.recovered) },
+        ...(plan.argos
+          ? [
+              { label: `${plan.argos.included} preguntas al mes`, text: "Las que no pudo responder no cuentan.", price: null, word: "incluidas" },
+              {
+                label: `${plan.argos.packQuestions} preguntas más`,
+                text: "Argos te pregunta antes de sumarlas.",
+                price: plan.argos.pack,
+                before: struck(plan.argos.pack, list?.argos?.pack),
+              },
+            ]
+          : []),
+      ]
+const shown = rows.filter((row) => row.price !== null || row.word)
+const currency = plan?.currency === "USD" ? "dólares" : plan?.currency
+---
+<section class:list={["ac", { white }]} id={id}>
+  <div class="wrap ac-in">
+    <div class="ac-copy">
+      <span class="tag ac-tag" style={`color: ${tagColor}`}>[ {tag} ]</span>
+      <h2 class="ac-h2">{title}</h2>
+      <p class="ac-text">{text}</p>
+      <slot />
+    </div>
+    {shown.length > 0 ? (
+      <div class="ac-card">
+        <dl class="ac-rows">
+          {shown.map((row) => (
+            <div class="ac-row">
+              <dt><b>{row.label}</b><span>{row.text}</span></dt>
+              <dd>
+                {row.price !== null ? cut(row.price) : row.word}
+                {row.before ? <s>{row.before}</s> : null}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <span class="ac-note">
+          Precios en {currency} más impuestos.{founder ? " Precio Fundadores; tachado, el de lista." : ""}
+        </span>
+      </div>
+    ) : (
+      <div class="ac-card ac-empty">
+        <p>Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
+      </div>
+    )}
+  </div>
+</section>
+
+<style>
+  .ac { padding: 96px 0; background: var(--bg); }
+  .ac.white { background: var(--paper); }
+  .ac-in { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  .ac-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .ac-tag { font-size: 13px; letter-spacing: .12em; }
+  .ac-h2 { margin: 0; font-size: clamp(32px, 3.6vw, 44px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .ac-text { margin: 0; font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .ac-copy :global(a) { font-weight: 700; }
+  .ac-card { flex: 1 1 520px; min-width: 0; background: var(--paper); border-radius: 22px; padding: 26px; display: flex; flex-direction: column; gap: 4px; }
+  .white .ac-card { background: var(--bg); }
+  .ac-rows { margin: 0; display: flex; flex-direction: column; }
+  .ac-row { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .ac-row:last-child { border-bottom: 0; }
+  .ac-row dt { display: flex; flex-direction: column; gap: 2px; }
+  .ac-row dt span { color: var(--muted); font-size: 15px; line-height: 1.45; }
+  .ac-row dd { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; display: flex; align-items: baseline; gap: 6px; }
+  .ac-row s { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
+  .ac-note { font-family: var(--mono); font-size: 12px; color: var(--soft); padding-top: 4px; }
+  .ac-empty p { margin: 0; font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .ac-empty a { font-weight: 700; }
+  @media (max-width: 720px) {
+    .ac { padding: 64px 0; }
+    .ac-in { gap: 24px; }
+    .ac-card { padding: 18px; border-radius: 18px; }
+    .ac-row dt span { font-size: 14px; }
+    .ac-row dd { font-size: 20px; flex-direction: column; align-items: flex-end; gap: 0; }
+  }
+</style>

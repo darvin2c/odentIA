@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Dominio dental puro (ADR 0079): odontograma, periodontograma, tipos de tratamiento y lo dental de cada país.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./odontogram-arch": "./src/odontogram-arch.ts",
+    "./tooth-shapes": "./src/tooth-shapes.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

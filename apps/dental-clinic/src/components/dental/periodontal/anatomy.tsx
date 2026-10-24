@@ -5,7 +5,7 @@
  */
 import { toothTypeOf } from "@odentia/dental"
 import { useId } from "react"
-import { silhouetteFor, zonesFor } from "../tooth-svg"
+import { silhouetteFor, zonesFor } from "@odentia/dental/tooth-shapes"
 
 /** Escala del gráfico: 4 px por milímetro hacia la raíz desde el límite del esmalte. */
 export const MM = 4

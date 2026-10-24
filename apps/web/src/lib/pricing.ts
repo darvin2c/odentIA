@@ -187,7 +187,7 @@ export interface ValuePrices {
  * esas citas se dan; de cada 100 consultas, 40 son simples, 35 estándar y 25
  * completas. Es un promedio para la calculadora, no lo que se cobra.
  */
-const MIX = { informa: 0.5, gestiona: 0.5, agenda: 0.25, simple: 0.4, estandar: 0.35, completa: 0.25 }
+export const MIX = { informa: 0.5, gestiona: 0.5, agenda: 0.25, simple: 0.4, estandar: 0.35, completa: 0.25 }
 
 /** Las cifras de un plan para las islas; null si alguna acción no tiene precio. */
 export function valuePricesOf(plan: PlanPrices | null): ValuePrices | null {

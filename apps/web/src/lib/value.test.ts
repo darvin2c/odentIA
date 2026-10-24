@@ -49,8 +49,9 @@ describe("lo que pagas y lo que recuperas", () => {
 
   it("con poco uso se paga solo el plan, que el crédito cubre", () => {
     const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 10, noShows: 0, consultations: 0 }, LIST)
-    expect(v.usage).toBeCloseTo(4.25)
-    expect(v.coveredByPlan).toBeCloseTo(4.25)
+    // Personas enteras: 5 informan, 5 gestionan y 3 de sus citas se dan.
+    expect(v.usage).toBeCloseTo(4.5)
+    expect(v.coveredByPlan).toBeCloseTo(4.5)
     expect(v.withUs).toBe(29)
   })
 
@@ -59,6 +60,16 @@ describe("lo que pagas y lo que recuperas", () => {
     expect(v.usage).toBeCloseTo(30.65)
     expect(v.coveredByPlan).toBe(0)
     expect(v.withUs).toBeCloseTo(30.65)
+  })
+
+  it("cada fila se cobra por su tipo, como en la cuenta: el ejemplo de Precios da USD 108 con Fundadores", () => {
+    const v = computeValue(DEFAULT_VALUE_INPUT, FOUNDER)
+    expect(v.byType.informa).toEqual({ count: 150, cost: 7.5 })
+    expect(v.byType.gestiona).toEqual({ count: 150, cost: 37.5 })
+    expect(v.byType.agenda).toEqual({ count: 75, cost: 18.75 })
+    expect(v.consultations).toBeCloseTo(35.25)
+    expect(v.recoveredCost).toBe(9)
+    expect(v.withUs).toBeCloseTo(108)
   })
 
   it("los importes van con punto de miles y coma decimal", () => {

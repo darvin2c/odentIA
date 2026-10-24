@@ -1,0 +1,61 @@
+---
+// Portada de la página de cada agente y de Reportes (lienzo del paso 3, tableros Sofi, Argos y Reportes):
+// a la izquierda el nombre enorme (o la frase grande), su frase de color, el h1 para los buscadores en
+// chico, el significado o la bajada y los botones; a la derecha, la demostración. La cabecera del sitio
+// va absoluta encima: el relleno de arriba le deja su sitio.
+interface Props {
+  /** Lo que va entre corchetes, arriba. */
+  tag: string
+  /** Color del corchete y de la raya del significado (sobre oscuro). */
+  color: string
+  /** El título para los buscadores, en chico debajo de lo grande. */
+  h1: string
+  /** Por qué el agente se llama así, con la raya de su color. */
+  meaning?: string
+  /** Una bajada normal, en vez del significado (Reportes). */
+  lead?: string
+  /** Ancho base del texto y de la demostración, como en cada tablero (Sofi: 500 y 460; Argos y Reportes: 460 y 520). */
+  copyBasis?: number
+  demoBasis?: number
+  gap?: number
+}
+const { tag, color, h1, meaning, lead, copyBasis = 460, demoBasis = 520, gap = 48 } = Astro.props
+---
+<section class="hero sh" style={`--c: ${color}; --cb: ${copyBasis}px; --db: ${demoBasis}px; --gap: ${gap}px`}>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap sh-in">
+    <div class="sh-copy">
+      <span class="tag sh-tag rise">[ {tag} ]</span>
+      <div class="sh-big rise d1"><slot /></div>
+      <h1 class="sh-h1 rise d2">{h1}</h1>
+      {meaning && <p class="sh-meaning rise d2">{meaning}</p>}
+      {lead && <p class="sh-lead rise d2">{lead}</p>}
+      <div class="sh-ctas rise d3"><slot name="actions" /></div>
+    </div>
+    <div class="sh-demo rise d2"><slot name="demo" /></div>
+  </div>
+</section>
+
+<style>
+  .sh { padding: 152px 0 88px; }
+  .sh-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px var(--gap); align-items: center; }
+  .sh-copy { flex: 1 1 var(--cb); min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .sh-demo { flex: 1 1 var(--db); min-width: 0; }
+  .sh-tag { color: var(--c); font-size: 13px; letter-spacing: .12em; }
+  .sh-big { display: flex; flex-direction: column; gap: 20px; }
+  .sh-big :global(.sh-name) { margin: 0; font-size: clamp(64px, 8vw, 104px); line-height: .9; letter-spacing: -.06em; font-weight: 800; }
+  .sh-big :global(.sh-phrase) { margin: 0; font-size: clamp(28px, 3vw, 40px); line-height: 1.05; letter-spacing: -.035em; font-weight: 800; color: var(--c); text-wrap: balance; }
+  .sh-big :global(.sh-title) { margin: 0; font-size: clamp(48px, 6vw, 72px); line-height: .95; letter-spacing: -.05em; font-weight: 800; }
+  .sh-h1 { margin: 0; font-size: 22px; line-height: 1.35; font-weight: 700; color: #e2eef1; text-wrap: pretty; }
+  .sh-meaning { margin: 0; padding-left: 14px; border-left: 2px solid var(--c); font-size: 15px; line-height: 1.5; font-style: italic; color: #cfe2e7; }
+  .sh-lead { margin: 0; font-size: 18px; line-height: 1.55; color: var(--on-night-2); }
+  .sh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .sh { padding: 104px 0 64px; }
+    .sh-in { gap: 32px; }
+    .sh-copy { gap: 16px; flex-basis: 100%; }
+    .sh-demo { flex-basis: 100%; }
+    .sh-h1 { font-size: 19px; }
+    .sh-ctas :global(.btn) { flex: 1 1 100%; }
+  }
+</style>
