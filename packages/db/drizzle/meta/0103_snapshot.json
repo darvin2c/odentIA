@@ -1,5 +1,5 @@
 {
-  "id": "8a91348d-c890-4bc9-87c6-9fc9cd615aa3",
+  "id": "b8171271-e83e-492f-96ca-fc17f6a6cfac",
   "prevId": "5185bf40-bc8d-4ef8-a870-92966b39a000",
   "version": "7",
   "dialect": "postgresql",
@@ -12635,7 +12635,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -35171,18 +35171,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "tier_changed_at": {
-          "name": "tier_changed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_price_micros": {
-          "name": "previous_price_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
         },
         "dedupe_key": {
           "name": "dedupe_key",

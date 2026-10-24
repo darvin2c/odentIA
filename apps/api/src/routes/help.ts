@@ -15,6 +15,7 @@ import {
   listMySupportCases,
   markSupportCaseSeen,
   orgProduct,
+  productHelpTopics,
   rateHelp,
   reopenMySupportCase,
   replyToMySupportCase,
@@ -70,15 +71,15 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
   app.get("/screen", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const path = (c.req.query("path") ?? "/").slice(0, 200)
-    return runService(c, 200, async () => ({
-      ...describeHelpScreen(path),
-      attached: await withOrgContext(deps.db, orgId, async (tx) =>
-        describeHelpAttachments(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), {
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({
+        ...describeHelpScreen(path, await productHelpTopics(tx, orgId)),
+        attached: await describeHelpAttachments(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), {
           screen: path,
           appVersion: deps.appVersion ?? null,
         }),
-      ),
-    }))
+      })),
+    )
   })
 
   app.post("/ask", async (c) => {

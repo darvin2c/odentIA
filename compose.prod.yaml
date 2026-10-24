@@ -165,6 +165,20 @@ services:
     depends_on:
       - api
 
+  # La web de latidia72.com (decisión 18 del issue 229): la misma web con VITE_PRODUCT=medical,
+  # solo con inicio, precios, invitación y legales. Lee los precios de la misma API, por dentro.
+  latidia-web:
+    profiles: ["latidia"]
+    build: *latidia-build
+    command: ["pnpm", "--filter", "@odentia/web", "start"]
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      ODENTIA_API_INTERNAL_URL: "http://api:3001"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3016:3000"
+
   # Web de marketing (ADR 0046): HTML generado al compilar, sin variables de runtime
   # ni dependencias. Solo el Libro de Reclamaciones envía a la API desde el navegador.
   web:

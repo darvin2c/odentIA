@@ -50,11 +50,12 @@ export function dictationList(
   describe: string,
   words?: Parameters<typeof operationAgentSchema>[1],
 ) {
-  return z
-    .array(operationAgentSchema(operation, words).extend({ dicho: dictationSaid }))
-    .max(DICTATION_MAX_SUGGESTIONS)
-    .default([])
-    .describe(describe)
+  return dictationItems(operationAgentSchema(operation, words), describe)
+}
+
+/** Lo mismo con el esquema ya armado (latidIA: un diagnóstico sin pieza ni caras). */
+export function dictationItems(schema: z.ZodObject, describe: string) {
+  return z.array(schema.extend({ dicho: dictationSaid })).max(DICTATION_MAX_SUGGESTIONS).default([]).describe(describe)
 }
 
 /**
@@ -113,8 +114,12 @@ export const DICTATION_TOOL = "registrar_dictado"
 export interface DictationProfile {
   /** El esquema de la herramienta: `nota`, las listas de `parts` y `dictationEdits`. */
   extraction: z.ZodObject
-  /** Cada lista de registros de la respuesta y su clase de sugerencia, en el orden en que se guardan. */
-  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"] }>
+  /**
+   * Cada parte de la respuesta y su clase de sugerencia, en el orden en que se
+   * guardan. Una parte es una lista; con `single`, una sola entrada (latidIA:
+   * los signos vitales, el descanso).
+   */
+  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"]; single?: true }>
   /** Lo que dice la herramienta al modelo. */
   toolDescription: string
   /** Las instrucciones fijas, con lo de la clínica que no cambia en la atención. */
@@ -292,7 +297,8 @@ export function readDictation(
     else if (Object.values(payload).some((value) => !blank(value))) skip(nota)
   } else if (!blank(nota)) omitted += 1
   for (const part of parts) {
-    for (const item of items(args[part.key])) {
+    const value = args[part.key]
+    for (const item of part.single && isRecord(value) ? [value] : items(value)) {
       const payload = isRecord(item) ? fields(part.kind, item) : {}
       if (!isRecord(item) || Object.keys(payload).length === 0) skip(item)
       else drafts.push({ kind: part.kind, payload, sourceText: quote(item) })

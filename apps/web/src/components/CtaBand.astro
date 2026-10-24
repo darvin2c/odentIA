@@ -1,7 +1,7 @@
 ---
 // Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
 import { shownPlan } from "../lib/pricing"
-import { ctaOf } from "../lib/site"
+import { contactHref, ctaOf } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
@@ -24,7 +24,7 @@ const {
     <p class="lead lead-d">{text}</p>
     <div class="ctas">
       <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-      <a class="btn btn-g" href="/contacto">Habla con nosotros</a>
+      <a class="btn btn-g" href={contactHref}>Habla con nosotros</a>
     </div>
   </div>
 </section>

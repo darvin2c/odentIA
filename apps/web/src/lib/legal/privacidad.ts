@@ -20,7 +20,7 @@ export const PRIVACIDAD: LegalDoc = {
       id: "titular",
       title: "Quién es el responsable",
       blocks: [
-        `${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú («odentIA»).`,
+        `${TITULAR.razonSocial}, con RUC ${TITULAR.ruc} y domicilio en ${TITULAR.domicilio}, Perú («odentIA»), que ofrece el servicio con dos marcas: odentIA y latidIA. Esta política se aplica a las dos.`,
         `Contacto para asuntos de privacidad: ${TITULAR.correoPrivacidad}. Para consultas generales: [${contactEmail}](mailto:${contactEmail}).`,
       ],
     },
@@ -39,7 +39,7 @@ export const PRIVACIDAD: LegalDoc = {
                 "Responsable del tratamiento y titular del banco de datos.",
               ],
               [
-                "Usuarios de la cuenta de una clínica (recepción, odontólogos, caja, administración) y datos de facturación de la clínica",
+                "Usuarios de la cuenta de una clínica (recepción, odontólogos o médicos, caja, administración) y datos de facturación de la clínica",
                 "odentIA",
                 "Responsable del tratamiento y titular del banco de datos.",
               ],
@@ -176,7 +176,7 @@ export const PRIVACIDAD: LegalDoc = {
       title: "Datos de los pacientes de las clínicas",
       blocks: [
         "Cada clínica es la titular del banco de datos de sus pacientes y la responsable de su tratamiento. Ella decide qué datos carga en odentIA, con qué finalidad y durante cuánto tiempo, y debe informar a sus pacientes y obtener los consentimientos que exija la ley.",
-        "Estos datos incluyen datos sensibles de salud: historia clínica, odontograma, diagnósticos, tratamientos y presupuestos, además de datos de contacto y las conversaciones mantenidas por los canales que la clínica conecta.",
+        "Estos datos incluyen datos sensibles de salud: historia clínica (con el odontograma o el examen físico), diagnósticos, tratamientos y presupuestos, además de datos de contacto y las conversaciones mantenidas por los canales que la clínica conecta.",
         "odentIA trata esos datos como encargado del tratamiento, solo para prestar el servicio a la clínica y según sus instrucciones. Las condiciones están en el [contrato de encargo de tratamiento](/encargo-de-tratamiento).",
         "Cuando Sofi, el agente de recepción, atiende a una persona, se presenta como asistente virtual de la clínica. Los mensajes de atención (citas, controles y presupuestos) forman parte del servicio de la clínica; las promociones solo se envían con el consentimiento del paciente.",
         ENTRENAMIENTO,

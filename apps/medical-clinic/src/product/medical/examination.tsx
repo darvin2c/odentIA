@@ -210,4 +210,13 @@ export const medicalExamination: ProductExaminationUi = {
   Fields: (props) => <SystemsExamFields {...props} />,
   VitalsNote: (props) => <VitalsNote {...props} />,
   readLines: (saved) => examLines(readSystemsExam(saved)),
+  // Un sistema que dictó Clío y se confirmó: entra con lo dicho y lo demás queda como estaba.
+  withDictated: (draft, payload) => {
+    const exam = draft as SystemsExam | null
+    const system = EXAM_SYSTEMS.find((item) => item.key === payload["system"])
+    if (!system) return draft
+    const finding = typeof payload["finding"] === "string" ? payload["finding"] : ""
+    const entry = payload["state"] === "con_hallazgos" && finding ? { estado: "con_hallazgos" as const, hallazgo: finding } : { estado: "sin_alteraciones" as const }
+    return { sistemas: { ...(exam?.sistemas ?? {}), [system.key]: entry } }
+  },
 }

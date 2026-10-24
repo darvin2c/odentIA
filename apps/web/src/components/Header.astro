@@ -1,7 +1,10 @@
 ---
 // Cabecera: se superpone a la portada oscura de cada página; en teléfono, un menú desplegable.
+import latidiaDark from "../assets/latidia-logotipo-dark.svg?raw"
+import latidiaLight from "../assets/latidia-logotipo-light.svg?raw"
 import logoDark from "../assets/logotipo-dark.svg?raw"
 import logoLight from "../assets/logotipo-light.svg?raw"
+import { MEDICAL, WORDS } from "../lib/product"
 import { ctaOf, loginUrl, mainNav } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
@@ -11,10 +14,11 @@ interface Props {
 const { variant = "dark" } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, "") || "/"
 const current = (href: string) => path === href || path.startsWith(`${href}/`)
+const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : variant === "dark" ? logoDark : logoLight
 ---
 <header class:list={["site-head", variant]}>
   <div class="wrap row">
-    <a href="/" class="logo" aria-label="odentIA, inicio" set:html={variant === "dark" ? logoDark : logoLight} />
+    <a href="/" class="logo" aria-label={`${WORDS.name}, inicio`} set:html={logo} />
     <nav class="nav" aria-label="Principal">
       {mainNav.map((l) => <a href={l.href} class:list={["navlink", { cur: current(l.href) }]} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>)}
     </nav>

@@ -176,6 +176,8 @@ export interface ProductExaminationUi {
   VitalsNote(props: { patientId: string; encounterId: string; vitals: Vitals | null }): ReactNode
   /** Lo guardado, al leer la atención: una línea por parte; vacío si no se muestra. */
   readLines(saved: unknown): string[]
+  /** El borrador con una parte del examen que dictó Clío y se confirmó (latidIA: un sistema); sin él no se dicta. */
+  withDictated?(draft: unknown, payload: Record<string, unknown>): unknown
 }
 
 export interface ExaminationFieldsProps {
@@ -309,11 +311,17 @@ export interface ProductDictationUi {
    * Debajo de una sugerencia que aún no se puede confirmar (odentIA: lo que la
    * norma del país pide de un hallazgo dictado y no se dijo, con un toque).
    */
-  SuggestionChoices(props: {
+  SuggestionChoices?(props: {
     session: DictationSession
     item: DictationSuggestion
     busy: boolean
   }): ReactNode
+  /** Qué se puede dictar, con una frase de ejemplo por bloque (issue 109). */
+  examples: ReadonlyArray<{ block: string; say: string }>
+  /** Un trozo de dictado de ejemplo, para el cuadro donde se escribe o se pega. */
+  placeholder: string
+  /** Un dictado de ejemplo completo, para practicar en la página de Clío. */
+  practice: string
 }
 
 /** Una sección de Clínica que aporta el producto (odentIA: Odontograma y Periodontograma). */

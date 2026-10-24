@@ -20,6 +20,7 @@ import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, eq, inArray } from "drizzle-orm"
+import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
 import { savePatientHealth } from "../clinical.js"
@@ -121,6 +122,8 @@ export async function seedMedicalDemo(
     signatureName: "Elena Vela",
   })
   await db.transaction((tx) => ensureDefaultPaymentMethods(tx, ORG, VELA_ID, "PE"))
+  // Clío encendida (entrega 10): las atenciones en borrador ofrecen «Dictar la atención».
+  await db.transaction((tx) => upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: true }, { actorUserId: VELA_ID }))
 
   const [sede] = await db
     .insert(branch)

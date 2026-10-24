@@ -13,14 +13,15 @@ import { and, desc, eq } from "drizzle-orm"
 import { clinicToday } from "../inventory-stock.js"
 import { NO_PRODUCT_HOOKS, type ProductHooks } from "../product-hooks.js"
 import { medicalCatalog } from "./catalog.js"
+import { MEDICAL_DICTATION } from "./dictation.js"
 import { medicalExamination } from "./examination.js"
 import { medicalInterview } from "./interview.js"
 import { medicalPrescribing } from "./prescribing.js"
 
 /**
  * Lo que latidIA hace en los momentos de lo común (ADR 0079). Sin «dónde»
- * (la parte del cuerpo se escribe, decisión 4 del issue 229) ni dictado
- * todavía; su examen es por sistemas, registra dos signos vitales más y su
+ * (la parte del cuerpo se escribe, decisión 4 del issue 229); Clío dicta sus
+ * signos vitales, su examen y el descanso (entrega 10); su examen es por sistemas, registra dos signos vitales más y su
  * entrevista suma los antecedentes médicos, que la copia de la historia lleva.
  * Lo indicado queda aceptado al indicarlo: el presupuesto es opcional; y se
  * invita a volver a quien no viene hace un año (decisiones 15 y 16). Su
@@ -42,6 +43,7 @@ export const medicalHooks: ProductHooks = {
   interview: medicalInterview,
   examination: medicalExamination,
   vitals: MEDICAL_VITAL_KEYS,
+  dictation: MEDICAL_DICTATION,
   async recordSections(tx, { orgId, patientId }) {
     const [latest] = await tx
       .select({ answers: patientAnamnesis.answers })

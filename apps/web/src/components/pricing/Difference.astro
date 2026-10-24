@@ -1,5 +1,7 @@
 ---
 // «La diferencia»: tabla en pantallas anchas; en el teléfono, cada fila apilada (como en su tablero).
+import { MEDICAL, WORDS } from "../../lib/product"
+
 const rows = [
   {
     k: "Cómo se vende",
@@ -10,9 +12,9 @@ const rows = [
   },
   {
     k: "Cómo se cobra",
-    was: "Por odontólogo, agenda o sede, cada mes.",
+    was: `Por ${WORDS.clinician}, agenda o sede, cada mes.`,
     now: "Por lo que hizo cada agente: lo simple cuesta poco.",
-    wasM: "por odontólogo, agenda o sede.",
+    wasM: `por ${WORDS.clinician}, agenda o sede.`,
     nowM: "por lo que hizo cada agente.",
   },
   {
@@ -49,12 +51,12 @@ const rows = [
   <div class="wrap in">
     <div class="head">
       <span class="tag">[ La diferencia ]</span>
-      <h2 class="h2">El software de siempre se vende por sus funciones. odentIA, por lo que resuelve.</h2>
+      <h2 class="h2">El software de siempre se vende por sus funciones. {WORDS.name}, por lo que resuelve.</h2>
     </div>
     <table class="cmp">
-      <caption class="sr">Comparación entre el software de siempre y odentIA</caption>
+      <caption class="sr">Comparación entre el software de siempre y {WORDS.name}</caption>
       <thead>
-        <tr><td></td><th scope="col">Lo de siempre</th><th scope="col" class="us">odentIA</th></tr>
+        <tr><td></td><th scope="col">Lo de siempre</th><th scope="col" class="us">{WORDS.name}</th></tr>
       </thead>
       <tbody>
         {rows.map((r) => (
@@ -64,10 +66,10 @@ const rows = [
     </table>
     <div class="stack-m">
       {rows.map((r) => (
-        <div class="dif"><strong>{r.k}</strong><span class="was">Lo de siempre: {r.wasM}</span><span class="now">odentIA: {r.nowM}</span></div>
+        <div class="dif"><strong>{r.k}</strong><span class="was">Lo de siempre: {r.wasM}</span><span class="now">{WORDS.name}: {r.nowM}</span></div>
       ))}
     </div>
-    <p class="links">Mira cómo lo hacen <a href="/agentes">los tres agentes</a> y cómo <a href="/omnicanal">todos tus canales</a> llegan a un mismo lugar.</p>
+    {MEDICAL ? null : <p class="links">Mira cómo lo hacen <a href="/agentes">los tres agentes</a> y cómo <a href="/omnicanal">todos tus canales</a> llegan a un mismo lugar.</p>}
   </div>
 </section>
 

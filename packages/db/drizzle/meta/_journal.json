@@ -726,15 +726,22 @@
     {
       "idx": 103,
       "version": "7",
-      "when": 1792855107346,
-      "tag": "0103_tipo_cambiado",
+      "when": 1792851199724,
+      "tag": "0103_dictado_medico",
       "breakpoints": true
     },
     {
       "idx": 104,
       "version": "7",
-      "when": 1792855723904,
-      "tag": "0104_tipo_cambiado_reglas",
+      "when": 1792857187452,
+      "tag": "0104_tipo_cambiado",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792857194039,
+      "tag": "0105_tipo_cambiado_reglas",
       "breakpoints": true
     }
   ]

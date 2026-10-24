@@ -25,7 +25,9 @@ const { items, title = "Lo que nos preguntan.", tag = "Preguntas" } = Astro.prop
 </section>
 
 <style>
-  .faq { display: flex; flex-wrap: wrap; gap: 48px; }
+  /* .section pone su relleno arriba y abajo y le quitaba a .wrap el de los lados. */
+  .faq { display: flex; flex-wrap: wrap; gap: 48px; padding-inline: 32px; }
+  @media (max-width: 720px) { .faq { padding-inline: 16px; } }
   .head { flex: 1 1 300px; display: flex; flex-direction: column; gap: 18px; }
   .list { flex: 999 1 560px; min-width: 0; }
 </style>

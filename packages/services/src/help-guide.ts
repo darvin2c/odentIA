@@ -1,6 +1,6 @@
 import { normalizeForSearch, scoreKnowledgeMatch } from "./knowledge.js"
 
-/* ---------- Guía de odentIA: el mapa del sistema que usa la Ayuda ---------- */
+/* ---------- Guía de odentIA: el mapa del sistema que usa la Ayuda (latidIA: `medical/help.ts`) ---------- */
 
 /**
  * Un tema por pantalla. Lo que identifica a la pantalla —ruta y nombre— tiene
@@ -460,10 +460,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   },
 ] as const
 
-const byId = new Map(HELP_TOPICS.map((topic) => [topic.id, topic]))
-
-export function helpTopic(id: string): HelpTopic | undefined {
-  return byId.get(id)
+/**
+ * Cada función recibe la guía del producto de la clínica (`productHelpTopics`;
+ * latidIA tiene la suya, issue 229). Sin ella, la de odentIA.
+ */
+export function helpTopic(id: string, topics: readonly HelpTopic[] = HELP_TOPICS): HelpTopic | undefined {
+  return topics.find((topic) => topic.id === id)
 }
 
 /** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Horarios y ausencias». */
@@ -472,10 +474,10 @@ export function helpTopicLabel(topic: HelpTopic): string {
 }
 
 /** El tema de la pantalla donde está la persona: el de la ruta más larga que coincide. */
-export function helpTopicForScreen(pathname: string): HelpTopic | undefined {
+export function helpTopicForScreen(pathname: string, topics: readonly HelpTopic[] = HELP_TOPICS): HelpTopic | undefined {
   const clean = pathname.replace(/\/+$/, "") || "/"
   const under = (base: string) => clean === base || clean.startsWith(`${base}/`)
-  return [...HELP_TOPICS]
+  return [...topics]
     .filter((topic) => under(topic.path) || (topic.alsoAt ?? []).some(under))
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
@@ -498,11 +500,11 @@ export interface HelpMatch {
  * Sin modelo: es barato, se puede probar y no inventa. Si nada coincide lo
  * bastante, no hay respuesta.
  */
-export function matchHelpTopics(question: string): HelpMatch[] {
+export function matchHelpTopics(question: string, topics: readonly HelpTopic[] = HELP_TOPICS): HelpMatch[] {
   const asked = normalizeForSearch(question)
   if (!asked) return []
   const matches: HelpMatch[] = []
-  for (const topic of HELP_TOPICS) {
+  for (const topic of topics) {
     let best: HelpMatch = {
       topic,
       faq: null,
@@ -527,8 +529,8 @@ export function matchHelpTopics(question: string): HelpMatch[] {
 }
 
 /** Preguntas que la gente suele hacer en una pantalla, para ofrecerlas sin que escriba. */
-export function helpSuggestions(pathname: string): string[] {
-  const topic = helpTopicForScreen(pathname)
+export function helpSuggestions(pathname: string, topics: readonly HelpTopic[] = HELP_TOPICS): string[] {
+  const topic = helpTopicForScreen(pathname, topics)
   const own = (topic?.faqs ?? []).map((faq) => faq.q)
   const general = ["¿Dónde configuro los horarios?", "¿Cómo invito a alguien a mi equipo?", "¿Cómo enciendo el agente?"]
   return [...new Set([...own, ...general])].slice(0, 3)
