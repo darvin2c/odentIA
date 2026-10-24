@@ -5,13 +5,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, FileDown, MapPin } from "lucide-react"
 import { useId, useState } from "react"
-import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../components/booking-data-form"
-import { AppointmentBlock } from "../components/public/appointment-block"
-import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
-import { LinkConsentStep, LinkQuestionnaireStep } from "../components/public/link-steps"
-import { PersonalDataForm } from "../components/public/personal-data-form"
-import { capital, ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
-import { ApiError } from "../lib/api"
+import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../../components/booking-data-form"
+import { AppointmentBlock } from "../../components/public/appointment-block"
+import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
+import { LinkConsentStep, LinkQuestionnaireStep } from "../../components/public/link-steps"
+import { PersonalDataForm } from "../../components/public/personal-data-form"
+import { capital, ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../../components/public/week-slots"
+import { ApiError } from "../../lib/api"
 import {
   answerLinkBudget,
   type BookingAppointment,
@@ -28,10 +28,10 @@ import {
   type PersonalLinkMessages,
   type PersonalLinkView,
   reserveBooking,
-} from "../lib/booking-link"
-import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../lib/locale"
-import { formatPortalMoney } from "../lib/portal"
+} from "../../lib/booking-link"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
+import { formatPortalMoney } from "../../lib/portal"
 
 /**
  * «Su enlace» (ADR 0037): la página personal de cada persona. Muestra lo

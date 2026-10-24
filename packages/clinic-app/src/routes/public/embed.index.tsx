@@ -4,8 +4,8 @@ import { createIsomorphicFn } from "@tanstack/react-start"
 import { setResponseHeader } from "@tanstack/react-start/server"
 import { CheckCircle2, SendHorizontal, X } from "lucide-react"
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
-import { API_URL } from "../lib/auth-client"
-import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { API_URL } from "../../lib/auth-client"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 
 /**
  * El chat de la clínica dentro de su sitio (fase 6 del pulido de la Bandeja):

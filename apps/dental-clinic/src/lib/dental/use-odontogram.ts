@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { apiFetch } from "../api"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
 import type { OdontogramEntry, OdontogramState } from "./odontogram"
 
 /** El odontograma de la persona: su estado por pieza y su historial. */

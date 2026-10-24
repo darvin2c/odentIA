@@ -2,8 +2,8 @@ import { EmptyState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
-import { fetchBranchDirections } from "../lib/booking-link"
-import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { fetchBranchDirections } from "../../lib/booking-link"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 
 export const Route = createFileRoute("/llegar/$branch")({
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),

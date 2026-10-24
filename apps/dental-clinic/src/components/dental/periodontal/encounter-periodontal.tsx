@@ -34,7 +34,7 @@ import { Badge, Button, cn, Field, FieldLabel, Input, toast } from "@odentia/ui"
 import { LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useMemo, useState } from "react"
-import { ApiError } from "../../../lib/api"
+import { ApiError } from "@odentia/clinic-app/lib/api"
 import {
   classifyPeriodontalChart,
   fetchPeriodontalChart,
@@ -44,8 +44,8 @@ import {
   periodontalKeys,
   startPeriodontalChart,
 } from "../../../lib/dental/periodontal"
-import { QueryErrorState } from "../../../lib/query-error"
-import { ChoiceSelect } from "../../ui/choice-select"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
+import { ChoiceSelect } from "@odentia/clinic-app/components/ui/choice-select"
 import { PeriodontalCapture } from "./periodontal-capture"
 import { PeriodontalChart } from "./periodontal-chart"
 import { PeriodontalTiles } from "./periodontal-views"

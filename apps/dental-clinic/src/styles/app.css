@@ -2,6 +2,7 @@
 @import "@odentia/ui-patterns/src/image-adjust.css";
 @source "../../../../packages/ui/src";
 @source "../../../../packages/ui-patterns/src";
+@source "../../../../packages/clinic-app/src";
 
 /*
  * Periodontograma (issue 49): colores clínicos del gráfico. El borde de la

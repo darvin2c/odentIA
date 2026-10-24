@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { OdontogramDocument } from "../../components/dental/odontogram-document"
 import { fetchSignedOdontogramPrint } from "../../lib/dental/odontogram"
-import { hcLabel } from "../../lib/patients"
-import { QueryErrorState } from "../../lib/query-error"
+import { hcLabel } from "@odentia/clinic-app/lib/patients"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/$assessmentId/print")({
   component: SignedOdontogramPrintPage,

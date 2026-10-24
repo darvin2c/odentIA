@@ -3,12 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { useMemo, useState } from "react"
-import { RegistrationQuestionnaire } from "../components/patient/registration-questionnaire"
-import { publicAddressSource } from "../lib/address-suggestions"
-import { ApiError } from "../lib/api"
-import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { setOrgLocale } from "../lib/locale"
-import { fetchPublicRegistration, submitPublicRegistration } from "../lib/patient-registration"
+import { RegistrationQuestionnaire } from "../../components/patient/registration-questionnaire"
+import { publicAddressSource } from "../../lib/address-suggestions"
+import { ApiError } from "../../lib/api"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { setOrgLocale } from "../../lib/locale"
+import { fetchPublicRegistration, submitPublicRegistration } from "../../lib/patient-registration"
 
 export const Route = createFileRoute("/registro")({
   validateSearch: (search: Record<string, unknown>) => ({

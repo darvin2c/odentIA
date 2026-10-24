@@ -2,8 +2,8 @@ import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-pat
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
-import { ApiError } from "../lib/api"
-import { personalLinkFromEmail } from "../lib/public-automations"
+import { ApiError } from "../../lib/api"
+import { personalLinkFromEmail } from "../../lib/public-automations"
 
 export const Route = createFileRoute("/c/$token")({
   head: () => ({

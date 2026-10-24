@@ -42,9 +42,9 @@ import {
   useRef,
   useState,
 } from "react"
-import { usePermission } from "../../lib/crm"
+import { usePermission } from "@odentia/clinic-app/lib/crm"
 import { type Dentition, suggestedDentition } from "../../lib/dental/dentition"
-import { statusLabel } from "../../lib/patients"
+import { statusLabel } from "@odentia/clinic-app/lib/patients"
 import { type OdontogramEntry, type OdontogramState, winnersAsOf } from "../../lib/dental/odontogram"
 import { OdontogramArch } from "./odontogram-arch"
 import { SignedOdontograms } from "./odontogram-assessments"
@@ -52,8 +52,8 @@ import { OdontogramDocument } from "./odontogram-document"
 import { findingWords, OdontogramNotationProvider, useOdontogramNotation } from "./odontogram-notation"
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
-import { formatDate } from "../../lib/clinical-journey"
-import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 /** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
 function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean } {

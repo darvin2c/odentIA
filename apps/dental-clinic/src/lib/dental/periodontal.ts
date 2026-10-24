@@ -15,8 +15,8 @@ import type {
   PeriodontitisStatus,
   PreviousPeriodontitis,
 } from "@odentia/dental"
-import { apiFetch } from "../api"
-import { activeOrgLocale, activeOrgTimeZone } from "../locale"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 /** «Inicial» para la primera visita de la persona; «Reevaluación» para las siguientes. */
 export function visitName(index: number): string {

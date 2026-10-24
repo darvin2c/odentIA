@@ -10,8 +10,8 @@ import {
   type ManualOdontogramPurpose,
   type SignedOdontogramPurpose,
 } from "@odentia/dental"
-import { apiFetch } from "../api"
-import type { SiteFinding } from "../patients"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 
 /** Un hallazgo del odontograma, con lo propio de odentIA (sus detalles, su revisión, lo que lo dejó). */
 export interface OdontogramEntry extends SiteFinding {

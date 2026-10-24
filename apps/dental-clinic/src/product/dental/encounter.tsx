@@ -11,14 +11,14 @@ import {
   useEncounterPeriodontal,
 } from "../../components/dental/periodontal/encounter-periodontal"
 import { useOdontogram } from "../../lib/dental/use-odontogram"
-import { ApiError } from "../../lib/api"
-import type { ClosingCheck, ClosingOdontogram } from "../../lib/encounters"
-import { type EncounterDetail, statusLabel } from "../../lib/patients"
+import { ApiError } from "@odentia/clinic-app/lib/api"
+import type { ClosingCheck, ClosingOdontogram } from "@odentia/clinic-app/lib/encounters"
+import { type EncounterDetail, statusLabel } from "@odentia/clinic-app/lib/patients"
 import type {
   EncounterBlockContext,
   ProductEncounterBlocks,
   ProductEncounterUi,
-} from "../product-ui"
+} from "@odentia/clinic-app/product/product-ui"
 
 /** Lo dictado de una pieza se revisa en su bloque y entra como al tocarla (issue 109). */
 const NO_FINDINGS = "Sin hallazgos en esta atención"

@@ -17,7 +17,7 @@ import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "..
  * Cada app es de un producto y lo declara una sola vez al arrancar
  * (`declareProduct` en `router.tsx`); lo común le pide sus partes con
  * `productUi()`. Ninguna pantalla común importa lo de un producto: lo fija
- * `boundaries.test.ts`.
+ * `packages/dental/src/boundaries.test.ts`.
  */
 export interface ProductUi {
   product: ClinicalProduct

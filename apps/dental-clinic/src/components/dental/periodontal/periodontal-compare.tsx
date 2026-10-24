@@ -40,7 +40,7 @@ import {
   visitDay,
   visitName,
 } from "../../../lib/dental/periodontal"
-import { QueryErrorState } from "../../../lib/query-error"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { isUpper } from "./anatomy"
 import { displaySites, LOWER_ROW, PeriodontalChart, UPPER_ROW } from "./periodontal-chart"
 import { PeriodontalToothDetail } from "./periodontal-views"

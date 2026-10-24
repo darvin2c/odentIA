@@ -3,8 +3,8 @@ import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@od
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
-import { ApiError } from "../lib/api"
-import { fetchAutomationLink, submitAutomationLink } from "../lib/public-automations"
+import { ApiError } from "../../lib/api"
+import { fetchAutomationLink, submitAutomationLink } from "../../lib/public-automations"
 
 export const Route = createFileRoute("/baja/$token")({
   head: () => ({
