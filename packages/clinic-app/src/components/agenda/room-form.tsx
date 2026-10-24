@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query"
 import * as React from "react"
 import { apiFetch } from "../../lib/api"
 import { errorMessage } from "./shared"
+import { appWords, upperFirst } from "../../lib/product-words"
 
 /**
  * El formulario de una unidad dental, el mismo en la agenda y en Configuración: da de
@@ -28,6 +29,7 @@ export function RoomForm({
   onSaved: () => Promise<void>
 }) {
   const initialName = room?.name ?? suggestedName
+  const word = appWords().room
   const [name, setName] = React.useState(initialName)
   const [error, setError] = React.useState("")
   const save = useMutation({
@@ -42,7 +44,7 @@ export function RoomForm({
             body: JSON.stringify({ branchId, name: name.trim() }),
           }),
     onSuccess: async () => {
-      toast.success(room ? "Unidad dental guardada" : "Unidad dental añadida")
+      toast.success(`${upperFirst(word.one)} ${room ? "guardada" : "añadida"}`)
       await onSaved()
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -50,11 +52,11 @@ export function RoomForm({
   return (
     <FormDrawer
       open
-      title={room ? `Renombrar ${room.name}` : "Nueva unidad dental"}
+      title={room ? `Renombrar ${room.name}` : `Nueva ${word.one}`}
       description={
         room
-          ? `Unidad dental de ${branchName}. Sus citas se verán con el nombre nuevo.`
-          : `Se añade a ${branchName}. Cada cita ocupa una unidad dental.`
+          ? `${upperFirst(word.one)} de ${branchName}. Sus citas se verán con el nombre nuevo.`
+          : `Se añade a ${branchName}. Cada cita ocupa una ${word.one}.`
       }
       onClose={onClose}
       onSubmit={(event) => {
@@ -66,7 +68,7 @@ export function RoomForm({
       isDirty={name !== initialName}
       error={error || null}
       submitDisabled={!name.trim() || (room !== undefined && name.trim() === room.name)}
-      submitLabel={room ? "Guardar" : "Añadir unidad dental"}
+      submitLabel={room ? "Guardar" : `Añadir ${word.one}`}
     >
       <div className="grid gap-2">
         <FieldLabel htmlFor="sillon-nombre">Nombre</FieldLabel>

@@ -104,6 +104,7 @@ import { apiFetch } from "../../lib/api"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
+import { appWords, upperFirst } from "../../lib/product-words"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -867,7 +868,7 @@ function AgendaPage() {
                   })
                 }
               >
-                {group === "rooms" ? "Ver por profesional" : "Ver por unidad dental"}
+                {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -877,7 +878,7 @@ function AgendaPage() {
   }
   const pickWho = (id: string | null) => setParam("who", id ?? (ownColumn ? WHO_ALL : undefined))
   // Las fichas del teléfono: quiénes son según la vista y cuál está elegida; la fila dice el nombre.
-  const resourceTitle = group === "rooms" ? "Unidades dentales" : "Profesionales"
+  const resourceTitle = group === "rooms" ? upperFirst(appWords().room.many) : "Profesionales"
   const phoneResources = view === "semana" ? team : view === "dia" ? dayColumns : dayTeam
   const phoneValue = view === "lista" ? filter : view === "semana" ? focus : dayFocus
   const resourceChosen = phoneResources.find((item) => item.id === phoneValue)?.label ?? "todos"
@@ -922,13 +923,13 @@ function AgendaPage() {
   const setupState = noRooms ? (
     <EmptyState
       icon={Armchair}
-      title="Esta sede aún no tiene unidades dentales"
+      title={`Esta sede aún no tiene ${appWords().room.many}`}
       description={
         canConfigure
-          ? "Añade al menos una: cada cita ocupa una unidad dental."
-          : "Cada cita ocupa una unidad dental. Pide a quien administra la clínica que añada una."
+          ? `Añade al menos una: cada cita ocupa una ${appWords().room.one}.`
+          : `Cada cita ocupa una ${appWords().room.one}. Pide a quien administra la clínica que añada una.`
       }
-      actionLabel={canConfigure ? "Añadir unidad dental" : undefined}
+      actionLabel={canConfigure ? `Añadir ${appWords().room.one}` : undefined}
       onAction={canConfigure ? () => setRoomForm(true) : undefined}
     />
   ) : (
@@ -1156,7 +1157,7 @@ function AgendaPage() {
                     filter,
                     dayColumns,
                     pickWho,
-                    group === "rooms" ? "Unidades dentales: todas" : "Profesionales: todos",
+                    group === "rooms" ? `${upperFirst(appWords().room.many)}: todas` : "Profesionales: todos",
                   )}
             </>
           )
@@ -1207,7 +1208,7 @@ function AgendaPage() {
                         setParams({ group: group === "rooms" ? undefined : "rooms", who: undefined })
                       }
                     >
-                      {group === "rooms" ? "Ver por profesional" : "Ver por unidad dental"}
+                      {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
                     </Button>
                   ) : null}
                   <ScheduleResourceChips
@@ -1394,7 +1395,7 @@ function AgendaPage() {
         <RoomForm
           branchId={branchId}
           branchName={resources.branchName}
-          suggestedName={`Unidad dental ${resources.rooms.length + 1}`}
+          suggestedName={`${upperFirst(appWords().room.one)} ${resources.rooms.length + 1}`}
           onClose={() => setRoomForm(false)}
           onSaved={async () => {
             setRoomForm(false)

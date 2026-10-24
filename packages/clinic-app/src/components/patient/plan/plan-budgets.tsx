@@ -65,6 +65,7 @@ import {
 } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
+import { appWords } from "../../../lib/product-words"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
@@ -161,7 +162,7 @@ export function PlanBudgets({
           description={
             canPrepare
               ? "Se arma solo al firmar la atención con lo indicado. También puedes prepararlo ahora con lo que ya está en el plan."
-              : "Se arma solo al firmar la atención con lo que el odontólogo indicó."
+              : `Se arma solo al firmar la atención con lo que el ${appWords().clinician.one} indicó.`
           }
           actionLabel={canPrepare ? "Preparar presupuesto" : undefined}
           onAction={canPrepare && !prepare.isPending ? () => prepare.mutate() : undefined}

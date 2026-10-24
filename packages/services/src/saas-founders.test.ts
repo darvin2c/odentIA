@@ -20,6 +20,7 @@ import {
   releaseFounderInvitation,
   setSignupMode,
   submitWaitlistRequest,
+  type WaitlistInput,
 } from "./saas-founders.js"
 import { decideSaasNegotiation, getSaasAlerts, setSaasDiscount } from "./saas-terms.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -120,6 +121,19 @@ describe("la lista de espera", () => {
     expect(again).toEqual({ id: first.id, existing: true, answerDays: 2 })
     const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, first.id))
     expect(row).toMatchObject({ email: "ana@sonrisa.test", phone: "+51987654321", countryCode: "PE", status: "por_revisar" })
+  })
+
+  it("guarda el producto del dominio y pregunta por quien atiende con su palabra (decisión 17 del issue 229)", async () => {
+    const { id } = await submitWaitlistRequest(ownerDb, request("vela@sanmartin.test"), "medical")
+    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
+    expect(row?.product).toBe("medical")
+    const { professionals: _, ...without } = request("sinrespuesta@sanmartin.test")
+    await expect(submitWaitlistRequest(ownerDb, without as WaitlistInput, "medical")).rejects.toMatchObject({
+      message: "Elige cuántos médicos atienden",
+    })
+    await expect(submitWaitlistRequest(ownerDb, without as WaitlistInput)).rejects.toMatchObject({
+      message: "Elige cuántos odontólogos atienden",
+    })
   })
 
   it("rechaza datos que no sirven con un mensaje claro", async () => {

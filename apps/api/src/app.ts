@@ -6,7 +6,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { configurePublicLinks, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configurePublicLinks, onDomain, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -242,11 +242,19 @@ export function createApp(deps: AppDeps) {
   const tenantOrigins = Object.values(domains).flatMap((domain) =>
     domain ? [new RegExp(`^https://[a-z0-9-]+\\.${domain.replace(/^\./, "").replaceAll(".", "\\.")}(:\\d+)?$`)] : [],
   )
-  /** La sesión del dominio de la petición: el inicio, el registro y la salida ponen la cookie en el suyo. */
-  const authOf = (c: Context): Auth => {
-    const product = productOfHost(new URL(c.req.url).hostname, domains)
-    return (product && deps.productAuth?.[product]) || auth
+  /**
+   * El producto del dominio de la petición: el de la clínica que nace ahí y el
+   * de una solicitud de Fundadores (entrega 3 del issue 229). Fuera de los
+   * dominios conocidos, odentIA.
+   */
+  const productOfRequest = (c: Context): ClinicalProduct => productOfHost(new URL(c.req.url).hostname, domains) ?? "dental"
+  /** El panel de un producto: el de odentIA llevado a su dominio. Sin ese dominio, el de odentIA. */
+  const panelUrlOf = (product: ClinicalProduct): string => {
+    const domain = domains[product]
+    return domain ? onDomain(deps.webURL, deps.cookieDomain, domain) : deps.webURL
   }
+  /** La sesión del dominio de la petición: el inicio, el registro y la salida ponen la cookie en el suyo. */
+  const authOf = (c: Context): Auth => deps.productAuth?.[productOfRequest(c)] || auth
 
   const app = new Hono()
 
@@ -311,13 +319,14 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/access", createAdminCoreRoute(deps))
   app.route("/api/admin/organizations", createAdminOrganizationsRoute({
     ...deps,
+    panelUrlOf,
     getBillingSummary: getOrganizationBillingSummary,
     startTrial: startSaasTrial,
   }))
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
-  app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelURL: deps.webURL, replyTo: deps.foundersEmail }))
+  app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf, replyTo: deps.foundersEmail }))
   app.get("/api/admin/overview", (c) => runService(c, 200, () =>
     deps.ownerDb.transaction((tx) =>
       getBackofficeOverview(tx, adminContextOf(c), {
@@ -359,6 +368,7 @@ export function createApp(deps: AppDeps) {
       mailer: deps.mailer,
       remoteAddress: deps.registrationRemoteAddress,
       replyTo: deps.foundersEmail,
+      productOf: productOfRequest,
     }),
   )
   // Libro de Reclamaciones de odentIA.
@@ -574,11 +584,13 @@ export function createApp(deps: AppDeps) {
           .set({ ...identity, updatedAt: new Date() })
           .where(eq(orgProfile.organizationId, orgId))
       } else {
-        // El perfil nace con su región explícita: la base no asume ningún país.
+        // El perfil nace con su región explícita: la base no asume ningún país. Y
+        // con el producto del dominio donde se creó la clínica, que ya no cambia.
         await tx
           .insert(orgProfile)
           .values({
             organizationId: orgId,
+            product: productOfRequest(c),
             ...identity,
             ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
           })

@@ -18,7 +18,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { branchNotFound, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
-import { NEUTRAL_TIMEZONE } from "./locale.js"
+import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
 
 // Sin zona en la sede ni en la organización: UTC, nunca la de un país.
@@ -175,7 +175,7 @@ async function requireRoomInBranch(tx: Db, orgId: string, roomId: string, branch
       ),
     )
     .limit(1)
-  if (!row) throw roomNotFound()
+  if (!row) throw roomNotFound((await roomWord(tx, orgId)).one)
   return row
 }
 
@@ -549,7 +549,7 @@ export async function validateAvailability(
   if (clash) {
     throw conflict(
       "APPOINTMENT_CONFLICT",
-      "El profesional o la unidad dental ya están ocupados en ese horario",
+      `El profesional o la ${(await roomWord(tx, orgId)).one} ya están ocupados en ese horario`,
     )
   }
 }

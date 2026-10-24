@@ -4,6 +4,8 @@ import {
   clinicalProfileFor,
   formatMoney,
   isClinicalProduct,
+  type ProductWords,
+  productWords,
 } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import type { Db } from "@odentia/db"
@@ -146,6 +148,15 @@ export async function orgProduct(tx: Db, orgId: string): Promise<ClinicalProduct
     select product from org_profile where organization_id = ${orgId}`)
   const product = row?.product
   return isClinicalProduct(product) ? product : "dental"
+}
+
+/**
+ * Lo que se reserva con la sede y el profesional, con la palabra del producto
+ * de la clínica: «unidad dental» en odentIA, «sala» en latidIA (entrega 3 del
+ * issue 229). Femenina en los dos: las frases no cambian de artículo.
+ */
+export async function roomWord(tx: Db, orgId: string): Promise<ProductWords["room"]> {
+  return productWords(await orgProduct(tx, orgId)).room
 }
 
 /**

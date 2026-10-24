@@ -39,6 +39,7 @@ import {
 } from "../../lib/reports"
 import { ReceptionOffNotice } from "../agent/reception-off-notice"
 import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { appWords } from "../../lib/product-words"
 
 
 /**
@@ -114,7 +115,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
       <EmptyState
         icon={Bot}
         title={`El agente no hizo nada ${during(period)}`}
-        description={`Cuando ${receptionName} atienda conversaciones o agende citas, o un odontólogo confirme una consulta dictada, aquí verás lo que hizo y lo cobrado en sus citas.`}
+        description={`Cuando ${receptionName} atienda conversaciones o agende citas, o un ${appWords().clinician.one} confirme una consulta dictada, aquí verás lo que hizo y lo cobrado en sus citas.`}
         actionLabel={canAgent ? "Ver el agente" : undefined}
         onAction={() => void navigate({ to: "/agent" })}
       />
@@ -167,7 +168,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
           sparkLabel={`Consultas dictadas ${twelve}: ${travel(dictated.months, String)}`}
           change={change(dictated.current, dictated.previous)}
           better="up"
-          detail="Confirmadas por el odontólogo"
+          detail={`Confirmadas por el ${appWords().clinician.one}`}
         />
       </section>
 

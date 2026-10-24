@@ -1,4 +1,5 @@
-import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, ROLE_LABELS } from "@odentia/auth/permissions"
+import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, roleLabel } from "@odentia/auth/permissions"
+import type { ClinicalProduct } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   askHelp,
@@ -13,6 +14,7 @@ import {
   listActiveSupportGrants,
   listMySupportCases,
   markSupportCaseSeen,
+  orgProduct,
   rateHelp,
   reopenMySupportCase,
   replyToMySupportCase,
@@ -39,18 +41,21 @@ const caseMessageInput = z.object({ body: z.string().trim().min(1).max(4000) })
 const grantInput = z.object({ minutes: z.number().int().min(5).max(60).optional() })
 const grantRevokeInput = z.object({ grantId: z.uuid() })
 
-/** Quién pregunta, visto con la matriz canónica de permisos: la Ayuda no decide accesos, los lee. */
-function askerOf(userId: string, memberRole: string): HelpAsker {
+/**
+ * Quién pregunta, visto con la matriz canónica de permisos: la Ayuda no decide
+ * accesos, los lee. Los roles se nombran como en el producto de la clínica.
+ */
+function askerOf(userId: string, memberRole: string, product: ClinicalProduct): HelpAsker {
   const role = (ORG_ROLES as readonly string[]).includes(memberRole) ? (memberRole as OrgRole) : null
   return {
     userId,
-    roleLabel: role ? ROLE_LABELS[role] : memberRole,
+    roleLabel: role ? roleLabel(role, product) : memberRole,
     canOpen: (path) => {
       const needed = platformPathPermission(path)
       return needed === null || canAccessAny(memberRole, needed)
     },
     can: (permission) => canAccess(memberRole, permission as Permission),
-    whoCan: (permission) => ORG_ROLES.filter((item) => canAccess(item, permission as Permission)).map((item) => ROLE_LABELS[item]),
+    whoCan: (permission) => ORG_ROLES.filter((item) => canAccess(item, permission as Permission)).map((item) => roleLabel(item, product)),
   }
 }
 
@@ -67,8 +72,11 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const path = (c.req.query("path") ?? "/").slice(0, 200)
     return runService(c, 200, async () => ({
       ...describeHelpScreen(path),
-      attached: await withOrgContext(deps.db, orgId, (tx) =>
-        describeHelpAttachments(tx, orgId, askerOf(userId, memberRole), { screen: path, appVersion: deps.appVersion ?? null }),
+      attached: await withOrgContext(deps.db, orgId, async (tx) =>
+        describeHelpAttachments(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), {
+          screen: path,
+          appVersion: deps.appVersion ?? null,
+        }),
       ),
     }))
   })
@@ -77,7 +85,7 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = askInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => askHelp(tx, orgId, askerOf(userId, memberRole), parsed.data)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => askHelp(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), parsed.data)))
   })
 
   app.post("/ask/:id/feedback", async (c) => {
@@ -101,9 +109,9 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = requestInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const asker = askerOf(userId, memberRole)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
+        const asker = askerOf(userId, memberRole, await orgProduct(tx, orgId))
         const kase = await sendHelpRequest(tx, orgId, asker, { ...parsed.data, appVersion: deps.appVersion ?? null })
         return { ...kase, caseId: kase.id }
       }),

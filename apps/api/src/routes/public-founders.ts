@@ -1,4 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
+import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -7,7 +8,7 @@ import {
   readFounderInvitation,
   ServiceError,
   submitWaitlistRequest,
-  waitlistInputSchema,
+  waitlistInputSchemaFor,
   waitlistReceivedEmail,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -39,6 +40,8 @@ export function createPublicFoundersRoute(deps: {
   remoteAddress?: RegistrationRemoteAddress | undefined
   /** Buzón que lee las respuestas (FOUNDERS_EMAIL). */
   replyTo?: string | undefined
+  /** El producto del dominio de la petición: la solicitud lo guarda (decisión 17 del issue 229). */
+  productOf?: (c: Context) => ClinicalProduct
 }) {
   const app = new Hono()
   const buckets = new Map<string, { expiresAt: number; posts: number }>()
@@ -105,11 +108,12 @@ export function createPublicFoundersRoute(deps: {
     c.header("Cache-Control", "no-store")
     const blocked = limited(c)
     if (blocked) return blocked
-    const parsed = waitlistInputSchema.safeParse(await c.req.json().catch(() => null))
+    const product = deps.productOf?.(c) ?? "dental"
+    const parsed = waitlistInputSchemaFor(product).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) {
       return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Revisa los datos de la solicitud"), 400)
     }
-    const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data))
+    const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product))
     // La copia sale una sola vez: si ya estaba en la lista, no se repite.
     if (!result.existing) {
       try {

@@ -42,6 +42,7 @@ import { usePermission } from "../../../lib/crm"
 import type { PatientFull } from "../../../lib/patients"
 import { ChoiceSelect } from "../../ui/choice-select"
 import { AMOUNT_PENDING, budgetStatusTone, type Money, mutationMessage } from "./budget-parts"
+import { appWords } from "../../../lib/product-words"
 
 type Answer = "aceptado" | "pospuesto" | "rechazado"
 
@@ -391,7 +392,7 @@ export function BudgetResponse({
 
       {!answerable ? null : !canDecide ? (
         <p className="text-sm text-muted-foreground">
-          Tu rol no anota respuestas de presupuestos: lo hacen recepción, caja, el odontólogo o la administración.
+          Tu rol no anota respuestas de presupuestos: lo hacen recepción, caja, el {appWords().clinician.one} o la administración.
         </p>
       ) : decidersLoading ? (
         <div className="flex flex-col gap-2" aria-busy="true">

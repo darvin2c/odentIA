@@ -587,6 +587,9 @@ importers:
 
   packages/auth:
     dependencies:
+      '@odentia/clinical':
+        specifier: workspace:*
+        version: link:../clinical
       '@odentia/db':
         specifier: workspace:*
         version: link:../db

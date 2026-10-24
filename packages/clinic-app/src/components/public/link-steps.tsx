@@ -7,6 +7,7 @@ import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
 import { FirmaPad } from "../patient/firma-pad"
 import { AnswerInput, isFieldVisible, missingRequired } from "../patient/form-fields"
+import { appWords } from "../../lib/product-words"
 
 function problemOf(error: unknown, fallback: string): string {
   return error instanceof ApiError ? (error.shape.message ?? fallback) : `${fallback} Revisa tu conexión y vuelve a intentarlo.`
@@ -40,7 +41,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
     retry: false,
     mutationFn: () => signLinkConsent(slug, token, consentId, { docNumber: docNumber.trim(), comprehensionConfirmed: understood, signatureData: { strokes } }),
   })
-  if (sign.isSuccess) return <Done title="Firmado, gracias" text="Tu odontólogo lo revisa contigo antes de empezar." onBack={onBack} />
+  if (sign.isSuccess) return <Done title="Firmado, gracias" text={`Tu ${appWords().clinician.one} lo revisa contigo antes de empezar.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el consentimiento…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el consentimiento" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const consent = query.data.data
@@ -117,7 +118,7 @@ export function LinkQuestionnaireStep({ slug, token, onBack }: { slug: string; t
     mutationFn: () => submitLinkQuestionnaire(slug, token, answers),
     onError: (error) => setProblem(problemOf(error, "No pudimos enviar tus respuestas.")),
   })
-  if (send.isSuccess) return <Done title="Gracias, recibimos tus respuestas" text="Tu odontólogo las revisa contigo en la cita." onBack={onBack} />
+  if (send.isSuccess) return <Done title="Gracias, recibimos tus respuestas" text={`Tu ${appWords().clinician.one} las revisa contigo en la cita.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data

@@ -1,4 +1,4 @@
-import { canAccessAny, platformPathPermission, ROLE_LABELS } from "@odentia/auth/permissions"
+import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import {
   Badge,
   Button,
@@ -29,6 +29,7 @@ import {
   updateSpecialty,
 } from "../../lib/clinical-forms"
 import { useMyRole, useOrgMembers, usePermission } from "../../lib/crm"
+import { appRoleLabel } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings/specialties")({
   component: SpecialtiesPage,
@@ -396,7 +397,7 @@ function SpecialtyForm({
             <ul className="flex flex-col divide-y">
               {members.map((member) => {
                 const id = `${ids}-atiende-${member.userId}`
-                const role = ROLE_LABELS[member.role as keyof typeof ROLE_LABELS]
+                const role = appRoleLabel(member.role, "")
                 return (
                   <li key={member.userId} className="flex min-h-11 items-center gap-3 py-2">
                     <Checkbox

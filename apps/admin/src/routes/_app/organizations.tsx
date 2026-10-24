@@ -25,6 +25,7 @@ import {
   PageHeader,
   PageShell,
 } from "@odentia/ui-patterns"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
@@ -153,7 +154,14 @@ const assistedSchema = z.object({
   planCode: z.string(),
   sellerId: z.string().trim().max(120),
   isDemo: z.boolean(),
+  product: z.enum(CLINICAL_PRODUCTS),
 })
+
+/** Cada producto, como se elige al dar de alta una clínica. */
+const PRODUCT_CHOICES: Record<ClinicalProduct, string> = {
+  dental: `${productWords("dental").name} · clínica dental`,
+  medical: `${productWords("medical").name} · consultorio médico`,
+}
 
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.shape.message ?? common.errors.generic
@@ -323,6 +331,7 @@ function OrganizationsPage() {
     planCode: string
     sellerId: string
     isDemo: boolean
+    product: ClinicalProduct
   }
   const assistedDefaults: AssistedFormValues = {
     orgName: "",
@@ -334,6 +343,7 @@ function OrganizationsPage() {
     planCode: "",
     sellerId: "",
     isDemo: false,
+    product: "dental",
   }
   const form = useForm({
     defaultValues: assistedDefaults,
@@ -594,6 +604,32 @@ function OrganizationsPage() {
         }}
       >
         <div className="flex flex-col gap-4">
+          {/* El producto no cambia después (decisión 9 del issue 229): la clínica abre en su dominio. */}
+          <form.Field name="product">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="assisted-product">Producto</FieldLabel>
+                <Select<ClinicalProduct>
+                  value={field.state.value}
+                  onValueChange={(next) => {
+                    if (next) field.handleChange(next)
+                  }}
+                >
+                  <SelectTrigger id="assisted-product">
+                    <SelectValue>{(selected: ClinicalProduct) => PRODUCT_CHOICES[selected]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLINICAL_PRODUCTS.map((product) => (
+                      <SelectItem key={product} value={product}>
+                        {PRODUCT_CHOICES[product]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>No se cambia después: la clínica abre en el dominio de su producto.</FieldDescription>
+              </Field>
+            )}
+          </form.Field>
           <form.Field name="orgName">
             {(field) => (
               <Field>

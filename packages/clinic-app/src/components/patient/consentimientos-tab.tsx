@@ -37,6 +37,7 @@ import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./conse
 import { FirmaPad } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { appWords } from "../../lib/product-words"
 
 const errorMessage = (e: unknown) =>
   e instanceof ApiError
@@ -284,7 +285,7 @@ export function ConsentDetail({
         <div className="flex flex-col gap-2 rounded-md border p-3">
           <p className="text-sm">
             {consentLinkWords(document) ??
-              "Falta la firma. En la unidad dental, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono."}
+              `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
           </p>
           <div className="flex flex-wrap gap-2">
             {/* Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces. */}

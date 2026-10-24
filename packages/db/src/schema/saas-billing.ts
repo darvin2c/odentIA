@@ -887,6 +887,8 @@ export const saasWaitlistRequest = adminSchema.table(
     city: text("city").notNull(),
     professionals: text("professionals").notNull(),
     currentTool: text("current_tool").notNull(),
+    /** odentIA o latidIA: el del dominio donde se pidió (entrega 3 del issue 229). La clínica nace con él. */
+    product: text("product").notNull().default("dental"),
     status: text("status").notNull().default("por_revisar"),
     note: text("note"),
     discardReason: text("discard_reason"),
@@ -918,6 +920,7 @@ export const saasWaitlistRequest = adminSchema.table(
       sql`${table.currentTool} IN ('nada','cuaderno_excel','otro_software')`,
     ),
     check("saas_waitlist_request_country_check", sql`${table.countryCode} ~ '^[A-Z]{2}$'`),
+    check("saas_waitlist_request_product_check", sql`${table.product} IN ('dental','medical')`),
     check(
       "saas_waitlist_request_text_check",
       sql`length(trim(${table.firstName})) BETWEEN 1 AND 80 AND length(trim(${table.lastName})) BETWEEN 1 AND 80

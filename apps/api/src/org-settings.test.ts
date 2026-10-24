@@ -132,6 +132,7 @@ beforeAll(async () => {
     webhookBaseUrl: "https://api.example.com",
     trustedOrigins: [],
     cookieDomain: "odentia.localhost",
+    productDomains: { medical: "latidia.localhost" },
     webURL: "https://app.odentia.localhost",
     adminURL: "https://admin.odentia.localhost",
     mailer: { send: async () => { throw new Error("Correo no esperado en este recorrido") } },
@@ -337,4 +338,22 @@ it("logo: quitarlo solo borra dentro de la carpeta de la clínica, aunque el gua
   expect(isInAvatarFolder(`avatars/clinica-${ORG}/logo.png`, `clinica-${ORG}`)).toBe(true)
   expect(isInAvatarFolder(`avatars/clinica-${ORG}/../clinica-org_settings_b/logo.png`, `clinica-${ORG}`)).toBe(false)
   expect(isInAvatarFolder("avatars/u-otra/foto.png", `clinica-${ORG}`)).toBe(false)
+})
+
+it("la clínica nace con el producto del dominio donde se crea, y no cambia (entrega 3 del issue 229)", async () => {
+  const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  const put = (body: unknown) =>
+    app.request("https://api.latidia.localhost/api/org-profile", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-test-session": "other", "x-odentia-org": OTHER_SLUG },
+      body: JSON.stringify(body),
+    })
+  expect((await put({ legalName: "Consultorio Ajeno", ...region })).status).toBe(200)
+  const productOf = async (org: string) =>
+    (await ownerDb.execute<{ product: string }>(sql`select product from org_profile where organization_id = ${org}`))[0]?.product
+  expect(await productOf(OTHER_ORG)).toBe("medical")
+  // La de odentIA nació en su dominio; guardar sus datos desde otro no la cambia.
+  expect(await productOf(ORG)).toBe("dental")
+  expect((await put({ legalName: "Consultorio Ajeno", ...region })).status).toBe(200)
+  expect(await productOf(OTHER_ORG)).toBe("medical")
 })

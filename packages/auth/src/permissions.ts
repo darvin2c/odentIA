@@ -38,6 +38,8 @@
  * Rol o permiso desconocido siempre deniega, incluso para owner/admin.
  */
 
+import { type ClinicalProduct, productWords } from "@odentia/clinical";
+
 /** Roles de membresía de la organización. */
 export const ORG_ROLES = ["owner", "admin", "reception", "clinician", "cashier", "member"] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
@@ -85,6 +87,14 @@ export const ROLE_LABELS: Record<OrgRole, string> = {
   cashier: "Caja",
   member: "Miembro",
 };
+
+/**
+ * El nombre de un rol en el producto de la clínica: quien atiende es
+ * «Odontólogo» en odentIA y «Médico» en latidIA (entrega 3 del issue 229).
+ */
+export function roleLabel(role: OrgRole, product: ClinicalProduct = "dental"): string {
+  return role === "clinician" ? productWords(product).clinician.label : ROLE_LABELS[role];
+}
 
 /** Qué hace cada rol, en español para la UI de miembros. */
 export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
