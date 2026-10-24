@@ -75,7 +75,7 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${professionalId}`, userId: professionalId, organizationId: orgId, role: "clinician", createdAt: new Date() },
   ])
-  // Recepción y el Administrador encendidos y con el horario para escribir a toda hora: el reloj es el real.
+  // Recepción y el Administrador encendidos y con el horario de recontacto a toda hora: el reloj es el real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: true,

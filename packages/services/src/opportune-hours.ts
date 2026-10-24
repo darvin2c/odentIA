@@ -1,9 +1,9 @@
 /**
  * Horas de un horario semanal: si un instante cae dentro, el primero y el
- * último momento permitido. Sirve al «Horario para escribir» (decisión 18 v3,
- * `writing-hours.ts`): cuándo odentIA le escribe a alguien por su cuenta, por
- * día y con la hora de cada sede; un día sin tramos no se escribe. También al
- * horario propio del agente («A qué horas responde»), que va aparte.
+ * último momento permitido. Sirve al «Horario de recontacto» (decisión 18 v3,
+ * `writing-hours.ts`; ADR 0084): cuándo se le escribe primero a alguien, por
+ * día y con la hora de cada sede; un día sin tramos no se escribe. Es el único
+ * horario: cuando la persona escribe, se le responde siempre.
  *
  * Funciones puras: reciben el horario ya leído y el instante; nunca la hora real.
  */
@@ -15,8 +15,6 @@ export interface OpportuneSchedule {
   timeZone: string
   /** Por día de la semana (0 = domingo), los tramos permitidos; vacío = ese día no. */
   week: MinuteRange[][]
-  /** Horario del agente (`activeFromMin`/`activeUntilMin`) que lo acota; puede cruzar la medianoche. Nulo = sin acotar. */
-  agent?: { fromMin: number; untilMin: number } | null
 }
 
 /** Cuántos días se busca hacia adelante o atrás antes de rendirse (un horario sin tramos). */
@@ -40,31 +38,9 @@ function merge(ranges: MinuteRange[]): MinuteRange[] {
   return out
 }
 
-function intersect(a: MinuteRange[], b: MinuteRange[]): MinuteRange[] {
-  const out: MinuteRange[] = []
-  for (const [aStart, aEnd] of a) {
-    for (const [bStart, bEnd] of b) {
-      const start = Math.max(aStart, bStart)
-      const end = Math.min(aEnd, bEnd)
-      if (end > start) out.push([start, end])
-    }
-  }
-  return merge(out)
-}
-
-/** Los tramos permitidos de un día de la semana, ya recortados por el horario del agente. */
+/** Los tramos permitidos de un día de la semana. */
 export function opportuneRangesOn(schedule: OpportuneSchedule, weekday: number): MinuteRange[] {
-  const day = merge(schedule.week[weekday] ?? [])
-  const agent = schedule.agent
-  if (!agent) return day
-  const agentRanges: MinuteRange[] =
-    agent.fromMin < agent.untilMin
-      ? [[agent.fromMin, agent.untilMin]]
-      : [
-          [0, agent.untilMin],
-          [agent.fromMin, 1440],
-        ]
-  return intersect(day, agentRanges)
+  return merge(schedule.week[weekday] ?? [])
 }
 
 interface LocalDay {
@@ -171,25 +147,6 @@ export function lastOpportuneAtOrBefore(at: Date, schedule: OpportuneSchedule): 
     }
   }
   return null
-}
-
-/**
- * Cuándo vuelve a responder el agente con su horario propio: el próximo inicio
- * de su franja desde `at`, o `at` si ya está dentro. Sin horario, `at`.
- */
-export function nextAgentOpening(at: Date, timeZone: string, agent: OpportuneSchedule["agent"] = null): Date {
-  if (!agent) return at
-  const always: OpportuneSchedule = { timeZone, week: Array.from({ length: 7 }, () => [[0, 1440]]), agent }
-  return nextOpportuneFrom(at, always) ?? at
-}
-
-/** ¿Está el agente dentro de su horario propio en `at`? Sin horario, siempre. */
-export function insideAgentHours(at: Date, timeZone: string, agent: OpportuneSchedule["agent"] = null): boolean {
-  if (!agent) return true
-  const { minute } = localDayOf(at, timeZone)
-  return agent.fromMin < agent.untilMin
-    ? minute >= agent.fromMin && minute < agent.untilMin
-    : minute >= agent.fromMin || minute < agent.untilMin
 }
 
 /**

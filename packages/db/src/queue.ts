@@ -40,9 +40,9 @@ export interface AgentRunJob {
   conversationId: string
   messageId: string
   /**
-   * La corrida llegó fuera del horario del agente y se pospuso hasta que
-   * abriera: atiende todo lo que la persona escribió desde la última
-   * respuesta, aunque tenga más de la ventana de ráfaga.
+   * La corrida se pospuso porque una persona del equipo conversaba (ADR 0050):
+   * atiende todo lo que la persona escribió desde la última respuesta, aunque
+   * tenga más de la ventana de ráfaga.
    */
   deferred?: boolean
 }

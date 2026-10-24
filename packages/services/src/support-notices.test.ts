@@ -183,8 +183,8 @@ describe("a quien preguntó", () => {
     // Soporte le responde en público por error y lo pasa a «Esperando a la clínica».
     await replyToSupportCase(ownerDb, staff, outage.caseId, "Respondido por error en público.")
     await setSupportCaseStatus(ownerDb, staff, outage.caseId, "esperando_clinica")
-    const other = await ask("¿Cómo cambio el horario para escribir?")
-    await replyToSupportCase(ownerDb, staff, other.id, "En Agente › Horario para escribir.")
+    const other = await ask("¿Cómo cambio el horario de recontacto?")
+    await replyToSupportCase(ownerDb, staff, other.id, "En Agente › Horario de recontacto.")
     const latest = Math.max(await lastAnswerOf(outage.caseId), await lastAnswerOf(other.id))
     await expect(tickSupportNotices(ownerDb, new Date(latest + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))).resolves.toBeDefined()
     expect(await personNoticesOf(outage.caseId)).toEqual([])

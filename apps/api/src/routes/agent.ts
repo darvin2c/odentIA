@@ -36,9 +36,6 @@ const putInput = z.object({
   about: z.string().max(600).optional(),
   disabledFunctions: z.array(z.string().max(40)).max(20).optional(),
   functionNotes: z.record(z.string().max(40), z.string().max(300)).optional(),
-  activeFromMin: z.number().int().min(0).max(1439).nullable().optional(),
-  activeUntilMin: z.number().int().min(1).max(1440).nullable().optional(),
-  channels: z.array(z.string().max(40)).max(20).nullable().optional(),
   /** Horas de silencio tras las que el agente se despide y cierra (ADR 0024). */
   closeAfterHours: z.number().int().min(6).max(23).optional(),
 })
@@ -88,7 +85,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
    * entrega el motivo técnico: ese va a Soporte de odentIA.
    */
   /**
-   * «Horario para escribir» (decisión 18 v3): cuándo odentIA escribe por su
+   * «Horario de recontacto» (decisión 18 v3): cuándo odentIA escribe por su
    * cuenta. Lo ve quien supervisa el agente y lo cambia quien lo administra.
    */
   app.get("/writing-hours", async (c) => {

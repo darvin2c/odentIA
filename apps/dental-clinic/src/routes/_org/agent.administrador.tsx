@@ -101,15 +101,15 @@ function LineBlock({
 }
 
 /**
- * A qué hora escribe: el «Horario para escribir» de Agente (decisión 18 v3),
+ * A qué hora escribe: el «Horario de recontacto» de Agente (decisión 18 v3),
  * el mismo para todo lo que sale solo. Aquí solo se dice y se lleva ahí.
  */
 function WritingHoursNote({ page }: { page: AdminPage }) {
   const rows = writingWeekRows(page.writingHours)
   return (
-    <section aria-label="Horario para escribir" className="flex flex-wrap items-center gap-3 rounded-xl bg-muted p-4 text-sm">
+    <section aria-label="Horario de recontacto" className="flex flex-wrap items-center gap-3 rounded-xl bg-muted p-4 text-sm">
       <p className="min-w-0 flex-1 basis-64">
-        <span className="font-semibold">Horario para escribir:</span>{" "}
+        <span className="font-semibold">Horario de recontacto:</span>{" "}
         {rows.map((row) => `${row.days} ${row.hours ?? "no escribimos"}`).join(" · ")}, con la hora de cada sede. Como mucho un mensaje al día por
         persona.
       </p>

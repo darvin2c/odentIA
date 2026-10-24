@@ -346,12 +346,12 @@ function audioEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
 }
 
 /** Con el agente encendido en la clínica (la transcripción es para que él lea el audio). */
-async function withAgentOn<T>(fn: () => Promise<T>, channels: string[] | null = null): Promise<T> {
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true, channels }))
+async function withAgentOn<T>(fn: () => Promise<T>): Promise<T> {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true }))
   try {
     return await fn()
   } finally {
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: false, channels: null }))
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: false }))
   }
 }
 
@@ -394,8 +394,6 @@ it("sin el agente que la lea, la nota de voz queda como audio y no se paga su tr
     (await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", conversationId))).messages[0]?.body
   // Agente apagado en la clínica.
   expect(await bodyOf((await ingestAudio("evt-t-off")).conversationId)).toBeNull()
-  // Encendido, pero sin atender ese canal.
-  expect(await withAgentOn(async () => bodyOf((await ingestAudio("evt-t-canal")).conversationId), ["whatsapp"])).toBeNull()
   // Encendido en la clínica, pero apagado en esa conversación.
   const { conversationId } = await ingestAudio("evt-t-hilo")
   await withOrgContext(appDb, "org_a", (tx) => tx.update(conversation).set({ agentStatus: "off" }).where(eq(conversation.id, conversationId)))

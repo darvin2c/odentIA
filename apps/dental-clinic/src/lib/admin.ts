@@ -78,7 +78,7 @@ export interface AdminRequestResult {
 
 export interface AdminPage {
   enabled: boolean
-  /** El «Horario para escribir» de Agente: por día (0 = domingo), sus tramos en minutos. */
+  /** El «Horario de recontacto» de Agente: por día (0 = domingo), sus tramos en minutos. */
   writingHours: WritingWeek
   receptionOn: boolean
   whatsapp: boolean

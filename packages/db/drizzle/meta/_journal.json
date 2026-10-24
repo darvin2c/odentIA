@@ -638,6 +638,13 @@
       "when": 1792768149644,
       "tag": "0090_impuestos_de_lo_cobrado_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1792810721733,
+      "tag": "0091_sofi_responde_siempre",
+      "breakpoints": true
     }
   ]
 }

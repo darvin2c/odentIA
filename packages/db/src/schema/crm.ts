@@ -738,7 +738,7 @@ export interface AgentAdvisorSettings {
 }
 
 /**
- * «Horario para escribir» (decisión 18 v3, ADR 0042): por día de la semana
+ * «Horario de recontacto» (decisión 18 v3, ADR 0042): por día de la semana
  * (0 = domingo), los tramos en minutos locales en que odentIA escribe por su
  * cuenta; vacío = ese día no. Se lee con la hora de cada sede.
  */
@@ -756,7 +756,7 @@ export const agentConfig = pgTable(
     /**
      * Modelo de decisión (none | baseline | jev). Toda
      * clínica nace con Jev (ADR 0047), también la fila que crea otra
-     * operación sin decir el proveedor (Administrador, horario para escribir).
+     * operación sin decir el proveedor (Administrador, horario de recontacto).
      */
     decisionProvider: text("decision_provider").notNull().default("jev"),
     /**
@@ -767,7 +767,7 @@ export const agentConfig = pgTable(
     decisionRoutingEnabled: boolean("decision_routing_enabled").notNull().default(true),
     /** Administrador: si está encendido. Vacío = apagado. */
     advisor: jsonb("advisor").$type<AgentAdvisorSettings>().notNull().default(sql`'{}'::jsonb`),
-    /** «Horario para escribir»: vale para todo lo que odentIA envía por su cuenta. */
+    /** «Horario de recontacto»: vale para todo lo que odentIA envía por su cuenta. */
     writingHours: jsonb("writing_hours")
       .$type<AgentWritingHours>()
       .notNull()
@@ -794,14 +794,6 @@ export const agentConfig = pgTable(
     /** Indicación de la clínica para una función concreta, por id de función. */
     functionNotes: jsonb("function_notes").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
     /**
-     * Límites que aplica el sistema: franja del día en que responde (minutos
-     * desde medianoche en la zona de la clínica; nulos = a toda hora) y canales
-     * donde atiende (nulo = todos los conectados).
-     */
-    activeFromMin: integer("active_from_min"),
-    activeUntilMin: integer("active_until_min"),
-    channels: text("channels").array(),
-    /**
      * Horas de silencio del paciente tras las que el agente cierra la
      * conversación con una despedida (ADR 0024). Tope 23: después de 24 horas
      * WhatsApp ya no deja escribir sin un mensaje aprobado.
@@ -827,10 +819,6 @@ export const agentConfig = pgTable(
     check("agent_config_treatment_check", sql`${table.treatment} is null or ${table.treatment} in ('tu','usted')`),
     check("agent_config_tone_check", sql`${table.tone} in ('cercano','neutro','formal')`),
     check("agent_config_emojis_check", sql`${table.emojis} in ('no','pocos')`),
-    check(
-      "agent_config_active_hours_check",
-      sql`(${table.activeFromMin} is null) = (${table.activeUntilMin} is null) and (${table.activeFromMin} is null or (${table.activeFromMin} between 0 and 1439 and ${table.activeUntilMin} between 1 and 1440 and ${table.activeFromMin} <> ${table.activeUntilMin}))`,
-    ),
   ],
 )
 

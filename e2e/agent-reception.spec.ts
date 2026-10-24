@@ -2,7 +2,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
-import { api, call, chooseOption, expect, test } from "./fixtures"
+import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -18,8 +18,6 @@ interface Config {
   functionNotes: Record<string, string>
   personaName: string | null
   emojis: "no" | "pocos"
-  activeFromMin: number | null
-  activeUntilMin: number | null
   handoffKeywords: string[]
   dailyRunLimit: number
 }
@@ -59,6 +57,11 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Lo básico que falta se dice en la ficha de las preguntas sin respuesta: se responde en el mismo sitio.
   await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("preguntas básicas")
   await expect(page.getByRole("region", { name: "Cómo le fue esta semana" })).toContainText("Está apagado")
+  // Un solo horario, el de recontacto (ADR 0084): para escribir primero; cuando la persona escribe, responde siempre.
+  const recontact = page.getByRole("region", { name: "Horario de recontacto" })
+  await expect(recontact).toContainText("Es el horario decente para volver a contactar.")
+  await expect(recontact).toContainText("Cuando la persona escribe, Sofi responde siempre, a cualquier hora.")
+  await expect(recontact.getByRole("link", { name: "A qué horas responde" })).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("resumen-apagado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
@@ -143,18 +146,10 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(reach).toContainText("Mencionan «queja»")
   await expect(reach).toContainText("Mencionan «reclamo»")
 
-  // Límites: cada fila abre solo lo suyo y guardar una no pisa las otras.
-  await expect(reach.getByRole("button", { name: /^Canales/ })).toContainText("Telegram")
-  await reach.getByRole("button", { name: /^Horario/ }).click()
-  const hoursForm = sideSurface(page, { name: "Horario de Sofi", exact: true })
-  await expect(hoursForm.getByRole("checkbox", { name: "En todos los canales conectados" })).toHaveCount(0)
-  await hoursForm.getByRole("checkbox", { name: "A toda hora" }).uncheck()
-  // «Hora»: una lista cada 15 minutos, no el campo de hora del navegador.
-  await chooseOption(hoursForm.getByLabel("Desde", { exact: true }), { label: "08:00" })
-  await chooseOption(hoursForm.getByLabel("Hasta", { exact: true }), { label: "20:00" })
-  await hoursForm.getByRole("button", { name: "Guardar" }).click()
-  await expect(hoursForm).toBeHidden()
-  await expect(reach.getByRole("button", { name: /^Horario/ })).toContainText("De 08:00 a 20:00")
+  // Límites: cada fila abre solo lo suyo y guardar una no pisa las otras. Sofi responde
+  // siempre, a toda hora y en todos los canales (ADR 0084): no hay fila de horario ni de canales.
+  await expect(reach.getByRole("button", { name: /^Horario/ })).toHaveCount(0)
+  await expect(reach.getByRole("button", { name: /^Canales/ })).toHaveCount(0)
   await expect(reach.getByRole("button", { name: /^Tope diario/ })).toContainText("500 respuestas")
   await reach.getByRole("button", { name: /^Tope diario/ }).click()
   const capForm = sideSurface(page, { name: "Tope diario de Sofi", exact: true })
@@ -164,7 +159,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await capForm.getByRole("button", { name: "Guardar" }).click()
   await expect(capForm).toBeHidden()
   await expect(reach.getByRole("button", { name: /^Tope diario/ })).toContainText("300 respuestas")
-  expect(await config()).toMatchObject({ activeFromMin: 480, activeUntilMin: 1200, dailyRunLimit: 300, handoffKeywords: ["queja", "reclamo"] })
+  expect(await config()).toMatchObject({ dailyRunLimit: 300, handoffKeywords: ["queja", "reclamo"] })
   await expect(reach).toContainText("Nunca, y no se puede cambiar")
 
   // Qué sabe: cuatro filas que llevan a donde se edita cada cosa, y lo que recuerda de cada persona.
@@ -312,7 +307,9 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await info.attach("recepcion-movil-pantalla", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await reach.getByRole("button", { name: "Límites y cuándo pasa a una persona" }).click()
   const mobileLimits = page.getByRole("dialog", { name: "Límites de Sofi" })
-  await expect(mobileLimits.getByLabel("Desde", { exact: true })).toContainText("08:00")
+  // Sin horario ni canales: Sofi responde siempre (ADR 0084).
+  await expect(mobileLimits.getByText("A qué horas responde")).toHaveCount(0)
+  await expect(mobileLimits.getByText("En qué canales responde")).toHaveCount(0)
   await expect(mobileLimits.getByLabel("Tope diario de respuestas")).toHaveValue("300")
   await expect(mobileLimits.getByLabel("Pasa siempre a una persona si mencionan")).toHaveValue("queja, reclamo")
   await info.attach("limites-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })

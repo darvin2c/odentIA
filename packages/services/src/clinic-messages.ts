@@ -1919,7 +1919,7 @@ export async function resumeConversationBySystem(
       waiting: `Pasaron 24 horas desde que ${name} escribió: ${channel} no deja escribirle hasta que vuelva a escribir. Si tiene WhatsApp, escríbele por ahí desde la Bandeja.`,
     }
   }
-  // Lo inicia el agente: sale dentro del «Horario para escribir» (ADR 0042).
+  // Lo inicia el agente: sale dentro del «Horario de recontacto» (ADR 0042).
   const schedule = await writingScheduleOf(tx, orgId)
   if (!isWritingTime(now, schedule)) {
     const opens = nextOpportuneFrom(now, schedule)
@@ -1929,7 +1929,7 @@ export async function resumeConversationBySystem(
       : null
     return {
       sent: false,
-      waiting: `Es fuera del horario para escribir${when ? `: el agente puede escribirle a ${name} desde el ${when}` : ""}. Llámala si es urgente.`,
+      waiting: `Es fuera del horario de recontacto${when ? `: el agente puede escribirle a ${name} desde el ${when}` : ""}. Llámala si es urgente.`,
     }
   }
   const { options, why } = await sendables(tx, orgId, conversationId, now)

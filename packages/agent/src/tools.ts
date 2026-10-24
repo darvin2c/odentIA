@@ -78,12 +78,13 @@ import {
   updateContact,
   webchatHandoffWhere,
   agentTextsFor,
+  emergencyAdviceFor,
   type ProductAgentTexts,
 } from "@odentia/services"
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
-import { type AgentRoute, handoffFallbackNotice } from "./decision/route.js"
+import { type AgentRoute, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
@@ -232,6 +233,8 @@ export interface AgentToolCtx {
   lessonOverrides?: LessonOverrides
   /** Camino que eligió el modelo de decisión para este turno; ausente = camino abierto. */
   route?: AgentRoute | null
+  /** Lo que escribió trae una señal de alarma (`hasAlarmSignal`, ADR 0084): el aviso dice a dónde llamar. */
+  alarm?: boolean
   /**
    * Lo que el sistema ya sabe del turno sin preguntarle a un modelo: la persona
    * tocó un botón de un mensaje automático. Va con lo del turno, tras el camino.
@@ -394,7 +397,12 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
           channel === "webchat"
             ? await withOrgContext(ctx.db, ctx.orgId, (tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "preguntar" as const)
             : undefined
-        return handoffFallbackNotice(treatment ?? null, channel, where)
+        // Una posible emergencia empieza por a dónde llamar (ADR 0084).
+        const urgent = ctx.alarm === true || (ctx.route?.urgency ?? 0) >= URGENT_SCORE
+        const emergency = urgent
+          ? await withOrgContext(ctx.db, ctx.orgId, (tx) => emergencyAdviceFor(tx, ctx.orgId, treatment ?? null)).catch(() => null)
+          : null
+        return handoffFallbackNotice(treatment ?? null, channel, where, emergency)
       })(),
     })
     outcome = typeof result === "string" ? result : ""

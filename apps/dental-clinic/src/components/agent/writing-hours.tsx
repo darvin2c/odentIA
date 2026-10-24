@@ -1,9 +1,8 @@
 import { Button } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { QueryErrorState } from "../../lib/query-error"
 import { WRITING_HOURS_KEY, type WritingWeek, writingWeekRows } from "../../lib/writing-hours"
@@ -47,10 +46,10 @@ export function WritingHoursRows({ week }: { week: WritingWeek }) {
 }
 
 /**
- * Agente › «Horario para escribir» (decisión 18 v3): cuándo odentIA escribe por
- * su cuenta, por día y con la hora de cada sede. Se cambia con el mismo editor
- * semanal de los horarios del equipo. No es el horario de atención ni «A qué
- * horas responde» el agente.
+ * Agente › «Horario de recontacto» (decisión 18 v3; ADR 0084): cuándo se le
+ * escribe primero a alguien, por día y con la hora de cada sede. Se cambia con
+ * el mismo editor semanal de los horarios del equipo. Es el único horario: no
+ * es el de atención, y cuando la persona escribe se le responde siempre.
  */
 export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
   const query = useWritingHours()
@@ -62,11 +61,12 @@ export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1 basis-56">
           <h2 id="horario-para-escribir" className="font-heading text-base font-bold sm:text-lg">
-            Horario para escribir
+            Horario de recontacto
           </h2>
           <p className="text-sm text-muted-foreground">
-            Cuándo odentIA escribe por su cuenta: recordatorios, controles, seguimientos, novedades y lo que inicia {ADMIN_NAME}.
-            Con la hora de cada sede. No cambia cuándo responde {receptionName} cuando la persona escribe.
+            Es el horario decente para volver a contactar. {receptionName} solo escribe primero dentro de él: retomar lo que quedó pendiente,
+            recordatorios, controles, seguimientos y novedades. Con la hora de cada sede. Cuando la persona escribe, {receptionName} responde
+            siempre, a cualquier hora.
           </p>
         </div>
         {canWrite && week ? (
@@ -86,11 +86,7 @@ export function WritingHoursCard({ canWrite }: { canWrite: boolean }) {
       )}
       <p className="text-sm text-muted-foreground">
         Si un mensaje toca fuera de este horario, sale en el último momento permitido antes o, si no hay, en el primero después, siempre que falte al
-        menos una hora para la cita. Los avisos de algo que pasó, como una cita cancelada, salen al momento.{" "}
-        <Link to="/agent/recepcion" className="font-semibold text-primary underline-offset-4 hover:underline">
-          A qué horas responde
-        </Link>{" "}
-        va aparte, en la página de {receptionName}.
+        menos una hora para la cita. Los avisos de algo que pasó, como una cita cancelada, salen al momento.
       </p>
       {open && week ? <WritingHoursDrawer week={week} onClose={() => setOpen(false)} /> : null}
     </section>
@@ -105,7 +101,7 @@ function WritingHoursDrawer({ week, onClose }: { week: WritingWeek; onClose: () 
     failed: false,
     retry: () => undefined,
     save: (rules) => apiFetch("/api/agent/writing-hours", { method: "PUT", body: JSON.stringify({ week: weekOf(rules) }) }),
-    savedMessage: "Horario para escribir guardado",
+    savedMessage: "Horario de recontacto guardado",
     onSaved: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: WRITING_HOURS_KEY }),
@@ -117,7 +113,7 @@ function WritingHoursDrawer({ week, onClose }: { week: WritingWeek; onClose: () 
   return (
     <FormDrawer
       open
-      title="Horario para escribir"
+      title="Horario de recontacto"
       description="Por día, con la hora de cada sede. Un día sin tramos no se escribe."
       onClose={onClose}
       onSubmit={(event) => {

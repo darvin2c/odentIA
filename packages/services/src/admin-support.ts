@@ -121,9 +121,6 @@ export interface SupportDiagnostic {
     decisionRoutingEnabled: boolean
     clinicalAssistantEnabled: boolean
     dailyRunLimit: number
-    activeFromMin: number | null
-    activeUntilMin: number | null
-    channels: string[] | null
   } | null
   channels: { channel: string; provider: string; displayName: string; status: string }[]
   services: { total: number }
@@ -1186,9 +1183,6 @@ export async function readSupportDiagnostic(
         decisionRoutingEnabled: agentConfig.decisionRoutingEnabled,
         clinicalAssistantEnabled: agentConfig.clinicalAssistantEnabled,
         dailyRunLimit: agentConfig.dailyRunLimit,
-        activeFromMin: agentConfig.activeFromMin,
-        activeUntilMin: agentConfig.activeUntilMin,
-        channels: agentConfig.channels,
       })
       .from(agentConfig)
       .where(eq(agentConfig.organizationId, orgId))

@@ -1154,7 +1154,7 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   expect(config.data.closeAfterHours).toBe(12)
 })
 
-it("«Horario para escribir», «Esperan su sí» y «Lo que el agente debe saber»: los lee quien supervisa y los cambia quien administra", async () => {
+it("«Horario de recontacto», «Esperan su sí» y «Lo que el agente debe saber»: los lee quien supervisa y los cambia quien administra", async () => {
   const json = { "content-type": "application/json" }
   const owner = buildApp("owner")
   const reception = buildApp("reception")

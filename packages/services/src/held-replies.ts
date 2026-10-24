@@ -31,7 +31,7 @@ export type HeldOffer =
   | "sin_permiso"
   /** Meta todavía no aprueba «Ver respuesta»: el ciclo lo envía cuando lo apruebe. */
   | "sin_aprobar"
-  /** Lo envía el ciclo, fuera del «Horario para escribir»: espera a que abra. */
+  /** Lo envía el ciclo, fuera del «Horario de recontacto»: espera a que abra. */
   | "fuera_de_horario"
 
 /**

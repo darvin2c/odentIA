@@ -40,7 +40,7 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 /**
  * Ninguna conversación queda abierta (ADR 0024): cerrar con su motivo y sus
  * efectos, escribir reabre, «Resolver», «Tomar» y «Devolver», y el ciclo que
- * insiste una vez y cierra por silencio dentro del «Horario para escribir»
+ * insiste una vez y cierra por silencio dentro del «Horario de recontacto»
  * (ADR 0042). Lima es UTC−5 y el 12 de octubre de 2026 es lunes; la clínica de
  * prueba tiene el horario que viene: lunes a viernes de 8:00 a 20:00, sábado
  * de 8:00 a 14:00 y domingo sin mensajes.
@@ -265,7 +265,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await settle(conv.id, new Date("2026-10-12T17:05:00Z"))
     expect(await tick(c, new Date("2026-10-12T20:30:00Z"))).toMatchObject({ nudged: 0, closed: 0 })
     // Las 22 horas caen el martes a las 7:00 (antes de las 8:00): se adelanta al lunes a las 19:59,
-    // el último momento del «Horario para escribir» (de 8:00 a 20:00), no el de atención.
+    // el último momento del «Horario de recontacto» (de 8:00 a 20:00), no el de atención.
     expect(await tick(c, new Date("2026-10-13T00:30:00Z"))).toMatchObject({ closed: 0 })
     expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta", closedByUserId: null })
@@ -336,7 +336,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     )
   })
 
-  it("insistir y despedirse siguen el «Horario para escribir» de la clínica, por día", async () => {
+  it("insistir y despedirse siguen el «Horario de recontacto» de la clínica, por día", async () => {
     const c = await clinic()
     // El domingo no se escribe: con el horario que viene, el agente no insiste.
     const sunday = new Date("2026-10-11T14:00:00Z") // domingo 9:00 en Lima

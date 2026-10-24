@@ -82,10 +82,7 @@ export function conversationWords(input: {
     return { text: `Por responder · ${agent} no la atiende`, tone: "team" }
   }
   if (attention.agentAttending) {
-    return {
-      text: attention.outOfHours ? `La atiende ${agent} · responde al abrir` : `La atiende ${agent}`,
-      tone: "agent",
-    }
+    return { text: `La atiende ${agent}`, tone: "agent" }
   }
   return null
 }

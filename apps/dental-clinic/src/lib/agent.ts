@@ -336,19 +336,6 @@ export function voicePreview(input: {
   return `¡Hola!${emoji} ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
 }
 
-/** Minutos del día ↔ «HH:MM», para el horario en que responde el agente. */
-export function minutesToClock(minutes: number): string {
-  const safe = Math.max(0, Math.min(1440, minutes)) % 1440
-  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`
-}
-
-export function clockToMinutes(clock: string): number | null {
-  const match = /^([0-9]{1,2}):([0-9]{2})$/.exec(clock.trim())
-  if (!match) return null
-  const minutes = Number(match[1]) * 60 + Number(match[2])
-  return minutes >= 0 && minutes < 1440 ? minutes : null
-}
-
 /* ---------- Aprender: por revisar, lecciones y casos de prueba ---------- */
 
 export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada"

@@ -82,7 +82,7 @@ export interface WeeklyRule {
 /**
  * Una semana de turnos como borrador hasta guardar: la que se edita con
  * `WeeklyScheduleFields`. La usan el horario de cada profesional y el
- * «Horario para escribir» del agente (decisión 18 v3): el mismo editor.
+ * «Horario de recontacto» del agente (decisión 18 v3): el mismo editor.
  */
 export function useWeeklyTurns(input: {
   /** Qué semana es: al cambiar, se vuelve a cargar lo guardado. */

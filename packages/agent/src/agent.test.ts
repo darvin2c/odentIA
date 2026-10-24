@@ -1977,48 +1977,32 @@ it("con «No usar» los emojis se quitan antes de enviar; con «Pocos» salen ta
   }
 })
 
-it("fuera de sus canales o de su horario el agente no responde y el hilo queda para el equipo", async () => {
-  const attempt = async (thread: string, eventId: string) => {
-    const { conversationId, messageId } = await ingestText(thread, eventId, "Hola")
-    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola." }, `e-${eventId}`))
-    expect(await runScripted(model, conversationId, messageId)).toBe("done")
-    const rows = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger)
-        .where(eq(agentRunLedger.conversationId, conversationId)))
-    return { calls: model.seen.length, replies: await agentMessages(conversationId), rows, status: await agentStatusOf(conversationId) }
-  }
-  const nowMin = (() => {
-    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date())
-    const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
-    return pick("hour") * 60 + pick("minute")
-  })()
+it("una señal de alarma no espera al equipo que conversa: pasa con prioridad alta y el aviso dice a dónde llamar (ADR 0084)", async () => {
+  const first = await ingestText("tg:alarma", "evt-alarma-1", "Hola")
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_agent_team', 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  // Carla acaba de escribir: con cualquier otro mensaje el agente esperaría 15 minutos.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: first.conversationId, senderKind: "user", senderUserId: "u_agent_team", content: { type: "text", text: "Hola, soy Carla" } }))
+  await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = '+5115550123' where "organization_id" = 'org_a'`)
   try {
-    // Solo WhatsApp: un hilo de Telegram no lo atiende.
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { channels: ["whatsapp"] }))
-    const offChannel = await attempt("tg:limite-canal", "evt-lim-1")
-    expect(offChannel).toMatchObject({ calls: 0, replies: [], status: "on", rows: [{ status: "omitida", error: "canal-no-atendido" }] })
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { channels: ["telegram"] }))
-    expect((await attempt("tg:limite-canal-ok", "evt-lim-2")).replies).toEqual(["Hola."])
-
-    // Franja que empieza dentro de una hora: ahora está fuera.
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { channels: null, activeFromMin: (nowMin + 60) % 1440, activeUntilMin: ((nowMin + 120) % 1440) || 1440 }))
-    // Fuera de horario no se omite para siempre: la misma corrida vuelve a la cola para cuando abra.
-    const offHours = await attempt("tg:limite-hora", "evt-lim-3")
-    expect(offHours).toMatchObject({ calls: 0, replies: [], rows: [] })
-    const deferred = await ownerDb.execute<{ message: { conversationId: string; deferred?: boolean } }>(
-      sql`select message from pgmq.q_agent_runs where message->>'deferred' = 'true'`,
+    const alarm = await ingestText("tg:alarma", "evt-alarma-2", "Me duele mucho el pecho y no puedo respirar")
+    // El modelo que escribe no responde: sale el aviso fijo, que también dice a dónde llamar.
+    const model = new ScriptedModel(() => {
+      throw new Error("el modelo no responde")
+    })
+    expect(await runScripted(model, alarm.conversationId, alarm.messageId)).toBe("done")
+    const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ reason: agentHandoff.reason, priority: agentHandoff.priority }).from(agentHandoff)
+        .where(eq(agentHandoff.conversationId, alarm.conversationId)))
+    expect(handoffs).toEqual([{ reason: "Urgencia clínica", priority: "alta" }])
+    const said = await agentMessages(alarm.conversationId)
+    expect(said).toHaveLength(1)
+    // El número del país (Perú, 106) y el de la clínica van primero, antes del aviso de siempre.
+    expect(said[0]).toBe(
+      "Si es una emergencia, llama ahora al 106 o ve a la emergencia más cercana. También puedes llamar a la clínica al +5115550123. Recibimos tu mensaje. Una persona del equipo te va a responder por aquí.",
     )
-    expect(deferred.some((row) => row.message.deferred === true)).toBe(true)
-    // Franja que cruza la medianoche y contiene este momento.
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { activeFromMin: (nowMin + 1380) % 1440, activeUntilMin: ((nowMin + 60) % 1440) || 1440 }))
-    expect((await attempt("tg:limite-hora-ok", "evt-lim-4")).replies).toEqual(["Hola."])
-    await expect(withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { activeFromMin: 600, activeUntilMin: null })))
-      .rejects.toMatchObject({ code: "VALIDATION" })
   } finally {
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { channels: null, activeFromMin: null, activeUntilMin: null }))
+    await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = null where "organization_id" = 'org_a'`)
   }
 })
 
