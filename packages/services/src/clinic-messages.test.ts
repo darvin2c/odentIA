@@ -1056,3 +1056,22 @@ describe("un solo WhatsApp por clínica", () => {
     expect(telegram.channel).toBe("telegram")
   })
 })
+
+describe("«Invitar a volver» por producto (issue 229)", () => {
+  it("latidIA invita al año con su propia plantilla; odentIA sigue con la de seis meses", async () => {
+    const dental = `vuelve-d-${randomUUID().slice(0, 8)}`
+    const medical = `vuelve-m-${randomUUID().slice(0, 8)}`
+    await insertOrg(ownerDb, dental, dental)
+    await insertOrg(ownerDb, medical, medical)
+    await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, medical))
+    const message = (orgId: string) => withOrgContext(appDb, orgId, (tx) => currentAutomationMessage(tx, orgId, "invitar_a_volver"))
+    expect(await message(dental)).toMatchObject({
+      template: "odentia_invitar_a_volver_v1",
+      body: expect.stringContaining("más de seis meses"),
+    })
+    expect(await message(medical)).toMatchObject({
+      template: "latidia_invitar_a_volver_v1",
+      body: expect.stringContaining("más de un año"),
+    })
+  })
+})

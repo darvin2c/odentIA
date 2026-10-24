@@ -7,7 +7,7 @@ import {
   type TemplateStatus,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
-import { formatMoney } from "@odentia/clinical"
+import { type ClinicalProduct, formatMoney } from "@odentia/clinical"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationRule } from "@odentia/db/schema/automation"
 import {
@@ -36,10 +36,12 @@ import {
   AUTOMATION_MESSAGES,
   type AutomationMessage,
   type AutomationMessageKey,
+  automationMessageOf,
   BUDGET_READY_MESSAGE_KEY,
   CATALOG_MESSAGE_KEYS,
   type CatalogMessageKey,
   catalogMessageOf,
+  catalogTemplatesOf,
   cleanVariable,
   dataNamesOf,
   isMessageVariable,
@@ -214,8 +216,9 @@ function catalogDef(
   key: CatalogMessageKey,
   row: MessageRow | null,
   versions: VersionRow[],
+  product: ClinicalProduct,
 ): MessageDef {
-  const spec = catalogMessageOf(key)
+  const spec = catalogMessageOf(key, product)
   if (!spec) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
   return {
     id: key,
@@ -329,9 +332,10 @@ async function loadMessages(
     .where(eq(clinicMessageVersion.organizationId, orgId))
     .orderBy(asc(clinicMessageVersion.number))
   const versionsOf = (id: string) => versions.filter((version) => version.messageId === id)
+  const product = await orgProduct(tx, orgId)
   const defs: MessageDef[] = CATALOG_MESSAGE_KEYS.map((key) => {
     const row = rows.find((item) => item.key === key) ?? null
-    return catalogDef(key, row, row ? versionsOf(row.id) : [])
+    return catalogDef(key, row, row ? versionsOf(row.id) : [], product)
   })
   for (const row of rows) {
     if (row.key === null && row.archivedAt === null) defs.push(ownDef(row, versionsOf(row.id)))
@@ -339,7 +343,7 @@ async function loadMessages(
   // Toda plantilla que es de un mensaje de la clínica, incluidas las de textos
   // ya reemplazados y las de mensajes eliminados: no son «de la cuenta».
   const known = new Set<string>(versions.map((version) => version.templateName))
-  for (const key of CATALOG_MESSAGE_KEYS) known.add(catalogMessageOf(key)?.template ?? "")
+  for (const key of CATALOG_MESSAGE_KEYS) for (const name of catalogTemplatesOf(key)) known.add(name)
   return { defs, known }
 }
 
@@ -359,7 +363,7 @@ export async function currentAutomationMessage(
   orgId: string,
   key: AutomationMessageKey,
 ): Promise<AutomationMessage> {
-  const base = AUTOMATION_MESSAGES[key]
+  const base = automationMessageOf(key, await orgProduct(tx, orgId)) ?? AUTOMATION_MESSAGES[key]
   return { ...base, ...(await currentTextOf(tx, orgId, base)) }
 }
 
@@ -405,7 +409,7 @@ async function currentTextOf(
  * cuerpo y datos): de aquí salen la plantilla, la respuesta y el correo.
  */
 export async function currentCatalogMessage(tx: Db, orgId: string, key: CatalogMessageKey): Promise<MessageSpec> {
-  const base = catalogMessageOf(key)
+  const base = catalogMessageOf(key, await orgProduct(tx, orgId))
   if (!base) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
   return { ...base, ...(await currentTextOf(tx, orgId, base)) }
 }
@@ -417,7 +421,7 @@ export async function findMessageTemplate(
   connectionId: string,
   key: CatalogMessageKey,
 ): Promise<TemplateItem | null> {
-  const base = catalogMessageOf(key)
+  const base = catalogMessageOf(key, await orgProduct(tx, orgId))
   if (!base) return null
   const { template } = await currentTextOf(tx, orgId, base)
   return findTemplateByName(tx, orgId, connectionId, template)

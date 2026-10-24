@@ -316,10 +316,32 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
   },
 }
 
-export function automationMessageOf(kind: string): AutomationMessage | null {
-  return (AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(kind)
-    ? AUTOMATION_MESSAGES[kind as AutomationMessageKey]
-    : null
+/**
+ * Lo que cambia en un producto (issue 229): latidIA invita a volver al año
+ * (`recallMonths`), así que su texto dice «un año» y es otra plantilla, con su
+ * propio nombre para que Meta la apruebe aparte. La de odentIA no cambia.
+ */
+const PRODUCT_MESSAGES: Partial<Record<ClinicalProduct, Partial<Record<AutomationMessageKey, Pick<AutomationMessage, "template" | "body">>>>> = {
+  medical: {
+    invitar_a_volver: {
+      template: "latidia_invitar_a_volver_v1",
+      body: "Hola, {{1}}. Hace más de un año que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
+    },
+  },
+}
+
+/** Todas las plantillas de un mensaje, de cualquier producto: un nombre que no hay que tratar como ajeno. */
+export function productTemplatesOf(key: AutomationMessageKey): string[] {
+  return [
+    AUTOMATION_MESSAGES[key].template,
+    ...Object.values(PRODUCT_MESSAGES).flatMap((messages) => (messages?.[key] ? [messages[key].template] : [])),
+  ]
+}
+
+export function automationMessageOf(kind: string, product: ClinicalProduct = "dental"): AutomationMessage | null {
+  if (!(AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(kind)) return null
+  const key = kind as AutomationMessageKey
+  return { ...AUTOMATION_MESSAGES[key], ...PRODUCT_MESSAGES[product]?.[key] }
 }
 
 /**
@@ -419,12 +441,19 @@ export const CATALOG_MESSAGE_KEYS = [
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
-export function catalogMessageOf(key: string): MessageSpec | null {
+export function catalogMessageOf(key: string, product: ClinicalProduct = "dental"): MessageSpec | null {
   if (key === RESUME_MESSAGE_KEY) return RESUME_MESSAGE
   if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
   if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
-  return automationMessageOf(key)
+  return automationMessageOf(key, product)
+}
+
+/** Las plantillas de un mensaje del catálogo en todos los productos. */
+export function catalogTemplatesOf(key: string): string[] {
+  return (AUTOMATION_MESSAGE_KEYS as readonly string[]).includes(key)
+    ? productTemplatesOf(key as AutomationMessageKey)
+    : [catalogMessageOf(key)?.template ?? ""]
 }
 
 /**
