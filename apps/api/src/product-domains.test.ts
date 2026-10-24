@@ -11,7 +11,10 @@ import { createApp } from "./app.js"
  * dos. Sin base de datos: estas rutas no la tocan.
  */
 const sessionOf = (product: string) =>
-  ({ handler: async () => new Response(product), api: { getSession: async () => null } }) as unknown as Auth
+  ({
+    handler: async () => new Response(product),
+    api: { getSession: async () => null },
+  }) as unknown as Auth
 
 const app = createApp({
   auth: sessionOf("odentIA"),
@@ -23,7 +26,11 @@ const app = createApp({
   storage: {} as Storage,
   validateExternal: false,
   webhookBaseUrl: "https://api.odentia.test",
-  trustedOrigins: ["https://odentia.test", "https://app.odentia.test", "https://admin.odentia.test"],
+  trustedOrigins: [
+    "https://odentia.test",
+    "https://app.odentia.test",
+    "https://admin.odentia.test",
+  ],
   cookieDomain: "odentia.test",
   webURL: "https://app.odentia.test",
   adminURL: "https://admin.odentia.test",
@@ -41,8 +48,12 @@ const allowed = async (origin: string) => {
 
 describe("los dos dominios en la API", () => {
   it("el inicio de sesión va a la sesión del dominio de la petición", async () => {
-    expect(await (await app.request("https://api.latidia.test/api/auth/get-session")).text()).toBe("latidIA")
-    expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
+    expect(await (await app.request("https://api.latidia.test/api/auth/get-session")).text()).toBe(
+      "latidIA",
+    )
+    expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe(
+      "odentIA",
+    )
   })
 
   it("CORS acepta las clínicas y el panel de los dos productos, y nada más", async () => {

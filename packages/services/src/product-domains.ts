@@ -17,7 +17,10 @@ const bare = (domain: string) => domain.trim().toLowerCase().replace(/^\./, "")
  * (`https://*.odentia32.com`). Lo que no es de ese dominio queda igual.
  */
 export function onDomain(address: string, from: string, to: string): string {
-  const match = new RegExp(`^([a-z][a-z0-9+.-]*://)((?:[^/:]+\\.)?)${quote(bare(from))}(?=[:/]|$)`, "i").exec(address)
+  const match = new RegExp(
+    `^([a-z][a-z0-9+.-]*://)((?:[^/:]+\\.)?)${quote(bare(from))}(?=[:/]|$)`,
+    "i",
+  ).exec(address)
   if (!match) return address
   return `${match[1]}${match[2]}${bare(to)}${address.slice(match[0].length)}`
 }
@@ -49,6 +52,13 @@ export function productOfHost(
  * dominio, llevados al del producto. La administración no se copia: es solo
  * de odentIA.
  */
-export function trustedOriginsOn(origins: readonly string[], from: string, to: string, except: readonly string[] = []): string[] {
-  return origins.filter((origin) => isOnDomain(origin, from) && !except.includes(origin)).map((origin) => onDomain(origin, from, to))
+export function trustedOriginsOn(
+  origins: readonly string[],
+  from: string,
+  to: string,
+  except: readonly string[] = [],
+): string[] {
+  return origins
+    .filter((origin) => isOnDomain(origin, from) && !except.includes(origin))
+    .map((origin) => onDomain(origin, from, to))
 }

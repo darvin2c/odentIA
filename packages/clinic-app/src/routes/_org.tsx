@@ -135,10 +135,11 @@ export const Route = createFileRoute("/_org")({
     const permissions = platformPathPermission(location.pathname)
     if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
     const region = await loadOrgRegion()
-    // Una clínica de otro producto se abre en su dominio, con su app (decisión 9 del issue 229).
-    if (region.product && region.product !== productUi().product) {
-      throw redirect({ href: tenantUrl(slug, location.href, region.product) })
-    }
+    // Una clínica de otro producto se abre en su dominio, con su app (decisión 9 del
+    // issue 229). Sin ese dominio configurado el destino es este mismo: no se redirige.
+    const elsewhere =
+      region.product && region.product !== productUi().product ? tenantUrl(slug, location.href, region.product) : null
+    if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
     return { session, org: data, region }
   },
   component: OrgLayout,

@@ -15,8 +15,13 @@ describe("la dirección de cada clínica, en el dominio de su producto (decisió
   })
 
   it("un producto sin dominio propio va en el de odentIA, con el puerto de la plataforma", () => {
-    const local = { webURL: "https://app.odentia.localhost:1355", cookieDomain: ".odentia.localhost" }
-    expect(clinicOrigin("sanmartin", "medical", local)).toBe("https://sanmartin.odentia.localhost:1355")
+    const local = {
+      webURL: "https://app.odentia.localhost:1355",
+      cookieDomain: ".odentia.localhost",
+    }
+    expect(clinicOrigin("sanmartin", "medical", local)).toBe(
+      "https://sanmartin.odentia.localhost:1355",
+    )
     expect(clinicOrigin("", "dental", local)).toBeNull()
     expect(clinicOrigin("sonrie", "dental", null)).toBeNull()
   })
