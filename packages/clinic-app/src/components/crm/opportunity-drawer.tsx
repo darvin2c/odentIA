@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 import {
   Button,
   Collapsible,
@@ -293,7 +294,7 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
             maxLength={200}
             required
             disabled={readOnly}
-            placeholder="Ortodoncia"
+            placeholder={appWords().examples.treatment}
             onChange={(event) => {
               setTitle(event.target.value)
               setTitleTouched(true)

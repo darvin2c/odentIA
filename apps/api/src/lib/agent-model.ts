@@ -1,3 +1,4 @@
+import { withOrgContext } from "@odentia/db"
 import {
   type AgentModelStatus,
   createModelChecker,
@@ -9,7 +10,7 @@ import {
   type PlatformLlm,
 } from "@odentia/agent"
 import type { Db } from "@odentia/db"
-import { AGENT_MODEL_LABEL, type AgentModelCheck, reportModelOutage } from "@odentia/services"
+import { AGENT_MODEL_LABEL, type AgentModelCheck, orgProductName, reportModelOutage } from "@odentia/services"
 import type { Context } from "hono"
 import { errorBody } from "./error.js"
 
@@ -111,9 +112,10 @@ export async function modelProblemResponse(c: Context, deps: AgentModelDeps, org
     problem: { code: problem.code, detail: problem.detail },
     checkedAt: new Date().toISOString(),
   })
+  const brand = await withOrgContext(deps.db, orgId, (tx) => orgProductName(tx, orgId))
   const message =
     who === "agente"
-      ? "Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA."
-      : "El asistente no puede usar el modelo ahora. Ya avisamos a odentIA."
+      ? `Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a ${brand}.`
+      : `El asistente no puede usar el modelo ahora. Ya avisamos a ${brand}.`
   return c.json(errorBody(c, "LLM_CONFIG", message), 409)
 }

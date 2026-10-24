@@ -107,7 +107,7 @@ export function DiagnosisPicker({
           role="status"
           aria-busy
           className="flex flex-col gap-2"
-          aria-label="Cargando lo que propone el odontograma"
+          aria-label="Cargando los diagnósticos propuestos"
         >
           <Skeleton className="h-4 w-40" />
           <Skeleton className="h-10 w-full" />

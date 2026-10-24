@@ -1,4 +1,4 @@
-import { MEDICAL_LEAVE_MAX_DAYS, VITAL_SIGNS, type VitalSignKey } from "@odentia/clinical"
+import { MEDICAL_LEAVE_MAX_DAYS, upperFirst, VITAL_SIGNS, type VitalSignKey } from "@odentia/clinical"
 import { z } from "zod"
 
 /**
@@ -517,16 +517,14 @@ export function operationBodyShape(operation: OperationId): Record<string, z.Zod
  */
 export function operationAgentSchema<O extends OperationId>(
   operation: O,
-  words: { room?: string; clinician?: string } = {},
+  words: ProductFieldWords = {},
 ): z.ZodObject<AgentShape<O>> {
   const shape: Record<string, z.ZodType> = {}
   for (const [name, field] of Object.entries(specOf(operation).fields)) {
     if (field.agent !== "requires" && field.agent !== "fills") continue
     const schema = field.kind === "enum" && field.agentValues ? z.enum(field.agentValues) : fieldSchema(field)
     // El recurso que se reserva y quien atiende, con las palabras del producto (latidIA: «sala», «médico»).
-    let description: string = field.description
-    if (words.room) description = description.replaceAll("unidad dental", words.room)
-    if (words.clinician) description = description.replaceAll("odontólogo", words.clinician)
+    const description = inProductWords(field.description, words)
     // La descripción va en el esquema final: el envoltorio opcional no hereda la del interior.
     shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(description)
   }
@@ -541,10 +539,28 @@ export interface OperationFieldInfo {
 }
 
 /** Qué puede llenar el agente en una operación, para mostrarlo en su página. */
-export function operationAgentFields(operation: OperationId): OperationFieldInfo[] {
+export function operationAgentFields(operation: OperationId, words: ProductFieldWords = {}): OperationFieldInfo[] {
   return Object.entries(specOf(operation).fields)
     .filter(([, field]) => field.agent === "requires" || field.agent === "fills")
-    .map(([name, field]) => ({ name, label: field.label, description: field.description, required: field.agent === "requires" }))
+    .map(([name, field]) => ({
+      name,
+      label: inProductWords(field.label, words),
+      description: inProductWords(field.description, words),
+      required: field.agent === "requires",
+    }))
+}
+
+/** Lo que se reserva y quien atiende con las palabras del producto (latidIA: «sala», «médico»). */
+export interface ProductFieldWords {
+  room?: string
+  clinician?: string
+}
+
+function inProductWords(text: string, words: ProductFieldWords): string {
+  let out = text
+  if (words.room) out = out.replaceAll("unidad dental", words.room).replaceAll("Unidad dental", upperFirst(words.room))
+  if (words.clinician) out = out.replaceAll("odontólogo", words.clinician)
+  return out
 }
 
 /**
@@ -608,11 +624,11 @@ export interface OperationFill {
 }
 
 /** Qué puede llenar un conjunto de herramientas: una entrada por operación declarada. */
-export function operationFillsOf(tools: readonly string[]): OperationFill[] {
+export function operationFillsOf(tools: readonly string[], words: ProductFieldWords = {}): OperationFill[] {
   const operations = [...new Set(tools.map((tool) => TOOL_OPERATION[tool]).filter((id): id is OperationId => id !== undefined))]
   return operations.map((operation) => ({
     operation,
     label: OPERATIONS[operation].label,
-    fields: operationAgentFields(operation),
+    fields: operationAgentFields(operation, words),
   }))
 }

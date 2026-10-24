@@ -481,6 +481,8 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   await expect(page.getByText("No hace falta para agendar ni para atender.")).toBeVisible()
   await expect(page.getByText("Todavía no tiene presupuesto")).toHaveCount(0)
   await views("plan-sin-presupuesto")
+  // Sin «dónde» en un consultorio: lo indicado no dice «Boca completa» (revisión final).
+  expect(await page.locator("main").innerText()).not.toMatch(/Boca completa|odontograma|Pieza/i)
   await page.getByRole("button", { name: "Agendar", exact: true }).first().click()
   await expect(page).toHaveURL(/\/agenda\?.*planItems=/)
 
@@ -782,6 +784,8 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
     slug,
   )
   expect(leaves.body.data).toEqual([expect.objectContaining({ days: 3, showDiagnosis: false, encounterId })])
+  // La atención no habla de piezas ni corrige con ejemplos dentales (revisión final).
+  expect(await page.locator("main").innerText()).not.toMatch(/Sin pieza|odontograma|veintiséis|endodoncia/i)
   await shot("clio-confirmado")
   await context.close()
 })

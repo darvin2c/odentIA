@@ -1,3 +1,4 @@
+import { productUi } from "../../product/product-ui"
 import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
@@ -19,11 +20,17 @@ function mutationMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-/** «36 · Oclusal, Mesial» o «Sin pieza». */
-export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">) {
-  if (dx.toothNumber === null) return "Sin pieza"
+/** «36 · Oclusal, Mesial» o «Sin pieza»; nada si el producto no registra el «dónde» (latidIA). */
+export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">): string | null {
+  if (dx.toothNumber === null) return productUi().site ? "Sin pieza" : null
   const surfaces = partNames(dx.surfaces)
   return surfaces ? `${dx.toothNumber} · ${surfaces}` : String(dx.toothNumber)
+}
+
+/** « · 36 · Oclusal» para seguir a otro dato, o nada. */
+export function diagnosisSiteSuffix(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">): string {
+  const site = diagnosisSiteLabel(dx)
+  return site ? ` · ${site}` : ""
 }
 
 /**
@@ -176,7 +183,7 @@ export function EncounterDiagnoses({
                     <Badge variant="outline">Sin tipo (histórico)</Badge>
                   )}
                   {dx.previouslyDiagnosed ? <Badge variant="secondary">Ya diagnosticado antes</Badge> : null}
-                  <span>{diagnosisSiteLabel(dx)}</span>
+                  {diagnosisSiteLabel(dx) ? <span>{diagnosisSiteLabel(dx)}</span> : null}
                   {dx.status === "resuelto" ? <Badge variant="secondary">Resuelto</Badge> : null}
                 </p>
               </div>
@@ -208,7 +215,8 @@ export function EncounterDiagnoses({
           <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
             {voided.map((dx) => (
               <li key={dx.id}>
-                <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span> · {diagnosisSiteLabel(dx)} ·
+                <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                {diagnosisSiteSuffix(dx)} ·
                 Motivo: {dx.voidReason}
               </li>
             ))}
@@ -233,7 +241,11 @@ export function EncounterDiagnoses({
             setOpen(false)
           }}
           title="Registrar diagnóstico"
-          description="El código de la lista de la clínica, su tipo y, si corresponde, la pieza y sus superficies."
+          description={
+            productUi().site
+              ? "El código de la lista de la clínica, su tipo y, si corresponde, la pieza y sus superficies."
+              : "El código de la lista de la clínica y su tipo."
+          }
           onSubmit={(event) => void onSubmit(event)}
           isDirty={code.trim() !== "" || diagnosisType !== "" || site.toothNumber !== null}
           isSubmitting={saving}
@@ -307,7 +319,7 @@ export function EncounterDiagnoses({
       <ConfirmDialog
         open={voiding !== null}
         title="Anular diagnóstico"
-        description={`${voiding ? diagnosisCodeLabel(voiding.diagnosisSystem, voiding.diagnosisCode) : ""} · ${voiding ? diagnosisSiteLabel(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
+        description={`${voiding ? diagnosisCodeLabel(voiding.diagnosisSystem, voiding.diagnosisCode) : ""}${voiding ? diagnosisSiteSuffix(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
         confirmLabel="Anular diagnóstico"
         pending={saving}
         confirmDisabled={!voidReason.trim()}

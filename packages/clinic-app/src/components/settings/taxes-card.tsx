@@ -23,7 +23,7 @@ import { useState } from "react"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import type { OrgProfile, OrgTaxesInput } from "../../lib/org"
-import { appWords } from "../../lib/product-words"
+import { appWords, upperFirst } from "../../lib/product-words"
 
 /** Lo que vive en el formulario: "" es «lo del país»; «otra» lleva su porcentaje escrito. */
 export interface TaxFormValues {
@@ -161,8 +161,8 @@ export function TaxesCard({
   const sameRate =
     taxes.servicios.category === taxes.productos.category && taxes.servicios.rateBps === taxes.productos.rateBps
   const example =
-    exampleLine(taxes.servicios, taxes.name, "Una limpieza", currency, locale) ??
-    exampleLine(taxes.productos, taxes.name, "Un cepillo", currency, locale)
+    exampleLine(taxes.servicios, taxes.name, upperFirst(appWords().examples.service), currency, locale) ??
+    exampleLine(taxes.productos, taxes.name, upperFirst(appWords().examples.soldItem), currency, locale)
   const backToCountry = () =>
     onChange({ servicesTax: "", servicesOther: "", productsTax: "", productsOther: "" })
   const form = taxLegalFormOf(profile, values.taxLegalForm)
@@ -211,7 +211,7 @@ export function TaxesCard({
           </InputGroup>
         ) : null}
         <FieldDescription>
-          {scope === "servicios" ? "Consultas, tratamientos y adelantos." : "Lo que se vende desde Cobrar: cepillos, blanqueadores."}
+          {scope === "servicios" ? "Consultas, tratamientos y adelantos." : `Lo que se vende desde Cobrar: ${appWords().examples.soldItems}.`}
         </FieldDescription>
         <FieldError>{error}</FieldError>
       </Field>

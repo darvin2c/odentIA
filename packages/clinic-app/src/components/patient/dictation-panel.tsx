@@ -1,3 +1,4 @@
+import { upperFirst } from "../../lib/product-words"
 import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
 import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
 import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
@@ -167,7 +168,11 @@ export function DictationPanel({
             <span aria-hidden className="ml-0.5 inline-block h-[1em] w-0.5 animate-pulse bg-primary align-[-2px] motion-reduce:animate-none" />»
           </p>
         ) : null}
-        <p className="text-xs text-muted-foreground sm:hidden">Para corregir, dilo: «no, es la veintiséis» o «quita la endodoncia».</p>
+        {productUi().dictation ? (
+          <p className="text-xs text-muted-foreground sm:hidden">
+            Para corregir, dilo: «{productUi().dictation?.corrections.change}» o «{productUi().dictation?.corrections.remove}».
+          </p>
+        ) : null}
         {status}
       </AgentSurface>
     )
@@ -405,7 +410,8 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
         <p className="font-semibold">Qué puedo decir</p>
         <DictationExamples />
         <p className="text-muted-foreground">
-          «No, es la veintiséis» cambia la última sugerencia y «Quita la endodoncia» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
+          «{upperFirst(productUi().dictation?.corrections.change ?? "")}» cambia la última sugerencia y «
+          {upperFirst(productUi().dictation?.corrections.remove ?? "")}» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
           editarla a mano.
         </p>
         <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>

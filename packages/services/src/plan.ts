@@ -780,7 +780,7 @@ export async function addPlanItemsBatch(
   const hooks = await hooksOf(tx, orgId)
   const scope = assertScopeValue(hooks.site, service.scope)
   if (!hooks.site.looseScope || scope !== hooks.site.looseScope)
-    throw validation("El lote de varios sitios solo admite prestaciones de un sitio suelto (odentIA: por pieza)")
+    throw validation("El lote de varios sitios solo admite prestaciones de un sitio suelto, como las de una pieza")
   const sites = teeth.map((tooth) => hooks.site.columns({ toothNumber: tooth }, { scope }))
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })

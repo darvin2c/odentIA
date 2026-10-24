@@ -1,3 +1,4 @@
+import { productUi } from "../../product/product-ui"
 import {
   Badge,
   Button,
@@ -736,7 +737,7 @@ function DocumentViewer({
         <div className="flex flex-wrap gap-2">
           {canEdit && (
             <Button size="sm" variant="outline" onClick={onEditContext}>
-              Piezas y vínculos
+              {productUi().site ? "Piezas y vínculos" : "Vínculos"}
             </Button>
           )}
           <Button
@@ -799,7 +800,7 @@ function DocumentViewer({
       <ConfirmDialog
         open={retireOpen}
         title="Retirar archivo"
-        description="Sale de Documentos, de la historia por pieza y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer."
+        description={`Sale de Documentos, ${productUi().site ? "de la historia por pieza" : "de la historia"} y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
         confirmLabel="Retirar"
         pending={actionPending}
         confirmDisabled={!retireReason.trim()}
@@ -987,7 +988,7 @@ function ContextDrawer({
       onClose={() => {
         if (!pending) onOpenChange(false)
       }}
-      title={`Piezas y vínculos · ${doc.label}`}
+      title={`${productUi().site ? "Piezas y vínculos" : "Vínculos"} · ${doc.label}`}
       description={`Se guarda como una versión nueva (ahora v${expectedVersion}); el archivo no cambia.`}
       onSubmit={(e) => void onSubmit(e)}
       isSubmitting={pending}

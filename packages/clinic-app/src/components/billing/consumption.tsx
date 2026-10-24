@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 /**
  * Lo que hicieron los agentes en el tramo que corre (ADR 0031 y 0085, tablero
  * C1): cada agente con sus tipos, cuántas y a cuánto; después el crédito, el
@@ -114,8 +115,8 @@ const TIER_ROWS: Record<SaasActionTier, { count: (n: number) => string; what: st
   gestiona: { count: (n) => `${n} ${n === 1 ? "conversación" : "conversaciones"}`, what: "Reservó, movió o canceló una cita" },
   agenda: { count: (n) => `${n} ${n === 1 ? "paciente vino" : "pacientes vinieron"}`, what: "Vino a la cita que reservó: cada una sube de Gestiona a Agenda" },
   simple: { count: (n) => `${n} ${n === 1 ? "atención" : "atenciones"}`, what: "Una receta, una nota o un control" },
-  estandar: { count: (n) => `${n} ${n === 1 ? "atención" : "atenciones"}`, what: "Nota con diagnóstico, receta, controles u odontograma" },
-  completa: { count: (n) => `${n} ${n === 1 ? "atención" : "atenciones"}`, what: "Armó el presupuesto" },
+  estandar: { count: (n) => `${n} ${n === 1 ? "atención" : "atenciones"}`, get what() { return appWords().clioTiers.estandar } },
+  completa: { count: (n) => `${n} ${n === 1 ? "atención" : "atenciones"}`, get what() { return appWords().clioTiers.completa } },
 }
 
 function day(iso: string): string {

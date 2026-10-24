@@ -1441,7 +1441,7 @@ export async function createRoom(
     .insert(scheduleRoom)
     .values({ organizationId: orgId, branchId: input.branchId, name })
     .returning({ id: scheduleRoom.id })
-  if (!created) throw new Error("No se pudo crear la unidad dental")
+  if (!created) throw new Error("No se pudo crear la unidad de atención")
   return created
 }
 

@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 import { ALLERGY_REMOVAL_REASONS } from "@odentia/clinical"
 import {
   Button,
@@ -391,7 +392,7 @@ export function AllergyFormDrawer({
           <FieldDescription id={`${id}-substance-help`}>
             {entry
               ? `${allergyListDetail(entry)}: el aviso al recetar compara por su código.`
-              : "Medicamentos y sus grupos (con su código ATC), materiales dentales y alimentos frecuentes."}
+              : `Medicamentos y sus grupos (con su código ATC), ${appWords().examples.allergyOthers} y alimentos frecuentes.`}
           </FieldDescription>
           {errors[`${id}-substance`] ? (
             <p role="alert" className="text-sm text-destructive">

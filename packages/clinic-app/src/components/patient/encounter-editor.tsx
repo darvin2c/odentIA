@@ -892,7 +892,9 @@ export function EncounterEditor({
     {
       key: "hallazgos",
       title: "Diagnóstico",
-      description: "Diagnósticos de la lista de la clínica con su tipo y pieza. Al menos uno para cerrar.",
+      description: productUi().site
+        ? "Diagnósticos de la lista de la clínica con su tipo y pieza. Al menos uno para cerrar."
+        : "Diagnósticos de la lista de la clínica con su tipo. Al menos uno para cerrar.",
       summary:
         activeDiagnoses === 0
           ? "Sin diagnósticos registrados"

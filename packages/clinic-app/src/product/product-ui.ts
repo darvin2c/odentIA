@@ -322,6 +322,8 @@ export interface ProductDictationUi {
   placeholder: string
   /** Un dictado de ejemplo completo, para practicar en la página de Clío. */
   practice: string
+  /** Cómo se corrige de viva voz: cambiar la última sugerencia y quitar una. */
+  corrections: { change: string; remove: string }
 }
 
 /** Una sección de Clínica que aporta el producto (odentIA: Odontograma y Periodontograma). */

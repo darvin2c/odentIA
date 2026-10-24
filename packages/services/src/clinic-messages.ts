@@ -54,8 +54,7 @@ import {
   ANSWER_READY_MESSAGE_KEY,
   RESUME_MESSAGE_KEY,
   replyId,
-  splitNamedBody,
-} from "./automation-messages.js"
+  splitNamedBody, messageExampleValues } from "./automation-messages.js"
 import { clinicName, findClinicName, firstName } from "./automation-routing.js"
 import {
   connectionWithAdapter,
@@ -70,7 +69,7 @@ import {
 } from "./channel-templates.js"
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { findOrgLocale } from "./locale.js"
+import { findOrgLocale, orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
 import { nextOpportuneFrom } from "./opportune-hours.js"
@@ -609,9 +608,7 @@ async function exampleValues(tx: Db, orgId: string): Promise<Record<MessageVaria
     .where(eq(branch.organizationId, orgId))
     .orderBy(asc(branch.createdAt), asc(branch.id))
     .limit(1)
-  const values = Object.fromEntries(
-    Object.entries(MESSAGE_VARIABLES).map(([name, spec]) => [name, spec.example]),
-  ) as Record<MessageVariable, string>
+  const values = messageExampleValues(await orgProduct(tx, orgId))
   // Sin perfil no se supone el nombre de la clínica: quedan los del ejemplo.
   if (clinic) {
     values.clinica = cleanVariable(clinic)

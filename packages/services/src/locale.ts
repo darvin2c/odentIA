@@ -159,6 +159,11 @@ export async function roomWord(tx: Db, orgId: string): Promise<ProductWords["roo
   return productWords(await orgProduct(tx, orgId)).room
 }
 
+/** El nombre del producto de la clínica en lo que ve el equipo: «odentIA» o «latidIA». */
+export async function orgProductName(tx: Db, orgId: string): Promise<string> {
+  return productWords(await orgProduct(tx, orgId)).name
+}
+
 /**
  * Lo que vale en las clínicas del país de esta (ADR 0036): documentos, seguro,
  * dirección y odontograma. Sin país, el núcleo internacional.

@@ -20,6 +20,13 @@ describe("las palabras de cada producto (entrega 3 del issue 229)", () => {
     })
   })
 
+  it("los ejemplos de latidIA no hablan de odontología (revisión final del issue 229)", () => {
+    const medical = JSON.stringify({ ...productWords("medical").examples, ...productWords("medical").clioTiers })
+    for (const word of [/pieza/i, /odonto/i, /ortodoncia|endodoncia/i, /limpieza/i, /cepillo/i, /dental/i, /presupuesto/i]) {
+      expect(medical).not.toMatch(word)
+    }
+  })
+
   it("la primera letra en mayúscula, también con tilde", () => {
     expect(upperFirst("unidad dental")).toBe("Unidad dental")
     expect(upperFirst("órdenes")).toBe("Órdenes")

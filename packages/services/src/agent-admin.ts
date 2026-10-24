@@ -19,7 +19,7 @@ import {
   TASK_AREA_LABELS,
 } from "./admin-lines.js"
 import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
-import { MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { messageExampleValues, renderMessage } from "./automation-messages.js"
 import { currentSaasPeriod } from "./saas-actions.js"
 import { currentAutomationMessageOf } from "./clinic-messages.js"
 import {
@@ -63,7 +63,7 @@ import { retakeForgottenTopics } from "./topic-retake.js"
 import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
-import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
+import { formatOrgMoney, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
@@ -1104,7 +1104,7 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
   // Lo que recibe la persona: el texto vigente de la clínica, con datos de ejemplo.
   const spec = await currentAutomationMessageOf(tx, orgId, line.key)
   const example = spec
-    ? renderMessage(spec, Object.fromEntries(spec.variables.map((name) => [name, MESSAGE_VARIABLES[name].example])))
+    ? renderMessage(spec, messageExampleValues(await orgProduct(tx, orgId)))
     : null
   const people = can(line.permission) ? await listAdminLinePeople(tx, orgId, can, line.key, { limit: 6 }) : { items: [], total: 0 }
   const history = rule

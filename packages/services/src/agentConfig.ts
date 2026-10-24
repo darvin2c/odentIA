@@ -1,3 +1,4 @@
+import { orgProductName } from "./locale.js"
 import type { Db } from "@odentia/db"
 import { agentConfig } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -207,7 +208,7 @@ export async function upsertAgentConfig(
     .limit(1)
   if (input.enabled === true && opts.modelCheck) {
     if (!(await opts.modelCheck()).responds) {
-      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a odentIA.")
+      throw new ServiceError(MODEL_NOT_RESPONDING, 409, `El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a ${await orgProductName(tx, orgId)}.`)
     }
   }
   const patch: Partial<typeof agentConfig.$inferInsert> = { ...input }

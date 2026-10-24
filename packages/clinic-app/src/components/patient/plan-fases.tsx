@@ -28,11 +28,12 @@ import { productUi } from "../../product/product-ui"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
+/** « · Pieza 16», « · Boca completa» o, si el producto no registra el «dónde» (latidIA), nada. */
 function site(item: PlanItem): string {
-  if (item.toothNumber != null) return `Pieza ${item.toothNumber}`
-  if (item.quadrant != null) return `Cuadrante ${item.quadrant}`
-  if (item.arch) return item.arch === "upper" ? "Arcada superior" : "Arcada inferior"
-  return "Boca completa"
+  if (item.toothNumber != null) return ` · Pieza ${item.toothNumber}`
+  if (item.quadrant != null) return ` · Cuadrante ${item.quadrant}`
+  if (item.arch) return item.arch === "upper" ? " · Arcada superior" : " · Arcada inferior"
+  return productUi().site ? " · Boca completa" : ""
 }
 
 function statusVariant(status: string): "success" | "outline" | "secondary" {
@@ -202,7 +203,8 @@ function PlanPhasesGroup({
                         <span
                           className={`text-sm font-medium ${closed && item.status !== "realizado" ? "line-through" : ""}`}
                         >
-                          {item.title} · {site(item)}
+                          {item.title}
+                          {site(item)}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {[
@@ -316,7 +318,7 @@ function PlanningDrawer({
     <FormDrawer
       open
       title="Planificar tratamiento"
-      description={`${item.title} · ${site(item)}`}
+      description={`${item.title}${site(item)}`}
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()

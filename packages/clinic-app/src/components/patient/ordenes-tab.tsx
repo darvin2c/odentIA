@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Badge,
@@ -268,10 +269,12 @@ function OrderCancelDrawer({
   )
 }
 
-const KIND_PLACEHOLDER: Record<ClinicalOrderKind, string> = {
-  imagen: "p. ej. Radiografía panorámica",
-  laboratorio: "p. ej. Hemograma completo",
-  interconsulta: "p. ej. Evaluación de ortodoncia",
+/** El ejemplo de cada orden, con lo que se pide en el producto de la app. */
+function kindPlaceholder(kind: ClinicalOrderKind): string {
+  const { examples } = appWords()
+  if (kind === "imagen") return `p. ej. ${examples.imagingOrder}`
+  if (kind === "interconsulta") return `p. ej. ${examples.referral}`
+  return "p. ej. Hemograma completo"
 }
 
 /**
@@ -446,7 +449,7 @@ export function NewOrderDrawer({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             maxLength={200}
-            placeholder={KIND_PLACEHOLDER[kind]}
+            placeholder={kindPlaceholder(kind)}
           />
         </Field>
         {kind === "interconsulta" && colleagues.length > 0 ? (

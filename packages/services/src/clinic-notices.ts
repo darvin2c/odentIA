@@ -16,7 +16,7 @@ import { supportAccessGrant, supportCase } from "@odentia/db/schema/admin-suppor
 import { member, user } from "@odentia/db/schema/auth"
 import { saasCharge, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm"
-import { getOrgLocale } from "./locale.js"
+import { getOrgLocale, orgProductName } from "./locale.js"
 import { type SaasAlert, getSaasAlerts } from "./saas-terms.js"
 
 export type ClinicNoticeTone = "aviso" | "alarma" | "limite"
@@ -68,6 +68,8 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
   const [sub] = await tx.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId)).limit(1)
   const locale = await getOrgLocale(tx, orgId).catch(() => null)
   const lang = locale?.locale ?? "es"
+  // El servicio se nombra con la marca de la clínica (issue 229): odentIA o latidIA.
+  const brand = await orgProductName(tx, orgId)
   const timeZone = locale?.timezone ?? "UTC"
   const longDay = (date: Date) => new Intl.DateTimeFormat(lang, { weekday: "long", day: "numeric", month: "long", timeZone }).format(date)
   const shortDay = (date: Date) =>
@@ -135,7 +137,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
         topic: "cobro",
         tone: "limite",
         message: billing
-          ? `odentIA puso la clínica en pausa: se puede ver todo, pero no guardar.${why}`
+          ? `${brand} puso la clínica en pausa: se puede ver todo, pero no guardar.${why}`
           : `La clínica está en pausa: puedes ver todo, pero no guardar. ${tellOwner}`,
         short: "La clínica está en pausa",
         action: billing ? SUPPORT : null,
@@ -157,7 +159,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
       const graceEnds = sub.graceEndsAt
       const tomorrow = graceEnds !== null && graceEnds.getTime() - now.getTime() <= DAY
       if (inReview) {
-        if (billing) notices.push(reviewNotice())
+        if (billing) notices.push(reviewNotice(brand))
       } else if (!next) {
         // Gracia al terminar la prueba sin plan: no hay cargo, falta elegir el plan.
         if (billing)
@@ -194,7 +196,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
       }
     } else if (billing && (sub.status === "activa" || sub.status === "prueba")) {
       // El cargo vence 7 días después de emitirse: se avisa desde que llega.
-      if (inReview) notices.push(reviewNotice())
+      if (inReview) notices.push(reviewNotice(brand))
       else if (next?.dueAt && next.dueAt.getTime() > now.getTime()) {
         const left = next.dueAt.getTime() - now.getTime()
         const soon = left <= 2 * DAY
@@ -272,7 +274,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
         id: `soporte:${grant.id}`,
         topic: "soporte",
         tone: "aviso",
-        message: `${who} acceso a soporte de odentIA hasta las ${hour(grant.expiresAt)}${why}. Solo ve la configuración, no pacientes.`,
+        message: `${who} acceso a soporte de ${brand} hasta las ${hour(grant.expiresAt)}${why}. Solo ve la configuración, no pacientes.`,
         short: `Soporte tiene acceso hasta las ${hour(grant.expiresAt)}`,
         action: { kind: "quitar_acceso", label: "Quitar acceso", shortLabel: "Quitar", grantId: grant.id, caseId: grant.caseId },
         dismiss: "nivel",
@@ -287,13 +289,13 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     .map(({ notice }) => notice)
 }
 
-function reviewNotice(): ClinicNotice {
+function reviewNotice(brand: string): ClinicNotice {
   return {
     id: "cobro:en-revision",
     topic: "cobro",
     tone: "aviso",
-    message: "odentIA está revisando tu pago. Mientras tanto la clínica sigue igual.",
-    short: "odentIA está revisando tu pago",
+    message: `${brand} está revisando tu pago. Mientras tanto la clínica sigue igual.`,
+    short: `${brand} está revisando tu pago`,
     action: SEE_PLAN,
     dismiss: "nivel",
   }

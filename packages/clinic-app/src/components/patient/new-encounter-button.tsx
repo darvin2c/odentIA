@@ -1,3 +1,4 @@
+import { appWords } from "../../lib/product-words"
 import {
   Button,
   Field,
@@ -292,7 +293,7 @@ export function NewEncounterButton({
             id="new-encounter-reason"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            placeholder="Ej.: dolor en muela inferior derecha desde anoche"
+            placeholder={`Ej.: ${appWords().examples.visitReason}`}
             rows={3}
             maxLength={2000}
             required

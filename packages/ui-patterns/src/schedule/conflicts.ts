@@ -47,11 +47,12 @@ export function findScheduleConflicts(
   return conflicts
 }
 
-export function conflictLabel(conflict: ScheduleConflict | undefined): string | undefined {
+/** `room`: lo que se reserva, con la palabra del producto («unidad dental», «sala»). */
+export function conflictLabel(conflict: ScheduleConflict | undefined, room = "unidad dental"): string | undefined {
   if (!conflict) return undefined
   return conflict.professional && conflict.room
-    ? "Solapamiento de profesional y unidad dental"
+    ? `Solapamiento de profesional y ${room}`
     : conflict.professional
       ? "Solapamiento de profesional"
-      : "Solapamiento de unidad dental"
+      : `Solapamiento de ${room}`
 }
