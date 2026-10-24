@@ -44,6 +44,7 @@ import { ApiError } from "../../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { setOrgLocale } from "../../lib/locale"
 import { AnswerInput, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
+import { appWords } from "../../lib/product-words"
 
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.
@@ -759,7 +760,7 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
     if (!sentNow) return null
     return (
       <p role="status" className="rounded-2xl bg-success-soft p-4 text-sm">
-        Gracias, recibimos tus respuestas. Tu odontólogo las revisa contigo en la cita.
+        Gracias, recibimos tus respuestas. Tu {appWords().clinician.one} las revisa contigo en la cita.
       </p>
     )
   }
@@ -803,7 +804,7 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
           ))}
       </div>
       <p className="text-xs text-muted-foreground">
-        Tu odontólogo revisará estas respuestas contigo en la cita. Guardamos tu avance; puedes
+        Tu {appWords().clinician.one} revisará estas respuestas contigo en la cita. Guardamos tu avance; puedes
         continuar más tarde desde el mismo enlace.
       </p>
       {error ? (

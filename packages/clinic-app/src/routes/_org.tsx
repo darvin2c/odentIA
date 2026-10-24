@@ -1,4 +1,4 @@
-import { canAccess, canAccessAny, platformPathPermission, ROLE_LABELS, seesBilling, type OrgRole } from "@odentia/auth/permissions"
+import { canAccess, canAccessAny, platformPathPermission, seesBilling } from "@odentia/auth/permissions"
 import {
   Avatar,
   AvatarFallback,
@@ -74,6 +74,7 @@ import { legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl }
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { productUi } from "../product/product-ui"
+import { appRoleLabel } from "../lib/product-words"
 import { useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
@@ -238,7 +239,7 @@ function OrgSwitcher() {
         </span>
         <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
           <span className="truncate text-sm font-semibold">{org.name}</span>
-          <span className="truncate text-xs text-muted-foreground">{ROLE_LABELS[role as OrgRole] ?? "Miembro"}</span>
+          <span className="truncate text-xs text-muted-foreground">{appRoleLabel(role, "Miembro")}</span>
         </span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenuTrigger>

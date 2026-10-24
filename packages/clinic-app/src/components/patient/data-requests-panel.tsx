@@ -52,6 +52,7 @@ import {
   verifyDataRequestApi,
 } from "../../lib/data-requests"
 import { useOrgLocale } from "../../lib/locale"
+import { appWords } from "../../lib/product-words"
 
 function problemOf(error: unknown): string | null {
   if (!error) return null
@@ -562,7 +563,7 @@ function AttendDrawer({
                 )
               ) : (
                 <p className="text-muted-foreground">
-                  Un dato personal se corrige en «Datos personales». Lo clínico lo corrige el odontólogo con una adenda: nunca se
+                  Un dato personal se corrige en «Datos personales». Lo clínico lo corrige el {appWords().clinician.one} con una adenda: nunca se
                   reescribe lo firmado.
                 </p>
               )}

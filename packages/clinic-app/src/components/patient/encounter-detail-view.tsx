@@ -17,6 +17,7 @@ import { EncounterMaterialsBlock } from "./encounter-materials"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
+import { appWords } from "../../lib/product-words"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -219,7 +220,7 @@ export function EncounterDetailView({
             <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>
+            <dt className="text-xs font-medium text-muted-foreground">{appWords().clinician.label}</dt>
             <dd className="text-sm">{memberName(encounter.professionalUserId)}</dd>
           </div>
           <div>

@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { type AgentRoles, namedAgentRoles } from "../../lib/agent"
-import { AGENT_NAME_REASONS, CLINICAL_NAME, useReceptionName } from "../../lib/agent-names"
+import { CLINICAL_NAME, clinicalNameReason, useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -91,7 +91,7 @@ function ClinicalAssistantPage() {
         title={`${CLINICAL_NAME}, tu agente clínico`}
         subtitle={
           <>
-            <p className="min-w-0">{AGENT_NAME_REASONS.asistente_clinico}</p>
+            <p className="min-w-0">{clinicalNameReason()}</p>
             {config && canWrite ? (
               <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
                 {on ? "Encendido" : "Apagado"}

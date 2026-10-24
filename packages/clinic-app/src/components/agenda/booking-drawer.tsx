@@ -34,6 +34,7 @@ import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
 import { errorMessage, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
+import { appWords } from "../../lib/product-words"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -387,7 +388,7 @@ export function BookingDrawer({
       <FormDrawer
         open
         title="Nueva cita"
-        description="Elige a quién y cuándo. La unidad dental se asigna con el hueco."
+        description={`Elige a quién y cuándo. La ${appWords().room.one} se asigna con el hueco.`}
         onClose={onClose}
         onSubmit={(event) => {
           event.preventDefault()

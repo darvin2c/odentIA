@@ -1,6 +1,6 @@
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
-import { ROLE_LABELS } from "@odentia/auth/permissions"
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import {
@@ -1348,9 +1348,8 @@ export async function listMyInvitations(tx: Db, email: string): Promise<PendingI
       organizationName: row.organizationName,
       slug: row.slug,
       role: row.role,
-      roleLabel: roleLabelOf(row.role),
+      ...withProduct(row.role, profile?.product),
       expiresAt: row.expiresAt,
-      product: isClinicalProduct(profile?.product) ? profile.product : "dental",
       provisioning: { hasProfile: Boolean(profile), hasBranch: Boolean(sede) },
     })
   }
@@ -1389,20 +1388,24 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       logo: row.logo ?? null,
       branches: sedes.filter((sede) => sede.isActive).map((sede) => sede.name),
       role: row.role,
-      roleLabel: roleLabelOf(row.role),
+      ...withProduct(row.role, profile?.product),
       canLeave: await canLeaveOrganization(tx, userId, row.organizationId, row.role),
-      product: isClinicalProduct(profile?.product) ? profile.product : "dental",
       provisioning: { hasProfile: Boolean(profile), hasBranch: sedes.length > 0 },
     })
   }
   return out
 }
 
-/** Etiqueta canónica del rol (misma que la plataforma; el panel no duplica). */
-function roleLabelOf(role: string | null): string {
-  if (!role) return "Por asignar"
-  const labels: Record<string, string> = { ...ROLE_LABELS }
-  return labels[role] ?? role
+/**
+ * El producto de la clínica y su etiqueta canónica del rol (misma que la
+ * plataforma; el panel no duplica): quien atiende es «Odontólogo» en odentIA y
+ * «Médico» en latidIA.
+ */
+function withProduct(role: string | null, stored: string | null | undefined): { product: ClinicalProduct; roleLabel: string } {
+  const product = isClinicalProduct(stored) ? stored : "dental"
+  if (!role) return { product, roleLabel: "Por asignar" }
+  const known = (ORG_ROLES as readonly string[]).includes(role)
+  return { product, roleLabel: known ? roleLabel(role as OrgRole, product) : role }
 }
 
 /** false si es la única propietaria (el servidor también rechaza la salida). */

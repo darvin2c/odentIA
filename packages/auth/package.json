@@ -16,6 +16,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@odentia/clinical": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/mail": "workspace:*",
     "better-auth": "1.7.4",

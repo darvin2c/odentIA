@@ -19,6 +19,7 @@ import {
   listInboxConversations,
   listPersonMessages,
   markRead,
+  orgProduct,
   OUTBOUND_MEDIA_MAX_BYTES,
   OUTBOUND_MEDIA_MIME_EXT,
   releaseConversation,
@@ -36,7 +37,7 @@ import {
   summarizeInbox,
   takeConversation,
 } from "@odentia/services"
-import { ORG_ROLES, type OrgRole, ROLE_LABELS } from "@odentia/auth/permissions"
+import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -423,7 +424,8 @@ export function createConversationsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const contactId = await contactOf(tx, orgId, c.req.param("id"))
-        return markSpamAndRefund(tx, orgId, { userId, roleLabel: role ? ROLE_LABELS[role] : memberRole }, contactId)
+        const label = role ? roleLabel(role, await orgProduct(tx, orgId)) : memberRole
+        return markSpamAndRefund(tx, orgId, { userId, roleLabel: label }, contactId)
       }),
     )
   })
