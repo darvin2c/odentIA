@@ -63,7 +63,7 @@ export function SpendCapDrawer({
       open={open}
       onClose={onClose}
       title="Presupuesto del mes"
-      description="Es lo máximo que pagarás al mes por encima de tu crédito. El almacenamiento no cuenta."
+      description="Lo que tus agentes pueden gastar al mes por encima de tu crédito. Al llegar no empiezan trabajo nuevo con cobro; lo que ya empezó se termina y se cobra. El almacenamiento va aparte."
       onSubmit={submit}
       isDirty={text !== (currentCents === null ? "" : centsToMajor(currentCents, currency))}
       isSubmitting={saving}

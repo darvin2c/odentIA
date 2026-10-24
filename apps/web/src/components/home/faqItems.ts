@@ -12,7 +12,7 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pen
   },
   {
     q: "¿Cuánto voy a pagar al mes?",
-    a: "La cuota del plan, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito. Lo calculas con tus números en la página de precios y puedes poner un tope: te avisamos antes de llegar.",
+    a: "La cuota del plan, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito. Lo calculas con tus números en la página de precios y puedes poner un presupuesto del mes: te avisamos antes de llegar.",
   },
   {
     q: "¿Qué cuenta como una conversación?",
@@ -34,7 +34,7 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms): (FaqItem & { pen
   },
   {
     q: "¿Tengo que pagarle algo más a WhatsApp?",
-    a: "Responder a quien te escribe, dentro de las 24 horas, no tiene costo de Meta. Los mensajes de plantilla, como un recordatorio fuera de esa ventana, los cobra Meta directamente a la clínica. odentIA te muestra el estimado.",
+    a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
   },
   {
     q: "¿Funciona en mi país?",
