@@ -61,7 +61,7 @@ import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./de
 import { offTopicReply } from "./decision/route.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, CONTACT_DAILY_RUN_LIMIT, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
+import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { extractDictation } from "./dental/dictation.js"
 import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
@@ -752,38 +752,10 @@ it("toda clínica nace con Jev; sin su clave, o con la clave rechazada, la corri
   }
 })
 
-it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", async () => {
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 1 }))
-  try {
-    // La primera corrida del día consume el tope; la segunda ya no llama al modelo.
-    const first = await ingestText("tg:ag-tope-1", "evt-ag-tope-1", "Hola")
-    const used = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime." }, "call-1"))
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 100_000 }))
-    expect(await runScripted(used, first.conversationId, first.messageId)).toBe("done")
-    expect(used.seen.length).toBe(1)
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 1 }))
-    const { conversationId, messageId } = await ingestText("tg:ag-tope", "evt-ag-tope", "Hola")
-    const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería enviarse." }, "call-1"))
-    expect(await runScripted(model, conversationId, messageId)).toBe("done")
-    expect(model.seen.length).toBe(0)
-    expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-    expect(await agentStatusOf(conversationId)).toBe("on")
-    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
-      tx
-        .select({ status: agentRunLedger.status, error: agentRunLedger.error })
-        .from(agentRunLedger)
-        .where(eq(agentRunLedger.conversationId, conversationId)),
-    )
-    expect(row).toMatchObject({ status: "error" })
-    expect(row?.error).toMatch(/^DAILY_LIMIT/)
-  } finally {
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 500 }))
-  }
-})
-
 it("la configuración no guarda modelo ni cuentas de proveedor (ADR 0052)", async () => {
   const cfg = await withOrgContext(appDb, "org_a", (tx) => getAgentConfig(tx, "org_a"))
-  expect(cfg).toMatchObject({ dailyRunLimit: 500 })
+  // Sin tope de corridas: el único límite es el presupuesto del mes (ADR 0085).
+  expect(cfg).not.toHaveProperty("dailyRunLimit")
   expect(Object.keys(cfg).filter((key) => /apikey|baseurl|^model$|^llm$/i.test(key))).toEqual([])
 })
 
@@ -2773,62 +2745,17 @@ it("si el equipo toma o cierra la conversación mientras el modelo escribe, lo r
   }
 })
 
-it("quien escribe sin parar pasa al equipo sin llamar al modelo, y los demás siguen atendidos", async () => {
+it("quien escribe mucho sigue atendido: no hay tope por persona ni por día (ADR 0085)", async () => {
   const { conversationId, messageId } = await ingestText("tg:sin-parar", "evt-sin-parar", "Hola otra vez")
   await ownerDb.insert(agentRunLedger).values(
-    Array.from({ length: CONTACT_DAILY_RUN_LIMIT }, () => ({
+    Array.from({ length: 60 }, () => ({
       organizationId: "org_a", conversationId, model: "fake", status: "ok", startedAt: new Date(), llmCalls: 1,
     })),
   )
-  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime en qué te ayudo." }, "call-1"))
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  expect(model.seen).toHaveLength(0)
-  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
-  expect(await agentStatusOf(conversationId)).toBe("on")
-  const rows = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(and(eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.status, "handoff"))))
-  expect(rows).toEqual([{ error: "CONTACT_DAILY_LIMIT" }])
-
-  const other = await ingestText("tg:otra-persona", "evt-otra-persona", "Hola, quiero info")
-  const answering = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime en qué te ayudo." }, "call-1"))
-  expect(await runScripted(answering, other.conversationId, other.messageId)).toBe("done")
-  expect(await agentMessages(other.conversationId)).toEqual(["Hola, dime en qué te ayudo."])
-})
-
-it("el tope por persona pasa al equipo una sola vez al día: lo que sigue escribiendo se guarda sin respuesta ni tema nuevo", async () => {
-  const first = await ingestText("tg:tope-una-vez", "evt-tope-1", "Hola otra vez")
-  await ownerDb.insert(agentRunLedger).values(
-    Array.from({ length: CONTACT_DAILY_RUN_LIMIT }, () => ({
-      organizationId: "org_a", conversationId: first.conversationId, model: "fake", status: "ok", startedAt: new Date(), llmCalls: 1,
-    })),
-  )
-  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
-  expect(await runScripted(model, first.conversationId, first.messageId)).toBe("done")
-  // Un bot sigue escribiendo el mismo día: cada mensaje queda guardado y nada más.
-  const later: string[] = []
-  for (const [i, text] of ["¿Hola?", "Promoción imperdible solo hoy", "¿Hola?"].entries()) {
-    const next = await ingestText("tg:tope-una-vez", `evt-tope-${i + 2}`, text)
-    later.push(next.messageId)
-    expect(await runScripted(model, next.conversationId, next.messageId)).toBe("done")
-  }
-  expect(model.seen).toHaveLength(0)
-  expect(await agentMessages(first.conversationId)).toEqual([HANDOFF_NOTICE])
-  const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ reason: agentHandoff.reason }).from(agentHandoff).where(eq(agentHandoff.conversationId, first.conversationId)))
-  expect(handoffs).toHaveLength(1)
-  const tasks = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ title: crmTask.title }).from(crmTask).where(eq(crmTask.conversationId, first.conversationId)))
-  expect(tasks).toHaveLength(1)
-  const inbound = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ id: message.id }).from(message).where(and(eq(message.conversationId, first.conversationId), eq(message.direction, "in"))))
-  expect(inbound).toHaveLength(4)
-  const rows = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ trigger: agentRunLedger.triggerMessageId, status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error })
-      .from(agentRunLedger).where(eq(agentRunLedger.conversationId, first.conversationId)).orderBy(agentRunLedger.startedAt))
-  expect(rows.filter((row) => row.status !== "ok")).toEqual([
-    { trigger: first.messageId, status: "handoff", llmCalls: 0, error: "CONTACT_DAILY_LIMIT" },
-    ...later.map((trigger) => ({ trigger, status: "omitida", llmCalls: 0, error: "tope-por-persona" })),
-  ])
+  expect(model.seen).toHaveLength(1)
+  expect(await agentMessages(conversationId)).toEqual(["Hola, dime en qué te ayudo."])
 })
 
 it("lo que no es de la clínica recibe el texto fijo una sola vez al día; después, silencio sin cobro ni tema", async () => {

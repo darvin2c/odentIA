@@ -107,7 +107,6 @@ const diagnosticPayload = z.object({
       decisionProvider: z.string(),
       decisionRoutingEnabled: z.boolean(),
       clinicalAssistantEnabled: z.boolean(),
-      dailyRunLimit: z.number(),
     })
     .nullable(),
   channels: z.array(
@@ -849,7 +848,7 @@ function SupportPage() {
                     <p>
                       Agente:{" "}
                       {diagnostic.data.agent
-                        ? `${diagnostic.data.agent.enabled ? "encendido" : "apagado"} · decisiones ${diagnostic.data.agent.decisionProvider} · tope ${diagnostic.data.agent.dailyRunLimit}/día`
+                        ? `${diagnostic.data.agent.enabled ? "encendido" : "apagado"} · decisiones ${diagnostic.data.agent.decisionProvider}`
                         : "sin configuración"}
                     </p>
                     <p>

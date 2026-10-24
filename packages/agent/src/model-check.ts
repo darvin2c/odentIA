@@ -31,7 +31,7 @@ export interface ModelCheckResult {
    * Por qué no responde: detalle técnico para odentIA (soporte y registros).
    * La clínica nunca lo ve: no puede arreglar una clave, un saldo o un rechazo.
    */
-  problem: { code: Exclude<LlmProblemCode, "DAILY_LIMIT">; detail: string } | null
+  problem: { code: LlmProblemCode; detail: string } | null
   checkedAt: string
 }
 
@@ -69,7 +69,7 @@ export function createModelChecker(
       await probe(resolveLlmSpec(platform))
     } catch (error) {
       const described = describeProviderProblem(error)
-      problem = { code: described.code === "DAILY_LIMIT" ? "PROVIDER_REJECTED" : described.code, detail: described.detail }
+      problem = { code: described.code, detail: described.detail }
     }
     const at = now()
     const result: ModelCheckResult = { model, responds: problem === null, problem, checkedAt: new Date(at).toISOString() }

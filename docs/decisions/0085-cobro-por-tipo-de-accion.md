@@ -1,6 +1,6 @@
 # 0085 · Cobro por tipo de acción, Argos con preguntas incluidas y almacenamiento por GB
 
-Fecha: 2026-10-24 · Estado: aceptada; fases 1 y 2 implementadas (contar y cobrar), las pantallas y los topes van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
+Fecha: 2026-10-24 · Estado: aceptada; fases 1 y 2 (contar y cobrar) y 3 (sin topes y el presupuesto) implementadas, las pantallas van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
 
 ## Problema
 
@@ -32,6 +32,13 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
 - **Un plan sin precios por tipo** cobra cada tipo con el único precio de su acción, como antes de esta decisión, y su conversación no sube a «Agenda»: los planes que ya existen siguen cobrando igual hasta que se les ponen los precios nuevos.
 - **Precios fijos y negociables.** Informa, Simple, Estándar y el paquete de preguntas no admiten descuento negociado (`fixed_price_tiers`): son baratos y cualquier descuento los dejaría sin margen. El resto se negocia como en la ADR 0031. La comprobación del doble se hace por tipo: un precio negociable, al descuento máximo, nunca baja del doble de su peor costo. Uno fijo es barato a propósito y su peor costo es un caso extremo: por debajo del doble se guarda y queda «Atento» (la consulta simple en una atención absurda de 60 pausas que deja una sola receta vale 1,9 veces; con Fundadores, menos de lo que cuesta).
 - **Fundadores, 50 % menos** en todo, solo para las 20 primeras clínicas y durante sus 12 meses garantizados.
+- **Sin topes; el presupuesto es el único límite.** Se quitan el tope de 40 respuestas por persona y día y el tope diario de corridas de Sofi (`agent_config.daily_run_limit`, migración `0094_sin_topes`). Al llegar al presupuesto del mes que fija la clínica:
+  - Sofi pasa al equipo a quien no estaba conversando, con un mensaje fijo, sin la IA y sin cobro, una sola vez por persona y día (D4): «Gracias por escribir a {clínica}. En un momento te atiende alguien del equipo.». En el chat web sale el aviso de siempre, que pide dónde avisarle. Una alarma pasa con su aviso, como siempre (ADR 0084);
+  - Clío no empieza a escuchar en una atención nueva; la que ya dictaba (tiene gasto de IA con su `encounter_id`) sigue hasta firmarse;
+  - Argos no escribe para recuperar: esos mensajes esperan y, cuando la clínica sube el presupuesto o empieza otro mes, salen los que siguen teniendo sentido; si la persona ya tiene su cita, se descartan solos (D5). Los recordatorios, los avisos de cita y el saldo vencido siguen;
+  - Argos responde lo incluido y no suma paquetes, ni con permiso ni solo;
+  - nada queda a medias: lo que ya empezó se termina y se cobra («Cobrado tras el presupuesto»: la cita que vino, la conversación que ya estaba abierta);
+  - el almacenamiento no cuenta para el presupuesto: guardar nunca detiene a un agente.
 - **Postpago.** Todo, también el paquete de preguntas y el almacenamiento, va en la factura del mes o de la quincena. No hay recargas ni pagos por adelantado.
 - **Cada gasto de IA dice a qué acción pertenece** cuando se sabe (`ai_usage.encounter_id`, `report_question_id`), para ver después lo que costó cada cosa.
 
@@ -41,7 +48,7 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
 - **Tope de Clío por odontólogo (USD 29) o escalones de Sofi.** El dueño los descartó: se cobra por acción, y los tipos ya hacen que lo simple cueste poco.
 - **Cobrar «Agenda» solo al asistir, o solo al reservar.** Al reservar Sofi ya hizo su trabajo, pero sin asistencia «no es cita»: por eso reservar es «Gestiona» y sube al asistir.
 - **Paquetes de preguntas por adelantado o recargas con bono.** odentIA es postpago.
-- **Un tope de preguntas al día, de pausas o de respuestas por persona.** Callan a un agente; el límite es el presupuesto que fija la clínica.
+- **Un tope de preguntas al día, de pausas, de respuestas por persona o de corridas al día.** Callan a un agente; el límite es el presupuesto que fija la clínica. Quien escribe sin parar (un bot) lo detecta el spam (ADR 0054), no un tope.
 
 ## Consecuencias
 
@@ -52,4 +59,4 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
 
 ## Referencias
 
-`packages/services/src/saas-actions.ts` (`conversationTierOf`, `consultationTierOf`, `recoveredSql`, `countAgendaUpgrade`), `saas-included.ts` (`getArgosAllowance`, `ensureArgosQuestion`, `countStorageAction`), `saas-invoicing.ts`, `seed-saas-billing.ts`, pruebas en `saas-tiers.test.ts`; migraciones `0092_cobro_por_tipo.sql` y `0093_cobro_por_tipo_reglas.sql`.
+`packages/services/src/saas-actions.ts` (`conversationTierOf`, `consultationTierOf`, `recoveredSql`, `countAgendaUpgrade`), `saas-included.ts` (`getArgosAllowance`, `ensureArgosQuestion`, `countStorageAction`), `saas-invoicing.ts`, `seed-saas-billing.ts`, pruebas en `saas-tiers.test.ts`; `saas-terms.ts` (`assertClioCanListen`, avisos del presupuesto), `automation.ts` (`BUDGET_HOLD`), `packages/agent/src/run.ts` (el presupuesto en Sofi), pruebas en `saas-budget.test.ts`; migraciones `0092_cobro_por_tipo.sql`, `0093_cobro_por_tipo_reglas.sql` y `0094_sin_topes.sql`.

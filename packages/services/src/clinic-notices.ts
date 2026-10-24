@@ -223,8 +223,8 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
               id,
               topic: "tope",
               tone: "limite",
-              message: `Llegaron al tope de gasto del mes: Sofi no atiende casos nuevos; te llegan a ti. ${tellOwner}`,
-              short: "Tope de gasto: los casos nuevos te llegan a ti",
+              message: `La clínica llegó a su presupuesto del mes: Sofi te pasa las conversaciones nuevas y Clío no escucha en las atenciones nuevas. ${tellOwner}`,
+              short: "Presupuesto del mes: las conversaciones nuevas te llegan a ti",
               action: null,
               dismiss: null,
             })

@@ -153,8 +153,8 @@ it("agent config: defaults y upsert", async () => {
 it("agent config: la clínica no elige el modelo ni la configuración lo guarda (ADR 0052)", async () => {
   const defaults = await withOrgContext(appDb, "org_b", (tx) => getAgentConfig(tx, "org_b"))
   expect(defaults).not.toHaveProperty("llm")
-  const saved = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { maxTurns: 7, dailyRunLimit: 300 }))
-  expect(saved).toMatchObject({ maxTurns: 7, dailyRunLimit: 300 })
+  const saved = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { maxTurns: 7, replyCheckEnabled: false }))
+  expect(saved).toMatchObject({ maxTurns: 7, replyCheckEnabled: false })
   for (const field of ["llm", "model", "llmBaseUrl", "hasLlmApiKey"]) expect(saved).not.toHaveProperty(field)
   const audits = await withOrgContext(appDb, "org_b", (tx) =>
     tx
@@ -162,7 +162,7 @@ it("agent config: la clínica no elige el modelo ni la configuración lo guarda 
       .from(auditEvent)
       .where(and(eq(auditEvent.organizationId, "org_b"), eq(auditEvent.action, "agent.config_updated"))),
   )
-  // maxTurns no se audita; el tope diario sí, y ningún modelo.
-  expect(audits.map((a) => a.metadata)).toEqual([expect.objectContaining({ changed: ["dailyRunLimit"] })])
+  // maxTurns no se audita; la comprobación de respuestas sí, y ningún modelo.
+  expect(audits.map((a) => a.metadata)).toEqual([expect.objectContaining({ changed: ["replyCheckEnabled"] })])
   expect(audits[0]?.metadata).not.toHaveProperty("llm")
 })

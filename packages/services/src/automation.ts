@@ -81,6 +81,7 @@ import { personalLinkRef } from "./personal-link-token.js"
 import { personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
+import { NOT_RECOVERY_KINDS } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
 import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
@@ -391,7 +392,14 @@ export interface AdminRuntime {
   receptionOn: boolean
   /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0031). */
   agentsPaused: boolean
+  /** La clínica llegó a su presupuesto del mes: Argos no escribe para recuperar; el mensaje espera (ADR 0085). */
+  recoveryPaused: boolean
 }
+
+/** Por qué espera un mensaje para recuperar: la clínica llegó a su presupuesto del mes (ADR 0085). */
+export const BUDGET_HOLD = "Espera: la clínica llegó a su presupuesto del mes"
+/** Cada cuánto se mira otra vez si la clínica subió su presupuesto o empezó otro mes. */
+const BUDGET_HOLD_MS = 60 * 60_000
 
 export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime> {
   const [row] = await tx
@@ -404,6 +412,7 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
     adminOn: row?.advisor?.enabled === true,
     receptionOn: row?.enabled === true,
     agentsPaused: gate.trialExhausted,
+    recoveryPaused: gate.capReached,
   }
 }
 
@@ -1596,6 +1605,18 @@ async function arrivedSince(tx: Db, orgId: string, patientId: string, since: Dat
   return !!row
 }
 
+/**
+ * Los mensajes para recuperar que esperan porque la clínica llegó a su
+ * presupuesto del mes (ADR 0085), por línea: lo que dice el panel de Argos.
+ */
+export async function listBudgetHeldJobs(tx: Db, orgId: string): Promise<Array<{ kind: string; count: number }>> {
+  return tx
+    .select({ kind: automationJob.kind, count: sql<number>`count(*)::int` })
+    .from(automationJob)
+    .where(and(eq(automationJob.organizationId, orgId), eq(automationJob.status, "pendiente"), eq(automationJob.lastError, BUDGET_HOLD)))
+    .groupBy(automationJob.kind)
+}
+
 async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, now: Date): Promise<boolean> {
   const [next] = await tx
     .select({ id: appointment.id })
@@ -2085,6 +2106,13 @@ export async function deliverJob(
     await close([job.id], "cancelado", validity.reason)
     return { jobId: job.id, outcome: "cancelado", detail: validity.reason }
   }
+  // Lo que esperó por el presupuesto sale si sigue teniendo sentido (D5 del cobro por tipo):
+  // si la persona ya tiene su cita, se descarta solo.
+  if (job.lastError === BUDGET_HOLD && job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
+    const reason = "Ya tiene su cita: el mensaje esperaba por el presupuesto y dejó de hacer falta"
+    await close([job.id], "cancelado", reason)
+    return { jobId: job.id, outcome: "cancelado", detail: reason }
+  }
 
   // Un aviso de cita es solo un mensaje: sin «el agente le escribe» no queda nada.
   if (isAppointmentNotice(job.kind) && !rule.agentPart) {
@@ -2144,6 +2172,16 @@ export async function deliverJob(
     // atrás no se envía al volver a encenderla.
     await close([job.id], "cancelado", "Sofi no atiende")
     return { jobId: job.id, outcome: "cancelado", detail: "Sofi no atiende" }
+  }
+  // Al llegar al presupuesto del mes, Argos no escribe para recuperar (ADR 0085): el mensaje
+  // espera a que la clínica lo suba o empiece otro mes. Los recordatorios, los avisos de cita y
+  // el saldo vencido siguen: no recuperan a nadie.
+  if (runtime.recoveryPaused && !NOT_RECOVERY_KINDS.includes(job.kind)) {
+    await tx
+      .update(automationJob)
+      .set({ scheduledFor: new Date(now.getTime() + BUDGET_HOLD_MS), lastError: BUDGET_HOLD, updatedAt: now })
+      .where(eq(automationJob.id, job.id))
+    return { jobId: job.id, outcome: "pospuesto", detail: BUDGET_HOLD }
   }
   /** Casos que salen en este mismo mensaje; al menos, el reclamado. */
   let group: JobRow[] = [job]
