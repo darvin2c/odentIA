@@ -751,8 +751,6 @@ export const agentConfig = pgTable(
       .primaryKey()
       .references(() => organization.id),
     enabled: boolean("enabled").notNull().default(false),
-    /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
-    dailyRunLimit: integer("daily_run_limit").notNull().default(500),
     /**
      * Modelo de decisión (none | baseline | jev). Toda
      * clínica nace con Jev (ADR 0047), también la fila que crea otra
@@ -806,7 +804,6 @@ export const agentConfig = pgTable(
   },
   (table) => [
 
-    check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
     check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
     check(
       "agent_config_writing_hours_check",

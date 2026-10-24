@@ -299,7 +299,6 @@ export interface AgentOverview {
   provider: { problem: AgentProviderProblem | null; at: string | null }
   knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
-  usage: { runsToday: number; dailyRunLimit: number }
 }
 
 /** Estado de una conversación de prueba; el servidor lo devuelve y vuelve tal cual en el turno siguiente. */

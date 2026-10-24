@@ -85,7 +85,7 @@ import {
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
-import { type AgentRoute, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
+import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
@@ -378,9 +378,10 @@ export async function performHandoff(
  * Derivar siempre avisa (ADR 0024): si el caso pasó a una persona y la persona
  * aún no recibió nada en esta corrida, sale el aviso fijo, sin modelo, por el
  * mismo camino que cualquier respuesta. Si el canal no deja escribir, queda
- * dicho en la derivación para quien la tome.
+ * dicho en la derivación para quien la tome. `presupuesto`: la clínica llegó a
+ * su presupuesto del mes y el aviso es el de la D4 (ADR 0085).
  */
-export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
+export async function noticeAfterHandoff(ctx: AgentToolCtx, kind: "caso" | "presupuesto" = "caso"): Promise<void> {
   if (!ctx.handedOff || ctx.replySettled || ctx.dryRun || ctx.windowClosed) return
   const treatment =
     ctx.treatment !== undefined
@@ -394,6 +395,10 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
       summary: "Aviso al interlocutor",
       message: await (async () => {
         const channel = await conversationChannel(ctx)
+        if (kind === "presupuesto" && channel !== "webchat") {
+          const clinic = await withOrgContext(ctx.db, ctx.orgId, async (tx) => (await getClinicInfoSnapshot(tx, ctx.orgId)).clinicName).catch(() => null)
+          return budgetNotice(clinic || "la clínica", treatment ?? null)
+        }
         const where =
           channel === "webchat"
             ? await withOrgContext(ctx.db, ctx.orgId, (tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "preguntar" as const)

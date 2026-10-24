@@ -34,7 +34,7 @@ async function conversationWindowMs(tx: Db, at: Date): Promise<number> {
  * vencido, que cobra y no trae de vuelta a nadie (ADR 0085). El aviso de un
  * control sí puede recuperar: lo decide si la persona ya tenía su cita.
  */
-const NOT_RECOVERY_KINDS = ["recordatorio_cita", "cobranza_vencida", ...APPOINTMENT_NOTICE_KEYS]
+export const NOT_RECOVERY_KINDS: readonly string[] = ["recordatorio_cita", "cobranza_vencida", ...APPOINTMENT_NOTICE_KEYS]
 /** Por dónde reservó el agente: en su conversación o desde su enlace. La que agenda el equipo no cuenta. */
 export const AGENT_SOURCES = ["agent", "enlace"]
 /** Lo que hizo Sofi en la agenda y cambia el tipo de la conversación a «Gestiona» (ADR 0085). */
@@ -949,6 +949,19 @@ export interface SaasConsumption {
   overCreditCents: number
   /** Al ritmo de lo transcurrido, cuánto sumarán las acciones al terminar el tramo. */
   projectedCents: number | null
+  /**
+   * El presupuesto del mes (ADR 0085): lo que va por encima del crédito, sin
+   * el almacenamiento (guardar nunca detiene a un agente), frente al que fijó
+   * la clínica. `after`: lo que se cobró después de llegar, porque era el
+   * resultado de un trabajo ya hecho (la cita que vino, lo que ya empezó).
+   */
+  budget: {
+    capCents: number | null
+    spentCents: number
+    reachedAt: Date | null
+    after: { count: number; amountCents: number; lines: Array<{ kind: SaasActionKind; tier: SaasActionTier | null; count: number; amountCents: number }> }
+    storageCents: number
+  }
 }
 
 /** C2: lo que hicieron los agentes en el tramo, con precio base, precio propio e importe. */
@@ -998,6 +1011,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
     if (exhaustedAt === null && creditMicros > 0 && used >= creditMicros) exhaustedAt = row.occurredAt
   }
   const elapsed = Math.min(1, Math.max(0, (now.getTime() - period.start.getTime()) / (period.end.getTime() - period.start.getTime())))
+  const budget = await budgetOf(tx, orgId, billable, creditMicros)
   return {
     period: { start: period.start, end: period.end, credit: period.credit },
     currency: pricing.currency,
@@ -1017,6 +1031,55 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
     overCreditCents: Math.max(0, subtotalCents - period.creditCents),
     // Con menos de un día de tramo la proyección no dice nada.
     projectedCents: elapsed > 0 && now.getTime() - period.start.getTime() >= 24 * 60 * 60 * 1000 ? Math.round(subtotalCents / elapsed) : null,
+    budget,
+  }
+}
+
+/**
+ * El presupuesto del tramo: lo que pasa del crédito, en el orden en que se
+ * hizo y sin el almacenamiento. Lo que se cobra después de llegar (la cita
+ * que vino, la conversación que ya estaba abierta) se dice aparte.
+ */
+async function budgetOf(
+  tx: Db,
+  orgId: string,
+  billable: SaasActionRow[],
+  creditMicros: number,
+): Promise<SaasConsumption["budget"]> {
+  const [sub] = await tx
+    .select({ capCents: saasSubscription.spendCapCents })
+    .from(saasSubscription)
+    .where(eq(saasSubscription.organizationId, orgId))
+    .limit(1)
+  const capMicros = sub?.capCents && sub.capCents > 0 ? sub.capCents * 10_000 : null
+  let used = 0
+  let reachedAt: Date | null = null
+  const after: SaasActionRow[] = []
+  for (const row of billable) {
+    if (row.priceMicros === null || row.kind === "almacenamiento") continue
+    if (reachedAt) after.push(row)
+    used += netMicros(row)
+    if (!reachedAt && capMicros !== null && used - creditMicros >= capMicros) reachedAt = row.occurredAt
+  }
+  const keys = [...new Set(after.map((row) => `${row.kind}:${row.tier ?? ""}`))]
+  return {
+    capCents: sub?.capCents && sub.capCents > 0 ? sub.capCents : null,
+    spentCents: microsToCents(Math.max(0, used - creditMicros)),
+    reachedAt,
+    after: {
+      count: after.length,
+      amountCents: microsToCents(after.reduce((sum, row) => sum + netMicros(row), 0)),
+      lines: keys.map((key) => {
+        const rows = after.filter((row) => `${row.kind}:${row.tier ?? ""}` === key)
+        return {
+          kind: rows[0]!.kind,
+          tier: rows[0]!.tier,
+          count: rows.length,
+          amountCents: microsToCents(rows.reduce((sum, row) => sum + netMicros(row), 0)),
+        }
+      }),
+    },
+    storageCents: microsToCents(billable.filter((row) => row.kind === "almacenamiento").reduce((sum, row) => sum + netMicros(row), 0)),
   }
 }
 

@@ -10,7 +10,7 @@ import { convertToOpenAITool } from "@langchain/core/utils/function_calling"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
-import { message } from "@odentia/db/schema/crm"
+import { conversation, message } from "@odentia/db/schema/crm"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { saasAction } from "@odentia/db/schema/saas-billing"
 import {
@@ -504,5 +504,55 @@ it("sin saldo de prueba los agentes se pausan: el caso pasa al equipo sin llamar
   } finally {
     await ownerDb.execute(sql`delete from saas_action where dedupe_key = 'uso-pausa-1'`)
     await ownerDb.execute(sql`update saas_plan set is_default = false where code = 'uso-pausa'`)
+  }
+})
+
+it("al llegar al presupuesto, Sofi pasa al equipo a quien no conversaba con el mensaje fijo, una vez al día; quien conversaba sigue (ADR 0085)", async () => {
+  const [before] = (await ownerDb.execute(sql`select status, is_demo, spend_cap_cents, current_period_start, current_period_end from saas_subscription where organization_id = ${ORG}`)) as unknown as Array<Record<string, unknown>>
+  await ownerDb.execute(sql`insert into saas_plan (code, name, currency, price_cents, credit_cents, conversation_micros, trial_credit_cents, trial_max_credit_cents, is_default)
+    values ('uso-presupuesto', 'Plan', 'USD', 2900, 2900, 500000, 0, 0, true) on conflict do nothing`)
+  // Crédito de USD 29 y presupuesto de USD 1: 62 conversaciones (USD 31) ya lo pasaron.
+  await ownerDb.execute(sql`update saas_subscription set status = 'activa', is_demo = false, spend_cap_cents = 100,
+    current_period_start = now() - interval '10 days', current_period_end = now() + interval '20 days' where organization_id = ${ORG}`)
+  await ownerDb.execute(sql`insert into saas_action (organization_id, kind, tier, occurred_at, contact_id, detail, currency, base_price_micros, price_micros, dedupe_key)
+    select ${ORG}, 'conversacion', 'gestiona', now() - make_interval(hours => g), gen_random_uuid(), 'Atendió una conversación', 'USD', 500000, 500000, 'uso-presupuesto-' || g
+    from generate_series(2, 63) g`)
+  try {
+    // Lucía ya conversaba hoy (su conversación se contó antes de llegar): Sofi termina lo que empezó.
+    const talking = await ingest("tg:uso-presupuesto-sigue", "uso-presupuesto-sigue-1", "¿Me confirmas el jueves?")
+    const [conv] = await ownerDb.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, talking.conversationId))
+    await ownerDb.execute(sql`insert into saas_action (organization_id, kind, tier, occurred_at, contact_id, detail, currency, base_price_micros, price_micros, dedupe_key)
+      values (${ORG}, 'conversacion', 'gestiona', now() - interval '30 minutes', ${conv!.contactId}, 'Atendió una conversación', 'USD', 500000, 500000, 'uso-presupuesto-sigue')`)
+    const going = new RecordingModel()
+    expect(await run(going, talking.conversationId, talking.messageId)).toBe("done")
+    expect(going.calls.length).toBeGreaterThan(0)
+    expect(await repliesOf(talking.conversationId)).toHaveLength(1)
+
+    // Alguien nuevo: el mensaje fijo, sin la IA y sin cobro, y el caso a la Bandeja.
+    const model = new RecordingModel()
+    const first = await ingest("tg:uso-presupuesto-nueva", "uso-presupuesto-nueva-1", "Hola, ¿tienen cita mañana para una limpieza?")
+    expect(await run(model, first.conversationId, first.messageId)).toBe("done")
+    const bodies = async () =>
+      (await ownerDb.select({ body: message.body }).from(message).where(and(eq(message.conversationId, first.conversationId), eq(message.senderKind, "agent")))).map((row) => row.body)
+    expect(await bodies()).toEqual(["Gracias por escribir a Clínica Uso. En un momento te atiende alguien del equipo."])
+    // Escribe otra vez el mismo día: lo ve el equipo, sin otro aviso.
+    const second = await ingest("tg:uso-presupuesto-nueva", "uso-presupuesto-nueva-2", "¿Hola?")
+    expect(await run(model, second.conversationId, second.messageId)).toBe("done")
+    expect(model.calls).toHaveLength(0)
+    expect(await bodies()).toHaveLength(1)
+    const rows = await withOrgContext(appDb, ORG, (tx) =>
+      tx.select({ status: agentRunLedger.status, error: agentRunLedger.error, llmCalls: agentRunLedger.llmCalls }).from(agentRunLedger)
+        .where(eq(agentRunLedger.conversationId, first.conversationId)).orderBy(agentRunLedger.startedAt))
+    expect(rows).toEqual([
+      { status: "handoff", error: "PRESUPUESTO", llmCalls: 0 },
+      { status: "omitida", error: "presupuesto-ya-avisado", llmCalls: 0 },
+    ])
+    expect(await chargedConversationsOf(first.conversationId)).toHaveLength(0)
+  } finally {
+    await ownerDb.execute(sql`delete from saas_action where dedupe_key like 'uso-presupuesto-%'`)
+    await ownerDb.execute(sql`update saas_plan set is_default = false where code = 'uso-presupuesto'`)
+    await ownerDb.execute(sql`update saas_subscription set status = ${before!.status as string}, is_demo = ${before!.is_demo as boolean},
+      spend_cap_cents = ${(before!.spend_cap_cents as number | null) ?? null}, current_period_start = ${before!.current_period_start as Date | null},
+      current_period_end = ${before!.current_period_end as Date | null} where organization_id = ${ORG}`)
   }
 })

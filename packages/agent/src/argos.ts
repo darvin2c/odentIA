@@ -55,7 +55,7 @@ import {
   argosSentenceProblem,
   fillArgosSentence,
   formatArgosValue,
-  argosQuestionLimit,
+  argosQuestionGate,
   prepareArgosQuestion,
   recordArgosQuestion,
   type ReportQuery,
@@ -520,9 +520,11 @@ export type ArgosAskResult =
       source: "oficial" | "argos"
       /** Varios pacientes se llaman como el de la pregunta (D23): la pantalla pregunta cuál antes de mostrar nada. */
       choose: { message: string; options: ArgosPatientOption[] } | null
+      /** Sumó un paquete de preguntas solo, como pidió la clínica («Sumar solas», ADR 0085): lo dice arriba. */
+      packAdded: string | null
     })
   | { kind: "no_existe"; message: string; missing: string | null; closest: ArgosClosest | null }
-  | { kind: "ayuda" | "otro" | "apagado" | "tope" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
+  | { kind: "ayuda" | "otro" | "apagado" | "tope" | "presupuesto" | "sin_modelo" | "no_pudo" | "tiempo" | "sin_permiso"; message: string }
 
 function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2], repeated: Set<string> = new Set()): ArgosTable {
   // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre;
@@ -588,8 +590,8 @@ export async function askArgos(
     return { kind: route, message: ARGOS_WORDS[route] }
   }
   // Una pregunta del negocio gasta de las del mes (ADR 0085): sin ninguna, Argos pide permiso para sumar más.
-  const limit = await withOrgContext(db, input.orgId, (tx) => argosQuestionLimit(tx, input.orgId, now))
-  if (limit) return { kind: "tope", message: limit }
+  const gate = await withOrgContext(db, input.orgId, (tx) => argosQuestionGate(tx, input.orgId, now))
+  if (!gate.ok) return { kind: gate.kind, message: gate.message }
 
   const ask: ArgosAsk = { texts: ready.texts, question: input.text, key, now, zone: ready.zone, screen: ready.screen, previous: input.previous ?? null, names: argosNamesText(ready.names, key), asker: ready.asker }
   const run = (query: string) => runArgosQuery(db, { orgId: input.orgId, memberRole: input.memberRole, query })
@@ -1011,6 +1013,7 @@ export async function askArgos(
     period: argosPeriodView(binding.period, ready.zone, now, { chosen: binding.branch, options: ready.branches, used: argosUsesBranch(answer.sql) }),
     source,
     choose,
+    packAdded: gate.added,
   }
 }
 

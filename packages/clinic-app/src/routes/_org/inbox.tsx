@@ -1862,11 +1862,6 @@ function ThreadView({
           onTake={(topic) => topicMutation.mutate({ topicId: topic.id, path: "take" })}
           onPass={(topic, userId) => topicMutation.mutate({ topicId: topic.id, path: "take", body: { toUserId: userId } })}
           onResolve={(topic) => topicMutation.mutate({ topicId: topic.id, path: "resolve" })}
-          onSpam={
-            screenView && screenView.screen === null && !screenView.isPatient
-              ? () => screenActions.spam.mutate(conversationTarget(id, name))
-              : undefined
-          }
         />
       ) : null}
       {otherTopics.map((item) => (
@@ -2383,9 +2378,6 @@ function quoteOf(
  * solo botón principal, «Responder». Tomar, pasar a otra persona y marcar
  * resuelto van en «…». Con varios temas, primero los de quien mira.
  */
-/** El tema que deja el límite de respuestas por persona y día (ver `run.ts`). */
-const TOPIC_DAILY_LIMIT = /^escribió más de \d+ veces hoy/i
-
 function TopicBand({
   topics,
   unreachable,
@@ -2401,7 +2393,6 @@ function TopicBand({
   onTake,
   onPass,
   onResolve,
-  onSpam,
 }: {
   topics: InboxTopic[]
   /** Chat web sin dónde avisarle (R4): si cierra la pestaña, la respuesta no le llega. */
@@ -2418,8 +2409,6 @@ function TopicBand({
   onTake: (topic: InboxTopic) => void
   onPass: (topic: InboxTopic, userId: string) => void
   onResolve: (topic: InboxTopic) => void
-  /** «Es spam» en el tema del límite diario por persona (ADR 0054); ausente si no se puede. */
-  onSpam?: () => void
 }) {
   const [first, ...rest] = topics
   const [showRest, setShowRest] = useState(false)
@@ -2470,10 +2459,6 @@ function TopicBand({
                   ? [{ key: "ver", label: "Ver en la conversación", onSelect: () => onJump(topic.source?.id ?? "") }]
                   : []),
                 { key: "vista", label: onlyTopic ? "Ver toda la conversación" : "Ver solo este tema", onSelect: onToggleOnlyTopic },
-                // Pasó el límite del día: suele ser un envío automático, y se resuelve en un toque.
-                ...(onSpam && TOPIC_DAILY_LIMIT.test(topic.reason)
-                  ? [{ key: "spam", label: "Es spam", disabled: pending, onSelect: onSpam }]
-                  : []),
                 ...members
                   // Caja solo recibe pagos (decisión 3); el servidor también lo exige.
                   .filter((member) => member.userId !== topic.assigneeUserId && (member.role !== "cashier" || topic.kind === "pago"))

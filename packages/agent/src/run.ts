@@ -18,8 +18,6 @@ import {
   SPAM_UNDECIDED_RUN_REASON,
   contactGotAgentTextToday,
   contactHadRunToday,
-  countAgentModelRunsToday,
-  countContactModelRunsToday,
   askGeneralPermissionAfterBooking,
   getAgentSpendGate,
   hasOpenConversationAction,
@@ -118,8 +116,6 @@ type ProviderProblem = ReturnType<typeof describeProviderProblem>
 /** Motivo de la derivación: fijo por tipo de problema, nunca el texto del proveedor. */
 function handoffReasonFor(problem: ProviderProblem): string {
   switch (problem.code) {
-    case "DAILY_LIMIT":
-      return "Sofi alcanzó su tope diario de corridas"
     case "PROVIDER_QUOTA":
       return "El proveedor del modelo de Sofi no tiene saldo o cuota; ya avisamos a odentIA"
     default:
@@ -137,15 +133,12 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 const BURST_COVERED = "burst-covered"
 /** El equipo tomó o cerró la conversación mientras el modelo redactaba: nada salió. */
 const TEAM_TOOK_OVER = "team-took-over"
-/**
- * Corridas con modelo por persona y día. Una conversación real larga no llega:
- * cada corrida atiende una ráfaga entera de mensajes.
- */
-export const CONTACT_DAILY_RUN_LIMIT = 40
-/** Motivo de la derivación de quien llegó al tope por persona. */
-const CONTACT_DAILY_LIMIT = "CONTACT_DAILY_LIMIT"
-/** Ya pasó hoy al equipo por el tope por persona: lo que siga escribiendo se guarda sin responder. */
-const CONTACT_LIMIT_SILENCED = "tope-por-persona"
+/** Motivo en el libro de quien pasó al equipo porque la clínica llegó a su presupuesto del mes. */
+const BUDGET_REACHED = "PRESUPUESTO"
+/** Ya recibió hoy el mensaje fijo del presupuesto: lo que siga escribiendo lo ve el equipo, sin otro aviso. */
+const BUDGET_TOLD = "presupuesto-ya-avisado"
+/** Lo que dice la Bandeja del caso que pasó por el presupuesto. */
+const BUDGET_HANDOFF_REASON = "Para el equipo · presupuesto del mes"
 /** Lo que no es de la clínica ya recibió hoy el texto fijo: no se le repite. */
 const OFF_TOPIC_REPEATED = "fuera-de-tema-repetido"
 /** La corrida se pospuso porque la persona seguía escribiendo; no deja fila en el libro. */
@@ -537,20 +530,43 @@ async function attendAgentRun(
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
     if (runtime.storage) toolCtx.storage = runtime.storage
     runUsage = toolCtx.usage
-    // Dinero (ADR 0031): sin saldo de prueba los agentes se pausan; con el tope
-    // del mes alcanzado, Recepción no toma casos nuevos (quien ya conversa hoy
-    // sigue: no cuesta otra conversación). La persona recibe el aviso fijo y el
-    // caso pasa al equipo, sin llamar al modelo.
+    // Dinero (ADR 0031 y 0085): ningún agente se calla por un tope; el único
+    // límite es el presupuesto del mes que fija la clínica. Sin saldo de prueba
+    // los agentes se pausan. Al llegar al presupuesto, Sofi pasa a tu equipo a
+    // quien no estaba conversando (lo que ya empezó se termina: no cuesta otra
+    // conversación), con el mensaje fijo de la D4, sin la IA y sin cobro, una
+    // sola vez por persona y día; lo que siga escribiendo ese día lo ve el
+    // equipo en la Bandeja. Una alarma pasa siempre con su aviso (ADR 0084).
     const spend = await withOrgContext(db, orgId, async (tx) => {
       const gate = await getAgentSpendGate(tx, orgId)
       if (gate.trialExhausted) return "SALDO_PRUEBA" as const
-      if (gate.capReached && !(await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return "TOPE_GASTO" as const
-      return null
+      if (!gate.capReached || (await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return null
+      const told = await contactHadRunToday(tx, orgId, toolCtx.contactId, { status: "handoff", error: BUDGET_REACHED })
+      return told && !alarm ? ("PRESUPUESTO_AVISADO" as const) : ("PRESUPUESTO" as const)
     }).catch(() => null)
     if (spend && screenMode === "recheck") return stayInSpam()
+    if (spend === "PRESUPUESTO_AVISADO") {
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "omitida",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: BUDGET_TOLD,
+      })
+      return "done"
+    }
     if (spend) {
-      await performHandoff(toolCtx, spend === "SALDO_PRUEBA" ? "agentes en pausa: se usó todo el saldo de prueba" : "se alcanzó el tope de gasto del mes")
-      await noticeAfterHandoff(toolCtx)
+      const trial = spend === "SALDO_PRUEBA"
+      await performHandoff(
+        toolCtx,
+        alarm ? "Posible urgencia" : trial ? "agentes en pausa: se usó todo el saldo de prueba" : BUDGET_HANDOFF_REASON,
+        undefined,
+        alarm ? "alta" : "media",
+      )
+      await noticeAfterHandoff(toolCtx, trial || alarm ? "caso" : "presupuesto")
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId: inboundMessageId,
@@ -559,54 +575,9 @@ async function attendAgentRun(
         startedAt,
         endedAt: new Date(),
         llmCalls: 0,
-        error: spend,
+        error: trial ? spend : BUDGET_REACHED,
       })
       return "done"
-    }
-    // Tope por persona: quien escribe sin parar (un bot, una cadena) pasa al
-    // equipo antes de agotar el tope diario de la clínica; los demás siguen
-    // atendidos. Derivar no apaga al agente en el hilo (ADR 0050) y cada
-    // mensaje nuevo trae su corrida: el tema y el aviso salen una sola vez por
-    // persona y día, y lo que siga escribiendo ese día queda guardado, sin
-    // respuesta ni tema nuevo. Al día siguiente se la vuelve a atender.
-    const contactLimit = await withOrgContext(db, orgId, async (tx) => {
-      if ((await countContactModelRunsToday(tx, orgId, toolCtx.contactId)) < CONTACT_DAILY_RUN_LIMIT) return null
-      const handedOff = await contactHadRunToday(tx, orgId, toolCtx.contactId, { status: "handoff", error: CONTACT_DAILY_LIMIT })
-      return handedOff ? ("silencio" as const) : ("derivar" as const)
-    })
-    if (contactLimit && screenMode === "recheck") return stayInSpam()
-    // Una alarma no se calla por el tope: pasa otra vez al equipo con su aviso (ADR 0084).
-    if (contactLimit === "derivar" || (contactLimit === "silencio" && alarm)) {
-      await performHandoff(
-        toolCtx,
-        alarm ? "Posible urgencia" : `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`,
-        undefined,
-        alarm ? "alta" : "media",
-      )
-      await noticeAfterHandoff(toolCtx)
-    }
-    if (contactLimit) {
-      await ledger(db, orgId, {
-        conversationId,
-        triggerMessageId: inboundMessageId,
-        model: effectiveModel,
-        status: contactLimit === "derivar" ? "handoff" : "omitida",
-        startedAt,
-        endedAt: new Date(),
-        llmCalls: 0,
-        error: contactLimit === "derivar" ? CONTACT_DAILY_LIMIT : CONTACT_LIMIT_SILENCED,
-      })
-      return "done"
-    }
-    // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
-    // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
-    const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
-    if (usedToday >= cfg.dailyRunLimit) {
-      if (screenMode === "recheck") return stayInSpam()
-      return finishWithProviderProblem({
-        code: "DAILY_LIMIT",
-        detail: `Se alcanzó el tope diario de ${cfg.dailyRunLimit} corridas del agente`,
-      })
     }
     // El modelo de decisión se prepara antes del turno: elige qué conocimiento
     // llega y, al terminar, opina en sombra sobre el triaje. Que no pueda
@@ -936,14 +907,14 @@ async function attendAgentRun(
   }
 
   /**
-   * Proveedor inutilizable (configuración, credencial rechazada, tope
-   * diario): no se reintenta, el caso pasa a una persona y el aviso a quien
+   * Proveedor inutilizable (configuración, credencial rechazada o sin
+   * saldo): no se reintenta, el caso pasa a una persona y el aviso a quien
    * administra el agente se deduplica por problema y día.
    */
   async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
     await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
     // El aviso a la clínica dice «Ya avisamos a odentIA»: el caso de Soporte lleva el motivo técnico.
-    if (problem.code !== "DAILY_LIMIT" && runtime.ownerDb) {
+    if (runtime.ownerDb) {
       await reportModelOutage(runtime.ownerDb, {
         orgId,
         llm: effectiveModel,

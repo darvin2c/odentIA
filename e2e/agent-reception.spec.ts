@@ -19,7 +19,6 @@ interface Config {
   personaName: string | null
   emojis: "no" | "pocos"
   handoffKeywords: string[]
-  dailyRunLimit: number
 }
 
 /** El control cabe entero en la ventana: no queda tapado ni fuera de la pantalla. */
@@ -147,19 +146,12 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(reach).toContainText("Mencionan «reclamo»")
 
   // Límites: cada fila abre solo lo suyo y guardar una no pisa las otras. Sofi responde
-  // siempre, a toda hora y en todos los canales (ADR 0084): no hay fila de horario ni de canales.
+  // siempre, a toda hora y en todos los canales (ADR 0084), sin tope de respuestas: el
+  // único límite es el presupuesto del mes (ADR 0085).
   await expect(reach.getByRole("button", { name: /^Horario/ })).toHaveCount(0)
   await expect(reach.getByRole("button", { name: /^Canales/ })).toHaveCount(0)
-  await expect(reach.getByRole("button", { name: /^Tope diario/ })).toContainText("500 respuestas")
-  await reach.getByRole("button", { name: /^Tope diario/ }).click()
-  const capForm = sideSurface(page, { name: "Tope diario de Sofi", exact: true })
-  await capForm.getByLabel("Tope diario de respuestas").fill("0")
-  await expect(capForm.getByRole("button", { name: "Guardar" })).toBeDisabled()
-  await capForm.getByLabel("Tope diario de respuestas").fill("300")
-  await capForm.getByRole("button", { name: "Guardar" }).click()
-  await expect(capForm).toBeHidden()
-  await expect(reach.getByRole("button", { name: /^Tope diario/ })).toContainText("300 respuestas")
-  expect(await config()).toMatchObject({ dailyRunLimit: 300, handoffKeywords: ["queja", "reclamo"] })
+  await expect(reach.getByRole("button", { name: /^Tope diario/ })).toHaveCount(0)
+  expect(await config()).toMatchObject({ handoffKeywords: ["queja", "reclamo"] })
   await expect(reach).toContainText("Nunca, y no se puede cambiar")
 
   // Qué sabe: cuatro filas que llevan a donde se edita cada cosa, y lo que recuerda de cada persona.

@@ -2,7 +2,7 @@ import { isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/ag
 import { extractDictation } from "@odentia/agent/dental"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
-  assertAgentsNotPaused,
+  assertClioCanListen,
   getAgentConfig,
 } from "@odentia/services"
 import {
@@ -98,8 +98,9 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
         if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
-        // Sin saldo de prueba los agentes están en pausa (ADR 0031): no se gasta una llamada.
-        await withOrgContext(deps.db, orgId, (tx) => assertAgentsNotPaused(tx, orgId))
+        // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
+        // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
+        await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
           extractDictation(
             deps.db,

@@ -9,7 +9,7 @@ import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { addAgentCaseNote, getAgentCaseState, formatAgentCaseForPrompt } from "./agent-case.js"
-import { countContactModelRunsToday, createHandoff } from "./agent-operations.js"
+import { createHandoff } from "./agent-operations.js"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { describeAuditEvent } from "./audit-words.js"
 import {
@@ -414,26 +414,6 @@ describe("lo que el agente redactó no sale si el equipo apagó al agente, conve
     // Una persona del equipo escribió hace menos de 15 minutos: el agente espera (ADR 0050).
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, live.id))).toMatch(/conversando/)
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, earlier.id))).toBeNull()
-  })
-})
-
-describe("tope por persona", () => {
-  it("cuenta solo las corridas con modelo de hoy en las conversaciones de esa persona", async () => {
-    const c = await clinic()
-    const bot = await c.thread("Número desconocido")
-    const other = await c.thread("Ana Paredes")
-    const now = new Date()
-    const ledgerRow = (conversationId: string, llmCalls: number, startedAt = now) =>
-      ({ organizationId: c.orgId, conversationId, model: "fake", status: "ok", startedAt, llmCalls }) as const
-    await ownerDb.insert(agentRunLedger).values([
-      ledgerRow(bot.id, 2),
-      ledgerRow(bot.id, 1),
-      ledgerRow(bot.id, 0),
-      ledgerRow(bot.id, 1, new Date(now.getTime() - 3 * 24 * HOUR)),
-      ledgerRow(other.id, 1),
-    ])
-    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, bot.contactId))).toBe(2)
-    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, other.contactId))).toBe(1)
   })
 })
 

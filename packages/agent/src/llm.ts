@@ -2,8 +2,8 @@ import { ChatOpenAI } from "@langchain/openai"
 import { ServiceError } from "@odentia/services"
 import { FakeChatModel } from "./fake-model.js"
 
-/** Códigos de problema del proveedor; `DAILY_LIMIT` lo emite la corrida, no la configuración. */
-export type LlmProblemCode = "API_KEY_REQUIRED" | "PROVIDER_REJECTED" | "PROVIDER_QUOTA" | "DAILY_LIMIT"
+/** Códigos de problema del proveedor. */
+export type LlmProblemCode = "API_KEY_REQUIRED" | "PROVIDER_REJECTED" | "PROVIDER_QUOTA"
 
 /** La plataforma no puede usar el modelo (le falta la cuenta del proveedor). */
 export class LlmConfigError extends Error {
