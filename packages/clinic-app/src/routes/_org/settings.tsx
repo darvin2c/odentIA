@@ -4,6 +4,7 @@ import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { useMyRole } from "../../lib/crm"
 import { PLAN_PATH } from "../../lib/billing"
 import { RouterLink } from "../../lib/router-link"
+import { appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings")({
   component: SettingsLayout,
@@ -54,7 +55,10 @@ const grupos: SectionNavGroup[] = [
  * Facturación (`seesBilling`), que no es un permiso repartible.
  */
 const cuentaOdentia: SectionNavGroup = {
-  label: "Tu cuenta odentIA",
+  // Al leerlo, no al cargar el módulo: la app declara su producto después.
+  get label() {
+    return `Tu cuenta ${appWords().name}`
+  },
   items: [{ label: "Plan y pagos", to: PLAN_PATH }],
 }
 

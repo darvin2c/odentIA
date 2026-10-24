@@ -1,4 +1,4 @@
-# Receta compartida de producción para admin, panel, platform, web, api y worker.
+# Receta compartida de producción para admin, panel, platform, latidIA, web, api y worker.
 # OpenShip construye un artefacto por servicio; cada uno cambia su comando.
 
 FROM node:24-slim AS base
@@ -15,9 +15,11 @@ COPY apps/worker/package.json apps/worker/
 COPY apps/panel/package.json apps/panel/
 COPY apps/admin/package.json apps/admin/
 COPY apps/dental-clinic/package.json apps/dental-clinic/
+COPY apps/medical-clinic/package.json apps/medical-clinic/
 COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
+COPY packages/brand-scene/package.json packages/brand-scene/
 COPY packages/channels/package.json packages/channels/
 COPY packages/clinic-app/package.json packages/clinic-app/
 COPY packages/clinical/package.json packages/clinical/
@@ -36,6 +38,7 @@ RUN pnpm install --frozen-lockfile \
   --filter @odentia/panel... \
   --filter @odentia/admin... \
   --filter @odentia/dental-clinic... \
+  --filter @odentia/medical-clinic... \
   --filter @odentia/web...
 
 FROM deps AS build
@@ -47,12 +50,15 @@ ARG VITE_BASE_DOMAIN
 # Dónde abre una clínica de cada producto (odentIA y latidIA); vacíos, en VITE_BASE_DOMAIN.
 ARG VITE_DENTAL_DOMAIN=""
 ARG VITE_MEDICAL_DOMAIN=""
+# El producto del panel de este artefacto: vacío, odentIA; `medical`, el de latidIA.
+ARG VITE_PRODUCT=""
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_BASE_DOMAIN=$VITE_BASE_DOMAIN
 ENV VITE_DENTAL_DOMAIN=$VITE_DENTAL_DOMAIN
 ENV VITE_MEDICAL_DOMAIN=$VITE_MEDICAL_DOMAIN
+ENV VITE_PRODUCT=$VITE_PRODUCT
 RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/dental-clinic build \
-  && pnpm --filter @odentia/web build
+  && pnpm --filter @odentia/medical-clinic build && pnpm --filter @odentia/web build
 
 FROM base AS runtime
 ENV NODE_ENV=production

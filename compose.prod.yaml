@@ -126,6 +126,44 @@ services:
     depends_on:
       - api
 
+  # latidIA (decisión 9 del issue 229): su panel y la app de sus clínicas son otro
+  # artefacto de la misma receta, con los dominios de latidia72.com. Solo arrancan
+  # con el perfil «latidia» y LATIDIA_API_URL y MEDICAL_DOMAIN definidos
+  # (docs/deployment.md, «latidIA en su dominio»).
+  latidia-panel:
+    profiles: ["latidia"]
+    build: &latidia-build
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${LATIDIA_API_URL:-}
+        VITE_BASE_DOMAIN: ${MEDICAL_DOMAIN:-}
+        VITE_DENTAL_DOMAIN: ${VITE_DENTAL_DOMAIN:-}
+        VITE_MEDICAL_DOMAIN: ${MEDICAL_DOMAIN:-}
+        VITE_PRODUCT: medical
+    command: ["pnpm", "--filter", "@odentia/panel", "start"]
+    env_file: *runtime-env-file
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3014:3000"
+    depends_on:
+      - api
+
+  latidia:
+    profiles: ["latidia"]
+    build: *latidia-build
+    command: ["pnpm", "--filter", "@odentia/medical-clinic", "start"]
+    env_file: *runtime-env-file
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3013:3000"
+    depends_on:
+      - api
+
   # Web de marketing (ADR 0046): HTML generado al compilar, sin variables de runtime
   # ni dependencias. Solo el Libro de Reclamaciones envía a la API desde el navegador.
   web:

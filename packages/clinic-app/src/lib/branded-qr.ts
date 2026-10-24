@@ -1,8 +1,10 @@
-import isotipo from "../../../../assets/brand/isotipo-light.svg?raw"
+import { BRAND_DIGITS, type BrandId } from "@odentia/ui"
+import { appWords } from "./product-words"
 
 /**
- * Códigos QR de la aplicación con nuestro isotipo [32] al centro (decisión 10
- * del lienzo «Su enlace y el código QR»). Se generan con la corrección de
+ * Códigos QR de la aplicación con el isotipo de su marca al centro, el [32] de
+ * odentIA o el [72] de latidIA (decisión 10 del lienzo «Su enlace y el código
+ * QR» y decisión 2 del issue 229). Se generan con la corrección de
  * errores más alta (H, ISO/IEC 18004: recupera hasta ~30 % del código) y el
  * isotipo tapa cerca del 5 % del área, así que se lee igual. Nunca el logo de
  * la clínica: un logo cualquiera puede estropear la lectura; ese va afuera.
@@ -13,10 +15,17 @@ const QUIET = 2
 /** Lado del recuadro del isotipo respecto del código (~22 % del ancho). */
 const LOGO_SHARE = 0.22
 
-const ISOTIPO_INNER = isotipo
-  .replace(/^[\s\S]*?<svg[^>]*>/, "")
-  .replace(/<\/svg>\s*$/, "")
-  .replace(/<title>[\s\S]*?<\/title>/, "")
+/** El color del isotipo sobre el blanco del código: el de cada marca en claro. */
+const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0" }
+
+/** El isotipo de la marca en su caja de 128 × 112: los dos dígitos y los corchetes. */
+function isotipo(brand: BrandId): string {
+  const [first, second] = BRAND_DIGITS[brand]
+  return (
+    `<g transform="translate(20 12) scale(.8)"><path d="${first}"/><path d="${second}"/></g>` +
+    `<path d="M16 10H6V102H16M112 10H122V102H112" fill="none" stroke="currentColor" stroke-width="5"/>`
+  )
+}
 
 /** El código como SVG (texto), con el isotipo al centro sobre un recuadro blanco. */
 export async function brandedQrSvg(text: string): Promise<string> {
@@ -37,12 +46,14 @@ export async function brandedQrSvg(text: string): Promise<string> {
     }
   }
   const at = start + QUIET
+  const brand = appWords().brand
+  const color = ISOTIPO_COLOR[brand]
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges">` +
     `<rect width="${size}" height="${size}" fill="#fff"/>` +
     `<path fill="#0f172a" d="${path}"/>` +
     `<rect x="${at - 0.6}" y="${at - 0.6}" width="${box + 1.2}" height="${box + 1.2}" rx="1.4" fill="#fff"/>` +
-    `<svg x="${at}" y="${at}" width="${box}" height="${box}" viewBox="0 0 128 112" style="color:#0e7490" fill="#0e7490" shape-rendering="geometricPrecision">${ISOTIPO_INNER}</svg>` +
+    `<svg x="${at}" y="${at}" width="${box}" height="${box}" viewBox="0 0 128 112" style="color:${color}" fill="${color}" shape-rendering="geometricPrecision">${isotipo(brand)}</svg>` +
     `</svg>`
   )
 }

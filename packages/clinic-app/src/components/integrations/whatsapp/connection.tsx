@@ -26,6 +26,7 @@ import { ConnectedNotice } from "./connected-notice"
 import { WhatsAppConnectSteps } from "./connect-steps"
 import { WhatsAppMessagePanel } from "./message-panel"
 import { WhatsAppMessages } from "./messages"
+import { appWords } from "../../../lib/product-words"
 
 const STATUS_WORD: Record<ConnectionTone, string> = {
   ok: "text-primary-soft-foreground",
@@ -116,7 +117,7 @@ function KeyPanel({
           />
         ))}
         <p className="rounded-xl bg-muted px-3.5 py-3 text-sm text-muted-foreground">
-          Con la clave nueva odentIA comprueba que sea de la misma cuenta y vuelve a pedir a WhatsApp los mensajes que hayan
+          Con la clave nueva {appWords().name} comprueba que sea de la misma cuenta y vuelve a pedir a WhatsApp los mensajes que hayan
           faltado.
         </p>
       </div>

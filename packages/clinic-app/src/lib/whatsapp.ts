@@ -1,6 +1,7 @@
 import type { ConnectionItem } from "./crm"
 import { type ChannelField, channelAccount } from "./integrations"
 import { ADMIN_NAME } from "./agent-names"
+import { appWords } from "./product-words"
 
 /**
  * WhatsApp en Configuración y en la Bandeja: lo que entrega el servidor y lo
@@ -377,11 +378,16 @@ export const STATUS_TONE: Record<MessageStatus, StatusTone> = {
   sin_pedir: "off",
 }
 
+// Lo que trae la plataforma lleva su nombre al leerlo: la app declara su producto después de cargar el módulo.
 const SOURCE_WORDS: Record<Exclude<MessageOrigin, "agente">, string> = {
-  bandeja: "Viene con odentIA",
+  get bandeja() {
+    return `Viene con ${appWords().name}`
+  },
   clinica: "Lo creó la clínica",
   cuenta: "Ya estaba en tu cuenta",
-  plan: "Viene con odentIA",
+  get plan() {
+    return `Viene con ${appWords().name}`
+  },
 }
 
 /** De dónde sale: los automáticos dicen cómo está su línea; los demás, su origen. */
@@ -472,7 +478,7 @@ export function statusDetail(item: ClinicMessage, since: Since): string {
   const state = item.current
   const when = state.since ? since(state.since) : ""
   const catalog = item.origin === "agente" || item.origin === "bandeja" || item.origin === "plan"
-  const text = catalog ? (state.isDefault ? "con el texto que trae odentIA" : "con el texto de la clínica") : ""
+  const text = catalog ? (state.isDefault ? `con el texto que trae ${appWords().name}` : "con el texto de la clínica") : ""
   const lead = [when ? `desde ${when}` : "", text].filter(Boolean).join(", ")
   const sentence = lead ? `${lead.charAt(0).toUpperCase()}${lead.slice(1)}.` : ""
   // El tipo importa en lo que WhatsApp tiene en su poder y puede salir: de eso depende lo que cobra.

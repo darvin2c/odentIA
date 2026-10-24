@@ -9,6 +9,7 @@ import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { mutationErrorMessage } from "../../lib/query-error"
 import { adminFlowToDiagram } from "./admin-line"
+import { appWords } from "../../lib/product-words"
 
 /** Con el modelo caído el campo se desactiva y vuelve solo pasado este tiempo. */
 const RETRY_AFTER_MS = 30_000
@@ -139,14 +140,14 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
           ) : null}
           {unknown ? (
             forward.isSuccess ? (
-              <p className="font-medium">Enviado a odentIA. La respuesta te llega en Ayuda.</p>
+              <p className="font-medium">Enviado a {appWords().name}. La respuesta te llega en Ayuda.</p>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={forward.isPending} onClick={() => forward.mutate(text.trim())}>
-                  {forward.isPending ? "Enviando…" : "Enviarlo a odentIA como pedido"}
+                  {forward.isPending ? "Enviando…" : `Enviarlo a ${appWords().name} como pedido`}
                 </Button>
                 <span className="min-w-0 flex-1 basis-64 text-muted-foreground">
-                  Se envía lo que escribiste, con el nombre de tu clínica, tu rol, esta pantalla y la versión de odentIA.
+                  Se envía lo que escribiste, con el nombre de tu clínica, tu rol, esta pantalla y la versión de {appWords().name}.
                 </span>
               </div>
             )

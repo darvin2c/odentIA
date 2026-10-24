@@ -56,6 +56,7 @@ import { type PickedPerson, PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
 import { Optional, PickCombobox, QuantityInput } from "./fields"
 import { type StockActionKind, useInventory } from "./inventory-scope"
+import { appWords } from "../../lib/product-words"
 
 export function StockActionDrawer({
   kind,
@@ -201,7 +202,7 @@ function AdjustDrawer({ preset, onClose }: { preset: { productId?: string; lotId
   const unit = detail?.unit ?? "unidad"
   const help = (() => {
     if (!lot) return null
-    const has = `odentIA tiene ${formatWhole(lot.quantityOnHand)}.`
+    const has = `${appWords().name} tiene ${formatWhole(lot.quantityOnHand)}.`
     if (parsed === null || Number.isNaN(parsed)) return has
     const delta = parsed - lot.quantityOnHand
     if (delta === 0) return `${has} Es lo mismo: no cambia nada.`

@@ -206,7 +206,7 @@ export function SpecialPlanCard({ plan, taxLabel }: { plan: OfferPlan; taxLabel:
         <p className="text-sm font-medium">
           {plan.name} <span className="font-normal text-muted-foreground">(tu plan)</span>
         </p>
-        <p className="text-sm text-muted-foreground">Condiciones que acordaste con odentIA. Arriba, el plan de lista, por si quieres pasarte.</p>
+        <p className="text-sm text-muted-foreground">Condiciones que acordaste con {appWords().name}. Arriba, el plan de lista, por si quieres pasarte.</p>
       </div>
       <p className="text-lg font-semibold tabular-nums">
         {formatPlanMoney(plan.priceCents, plan.currency)}{" "}

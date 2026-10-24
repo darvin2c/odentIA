@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { bareProduct, declareProduct } from "../product/product-ui"
 import type { ConnectionItem } from "./crm"
 import {
   awaitsAddress,
@@ -14,6 +15,9 @@ import {
   validateIntegrationsSearch,
   webchatRows,
 } from "./integrations"
+
+// Lo que nombra a la plataforma dice el nombre del producto de la app: aquí, odentIA.
+declareProduct(bareProduct("dental"))
 
 const NOW = Date.parse("2026-10-13T15:00:00Z")
 const minutesAgo = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()

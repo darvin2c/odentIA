@@ -13,6 +13,7 @@ import {
   type PanelChannel,
   secretFields,
 } from "../../lib/integrations"
+import { appWords } from "../../lib/product-words"
 
 /** La cuenta que el proveedor reconoce con unos datos; cada parte puede faltar. */
 interface ProviderAccount {
@@ -335,7 +336,7 @@ export function ChannelPanel({
                   <>
                     <strong className="font-semibold">Es el único dato</strong>
                     <span className="text-muted-foreground">
-                      odentIA comprueba la clave, toma el nombre del bot y le dice a Telegram adónde avisar. No hay nada que
+                      {appWords().name} comprueba la clave, toma el nombre del bot y le dice a Telegram adónde avisar. No hay nada que
                       copiar ni pegar.
                     </span>
                   </>
@@ -410,7 +411,7 @@ export function ChannelPanel({
               </section>
             ) : setup.pasteAddress ? null : (
               <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
-                No hay nada que copiar ni pegar: odentIA le dice a Telegram adónde avisar.
+                No hay nada que copiar ni pegar: {appWords().name} le dice a Telegram adónde avisar.
               </p>
             )}
 

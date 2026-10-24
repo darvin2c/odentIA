@@ -34,6 +34,7 @@ import {
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import { type Better, ChangeLine, EmptyLine, ReportCard } from "./report-parts"
+import { appWords } from "../../lib/product-words"
 
 /** Lo que se aparta de la clínica más de estos puntos (o la mitad, en minutos) lleva su marca. */
 const APART_POINTS = 5
@@ -510,7 +511,7 @@ function FreeHours({ data }: { data: AgendaReport }) {
       <p className="rounded-lg bg-muted/50 px-3 py-2 text-[13px] text-foreground/80">
         Cada día se calcula con el horario que tenía cada profesional ese día; los feriados y los bloqueos de la sede cuentan como cerrado.
         {assumed && firsts.length > 0
-          ? ` Antes de que odentIA guardara su horario se usó el de hoy: ${firsts
+          ? ` Antes de que ${appWords().name} guardara su horario se usó el de hoy: ${firsts
               .map((first) => `${names.get(first.userId) ?? "un profesional"} desde el ${dayText(first.day, locale)}`)
               .join(", ")}.`
           : ""}

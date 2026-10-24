@@ -21,6 +21,8 @@ export default defineConfig({
     port: Number(process.env.PORT) || 5173,
     strictPort: Boolean(process.env.PORT),
   },
+  // `chat.js` del chat web (ADR 0076) es común a los productos: vive en el paquete.
+  publicDir: "../../packages/clinic-app/public",
   resolve: { alias: clinicAppAliases() },
   plugins: [tailwindcss(), tanstackStart({ router: { virtualRouteConfig: routes } }), viteReact()],
 })

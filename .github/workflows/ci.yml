@@ -26,11 +26,11 @@ jobs:
           - parte: general
             tipos: true
             postgres: true
-            paquetes: --filter=!@odentia/e2e --filter=!@odentia/services --filter=!@odentia/api --filter=!@odentia/ui-patterns --filter=!@odentia/dental-clinic --filter=!@odentia/clinic-app
+            paquetes: --filter=!@odentia/e2e --filter=!@odentia/services --filter=!@odentia/api --filter=!@odentia/ui-patterns --filter=!@odentia/dental-clinic --filter=!@odentia/medical-clinic --filter=!@odentia/clinic-app
           # `--only` omite el `^build` (tsc --noEmit): ya lo comprueba la parte general.
           # Pruebas de interfaz con jsdom: sin base de datos, pero mucha CPU.
           - parte: interfaz
-            paquetes: --filter=@odentia/ui-patterns --filter=@odentia/dental-clinic --filter=@odentia/clinic-app
+            paquetes: --filter=@odentia/ui-patterns --filter=@odentia/dental-clinic --filter=@odentia/medical-clinic --filter=@odentia/clinic-app
             opciones: --only
           - parte: api
             postgres: true

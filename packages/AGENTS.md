@@ -12,10 +12,10 @@ Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni dupli
 | `clinical` | Utilidades clínicas comunes a todos los productos; no una historia paralela ni otra capa de persistencia. Nunca importa `dental`. |
 | `dental` | Dominio dental puro (ADR 0079): odontograma, periodontograma, tipos de tratamiento y lo dental de cada país (`dentalProfileFor`). Lo común no lo importa: lo dental de `services`, `agent` y `db` vive en su `src/dental/` (`@odentia/services/dental`, `@odentia/agent/dental`, `@odentia/db/dental`) y se conecta con lo común solo por `products.ts`; la prueba de límites lo exige. |
 | `mail` | Correo transaccional de la plataforma; distinto del buzón omnicanal de una organización. |
-| `ui` | Primitivas visuales y accesibles sin negocio. |
+| `ui` | Primitivas visuales y accesibles sin negocio. La marca de la app (`BrandProvider`, `useBrand`: odentIA o latidIA, ADR 0087) decide el logo, el isotipo y el `Spinner`; el color, `[data-brand]` en `globals.css`. |
 | `ui-patterns` | Composiciones reutilizables, con stories; las apps deciden sus datos y permisos. |
 | `clinic-app` | Las pantallas comunes de la clínica (ADR 0086): componentes, `lib`, páginas y el contrato del producto (`productUi()`). Cada producto lo monta en su app; nunca importa lo de un producto. |
-| `brand-scene` | La escena de las 32 piezas de la portada de la web, compartida por la web y el panel; sin datos de clínicas. |
+| `brand-scene` | Las escenas de la marca, sin datos de clínicas: las 32 piezas de odentIA (portada de la web y acceso del panel) y el pulso de latidIA (`CalmPulseScene`). |
 
 ## Contratos particulares
 

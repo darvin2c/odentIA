@@ -31,6 +31,7 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient } from "../../lib/auth-client"
 import { tenantUrl } from "../../lib/host"
+import { panelWords } from "../../lib/brand"
  import { parseUserAgent, relativeTime } from "../../lib/user-agent"
 
 export const Route = createFileRoute("/_app/profile")({
@@ -196,7 +197,7 @@ function ProfilePage() {
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Perfil</div>
-          <p className="text-sm text-muted-foreground">Tu información personal en odentIA.</p>
+          <p className="text-sm text-muted-foreground">Tu información personal en {panelWords.name}.</p>
         </div>
         <div>
           <div className="flex items-center gap-4">

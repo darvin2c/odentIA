@@ -11,6 +11,7 @@ import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
 import { storedInvitation } from "../../lib/founders"
 import { adminUrl, domainOf, tenantUrl, webUrl } from "../../lib/host"
+import { panelWords } from "../../lib/brand"
 
 const appRouteApi = getRouteApi("/_app")
 
@@ -395,11 +396,11 @@ function NoInvitation({ email }: { email: string }) {
     <div className="flex flex-col gap-4 rounded-xl border bg-card p-6">
       <div>
         <p className="text-lg font-semibold">Todavía no perteneces a una clínica</p>
-        <p className="mt-1 text-sm text-muted-foreground">Por ahora se entra a odentIA con invitación: estamos abriendo con un grupo de clínicas Fundadoras.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Por ahora se entra a {panelWords.name} con invitación: estamos abriendo con un grupo de clínicas Fundadoras.</p>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
         <div>
-          <p className="font-medium">Quiero usar odentIA en mi clínica</p>
+          <p className="font-medium">Quiero usar {panelWords.name} en mi {panelWords.place.one}</p>
           <p className="text-sm text-muted-foreground">
             Pide tu invitación en la web
             {answerDays ? `; te respondemos en ${answerDays} ${answerDays === 1 ? "día hábil" : "días hábiles"}` : ""}.
@@ -408,7 +409,7 @@ function NoInvitation({ email }: { email: string }) {
         <Button render={<a href={webUrl("/solicitar-invitacion")} />}>Solicitar invitación</Button>
       </div>
       <div className="rounded-lg border p-4">
-        <p className="font-medium">Trabajo en una clínica que ya usa odentIA</p>
+        <p className="font-medium">Trabajo en {panelWords.place.indefinite} que ya usa {panelWords.name}</p>
         <p className="text-sm text-muted-foreground">
           Pide a quien administra tu clínica que te invite{email ? ` a ${email}` : ""}. La invitación aparecerá aquí.
         </p>

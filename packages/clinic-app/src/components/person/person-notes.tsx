@@ -9,6 +9,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import type { PersonNote } from "../../lib/people"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { SummaryCard } from "../patient/resumen-tab"
+import { appWords } from "../../lib/product-words"
 
 interface MemoryFact {
   id: string
@@ -97,7 +98,7 @@ export function PersonNotes({ personId }: { personId: string }) {
           {list.map((note) => (
             <li key={note.id} className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0">
               <span className="text-xs text-muted-foreground">
-                {`${note.authorName ?? "Anotado por odentIA"} · ${timeAgo(note.at) || new Date(note.at).toLocaleDateString(activeOrgLocale())}`}
+                {`${note.authorName ?? `Anotado por ${appWords().name}`} · ${timeAgo(note.at) || new Date(note.at).toLocaleDateString(activeOrgLocale())}`}
               </span>
               <span className="whitespace-pre-wrap text-sm">{note.body}</span>
             </li>

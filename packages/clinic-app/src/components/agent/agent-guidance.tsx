@@ -9,6 +9,7 @@ import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { appWords } from "../../lib/product-words"
 
 type Filter = "todas" | "escrita" | "aprendida"
 
@@ -248,7 +249,7 @@ function GuidanceDrawer({
           onChange={(event) => setText(event.target.value)}
           placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
         />
-        <FieldDescription>Una idea por línea. No puede contradecir lo que fija odentIA: ante un choque, gana la base.</FieldDescription>
+        <FieldDescription>Una idea por línea. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la base.</FieldDescription>
       </Field>
     </FormDrawer>
   )

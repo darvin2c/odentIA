@@ -1,5 +1,6 @@
 import { AuthAside } from "@odentia/ui-patterns"
 import { webUrl } from "./host"
+import { panelWords } from "./brand"
 
 /** Pie de las pantallas de acceso: los documentos y la ayuda viven en la web. */
 export function AuthLegal() {
@@ -21,7 +22,7 @@ export function AuthLegal() {
 /** Entrar recibe, no vende (lienzo «Entrar: dos fondos», prueba 2). */
 export function WelcomeAside() {
   return (
-    <AuthAside tag="Tu clínica" title="Omnicanal" accent="y agéntica.">
+    <AuthAside tag={`Tu ${panelWords.place.one}`} title="Omnicanal" accent="y agéntica.">
       <p>Tus agentes siguieron trabajando mientras no estabas.</p>
     </AuthAside>
   )
@@ -30,7 +31,7 @@ export function WelcomeAside() {
 /** Recuperar el acceso tranquiliza: la clínica no se detiene mientras tanto. */
 export function RecoverAside() {
   return (
-    <AuthAside tag="Todo sigue en marcha" title="Tu clínica" accent="sigue atendiendo.">
+    <AuthAside tag="Todo sigue en marcha" title={`Tu ${panelWords.place.one}`} accent="sigue atendiendo.">
       <p>Mientras recuperas tu acceso, tus agentes siguen respondiendo y agendando.</p>
     </AuthAside>
   )

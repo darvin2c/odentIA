@@ -12,6 +12,7 @@ import { requireVerifiedSession } from "../lib/guards"
 import { legalLinks } from "../lib/host"
 import { safeNext } from "../lib/safe-next"
 import { initials } from "../lib/welcome"
+import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/terminos")({
   ssr: false,
@@ -169,7 +170,7 @@ function TermsStepPage() {
           />
         ) : (
           <AuthAside
-            tag={invitation ? "Te invitaron" : "Tu clínica"}
+            tag={invitation ? "Te invitaron" : `Tu ${panelWords.place.one}`}
             title={invitation?.organizationName ?? clinic ?? "Tu clínica"}
             accent="te espera."
           />

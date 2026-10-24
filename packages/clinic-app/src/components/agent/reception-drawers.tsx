@@ -9,6 +9,7 @@ import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } fr
 import type { AgentConfig } from "../../lib/crm"
 import { sameDraft } from "../../lib/page-draft-guard"
 import { mutationErrorMessage } from "../../lib/query-error"
+import { appWords } from "../../lib/product-words"
 
 /** Guarda una parte de la configuración y refresca lo que la muestra. */
 function useSaveConfig(onSaved: () => void) {
@@ -60,7 +61,7 @@ export function FunctionNoteDrawer({
         onClose()
       }}
       title={fn ? `Indicación para «${fn.label}»` : "Indicación"}
-      description="Una nota corta sobre cómo quieres que haga esto. No reemplaza lo que fija odentIA."
+      description={`Una nota corta sobre cómo quieres que haga esto. No reemplaza lo que fija ${appWords().name}.`}
       onSubmit={submit}
       isSubmitting={save.isPending}
       isDirty={note !== saved}

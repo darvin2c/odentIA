@@ -10,6 +10,7 @@ import { accountWords, type ConnectResult, type ConnectionSetup, WHATSAPP_FIELDS
 import { CopyValue } from "../channel-panel"
 import { AccountField } from "./account-field"
 import { Note } from "./note"
+import { appWords } from "../../../lib/product-words"
 
 type StepState = "done" | "current" | "pending"
 
@@ -161,7 +162,7 @@ function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (cr
           Comprobar
         </SubmitButton>
         <p className="text-sm text-muted-foreground">
-          odentIA le pregunta a WhatsApp con estos datos y te dice qué número encontró antes de seguir.
+          {appWords().name} le pregunta a WhatsApp con estos datos y te dice qué número encontró antes de seguir.
         </p>
       </div>
     </form>
@@ -233,7 +234,7 @@ function AddressStep({
   return (
     <div className="flex flex-col gap-4">
       {webhookUrl ? (
-        <CopyValue id={`${idPrefix}-direccion`} label="Dirección de odentIA" hint="En Meta se llama «Callback URL»." value={webhookUrl} />
+        <CopyValue id={`${idPrefix}-direccion`} label={`Dirección de ${appWords().name}`} hint="En Meta se llama «Callback URL»." value={webhookUrl} />
       ) : null}
       {verifyToken ? (
         <CopyValue

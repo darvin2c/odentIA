@@ -130,8 +130,12 @@ Pendiente fuera del código, en la cuenta de cada servicio:
 4. R2: `https://*.latidia72.com` en el CORS del bucket de adjuntos.
 5. Correo: `hola@` y `privacidad@latidia72.com` (Email Routing) y el remitente de los correos.
 
-El panel de `app.latidia72.com` y la app de sus clínicas son otro build, con
-`VITE_BASE_DOMAIN=latidia72.com`: llegan con la app médica (entrega 4 del plan).
+El panel de `app.latidia72.com` y la app de sus clínicas (`apps/medical-clinic`) son
+otro artefacto de la misma receta, con `VITE_BASE_DOMAIN=latidia72.com`,
+`VITE_API_URL=https://api.latidia72.com` (`LATIDIA_API_URL`) y `VITE_PRODUCT=medical`:
+los servicios `latidia-panel` (puerto 3014) y `latidia` (3013) del compose, con el
+perfil `latidia`. El túnel lleva `app.latidia72.com` al primero y `*.latidia72.com` al
+segundo; `api.latidia72.com`, a la misma API.
 
 ## Variables: una sola fuente
 

@@ -33,6 +33,7 @@ import {
   E2E_SCRUB_ENV_KEYS,
   PORTLESS_CLI,
   ROOT,
+  latidiaBuildEnv,
   stackEnv,
   type HarnessRuntime,
 } from "./harness-env"
@@ -89,7 +90,7 @@ interface RunState {
   fixtureClose: (() => Promise<void>) | null
   proxyStarted: boolean
   proxyPid: number | null
-  outDirs: { panel: string; platform: string; admin: string }
+  outDirs: { panel: string; platform: string; admin: string; latidiaPanel?: string; latidia?: string }
   timings: Array<{ label: string; ms: number }>
   closePromise: Promise<string[]> | null
 }
@@ -543,15 +544,17 @@ function resolveViteCli(appDir: string): string {
 
 async function runBuild(
   state: RunState,
-  app: "panel" | "dental-clinic" | "admin",
+  app: "panel" | "dental-clinic" | "medical-clinic" | "admin",
   viteCli: string,
   outDir: string,
   env: Record<string, string>,
+  /** Otro nombre para el log cuando la misma app se compila dos veces (el panel de latidIA). */
+  label: string = app,
 ): Promise<void> {
-  state.log.log(`Compilando ${app} → ${outDir}…`)
+  state.log.log(`Compilando ${label} → ${outDir}…`)
   const owned = spawnOwned(
     state,
-    `build-${app}`,
+    `build-${label}`,
     process.execPath,
     [viteCli, "build", "--outDir", outDir],
     {
@@ -717,6 +720,8 @@ interface ReadinessTargets {
   smtpHost: string
   smtpPort: number
   storageUrl: string
+  /** latidIA, cuando corre: su panel y la misma API en su dominio. */
+  latidia?: { panelOrigin: string; apiOrigin: string }
 }
 
 /** Todas las sondas funcionales en paralelo; si alguna falla se recogen sus diagnósticos. */
@@ -793,6 +798,20 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
       const res = await fetchVia(targets.storageUrl, undefined, "RustFS /health")
       if (res.status !== 200) throw new Error(`RustFS devolvió ${res.status}`)
     })(),
+    ...(targets.latidia
+      ? [
+          (async () => {
+            const latidia = targets.latidia
+            if (!latidia) return
+            const health = await fetchVia(`${latidia.apiOrigin}/health`, dispatcher, "API de latidIA /health")
+            if (health.status !== 200) throw new Error(`API de latidIA /health devolvió ${health.status}`)
+            const login = await fetchVia(`${latidia.panelOrigin}/login`, dispatcher, "panel de latidIA /login")
+            if (login.status !== 200 || !login.text.includes('data-brand="latidia"')) {
+              throw new Error(`el panel de latidIA /login devolvió ${login.status} sin su marca`)
+            }
+          })(),
+        ]
+      : []),
   ])
   const failures: string[] = []
   for (const result of results) {
@@ -1012,6 +1031,10 @@ export async function main(args: string[]): Promise<number> {
   const runId = randomUUID()
   const tld = `e2e-${runId}.localhost`
   const baseDomain = `odentia.${tld}`
+  // latidIA en su dominio (decisión 9 del issue 229): su panel y su app son otro build,
+  // así que se levantan solo con la suite completa o con un recorrido suyo.
+  const specs = args.filter((arg) => !arg.startsWith("-"))
+  const medicalDomain = specs.length === 0 || specs.some((spec) => /latidia/i.test(spec)) ? `latidia.${tld}` : undefined
   const stateDir = await mkdtemp(join(tmpdir(), "odentia-e2e-"))
   const portlessDir = join(stateDir, "portless")
   const metaPath = runtimeMetaPath(runId)
@@ -1019,6 +1042,12 @@ export async function main(args: string[]): Promise<number> {
     panel: join(ROOT, "apps", "panel", ".cache", "e2e", runId),
     platform: join(ROOT, "apps", "dental-clinic", ".cache", "e2e", runId),
     admin: join(ROOT, "apps", "admin", ".cache", "e2e", runId),
+    ...(medicalDomain
+      ? {
+          latidiaPanel: join(ROOT, "apps", "panel", ".cache", "e2e", `${runId}-latidia`),
+          latidia: join(ROOT, "apps", "medical-clinic", ".cache", "e2e", runId),
+        }
+      : {}),
   }
   const logsDir = join(dirname(metaPath), "logs")
   const state: RunState = {
@@ -1070,13 +1099,22 @@ export async function main(args: string[]): Promise<number> {
       )
     }
     const tPorts = performance.now()
-    leases.push(...(await reservePorts(5)))
-    const [proxyLease, apiLease, panelLease, platformLease, adminLease] = leases
+    leases.push(...(await reservePorts(medicalDomain ? 7 : 5)))
+    const [proxyLease, apiLease, panelLease, platformLease, adminLease, latidiaPanelLease, latidiaLease] = leases
     if (!proxyLease || !apiLease || !panelLease || !platformLease || !adminLease) {
       throw new Error("No se pudieron reservar los 5 puertos del run.")
     }
+    if (medicalDomain && (!latidiaPanelLease || !latidiaLease)) {
+      throw new Error("No se pudieron reservar los 2 puertos de latidIA.")
+    }
     state.proxyPort = proxyLease.port
-    const appPorts = { api: apiLease.port, panel: panelLease.port, platform: platformLease.port, admin: adminLease.port }
+    const appPorts = {
+      api: apiLease.port,
+      panel: panelLease.port,
+      platform: platformLease.port,
+      admin: adminLease.port,
+      ...(latidiaPanelLease && latidiaLease ? { latidiaPanel: latidiaPanelLease.port, latidia: latidiaLease.port } : {}),
+    }
     initRuntimeMeta(metaPath, {
       runId,
       stateDir,
@@ -1093,6 +1131,7 @@ export async function main(args: string[]): Promise<number> {
       baseDomain,
       proxyPort: state.proxyPort,
       appPorts,
+      ...(medicalDomain ? { medicalDomain } : {}),
     }
     let stack: HarnessStack
     try {
@@ -1124,10 +1163,18 @@ export async function main(args: string[]): Promise<number> {
     const vitePanel = resolveViteCli(join(ROOT, "apps", "panel"))
     const vitePlatform = resolveViteCli(join(ROOT, "apps", "dental-clinic"))
     const viteAdmin = resolveViteCli(join(ROOT, "apps", "admin"))
+    const viteLatidia = medicalDomain ? resolveViteCli(join(ROOT, "apps", "medical-clinic")) : null
+    const latidiaEnv = medicalDomain ? { ...childEnv, ...latidiaBuildEnv(runtime) } : null
     const builds = await Promise.allSettled([
       runBuild(state, "panel", vitePanel, outDirs.panel, childEnv),
       runBuild(state, "dental-clinic", vitePlatform, outDirs.platform, childEnv),
       runBuild(state, "admin", viteAdmin, outDirs.admin, childEnv),
+      ...(viteLatidia && latidiaEnv && outDirs.latidiaPanel && outDirs.latidia
+        ? [
+            runBuild(state, "panel", vitePanel, outDirs.latidiaPanel, latidiaEnv, "panel-latidia"),
+            runBuild(state, "medical-clinic", viteLatidia, outDirs.latidia, latidiaEnv),
+          ]
+        : []),
     ])
     for (const build of builds) {
       if (build.status === "rejected") throw build.reason
@@ -1223,10 +1270,48 @@ export async function main(args: string[]): Promise<number> {
       join(ROOT, "apps", "admin"),
       { ...childEnv, NODE_ENV: "production" },
     )
+    if (viteLatidia && latidiaPanelLease && latidiaLease && appPorts.latidiaPanel && appPorts.latidia && outDirs.latidiaPanel && outDirs.latidia) {
+      /** `vite preview` de un build, como el resto de las apps del run. */
+      const preview = (viteCli: string, outDir: string, port: number) => [
+        "--import",
+        bootstrapUrl,
+        viteCli,
+        "preview",
+        "--outDir",
+        outDir,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(port),
+        "--strictPort",
+      ]
+      await spawnListening(
+        "panel-latidia",
+        latidiaPanelLease,
+        appPorts.latidiaPanel,
+        preview(vitePanel, outDirs.latidiaPanel, appPorts.latidiaPanel),
+        join(ROOT, "apps", "panel"),
+        { ...childEnv, NODE_ENV: "production" },
+      )
+      await spawnListening(
+        "latidia",
+        latidiaLease,
+        appPorts.latidia,
+        preview(viteLatidia, outDirs.latidia, appPorts.latidia),
+        join(ROOT, "apps", "medical-clinic"),
+        { ...childEnv, NODE_ENV: "production" },
+      )
+    }
     await registerAlias(state, "api.odentia", appPorts.api)
     await registerAlias(state, "app.odentia", appPorts.panel)
     await registerAlias(state, "admin.odentia", appPorts.admin)
     await registerAlias(state, "odentia", appPorts.platform)
+    if (appPorts.latidiaPanel && appPorts.latidia) {
+      // latidIA: la misma API en su dominio, su panel y sus clínicas.
+      await registerAlias(state, "api.latidia", appPorts.api)
+      await registerAlias(state, "app.latidia", appPorts.latidiaPanel)
+      await registerAlias(state, "latidia", appPorts.latidia)
+    }
     mark("Apps y rutas del proxy", tApps)
 
     const tReady = performance.now()
@@ -1252,6 +1337,14 @@ export async function main(args: string[]): Promise<number> {
       smtpHost: mailpit.host,
       smtpPort: mailpit.smtpPort,
       storageUrl: `http://${storage.host}:${storage.port}/health`,
+      ...(medicalDomain
+        ? {
+            latidia: {
+              panelOrigin: `https://app.${medicalDomain}:${state.proxyPort}`,
+              apiOrigin: `https://api.${medicalDomain}:${state.proxyPort}`,
+            },
+          }
+        : {}),
     })
     mark("Readiness funcional", tReady)
 

@@ -6,11 +6,15 @@ describe("las palabras de cada producto (entrega 3 del issue 229)", () => {
     expect(productWords()).toEqual(productWords("dental"))
     expect(productWords("dental")).toMatchObject({
       name: "odentIA",
+      brand: "odentia",
+      place: { one: "clínica", indefinite: "una clínica" },
       clinician: { label: "Odontólogo", one: "odontólogo", many: "odontólogos" },
       room: { one: "unidad dental", many: "unidades dentales" },
     })
     expect(productWords("medical")).toMatchObject({
       name: "latidIA",
+      brand: "latidia",
+      place: { one: "consultorio", indefinite: "un consultorio" },
       clinician: { label: "Médico", one: "médico", many: "médicos" },
       room: { one: "sala", many: "salas" },
     })
