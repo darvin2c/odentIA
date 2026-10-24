@@ -233,7 +233,7 @@ export interface AgentToolCtx {
   lessonOverrides?: LessonOverrides
   /** Camino que eligió el modelo de decisión para este turno; ausente = camino abierto. */
   route?: AgentRoute | null
-  /** Lo que escribió trae una señal de alarma (`hasAlarmSignal`, ADR 0084): el aviso dice a dónde llamar. */
+  /** Lo que escribió trae una señal de alarma (`hasAlarmSignal`, ADR 0084): el aviso empieza por el número de emergencias. */
   alarm?: boolean
   /**
    * Lo que el sistema ya sabe del turno sin preguntarle a un modelo: la persona
@@ -397,10 +397,11 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
           channel === "webchat"
             ? await withOrgContext(ctx.db, ctx.orgId, (tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "preguntar" as const)
             : undefined
-        // Una posible emergencia empieza por a dónde llamar (ADR 0084).
-        const urgent = ctx.alarm === true || (ctx.route?.urgency ?? 0) >= URGENT_SCORE
-        const emergency = urgent
-          ? await withOrgContext(ctx.db, ctx.orgId, (tx) => emergencyAdviceFor(tx, ctx.orgId, treatment ?? null)).catch(() => null)
+        // Una señal de alarma empieza por el número de emergencias; una urgencia
+        // sin alarma, por el teléfono para urgencias de la clínica (ADR 0084).
+        const level = ctx.alarm === true ? "alarma" : (ctx.route?.urgency ?? 0) >= URGENT_SCORE ? "urgente" : null
+        const emergency = level
+          ? await withOrgContext(ctx.db, ctx.orgId, (tx) => emergencyAdviceFor(tx, ctx.orgId, treatment ?? null, level)).catch(() => null)
           : null
         return handoffFallbackNotice(treatment ?? null, channel, where, emergency)
       })(),

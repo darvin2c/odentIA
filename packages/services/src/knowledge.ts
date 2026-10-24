@@ -811,8 +811,8 @@ export function formatKnowledgeForPrompt(
   // Ante una emergencia, a dónde llamar (ADR 0084): el número del país y el teléfono de la clínica.
   lines.push(
     snapshot.emergencyNumber
-      ? `Número de emergencias del país (ambulancia): ${snapshot.emergencyNumber}. Ante una emergencia, que llame ahora a ese número o vaya a la emergencia más cercana.`
-      : "Ante una emergencia, que vaya ahora a la emergencia más cercana.",
+      ? `Número de emergencias del país (ambulancia): ${snapshot.emergencyNumber}. Solo si su vida puede estar en peligro, que llame ahora a ese número o vaya a la emergencia más cercana.`
+      : "Si su vida puede estar en peligro, que vaya ahora a la emergencia más cercana.",
   )
   if (snapshot.emergencyPhone) lines.push(`Teléfono para urgencias de la clínica (también fuera de horario): ${snapshot.emergencyPhone}.`)
   lines.push(...clinicLines)

@@ -2006,6 +2006,36 @@ it("una señal de alarma no espera al equipo que conversa: pasa con prioridad al
   }
 })
 
+it("una urgencia sin señal de alarma pasa con prioridad alta y el aviso da el teléfono de la clínica, no el de emergencias (ADR 0084)", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = '+5115550123' where "organization_id" = 'org_a'`)
+  try {
+    // El modelo de decisión la marca urgente; no es una señal de alarma.
+    const urgent = await ingestText("tg:urgente", "evt-urgente-1", "Tengo un dolor fuerte de muela desde ayer")
+    const model = new ScriptedModel(() => {
+      throw new Error("el modelo no responde")
+    })
+    const verdict = await processAgentRun(
+      appDb,
+      { ...runtime, createModel: async () => model, createDecisionModel: () => createFakeDecisionModel() },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: urgent.conversationId, messageId: urgent.messageId } },
+    )
+    expect(verdict).toBe("done")
+    expect(systemTextOf(model.seen[0] ?? [])).toContain("No le digas que llame al número de emergencias del país")
+    const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ reason: agentHandoff.reason, priority: agentHandoff.priority }).from(agentHandoff)
+        .where(eq(agentHandoff.conversationId, urgent.conversationId)))
+    expect(handoffs).toEqual([{ reason: "Urgencia", priority: "alta" }])
+    // Un dolor de muela no se manda a la ambulancia: el teléfono de la clínica va primero.
+    expect(await agentMessages(urgent.conversationId)).toEqual([
+      "Si es urgente, puedes llamar a la clínica al +5115550123. Recibimos tu mensaje. Una persona del equipo te va a responder por aquí.",
+    ])
+  } finally {
+    await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = null where "organization_id" = 'org_a'`)
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
+})
+
 it("probar: una conversación de prueba reserva en dos turnos sin tocar la base", async () => {
   // La sede y su horario son reales (la agenda se lee de verdad); el paciente de la prueba, no.
   const seed = await ingestText("tg:prueba-sede", "evt-prueba-sede", "Hola")

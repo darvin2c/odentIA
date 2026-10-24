@@ -192,7 +192,7 @@ export function widenDescription(path: RoutePath): string {
   return `Para este mensaje tienes solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
 }
 
-/** Desde esta urgencia (de 0 a 2) un caso es urgente: prioridad alta y el aviso dice a dónde llamar. */
+/** Desde esta urgencia (de 0 a 2) un caso es urgente: prioridad alta y el aviso da el teléfono para urgencias de la clínica. */
 export const URGENT_SCORE = 1.5
 
 /**
@@ -254,8 +254,8 @@ export function offTopicReply(treatment: "tu" | "usted" | null, persona: string,
 /**
  * El aviso fijo al pasar un tema. En el chat web no se promete «por aquí»: si
  * cierra la pestaña no le llega; el chat le pide dónde avisarle (R4 del pulido).
- * Ante una posible emergencia empieza por a dónde llamar (`emergencyAdvice`,
- * ADR 0084): también cuando el modelo que escribe no pudo redactar el suyo.
+ * Ante una urgencia empieza por a dónde llamar (`emergencyAdviceFor`, ADR 0084):
+ * también cuando el modelo que escribe no pudo redactar el suyo.
  */
 export function handoffFallbackNotice(
   treatment: "tu" | "usted" | null,
@@ -300,8 +300,12 @@ export interface RouteFacts {
   services?: "lista" | "indice" | "ninguno"
   /** «Informar» encendida. */
   informs?: boolean
-  /** Lo que escribió es una posible emergencia: el aviso empieza por a dónde llamar (ADR 0084). */
-  urgent?: boolean
+  /**
+   * Lo que escribió es urgente (ADR 0084): con una señal de alarma, el aviso
+   * empieza por el número de emergencias; si no, por el teléfono para
+   * urgencias de la clínica.
+   */
+  urgency?: "alarma" | "urgente" | null
 }
 
 /**
@@ -350,11 +354,15 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso, breve, sin consultar nada: si agradece o se despide y no queda nada pendiente, despídete con despedirse_y_cerrar; si no, con send_reply.`
   }
   if (path === "derivar") {
-    // Una posible emergencia empieza por a dónde llamar: el número figura en lo que sabes de la clínica (ADR 0084).
-    const urgent = facts.urgent
-      ? " Es una posible emergencia: el aviso empieza diciéndole, tal cual figura en lo que sabes de la clínica, a qué número de emergencias llamar ahora o que vaya a la emergencia más cercana, y el teléfono para urgencias de la clínica si figura."
-      : ""
-    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual).`
+    // A dónde llamar ante una urgencia (ADR 0084): el número de emergencias solo
+    // con una señal de alarma; si no, el teléfono para urgencias de la clínica.
+    const urgent =
+      facts.urgency === "alarma"
+        ? " Su vida puede estar en peligro: el aviso empieza diciéndole, tal cual figura en lo que sabes de la clínica, a qué número de emergencias llamar ahora o que vaya a la emergencia más cercana, y el teléfono para urgencias de la clínica si figura."
+        : facts.urgency === "urgente"
+          ? " Es urgente: si figura en lo que sabes de la clínica, el aviso empieza dándole el teléfono para urgencias de la clínica. No le digas que llame al número de emergencias del país salvo que lo que contó ponga en peligro su vida (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar); si podría llegar a eso, puedes decirle que, si pasa, vaya a la emergencia más cercana."
+          : ""
+    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
   if (path === "clinico") {
     return `${head} una consulta clínica. No des consejo clínico ni diagnóstico. En este mismo paso, pasa el caso a una persona con request_human_handoff y avisa al interlocutor en su campo message.`

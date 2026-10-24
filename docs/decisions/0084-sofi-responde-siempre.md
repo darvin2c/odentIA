@@ -17,6 +17,8 @@ La urgencia empeoraba el problema. «Me duele el pecho y no puedo respirar» esp
   - el caso pasa con prioridad alta («Urgencia clínica»), decida lo que decida el modelo de decisión;
   - el aviso empieza por a dónde llamar, tanto el que redacta el modelo como el fijo.
 - **El número de emergencias, por país y comprobado.** `emergencyNumberFor` (`@odentia/clinical`, con la fuente de cada uno) da Perú 106, Colombia 123, Chile 131, México 911, Costa Rica 911, Ecuador 911, El Salvador 132 y Argentina 911. Un país sin número comprobado dice «la emergencia más cercana»: nunca se inventa uno. Va en lo que sabe Sofi de la clínica junto al teléfono para urgencias de la clínica, y lo dice el aviso fijo (`emergencyAdvice`).
+- **El número de emergencias, solo si la vida puede estar en peligro.** Una urgencia que marca el modelo de decisión sin señal de alarma (un dolor fuerte, un diente roto, una hinchazón con fiebre) pasa con prioridad alta y el aviso empieza por el teléfono para urgencias de la clínica (`urgentClinicPhone`), sin el número de emergencias. Medido con el modelo real: con la primera versión, «me duele horrible la muela» recibía «Llama ahora al 106», y un dolor de muela no es para una ambulancia. Si lo que contó podría llegar a eso, el modelo puede decirle que, si pasa, vaya a la emergencia más cercana.
+- **El vencimiento de una tarea no es una hora de respuesta.** El aviso de una derivación no promete el plazo interno de la tarea del equipo («te responderá antes de las 2:45 a. m.» salió en la misma medición).
 
 ## Alternativas descartadas
 
@@ -26,11 +28,11 @@ La urgencia empeoraba el problema. «Me duele el pecho y no puedo respirar» esp
 
 ## Consecuencias
 
-- Se gana que ningún paciente espera para recibir respuesta y que una urgencia siempre recibe a dónde llamar.
+- Se gana que ningún paciente espera para recibir respuesta y que una urgencia siempre recibe a dónde llamar: emergencias si su vida puede estar en peligro, la clínica si no.
 - Se sacrifica que una clínica que quería atender ella misma en el día ya no puede apagar a Sofi por horario. Le queda apagarla, o tomar la conversación: Sofi se calla 15 minutos cuando el equipo escribe.
 - Una falsa alarma cuesta un aviso de más y un caso con prioridad alta. Hay que revisar la lista de frases si los equipos se quejan de alarmas que no lo eran, o si aparece una emergencia que no se reconoció.
 - Un país nuevo no da número hasta que se comprueba en una fuente oficial.
 
 ## Referencias
 
-`packages/agent/src/run.ts`, `alarm.ts`, `decision/route.ts` (`URGENT_SCORE`, `handoffFallbackNotice`), `packages/clinical/src/emergency.ts`, `packages/services/src/emergency-advice.ts`, `knowledge.ts`, `writing-hours.ts`; migración `0091_sofi_responde_siempre.sql`.
+`packages/agent/src/run.ts`, `alarm.ts`, `decision/route.ts` (`URGENT_SCORE`, `handoffFallbackNotice`), `packages/clinical/src/emergency.ts`, `packages/services/src/emergency-advice.ts`, `knowledge.ts`, `writing-hours.ts`; migración `0091_sofi_responde_siempre.sql`. Medición con el modelo real: `GUIONES=urgencias` en `packages/agent/src/consumo.eval.ts` (sección 3c).

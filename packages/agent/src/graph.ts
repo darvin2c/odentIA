@@ -327,7 +327,7 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá y cuándo le responde; no uses send_reply para ese aviso. No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo»).",
-    "Ante una urgencia (sangrado, dolor fuerte, fiebre, hinchazón, dolor de pecho, falta de aire), además de pasar el tema con prioridad alta, dile lo que figura en lo que sabes de la clínica para una emergencia: el número de emergencias al que llamar o la emergencia más cercana, y el teléfono para urgencias de la clínica si figura.",
+    "Ante una urgencia (dolor fuerte, sangrado, hinchazón, fiebre, un golpe), además de pasar el tema con prioridad alta, dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana. El vencimiento de una tarea es un plazo interno del equipo: no lo digas como hora de respuesta.",
     // Lo del producto (odentIA: la tomografía llega en CD, USB o ZIP).
     ...texts.receptionRules,
     "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
@@ -839,7 +839,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             tools: available,
             services,
             informs: clinicData.informs,
-            urgent: route.urgency !== null && route.urgency >= URGENT_SCORE,
+            urgency: toolCtx.alarm ? "alarma" : route.urgency !== null && route.urgency >= URGENT_SCORE ? "urgente" : null,
           }),
           toolCtx.routeHint,
         ]

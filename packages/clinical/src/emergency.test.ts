@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { emergencyAdvice, emergencyNumberFor } from "./emergency.js"
+import { emergencyAdvice, emergencyNumberFor, urgentClinicPhone } from "./emergency.js"
 
 describe("a dónde llamar ante una emergencia (ADR 0084)", () => {
   it("cada país con su número comprobado; sin número, ninguno inventado", () => {
@@ -18,5 +18,11 @@ describe("a dónde llamar ante una emergencia (ADR 0084)", () => {
     )
     expect(emergencyAdvice("106", null, "usted")).toBe("Si es una emergencia, llame ahora al 106 o vaya a la emergencia más cercana.")
     expect(emergencyAdvice(null, null)).toBe("Si es una emergencia, ve ahora a la emergencia más cercana.")
+  })
+
+  it("una urgencia sin peligro para la vida da solo el teléfono de la clínica, nunca el de emergencias", () => {
+    expect(urgentClinicPhone("+5115550123")).toBe("Si es urgente, puedes llamar a la clínica al +5115550123.")
+    expect(urgentClinicPhone("+5115550123", "usted")).toBe("Si es urgente, puede llamar a la clínica al +5115550123.")
+    expect(urgentClinicPhone(null)).toBeNull()
   })
 })

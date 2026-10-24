@@ -1,8 +1,8 @@
 /**
  * El número para pedir una ambulancia ante una emergencia, por país (ISO 3166-1
- * alfa-2). Sofi lo dice ante una urgencia y va en el aviso fijo cuando el
- * mensaje trae una señal de alarma (ADR 0084). Fuentes, consultadas el
- * 2026-10-23:
+ * alfa-2). Sofi lo dice solo cuando la vida puede estar en peligro y va en el
+ * aviso fijo cuando el mensaje trae una señal de alarma (ADR 0084). Fuentes,
+ * consultadas el 2026-10-23:
  *
  * - AR 911: argentina.gob.ar/tema/emergencias («si necesitás pedir una
  *   ambulancia»); el 107 (SAME) solo cubre la Ciudad y parte de la provincia
@@ -58,4 +58,16 @@ export function emergencyAdvice(
       : ` También puedes llamar a la clínica al ${clinicPhone}.`
     : ""
   return `Si es una emergencia, ${go}.${clinic}`
+}
+
+/**
+ * Ante una urgencia sin peligro para la vida (un dolor fuerte, un golpe, una
+ * hinchazón), el teléfono para urgencias de la clínica si lo registró: mandar a
+ * llamar a una ambulancia por un dolor de muela asusta y no ayuda (ADR 0084).
+ */
+export function urgentClinicPhone(clinicPhone: string | null, treatment: "tu" | "usted" | null = null): string | null {
+  if (!clinicPhone) return null
+  return treatment === "usted"
+    ? `Si es urgente, puede llamar a la clínica al ${clinicPhone}.`
+    : `Si es urgente, puedes llamar a la clínica al ${clinicPhone}.`
 }
