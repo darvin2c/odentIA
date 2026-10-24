@@ -36,6 +36,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import { repeatFollowUp } from "./follow-ups.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -1879,12 +1880,14 @@ async function closeAppointment(
         eq(clinicalFollowUp.status, "programado"),
       ),
     )
-    .returning({ id: clinicalFollowUp.id })
+    .returning()
   for (const followUp of completed) {
     await audit(tx, orgId, actorUserId, "follow_up.completed", "clinical_follow_up", followUp.id, {
       patientId,
       encounterId: row.id,
     })
+    // El que se repite deja indicado el siguiente (issue 229, decisión 16).
+    await repeatFollowUp(tx, orgId, actorUserId, followUp)
   }
   await setAppointmentStatus(tx, orgId, actorUserId, row.appointmentId, "atendida")
 }

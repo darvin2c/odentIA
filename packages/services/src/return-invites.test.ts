@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { inviteStepText, lapsedToInvite, markInvitedToReturn, INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import { listPeople } from "./people.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
+import { getReportPatients } from "./report-patients.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -150,4 +151,27 @@ it("«Qué sigue» de quien ya fue invitada: el agente, quien no quiere, y cuán
   expect(inviteStepText({ invitedAt: null, invitedBy: null, declined: true }, away, zone, NOW)).toEqual({ text: "No quiere invitaciones", by: null })
   // Quien vino hace poco no es «no quiere invitaciones»: no le tocaría ninguna.
   expect(inviteStepText({ invitedAt: null, invitedBy: null, declined: true }, { lastVisitAt: "2026-09-10T15:00:00Z", nextAppointmentAt: null }, zone, NOW)).toBeNull()
+})
+
+it("en latidIA se invita a volver a quien no viene hace un año, y la próxima vez al año siguiente (issue 229, decisión 16)", async () => {
+  const c = await clinic()
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, c.orgId))
+  // Rosa vino hace ocho meses: en odentIA tocaría invitarla, en latidIA todavía no. Luis, hace catorce.
+  const rosa = await c.person("Rosa Paredes")
+  const luis = await c.person("Luis Quispe")
+  await c.visit(rosa.patientId, "2026-02-10T15:00:00Z")
+  await c.visit(luis.patientId, "2025-08-10T15:00:00Z")
+
+  const due = await c.run((tx) => lapsedToInvite(tx, c.orgId, LIMA, NOW))
+  expect(due.map((row) => row.personName)).toEqual(["Luis Quispe"])
+  // Reportes dice lo mismo, con sus doce meses.
+  const report = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "este_mes" }, NOW))
+  expect(report.lapsed).toEqual({ count: 1, months: 12 })
+
+  // Invitado hace siete meses: en odentIA ya le tocaría de nuevo; en latidIA, al año.
+  const invited = { invitedAt: new Date("2026-03-12T15:00:00Z"), invitedBy: "Ana Torres", declined: false }
+  const person = { lastVisitAt: "2025-08-10T15:00:00Z", nextAppointmentAt: null }
+  const zone = { locale: "es-PE", timezone: LIMA }
+  expect(inviteStepText(invited, person, zone, NOW)).toBeNull()
+  expect(inviteStepText(invited, person, zone, NOW, 12)?.text).toMatch(/^Invitada por Ana Torres el 12 mar · la próxima, en marzo$/)
 })

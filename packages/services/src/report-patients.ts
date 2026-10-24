@@ -67,7 +67,10 @@ export const FUNNEL_OPEN_DAYS = 30
 export const STOPPED_WRITING_DAYS = 3
 /** Pacientes activos: con una cita atendida en estos meses. */
 export const ACTIVE_MONTHS = 18
-/** Sin venir: su última cita atendida fue hace más de estos meses. */
+/**
+ * Sin venir: su última cita atendida fue hace más de estos meses. Es el de
+ * odentIA; cada producto dice el suyo (`ProductHooks.recallMonths`: latidIA, 12).
+ */
 export const LAPSED_MONTHS = 6
 
 const DAY_MS = 86_400_000
@@ -328,14 +331,19 @@ export async function returnedMany(
 }
 
 /**
- * Sin venir hace más de `LAPSED_MONTHS` meses, a hoy (la misma regla que
+ * Sin venir hace más de `months` meses (los del producto), a hoy (la misma regla que
  * tendrá «Invitar a volver», #139): personas sin archivar cuya última cita
  * atendida fue antes de eso y que hoy no tienen cita por venir, presupuesto
  * que espere respuesta (`budgetAwaitsAnswerSql`) ni control pendiente. Da
  * `lapsed(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`
  * con su última cita atendida.
  */
-export function lapsedSql(orgId: string, scope: Pick<ReportScope, "branch" | "timezone">, now: Date): SQL {
+export function lapsedSql(
+  orgId: string,
+  scope: Pick<ReportScope, "branch" | "timezone">,
+  now: Date,
+  months: number = LAPSED_MONTHS,
+): SQL {
   const budget = { id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` }
   return sql`${attendedSql(orgId, undefined)}, last_visit as (
       select distinct on (patient_id) * from attended order by patient_id, starts_at desc, id desc
@@ -343,7 +351,7 @@ export function lapsedSql(orgId: string, scope: Pick<ReportScope, "branch" | "ti
       select v.* from last_visit v
       join patient p on p.organization_id = ${orgId} and p.id = v.patient_id
       join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active
-      where v.starts_at < ${monthsBefore(at(now), LAPSED_MONTHS, scope.timezone)}
+      where v.starts_at < ${monthsBefore(at(now), months, scope.timezone)}
         ${scope.branch ? sql`and v.branch_id = ${scope.branch.id}` : sql``}
         and not exists (select 1 from appointment n where n.organization_id = ${orgId} and n.patient_id = v.patient_id
           and n.starts_at > ${at(now)} and n.status in ('programada','confirmada'))
@@ -355,7 +363,8 @@ export function lapsedSql(orgId: string, scope: Pick<ReportScope, "branch" | "ti
 }
 
 export async function lapsedCount(tx: Db, orgId: string, scope: ReportScope): Promise<number> {
-  const [row] = await tx.execute<{ count: number }>(sql`with ${lapsedSql(orgId, scope, scope.now)} select count(*)::int as count from lapsed`)
+  const months = (await productHooks(tx, orgId)).recallMonths
+  const [row] = await tx.execute<{ count: number }>(sql`with ${lapsedSql(orgId, scope, scope.now, months)} select count(*)::int as count from lapsed`)
   return row?.count ?? 0
 }
 
@@ -459,7 +468,7 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
     referral: nth(referral, 0),
     controls: { current: controls, previous: previousControls },
     returned: { current: nth(returned, 0), previous: nth(returned, 1), months: returned.slice(2) },
-    lapsed: { count: lapsed, months: LAPSED_MONTHS },
+    lapsed: { count: lapsed, months: (await productHooks(tx, orgId)).recallMonths },
     /** Invitados a volver en el periodo y cuántos de ellos ya vinieron, a hoy. */
     invites,
     /** Personas, conversaciones, presupuestos, controles e invitaciones no son de una sede. */
@@ -543,6 +552,7 @@ export async function getPatientReportList(
       and n.starts_at > ${at(now)} and n.status in ('programada','confirmada'))`
   type Row = Omit<PatientReportListRow, "cents"> & { cents: string | null; total: number }
   let rows: Row[]
+  const { recallMonths } = await productHooks(tx, orgId)
 
   if (query.list === "controls_missed") {
     // Los controles que tocaban en el periodo y no se hicieron: los que no cuentan como «vino» en `controlTotals`.
@@ -562,7 +572,7 @@ export async function getPatientReportList(
   } else if (query.list === "lapsed") {
     rows = [
       ...(await tx.execute<Row>(sql`
-        with ${lapsedSql(orgId, scope, now)}
+        with ${lapsedSql(orgId, scope, now, recallMonths)}
         select v.patient_id::text as id, v.starts_at as at, v.patient_id as "patientId", pp.id as "personId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", br.name as "branchName",
           false as "hasNextAppointment", null::text as cents, null::text as currency, null::uuid as "conversationId", count(*) over()::int as total
@@ -609,7 +619,7 @@ export async function getPatientReportList(
     /** Las personas del embudo, los controles y las invitaciones no son de una sede: con una sede elegida, la lista es de toda la clínica. */
     wholeClinic: scope.branch !== null && query.list !== "lapsed",
     /** Los plazos con que se arma la lista, para decirlos en «Cómo se calcula». */
-    rules: { stoppedDays: STOPPED_WRITING_DAYS, lapsedMonths: LAPSED_MONTHS },
+    rules: { stoppedDays: STOPPED_WRITING_DAYS, lapsedMonths: recallMonths },
     /** Filas que existen; la respuesta trae como mucho `LIST_LIMIT`. */
     total: rows[0]?.total ?? 0,
     rows: rows.map(({ total: _total, cents: _cents, at: when, ...row }) => ({

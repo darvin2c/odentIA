@@ -6,6 +6,7 @@ import {
   createFollowUp,
   listFollowUps,
   scheduleFollowUp,
+  stopFollowUpRepeat,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -21,6 +22,8 @@ const createInput = z
     planItemId: z.uuid().nullish(),
     encounterProcedureId: z.uuid().nullish(),
     originEncounterId: z.uuid().nullish(),
+    // Cada cuántos meses se repite (issue 229, decisión 16); el servicio valida los valores.
+    repeatEveryMonths: z.number().int().nullish(),
   })
   .strict()
 const scheduleInput = z.union([
@@ -99,6 +102,16 @@ export function createPatientFollowUpsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         completeFollowUp(tx, orgId, userId, params.data.id, params.data.followUpId, parsed.data),
+      ),
+    )
+  })
+  app.post("/:id/follow-ups/:followUpId/stop-repeat", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = z.object({ id: z.uuid(), followUpId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        stopFollowUpRepeat(tx, orgId, userId, params.data.id, params.data.followUpId),
       ),
     )
   })

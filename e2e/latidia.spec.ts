@@ -17,7 +17,8 @@ import { surface } from "./surface"
  * dominio con su sesión, su panel y su app; la clínica que nace ahí es médica,
  * se ve con su marca y dice sus palabras. Su ficha (entrega 5) tiene el examen
  * por sistemas y los signos vitales en el tiempo. Lo indicado queda aceptado
- * sin presupuesto y Reportes cuenta la consulta cobrada (entrega 7).
+ * sin presupuesto, Reportes cuenta la consulta cobrada y un control puede
+ * repetirse (entrega 7).
  */
 
 /** Una llamada a la API desde la página, con la sesión de su dominio. */
@@ -510,5 +511,81 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   await expect(page.getByText("Recibieron presupuesto")).toHaveCount(0)
   await expect(page.getByText("Aceptaron su presupuesto")).toHaveCount(0)
   await views("reportes-pacientes")
+  await context.close()
+})
+
+test("latidIA: un control que se repite deja indicado el siguiente al completarlo, hasta que se detiene", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(240_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Luis Quispe", docType: "DNI", docNumber: "08123456", birthDate: "1962-07-20" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  // Su control de hoy, ya firmado: contra él se completa el control.
+  await fixtureDb.insert(encounter).values({
+    organizationId: orgId,
+    patientId,
+    professionalUserId: vela.id,
+    status: "finalizada",
+    reason: "Control de presión arterial",
+    finalizedAt: new Date(),
+    finalizedBy: vela.id,
+    signerName: "Elena Vela",
+  })
+  const person = await request<{ data: { personId: string } }>(page, api, "GET", `/api/people/by-patient/${patientId}`, slug)
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${person.body.data.personId}?tab=plan`))
+
+  // «Control de presión cada 3 meses» (decisión 16).
+  await page.getByRole("button", { name: "Indicar control" }).first().click()
+  const indicate = surface(page, { name: "Indicar control" })
+  await indicate.getByLabel("Título del control", { exact: true }).fill("Control de presión arterial")
+  await chooseOption(indicate.getByLabel("Se repite", { exact: true }), "3")
+  await expect(indicate.getByText("Al completarlo queda indicado el siguiente, hasta que lo detengas.")).toBeVisible()
+  await shot("control-indicar")
+  await indicate.getByRole("button", { name: "Indicar control", exact: true }).click()
+  await expect(indicate).toBeHidden()
+  // «Qué sigue» lo nombra enseguida, sin recargar.
+  await expect(page.getByText("Control de presión arterial · por reservar")).toBeVisible()
+  const controls = page.getByRole("region", { name: "Controles" })
+  await expect(controls.getByText("Se repite cada 3 meses: al completarlo queda indicado el siguiente.")).toBeVisible()
+  await shot("control-repite")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot("control-repite-telefono")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("control-repite-oscuro")
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
+  // Al completarlo queda indicado el siguiente, con su repetición.
+  await controls.getByRole("button", { name: "Completar control" }).click()
+  const complete = surface(page, { name: "Completar control" })
+  await complete.getByLabel("Resultado del control", { exact: true }).fill("PA 128/82, sigue con enalapril")
+  await complete.getByRole("button", { name: "Completar", exact: true }).click()
+  await expect(complete).toBeHidden()
+  await expect(controls.getByText("Realizado", { exact: true })).toBeVisible()
+  await expect(controls.getByText("Pendiente", { exact: true })).toBeVisible()
+  await expect(controls.getByText("Se repite cada 3 meses: al completarlo queda indicado el siguiente.")).toHaveCount(1)
+
+  // «Dejar de repetir»: el siguiente sigue en pie, pero ya no deja otro.
+  await controls.getByRole("button", { name: "Dejar de repetir" }).click()
+  await expect(page.getByText("Ya no se repite: al completarlo no queda indicado otro.")).toBeVisible()
+  await expect(controls.getByText(/^Se repite cada/)).toHaveCount(0)
+  await expect(controls.getByRole("button", { name: "Dejar de repetir" })).toHaveCount(0)
+  await shot("control-detenido")
   await context.close()
 })

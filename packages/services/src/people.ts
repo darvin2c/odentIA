@@ -36,6 +36,7 @@ import {
 import { type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
+import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
 import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
 import { inviteStatusOf, inviteStepText } from "./return-invites.js"
@@ -638,6 +639,8 @@ export async function listPeople(
   const lines = view === "pacientes" ? await enabledLineKinds(tx, orgId) : new Set<string>()
   const missing = new Set(members?.faltan_datos ?? [])
   const toInvite = new Set(members?.por_invitar_a_volver ?? [])
+  // Cada cuánto vuelve a tocar invitarla: 6 meses en odentIA, 12 en latidIA.
+  const { recallMonths } = await productHooks(tx, orgId)
   if (atajo && members?.[atajo] === undefined) throw new ServiceError("FORBIDDEN", 403, "Este atajo no es para quien lo pide")
   const atajoIds = atajo ? (members?.[atajo] ?? []) : []
   const inAtajo = atajo
@@ -760,7 +763,7 @@ export async function listPeople(
       const invite = toInvite.has(r.patient_id) && step.kind === "ninguno"
       const invited =
         step.kind === "ninguno"
-          ? inviteStepText(invites.get(r.patient_id), { lastVisitAt: r.last_visit_at, nextAppointmentAt: r.next_appointment_at }, { locale, timezone }, now)
+          ? inviteStepText(invites.get(r.patient_id), { lastVisitAt: r.last_visit_at, nextAppointmentAt: r.next_appointment_at }, { locale, timezone }, now, recallMonths)
           : null
       item.nextStep = invite
         ? { text: "Toca invitarla a volver", actionLabel: null }

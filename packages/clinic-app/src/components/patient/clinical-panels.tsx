@@ -10,6 +10,8 @@ import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
   DOSAGE_FORMS,
+  FOLLOW_UP_REPEAT_MONTHS,
+  followUpRepeatWords,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
@@ -37,6 +39,7 @@ import {
   mutationMessage,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
+  stopFollowUpRepeatApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
@@ -104,6 +107,8 @@ export function ControlesPanel({
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+    // «Qué sigue» nombra el próximo control: cambia con él.
+    void queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
     void invalidateAppointmentQueries(queryClient)
   }
@@ -121,6 +126,9 @@ export function ControlesPanel({
   // un control es para un día, no para una hora (la hora la pone la cita).
   const [dueDay, setDueDay] = useState(() => addDays(regionToday(), 1))
   const [instructions, setInstructions] = useState("")
+  // Controles que se repiten (latidIA, decisión 16 del issue 229): "" es una sola vez.
+  const repeats = productUi().plan.repeatingControls
+  const [repeat, setRepeat] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scheduling, setScheduling] = useState<FollowUp | null>(null)
@@ -139,10 +147,12 @@ export function ControlesPanel({
         instructions: instructions.trim() || null,
         planItemId: kind === "tratamiento" ? planItemId || null : null,
         originEncounterId: encounterId ?? null,
+        repeatEveryMonths: repeats && repeat ? Number(repeat) : null,
       }),
     onSuccess: () => {
       setTitle("")
       setInstructions("")
+      setRepeat("")
       setCreateOpen(false)
       setError(null)
       invalidate()
@@ -158,6 +168,15 @@ export function ControlesPanel({
     onSuccess: () => {
       setCompleting(null)
       setOutcome("")
+      setError(null)
+      invalidate()
+    },
+    onError: (mutationError) => setError(mutationMessage(mutationError)),
+  })
+  const stopRepeatMutation = useMutation({
+    mutationFn: (followUpId: string) => stopFollowUpRepeatApi(patientId, followUpId),
+    onSuccess: () => {
+      toast.success("Ya no se repite: al completarlo no queda indicado otro.")
       setError(null)
       invalidate()
     },
@@ -249,6 +268,11 @@ export function ControlesPanel({
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              {row.repeatEveryMonths && (row.status === "pendiente" || row.status === "programado") ? (
+                <p className="text-sm text-muted-foreground">
+                  Se repite {followUpRepeatWords(row.repeatEveryMonths)}: al completarlo queda indicado el siguiente.
+                </p>
+              ) : null}
               {row.appointment &&
               (row.appointment.status === "programada" ||
                 row.appointment.status === "confirmada") &&
@@ -307,6 +331,20 @@ export function ControlesPanel({
                       >
                         Completar control
                       </Button>
+                      {row.repeatEveryMonths ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={stopRepeatMutation.isPending}
+                          onClick={() => {
+                            setError(null)
+                            stopRepeatMutation.mutate(row.id)
+                          }}
+                        >
+                          Dejar de repetir
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="sm"
@@ -431,6 +469,26 @@ export function ControlesPanel({
               onChange={setDueDay}
             />
           </Field>
+          {repeats ? (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-repeat`}>Se repite</FieldLabel>
+              <ChoiceSelect
+                id={`${uid}-repeat`}
+                value={repeat}
+                onChange={(event) => setRepeat(event.target.value)}
+              >
+                <option value="">Una sola vez</option>
+                {FOLLOW_UP_REPEAT_MONTHS.map((months) => (
+                  <option key={months} value={String(months)}>
+                    {followUpRepeatWords(months).replace(/^c/, "C")}
+                  </option>
+                ))}
+              </ChoiceSelect>
+              <FieldDescription>
+                Al completarlo queda indicado el siguiente, hasta que lo detengas.
+              </FieldDescription>
+            </Field>
+          ) : null}
           <Field>
             <FieldLabel htmlFor={`${uid}-instructions`}>Indicaciones del control</FieldLabel>
             <Textarea

@@ -1,4 +1,4 @@
-import { FOLLOW_UP_STATUSES } from "@odentia/clinical"
+import { FOLLOW_UP_REPEAT_MONTHS, FOLLOW_UP_STATUSES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -8,10 +8,11 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
 import { requireEncounter } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 
 export type ScheduleFollowUpInput =
@@ -74,6 +75,8 @@ export interface CreateFollowUpInput {
   title: string
   instructions?: string | null
   dueAt: string
+  /** Cada cuántos meses se repite (1, 3, 6 o 12); sin él, una vez (issue 229, decisión 16). */
+  repeatEveryMonths?: number | null
 }
 
 function instant(value: string): Date {
@@ -129,6 +132,12 @@ export async function createFollowUp(
   const dueAt = instant(input.dueAt)
   if (dueAt.toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10))
     throw validation("El control debe vencer hoy o en el futuro")
+  const repeatEveryMonths = input.repeatEveryMonths ?? null
+  if (
+    repeatEveryMonths !== null &&
+    !(FOLLOW_UP_REPEAT_MONTHS as readonly number[]).includes(repeatEveryMonths)
+  )
+    throw validation("Un control se repite cada 1, 3, 6 o 12 meses")
   if (input.planItemId) {
     const [item] = await tx
       .select({ id: treatmentPlanItem.id })
@@ -167,7 +176,15 @@ export async function createFollowUp(
   }
   const [row] = await tx
     .insert(clinicalFollowUp)
-    .values({ ...input, title, dueAt, organizationId: orgId, patientId, createdBy: actorUserId })
+    .values({
+      ...input,
+      title,
+      dueAt,
+      repeatEveryMonths,
+      organizationId: orgId,
+      patientId,
+      createdBy: actorUserId,
+    })
     .returning()
   await audit(tx, orgId, actorUserId, row.id, "follow_up.created")
   return detail(tx, orgId, patientId, row.id)
@@ -256,7 +273,86 @@ export async function completeFollowUp(
     .where(scoped(orgId, patientId, id))
     .returning()
   await audit(tx, orgId, actorUserId, id, "follow_up.completed")
+  if (row) await repeatFollowUp(tx, orgId, actorUserId, row)
   return detail(tx, orgId, patientId, row.id)
+}
+
+/**
+ * Un control que se repite, recién realizado, deja indicado el siguiente:
+ * los mismos datos, para N meses después del día en que se hizo, a la hora
+ * que tenía. Uno solo por control (`repeats_from_id` es único): completarlo
+ * por la atención y a mano a la vez no deja dos.
+ */
+export async function repeatFollowUp(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  done: typeof clinicalFollowUp.$inferSelect,
+): Promise<void> {
+  if (!done.repeatEveryMonths || done.status !== "realizado") return
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const at = (done.completedAt ?? new Date()).toISOString()
+  const [next] = await tx.execute<{ due: Date | string }>(sql`
+    select (((${at}::timestamptz at time zone ${timezone})::date + make_interval(months => ${done.repeatEveryMonths}))::date
+      + (${done.dueAt.toISOString()}::timestamptz at time zone ${timezone})::time) at time zone ${timezone} as due`)
+  if (!next) return
+  const [row] = await tx
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: orgId,
+      patientId: done.patientId,
+      planItemId: done.planItemId,
+      originEncounterId: done.completedEncounterId,
+      kind: done.kind,
+      title: done.title,
+      instructions: done.instructions,
+      dueAt: new Date(next.due),
+      repeatEveryMonths: done.repeatEveryMonths,
+      repeatsFromId: done.id,
+      createdBy: actorUserId,
+    })
+    .onConflictDoNothing({
+      target: clinicalFollowUp.repeatsFromId,
+      where: sql`"repeats_from_id" is not null`,
+    })
+    .returning({ id: clinicalFollowUp.id })
+  if (!row) return
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    entity: "clinical_follow_up",
+    entityId: row.id,
+    action: "follow_up.repeated",
+    metadata: { patientId: done.patientId, fromId: done.id, everyMonths: done.repeatEveryMonths },
+  })
+}
+
+/** «Dejar de repetir»: el control abierto sigue en pie, pero al completarlo ya no deja otro. */
+export async function stopFollowUpRepeat(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  id: string,
+) {
+  const current = await lock(tx, orgId, patientId, id)
+  if (!["pendiente", "programado"].includes(current.status))
+    throw new ServiceError("FOLLOW_UP_STATUS", 409, "El control está cerrado")
+  if (!current.repeatEveryMonths)
+    throw new ServiceError("FOLLOW_UP_REPEAT", 409, "El control no se repite")
+  await tx
+    .update(clinicalFollowUp)
+    .set({ repeatEveryMonths: null, updatedAt: new Date() })
+    .where(scoped(orgId, patientId, id))
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    entity: "clinical_follow_up",
+    entityId: id,
+    action: "follow_up.repeat_stopped",
+    metadata: { patientId, everyMonths: current.repeatEveryMonths },
+  })
+  return detail(tx, orgId, patientId, id)
 }
 export async function cancelFollowUp(
   tx: Db,

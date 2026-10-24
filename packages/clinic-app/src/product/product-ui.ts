@@ -50,7 +50,13 @@ export interface ProductUi {
    * decisión 15 del issue 229) queda aceptado al indicarlo y el presupuesto es
    * opcional; es el `budgetRequired` del servidor, que lo vuelve a decidir.
    */
-  plan: { phases: readonly ProductPlanPhase[]; defaultPhase: string; budgetRequired: boolean }
+  plan: {
+    phases: readonly ProductPlanPhase[]
+    defaultPhase: string
+    budgetRequired: boolean
+    /** Si un control puede repetirse cada 1, 3, 6 o 12 meses (latidIA, decisión 16). */
+    repeatingControls: boolean
+  }
   /** Servicios: lo que el producto agrega al servicio y a su biblioteca. */
   services: ProductServicesUi
   /** La historia: los hechos propios del producto y lo que firmó con una atención. */
@@ -420,6 +426,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
       phases: [{ key: "general", label: "General", hint: "Lo indicado" }],
       defaultPhase: "general",
       budgetRequired: true,
+      repeatingControls: false,
     },
     services: { kinds: [], leaves: null },
     history: { owns: () => false, Item: () => null, EncounterSigned: () => null },

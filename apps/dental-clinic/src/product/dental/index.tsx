@@ -122,6 +122,7 @@ export const dentalUi: ProductUi = {
     })),
     defaultPhase: "basica",
     budgetRequired: true,
+    repeatingControls: false,
   },
   services: {
     kinds: TREATMENT_KINDS.map((kind) => ({ key: kind.key, name: kind.name })),

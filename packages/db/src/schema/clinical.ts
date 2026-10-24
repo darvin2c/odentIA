@@ -1880,6 +1880,13 @@ export const clinicalFollowUp = pgTable(
     completedEncounterId: uuid("completed_encounter_id").references(() => encounter.id),
     outcome: text("outcome"),
     cancelledReason: text("cancelled_reason"),
+    /**
+     * Cada cuántos meses se repite (issue 229, decisión 16): al completarlo
+     * queda indicado el siguiente, hasta que el médico lo detiene. Nulo: una vez.
+     */
+    repeatEveryMonths: smallint("repeat_every_months"),
+    /** El control de la serie que lo dejó indicado; uno solo por control. */
+    repeatsFromId: uuid("repeats_from_id").references((): AnyPgColumn => clinicalFollowUp.id),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -1891,6 +1898,14 @@ export const clinicalFollowUp = pgTable(
       foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
       name: "clinical_follow_up_appointment_fk",
     }),
+    check(
+      "clinical_follow_up_repeat_check",
+      sql`${table.repeatEveryMonths} IS NULL OR ${table.repeatEveryMonths} IN (1, 3, 6, 12)`,
+    ),
+    // Completar dos veces, o en dos caminos a la vez, no deja dos siguientes.
+    uniqueIndex("clinical_follow_up_repeats_from_idx")
+      .on(table.repeatsFromId)
+      .where(sql`${table.repeatsFromId} IS NOT NULL`),
     index("clinical_follow_up_appointment_idx").on(table.organizationId, table.appointmentId),
     check(
       "clinical_follow_up_reservation_check",

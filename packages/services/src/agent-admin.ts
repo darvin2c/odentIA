@@ -64,6 +64,7 @@ import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
+import { productHooks } from "./products.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
@@ -342,9 +343,10 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
   }
 }
 
-/** «Invitar a volver»: quien no viene hace 6 meses y toca invitarlo (decisión 15). */
+/** «Invitar a volver»: quien no viene hace 6 meses (12 en latidIA) y toca invitarlo (decisión 15). */
 async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const all = await lapsedToInvite(tx, orgId, zone.timezone, new Date())
+  const months = (await productHooks(tx, orgId)).recallMonths
   const total = all.length
   return {
     total,
@@ -357,9 +359,9 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
       contactId: row.personId,
       appointmentId: row.appointmentId,
     })),
-    title: `${total} ${plural(total, "persona", "personas")} sin venir hace 6 meses ${plural(total, "le toca", "les toca")} una invitación`,
+    title: `${total} ${plural(total, "persona", "personas")} sin venir hace ${months} meses ${plural(total, "le toca", "les toca")} una invitación`,
     detail: "Ordenadas de la visita más antigua a la más reciente.",
-    how: "Pacientes cuya última cita atendida fue hace más de 6 meses, sin cita, presupuesto que espere respuesta ni control pendiente. Quien ya recibió una invitación en los últimos 6 meses, o pidió no recibir mensajes de seguimiento, no aparece.",
+    how: `Pacientes cuya última cita atendida fue hace más de ${months} meses, sin cita, presupuesto que espere respuesta ni control pendiente. Quien ya recibió una invitación en los últimos ${months} meses, o pidió no recibir mensajes de seguimiento, no aparece.`,
   }
 }
 

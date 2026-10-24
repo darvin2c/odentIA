@@ -28,8 +28,9 @@ export const medicalUi: ProductUi = {
       },
     ],
   },
-  // Lo indicado queda aceptado al indicarlo: el presupuesto es opcional (decisión 15).
-  plan: { ...bare.plan, budgetRequired: false },
+  // Lo indicado queda aceptado al indicarlo: el presupuesto es opcional (decisión
+  // 15); los controles pueden repetirse (decisión 16).
+  plan: { ...bare.plan, budgetRequired: false, repeatingControls: true },
   encounter: { ...bare.encounter, examination: medicalExamination },
   health: medicalHealth,
   summary: { ClinicalCards: (props) => <ProblemsCard {...props} /> },

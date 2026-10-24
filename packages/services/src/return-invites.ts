@@ -1,6 +1,7 @@
 /**
  * «Invitar a volver» (issue 139, decisiones 13 a 15 del lienzo): quién no viene
- * hace 6 meses, a quién ya se invitó y cómo se anota una invitación. Es la misma
+ * hace 6 meses (12 en latidIA, `ProductHooks.recallMonths`), a quién ya se
+ * invitó y cómo se anota una invitación. Es la misma
  * regla de Reportes (`lapsedSql`) que usan el atajo de Pacientes, la línea del
  * Administrador y su cifra: no hay una segunda definición.
  *
@@ -13,11 +14,15 @@ import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
 import { notFound } from "./errors.js"
+import { productHooks } from "./products.js"
 import { lapsedSql } from "./report-patients.js"
 
 export const INVITED_TO_RETURN_ACTION = "paciente.invitada_a_volver"
 
-/** Meses sin invitar a quien ya lo fue (decisión 15: vuelve a tocarle 6 meses después). */
+/**
+ * Meses sin invitar a quien ya lo fue (decisión 15: vuelve a tocarle 6 meses
+ * después). Es el de odentIA; cada producto dice el suyo (`recallMonths`).
+ */
 export const INVITE_CYCLE_MONTHS = 6
 
 export interface InviteCase {
@@ -43,6 +48,7 @@ export async function lapsedToInvite(
   now: Date,
   options: { patientId?: string; limit?: number } = {},
 ): Promise<InviteCase[]> {
+  const months = (await productHooks(tx, orgId)).recallMonths
   const only = options.patientId ? sql`and l.patient_id = ${options.patientId}::uuid` : sql``
   const limit = options.limit ? sql`limit ${options.limit}` : sql``
   const rows = await tx.execute<{
@@ -53,7 +59,7 @@ export async function lapsedToInvite(
     last_visit: Date | string
     invites: number
   }>(sql`
-    with ${lapsedSql(orgId, { branch: null, timezone }, now)}
+    with ${lapsedSql(orgId, { branch: null, timezone }, now, months)}
     select l.id as appointment_id, l.patient_id, p.person_id, pp.display_name as person_name, l.starts_at as last_visit,
       (select count(*)::int from audit_event ae
         where ae.organization_id = ${orgId} and ae.action = ${INVITED_TO_RETURN_ACTION}
@@ -65,7 +71,7 @@ export async function lapsedToInvite(
         select 1 from audit_event ae
         where ae.organization_id = ${orgId} and ae.action = ${INVITED_TO_RETURN_ACTION}
           and ae.entity = 'patient' and ae.entity_id = l.patient_id::text
-          and ae.created_at > ${now.toISOString()}::timestamptz - make_interval(months => ${INVITE_CYCLE_MONTHS}))
+          and ae.created_at > ${now.toISOString()}::timestamptz - make_interval(months => ${months}))
       and not exists (
         select 1 from automation_consent ac
         where ac.organization_id = ${orgId} and ac.contact_id = p.person_id
@@ -128,16 +134,17 @@ export function inviteStepText(
   person: { lastVisitAt: string | null; nextAppointmentAt: string | null },
   zone: { locale: string; timezone: string },
   now: Date,
+  cycleMonths: number = INVITE_CYCLE_MONTHS,
 ): { text: string; by: "agente" | "persona" | null } | null {
   if (!status || person.nextAppointmentAt) return null
   const lastVisit = person.lastVisitAt ? new Date(person.lastVisitAt) : null
-  const cycleStart = monthsAgo(now, INVITE_CYCLE_MONTHS)
+  const cycleStart = monthsAgo(now, cycleMonths)
   const { invitedAt } = status
   if (invitedAt && invitedAt > cycleStart && (!lastVisit || invitedAt > lastVisit)) {
     const day = new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "short", timeZone: zone.timezone }).format(invitedAt).replace(".", "")
     // El mes solo, en minúscula: algunos idiomas lo escriben con mayúscula cuando va suelto.
     const next = new Intl.DateTimeFormat(zone.locale, { month: "long", timeZone: zone.timezone })
-      .format(monthsAgo(invitedAt, -INVITE_CYCLE_MONTHS))
+      .format(monthsAgo(invitedAt, -cycleMonths))
       .toLocaleLowerCase(zone.locale)
     const by = status.invitedBy ? ` por ${status.invitedBy.trim()}` : ""
     return { text: `Invitada${by} el ${day} · la próxima, en ${next}`, by: status.invitedBy ? "persona" : "agente" }

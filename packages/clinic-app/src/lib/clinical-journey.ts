@@ -114,6 +114,10 @@ export interface FollowUp {
   appointmentId: string | null
   appointment: { id: string; startsAt: string; endsAt: string; status: AppointmentStatus } | null
   legacyScheduledAt: string | null
+  /** Cada cuántos meses se repite; nulo: una vez (issue 229, decisión 16). */
+  repeatEveryMonths: number | null
+  /** El control de la serie que lo dejó indicado. */
+  repeatsFromId: string | null
   completedEncounterId: string | null
   outcome: string | null
   cancelledReason: string | null
@@ -168,6 +172,7 @@ export interface CreateFollowUpBody {
   planItemId?: string | null
   encounterProcedureId?: string | null
   originEncounterId?: string | null
+  repeatEveryMonths?: number | null
 }
 
 export function createFollowUpApi(
@@ -229,6 +234,14 @@ export function completeFollowUpApi(
   return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/complete`, {
     method: "POST",
     body: JSON.stringify(body),
+  })
+}
+
+/** «Dejar de repetir»: el control sigue en pie; al completarlo ya no deja otro. */
+export function stopFollowUpRepeatApi(patientId: string, followUpId: string): Promise<{ data: FollowUp }> {
+  return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/stop-repeat`, {
+    method: "POST",
+    body: JSON.stringify({}),
   })
 }
 

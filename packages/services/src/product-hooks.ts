@@ -274,6 +274,12 @@ export interface ProductHooks {
    */
   budgetRequired: boolean
   /**
+   * «Invitar a volver»: los meses sin venir que lo disparan y los que pasan
+   * entre una invitación y la siguiente (odentIA 6, como la limpieza dental;
+   * latidIA 12, decisión 16 del issue 229). Es también «Sin venir» de Reportes.
+   */
+  recallMonths: number
+  /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
    */
@@ -363,6 +369,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   catalog: NO_CATALOG,
   dictates: false,
   budgetRequired: true,
+  recallMonths: 6,
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),
   encounterFinalized: async () => ({}),
