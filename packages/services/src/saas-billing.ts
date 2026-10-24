@@ -1287,9 +1287,8 @@ export interface SaasUsageSummary {
   cachedInputTokens: number | null
   /**
    * Cobertura: cuántas corridas informaron tokens. El costo real de IA no
-   * va aquí: es de odentIA y lo ve solo su administración
-   * (`OrganizationDetail.aiCost`); la clínica verá lo que se le cobra por
-   * acción (ADR 0031).
+   * va aquí: es de odentIA y lo ve solo su administración («Costo y margen»,
+   * `getClinicCostMargin`); la clínica ve lo que se le cobra por acción.
    */
   runsWithTokens: number
   /** Mes calendario evaluado (nunca "últimos 30 días"). */

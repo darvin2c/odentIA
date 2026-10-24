@@ -1077,7 +1077,6 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     { tabla: "saas_commercial_terms", escribe: false },
     { tabla: "saas_payment_method", escribe: false },
     { tabla: "saas_plan", escribe: false },
-    { tabla: "saas_whatsapp_rate", escribe: false },
   ])
   const catalogo = (await ownerDb.execute(sql`
     select c.relname as "tabla"

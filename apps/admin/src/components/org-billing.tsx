@@ -12,6 +12,19 @@ import { centsToMajor, majorToCents } from "./billing-fields"
 
 type Kind = "conversacion" | "consulta" | "cita"
 
+/** Los precios de cada tipo, en el orden de la lista (ADR 0085). */
+const PRICE_ROWS = [
+  { key: "informa", label: "Sofi · Informa" },
+  { key: "gestiona", label: "Sofi · Gestiona" },
+  { key: "agenda", label: "Sofi · Agenda" },
+  { key: "simple", label: "Clío · Simple" },
+  { key: "estandar", label: "Clío · Estándar" },
+  { key: "completa", label: "Clío · Completa" },
+  { key: "cita", label: "Cita recuperada" },
+  { key: "preguntas", label: "Paquete de preguntas" },
+  { key: "almacenamiento", label: "GB extra" },
+] as const
+
 interface BillingTerms {
   plan: {
     name: string
@@ -25,6 +38,9 @@ interface BillingTerms {
     trialMaxCreditCents: number
     trialMaxDays: number
     base: Record<Kind, number | null>
+    /** El precio de cada tipo y lo que no se negocia (ADR 0085). */
+    prices?: Record<string, number | null>
+    fixed?: string[]
   } | null
   status: string
   trial: { creditCents: number; days: number; startedAt: string | null; endsAt: string | null }
@@ -254,7 +270,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
             <p className="text-sm font-medium">Precio negociado</p>
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor="org-discount">Descuento en todas las acciones (%)</Label>
+                <Label htmlFor="org-discount">Descuento en lo que se negocia (%)</Label>
                 <Input id="org-discount" inputMode="decimal" value={discount} onChange={(event) => setDiscount(event.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
@@ -291,22 +307,24 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
                   </tr>
                 </thead>
                 <tbody>
-                  {(["conversacion", "consulta", "cita"] as const)
-                    .filter((kind) => plan.base[kind] !== null)
-                    .map((kind) => {
-                      const base = plan.base[kind] ?? 0
-                      return (
-                        <tr key={kind}>
-                          <td className="py-1">{kind === "conversacion" ? "Conversación" : kind === "consulta" ? "Consulta" : "Cita recuperada"}</td>
-                          <td className="py-1 text-right text-muted-foreground tabular-nums">
-                            {bps > 0 ? <s>{priceText(base, currency)}</s> : priceText(base, currency)}
-                          </td>
-                          <td className="py-1 text-right font-semibold tabular-nums">
-                            {priceText(discounted(base, Math.min(bps, plan.maxDiscountBps)), currency)}
-                          </td>
-                        </tr>
-                      )
-                    })}
+                  {PRICE_ROWS.filter((row) => (plan.prices?.[row.key] ?? null) !== null).map((row) => {
+                    const base = plan.prices?.[row.key] ?? 0
+                    // Lo que no se negocia queda siempre a su precio de lista (ADR 0085).
+                    const fixed = plan.fixed?.includes(row.key) ?? false
+                    const own = fixed ? base : discounted(base, Math.min(bps, plan.maxDiscountBps))
+                    return (
+                      <tr key={row.key}>
+                        <td className="py-1">
+                          {row.label}
+                          {fixed ? <span className="block text-xs text-muted-foreground">No se negocia</span> : null}
+                        </td>
+                        <td className="py-1 text-right text-muted-foreground tabular-nums">
+                          {own !== base ? <s>{priceText(base, currency)}</s> : priceText(base, currency)}
+                        </td>
+                        <td className="py-1 text-right font-semibold tabular-nums">{priceText(own, currency)}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             ) : null}

@@ -1,6 +1,6 @@
 # 0085 · Cobro por tipo de acción, Argos con preguntas incluidas y almacenamiento por GB
 
-Fecha: 2026-10-24 · Estado: aceptada; implementadas las fases 1 y 2 (contar y cobrar), 3 (sin topes y el presupuesto) y 4 (lo que ve la clínica); la administración, la web y los planes de producción van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
+Fecha: 2026-10-24 · Estado: aceptada; implementadas las fases 1 y 2 (contar y cobrar), 3 (sin topes y el presupuesto), 4 (lo que ve la clínica), 5 (la administración) y 6 (la web, los términos y la presentación de Fundadores); los planes de producción van después · Precisa [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (qué se cobra y a qué precio), cambia el 40 % de [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) por 50 % y sigue a [0084](0084-sofi-responde-siempre.md) («Sofi responde siempre»). Estudio «Cómo cobra odentIA» y lienzo «Cobro por tipo odentIA» (aprobado el 2026-10-24).
 
 ## Problema
 
@@ -30,7 +30,7 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
 - **Argos: preguntas incluidas y paquetes.** El plan trae 300 preguntas al mes; cada paquete de 100 cuesta USD 3 y se suma solo con el permiso de quien administra la clínica, o sin preguntar si encendió «Sumar solas» (`argos_auto_pack`, apagado al empezar). No cuentan las preguntas que Argos no pudo responder ni las que fueron a la Ayuda. Un paquete comprado en los últimos 7 días del mes dura hasta el cierre del siguiente: lo que le quedó sigue. Reemplaza al tope de 200 al día.
 - **Almacenamiento: 20 GB incluidos y USD 0,20 por GB extra al mes.** Se mide cada día lo guardado (`storage_usage_day`: documentos, tomografías y adjuntos de conversaciones) y el extra del mes sale del promedio de sus días, como cobra el proveedor. Nunca se deja de guardar. La base de datos no se cobra.
 - **Un plan sin precios por tipo** cobra cada tipo con el único precio de su acción, como antes de esta decisión, y su conversación no sube a «Agenda»: los planes que ya existen siguen cobrando igual hasta que se les ponen los precios nuevos.
-- **Precios fijos y negociables.** Informa, Simple, Estándar y el paquete de preguntas no admiten descuento negociado (`fixed_price_tiers`): son baratos y cualquier descuento los dejaría sin margen. El resto se negocia como en la ADR 0031. La comprobación del doble se hace por tipo: un precio negociable, al descuento máximo, nunca baja del doble de su peor costo. Uno fijo es barato a propósito y su peor costo es un caso extremo: por debajo del doble se guarda y queda «Atento» (la consulta simple en una atención absurda de 60 pausas que deja una sola receta vale 1,9 veces; con Fundadores, menos de lo que cuesta).
+- **Precios fijos y negociables.** Informa, Simple, Estándar, el paquete de preguntas y el GB extra no admiten descuento negociado (`fixed_price_tiers`): son baratos y cualquier descuento los dejaría sin margen. Solo se negocian Gestiona, Agenda, Completa y la cita recuperada, como en la ADR 0031. La comprobación del doble se hace por tipo: un precio negociable, al descuento máximo, nunca baja del doble de su peor costo. Uno fijo es barato a propósito y su peor costo es un caso extremo: por debajo del doble se guarda y queda «Atento» (la consulta simple en una atención absurda de 60 pausas que deja una sola receta vale 1,9 veces; con Fundadores, menos de lo que cuesta).
 - **Fundadores, 50 % menos** en todo, solo para las 20 primeras clínicas y durante sus 12 meses garantizados.
 - **Sin topes; el presupuesto es el único límite.** Se quitan el tope de 40 respuestas por persona y día y el tope diario de corridas de Sofi (`agent_config.daily_run_limit`, migración `0094_sin_topes`). Al llegar al presupuesto del mes que fija la clínica:
   - Sofi pasa al equipo a quien no estaba conversando, con un mensaje fijo, sin la IA y sin cobro, una sola vez por persona y día (D4): «Gracias por escribir a {clínica}. En un momento te atiende alguien del equipo.». En el chat web sale el aviso de siempre, que pide dónde avisarle. Una alarma pasa con su aviso, como siempre (ADR 0084);
@@ -41,6 +41,14 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
   - el almacenamiento no cuenta para el presupuesto: guardar nunca detiene a un agente.
 - **Postpago.** Todo, también el paquete de preguntas y el almacenamiento, va en la factura del mes o de la quincena. No hay recargas ni pagos por adelantado.
 - **Cada gasto de IA dice a qué acción pertenece** cuando se sabe (`ai_usage.encounter_id`, `report_question_id`), para ver después lo que costó cada cosa.
+- **«Costo y margen» en la administración**, en la ficha de cada clínica y de todas en Inicio:
+  - lo cobrado sin impuesto frente a lo que nos costó, por agente y tipo;
+  - lo que se regala va en su fila: las preguntas incluidas, Jev, las pruebas y lo que pasó al equipo;
+  - el espacio se calcula al precio del proveedor y el servidor con un estimado por clínica;
+  - el margen se dice también tras la comisión del vendedor, que se calcula sin impuesto.
+  - Una alarma interna avisa cuando la IA pasa del 20 % de lo que paga la clínica o de USD 30 al mes, y nunca corta nada. También se avisa de la Fundadora sin encender un agente en 60 días.
+  - Reemplaza a «Margen bajo dos meses seguidos».
+- **WhatsApp ni se cobra ni se estima.** Se quitan las tarifas de Meta de la administración (`saas_whatsapp_rate`, migración `0095_sin_tarifas_de_whatsapp`): la clínica lo revisa en Meta con el enlace.
 
 ## Alternativas descartadas
 
@@ -59,4 +67,4 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
 
 ## Referencias
 
-`packages/services/src/saas-actions.ts` (`conversationTierOf`, `consultationTierOf`, `recoveredSql`, `countAgendaUpgrade`), `saas-included.ts` (`getArgosAllowance`, `ensureArgosQuestion`, `countStorageAction`), `saas-invoicing.ts`, `seed-saas-billing.ts`, pruebas en `saas-tiers.test.ts`; `saas-terms.ts` (`assertClioCanListen`, avisos del presupuesto), `automation.ts` (`BUDGET_HOLD`), `packages/agent/src/run.ts` (el presupuesto en Sofi), pruebas en `saas-budget.test.ts`; migraciones `0092_cobro_por_tipo.sql`, `0093_cobro_por_tipo_reglas.sql` y `0094_sin_topes.sql`.
+`packages/services/src/saas-actions.ts` (`conversationTierOf`, `consultationTierOf`, `recoveredSql`, `countAgendaUpgrade`), `saas-included.ts` (`getArgosAllowance`, `ensureArgosQuestion`, `countStorageAction`), `saas-invoicing.ts`, `seed-saas-billing.ts`, pruebas en `saas-tiers.test.ts`; `saas-terms.ts` (`assertClioCanListen`, avisos del presupuesto), `automation.ts` (`BUDGET_HOLD`), `packages/agent/src/run.ts` (el presupuesto en Sofi), `saas-cost.ts` (`getClinicCostMargin`, `getCostMarginOverview`), pruebas en `saas-budget.test.ts` y `saas-cost.test.ts`; migraciones `0092_cobro_por_tipo.sql`, `0093_cobro_por_tipo_reglas.sql`, `0094_sin_topes.sql` y `0095_sin_tarifas_de_whatsapp.sql`.

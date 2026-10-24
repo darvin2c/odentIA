@@ -2,7 +2,6 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { getOrganizationDetail } from "./admin-organizations.js"
 import { recordAgentRun } from "./agent-operations.js"
 import {
   AGENT_TEST_BUDGET_MICROS,
@@ -11,6 +10,7 @@ import {
   getAiCostByOrigin,
   recordAiUsage,
 } from "./ai-usage.js"
+import { getClinicCostMargin } from "./saas-cost.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Uso de IA por origen (ADR 0031, fase 1): lo que se guarda, quién lo ve y el tope de pruebas. */
@@ -110,14 +110,16 @@ describe("tope de pruebas", () => {
   })
 })
 
-describe("ficha de la clínica en la administración", () => {
-  it("el rol admin ve el costo real del mes por origen; soporte no", async () => {
-    const detail = await getOrganizationDetail(ownerDb, { userId: "staff-admin", role: "admin" }, ORG)
-    expect(detail.aiCost?.periodLabel).toMatch(/^\d{4}-\d{2}$/)
-    expect(detail.aiCost?.byOrigin.map((item) => item.origin)).toEqual(expect.arrayContaining(["dictado", "recepcion", "vectores"]))
-    expect(detail.aiCost?.totalMicros).toBe(450 + 20 + 155)
-    expect(detail.aiCost?.unpricedCalls).toBe(2)
-    const support = await getOrganizationDetail(ownerDb, { userId: "staff-support", role: "support" }, ORG)
-    expect(support.aiCost).toBeNull()
+describe("costo y margen en la administración (ADR 0085)", () => {
+  it("suma la IA del tramo, pone lo que no tiene acción en su fila y cuenta lo que no tiene precio", async () => {
+    const cost = await getClinicCostMargin(ownerDb, ORG)
+    const line = (key: string) => cost.lines.find((item) => item.key === key)
+    expect(cost.aiMicros).toBe(450 + 20 + 155)
+    // Sin consulta cobrada, el dictado es un borrador descartado; sin conversación cobrada, lo de Sofi no se cobró.
+    expect(line("clio:sin_cobro")).toMatchObject({ costMicros: 450, count: 3 })
+    expect(line("sofi:sin_cobro")).toMatchObject({ costMicros: 155, count: 2 })
+    expect(line("soporte")).toMatchObject({ costMicros: 20, count: 1 })
+    expect(line("jev")).toMatchObject({ costMicros: 0, count: 2 })
+    expect(cost.unpricedCalls).toBe(2)
   })
 })

@@ -1,5 +1,5 @@
 {
-  "id": "6e99efdb-ea41-44bf-bdd3-2d28ab52f147",
+  "id": "11f54b2e-faea-400a-946f-c22d1e2b7dc8",
   "prevId": "169ccfa0-69f3-4ef5-ab79-a1d158c276c2",
   "version": "7",
   "dialect": "postgresql",
@@ -38037,13 +38037,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'dental'"
-        },
         "status": {
           "name": "status",
           "type": "text",
@@ -38275,10 +38268,6 @@
           "name": "saas_waitlist_request_country_check",
           "value": "\"admin\".\"saas_waitlist_request\".\"country_code\" ~ '^[A-Z]{2}$'"
         },
-        "saas_waitlist_request_product_check": {
-          "name": "saas_waitlist_request_product_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"product\" IN ('dental','medical')"
-        },
         "saas_waitlist_request_text_check": {
           "name": "saas_waitlist_request_text_check",
           "value": "length(trim(\"admin\".\"saas_waitlist_request\".\"first_name\")) BETWEEN 1 AND 80 AND length(trim(\"admin\".\"saas_waitlist_request\".\"last_name\")) BETWEEN 1 AND 80\n        AND length(trim(\"admin\".\"saas_waitlist_request\".\"clinic_name\")) BETWEEN 1 AND 120 AND length(trim(\"admin\".\"saas_waitlist_request\".\"city\")) BETWEEN 1 AND 80\n        AND length(\"admin\".\"saas_waitlist_request\".\"email\") BETWEEN 3 AND 254 AND length(\"admin\".\"saas_waitlist_request\".\"phone\") BETWEEN 6 AND 20\n        AND (\"admin\".\"saas_waitlist_request\".\"note\" IS NULL OR length(\"admin\".\"saas_waitlist_request\".\"note\") <= 2000)"
@@ -38286,116 +38275,6 @@
         "saas_waitlist_request_invite_check": {
           "name": "saas_waitlist_request_invite_check",
           "value": "(\"admin\".\"saas_waitlist_request\".\"status\" = 'por_revisar' AND \"admin\".\"saas_waitlist_request\".\"token_hash\" IS NULL AND \"admin\".\"saas_waitlist_request\".\"organization_id\" IS NULL)\n        OR (\"admin\".\"saas_waitlist_request\".\"status\" = 'invitada' AND \"admin\".\"saas_waitlist_request\".\"token_hash\" IS NOT NULL AND \"admin\".\"saas_waitlist_request\".\"plan_id\" IS NOT NULL AND \"admin\".\"saas_waitlist_request\".\"invite_expires_at\" IS NOT NULL AND \"admin\".\"saas_waitlist_request\".\"organization_id\" IS NULL)\n        OR (\"admin\".\"saas_waitlist_request\".\"status\" = 'entro' AND \"admin\".\"saas_waitlist_request\".\"plan_id\" IS NOT NULL AND \"admin\".\"saas_waitlist_request\".\"entered_at\" IS NOT NULL)\n        OR (\"admin\".\"saas_waitlist_request\".\"status\" = 'descartada' AND \"admin\".\"saas_waitlist_request\".\"organization_id\" IS NULL AND length(trim(coalesce(\"admin\".\"saas_waitlist_request\".\"discard_reason\", ''))) > 0)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_whatsapp_rate": {
-      "name": "saas_whatsapp_rate",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "char(2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "price_micros": {
-          "name": "price_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_whatsapp_rate_country_category_uidx": {
-          "name": "saas_whatsapp_rate_country_category_uidx",
-          "columns": [
-            {
-              "expression": "country_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "category",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_whatsapp_rate_updated_by_user_id_fk": {
-          "name": "saas_whatsapp_rate_updated_by_user_id_fk",
-          "tableFrom": "saas_whatsapp_rate",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_whatsapp_rate_category_check": {
-          "name": "saas_whatsapp_rate_category_check",
-          "value": "\"admin\".\"saas_whatsapp_rate\".\"category\" IN ('marketing','utility','authentication')"
-        },
-        "saas_whatsapp_rate_price_check": {
-          "name": "saas_whatsapp_rate_price_check",
-          "value": "\"admin\".\"saas_whatsapp_rate\".\"price_micros\" >= 0"
         }
       },
       "isRLSEnabled": false

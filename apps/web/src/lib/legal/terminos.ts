@@ -12,8 +12,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
   const price = (v: number | null | undefined) =>
     list && v !== null && v !== undefined ? money(v, list.currency).replace(" ", " ") : "Según la página Precios"
   const PLAN = list?.plan
-  const CONVERSATION = list?.conversation
-  const CONSULTATION = list?.consultation
+  const TIERS = list?.tiers
   const RECOVERED = list?.recovered
   const terms = pricing.terms
   return {
@@ -66,7 +65,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "plan-y-cobro",
       title: "Plan y cobro por acción",
       blocks: [
-        "El servicio se cobra con un plan mensual más un cobro por cada acción de valor que realizan los agentes. Los precios vigentes son los publicados en la página [Precios](/precios); a la fecha de esta versión son los siguientes:",
+        "El servicio se cobra con un plan mensual más un cobro por cada acción que realizan los agentes, según su tipo: lo que el agente deja hecho determina el precio. Los precios vigentes son los publicados en la página [Precios](/precios); a la fecha de esta versión son los siguientes:",
         {
           table: {
             caption:
@@ -79,20 +78,58 @@ export function terminosFor(pricing: Pricing): LegalDoc {
                 "Cada mes, desde el día en que se activa el plan. El importe del plan vuelve a la Clínica como crédito para los agentes de ese mes.",
               ],
               [
-                "Conversación atendida",
-                price(CONVERSATION),
-                `Cuando Sofi responde a una persona; incluye todo lo que le responda en las ${hours(terms.conversationWindowHours)} siguientes.`,
+                "Conversación de Sofi que informa",
+                price(TIERS?.informa),
+                `Una vez por persona cada ${hours(terms.conversationWindowHours)}, cuando Sofi responde, confirma o informa sin cambiar la agenda.`,
               ],
               [
-                "Consulta documentada",
-                price(CONSULTATION),
-                "Cuando el odontólogo confirma la nota propuesta por Clío.",
+                "Conversación de Sofi que gestiona una cita",
+                price(TIERS?.gestiona),
+                `En lugar de la anterior, cuando en esas ${hours(terms.conversationWindowHours)} Sofi reserva, mueve o cancela una cita.`,
+              ],
+              [
+                "Cita que reservó Sofi y se dio",
+                price(TIERS?.agenda),
+                "Cuando el paciente asiste a la cita que reservó Sofi. Se cobra solo la diferencia con la conversación que la gestionó; si el paciente no asiste, no se cobra.",
+              ],
+              [
+                "Consulta de Clío simple",
+                price(TIERS?.simple),
+                "Una vez por atención, cuando el odontólogo confirma un solo registro propuesto por Clío: una receta, una nota o un control.",
+              ],
+              [
+                "Consulta de Clío estándar",
+                price(TIERS?.estandar),
+                "Una vez por atención, cuando el odontólogo confirma un diagnóstico, el odontograma o dos registros o más.",
+              ],
+              [
+                "Consulta de Clío completa",
+                price(TIERS?.completa),
+                "Una vez por atención, cuando el odontólogo confirma el presupuesto que armó Clío.",
               ],
               [
                 "Cita recuperada",
                 price(RECOVERED),
-                "Cuando un paciente recupera una cita gracias a un agente y asiste a ella. Si no asiste, no se cobra.",
+                `Cuando un paciente que no tenía cita ni tratamiento en curso reserva en los ${days(terms.recoveryWindowDays)} siguientes a un mensaje de Argos y asiste. Si no asiste, no se cobra; la conversación que llevó a ella va incluida.`,
               ],
+              ...(list?.argos
+                ? [
+                    [
+                      `Paquete de ${list.argos.packQuestions} preguntas a Argos`,
+                      price(list.argos.pack),
+                      `El plan incluye ${list.argos.included} preguntas al mes. Cada paquete adicional se suma solo con la autorización de la Clínica, o automáticamente si la Clínica lo activa. Vale hasta el cierre del mes; si se suma en los últimos 7 días del mes, hasta el cierre del siguiente.`,
+                    ],
+                  ]
+                : []),
+              ...(list?.storage
+                ? [
+                    [
+                      "Almacenamiento adicional, por GB al mes",
+                      price(list.storage.perGb),
+                      `El plan incluye ${list.storage.includedGb} GB. Lo adicional se calcula con el promedio diario de lo almacenado en el periodo.`,
+                    ],
+                  ]
+                : []),
             ],
           },
         },
@@ -101,13 +138,16 @@ export function terminosFor(pricing: Pricing): LegalDoc {
           list: [
             "Las propuestas de Clío que el odontólogo no confirma.",
             "Las citas recuperadas a las que el paciente no asiste.",
+            "El spam, los mensajes ajenos a la Clínica y los recordatorios y avisos de cita.",
+            "Lo que ocupa en la base de datos la información de la Clínica (fichas, citas, mensajes).",
             "Los mensajes que envían las personas del equipo de la Clínica sin intervención de un agente.",
             "El uso del resto del sistema (agenda, historia clínica, caja, reportes) dentro del plan.",
           ],
         },
-        { h: "Crédito, tope y facturación" },
+        { h: "Crédito, presupuesto y facturación" },
         "Las acciones se descuentan primero del crédito del mes. Lo que exceda el crédito se factura como consumo variable, de forma mensual o quincenal según la modalidad elegida por la Clínica. El crédito no usado en un mes no se acumula para el siguiente.",
-        "La Clínica puede fijar un tope de gasto y odentIA le avisa cuando el consumo se acerca a ese tope. Al alcanzarlo, los casos nuevos pasan al equipo de la Clínica y el paciente siempre recibe respuesta; los agentes no realizan nuevas acciones con cobro hasta que la Clínica amplíe el tope o empiece un nuevo periodo.",
+        "La Clínica puede fijar un presupuesto mensual y odentIA le avisa cuando el consumo se acerca a ese presupuesto. Al alcanzarlo, las conversaciones nuevas pasan al equipo de la Clínica con un mensaje fijo y el paciente siempre recibe respuesta; Clío no inicia la escucha en nuevas atenciones y Argos no inicia nuevas acciones de recuperación ni suma paquetes de preguntas, hasta que la Clínica amplíe el presupuesto o empiece un nuevo periodo. Lo que ya había empezado se termina y se cobra. El almacenamiento no cuenta para el presupuesto.",
+        "El servicio es pospago: el plan, las acciones, los paquetes de preguntas y el almacenamiento adicional se pagan al cerrar el periodo, después de usarlos.",
         { h: "Impuestos y terceros" },
         "Los precios están expresados en dólares estadounidenses y no incluyen impuestos. Se añaden los impuestos que correspondan según la ley aplicable; en Perú, el Impuesto General a las Ventas (IGV). Los comprobantes se emiten conforme a la normativa tributaria peruana.",
         "Las plantillas de mensajes de WhatsApp que exige Meta para iniciar conversaciones las cobra Meta directamente a la Clínica, según sus propias tarifas. Esos importes no forman parte del precio de odentIA.",

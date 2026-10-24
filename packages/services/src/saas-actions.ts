@@ -626,6 +626,8 @@ export interface SaasActionRow {
   contactId: string | null
   personName: string | null
   conversationId: string | null
+  /** La atención de una consulta dictada. */
+  encounterId: string | null
   appointmentId: string | null
   channel: string | null
   detail: string
@@ -702,6 +704,7 @@ export async function listPeriodActions(
       contactId: saasAction.contactId,
       personName: contact.displayName,
       conversationId: saasAction.conversationId,
+      encounterId: saasAction.encounterId,
       appointmentId: saasAction.appointmentId,
       channel: saasAction.channel,
       windowStart: saasAction.windowStart,
@@ -779,6 +782,7 @@ export async function listPeriodActions(
       contactId: row.contactId,
       personName: row.personName,
       conversationId: row.conversationId,
+      encounterId: row.encounterId,
       appointmentId: row.appointmentId,
       channel: row.channel,
       detail: row.detail,
@@ -927,6 +931,7 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
     contactId: row.contact_id,
     personName: nameOf.get(row.contact_id) ?? null,
     conversationId: row.conversation_id,
+    encounterId: null,
     appointmentId: row.appointment_id,
     channel: row.source,
     detail: recoveryDetail(row),
@@ -1152,6 +1157,8 @@ export interface ActionPriceCheck {
   kind: SaasPriceKey
   baseMicros: number | null
   minimumMicros: number | null
+  /** El peor costo medido con que se compara (USD); null en otra moneda. */
+  worstMicros: number | null
   /** Veces su peor costo, a precio base y al mínimo. */
   baseMultiple: number | null
   minimumMultiple: number | null
@@ -1206,7 +1213,7 @@ export function checkActionPricing(plan: PlanPriceInput): ActionPriceCheck[] {
     const minimum = fixed ? base : discountedMicros(base, plan.maxDiscountBps)
     const worst = SAAS_WORST_COST_MICROS[kind]
     // El peor costo está en dólares: en otra moneda no hay con qué comparar y no se afirma nada.
-    if (plan.currency !== "USD") return [{ kind, baseMicros: base, minimumMicros: minimum, baseMultiple: null, minimumMultiple: null, fixed, ok: true, watch: false }]
+    if (plan.currency !== "USD") return [{ kind, baseMicros: base, minimumMicros: minimum, worstMicros: null, baseMultiple: null, minimumMultiple: null, fixed, ok: true, watch: false }]
     const double = minimum >= worst * SAAS_PRICE_FLOOR_MULTIPLE
     const ok = double || fixed
     return [
@@ -1214,6 +1221,7 @@ export function checkActionPricing(plan: PlanPriceInput): ActionPriceCheck[] {
         kind,
         baseMicros: base,
         minimumMicros: minimum,
+        worstMicros: worst,
         baseMultiple: Math.round((base / worst) * 10) / 10,
         minimumMultiple: Math.round((minimum / worst) * 10) / 10,
         fixed,

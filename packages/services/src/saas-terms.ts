@@ -1,16 +1,15 @@
 import type { Db } from "@odentia/db"
 import { aiUsage } from "@odentia/db/schema/agent"
 import { organization, user } from "@odentia/db/schema/auth"
-import { channelConnection, channelTemplate, conversation, message } from "@odentia/db/schema/crm"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { saasAction, saasNegotiation, saasNotice, saasPlan, saasSeller, saasSubscription, saasWhatsappRate } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { saasNegotiation, saasNotice, saasPlan, saasSeller, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, desc, eq, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { formatMoney } from "@odentia/clinical"
 import { findOrgLocale } from "./locale.js"
 import { currentSaasTerms, saasTermsAt } from "./saas-commercial-terms.js"
-import { activeDiscountBps, currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
+import { activeDiscountBps, getSaasConsumption, planPrices, type SaasConsumption, type SaasPriceKey } from "./saas-actions.js"
 
 /* ---------- Negociación por clínica (ADR 0031, tablero O2) ---------- */
 
@@ -224,15 +223,15 @@ export async function saasSellerOf(tx: Db, orgId: string): Promise<{ id: string;
   return row ?? null
 }
 
-/* ---------- Tope de gasto y ciclo (tableros C5 y O2) ---------- */
+/* ---------- Presupuesto del mes y ciclo (tableros C5 y O2) ---------- */
 
 /**
- * Lo máximo que la clínica paga al mes por encima del crédito; null lo quita.
- * Lo decide quien administra la clínica. Distinto del tope técnico de
- * corridas por día de Recepción: ese protege el sistema; este es dinero.
+ * El presupuesto del mes: lo máximo que la clínica paga por encima del
+ * crédito; null lo quita. Lo decide quien administra la clínica y es el único
+ * límite de los agentes (ADR 0085).
  */
 export async function setSaasSpendCap(tx: Db, orgId: string, actorUserId: string, capCents: number | null): Promise<void> {
-  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0)) throw validation("El tope debe ser un importe válido")
+  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0)) throw validation("El presupuesto debe ser un importe válido")
   const [row] = await tx
     .update(saasSubscription)
     .set({ spendCapCents: capCents, updatedAt: new Date() })
@@ -519,106 +518,6 @@ export async function assertAgentsNotPaused(tx: Db, orgId: string): Promise<void
   }
 }
 
-/* ---------- Estimación de WhatsApp (tablero C2) ---------- */
-
-export interface WhatsappEstimate {
-  /** Plantillas enviadas en el tramo por categoría. */
-  templates: { marketing: number; utility: number; authentication: number }
-  currency: string | null
-  /** null si la administración aún no cargó las tarifas de Meta para el país de la clínica. */
-  estimateMicros: number | null
-}
-
-/**
- * Lo que Meta le cobraría a la clínica por las plantillas del tramo, con las
- * tarifas que cargó la administración para su país. Es una estimación: lo
- * cobra Meta directo y depende por completo de Meta.
- */
-export async function getWhatsappEstimate(tx: Db, orgId: string, now = new Date()): Promise<WhatsappEstimate> {
-  const period = await currentSaasPeriod(tx, orgId, now)
-  const rows = await tx
-    .select({ category: channelTemplate.category, n: sql<number>`count(*)::int` })
-    .from(message)
-    .innerJoin(conversation, eq(conversation.id, message.conversationId))
-    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
-    .innerJoin(
-      channelTemplate,
-      and(
-        eq(channelTemplate.connectionId, channelConnection.id),
-        eq(channelTemplate.name, message.templateName),
-        eq(channelTemplate.language, sql`coalesce(${message.templateLanguage}, ${channelTemplate.language})`),
-      ),
-    )
-    .where(
-      and(
-        eq(message.organizationId, orgId),
-        eq(message.direction, "out"),
-        eq(message.contentType, "template"),
-        eq(channelConnection.channel, "whatsapp"),
-        gte(message.createdAt, period.start),
-        lt(message.createdAt, period.end),
-      ),
-    )
-    .groupBy(channelTemplate.category)
-  const templates = { marketing: 0, utility: 0, authentication: 0 }
-  for (const row of rows) {
-    if (row.category === "marketing" || row.category === "utility" || row.category === "authentication") templates[row.category] = Number(row.n)
-  }
-  const [profile] = await tx.select({ country: orgProfile.countryCode }).from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1)
-  const rates = profile
-    ? await tx.select().from(saasWhatsappRate).where(eq(saasWhatsappRate.countryCode, profile.country)).orderBy(asc(saasWhatsappRate.category))
-    : []
-  const used = (Object.keys(templates) as Array<keyof typeof templates>).filter((category) => templates[category] > 0)
-  const rateOf = (category: string) => rates.find((rate) => rate.category === category)
-  const complete = used.every((category) => rateOf(category))
-  return {
-    templates,
-    currency: rates[0]?.currency ?? null,
-    estimateMicros: complete && rates.length ? used.reduce((sum, category) => sum + templates[category] * (rateOf(category)?.priceMicros ?? 0), 0) : null,
-  }
-}
-
-export interface WhatsappRateRow {
-  countryCode: string
-  category: "marketing" | "utility" | "authentication"
-  currency: string
-  priceMicros: number
-  updatedAt: Date
-}
-
-export async function listWhatsappRates(tx: Db): Promise<WhatsappRateRow[]> {
-  const rows = await tx.select().from(saasWhatsappRate).orderBy(asc(saasWhatsappRate.countryCode), asc(saasWhatsappRate.category))
-  return rows.map((row) => ({
-    countryCode: row.countryCode,
-    category: row.category as WhatsappRateRow["category"],
-    currency: row.currency,
-    priceMicros: row.priceMicros,
-    updatedAt: row.updatedAt,
-  }))
-}
-
-/** Carga o cambia la tarifa de Meta de un país y categoría (administración, con owner). */
-export async function upsertWhatsappRate(
-  tx: Db,
-  actor: AdminActor,
-  input: { countryCode: string; category: string; currency: string; priceMicros: number },
-): Promise<void> {
-  if (actor.role !== "admin") throw forbidden("Solo la administración carga las tarifas de WhatsApp")
-  const country = input.countryCode.trim().toUpperCase()
-  if (!/^[A-Z]{2}$/.test(country)) throw validation("País inválido (ISO 3166-1 alfa-2)")
-  if (!["marketing", "utility", "authentication"].includes(input.category)) throw validation("Categoría inválida")
-  const currencyCode = input.currency.trim().toUpperCase()
-  if (!/^[A-Z]{3}$/.test(currencyCode)) throw validation("Moneda inválida (ISO 4217)")
-  if (!Number.isSafeInteger(input.priceMicros) || input.priceMicros < 0) throw validation("La tarifa debe ser un importe válido")
-  await tx
-    .insert(saasWhatsappRate)
-    .values({ countryCode: country, category: input.category, currency: currencyCode, priceMicros: input.priceMicros, updatedBy: actor.userId })
-    .onConflictDoUpdate({
-      target: [saasWhatsappRate.countryCode, saasWhatsappRate.category],
-      set: { currency: currencyCode, priceMicros: input.priceMicros, updatedBy: actor.userId, updatedAt: new Date() },
-    })
-}
-
 /* ---------- Ficha de la clínica en la administración (tablero O2) ---------- */
 
 export interface OrganizationBillingTerms {
@@ -635,6 +534,9 @@ export interface OrganizationBillingTerms {
     trialMaxCreditCents: number
     trialMaxDays: number
     base: Record<"conversacion" | "consulta" | "cita", number | null>
+    /** El precio de cada tipo y lo que no se negocia (ADR 0085). */
+    prices: Record<SaasPriceKey, number | null>
+    fixed: SaasPriceKey[]
   } | null
   status: string
   trial: { creditCents: number; days: number; startedAt: Date | null; endsAt: Date | null }
@@ -690,6 +592,8 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
           trialMaxCreditCents: plan.trialMaxCreditCents,
           trialMaxDays: plan.trialMaxDays,
           base: { conversacion: plan.conversationMicros, consulta: plan.consultationMicros, cita: plan.recoveryMicros },
+          prices: planPrices(plan),
+          fixed: plan.fixedPriceTiers as SaasPriceKey[],
         }
       : null,
     status: sub.status,
@@ -774,56 +678,4 @@ export async function getSaasTrialWatch(tx: Db, now = new Date()): Promise<SaasT
   return rows.sort((a, b) => order[a.state] - order[b.state] || (a.daysLeft ?? 99) - (b.daysLeft ?? 99))
 }
 
-export interface SaasLowMarginRow {
-  organizationId: string
-  organizationName: string
-  currency: string
-  months: Array<{ label: string; revenueCents: number; costCents: number; marginPct: number }>
-}
 
-/** Margen bajo: menos de este porcentaje dos meses seguidos. */
-export const SAAS_LOW_MARGIN_PCT = 50
-
-/**
- * Clínicas activas con margen bajo los dos últimos meses cerrados: lo que se
- * les cobra (la cuota más lo que pasó del crédito, con su precio) frente a lo
- * que odentIA pagó a los proveedores de IA (`ai_usage`). Se revisa plan, uso
- * anómalo o precio.
- */
-export async function getSaasLowMargin(tx: Db, now = new Date()): Promise<SaasLowMarginRow[]> {
-  const subs = await tx
-    .select({ orgId: saasSubscription.organizationId, planId: saasSubscription.planId, name: organization.name })
-    .from(saasSubscription)
-    .innerJoin(organization, eq(organization.id, saasSubscription.organizationId))
-    .where(and(eq(saasSubscription.status, "activa"), eq(saasSubscription.isDemo, false)))
-  const months = [2, 1].map((back) => {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1))
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back + 1, 1))
-    return { start, end, label: start.toISOString().slice(0, 7) }
-  })
-  const rows: SaasLowMarginRow[] = []
-  for (const sub of subs) {
-    if (!sub.planId) continue
-    const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-    if (!plan) continue
-    const result: SaasLowMarginRow["months"] = []
-    for (const month of months) {
-      const [actions] = await tx
-        .select({ micros: sql<number>`coalesce(sum(${saasAction.priceMicros}), 0)` })
-        .from(saasAction)
-        .where(and(eq(saasAction.organizationId, sub.orgId), gte(saasAction.occurredAt, month.start), lt(saasAction.occurredAt, month.end)))
-      const [cost] = await tx
-        .select({ micros: sql<number>`coalesce(sum(${aiUsage.costMicros}), 0)` })
-        .from(aiUsage)
-        .where(and(eq(aiUsage.organizationId, sub.orgId), gte(aiUsage.createdAt, month.start), lt(aiUsage.createdAt, month.end)))
-      const actionsCents = microsToCents(Number(actions?.micros ?? 0))
-      const revenueCents = plan.priceCents + Math.max(0, actionsCents - plan.creditCents)
-      const costCents = microsToCents(Number(cost?.micros ?? 0))
-      result.push({ label: month.label, revenueCents, costCents, marginPct: revenueCents > 0 ? Math.round((1 - costCents / revenueCents) * 100) : 0 })
-    }
-    if (result.every((month) => month.costCents > 0 && month.marginPct < SAAS_LOW_MARGIN_PCT)) {
-      rows.push({ organizationId: sub.orgId, organizationName: sub.name, currency: plan.currency, months: result })
-    }
-  }
-  return rows
-}

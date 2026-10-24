@@ -565,29 +565,6 @@ export const saasNegotiation = adminSchema.table(
 )
 
 /**
- * Tarifa de Meta por plantilla de WhatsApp, por país y categoría, para la
- * estimación que ve la clínica. La carga la administración desde la tabla de
- * Meta: odentIA no cobra WhatsApp ni recibe ese pago.
- */
-export const saasWhatsappRate = adminSchema.table(
-  "saas_whatsapp_rate",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    countryCode: char("country_code", { length: 2 }).notNull(),
-    category: text("category").notNull(),
-    currency: char("currency", { length: 3 }).notNull(),
-    priceMicros: bigint("price_micros", { mode: "number" }).notNull(),
-    updatedBy: text("updated_by").references(() => user.id),
-    ...timestamps,
-  },
-  (table) => [
-    uniqueIndex("saas_whatsapp_rate_country_category_uidx").on(table.countryCode, table.category),
-    check("saas_whatsapp_rate_category_check", sql`${table.category} IN ('marketing','utility','authentication')`),
-    check("saas_whatsapp_rate_price_check", sql`${table.priceMicros} >= 0`),
-  ],
-)
-
-/**
  * Línea congelada de un cargo del cobro por acción (ADR 0031): la cuota, las
  * acciones por encima del crédito por tipo, la devolución de las conversaciones
  * ya cobradas que llevaron a una cita recuperada (negativa), lo que cubrió el

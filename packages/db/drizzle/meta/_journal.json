@@ -670,8 +670,15 @@
     {
       "idx": 95,
       "version": "7",
-      "when": 1792826684990,
-      "tag": "0095_fundadores_producto",
+      "when": 1792825091733,
+      "tag": "0095_sin_tarifas_de_whatsapp",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792827494236,
+      "tag": "0096_fundadores_producto",
       "breakpoints": true
     }
   ]

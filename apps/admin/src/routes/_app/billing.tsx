@@ -34,7 +34,7 @@ import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
 import { ApiError, api } from "../../lib/api"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
-import { NegotiationsSection, WhatsappRatesSection } from "../../components/billing-terms"
+import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
 
 export const Route = createFileRoute("/_app/billing")({
@@ -122,8 +122,20 @@ function money(cents: number, currency: string): string {
 }
 
 /** Precio por acción en millonésimas, hasta tres decimales. */
-function perAction(micros: number, currency: string): string {
-  return new Intl.NumberFormat(LOCALE, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
+/** «Por tipo · Sofi 0,10 / 0,50 / 1,00 · Clío 0,10 / 0,20 / 0,50 · cita 2,00 · Argos 300 + 3,00 · 20 GB + 0,20» (ADR 0085). */
+function tierSummary(plan: AdminPlan): string {
+  const n = (micros: number | null | undefined, fallback: number | null) => {
+    const value = micros ?? fallback
+    return value === null ? "—" : new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(value / 1_000_000)
+  }
+  const parts = [
+    `Sofi ${n(plan.conversationInformMicros, plan.conversationMicros)} / ${n(plan.conversationMicros, null)} / ${n(plan.conversationAgendaMicros, plan.conversationMicros)}`,
+    `Clío ${n(plan.consultationSimpleMicros, plan.consultationMicros)} / ${n(plan.consultationStandardMicros, plan.consultationMicros)} / ${n(plan.consultationMicros, null)}`,
+    `cita ${n(plan.recoveryMicros, null)}`,
+  ]
+  if (plan.argosPackMicros !== null) parts.push(`Argos ${plan.argosIncludedQuestions} + ${n(plan.argosPackMicros, null)}`)
+  if (plan.storageGbMicros !== null) parts.push(`${plan.storageIncludedGb} GB + ${n(plan.storageGbMicros, null)}`)
+  return `Por tipo (${plan.currency}) · ${parts.join(" · ")}`
 }
 
 function errorMessage(error: unknown): string {
@@ -440,9 +452,7 @@ function BillingPage() {
                     {plan.guaranteeMonths ? ` · garantizado ${plan.guaranteeMonths} meses` : ""}
                     {plan.showOnWeb ? " · en la web" : ""}
                     {plan.creditCents ? ` · vuelve ${money(plan.creditCents, plan.currency)} en crédito` : ""}
-                    {plan.conversationMicros !== null
-                      ? ` · conversación ${perAction(plan.conversationMicros, plan.currency)}, consulta ${perAction(plan.consultationMicros ?? 0, plan.currency)}, cita ${perAction(plan.recoveryMicros ?? 0, plan.currency)}`
-                      : ""}
+                    {plan.conversationMicros !== null ? ` · ${tierSummary(plan)}` : ""}
                   </p>
                 </div>
                 <p className="text-sm font-semibold tabular-nums">
@@ -463,7 +473,6 @@ function BillingPage() {
         organizationNames={Object.fromEntries((overview.data ?? []).map((row) => [row.organizationId, row.organizationName ?? row.organizationId]))}
       />
 
-      <WhatsappRatesSection />
 
       <section aria-labelledby="medios" className="flex flex-col gap-2">
         <h2 id="medios" className="text-base font-semibold">

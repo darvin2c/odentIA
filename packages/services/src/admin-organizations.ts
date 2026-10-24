@@ -35,8 +35,7 @@ import { ServiceError } from "./errors.js"
 
 import { initialOrgRegion } from "./organization-profile.js"
 import { ensureClinicSpecialties } from "./specialties.js"
-import { type OrganizationBillingSummary, usageMonthBounds } from "./saas-billing.js"
-import { type AiCostByOrigin, getAiCostByOrigin } from "./ai-usage.js"
+import type { OrganizationBillingSummary } from "./saas-billing.js"
 
 /**
  * Resumen de suscripción visible para soporte: sin importes, sin comisiones
@@ -185,11 +184,6 @@ export interface OrganizationDetail {
   }
   activity: OrgActivityItem[]
   billing: VisibleBillingSummary | null
-  /**
-   * Costo real de IA del mes calendario de la clínica, por origen (ADR 0031),
-   * en millonésimas de USD. Solo para el rol admin: null para soporte.
-   */
-  aiCost: { periodLabel: string; totalMicros: number | null; unpricedCalls: number; byOrigin: AiCostByOrigin[] } | null
 }
 /**
  * Subdominios reservados: nunca son slugs de tenant (colisionarían con las
@@ -574,19 +568,6 @@ export async function getOrganizationDetail(
     ? await loaders.getBillingSummary(tx, organizationId)
     : null
   const billing = fullBilling ? redactBillingSummary(fullBilling, actor) : null
-  let aiCost: OrganizationDetail["aiCost"] = null
-  if (!actor || actor.role === "admin") {
-    const month = usageMonthBounds(profile?.timezone ?? "UTC", new Date())
-    const byOrigin = await getAiCostByOrigin(tx, organizationId, month)
-    aiCost = {
-      periodLabel: month.label,
-      totalMicros: byOrigin.some((item) => item.costMicros !== null)
-        ? byOrigin.reduce((total, item) => total + (item.costMicros ?? 0), 0)
-        : null,
-      unpricedCalls: byOrigin.reduce((total, item) => total + item.unpricedCalls, 0),
-      byOrigin,
-    }
-  }
 
   return {
     id: org.id,
@@ -644,7 +625,6 @@ export async function getOrganizationDetail(
     },
     activity,
     billing,
-    aiCost,
   }
 }
 

@@ -79,8 +79,8 @@ function tierPlan(factor: number) {
     argosPackMicros: price(3),
     storageIncludedGb: 20,
     storageGbMicros: price(0.2),
-    // Lo barato no se negocia (ADR 0085).
-    fixedPriceTiers: ["informa", "simple", "estandar", "preguntas"],
+    // Solo se negocian Gestiona, Agenda, Completa y la cita recuperada (ADR 0085).
+    fixedPriceTiers: ["informa", "simple", "estandar", "preguntas", "almacenamiento"],
   }
 }
 
