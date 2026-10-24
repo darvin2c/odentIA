@@ -680,6 +680,11 @@ export interface SaasActionRow {
   refunds: SaasRefund[]
   /** La revisión que pidió la clínica, si pidió (ADR 0054). */
   review: SaasReviewView | null
+  /**
+   * De la acción con que se pasó del crédito, la parte que el crédito cubrió:
+   * se cobra solo lo que pasó (el crédito vuelve íntegro, ADR 0031). 0 en las demás.
+   */
+  creditPartMicros?: number
 }
 
 export interface SaasRefund {
@@ -800,6 +805,7 @@ export async function listPeriodActions(
   const creditMicros = period.creditCents * 10_000
   return rows.map((row) => {
     let state: SaasActionState
+    let creditPartMicros = 0
     const own = refunds.get(row.id) ?? []
     const review = reviews.get(row.id) ?? null
     if (needsVisit(row) && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
@@ -809,8 +815,11 @@ export async function listPeriodActions(
     else if (row.chargeId === null && insideCita(row)) state = "dentro_de_cita"
     else if (row.priceMicros === null) state = "sin_precio"
     else {
+      const before = usedMicros
       usedMicros += netMicros({ priceMicros: row.priceMicros, refunds: own })
       state = period.credit === "prueba" ? "prueba" : usedMicros <= creditMicros ? "credito" : "sobre_credito"
+      // La que cruza el crédito usa lo que quedaba de él: se cobra solo lo que pasó.
+      if (state === "sobre_credito" && before < creditMicros) creditPartMicros = creditMicros - before
     }
     return {
       refunds: state === "anulada" ? [] : own,
@@ -831,6 +840,7 @@ export async function listPeriodActions(
       discountBps: row.discountBps,
       state,
       chargeId: row.chargeId,
+      ...(creditPartMicros > 0 ? { creditPartMicros } : {}),
       review:
         review && review.status === "devuelta" && row.chargeId !== null
           ? { ...review, coveredByCredit: state === "credito" || state === "prueba" }
