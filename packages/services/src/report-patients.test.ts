@@ -20,7 +20,7 @@ import {
   treatmentPlan,
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, setAppointmentStatus } from "./appointments.js"
@@ -288,6 +288,39 @@ it("cada paso cuenta a quien llegó a él o a uno posterior: cancelar sin otra c
   expect((await list("funnel_lost_booked")).rows.map((row) => row.personName)).toEqual(["Hugo"])
   expect((await list("funnel_lost_came")).rows.map((row) => row.personName)).toEqual(["Inés"])
   expect((await list("funnel_came")).rows.map((row) => row.personName).sort()).toEqual(["Julia", "Karla"])
+})
+
+it("en latidIA «pagó» es la consulta cobrada: vino y pagó algo, sin presupuesto que aceptar (issue 229, decisión 15)", async () => {
+  const c = await clinic()
+  const steps = async () => (await c.run((tx) => getReportFunnel(tx, c.orgId, { period: "este_mes" }))).funnel.steps
+  expect(await steps()).toEqual(FUNNEL_STEPS)
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, c.orgId))
+  // Rosa vino y pagó su consulta; Tomás vino y aún no paga; Úrsula pagó una reserva y todavía no viene.
+  const [rosa, tomas, ursula] = [await c.person("Rosa"), await c.person("Tomás"), await c.person("Úrsula")]
+  const signed = (patientId: string) =>
+    ownerDb.insert(encounter).values({
+      organizationId: c.orgId, patientId, professionalUserId: c.actor, reason: "Consulta", status: "finalizada", finalizedAt: new Date(),
+      signerName: "Dra. Ana", signerRegistration: "CMP 1234",
+    })
+  const pay = (patientId: string) =>
+    ownerDb
+      .insert(patientPayment)
+      .values({ organizationId: c.orgId, patientId, branchId: c.branchId, amountCents: 8_000, currency: "PEN", paidAt: new Date(), methodName: "Efectivo" })
+  await signed(rosa.patientId)
+  await signed(tomas.patientId)
+  await pay(rosa.patientId)
+  await pay(ursula.patientId)
+
+  const today = { start: new Date(Date.now() - DAY), end: new Date(Date.now() + DAY) }
+  const funnel = (await c.run((tx) => funnelMany(tx, c.orgId, [today])))[0]?.counts
+  expect(funnel).toEqual({ sought: 3, booked: 2, came: 2, budget: 0, accepted: 0, paid: 1 })
+  // Argos cuenta lo mismo, y la pantalla muestra el embudo sin presupuesto.
+  expect(await argosFunnel(c.orgId, `primer_contacto_en >= timestamptz '${today.start.toISOString()}' and primer_contacto_en < timestamptz '${today.end.toISOString()}'`)).toEqual(funnel)
+  expect(await steps()).toEqual(["sought", "booked", "came", "paid"])
+  const list = (name: "funnel_paid" | "funnel_lost_paid") =>
+    c.run((tx) => getPatientReportList(tx, c.orgId, { period: "este_mes", list: name }))
+  expect((await list("funnel_paid")).rows.map((row) => row.personName)).toEqual(["Rosa"])
+  expect((await list("funnel_lost_paid")).rows.map((row) => row.personName)).toEqual(["Tomás"])
 })
 
 it("quien escribe por un paciente no es otra persona: la madre que registró a su hijo por WhatsApp no cuenta aparte ni como perdida", async () => {

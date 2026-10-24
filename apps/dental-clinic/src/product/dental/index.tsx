@@ -121,6 +121,7 @@ export const dentalUi: ProductUi = {
       hint: PHASE_HINTS[key],
     })),
     defaultPhase: "basica",
+    budgetRequired: true,
   },
   services: {
     kinds: TREATMENT_KINDS.map((kind) => ({ key: kind.key, name: kind.name })),

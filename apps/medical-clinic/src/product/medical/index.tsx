@@ -28,6 +28,8 @@ export const medicalUi: ProductUi = {
       },
     ],
   },
+  // Lo indicado queda aceptado al indicarlo: el presupuesto es opcional (decisión 15).
+  plan: { ...bare.plan, budgetRequired: false },
   encounter: { ...bare.encounter, examination: medicalExamination },
   health: medicalHealth,
   summary: { ClinicalCards: (props) => <ProblemsCard {...props} /> },

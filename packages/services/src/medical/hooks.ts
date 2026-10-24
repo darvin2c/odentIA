@@ -18,9 +18,11 @@ import { medicalPrescribing } from "./prescribing.js"
  * (la parte del cuerpo se escribe, decisión 4 del issue 229) ni dictado
  * todavía; su examen es por sistemas, registra dos signos vitales más y su
  * entrevista suma los antecedentes médicos, que la copia de la historia lleva.
+ * Lo indicado queda aceptado al indicarlo: el presupuesto es opcional.
  */
 export const medicalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
+  budgetRequired: false,
   prescribing: medicalPrescribing,
   imaging: MEDICAL_IMAGING_TYPES,
   consentSuggestions: MEDICAL_CONSENT_TEMPLATES,

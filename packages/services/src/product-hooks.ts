@@ -268,6 +268,12 @@ export interface ProductHooks {
   /** Si Clío dicta en sus clínicas (odentIA sí; la app médica, cuando tenga su dictado). */
   dictates: boolean
   /**
+   * Si lo indicado espera la respuesta a un presupuesto (odentIA) o queda
+   * aceptado al indicarlo (latidIA, decisión 15 del issue 229). Sin él, el
+   * presupuesto es opcional: nada lo exige para agendar, vincular ni realizar.
+   */
+  budgetRequired: boolean
+  /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
    */
@@ -356,6 +362,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   vitals: CORE_VITAL_KEYS,
   catalog: NO_CATALOG,
   dictates: false,
+  budgetRequired: true,
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),
   encounterFinalized: async () => ({}),

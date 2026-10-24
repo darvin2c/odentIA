@@ -30,6 +30,7 @@ import { sql, type SQL } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { uncountedSql } from "./conversation-state.js"
 import { budgetAcceptanceMany } from "./report-summary.js"
+import { productHooks } from "./products.js"
 import { lastMonths } from "./report-periods.js"
 import { INVITED_TO_RETURN_ACTION } from "./return-invites.js"
 import {
@@ -50,6 +51,15 @@ import { controlTotals, firstVisitSql, newPatientsMany, type ReportListRow } fro
 export const FUNNEL_STEPS = ["sought", "booked", "came", "budget", "accepted", "paid"] as const
 export type FunnelStep = (typeof FUNNEL_STEPS)[number]
 export type FunnelCounts = Record<FunnelStep, number>
+
+/**
+ * Los pasos que muestra la clínica. Donde lo indicado queda aceptado al
+ * indicarlo (latidIA, decisión 15 del issue 229) no hay presupuesto que
+ * recibir ni aceptar: tras venir, «pagó» es la consulta cobrada.
+ */
+export function funnelStepsOf(budgetRequired: boolean): readonly FunnelStep[] {
+  return budgetRequired ? FUNNEL_STEPS : FUNNEL_STEPS.filter((step) => step !== "budget" && step !== "accepted")
+}
 
 /** Un tramo que terminó hace menos de estos días sigue abierto: quienes escribieron todavía pueden agendar. */
 export const FUNNEL_OPEN_DAYS = 30
@@ -151,14 +161,16 @@ export function firstContactSql(orgId: string): SQL {
  * - recibió presupuesto (presentado) y lo aceptó (del todo o en parte, según
  *   su estado a hoy), sin exigir la cita atendida: la cita queda atendida al
  *   firmar la atención, que puede seguir en borrador;
- * - pagó algo: lo aceptó y tiene un pago sin anular.
+ * - pagó algo: lo aceptó y tiene un pago sin anular; sin presupuesto
+ *   (`budgetRequired` falso, latidIA), vino y lo tiene: la consulta cobrada.
  * `stopped`: no agendó, preguntó algo y dejó de escribir (ninguna conversación
  * suya ni de quien escribió por ella sigue abierta y nada llegó en los
  * últimos `STOPPED_WRITING_DAYS` días). `conversation_id`: de quien aún no es
  * paciente, su conversación más reciente.
  */
-export function funnelSql(orgId: string, hull: Span, now: Date): SQL {
+export function funnelSql(orgId: string, hull: Span, now: Date, budgetRequired = true): SQL {
   const quietSince = at(new Date(now.getTime() - STOPPED_WRITING_DAYS * DAY_MS))
+  const beforePaying = budgetRequired ? sql`r.accepted` : sql`(r.came or r.budget)`
   return sql`with ${firstContactSql(orgId)}, cohort as (
       select * from first_contact k where k.first_at >= ${at(hull.start)} and k.first_at < ${at(hull.end)}
     ), reached as (
@@ -191,7 +203,7 @@ export function funnelSql(orgId: string, hull: Span, now: Date): SQL {
         -- Aceptar exige un presupuesto presentado: ya está dentro de «budget».
         r.budget,
         r.accepted,
-        r.accepted and r.paid as paid,
+        ${beforePaying} and r.paid as paid,
         not (r.booked or r.came or r.budget)
           and coalesce(greatest(tp.last_in, tw.last_in) < ${quietSince}, false)
           and not coalesce(tp.open or tw.open, false) as stopped,
@@ -222,8 +234,9 @@ export type FunnelOfSpan = { counts: FunnelCounts; channels: FunnelChannel[]; st
  * los pasos, los canales y quienes dejaron de escribir.
  */
 export async function funnelMany(tx: Db, orgId: string, spans: Span[], now: Date = new Date()): Promise<FunnelOfSpan[]> {
+  const { budgetRequired } = await productHooks(tx, orgId)
   const rows = await tx.execute<{ idx: number; channel: string | null; stopped: number } & FunnelCounts>(sql`
-    ${funnelSql(orgId, hullOf(spans), now)}
+    ${funnelSql(orgId, hullOf(spans), now, budgetRequired)}
     select s.idx, f.channel, count(*)::int as sought,
       count(*) filter (where f.booked)::int as booked,
       count(*) filter (where f.came)::int as came,
@@ -393,6 +406,7 @@ export async function getReportFunnel(tx: Db, orgId: string, query: ReportQuery,
   return {
     ...reportHead(scope),
     funnel: {
+      steps: funnelStepsOf((await productHooks(tx, orgId)).budgetRequired),
       current: current?.counts ?? emptyFunnel(),
       previous: previous?.counts ?? emptyFunnel(),
       open: stillOpen(scope.window.end, now),
@@ -428,6 +442,7 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
     /** Los 12 meses de la línea de «Volvieron en el año». */
     months: months.map(serializeBucket),
     funnel: {
+      steps: funnelStepsOf((await productHooks(tx, orgId)).budgetRequired),
       current: current.counts,
       previous: nth(funnel, 1).counts,
       open: stillOpen(window.end, now),
@@ -491,8 +506,10 @@ export type PatientReportListRow = Omit<ReportListRow, "patientId"> & {
 
 const LIST_LIMIT = 200
 
+type FunnelListKey = Exclude<PatientReportListKey, "controls_missed" | "lapsed" | "invited_returned">
+
 /** Quiénes están en cada paso del embudo o se cayeron en él. */
-const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "lapsed" | "invited_returned">, SQL> = {
+const FUNNEL_WHERE: Record<FunnelListKey, SQL> = {
   funnel_sought: sql`true`,
   funnel_booked: sql`f.booked`,
   funnel_came: sql`f.came`,
@@ -505,6 +522,11 @@ const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "la
   funnel_lost_accepted: sql`f.budget and not f.accepted`,
   funnel_lost_paid: sql`f.accepted and not f.paid`,
   funnel_stopped: sql`f.stopped`,
+}
+
+/** Sin presupuesto (latidIA), quien no pagó se cayó después de venir. */
+function funnelWhere(list: FunnelListKey, budgetRequired: boolean): SQL {
+  return list === "funnel_lost_paid" && !budgetRequired ? sql`f.came and not f.paid` : FUNNEL_WHERE[list]
 }
 
 export async function getPatientReportList(
@@ -566,16 +588,17 @@ export async function getPatientReportList(
         order by i.returned_at desc, a.id limit ${limit}`)),
     ]
   } else {
+    const { budgetRequired } = await productHooks(tx, orgId)
     rows = [
       ...(await tx.execute<Row>(sql`
-        ${funnelSql(orgId, window, now)}
+        ${funnelSql(orgId, window, now, budgetRequired)}
         select f.person_id::text as id, f.first_at as at, f.patient_id as "patientId", f.person_id as "personId", pp.display_name as "personName",
           null::text as title, null::text as "professionalName", null::text as "branchName",
           (f.patient_id is not null and ${nextAppointment(sql`f.patient_id`)}) as "hasNextAppointment",
           null::text as cents, null::text as currency, f.channel, f.conversation_id as "conversationId",
           count(*) over()::int as total
         from funnel f join contact pp on pp.organization_id = ${orgId} and pp.id = f.person_id
-        where ${FUNNEL_WHERE[query.list]}
+        where ${funnelWhere(query.list, budgetRequired)}
         order by f.first_at desc, f.person_id limit ${limit}`)),
     ]
   }

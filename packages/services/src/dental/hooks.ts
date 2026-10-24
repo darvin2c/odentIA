@@ -179,6 +179,7 @@ export const dentalHooks: ProductHooks = {
   vitals: CORE_VITAL_KEYS,
   catalog: dentalCatalog,
   dictates: true,
+  budgetRequired: true,
 
   async closingParts(tx, { orgId, patientId, encounterId }) {
     const parts: DentalClosingParts = {

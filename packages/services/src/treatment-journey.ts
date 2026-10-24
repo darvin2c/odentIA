@@ -38,11 +38,13 @@ export function deriveNextAction(input: {
   decisionStatus: string
   budgetStatus: string | null
   openSession: boolean
+  /** Falso donde lo indicado queda aceptado al indicarlo (latidIA): el presupuesto es opcional. */
+  budgetRequired?: boolean
 }): TreatmentNextAction | null {
-  const { status, decisionStatus, budgetStatus, openSession } = input
+  const { status, decisionStatus, budgetStatus, openSession, budgetRequired = true } = input
   if (status === "cancelado" || status === "reemplazado") return null
   if (status === "realizado") return "controlar"
-  const budgetClosed = budgetStatus == null || budgetStatus === "cancelado"
+  const budgetClosed = budgetStatus === "cancelado" || (budgetStatus == null && budgetRequired)
   if (status === "suspendido") {
     if (budgetClosed || decisionStatus !== "aceptado") return "decidir"
     return "reanudar"
@@ -53,7 +55,7 @@ export function deriveNextAction(input: {
   if (
     decisionStatus === "pendiente" ||
     decisionStatus === "pospuesto" ||
-    budgetStatus === "borrador"
+    (budgetRequired && budgetStatus === "borrador")
   ) {
     return "decidir"
   }
@@ -89,6 +91,7 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
     .orderBy(desc(treatmentPlanItem.updatedAt), desc(treatmentPlanItem.id))
     .limit(Math.min(limit, 200))
   if (!rows.length) return []
+  const { budgetRequired } = await productHooks(tx, orgId)
   const ids = rows.map((r) => r.item.id)
   const procedures = await tx
     .select({ procedure: encounterProcedure, encounter })
@@ -130,6 +133,7 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       decisionStatus: row.item.decisionStatus,
       budgetStatus: row.budget?.status ?? null,
       openSession: lastSession?.encounter.status === "borrador",
+      budgetRequired,
     })
     return {
       ...row,
@@ -338,6 +342,7 @@ export async function getTreatmentJourney(
     decisionStatus: item.decisionStatus,
     budgetStatus: currentBudget?.status ?? null,
     openSession: procedures.some((p) => p.encounter.status === "borrador"),
+    budgetRequired: (await productHooks(tx, orgId)).budgetRequired,
   })
   const journey = {
     item,

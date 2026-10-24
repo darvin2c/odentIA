@@ -347,7 +347,9 @@ export function EncounterDetailView({
         </h4>
         {detail.plannedItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Sin tratamientos del presupuesto vinculados.
+            {productUi().plan.budgetRequired
+              ? "Sin tratamientos del presupuesto vinculados."
+              : "Sin tratamientos vinculados."}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">

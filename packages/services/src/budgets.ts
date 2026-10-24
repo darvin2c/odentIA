@@ -1064,7 +1064,9 @@ export interface AssembledBudget {
  * en ella que se puede cotizar entra al borrador de la persona, que crece con
  * cada atención; si no hay, nace uno. Lo que no se puede cotizar (sin precio,
  * cerrado, ya en otro presupuesto vigente) no entra ni detiene el cierre. No
- * envía nada: el cierre pregunta «¿Enviárselo ahora?».
+ * envía nada: el cierre pregunta «¿Enviárselo ahora?». Donde lo indicado
+ * queda aceptado al indicarlo (latidIA, decisión 15 del issue 229), el
+ * presupuesto es opcional y no se arma solo.
  */
 export async function assembleEncounterBudget(
   tx: Db,
@@ -1073,6 +1075,7 @@ export async function assembleEncounterBudget(
   patientId: string,
   encounterId: string,
 ): Promise<AssembledBudget | null> {
+  if (!(await productHooks(tx, orgId)).budgetRequired) return null
   const candidates = await tx
     .select()
     .from(treatmentPlanItem)
