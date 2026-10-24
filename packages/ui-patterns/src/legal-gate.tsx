@@ -1,4 +1,4 @@
-import { Checkbox, Dialog, DialogContent, DialogDescription, DialogTitle, toast } from "@odentia/ui"
+import { BRAND_NAMES, Checkbox, Dialog, DialogContent, DialogDescription, DialogTitle, toast, useBrand } from "@odentia/ui"
 import { useEffect, useId, useState } from "react"
 import type { AuthFetch } from "./access-link-gate.js"
 import { SubmitButton } from "./form/submit-button.js"
@@ -55,6 +55,7 @@ export function LegalGate({
   const [checked, setChecked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const brand = useBrand()
 
   useEffect(() => {
     let alive = true
@@ -93,7 +94,7 @@ export function LegalGate({
   const intro = terms
     ? `Rigen desde el ${longDate(terms.effectiveAt)}.${changes.length ? " Lo que cambió:" : ""}`
     : agreement?.first
-      ? "Tu clínica confía a odentIA los datos de sus pacientes. Como la administras, acéptalo en su nombre."
+      ? `Tu clínica confía a ${BRAND_NAMES[brand]} los datos de sus pacientes. Como la administras, acéptalo en su nombre.`
       : "Lo que cambió:"
 
   async function accept() {

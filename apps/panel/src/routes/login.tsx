@@ -17,6 +17,7 @@ import {
   readRememberedUser,
   rememberUser,
 } from "../lib/welcome"
+import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/login")({
   // El saludo depende de la hora del equipo y de lo que recuerda este navegador.
@@ -133,7 +134,7 @@ function LoginPage() {
         )
       }
       description={
-        known ? (known.clinic ?? "Qué bueno verte.") : "Qué bueno verte. Entra a tu clínica."
+        known ? (known.clinic ?? "Qué bueno verte.") : `Qué bueno verte. Entra a tu ${panelWords.place.one}.`
       }
       aside={<WelcomeAside />}
       legal={<AuthLegal />}

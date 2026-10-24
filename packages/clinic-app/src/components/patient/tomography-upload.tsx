@@ -22,6 +22,7 @@ import {
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
 import { PlacesField } from "../../product/site-fields"
+import { appWords } from "../../lib/product-words"
 
 /** Tope por tomografía (decisión 4 del lienzo; lo valida también la API). */
 export const TOMOGRAPHY_MAX_BYTES = 1024 ** 3
@@ -154,7 +155,7 @@ export function TomographyReview({
         <div role="alert" className="flex flex-col gap-1 rounded-xl bg-warning-soft p-3 text-sm text-warning">
           <p className="font-semibold">El archivo dice «{candidate.patientName}»</p>
           <p>
-            Y la ficha es de {personName}. Comprueba que sea de esta persona: odentIA no cambia la ficha
+            Y la ficha es de {personName}. Comprueba que sea de esta persona: {appWords().name} no cambia la ficha
             por lo que diga el archivo.
           </p>
         </div>
@@ -501,7 +502,7 @@ export function TomographyDropZone({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        En el CD, elige la carpeta entera: odentIA busca los DICOM dentro.
+        En el CD, elige la carpeta entera: {appWords().name} busca los DICOM dentro.
       </p>
     </section>
   )

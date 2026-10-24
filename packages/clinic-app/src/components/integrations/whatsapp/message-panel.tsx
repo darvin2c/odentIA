@@ -24,6 +24,7 @@ import {
 } from "../../../lib/whatsapp"
 import { MessagePreview } from "./message-preview"
 import { Note, type NoteTone } from "./note"
+import { appWords } from "../../../lib/product-words"
 
 const STATUS_NOTE: Record<StatusTone, NoteTone> = { ok: "ok", waiting: "waiting", danger: "danger", off: "plain" }
 const STATUS_BADGE = { ok: "soft", waiting: "warning", danger: "destructive", off: "secondary" } as const
@@ -182,7 +183,7 @@ function MessageView({
         <div className="flex flex-wrap gap-2 border-t pt-4">
           {item.canRevert ? (
             <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={busy} onClick={onRevert}>
-              Volver al texto de odentIA
+              Volver al texto de {appWords().name}
             </Button>
           ) : null}
           {item.deletable ? (
@@ -341,11 +342,11 @@ export function WhatsAppMessagePanel({
       setConfirming(null)
       setError(null)
       setEditing(false)
-      setNotice(saved.pending ? "El texto de odentIA entró a revisión de WhatsApp." : "Listo: vuelve el texto de odentIA.")
+      setNotice(saved.pending ? `El texto de ${appWords().name} entró a revisión de WhatsApp.` : `Listo: vuelve el texto de ${appWords().name}.`)
     },
     onError: (failure) => {
       setConfirming(null)
-      setError(errorText(failure, "No pudimos volver al texto de odentIA. Vuelve a intentarlo."))
+      setError(errorText(failure, `No pudimos volver al texto de ${appWords().name}. Vuelve a intentarlo.`))
     },
   })
 
@@ -598,7 +599,7 @@ export function WhatsAppMessagePanel({
               <div className="flex flex-wrap gap-2 border-t pt-4">
                 {message.canRevert ? (
                   <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" disabled={busy} onClick={() => setConfirming("revert")}>
-                    Volver al texto de odentIA
+                    Volver al texto de {appWords().name}
                   </Button>
                 ) : null}
                 {message.deletable ? (
@@ -626,9 +627,9 @@ export function WhatsAppMessagePanel({
         onClose={() => setConfirming(null)}
         onConfirm={() => revert.mutate()}
         variant="default"
-        title="Volver al texto de odentIA"
-        description="Se deja de usar el texto que escribió la clínica. Si el de odentIA ya está aprobado, sale desde ahora; si no, WhatsApp lo revisa primero y mientras tanto sigue saliendo el actual."
-        confirmLabel="Volver al texto de odentIA"
+        title={`Volver al texto de ${appWords().name}`}
+        description={`Se deja de usar el texto que escribió la clínica. Si el de ${appWords().name} ya está aprobado, sale desde ahora; si no, WhatsApp lo revisa primero y mientras tanto sigue saliendo el actual.`}
+        confirmLabel={`Volver al texto de ${appWords().name}`}
         pending={revert.isPending}
       />
       <ConfirmDialog

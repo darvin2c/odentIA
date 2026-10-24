@@ -24,6 +24,7 @@ import { PLAN_ACTIONS_PATH, useClinicLine, useSaasTerms } from "../../lib/billin
 import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings/plan/")({
   component: PlanPage,
@@ -210,7 +211,7 @@ function PlanContent() {
             </div>
           </dl>
           {inReview ? (
-            <p className="text-sm text-muted-foreground">odentIA está revisando tu pago. Mientras tanto la clínica sigue igual.</p>
+            <p className="text-sm text-muted-foreground">{appWords().name} está revisando tu pago. Mientras tanto la clínica sigue igual.</p>
           ) : (
             <Button className="self-start" render={<a href="#comprobante" />}>
               Registrar comprobante
@@ -257,7 +258,7 @@ function PlanContent() {
             {new Intl.DateTimeFormat(activeOrgLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: activeOrgTimeZone() }).format(
               new Date(summary.guaranteedUntil),
             )}
-            . Después pasas al plan de lista de odentIA
+            . Después pasas al plan de lista de {appWords().name}
             {terms ? `; te avisamos ${terms.guaranteeNoticeDays} ${terms.guaranteeNoticeDays === 1 ? "día" : "días"} antes` : ""}. Si quieres cambiar algo
             antes, escríbenos desde Ayuda.
           </p>

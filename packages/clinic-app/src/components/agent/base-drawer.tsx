@@ -9,6 +9,7 @@ import { apiFetch } from "../../lib/api"
 import type { AgentConfig } from "../../lib/crm"
 import { sameDraft } from "../../lib/page-draft-guard"
 import { mutationErrorMessage } from "../../lib/query-error"
+import { appWords } from "../../lib/product-words"
 
 interface VoiceDraft {
   personaName: string
@@ -183,7 +184,7 @@ export function AgentBaseDrawer({
       <section aria-labelledby="base-fija" className="flex flex-col gap-2 rounded-xl bg-muted/60 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h4 id="base-fija" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold">
-            <Lock className="size-4 shrink-0" aria-hidden /> Lo que fija odentIA
+            <Lock className="size-4 shrink-0" aria-hidden /> Lo que fija {appWords().name}
           </h4>
           <Badge variant="secondary">No se cambia</Badge>
         </div>

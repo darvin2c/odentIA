@@ -1,5 +1,6 @@
 import { type AgentModelStatus, MODEL_CHECK_TEXT } from "./agent"
 import { AGENT_MODEL_LABEL, type ConnectionItem } from "./crm"
+import { appWords } from "./product-words"
 
 /**
  * Integraciones (Configuración): lo que se conecta una vez. Aquí vive lo que la
@@ -591,7 +592,7 @@ export function mailRows(
           tone: "off",
           status: "No disponible",
           review: [],
-          detail: { kind: "note", text: "odentIA todavía no lo habilitó para tu clínica." },
+          detail: { kind: "note", text: `${appWords().name} todavía no lo habilitó para tu clínica.` },
           problem: null,
         },
       ]

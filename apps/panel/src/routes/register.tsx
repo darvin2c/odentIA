@@ -20,6 +20,7 @@ import { creditText } from "../lib/credit"
 import { invitationQuery, moneyText, rememberInvitation } from "../lib/founders"
 import { GoogleAuthButton } from "../lib/google-auth"
 import { webUrl } from "../lib/host"
+import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -170,14 +171,14 @@ function RegisterPage() {
         Los primeros <span className="text-[1.2em] leading-none whitespace-nowrap text-[#f5c46b]">{credit}</span> los pagamos nosotros.
       </>
     ) : (
-      "Tu lugar en odentIA está listo."
+      `Tu lugar en ${panelWords.name} está listo.`
     )
   ) : invitationOnly ? (
     "Crea tu cuenta."
   ) : credit ? (
     `Obtén ${credit} de crédito.`
   ) : (
-    "Prueba odentIA."
+    `Prueba ${panelWords.name}.`
   )
   const accent = founder ? "Tus agentes empiezan hoy." : invitationOnly ? "Para abrir tu clínica, pide tu invitación." : "Tus agentes empiezan hoy."
   const tag = founder ? "Invitación Fundadores" : invitationOnly ? "Programa Fundadores" : offer ? `Prueba de ${offer.days} días` : "Prueba gratis"
@@ -425,7 +426,7 @@ function RegisterPage() {
           </p>
           {invitationOnly ? (
             <p className="text-center text-sm text-muted-foreground">
-              ¿Quieres usar odentIA en tu clínica?{" "}
+              ¿Quieres usar {panelWords.name} en tu {panelWords.place.one}?{" "}
               <a href={webUrl("/solicitar-invitacion")} className="font-medium text-foreground underline">
                 Pide tu invitación
               </a>

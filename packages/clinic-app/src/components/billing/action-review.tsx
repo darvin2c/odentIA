@@ -14,6 +14,7 @@ import { businessDaysWords, type SaasTerms, useSaasTerms } from "../../lib/billi
 import type { SaasActionKind } from "./consumption"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { formatMicros } from "./money"
+import { appWords } from "../../lib/product-words"
 
 export type ReviewReason = "spam" | "agente" | "doble" | "otro"
 
@@ -45,7 +46,7 @@ export interface ReviewTarget {
 
 /** Lo que pasa con cada motivo, con las cifras de las condiciones comerciales (ADR 0074); sin ellas aún, sin cifra. */
 const reviewedByOdentia = (terms: SaasTerms | undefined) =>
-  terms ? `Lo revisa odentIA en ${businessDaysWords(terms.reviewAnswerDays)}.` : "Lo revisa odentIA."
+  terms ? `Lo revisa ${appWords().name} en ${businessDaysWords(terms.reviewAnswerDays)}.` : `Lo revisa ${appWords().name}.`
 
 const REASONS: Array<{ value: ReviewReason; label: string; outcome: (terms: SaasTerms | undefined) => string; onlyConversation?: boolean }> = [
   {
@@ -89,7 +90,7 @@ export function reviewStateWords(review: ActionReview, priceMicros: number | nul
   if (charged && review.coveredByCredit) return "Te dimos la razón · no se te cobró aparte: la cubrió el crédito del mes"
   if (charged) return review.credited ? `Devuelta: ${money}, descontada en el cargo siguiente` : `Devuelta: ${money} en tu próximo cargo`
   if (review.automatic) return `No se cobra: era spam${review.byName ? ` · lo marcó ${review.byName.split(" ")[0]}` : ""}`
-  return "No se cobra: odentIA la devolvió"
+  return `No se cobra: ${appWords().name} la devolvió`
 }
 
 /** El cajón «Pedir revisión de este cobro». */
@@ -135,7 +136,7 @@ export function ActionReviewDrawer({
         result.automatic
           ? "Listo: no se cobra y la persona pasó a Spam"
           : terms
-            ? `Pediste la revisión: odentIA responde en ${businessDaysWords(terms.reviewAnswerDays)} y la sigues en Soporte`
+            ? `Pediste la revisión: ${appWords().name} responde en ${businessDaysWords(terms.reviewAnswerDays)} y la sigues en Soporte`
             : "Pediste la revisión: la sigues en Soporte",
       )
       onClose()
@@ -208,10 +209,10 @@ export function ActionReviewDrawer({
         <div className="flex items-start gap-2.5 rounded-xl border p-3">
           <Checkbox id={readId} checked={allowRead} onCheckedChange={(checked) => setAllowRead(checked === true)} className="mt-0.5" />
           <label htmlFor={readId} className="grid gap-0.5 text-sm">
-            <span className="font-medium">Dejo que odentIA lea esta conversación</span>
+            <span className="font-medium">Dejo que {appWords().name} lea esta conversación</span>
             <span className="text-xs text-muted-foreground">
               Solo esta, hasta que responda la revisión{terms ? ` y como mucho ${terms.reviewReadDays} ${terms.reviewReadDays === 1 ? "día" : "días"}` : ""}. Sin esto,
-              odentIA solo ve lo que hizo el agente, sin los mensajes.
+              {appWords().name} solo ve lo que hizo el agente, sin los mensajes.
             </span>
           </label>
         </div>

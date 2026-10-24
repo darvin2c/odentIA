@@ -29,6 +29,7 @@ import {
 import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error"
 import { Chip } from "./fields"
 import { type PurchasePreset, useInventory } from "./inventory-scope"
+import { appWords } from "../../lib/product-words"
 
 export function toNeed(value: string | undefined): ProductNeed | null {
   return value === "hacen_falta" || value === "por_vencer" ? value : null
@@ -283,7 +284,7 @@ export function ProductsTab() {
           title="Todavía no hay productos"
           description={
             can.write
-              ? "Si ya tienes una lista en Excel o Google Sheets, pégala y odentIA la ordena."
+              ? `Si ya tienes una lista en Excel o Google Sheets, pégala y ${appWords().name} la ordena.`
               : "Los registra quien lleva el inventario de la clínica."
           }
           {...(can.write

@@ -23,6 +23,7 @@ import { useState } from "react"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import type { OrgProfile, OrgTaxesInput } from "../../lib/org"
+import { appWords } from "../../lib/product-words"
 
 /** Lo que vive en el formulario: "" es «lo del país»; «otra» lleva su porcentaje escrito. */
 export interface TaxFormValues {
@@ -145,7 +146,7 @@ export function TaxesCard({
           Impuestos
         </h2>
         <p className="text-sm text-muted-foreground">
-          odentIA aún no separa el impuesto de {countryLabel}: lo cobrado se muestra completo. Si lo necesitas, pídelo desde Ayuda.
+          {appWords().name} aún no separa el impuesto de {countryLabel}: lo cobrado se muestra completo. Si lo necesitas, pídelo desde Ayuda.
         </p>
       </section>
     )

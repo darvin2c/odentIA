@@ -43,6 +43,7 @@ import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "..
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
+import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ location }) => {
@@ -91,7 +92,7 @@ const onboardingSchema = personaSchema.extend({
     .regex(CLINIC_ADDRESS_PATTERN, "Usa solo letras sin tilde, números y guiones")
     .refine(
       (slug) => !RESERVED_SLUGS[slug],
-      "Esa dirección está reservada para odentIA. Elige otra.",
+      `Esa dirección está reservada para ${panelWords.name}. Elige otra.`,
     ),
   legalName: z.string().min(2, "Razón social"),
   fiscalDocNumber: z.string().max(20),
@@ -565,7 +566,7 @@ function OnboardingPage() {
                   const errors = fieldErrorMessages(field.state.meta.errors)
                   return (
                     <Field>
-                      <FieldLabel htmlFor="slug">Dirección de tu clínica en odentIA</FieldLabel>
+                      <FieldLabel htmlFor="slug">Dirección de tu {panelWords.place.one} en {panelWords.name}</FieldLabel>
                       <InputGroup>
                         <InputGroupInput
                           id="slug"
@@ -838,7 +839,7 @@ function AddressStatus({
     )
   else if (RESERVED_SLUGS[address])
     content = (
-      <span className="text-destructive">«{address}» está reservada para odentIA. Elige otra.</span>
+      <span className="text-destructive">«{address}» está reservada para {panelWords.name}. Elige otra.</span>
     )
   else if (checking)
     content = <span className="text-muted-foreground">Comprobando si está libre…</span>

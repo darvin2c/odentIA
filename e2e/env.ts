@@ -24,6 +24,17 @@ export const tenantPattern = (slug: string, path: string): RegExp =>
 export const panelPattern = (path: string): RegExp =>
   new RegExp(`^${escapeRegExp(hostUrl("app", path))}`)
 
+/**
+ * latidIA en su dominio (`latidia.<tld>`, decisión 9 del issue 229): solo
+ * cuando la ejecución lo levanta (la suite completa o un recorrido suyo).
+ */
+export function latidiaUrl(subdomain: string, path = ""): string {
+  const domain = process.env.E2E_MEDICAL_DOMAIN
+  if (!domain) throw new Error("Esta ejecución no levantó latidIA: corre un recorrido latidia*.spec.ts")
+  const host = subdomain ? `${subdomain}.${domain}` : domain
+  return `${SCHEME}://${host}${PORT}${path}`
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

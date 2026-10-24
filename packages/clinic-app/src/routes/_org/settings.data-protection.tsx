@@ -10,6 +10,7 @@ import { apiFetch } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { legalLinks, orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings/data-protection")({
   component: DataProtectionPage,
@@ -126,7 +127,7 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
         </div>
         <div className="flex flex-col gap-1">
           <h2 className="mb-1 text-base font-semibold">Encargado</h2>
-          <p>odentIA guarda y procesa los datos por cuenta de la clínica.</p>
+          <p>{appWords().name} guarda y procesa los datos por cuenta de la clínica.</p>
           <p className="text-muted-foreground">
             {view.agreement
               ? `Contrato de encargo aceptado el ${formatDate(view.agreement.acceptedAt)}${view.agreement.acceptedByName ? ` por ${view.agreement.acceptedByName}` : ""}`
@@ -190,7 +191,7 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
           </p>
         </div>
         {view.processors.inUse.length ? <ProcessorList title="Porque la clínica los usa" items={view.processors.inUse} /> : null}
-        <ProcessorList title="Siempre, porque odentIA funciona así" items={view.processors.always} />
+        <ProcessorList title={`Siempre, porque ${appWords().name} funciona así`} items={view.processors.always} />
         {view.processors.notUsed.length ? (
           <p className="text-sm text-muted-foreground">
             No usa: {missingWords(view.processors.notUsed)}. Si los conecta, aparecen aquí solos.

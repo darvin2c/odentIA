@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { bareProduct, declareProduct } from "../product/product-ui"
 import type { ConnectionItem } from "./crm"
 import { sinceWords } from "./integrations"
 import {
@@ -25,6 +26,9 @@ import {
   toFieldText,
   toServerBody,
 } from "./whatsapp"
+
+// Lo que nombra a la plataforma dice el nombre del producto de la app: aquí, odentIA.
+declareProduct(bareProduct("dental"))
 
 const NOW = Date.parse("2026-10-13T15:00:00Z")
 const minutesAgo = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
@@ -171,6 +175,13 @@ describe("la lista de mensajes", () => {
     expect(messageSource(message())).toBe("Línea prendida")
     expect(messageSource(message({ line: { key: "x", title: "X", enabled: false } }))).toBe("Línea apagada")
     expect(messageSource(message({ origin: "bandeja", line: null }))).toBe("Viene con odentIA")
+    // En latidIA, lo que trae la plataforma lleva su nombre (issue 229).
+    declareProduct(bareProduct("medical"))
+    try {
+      expect(messageSource(message({ origin: "bandeja", line: null }))).toBe("Viene con latidIA")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
     expect(messageSource(message({ origin: "clinica", line: null }))).toBe("Lo creó la clínica")
     expect(messageSource(message({ origin: "cuenta", line: null }))).toBe("Ya estaba en tu cuenta")
   })

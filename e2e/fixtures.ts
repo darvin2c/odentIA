@@ -37,7 +37,8 @@ export async function call<T>(page: Page, method: string, path: string, slug: st
   return result.body.data
 }
 
-const PASSWORD = "e2e-secreto-123"
+/** La contraseña de las cuentas de prueba (su hash lo da `passwordHash`). */
+export const PASSWORD = "e2e-secreto-123"
 type TestFixtures = { createOwner: (tag: string) => Promise<OwnerFixture>; owner: OwnerFixture }
 type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number; signupOpen: void }
 

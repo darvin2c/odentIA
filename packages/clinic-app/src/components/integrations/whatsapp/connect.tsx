@@ -3,6 +3,7 @@ import { useId } from "react"
 import type { ConnectResult } from "../../../lib/whatsapp"
 import { FacebookSignupButton } from "../../whatsapp/facebook-signup"
 import { WhatsAppConnectSteps } from "./connect-steps"
+import { appWords } from "../../../lib/product-words"
 
 /**
  * Conectar un número de WhatsApp: una sola pantalla con los dos caminos.
@@ -37,7 +38,7 @@ export function WhatsAppConnect({
               {another ? "Conecta otro número de WhatsApp" : "Conecta el WhatsApp de la clínica"}
             </h2>
             <p className="text-sm text-muted-foreground">
-              Tu número y tu cuenta siguen siendo tuyos: odentIA solo recibe permiso para enviar y recibir por ese número. Al
+              Tu número y tu cuenta siguen siendo tuyos: {appWords().name} solo recibe permiso para enviar y recibir por ese número. Al
               conectar, atiende el agente, responde tu equipo desde la Bandeja y salen los recordatorios y avisos.
             </p>
           </div>

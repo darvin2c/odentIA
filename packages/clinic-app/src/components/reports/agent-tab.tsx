@@ -210,7 +210,7 @@ function PaidAndCollected({ data, period }: { data: ReportAgent; period: string 
         <h3 id={id} className="text-[17px] font-extrabold tracking-tight">
           {title}
         </h3>
-        {paid ? <p className="text-sm text-muted-foreground">Con las mismas cuentas de tu factura de odentIA. Cada lado en su moneda: no convertimos.</p> : null}
+        {paid ? <p className="text-sm text-muted-foreground">Con las mismas cuentas de tu factura de {appWords().name}. Cada lado en su moneda: no convertimos.</p> : null}
       </div>
       <div className="grid min-w-0 gap-4 @3xl:grid-cols-2">
         {paid ? (

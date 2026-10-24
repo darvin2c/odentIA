@@ -77,6 +77,7 @@ import {
   targetVerb,
 } from "../lib/global-search"
 import { activeOrgTimeZone, useOrgLocale } from "../lib/locale"
+import { appWords } from "../lib/product-words"
 
 /**
  * Buscador rápido (Ctrl+K; lienzo «Buscador rápido odentIA», aprobado el
@@ -433,7 +434,7 @@ function GlobalSearchDialog({
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium">Preguntarle a Ayuda: «{text}»</span>
-        <span className="text-xs text-muted-foreground">Te enseña a usar odentIA; no conoce cifras</span>
+        <span className="text-xs text-muted-foreground">Te enseña a usar {appWords().name}; no conoce cifras</span>
       </span>
     </CommandItem>
   )

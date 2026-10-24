@@ -17,6 +17,7 @@ import {
 } from "../../lib/calendar-feed"
 import { errorMessage as errorText } from "./shared"
 import { activeOrgLocale } from "../../lib/locale"
+import { appWords } from "../../lib/product-words"
 
 /** «Hoy, 10:00 – 10:30», «Mañana, …» o «Lunes 26 de octubre, …» de la próxima cita, en la zona de su sede. */
 function previewWhen(preview: NonNullable<MyCalendarFeed["preview"]>, now = new Date()): string {
@@ -131,10 +132,10 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
               </p>
               <p>
                 <strong>Solo tus citas,</strong> de hoy a tres meses adelante. Desde tu calendario no se mueve ni se reserva nada: si
-                mueves o borras una cita ahí, en odentIA no cambia.
+                mueves o borras una cita ahí, en {appWords().name} no cambia.
               </p>
               <p>
-                <strong>Puede tardar.</strong> Tu calendario decide cuándo busca los cambios; odentIA no controla cuánto tarda. Para lo
+                <strong>Puede tardar.</strong> Tu calendario decide cuándo busca los cambios; {appWords().name} no controla cuánto tarda. Para lo
                 de hoy, mira la Agenda.
               </p>
               <p>
@@ -241,7 +242,7 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
               )}
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Tus citas de hoy a tres meses, como «Paciente · R. P.». Los cambios pueden tardar: depende de tu calendario, no de
-                odentIA.
+                {appWords().name}.
               </p>
             </section>
           </div>

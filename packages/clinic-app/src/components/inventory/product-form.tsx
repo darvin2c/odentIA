@@ -41,6 +41,7 @@ import {
 import { isAmbiguousMutationError } from "../../lib/query-error"
 import { MoneyInput, Optional, QuantityInput, UnitSelect } from "./fields"
 import { useInventory } from "./inventory-scope"
+import { appWords } from "../../lib/product-words"
 
 type FieldKey = "name" | "usage" | "unit" | "purchase" | "minimum" | "salePrice" | "sku"
 
@@ -414,7 +415,7 @@ export function ProductFormDrawer({
                 onChange={(event) => set("sku", event.target.value)}
               />
               <FieldDescription id={helpId("sku")}>
-                {product ? "Para encontrarlo rápido. Si lo dejas vacío, se queda el que tiene." : "Para encontrarlo rápido. Si lo dejas vacío, odentIA pone uno."}
+                {product ? "Para encontrarlo rápido. Si lo dejas vacío, se queda el que tiene." : `Para encontrarlo rápido. Si lo dejas vacío, ${appWords().name} pone uno.`}
               </FieldDescription>
               {errorOf("sku")}
             </Field>

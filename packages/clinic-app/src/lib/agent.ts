@@ -1,4 +1,5 @@
 import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
+import { appWords } from "./product-words"
 
 
 /**
@@ -268,9 +269,9 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 export function agentModelDown(receptionName: string): { title: string; body: string; line: string } {
   return {
     title: `${receptionName} no puede responder ahora`,
-    body: "Los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+    body: `Los mensajes pasan a tu equipo. Ya avisamos a ${appWords().name}.`,
     /** En una línea: «Sofi no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.» */
-    line: `${receptionName} no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.`,
+    line: `${receptionName} no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a ${appWords().name}.`,
   }
 }
 
@@ -285,7 +286,11 @@ export interface AgentModelStatus {
 
 export const MODEL_CHECK_TEXT = {
   checking: "Comprobando el modelo…",
-  down: "El modelo de odentIA no responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.",
+  // Al leerlo, no al cargar el módulo: la app declara su producto después.
+  get down() {
+    const name = appWords().name
+    return `El modelo de ${name} no responde ahora. Ya avisamos a ${name} y te escribimos cuando vuelva.`
+  },
   unreachable: "No pudimos comprobar el modelo. Revisa tu conexión y vuelve a intentarlo.",
 } as const
 

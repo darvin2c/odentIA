@@ -9,6 +9,7 @@ import { API_URL } from "../lib/auth-client"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
 import { mutationErrorMessage } from "../lib/query-error"
 import { useMyRole } from "../lib/crm"
+import { appWords } from "../lib/product-words"
 
 const supportStatus = z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"])
 type SupportStatus = z.infer<typeof supportStatus>
@@ -279,7 +280,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                     }
                   >
                     {message.authorKind === "staff" ? (
-                      <p className="text-xs font-bold text-muted-foreground">odentIA · soporte</p>
+                      <p className="text-xs font-bold text-muted-foreground">{appWords().name} · soporte</p>
                     ) : null}
                     <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
                   </li>

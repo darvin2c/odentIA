@@ -235,6 +235,38 @@
     --scale-4: #8ad8e6;
 }
 
+/*
+ * latidIA (issue 229, tablero «Marca y color» del lienzo): el mismo sistema en
+ * morado y lila. Solo cambian la identidad, el primario y el acento del agente;
+ * los estados y los colores de los gráficos significan lo mismo en las dos
+ * marcas. Cada app pone su marca en `<html data-brand>`.
+ */
+:root[data-brand="latidia"] {
+    --identity-accent: #6d3fc0;
+    --primary: #6d3fc0;
+    --primary-soft: #ece4fb;
+    --primary-soft-foreground: #4c2a8a;
+    --ring: #6d3fc0;
+    --sidebar-primary: #6d3fc0;
+    --sidebar-ring: #6d3fc0;
+    --agent-soft: #f5f0fd;
+    --agent-border: #dccdf5;
+}
+
+:root.dark[data-brand="latidia"] {
+    --identity-accent: #b79cf0;
+    --primary: #b79cf0;
+    --primary-foreground: #1e0b3d;
+    --primary-soft: #2e2150;
+    --primary-soft-foreground: #d6c6f7;
+    --ring: #b79cf0;
+    --sidebar-primary: #b79cf0;
+    --sidebar-primary-foreground: #1e0b3d;
+    --sidebar-ring: #b79cf0;
+    --agent-soft: #221836;
+    --agent-border: #3e2f66;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

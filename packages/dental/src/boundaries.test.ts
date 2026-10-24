@@ -57,6 +57,7 @@ const COMMON = [
   "packages/ui/src",
   "packages/ui-patterns/src",
   "packages/clinic-app/src",
+  "apps/medical-clinic/src",
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",

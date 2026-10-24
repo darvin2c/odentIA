@@ -10,6 +10,7 @@ import { useReceptionName, withReceptionName } from "../lib/agent-names"
 import { ASK_HELP_EVENT } from "../lib/global-search"
 import { mutationErrorMessage } from "../lib/query-error"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
+import { appWords } from "../lib/product-words"
 
 const helpAnswer = z.object({
   topicId: z.string(),
@@ -66,8 +67,11 @@ const SENT = 'Enviado. Te respondemos aquí, en "Tus casos con soporte". Si no l
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary underline underline-offset-4 sm:min-h-8"
 const ANSWER = "flex flex-col gap-2 rounded-2xl rounded-bl-md border border-primary/20 bg-primary-soft px-3.5 py-3 text-sm text-primary-soft-foreground"
+/** Al leerlo, no al cargar el módulo: la app declara su producto después. */
 const DIRECT: Record<SupportKind, { title: string; label: string }> = {
-  pregunta: { title: "Escribir a soporte de odentIA", label: "Tu mensaje para odentIA" },
+  get pregunta() {
+    return { title: `Escribir a soporte de ${appWords().name}`, label: `Tu mensaje para ${appWords().name}` }
+  },
   problema: { title: "Reportar un problema", label: "Qué pasó" },
 }
 
@@ -139,7 +143,7 @@ export function WhatIsSent({
       ) : null}
       <div className="flex flex-wrap gap-2">
         <SubmitButton type="button" className="min-h-11 flex-1 sm:min-h-9" pending={pending} disabled={value.trim().length < 3} onClick={onSend}>
-          Enviar a odentIA
+          Enviar a {appWords().name}
         </SubmitButton>
         <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={pending} onClick={onCancel}>
           {cancelLabel}
@@ -293,7 +297,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
         <DetailDrawer
           open
           title="Ayuda"
-          description={title ? `Estás en ${title}` : "Cómo usar odentIA"}
+          description={title ? `Estás en ${title}` : `Cómo usar ${appWords().name}`}
           onClose={() => setOpen(false)}
           isSubmitting={ask.isPending || send.isPending}
         >
@@ -364,7 +368,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                       <>
                         <div className={ANSWER}>
                           <p className="font-bold">Esto no está en la guía, y no quiero inventarlo.</p>
-                          {exchange.sent === undefined ? <p>¿Lo envío a odentIA para que te respondan?</p> : null}
+                          {exchange.sent === undefined ? <p>¿Lo envío a {appWords().name} para que te respondan?</p> : null}
                         </div>
                         {exchange.sent === "enviada" ? (
                           <p role="status" className="text-sm font-semibold">
@@ -507,7 +511,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                   <div className="flex flex-wrap items-center gap-x-4">
                     <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => openDirect("pregunta")}>
                       <span className="sm:hidden">Escribir a soporte</span>
-                      <span className="hidden sm:inline">Escribir a soporte de odentIA</span>
+                      <span className="hidden sm:inline">Escribir a soporte de {appWords().name}</span>
                     </Button>
                     <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => openDirect("problema")}>
                       Reportar un problema

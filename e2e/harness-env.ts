@@ -20,7 +20,12 @@ export type HarnessRuntime = {
   stateDir: string
   baseDomain: string
   proxyPort: number
-  appPorts: { api: number; panel: number; platform: number; admin: number }
+  appPorts: { api: number; panel: number; platform: number; admin: number; latidiaPanel?: number; latidia?: number }
+  /**
+   * El dominio de latidIA en esta ejecución (`latidia.<tld>`; decisión 9 del
+   * issue 229). Solo cuando corren sus recorridos: su panel y su app son otro build.
+   */
+  medicalDomain?: string
   postgres?: { host: string; port: number }
   storage?: { host: string; port: number }
   mailpit?: { host: string; httpPort: number; smtpPort: number }
@@ -167,5 +172,27 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     E2E_STATE_DIR: runtime.stateDir,
     NODE_EXTRA_CA_CERTS: join(portlessStateDir, "ca.pem"),
     MAILPIT_API: `http://${mailpit.host}:${mailpit.httpPort}/api/v1`,
+    ...(runtime.medicalDomain
+      ? {
+          // La misma instalación sirve latidIA en su dominio: la API toma su sesión y CORS de él.
+          MEDICAL_DOMAIN: runtime.medicalDomain,
+          VITE_DENTAL_DOMAIN: runtime.baseDomain,
+          VITE_MEDICAL_DOMAIN: runtime.medicalDomain,
+          E2E_MEDICAL_DOMAIN: runtime.medicalDomain,
+        }
+      : {}),
+  }
+}
+
+/**
+ * Lo que cambia en el build del panel y de la app de latidIA: su producto, su
+ * dominio y su API (`api.<dominio de latidIA>`), donde vive su sesión.
+ */
+export function latidiaBuildEnv(runtime: HarnessRuntime): Record<string, string> {
+  if (!runtime.medicalDomain) throw new Error("Esta ejecución no levanta latidIA.")
+  return {
+    VITE_PRODUCT: "medical",
+    VITE_BASE_DOMAIN: runtime.medicalDomain,
+    VITE_API_URL: `https://api.${runtime.medicalDomain}:${runtime.proxyPort}`,
   }
 }

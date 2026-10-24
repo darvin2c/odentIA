@@ -9,6 +9,10 @@ import type { ClinicalProduct } from "./products.js"
 export interface ProductWords {
   /** El nombre del producto: «odentIA» o «latidIA». */
   name: string
+  /** Su marca visual (`BrandId` de `@odentia/ui`): el logo, el isotipo y el color. */
+  brand: "odentia" | "latidia"
+  /** Cómo se llama el lugar en la voz de la marca («Entra a tu clínica», «Entra a tu consultorio»), y con su artículo. */
+  place: { one: string; indefinite: string }
   /** Quien atiende (el rol `clinician`): «Odontólogo», «odontólogo», «odontólogos». */
   clinician: { label: string; one: string; many: string }
   /**
@@ -22,11 +26,15 @@ export interface ProductWords {
 const WORDS: Record<ClinicalProduct, ProductWords> = {
   dental: {
     name: "odentIA",
+    brand: "odentia",
+    place: { one: "clínica", indefinite: "una clínica" },
     clinician: { label: "Odontólogo", one: "odontólogo", many: "odontólogos" },
     room: { one: "unidad dental", many: "unidades dentales" },
   },
   medical: {
     name: "latidIA",
+    brand: "latidia",
+    place: { one: "consultorio", indefinite: "un consultorio" },
     clinician: { label: "Médico", one: "médico", many: "médicos" },
     room: { one: "sala", many: "salas" },
   },

@@ -26,6 +26,7 @@ import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { QueryErrorState } from "../../lib/query-error"
 import { QuantityInput } from "./fields"
 import { useInventory } from "./inventory-scope"
+import { appWords } from "../../lib/product-words"
 
 type CountFilter = "sin_contar" | "diferencia" | "todos"
 
@@ -147,11 +148,11 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
       { id: "producto", header: "Producto", meta: { view: { role: "title" } }, cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
       {
         id: "tiene",
-        header: () => <span className="block text-right">odentIA tiene</span>,
-        meta: { view: { primary: true, label: "odentIA tiene" } },
+        header: () => <span className="block text-right">{appWords().name} tiene</span>,
+        meta: { view: { primary: true, label: `${appWords().name} tiene` } },
         cell: ({ row }) => (
           <span className="block whitespace-nowrap tabular-nums md:text-right">
-            <span className="md:hidden">odentIA tiene </span>
+            <span className="md:hidden">{appWords().name} tiene </span>
             {stockText(row.original.onHand, row.original)}
           </span>
         ),
