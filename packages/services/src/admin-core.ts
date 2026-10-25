@@ -19,6 +19,7 @@ import {
   twoFactor,
 } from "@odentia/db/schema/admin-core"
 import { session, user } from "@odentia/db/schema/auth"
+import { generateRandomString, type SecretConfig, symmetricEncrypt } from "better-auth/crypto"
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
@@ -76,8 +77,8 @@ export interface AdminSessionBinding {
   expiresAt: Date
 }
 
-/** El segundo factor rige 12 h por sesión; la recuperación solo 30 min. */
-export const ADMIN_MFA_SESSION_TTL_MS = 12 * 60 * 60 * 1000
+/** El segundo factor rige 48 h por sesión (para no pedirlo a cada rato); la recuperación solo 30 min. */
+export const ADMIN_MFA_SESSION_TTL_MS = 48 * 60 * 60 * 1000
 export const ADMIN_RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000
 /** La invitación caduca a los 7 días; el primer enrolamiento exige sesión fresca (10 min) si no hay contraseña. */
 export const ADMIN_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -540,6 +541,46 @@ export async function getStaffFactorId(ownerDb: Db, userId: string): Promise<str
 /** ¿Tiene `userId` factor TOTP confirmado? (fuente: tabla `two_factor`). */
 export async function hasStaffFactor(ownerDb: Db, userId: string): Promise<boolean> {
   return (await getStaffFactorId(ownerDb, userId)) !== null
+}
+
+/**
+ * El código se pide al abrir la administración, no al entrar: el personal
+ * entra a sus clínicas como cualquier persona. Better Auth pide el factor al
+ * iniciar sesión a toda cuenta con `twoFactorEnabled`, y lo enciende al
+ * confirmar el primer código; la administración lo apaga después. El factor
+ * (`two_factor` verificado) sigue siendo el que vale para la administración.
+ */
+export async function keepStaffSignInWithoutFactor(ownerDb: Db, userId: string): Promise<void> {
+  await ownerDb.update(user).set({ twoFactorEnabled: false }).where(eq(user.id, userId))
+}
+
+/** Cantidad y forma de los códigos de respaldo: las de Better Auth (`xxxxx-xxxxx`). */
+const BACKUP_CODE_COUNT = 10
+
+/**
+ * Códigos de respaldo nuevos para el factor confirmado, cifrados como los
+ * guarda Better Auth (`storeBackupCodes: "encrypted"`): su verificación los
+ * sigue leyendo. Better Auth no los regenera sin `twoFactorEnabled`, que el
+ * personal no tiene (ver `keepStaffSignInWithoutFactor`). Quien llama ya probó
+ * la contraseña.
+ */
+export async function regenerateStaffBackupCodes(
+  ownerDb: Db,
+  userId: string,
+  secretConfig: string | SecretConfig,
+): Promise<string[]> {
+  const codes = Array.from({ length: BACKUP_CODE_COUNT }, () => {
+    const code = generateRandomString(10, "a-z", "0-9", "A-Z")
+    return `${code.slice(0, 5)}-${code.slice(5)}`
+  })
+  const encrypted = await symmetricEncrypt({ key: secretConfig, data: JSON.stringify(codes) })
+  const updated = await ownerDb
+    .update(twoFactor)
+    .set({ backupCodes: encrypted })
+    .where(and(eq(twoFactor.userId, userId), eq(twoFactor.verified, true)))
+    .returning({ id: twoFactor.id })
+  if (updated.length === 0) throw new ServiceError("MFA_REQUIRED", 403, "Enrola tu segundo factor para continuar")
+  return codes
 }
 
 /**
