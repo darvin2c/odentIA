@@ -119,7 +119,9 @@ de su producto. Con `MEDICAL_DOMAIN=latidia72.com` en la API y el worker:
   el portal y su passkey, el calendario, el chat y «Cómo llegar») van en
   `<clínica>.latidia72.com`.
 - Panel y clínica abren cada clínica en su dominio con `VITE_DENTAL_DOMAIN` y
-  `VITE_MEDICAL_DOMAIN` (argumentos de build).
+  `VITE_MEDICAL_DOMAIN` (argumentos de build). Los dos van en el proyecto: sin
+  `VITE_MEDICAL_DOMAIN=latidia72.com`, una clínica de latidIA elegida en
+  `app.odentia32.com` abre en el dominio de odentIA.
 
 Pendiente fuera del código, en la cuenta de cada servicio:
 
@@ -149,7 +151,8 @@ En OpenShip, las variables comunes viven en el entorno **production del proyecto
 No copiar `.env.example` a los entornos de cada servicio ni mantener copias de los
 secretos. Los overrides por servicio tienen precedencia y pueden eclipsar cambios
 del proyecto. Admin, panel, platform y web necesitan el override declarado `PORT=3000`;
-la API usa `PORT=3001`.
+la API usa 3001 por defecto. Una variable con el valor por defecto del código no se
+pone en el proyecto: las pruebas corren con ese valor.
 
 Para Compose manual, la misma fuente es `infra/prod/.env`, excluido de Git y del
 contexto Docker. Los secretos se generan una vez, se conservan y se rotan mediante
