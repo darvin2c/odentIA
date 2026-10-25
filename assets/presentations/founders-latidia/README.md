@@ -1,6 +1,6 @@
 # Presentación Fundadores de latidIA
 
-Presentación animada para los consultorios médicos que entran primero al programa Fundadores. Es la de odentIA (`../founders`), pensada para un consultorio: diez problemas, cada uno con la respuesta de latidIA; los agentes Sofi, Clío y Argos; el precio de consultorio fundador y cómo entrar. Se presenta con clics: cada parte muestra primero el problema y, con un clic, la respuesta. Tiene guion para quien presenta (tecla N).
+Presentación animada para los consultorios médicos que entran primero al programa Fundadores. Es la de odentIA (`../founders`), pensada para un consultorio: diez momentos del día de un consultorio, cada uno como es hoy («Hoy · …») y como es con latidIA («Con latidIA · …»); los agentes Sofi, Clío y Argos; el precio de consultorio fundador y cómo entrar. Se presenta con clics: cada parte muestra primero el problema y, con un clic, la respuesta. Tiene guion para quien presenta (tecla N).
 
 Usa los datos de la demo de la web: el Consultorio San Martín, la Dra. Elena Vela y sus pacientes Rosa, Luis y Julia, más Carla para la señal de alarma.
 

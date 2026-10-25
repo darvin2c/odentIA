@@ -1,6 +1,6 @@
 # Presentación Fundadores
 
-Presentación animada para las clínicas que entran primero al programa Fundadores: nueve problemas de la clínica, cada uno con la respuesta de odentIA, los agentes Sofi, Clío y Argos, el precio de clínica fundadora y cómo entrar. Se presenta con clics (cada parte muestra primero el problema y con un clic la respuesta) y tiene guion para quien presenta (tecla N).
+Presentación animada para las clínicas que entran primero al programa Fundadores: nueve momentos del día de una clínica, cada uno como es hoy («Hoy · …») y como es con odentIA («Con odentIA · …»), los agentes Sofi, Clío y Argos, el precio de clínica fundadora y cómo entrar. Se presenta con clics (cada parte muestra primero el problema y con un clic la respuesta) y tiene guion para quien presenta (tecla N).
 
 ## Armarla
 
