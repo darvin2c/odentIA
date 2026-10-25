@@ -27,7 +27,7 @@ const BLOCKS = [
 ]
 
 /** La misma línea de pulso que la marca: tres latidos a 72 por minuto. */
-const ECG =
+export const ECG =
   "M0 50 L40 50 Q48 42 56 50 L76 50 L84 58 L92 8 L100 72 L108 50 L128 50 Q142 36 156 50 L200 50 L240 50 Q248 42 256 50 L276 50 L284 58 L292 8 L300 72 L308 50 L328 50 Q342 36 356 50 L400 50 L440 50 Q448 42 456 50 L476 50 L484 58 L492 8 L500 72 L508 50 L528 50 Q542 36 556 50 L600 50"
 
 export default function DictationDemo() {

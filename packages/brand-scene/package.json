@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./hero-data": "./src/hero-data.ts",
+    "./tooth-scene": "./src/tooth-scene.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

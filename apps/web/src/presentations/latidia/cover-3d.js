@@ -86,7 +86,12 @@ function build(host) {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      uniforms: { uHead: { value: 0 }, uStill: { value: reduce ? 1 : 0 }, uGain: { value: gain }, uColor: { value: new THREE.Color(LILA) } },
+      uniforms: {
+        uHead: { value: 0 },
+        uStill: { value: reduce ? 1 : 0 },
+        uGain: { value: gain },
+        uColor: { value: new THREE.Color(LILA) },
+      },
     })
     group.add(new THREE.Mesh(new THREE.TubeGeometry(path, 1400, radius, 8, false), mat))
     return mat
@@ -104,7 +109,11 @@ function build(host) {
     fragmentShader: DOTS_FS,
     transparent: true,
     depthWrite: false,
-    uniforms: { uBeat: { value: 0 }, uBeatX: { value: 0 }, uColor: { value: new THREE.Color(LILA) } },
+    uniforms: {
+      uBeat: { value: 0 },
+      uBeatX: { value: 0 },
+      uColor: { value: new THREE.Color(LILA) },
+    },
   })
   group.add(new THREE.Points(dotsGeo, dotsMat))
 
@@ -121,7 +130,13 @@ function build(host) {
     return new THREE.CanvasTexture(c)
   })()
   const head = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: glowTex, color: new THREE.Color("#e9defc"), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }),
+    new THREE.SpriteMaterial({
+      map: glowTex,
+      color: new THREE.Color("#e9defc"),
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    }),
   )
   head.scale.setScalar(1.5)
   head.visible = !reduce
@@ -143,7 +158,13 @@ function build(host) {
   const ring = (u, k) => {
     const m = new THREE.Mesh(
       new THREE.RingGeometry(0.62, 0.7, 64),
-      new THREE.MeshBasicMaterial({ color: AGENTS[k], transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({
+        color: AGENTS[k],
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
     )
     m.position.copy(path.getPointAt(u))
     group.add(m)
@@ -198,16 +219,16 @@ function build(host) {
     ctl.mx = 0
     ctl.my = 0
   }
-  const fit = () => {
+  const fitRenderer = () => {
     const st = host.closest(".stage")
     const k = st ? st.getBoundingClientRect().width / 1920 : 1
     renderer.setPixelRatio(Math.max(0.75, Math.min(2, (window.devicePixelRatio || 1) * k)))
     renderer.setSize(W, H, false)
   }
-  addEventListener("resize", fit)
+  addEventListener("resize", fitRenderer)
   return {
     start() {
-      fit()
+      fitRenderer()
       ctl.active = true
       ctl.t0 = performance.now()
       ctl.last = 0
