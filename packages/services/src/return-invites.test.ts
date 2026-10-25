@@ -6,7 +6,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { inviteStepText, lapsedToInvite, markInvitedToReturn, INVITED_TO_RETURN_ACTION } from "./return-invites.js"
-import { listPeople } from "./people.js"
+import { listPeople, listPeopleShortcuts } from "./people.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
 import { getReportPatients } from "./report-patients.js"
@@ -114,9 +114,9 @@ it("el atajo «Por invitar a volver» de Pacientes muestra a quien toca, con su 
   // Nadie le lleva la invitación todavía: la línea está apagada, así que la lleva una persona.
   expect(page.items[0]).toMatchObject({ attention: "persona", nextStep: { text: "Toca invitarla a volver", actionLabel: null } })
   // El contador de cada atajo dice lo mismo que la lista; el de quien no ve el atajo, no aparece.
-  const counts = await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes" }, everything))
-  expect(counts.shortcuts?.por_invitar_a_volver).toBe(1)
-  expect(counts.shortcuts?.faltan_datos).not.toBeNull()
+  const counts = await c.run((tx) => listPeopleShortcuts(tx, c.orgId, everything))
+  expect(counts.por_invitar_a_volver).toBe(1)
+  expect(counts.faltan_datos).not.toBeNull()
   // Un atajo que no es de la vista se rechaza, y uno que no existe también.
   await expect(
     c.run((tx) => listPeople(tx, c.orgId, { view: "todos", atajo: "deben" }, everything)),
@@ -131,7 +131,7 @@ it("ya invitada, la fila dice cuándo y cuándo le vuelve a tocar; «Ya la invit
   const page = await c.run((tx) => listPeople(tx, c.orgId, { view: "pacientes" }, everything))
   const row = page.items.find((item) => item.displayName === "Lucía Fernández")
   // Sale del atajo y su fila ya no dice «Toca invitarla a volver».
-  expect(page.shortcuts?.por_invitar_a_volver).toBe(0)
+  expect((await c.run((tx) => listPeopleShortcuts(tx, c.orgId, everything))).por_invitar_a_volver).toBe(0)
   expect(row?.nextStep?.text).toMatch(/^Invitada por Dra\. Ana el \d{1,2} \S+ · la próxima, en \S+$/)
   // La invitó una persona del equipo: no «nadie lo lleva».
   expect(row?.attention).toBe("persona")

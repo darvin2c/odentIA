@@ -26,7 +26,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { firstName } from "./automation-routing.js"
-import { listBudgets, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
+import { listBudgets, listBudgetsForPatients, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
 import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { deriveNextAction } from "./treatment-journey.js"
@@ -112,10 +112,140 @@ export async function getPlanNextStep(
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!person) throw notFound("Paciente")
-  const name = firstName(person)
-  const { locale, timezone } = await findOrgLocale(tx, orgId)
-  const day = (date: Date) => dayWords(date, locale, timezone)
+  const context = await planContext(tx, orgId)
   const budgets = await listBudgets(tx, orgId, patientId)
+  const items = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId)))
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  const withAppointment = await scheduledItems(tx, orgId, patientId, items.map((item) => item.id))
+  const [control] = await tx
+    .select()
+    .from(clinicalFollowUp)
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, patientId),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+      ),
+    )
+    .orderBy(sql`${clinicalFollowUp.status} = 'pendiente' desc`, asc(clinicalFollowUp.dueAt))
+    .limit(1)
+  return planNextStepFrom({ name: firstName(person), budgets, items, withAppointment, control }, context, can)
+}
+
+/**
+ * «Qué sigue» de muchos pacientes a la vez (los atajos de Pacientes y su
+ * página): lo mismo que `getPlanNextStep` de cada uno, con la misma regla
+ * (`planNextStepFrom`) y un puñado de consultas en total, no varias por
+ * paciente. Un paciente que no existe no aparece.
+ */
+export async function planNextStepsOf(
+  tx: Db,
+  orgId: string,
+  patientIds: string[],
+  can: Can,
+): Promise<Map<string, PlanNextStep>> {
+  const out = new Map<string, PlanNextStep>()
+  if (patientIds.length === 0) return out
+  const people = await tx
+    .select({ id: patient.id, givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
+    .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(eq(patient.organizationId, orgId), inArray(patient.id, patientIds)))
+  if (people.length === 0) return out
+  const ids = people.map((person) => person.id)
+  const context = await planContext(tx, orgId)
+  const budgets = await listBudgetsForPatients(tx, orgId, ids)
+  const items = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.patientId, ids)))
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  const scheduled = await tx
+    .select({ planItemId: appointmentPlanItem.planItemId })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      appointment,
+      and(eq(appointment.id, appointmentPlanItem.appointmentId), eq(appointment.organizationId, appointmentPlanItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        inArray(appointmentPlanItem.patientId, ids),
+        inArray(appointment.status, LIVE_APPOINTMENT),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+  const withAppointment = new Set(scheduled.map((row) => row.planItemId))
+  // El próximo control de cada uno, con el mismo orden que el de uno solo.
+  const controls = await tx
+    .selectDistinctOn([clinicalFollowUp.patientId])
+    .from(clinicalFollowUp)
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        inArray(clinicalFollowUp.patientId, ids),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+      ),
+    )
+    .orderBy(clinicalFollowUp.patientId, sql`${clinicalFollowUp.status} = 'pendiente' desc`, asc(clinicalFollowUp.dueAt))
+  const itemsOf = new Map<string, PlanItemRow[]>()
+  for (const item of items) {
+    const list = itemsOf.get(item.patientId) ?? []
+    list.push(item)
+    itemsOf.set(item.patientId, list)
+  }
+  const controlOf = new Map(controls.map((row) => [row.patientId, row]))
+  for (const person of people) {
+    out.set(
+      person.id,
+      planNextStepFrom(
+        {
+          name: firstName(person),
+          budgets: budgets.get(person.id) ?? [],
+          items: itemsOf.get(person.id) ?? [],
+          withAppointment,
+          control: controlOf.get(person.id),
+        },
+        context,
+        can,
+      ),
+    )
+  }
+  return out
+}
+
+type PlanItemRow = typeof treatmentPlanItem.$inferSelect
+type FollowUpRow = typeof clinicalFollowUp.$inferSelect
+
+/** Lo de la clínica que necesita la frase: formato de fechas y si su producto pide presupuesto. */
+interface PlanContext {
+  locale: string
+  timezone: string
+  budgetRequired: boolean
+}
+
+async function planContext(tx: Db, orgId: string): Promise<PlanContext> {
+  const { locale, timezone } = await findOrgLocale(tx, orgId)
+  return { locale, timezone, budgetRequired: (await productHooks(tx, orgId)).budgetRequired }
+}
+
+/** Lo de una persona que decide su «Qué sigue». `withAppointment` puede traer tratamientos de otras. */
+interface PlanFacts {
+  name: string
+  budgets: BudgetWithTotals[]
+  items: PlanItemRow[]
+  withAppointment: Set<string>
+  control: FollowUpRow | undefined
+}
+
+/** La regla de «Qué sigue», en el orden fijo de arriba. Sin consultas: decide con lo cargado. */
+function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
+  const { name, budgets, items, withAppointment, control } = facts
+  const { locale, timezone } = context
+  const day = (date: Date) => dayWords(date, locale, timezone)
 
   // 1. Armado y sin enviar: lo envía recepción (decisión 4).
   const unsent = unsentBudgetOf(budgets)
@@ -129,13 +259,7 @@ export async function getPlanNextStep(
   }
 
   // 2. Lo aceptado sin cita: «Agendar» con los tratamientos ya puestos.
-  const items = await tx
-    .select()
-    .from(treatmentPlanItem)
-    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId)))
-    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt))
   const accepted = items.filter((item) => item.decisionStatus === "aceptado" && item.status === "pendiente")
-  const withAppointment = await scheduledItems(tx, orgId, patientId, items.map((item) => item.id))
   const toSchedule = accepted.filter((item) => !withAppointment.has(item.id))
   if (toSchedule.length > 0) {
     const decided = budgets
@@ -145,7 +269,7 @@ export async function getPlanNextStep(
       ? decided.status === "aceptado"
         ? "Aceptó todo: falta agendar"
         : `${decided.stateText}: falta agendar`
-      : (await productHooks(tx, orgId)).budgetRequired
+      : context.budgetRequired
         ? "Tiene tratamientos aceptados sin cita"
         : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
           "Falta agendar lo indicado"
@@ -189,18 +313,6 @@ export async function getPlanNextStep(
   }
 
   // 5. El próximo control.
-  const [control] = await tx
-    .select()
-    .from(clinicalFollowUp)
-    .where(
-      and(
-        eq(clinicalFollowUp.organizationId, orgId),
-        eq(clinicalFollowUp.patientId, patientId),
-        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
-      ),
-    )
-    .orderBy(sql`${clinicalFollowUp.status} = 'pendiente' desc`, asc(clinicalFollowUp.dueAt))
-    .limit(1)
   if (control) {
     if (control.status === "pendiente") {
       return {

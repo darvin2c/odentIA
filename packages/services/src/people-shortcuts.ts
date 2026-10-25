@@ -1,17 +1,15 @@
 /**
  * Los atajos de «Pacientes» (decisión 6 del lienzo): cuántos y quiénes necesitan
  * algo ahora. No inventan reglas: cada paciente cae en el mismo paso que dice
- * «Qué sigue» (`getPlanNextStep`), en «no viene hace 6 meses» (`lapsedSql`, la
- * regla de Reportes), o en lo que falta de su ficha (`getPatientMissingData`) o
+ * «Qué sigue» (`planNextStepsOf`, la regla de `getPlanNextStep`), en «no viene hace 6 meses» (`lapsedSql`, la
+ * regla de Reportes), o en lo que falta de su ficha (`patientsMissingData`, la regla de `getPatientMissingData`) o
  * de sus cobros (`getDebts`). Así la lista y su atajo no pueden contradecirse.
  */
 import type { Db } from "@odentia/db"
-import { contact } from "@odentia/db/schema/crm"
-import { patient } from "@odentia/db/schema/clinical"
-import { and, eq, sql } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { getDebts } from "./finance.js"
-import { getPatientMissingData } from "./patient-registration.js"
-import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
+import { patientsMissingData } from "./patient-registration.js"
+import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { lapsedToInvite } from "./return-invites.js"
 
 export const PEOPLE_SHORTCUTS = [
@@ -54,24 +52,24 @@ async function plannedPatientIds(tx: Db, orgId: string): Promise<string[]> {
   return rows.map((row) => row.id)
 }
 
-/** Pacientes activos cuya ficha todavía le falta algo para atenderla (`missingData`). */
-async function missingDataPatientIds(tx: Db, orgId: string): Promise<string[]> {
-  const rows = await tx
-    .select({ id: patient.id })
-    .from(patient)
-    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
-    .where(and(eq(patient.organizationId, orgId), eq(contact.isActive, true)))
-  const out: string[] = []
-  for (const row of rows) {
-    if ((await getPatientMissingData(tx, orgId, row.id)).length > 0) out.push(row.id)
-  }
-  return out
+const PLAN_SHORTCUTS = ["por_agendar", "presupuesto_sin_enviar", "presupuesto_sin_respuesta", "control_por_reservar"] as const
+
+/** De esos pacientes, a cuáles todavía les falta algo en su ficha: lo que marca cada fila de la página. */
+export async function missingDataAmong(tx: Db, orgId: string, patientIds: string[]): Promise<Set<string>> {
+  return patientsMissingData(tx, orgId, patientIds)
+}
+
+/** Quienes tocan invitar a volver: una sola consulta para toda la clínica, sin recorrer pacientes. */
+export async function patientsToInvite(tx: Db, orgId: string, timezone: string, now: Date): Promise<Set<string>> {
+  return new Set((await lapsedToInvite(tx, orgId, timezone, now)).map((row) => row.patientId))
 }
 
 /**
  * Los atajos que quien mira puede ver, con sus pacientes. Recorre solo a los que
  * tienen plan, así que el costo crece con los tratamientos y no con toda la
- * clínica; «Faltan datos» recorre a los activos.
+ * clínica; «Faltan datos» recorre a los activos, en lote. La lista no lo llama
+ * para pintar una página, solo para filtrar por un atajo (`only`, solo ese) y
+ * para contarlos aparte (`countPeopleShortcuts`).
  */
 export async function peopleShortcutMembers(
   tx: Db,
@@ -79,23 +77,41 @@ export async function peopleShortcutMembers(
   can: ShortcutCan,
   timezone: string,
   now: Date,
+  only?: PeopleShortcut,
 ): Promise<PeopleShortcutMembers> {
   const members: PeopleShortcutMembers = {}
+  const wanted = (shortcut: PeopleShortcut) => only === undefined || only === shortcut
   const planAllowed = ["clinical.read", "budgets.read", "appointments.read"].some((permission) => can(permission))
-  if (planAllowed) {
-    for (const shortcut of ["por_agendar", "presupuesto_sin_enviar", "presupuesto_sin_respuesta", "control_por_reservar"] as const)
-      members[shortcut] = []
-    for (const patientId of await plannedPatientIds(tx, orgId)) {
-      const step = await getPlanNextStep(tx, orgId, patientId, () => true)
+  if (planAllowed && PLAN_SHORTCUTS.some(wanted)) {
+    for (const shortcut of PLAN_SHORTCUTS) members[shortcut] = []
+    // Todos de una vez, con la misma regla de «Qué sigue» (`planNextStepsOf`).
+    const steps = await planNextStepsOf(tx, orgId, await plannedPatientIds(tx, orgId), () => true)
+    for (const [patientId, step] of steps) {
       const shortcut = SHORTCUT_OF_PLAN[step.kind]
       if (shortcut && members[shortcut]) members[shortcut]?.push(patientId)
     }
   }
-  if (can("patients.read")) members.faltan_datos = await missingDataPatientIds(tx, orgId)
-  if (can("crm.read")) members.por_invitar_a_volver = (await lapsedToInvite(tx, orgId, timezone, now)).map((row) => row.patientId)
-  if (can("finance.read")) {
+  if (can("patients.read") && wanted("faltan_datos")) members.faltan_datos = [...(await patientsMissingData(tx, orgId))]
+  if (can("crm.read") && wanted("por_invitar_a_volver"))
+    members.por_invitar_a_volver = (await lapsedToInvite(tx, orgId, timezone, now)).map((row) => row.patientId)
+  if (can("finance.read") && wanted("deben")) {
     const debts = await getDebts(tx, orgId)
     members.deben = [...new Set(debts.map((debt) => debt.patientId))]
   }
   return members
+}
+
+/** Cuántos hay en cada atajo que quien mira ve; nulo, el que no ve. */
+export async function countPeopleShortcuts(
+  tx: Db,
+  orgId: string,
+  can: ShortcutCan,
+  timezone: string,
+  now: Date,
+): Promise<Record<PeopleShortcut, number | null>> {
+  const members = await peopleShortcutMembers(tx, orgId, can, timezone, now)
+  return Object.fromEntries(PEOPLE_SHORTCUTS.map((name) => [name, members[name]?.length ?? null])) as Record<
+    PeopleShortcut,
+    number | null
+  >
 }

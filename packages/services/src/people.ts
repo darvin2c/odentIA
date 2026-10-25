@@ -38,11 +38,14 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
-import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
+import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { inviteStatusOf, inviteStepText } from "./return-invites.js"
 import {
+  countPeopleShortcuts,
+  missingDataAmong,
   PEOPLE_SHORTCUTS,
   type PeopleShortcut,
+  patientsToInvite,
   peopleShortcutMembers,
 } from "./people-shortcuts.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -607,6 +610,19 @@ async function contactExtras(tx: Db, orgId: string, ids: string[]): Promise<Map<
  * de toda la clínica. Quien no ve a quien aún no es paciente (`seesNonPatients`)
  * recibe solo pacientes, en cualquier vista que tenga.
  */
+/**
+ * Cuántos hay en cada atajo de «Pacientes» que quien mira ve (nulo, el que no
+ * ve). Aparte de la lista: recorre paciente por paciente y la página no lo espera.
+ */
+export async function listPeopleShortcuts(
+  tx: Db,
+  orgId: string,
+  can: PersonCan,
+): Promise<Record<PeopleShortcut, number | null>> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  return countPeopleShortcuts(tx, orgId, can, timezone, new Date())
+}
+
 export async function listPeople(
   tx: Db,
   orgId: string,
@@ -616,8 +632,6 @@ export async function listPeople(
   items: PersonListItem[]
   nextCursor: string | null
   counts: { porRegistrar: number }
-  /** Cuántos hay en cada atajo que quien mira ve; nulo fuera de Pacientes. */
-  shortcuts: Record<PeopleShortcut, number | null> | null
 }> {
   const view = (input.view ?? "pacientes") as PeopleView
   if (!PEOPLE_VIEWS.includes(view)) throw validation("Vista inválida")
@@ -635,10 +649,12 @@ export async function listPeople(
   const fingerprint = JSON.stringify({ view, q, atajo })
   const { timezone, locale } = await findOrgLocale(tx, orgId)
   const now = new Date()
-  const members = view === "pacientes" ? await peopleShortcutMembers(tx, orgId, can, timezone, now) : null
+  // Los atajos se recorren paciente por paciente: solo el que se pidió, nunca para pintar la página
+  // (sus cuentas, aparte en `countPeopleShortcuts`). Con 1 000 pacientes la página tardaba 12 s.
+  const members = atajo ? await peopleShortcutMembers(tx, orgId, can, timezone, now, atajo) : null
   const lines = view === "pacientes" ? await enabledLineKinds(tx, orgId) : new Set<string>()
-  const missing = new Set(members?.faltan_datos ?? [])
-  const toInvite = new Set(members?.por_invitar_a_volver ?? [])
+  const toInvite =
+    view === "pacientes" && can("crm.read") ? await patientsToInvite(tx, orgId, timezone, now) : new Set<string>()
   // Cada cuánto vuelve a tocar invitarla: 6 meses en odentIA, 12 en latidIA.
   const { recallMonths } = await productHooks(tx, orgId)
   if (atajo && members?.[atajo] === undefined) throw new ServiceError("FORBIDDEN", 403, "Este atajo no es para quien lo pide")
@@ -707,6 +723,15 @@ export async function listPeople(
   `)
   const list = [...rows]
   const page = list.slice(0, limit)
+  // «Faltan datos» de cada fila: solo de los pacientes activos de esta página.
+  const missing =
+    view === "pacientes" && can("patients.read")
+      ? await missingDataAmong(
+          tx,
+          orgId,
+          page.flatMap((r) => (r.patient_id && r.is_active ? [r.patient_id] : [])),
+        )
+      : new Set<string>()
   const extras = chats
     ? await contactExtras(
         tx,
@@ -718,6 +743,16 @@ export async function listPeople(
   const invites =
     plan && agenda
       ? await inviteStatusOf(tx, orgId, page.flatMap((r) => (r.patient_id && !toInvite.has(r.patient_id) ? [r.patient_id] : [])))
+      : new Map()
+  // «Qué sigue» de los pacientes de la página, de una vez.
+  const steps =
+    plan
+      ? await planNextStepsOf(
+          tx,
+          orgId,
+          page.flatMap((r) => (r.patient_id ? [r.patient_id] : [])),
+          can,
+        )
       : new Map()
   const items: PersonListItem[] = []
   for (const r of page) {
@@ -757,7 +792,8 @@ export async function listPeople(
       missingData: isPatient && missing.has(r.patient_id ?? ""),
     })
     if (isPatient && plan && r.patient_id) {
-      const step = await getPlanNextStep(tx, orgId, r.patient_id, can)
+      const step = steps.get(r.patient_id)
+      if (!step) continue
       const item = items[items.length - 1]!
       // Sin nada en el plan y sin volver desde hace 6 meses: lo que sigue es invitarla (decisión 15).
       const invite = toInvite.has(r.patient_id) && step.kind === "ninguno"
@@ -788,15 +824,11 @@ export async function listPeople(
     where c.organization_id = ${orgId} and ${viewCondition("por_registrar")} and not ${testOnlyPersonSql(sql.raw("c"))}
   `)
     : [{ count: 0 }]
-  const shortcuts = members
-    ? (Object.fromEntries(PEOPLE_SHORTCUTS.map((name) => [name, members[name]?.length ?? null])) as Record<PeopleShortcut, number | null>)
-    : null
   return {
     items,
     nextCursor:
       list.length > limit && last ? encodePeopleCursor(last.sort_key, last.id, fingerprint) : null,
     counts: { porRegistrar: Number(counted?.count ?? 0) },
-    shortcuts,
   }
 }
 

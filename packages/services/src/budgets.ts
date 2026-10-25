@@ -389,6 +389,22 @@ async function listBudgetLines(
   patientId: string,
   budgetId: string,
 ): Promise<BudgetLineWithStatus[]> {
+  return (await budgetLinesOf(tx, orgId, [budgetId], patientId)).get(budgetId) ?? []
+}
+
+/**
+ * Las líneas de esos presupuestos, cada una con el estado de su tratamiento,
+ * por presupuesto y en el orden del plan. Una vez para muchos presupuestos
+ * (`listBudgetsForPatients`), con la misma forma que las de uno.
+ */
+async function budgetLinesOf(
+  tx: Db,
+  orgId: string,
+  budgetIds: string[],
+  patientId?: string,
+): Promise<Map<string, BudgetLineWithStatus[]>> {
+  const out = new Map<string, BudgetLineWithStatus[]>()
+  if (budgetIds.length === 0) return out
   const site = (await productHooks(tx, orgId)).site
   const lines = await tx
     .select({ line: treatmentBudgetItem, position: treatmentBudgetOption.position })
@@ -410,9 +426,9 @@ async function listBudgetLines(
     )
     .where(
       and(
-        eq(treatmentBudgetItem.budgetId, budgetId),
+        inArray(treatmentBudgetItem.budgetId, budgetIds),
         eq(treatmentBudgetItem.organizationId, orgId),
-        eq(treatmentBudgetItem.patientId, patientId),
+        ...(patientId ? [eq(treatmentBudgetItem.patientId, patientId)] : []),
       ),
     )
     .orderBy(
@@ -434,22 +450,25 @@ async function listBudgetLines(
       )
     for (const item of items) statuses.set(item.id, item.status)
   }
-  return lines.map(({ line }) => {
+  for (const { line } of lines) {
     const lineTotalCents = lineTotal(line, line.priceCents)
     const tariffLineTotalCents = lineTotal(line, line.tariffPriceCents ?? line.priceCents)
     const discount =
       lineTotalCents != null && tariffLineTotalCents != null
         ? tariffLineTotalCents - lineTotalCents
         : null
-    return {
+    const list = out.get(line.budgetId) ?? []
+    list.push({
       ...line,
       ...site.fields(line),
       itemStatus: statuses.get(line.planItemId) ?? "pendiente",
       lineTotalCents,
       tariffLineTotalCents,
       lineDiscountCents: discount != null && discount > 0 ? discount : null,
-    }
-  })
+    })
+    out.set(line.budgetId, list)
+  }
+  return out
 }
 
 /** Suma entera exacta; null si algún importe del conjunto es desconocido. */
@@ -1814,6 +1833,35 @@ export async function cancelBudget(
   })
   await notifyBudget(tx, orgId)
   return updated
+}
+
+/**
+ * Los presupuestos de muchos pacientes a la vez, con sus totales: lo mismo que
+ * `listBudgets` de cada uno (sin filtrar por profesional), en cuatro consultas.
+ * Lo usa «Qué sigue» en lote (`planNextStepsOf`).
+ */
+export async function listBudgetsForPatients(
+  tx: Db,
+  orgId: string,
+  patientIds: string[],
+): Promise<Map<string, BudgetWithTotals[]>> {
+  const out = new Map<string, BudgetWithTotals[]>()
+  if (patientIds.length === 0) return out
+  const budgets = await tx
+    .select()
+    .from(treatmentBudget)
+    .where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.patientId, patientIds)))
+    .orderBy(asc(treatmentBudget.budgetNumber), asc(treatmentBudget.revisionNumber))
+  const ids = budgets.map((budget) => budget.id)
+  const [options, lines] = [await listOptions(tx, orgId, ids), await budgetLinesOf(tx, orgId, ids)]
+  const optionsOf = new Map<string, BudgetOptionRow[]>()
+  for (const option of options) optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
+  for (const budget of budgets) {
+    const list = out.get(budget.patientId) ?? []
+    list.push(withTotals(budget, lines.get(budget.id) ?? [], optionsOf.get(budget.id) ?? []))
+    out.set(budget.patientId, list)
+  }
+  return out
 }
 
 export async function listBudgets(

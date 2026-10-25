@@ -29,7 +29,7 @@ import {
 import { contact, conversation, contactIdentity, channelConnection, crmTask, registrationHold } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { and, eq, sql, type SQL } from "drizzle-orm"
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, orgProduct } from "./locale.js"
@@ -45,6 +45,7 @@ import {
   updatePatient,
 } from "./patients.js"
 import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
+import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
@@ -233,6 +234,66 @@ export async function getPatientMissingData(
     { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
     { representativeContact: !!spokesperson },
   )
+}
+
+/**
+ * Lo mismo que `getPatientMissingData` para muchos pacientes a la vez, con la
+ * misma regla (`missingPersonData`): cuatro consultas en total, no cuatro por
+ * paciente. Sin `patientIds`, todos los activos (el atajo «Faltan datos»).
+ */
+export async function patientsMissingData(tx: Db, orgId: string, patientIds?: string[]): Promise<Set<string>> {
+  if (patientIds && patientIds.length === 0) return new Set()
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const among = patientIds ? inArray(patient.id, patientIds) : eq(contact.isActive, true)
+  const rows = await tx
+    .select(patientRowColumns())
+    .from(patient)
+    .innerJoin(contact, joinPatientPerson())
+    .where(and(eq(patient.organizationId, orgId), among))
+  if (rows.length === 0) return new Set()
+  const ids = rows.map((row) => row.id)
+  const spokespeople = await tx
+    .selectDistinct({ patientId: patientContact.patientId })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        inArray(patientContact.patientId, ids),
+        sql`${patientContact.relationship} <> 'self'`,
+        eq(contact.isActive, true),
+        sql`(${contact.phone} is not null or ${contact.email} is not null)`,
+      ),
+    )
+  const emergencies = await tx
+    .selectDistinctOn([patientContact.patientId], {
+      patientId: patientContact.patientId,
+      name: contact.displayName,
+      phone: contact.phone,
+    })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        inArray(patientContact.patientId, ids),
+        eq(patientContact.isEmergency, true),
+        eq(contact.isActive, true),
+      ),
+    )
+  const represented = new Set(spokespeople.map((row) => row.patientId))
+  const emergencyOf = new Map(emergencies.map((row) => [row.patientId, row]))
+  const out = new Set<string>()
+  for (const row of rows) {
+    const emergency = emergencyOf.get(row.id)
+    const missing = missingPersonData(
+      config,
+      { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
+      { representativeContact: represented.has(row.id) },
+    )
+    if (missing.length > 0) out.add(row.id)
+  }
+  return out
 }
 
 export interface SaveRegistrationConfigInput {
