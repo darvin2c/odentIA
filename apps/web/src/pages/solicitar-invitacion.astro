@@ -1,11 +1,14 @@
 ---
 // «Pide tus USD 100» (Fundadores, issue 165): la solicitud de la lista de espera. Mientras se abren
 // clínicas solo con invitación es el destino de todos los botones de la web; las cifras salen del
-// plan Fundadores publicado en la administración.
+// plan Fundadores publicado en la administración. Sin cabecera: el logo va dentro del lado oscuro y
+// lleva al inicio, y el pie es solo la fila legal (lienzo «Solicitar invitación: cabecera»).
+import latidiaLogo from "../assets/latidia-logotipo-dark.svg?raw"
+import odentiaLogo from "../assets/logotipo-dark.svg?raw"
 import WaitlistSplit from "../components/founders/WaitlistSplit"
 import Base from "../layouts/Base.astro"
 import { businessDays, giftOf } from "../lib/pricing"
-import { WORDS } from "../lib/product"
+import { MEDICAL, WORDS } from "../lib/product"
 
 const pricing = Astro.locals.pricing
 const founder = pricing.founders
@@ -15,10 +18,13 @@ const title = gift ? `Pide tus ${gift}: programa Fundadores` : "Solicita tu invi
 const description = gift
   ? `Programa Fundadores de ${WORDS.name}: los primeros ${gift} de tus agentes los pagamos nosotros. Se entra por invitación; te respondemos en ${answer}.`
   : `Programa Fundadores de ${WORDS.name}: se entra por invitación; te respondemos en ${answer}.`
+// El logotipo sin su título, para que no aparezca como globo al pasar el puntero.
+const logo = (MEDICAL ? latidiaLogo : odentiaLogo).replace(/<title>[^<]*<\/title>/, "")
 ---
-<Base title={title} description={description} header="light">
+<Base title={title} description={description} header="none" footer="legal">
   <WaitlistSplit
     client:load
+    logo={logo}
     gift={gift}
     discountPercent={founder?.discountPercent ?? null}
     noFee={founder ? founder.plan === 0 : false}
