@@ -61,7 +61,12 @@ function arg(name: string, fallback: string): string {
 const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/dictado-practica.json")), "utf8")) as { servicios: string[]; dictados: PracticeDictation[] }
 const spec = resolveLlmSpec(platformLlmFromEnv(process.env))
 if (spec.provider === "fake") throw new Error("Esta medición es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor")
-const model = await createConfiguredChatModel(spec, { explicitCache: true })
+// Como en la atención, con el razonamiento del perfil; `--razonamiento=none|low|…` lo cambia para comparar.
+const reasoning = arg("razonamiento", DENTAL_DICTATION_PROFILE.reasoning ?? "none")
+const model = await createConfiguredChatModel(spec, {
+  explicitCache: true,
+  ...(reasoning === "none" ? {} : { reasoning: reasoning as "low" | "medium" | "high" }),
+})
 
 const plain = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 /** La variante dicha como la leería el servicio: su valor o la más justa que la nombra. */
