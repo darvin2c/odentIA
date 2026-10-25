@@ -16,6 +16,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
+  FieldGroup,
   FieldLabel,
   Input,
   Textarea,
@@ -714,20 +715,22 @@ function EditBudgetDrawer({
           .finally(() => setPending(false))
       }}
     >
-      <Field>
-        <FieldLabel htmlFor={`${uid}-title`}>Título</FieldLabel>
-        <Input id={`${uid}-title`} value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-notes`}>Notas</FieldLabel>
-        <Textarea
-          id={`${uid}-notes`}
-          value={notes}
-          rows={3}
-          maxLength={4000}
-          onChange={(e) => setNotes(e.currentTarget.value)}
-        />
-      </Field>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-title`}>Título</FieldLabel>
+          <Input id={`${uid}-title`} value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-notes`}>Notas</FieldLabel>
+          <Textarea
+            id={`${uid}-notes`}
+            value={notes}
+            rows={3}
+            maxLength={4000}
+            onChange={(e) => setNotes(e.currentTarget.value)}
+          />
+        </Field>
+      </FieldGroup>
     </FormDrawer>
   )
 }

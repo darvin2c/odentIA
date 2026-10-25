@@ -3,6 +3,7 @@ import {
   Button,
   Field,
   FieldError,
+  FieldGroup,
   FieldLabel,
   Input,
   Separator,
@@ -471,36 +472,38 @@ function EditProfileDrawer({
       isSubmitting={isSubmitting}
       error={error}
     >
-      <form.Field name="firstName">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="profile-first-name">Nombre</FieldLabel>
-            <Input
-              id="profile-first-name"
-              type="text"
-              autoComplete="given-name"
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-          </Field>
-        )}
-      </form.Field>
-      <form.Field name="lastName">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="profile-last-name">Apellidos</FieldLabel>
-            <Input
-              id="profile-last-name"
-              type="text"
-              autoComplete="family-name"
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-          </Field>
-        )}
-      </form.Field>
+      <FieldGroup>
+        <form.Field name="firstName">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="profile-first-name">Nombre</FieldLabel>
+              <Input
+                id="profile-first-name"
+                type="text"
+                autoComplete="given-name"
+                value={field.state.value}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+            </Field>
+          )}
+        </form.Field>
+        <form.Field name="lastName">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="profile-last-name">Apellidos</FieldLabel>
+              <Input
+                id="profile-last-name"
+                type="text"
+                autoComplete="family-name"
+                value={field.state.value}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+            </Field>
+          )}
+        </form.Field>
+      </FieldGroup>
     </FormDrawer>
   )
 }
@@ -552,7 +555,7 @@ function ChangePasswordDrawer({
       isSubmitting={isSubmitting}
       error={error}
     >
-      <div className="flex flex-col gap-4">
+      <FieldGroup>
         <form.Field name="currentPassword">
           {(field) => (
             <Field>
@@ -598,7 +601,7 @@ function ChangePasswordDrawer({
             </Field>
           )}
         </form.Field>
-      </div>
+      </FieldGroup>
     </FormDrawer>
   )
 }

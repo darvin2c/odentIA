@@ -2,6 +2,7 @@ import { appWords } from "../../lib/product-words"
 import {
   Button,
   Field,
+  FieldGroup,
   FieldLabel,
   Select,
   SelectContent,
@@ -287,40 +288,42 @@ export function NewEncounterButton({
         submitLabel="Atender"
         submitDisabled={!reason.trim() || !professionalUserId || saving}
       >
-        <Field>
-          <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
-          <Textarea
-            id="new-encounter-reason"
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            placeholder={`Ej.: ${appWords().examples.visitReason}`}
-            rows={3}
-            maxLength={2000}
-            required
-            autoFocus
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="new-encounter-professional">Profesional que atiende</FieldLabel>
-          <Select
-            value={professionalUserId}
-            items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
-            onValueChange={(value) => {
-              if (value) setProfessionalUserId(value)
-            }}
-          >
-            <SelectTrigger id="new-encounter-professional" aria-label="Profesional que atiende">
-              <SelectValue placeholder="Selecciona el profesional…" />
-            </SelectTrigger>
-            <SelectContent>
-              {professionals.map((m) => (
-                <SelectItem key={m.userId} value={m.userId}>
-                  {m.user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
+            <Textarea
+              id="new-encounter-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder={`Ej.: ${appWords().examples.visitReason}`}
+              rows={3}
+              maxLength={2000}
+              required
+              autoFocus
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="new-encounter-professional">Profesional que atiende</FieldLabel>
+            <Select
+              value={professionalUserId}
+              items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
+              onValueChange={(value) => {
+                if (value) setProfessionalUserId(value)
+              }}
+            >
+              <SelectTrigger id="new-encounter-professional" aria-label="Profesional que atiende">
+                <SelectValue placeholder="Selecciona el profesional…" />
+              </SelectTrigger>
+              <SelectContent>
+                {professionals.map((m) => (
+                  <SelectItem key={m.userId} value={m.userId}>
+                    {m.user.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </FieldGroup>
       </FormDrawer>
     </>
   )

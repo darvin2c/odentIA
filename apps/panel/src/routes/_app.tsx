@@ -92,93 +92,96 @@ function AppLayout() {
   const volver = "inline-flex min-h-11 items-center gap-1 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9"
 
   return (
-    <div className="flex min-h-svh flex-col bg-background">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <Brand />
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={`Menú de ${user.name || "usuario"}`}
-            className="flex items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <PersonAvatar
-              name={user.name}
-              givenNames={user.givenNames}
-              familyName={user.familyName}
-              src={user.avatarUrl}
-              className="size-9"
-              fallbackClassName="text-xs"
-              decorative
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <div className="px-2 py-1.5">
-              <p className="truncate text-sm font-medium">{user.name}</p>
-              {user.email ? <p className="truncate text-xs text-muted-foreground">{user.email}</p> : null}
-            </div>
-            <DropdownMenuSeparator />
-            {accountMenu.map((item) => (
-              <DropdownMenuItem
-                key={item.label}
-                render={(menuProps) => {
-                  const { onClick, ...rest } = menuProps
-                  return (
-                    <RouterLink to={item.to} search={item.search} {...rest} onClick={onClick}>
-                      {menuProps.children}
-                    </RouterLink>
-                  )
-                }}
-              >
-                <item.icon />
-                {item.label}
-              </DropdownMenuItem>
-            ))}
-            {staff.data?.staff ? (
-              <DropdownMenuItem
-                render={(menuProps) => {
-                  const { onClick, ...rest } = menuProps
-                  return (
-                    <a href={adminUrl()} {...rest} onClick={onClick}>
-                      {menuProps.children}
-                    </a>
-                  )
-                }}
-              >
-                <ShieldCheck />
-                Administración de odentIA
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={signOut}>
-              <LogOut />
-              Cerrar sesión
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
-      {pathname !== "/" ? (
-        <nav aria-label="Volver" className="px-4 sm:px-6">
-          {clinicaOrigen ? (
-            <a href={tenantUrl(clinicaOrigen.slug, "/home", clinicaOrigen.product)} className={volver}>
-              <ChevronLeft className="size-4" aria-hidden />
-              {clinicaOrigen.organizationName}
-            </a>
-          ) : (
-            <RouterLink to="/" search={{ cambiar: 1 }} className={volver}>
-              <ChevronLeft className="size-4" aria-hidden />
-              Elige tu clínica
-            </RouterLink>
-          )}
-        </nav>
-      ) : null}
-      {/* Columna lateral del layout: los formularios del perfil se abren ahí
-          en ventana ancha, igual que en la plataforma. */}
+    // La columna lateral va a todo el alto, al lado de cabecera y contenido:
+    // debajo de la cabecera mediría una ventana entera desde más abajo y su pie
+    // («Guardar») quedaría fuera de la pantalla.
+    <div className="flex min-h-svh bg-background">
       <SideDockProvider draftGuard={DraftGuard}>
-        <div className="flex min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <Brand />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={`Menú de ${user.name || "usuario"}`}
+                className="flex items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <PersonAvatar
+                  name={user.name}
+                  givenNames={user.givenNames}
+                  familyName={user.familyName}
+                  src={user.avatarUrl}
+                  className="size-9"
+                  fallbackClassName="text-xs"
+                  decorative
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <div className="px-2 py-1.5">
+                  <p className="truncate text-sm font-medium">{user.name}</p>
+                  {user.email ? <p className="truncate text-xs text-muted-foreground">{user.email}</p> : null}
+                </div>
+                <DropdownMenuSeparator />
+                {accountMenu.map((item) => (
+                  <DropdownMenuItem
+                    key={item.label}
+                    render={(menuProps) => {
+                      const { onClick, ...rest } = menuProps
+                      return (
+                        <RouterLink to={item.to} search={item.search} {...rest} onClick={onClick}>
+                          {menuProps.children}
+                        </RouterLink>
+                      )
+                    }}
+                  >
+                    <item.icon />
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
+                {staff.data?.staff ? (
+                  <DropdownMenuItem
+                    render={(menuProps) => {
+                      const { onClick, ...rest } = menuProps
+                      return (
+                        <a href={adminUrl()} {...rest} onClick={onClick}>
+                          {menuProps.children}
+                        </a>
+                      )
+                    }}
+                  >
+                    <ShieldCheck />
+                    Administración de odentIA
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={signOut}>
+                  <LogOut />
+                  Cerrar sesión
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </header>
+          {pathname !== "/" ? (
+            <nav aria-label="Volver" className="px-4 sm:px-6">
+              {clinicaOrigen ? (
+                <a href={tenantUrl(clinicaOrigen.slug, "/home", clinicaOrigen.product)} className={volver}>
+                  <ChevronLeft className="size-4" aria-hidden />
+                  {clinicaOrigen.organizationName}
+                </a>
+              ) : (
+                <RouterLink to="/" search={{ cambiar: 1 }} className={volver}>
+                  <ChevronLeft className="size-4" aria-hidden />
+                  Elige tu clínica
+                </RouterLink>
+              )}
+            </nav>
+          ) : null}
           <div className="flex min-w-0 flex-1 flex-col">
             <Outlet />
           </div>
-          <SideDockSlot />
         </div>
+        {/* Columna lateral del layout: los formularios del perfil se abren ahí
+            en ventana ancha, igual que en la plataforma. */}
+        <SideDockSlot />
       </SideDockProvider>
       {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
       <AccessLinkPasswordGate request={authFetch} />
