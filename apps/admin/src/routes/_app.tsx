@@ -8,7 +8,9 @@ import {
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, Outlet, useRouterState } from "@tanstack/react-router"
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
 import {
+  ArrowLeft,
   BookOpen,
   Building2,
   ListChecks,
@@ -104,12 +106,20 @@ function AdminLayout() {
         </div>
       }
       sidebarFooter={
-        <a
-          href={panelUrl()}
-          className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Mis organizaciones
-        </a>
+        // Un ítem del menú como los demás: con el menú en íconos queda la flecha y su globo, no el
+        // texto partido. Lleva al panel, otra app, así que es un enlace normal y no del router.
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Mis organizaciones"
+              className="h-10 text-muted-foreground [&>svg]:text-muted-foreground"
+              render={<a href={panelUrl()} />}
+            >
+              <ArrowLeft />
+              <span>Mis organizaciones</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       }
       onSignOut={async () => {
         await authClient.signOut()
