@@ -312,10 +312,15 @@ function Sidebar({
             onClick={() => setOpen(false)}
           />
         ) : null}
+        {/* Flotando, el menú va encima del botón que lo cierra: si no, ese botón (fijo, sobre toda la
+            ventana) se llevaba también los clics de los ítems y el menú se cerraba sin navegar. */}
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-2xl group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className={cn(
+            "flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-2xl group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border",
+            overlay && "relative z-30"
+          )}
         >
           {children}
         </div>
