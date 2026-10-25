@@ -188,9 +188,14 @@ export function createAdminCoreRoute(deps: CoreDeps) {
     const actor = adminContextOf(c)
     const identity = adminIdentityOf(c)
     const now = new Date()
-    const [binding, enrolled] = await Promise.all([
+    const [binding, enrolled, credential] = await Promise.all([
       getLiveSessionBinding(deps.ownerDb, identity.sessionId, now),
       hasStaffFactor(deps.ownerDb, actor.userId),
+      deps.ownerDb
+        .select({ id: account.id })
+        .from(account)
+        .where(and(eq(account.userId, actor.userId), eq(account.providerId, "credential")))
+        .limit(1),
     ])
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
     return runService(c, 200, async () => ({
@@ -200,6 +205,8 @@ export function createAdminCoreRoute(deps: CoreDeps) {
         email: session?.user.email ?? identity.email,
         image: session?.user.image ?? null,
       },
+      // Enrolar pide la contraseña solo a quien entra con ella (Google no tiene).
+      hasPassword: credential.length > 0,
       enrolled,
       // verified exige las tres: factor enrolado, prueba viva y credencial vigente
       // (getLiveSessionBinding ya mata pruebas de factores retirados).
