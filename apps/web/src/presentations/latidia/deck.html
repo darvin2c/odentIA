@@ -157,7 +157,8 @@ h1, h2, h3, p { margin: 0; }
 .bpm span { font-size: 30px; color: var(--on-2); letter-spacing: .06em; }
 @keyframes beat { 0% { transform: scale(1); } 12% { transform: scale(1.5); } 30%, 100% { transform: scale(1); } }
 
-.pulse-gl { -webkit-mask-image: radial-gradient(ellipse 70% 72% at 50% 50%, #000 62%, transparent 100%); mask-image: radial-gradient(ellipse 70% 72% at 50% 50%, #000 62%, transparent 100%); }
+/* El 3D se apaga hacia los bordes del recuadro: el piso de puntos no termina en un corte recto. */
+.pulse-gl { -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 80%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 80%, transparent 100%); }
 
 /* ===== 3 · Señales de alarma ===== */
 .phone.lph.short { height: 560px; }
