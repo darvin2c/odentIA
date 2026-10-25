@@ -445,25 +445,34 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
  * alcanzando, no hay saldo vencido.
  */
 async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const credit = sql`greatest(${patientCreditSql(orgId, sql`p.id`, sql`c.currency`)}, 0)`
+  // Primero lo que debe cada persona por moneda (lo aplicado se suma una sola
+  // vez, no concepto por concepto); lo que tiene a favor, una vez por persona.
+  const credit = sql`greatest(${patientCreditSql(orgId, sql`d.patient_id`, sql`d.currency`)}, 0)`
   const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number }>(sql`
-    select p.id as patient_id, pp.display_name as name, c.currency,
-           (sum(c.amount_cents - coalesce(a.applied, 0)) - ${credit})::int as owed, min(c.created_at) as since,
-           to_char(min(c.created_at), 'YYYY-MM-DD') as since_day,
-           count(*) over ()::int as total
-    from patient_charge c
-    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    left join lateral (
-      select sum(app.amount_cents)::int as applied
+    with applied as materialized (
+      select app.charge_id, sum(app.amount_cents) as applied
       from patient_payment_application app
-      where app.charge_id = c.id and app.organization_id = c.organization_id and app.voided_at is null
-    ) a on true
-    where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
-    group by p.id, pp.display_name, p.organization_id, c.currency
-    having min(c.created_at) < now() - make_interval(days => ${days})
-      and sum(c.amount_cents - coalesce(a.applied, 0)) > ${credit}
-      ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
-    order by min(c.created_at) asc
+      where app.organization_id = ${orgId} and app.voided_at is null
+      group by app.charge_id
+    ), debt as materialized (
+      select p.id as patient_id, pp.display_name as name, c.currency,
+             sum(c.amount_cents - coalesce(a.applied, 0)) as due, min(c.created_at) as since
+      from patient_charge c
+      join patient p on p.id = c.patient_id and p.organization_id = c.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      left join applied a on a.charge_id = c.id
+      where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
+      group by p.id, pp.display_name, p.organization_id, c.currency
+      having min(c.created_at) < now() - make_interval(days => ${days})
+        ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
+    ), owed as materialized (
+      select d.*, ${credit} as credit from debt d
+    )
+    select d.patient_id, d.name, d.currency, (d.due - d.credit)::int as owed, d.since,
+           to_char(d.since, 'YYYY-MM-DD') as since_day,
+           count(*) over ()::int as total
+    from owed d
+    where d.due > d.credit
+    order by d.since asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {

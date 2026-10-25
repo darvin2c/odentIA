@@ -196,7 +196,7 @@ export async function seedPortal(
     publicKey: createHash("sha256").update(`seed-pub:${seedCredentialId}`, "utf8").digest("base64url"),
     counter: 0,
     transports: ["internal"],
-    nickname: "Seed demo (revocada)",
+    nickname: "Celular anterior",
     createdAt: past,
     revokedAt: past,
     revokedBy: ownerUserId,
