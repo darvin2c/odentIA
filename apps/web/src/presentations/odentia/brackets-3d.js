@@ -1,5 +1,5 @@
-// Parte 5 en 3D: los corchetes de cada agente (los del [72] del logo, metálicos como en Precios) y el
-// caso de Rosa como un latido de la marca. El latido pasa de un agente a otro y cada uno se cierra sobre él.
+// Parte 4 en 3D: los corchetes de cada agente (las piezas de la marca: el diente de la portada y los
+// corchetes metálicos de Precios). La pieza de Lucía pasa de un agente a otro y cada uno se cierra sobre ella.
 import * as THREE from "three"
 
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -12,12 +12,12 @@ const AG = {
     role: "Agente de recepción",
     short: "recepción",
     c: "#4fc3d7",
-    why: "De <i>sophía</i>, sabiduría: sabe todo de tu consultorio y responde con tu tono.",
+    why: "De <i>sophía</i>, sabiduría: sabe todo de tu clínica y responde con tu tono.",
   },
   clio: {
     name: "Clío",
     role: "Agente clínico",
-    short: "consulta",
+    short: "clínica",
     c: "#a6f0d8",
     why: "La musa de la <i>historia</i>: escribe la historia clínica mientras atiendes.",
   },
@@ -26,74 +26,85 @@ const AG = {
     role: "Agente administrador",
     short: "administración",
     c: "#f5c46b",
-    why: "El gigante de los <i>cien ojos</i>: ve todo tu consultorio y no deja a nadie atrás.",
+    why: "El gigante de los <i>cien ojos</i>: ve toda tu clínica y no deja a nadie atrás.",
   },
 }
 const ORDER = ["sofi", "clio", "argos"]
 const STORY = [
   {
     ag: "sofi",
-    t: "mié 23:41",
+    t: "vie 22:47",
     kind: "chat",
-    ch: "WhatsApp · 23:41",
+    ch: "Instagram · 22:47",
     msgs: [
-      ["them", "¿Atienden mañana? Tengo fiebre y me duele la garganta"],
-      ["us", "Hola, Rosa. Mañana a las 09:00 con la Dra. Vela. La consulta cuesta S/ 80. ¿Te la agendo?"],
+      ["them", "¿Tienen cita el viernes? Me duele una muela"],
+      ["us", "Hola, Lucía. Tengo el viernes a las 16:30 con la Dra. Ana. ¿Te la agendo?"],
     ],
-    res: "Consulta · jue 09:00",
+    res: "Evaluación · vie 16:30",
     to: "Agenda",
-    line: "atendió a Rosa por WhatsApp y agendó su consulta",
+    line: "atendió a Lucía por Instagram y agendó su evaluación",
   },
   {
     ag: "clio",
-    t: "jue 09:18",
+    t: "vie 16:52",
     kind: "note",
-    ch: "En la consulta · Dra. Vela",
+    ch: "En la consulta · Dra. Ana",
     lines: [
-      ["Signos", "PA 118/76 · FC 96 · T 38,4"],
-      ["Diagnóstico", "CIE-10 · J03.9 · presuntivo"],
-      ["Descanso", "3 días, para firmar"],
+      ["Hallazgo", "Pieza 36, caries oclusal"],
+      ["Diagnóstico", "CIE-10 · K02.1"],
+      ["Plan", "Resina en pieza 36"],
     ],
-    human: "La Dra. Vela confirmó",
-    res: "Atención confirmada",
+    human: "La Dra. Ana confirmó",
+    res: "Nota confirmada",
     to: "Historia",
-    line: "escuchó la consulta y propuso cada bloque; la Dra. Vela confirmó",
+    line: "escuchó la consulta y dejó la nota lista; la Dra. Ana la confirmó",
   },
   {
     ag: "sofi",
-    t: "jue 09:31",
+    t: "vie 17:10",
     kind: "chat",
     ch: "WhatsApp",
-    msgs: [["us", "Rosa, te envío tu receta y tu descanso médico firmados. También están en tu enlace."]],
-    res: "Receta y descanso",
-    to: "WhatsApp",
-    line: "le envió su receta y su descanso médico",
+    msgs: [["us", "Te envío tu presupuesto: resina en pieza 36. ¿Lo revisas con calma?"]],
+    res: "Presupuesto enviado",
+    to: "Presupuestos",
+    line: "le envió el presupuesto por WhatsApp",
   },
   {
     ag: "argos",
-    t: "jue 29 · 08:00",
+    t: "vie 09:00",
     kind: "alert",
-    big: "Control",
-    sub: "a los 7 días, como lo indicó la Dra. Vela",
-    res: "Le toca su control",
-    to: "Avisar los controles",
-    line: "vio que a Rosa le tocaba su control",
+    big: "7 días",
+    sub: "sin respuesta al presupuesto",
+    pass: "sofi",
+    res: "7 días sin respuesta",
+    to: "Le pasa el caso a Sofi",
+    line: "vio 7 días sin respuesta y le pasó el caso a Sofi",
   },
   {
-    ag: "argos",
-    t: "jue 29 · 08:01",
+    ag: "sofi",
+    t: "vie 09:02",
     kind: "chat",
     ch: "WhatsApp",
     msgs: [
-      ["us", "Hola, Rosa. Te toca tu control con la Dra. Vela. ¿Te agendo hoy a las 16:00?"],
-      ["them", "Sí, gracias"],
+      ["us", "Hola, Lucía. ¿Te ayudo a agendar tu tratamiento?"],
+      ["them", "Sí, el jueves en la tarde"],
     ],
-    res: "Control · jue 16:00",
+    res: "Tratamiento · jue 17:30",
     to: "Agenda",
-    line: "la invitó a su control y Rosa lo agendó",
+    line: "retomó el presupuesto y Lucía agendó su tratamiento",
+  },
+  {
+    ag: "argos",
+    t: "jue 18:40",
+    kind: "alert",
+    big: "6 meses",
+    sub: "su control queda listo para avisarle",
+    res: "Control · abril",
+    to: "Mensajes",
+    line: "dejó listo su control de los 6 meses",
   },
 ]
-const END = "Rosa volvió a su control. Tu equipo intervino una vez: para confirmar lo clínico."
+const END = "Lucía empezó su tratamiento. Tu equipo intervino una vez: para confirmar lo clínico."
 const STOP = Symbol("stop")
 const el = (tag, cls, html) => {
   const d = document.createElement(tag)
@@ -121,31 +132,51 @@ function piece(s) {
 }
 
 /* ===== Piezas de la marca ===== */
-// El latido de Rosa: un latido de la línea de la marca (el SVG de la web, 600 × 80), de 1,5 de ancho.
-function beatPath() {
-  const path = new THREE.CurvePath()
-  const P = (x, y) => new THREE.Vector3(((x - 92) / 120) * 1.5, ((50 - y) / 80) * 1.4 - 0.18, 0)
-  let last = P(32, 50)
-  const to = (x, y) => {
-    const p = P(x, y)
-    path.add(new THREE.LineCurve3(last, p))
-    last = p
+// El diente de la portada (packages/brand-scene): supercuádrica con cúspides y raíz más angosta.
+function toothGeo(kind) {
+  const LAT = 30,
+    LON = 36,
+    E = 3.0,
+    P = [],
+    I = []
+  const sm = (a, b, x) => {
+    const u = Math.min(1, Math.max(0, (x - a) / (b - a)))
+    return u * u * (3 - 2 * u)
   }
-  const wave = (cx, cy, x, y) => {
-    const p = P(x, y)
-    path.add(new THREE.QuadraticBezierCurve3(last, P(cx, cy), p))
-    last = p
+  for (let i = 0; i <= LAT; i++) {
+    const th = (i / LAT) * Math.PI
+    for (let j = 0; j <= LON; j++) {
+      const ph = (j / LON) * Math.PI * 2
+      const dx = Math.sin(th) * Math.cos(ph),
+        dy = Math.cos(th),
+        dz = Math.sin(th) * Math.sin(ph)
+      const r = (Math.abs(dx) ** E + Math.abs(dy) ** E + Math.abs(dz) ** E) ** (-1 / E)
+      let x = dx * r,
+        y = dy * r,
+        z = dz * r
+      const root = sm(-0.1, 1, y),
+        occ = sm(-0.45, -1, y)
+      const tp = (1 - 0.32 * root ** 1.3) * (1 + 0.06 * Math.exp(-(((y + 0.35) / 0.35) ** 2)))
+      x *= tp
+      z *= tp
+      if (kind === "inc") z *= 1 - 0.3 * occ
+      if (kind === "can") y -= 0.24 * occ * Math.exp(-(x * x + z * z) / 0.18)
+      if (kind === "pre") y += 0.13 * occ * Math.exp(-(z * z) / 0.05)
+      if (kind === "mol") y += 0.17 * occ * Math.exp(-(x * x + z * z) / 0.14)
+      P.push(x, y, z)
+    }
   }
-  to(40, 50)
-  wave(48, 42, 56, 50)
-  to(76, 50)
-  to(84, 58)
-  to(92, 8)
-  to(100, 72)
-  to(108, 50)
-  to(128, 50)
-  wave(142, 36, 156, 50)
-  return path
+  for (let i = 0; i < LAT; i++)
+    for (let j = 0; j < LON; j++) {
+      const a = i * (LON + 1) + j,
+        b = a + LON + 1
+      I.push(a, b, a + 1, b, b + 1, a + 1)
+    }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3))
+  g.setIndex(I)
+  g.computeVertexNormals()
+  return g
 }
 // La supercuádrica de los corchetes de Precios (exponente 10).
 function superGeo(E = 10, LAT = 22, LON = 28) {
@@ -185,12 +216,15 @@ function superGeo(E = 10, LAT = 22, LON = 28) {
 }
 const VS = `varying vec3 vN; varying vec3 vW; varying float vY;
 void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(transpose(inverse(modelMatrix))) * normal); vY = position.y; gl_Position = projectionMatrix * viewMatrix * w; }`
-// El latido: un trazo de luz lo recorre a 72 por minuto; se tiñe del agente que lo tiene.
-const BEAT_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
-const BEAT_FS = `varying vec2 vUv; uniform vec3 uTint; uniform float uLit; uniform float uGlow; uniform float uHead;
-void main(){ float d = uHead - vUv.x; if (d < 0.0) d += 1.0; float tail = exp(-d * 4.0);
-vec3 base = mix(vec3(0.83,0.78,0.96), uTint, uLit);
-vec3 col = base * (0.45 + 1.1 * tail) + vec3(1.0) * pow(tail, 6.0) * 0.5 + uTint * uGlow;
+// Sombreado marfil de las 32 piezas; la luz de oclusión baja hacia las raíces.
+const TOOTH_FS = `varying vec3 vN; varying vec3 vW; varying float vY; uniform vec3 uTint; uniform float uLit; uniform float uGlow;
+void main(){ vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n; vec3 v = normalize(cameraPosition - vW);
+vec3 l1 = normalize(vec3(0.3,0.9,0.6)); vec3 l2 = normalize(vec3(-0.8,-0.2,-0.4));
+float w1 = dot(n,l1)*0.5+0.5; float d1 = max(dot(n,l1),0.0); float d2 = max(dot(n,l2),0.0);
+float fr = pow(1.0-max(dot(n,v),0.0),3.0); vec3 h = normalize(l1+v); float sp = pow(max(dot(n,h),0.0),40.0);
+vec3 base = vec3(0.94,0.93,0.89); float ao = mix(1.0,0.7,smoothstep(0.15,1.0,vY));
+vec3 col = base*(0.16+0.46*w1+0.3*d1)*ao + vec3(0.31,0.76,0.84)*d2*0.14 + vec3(0.85,0.95,1.0)*fr*0.26 + vec3(1.0)*sp*0.24;
+col = mix(col, col*0.3+uTint*0.78, uLit*0.6); col = mix(col, uTint*1.2+vec3(0.12), uGlow);
 gl_FragColor = vec4(col, 1.0); }`
 const BRACKET_FS = `varying vec3 vN; varying vec3 vW; varying float vY; uniform vec3 uB; uniform float uG; uniform vec3 uGC;
 void main(){ vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n; vec3 v = normalize(cameraPosition - vW); vec3 r = reflect(-v, n);
@@ -343,17 +377,21 @@ function build(layer) {
     LAB[k].style.setProperty("--c", AG[k].c)
     CH[k] = anchor(POS[k].clone().add(V(0, -1.05, 0)), el("div", "p4-chips"))
   }
-  // El caso de Rosa es un latido de la marca, que late a 72 por minuto.
-  const beatMat = new THREE.ShaderMaterial({
-    vertexShader: BEAT_VS,
-    fragmentShader: BEAT_FS,
-    uniforms: { uTint: { value: lin(AG.sofi.c) }, uLit: { value: 0 }, uGlow: { value: 0 }, uHead: { value: 0 } },
+  // La muela de Lucía, con el sombreado marfil de la marca.
+  // La pieza de Lucía es un premolar de la portada, con sus mismas proporciones y de pie (corona arriba).
+  const toothMat = new THREE.ShaderMaterial({
+    vertexShader: VS,
+    fragmentShader: TOOTH_FS,
+    side: THREE.DoubleSide,
+    uniforms: { uTint: { value: lin(AG.sofi.c) }, uLit: { value: 0 }, uGlow: { value: 0 } },
   })
-  const rosa = new THREE.Mesh(new THREE.TubeGeometry(beatPath(), 260, 0.055, 8, false), beatMat)
-  scene.add(rosa)
-  const rosaLab = anchor(V(0, 0, 0), el("div", "p4-lab small", `<b>Rosa</b><span>su caso</span>`))
-  rosaLab.style.setProperty("--c", "#f1f5f9")
-  const rosaA = anchors[anchors.length - 1]
+  const lucia = new THREE.Mesh(toothGeo("pre"), toothMat)
+  const S = 1.5
+  lucia.scale.set(0.46 * 0.5 * S, -0.82 * 0.5 * S, 0.54 * 0.5 * S)
+  scene.add(lucia)
+  const lucLab = anchor(V(0, 0, 0), el("div", "p4-lab small", `<b>Lucía</b><span>su caso</span>`))
+  lucLab.style.setProperty("--c", "#f1f5f9")
+  const lucA = anchors[anchors.length - 1]
   const halo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: glowTex,
@@ -370,30 +408,29 @@ function build(layer) {
   const trails = []
   let at = null
   ctl.updaters.push((t) => {
-    rosa.rotation.y = reduce ? 0 : Math.sin(t * 0.5) * 0.3
-    rosa.rotation.x = 0
-    beatMat.uniforms.uHead.value = reduce ? 0.3 : (t % (60 / 72)) / (60 / 72)
-    halo.position.copy(rosa.position)
-    rosaA.v.copy(rosa.position).add(V(0, -0.85, 0))
-    rosaLab.style.opacity = at ? "0" : "1"
+    lucia.rotation.y = reduce ? 0.5 : 0.5 + Math.sin(t * 0.5) * 0.6
+    lucia.rotation.x = 0
+    halo.position.copy(lucia.position)
+    lucA.v.copy(lucia.position).add(V(0, -0.85, 0))
+    lucLab.style.opacity = at ? "0" : "1"
   })
 
   async function moveTo(k, ms = 1300, lift = 1.6) {
-    const from = rosa.position.clone(),
+    const from = lucia.position.clone(),
       to = POS[k].clone()
     if (at) {
       BR[at].target = 2.25
       BR[at].glowTarget = 0.15
     }
     const curve = arc(from, to, lift)
-    await tween(ms, (e) => rosa.position.copy(curve.getPoint(e)))
+    await tween(ms, (e) => lucia.position.copy(curve.getPoint(e)))
     trails.push(trail(curve, AG[k].c))
     at = k
     BR[k].target = 1.5
     BR[k].glowTarget = 1
-    beatMat.uniforms.uTint.value = lin(AG[k].c)
+    toothMat.uniforms.uTint.value = lin(AG[k].c)
     await tween(400, (e) => {
-      beatMat.uniforms.uLit.value = e * 0.75
+      toothMat.uniforms.uLit.value = e * 0.75
     })
     halo.material.color.set(AG[k].c)
     halo.material.opacity = 0.45
@@ -430,9 +467,9 @@ function build(layer) {
       LAB[k].className = "p4-lab hide"
       CH[k].innerHTML = ""
     }
-    rosa.position.copy(START)
-    beatMat.uniforms.uLit.value = 0
-    beatMat.uniforms.uGlow.value = 0
+    lucia.position.copy(START)
+    toothMat.uniforms.uLit.value = 0
+    toothMat.uniforms.uGlow.value = 0
     halo.material.opacity = 0
     at = null
     for (const n of ov.querySelectorAll(".p4-pass")) unanchor(n)
@@ -443,7 +480,7 @@ function build(layer) {
     try {
       reset()
       setNow(
-        `<span class="who">Tus agentes</span><p class="txt">Tres agentes de IA trabajan en tu consultorio, alrededor de cada paciente.</p>`,
+        `<span class="who">Tus agentes</span><p class="txt">Tres agentes de IA trabajan en tu clínica, alrededor de cada paciente.</p>`,
         "#f1f5f9",
       )
       await sleep(1400)
@@ -466,11 +503,10 @@ function build(layer) {
           `<span class="who">${s.t} · ${a.name}</span><p class="txt"><b>${a.name}</b> ${s.line}.</p>${piece(s)}`,
           a.c,
         )
-        // Si el mismo agente sigue con el caso, sus corchetes solo vuelven a apretarse.
-        if (at === s.ag) {
-          BR[at].target = 1.35
+        if (i === 4) {
+          BR.sofi.target = 1.35
           await sleep(400)
-          BR[at].target = 1.5
+          BR.sofi.target = 1.5
         } else await moveTo(s.ag)
         await sleep(500)
         chip(s.ag, s.res)
@@ -488,12 +524,12 @@ function build(layer) {
         await sleep(1600)
       }
       if (at) BR[at].target = 2.25
-      const curve = arc(rosa.position.clone(), V(0, -0.9, 2.6), 1.2)
-      await tween(1300, (e) => rosa.position.copy(curve.getPoint(e)))
+      const curve = arc(lucia.position.clone(), V(0, -0.9, 2.6), 1.2)
+      await tween(1300, (e) => lucia.position.copy(curve.getPoint(e)))
       for (const k of ORDER) BR[k].glowTarget = 0.7
-      beatMat.uniforms.uTint.value = lin("#a6f0d8")
+      toothMat.uniforms.uTint.value = lin("#a6f0d8")
       await tween(700, (e) => {
-        beatMat.uniforms.uGlow.value = e * 0.3
+        toothMat.uniforms.uGlow.value = e * 0.3
       })
       setNow(`<span class="who">Fin del recorrido</span><p class="txt">${END}</p>`, "#f1f5f9")
       await sleep(8000)
@@ -514,16 +550,16 @@ function build(layer) {
       a.node.style.top = `${(((1 - v3.y) / 2) * H).toFixed(1)}px`
     }
   }
-  const fit = () => {
+  const fitRenderer = () => {
     const st = layer.closest(".stage")
     const k = st ? st.getBoundingClientRect().width / 1920 : 1
     renderer.setPixelRatio(Math.max(0.75, Math.min(2, (window.devicePixelRatio || 1) * k)))
     renderer.setSize(W, H, false)
   }
-  addEventListener("resize", fit)
+  addEventListener("resize", fitRenderer)
   return {
     start() {
-      fit()
+      fitRenderer()
       ctl.active = true
       requestAnimationFrame(tick)
       play()

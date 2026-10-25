@@ -11,7 +11,8 @@
       "!**/build",
       "!**/.turbo",
       "!**/coverage",
-      "!**/assets/presentations/**/source.html"
+      "!**/apps/web/src/presentations/*/deck.js",
+      "!**/apps/web/src/presentations/*/deck.html"
     ]
   },
   "formatter": {
