@@ -1,0 +1,204 @@
+---
+// /agenda-medica de latidIA (lienzo de la web de latidIA, tablero «Agenda»): la portada con la
+// agenda del día por sala, los controles que se repiten con la captura real de la pestaña Plan,
+// Argos invitando a volver, los recordatorios, las preguntas y el cierre.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf } from "../../../lib/pricing"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import DayAgenda from "./DayAgenda"
+import RecurringControl from "./RecurringControl"
+import ReturnInvite from "./ReturnInvite"
+
+const title = "Agenda médica para tu consultorio, por sala y por médico"
+const description =
+  "Agenda médica para consultorios: citas por sala y por médico, quién llegó y quién espera, recordatorios por WhatsApp, controles que se repiten y un agente que agenda con el sí del paciente."
+const cta = ctaOf(Astro.locals.pricing)
+const gift = giftOf(Astro.locals.pricing)
+const trail: [string, string][] = [["Inicio", "/"], ["Agenda médica", "/agenda-medica"]]
+
+const reminders = [
+  { title: "Antes de cada cita", text: "Un recordatorio por su canal, con la hora, el médico y la dirección." },
+  { title: "Cambia o cancela sola", text: "Respondiendo el mensaje o desde Su enlace, y el horario se libera para otro.", link: true },
+  { title: "Por sala y por médico", text: "Vista de día, de semana o en lista; un médico o todos; una sede o varias." },
+  { title: "Cada servicio con quien lo atiende", text: "La agenda ofrece pediatría a quien atiende pediatría, en sus horarios libres." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿La agenda es por sala o por médico?",
+    a: "Por las dos. Cada cita ocupa una sala y tiene un médico; la ves por día, por semana o en lista, con todos los médicos o con uno, y en una sede o en varias.",
+  },
+  {
+    q: "¿Sofi puede agendar sola?",
+    a: "Sí, en los horarios libres de quien atiende ese servicio y siempre con el sí del paciente. Si prefieres, la apagas y Sofi le envía Su enlace para que elija la hora.",
+  },
+  {
+    q: "¿Los controles se reservan solos?",
+    a: "Quedan indicados con su fecha. Argos invita al paciente a reservar a tiempo y la cita se reserva con su sí. Un control se completa contra una atención finalizada.",
+  },
+  {
+    q: "¿Qué pasa si un paciente no viene?",
+    a: "Argos le escribe para ofrecerle otro horario. Si no hay cómo escribirle, deja una tarea de llamada para recepción.",
+  },
+  {
+    q: "¿Necesito un presupuesto para agendar?",
+    a: "No. El presupuesto es opcional: lo indicado queda aceptado al indicarlo y se puede agendar enseguida.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="sp">
+    <section class="hero sp-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap sp-hero-in">
+        <div class="sp-copy">
+          <span class="tag tag-d sp-tag rise">[ Agenda y controles ]</span>
+          <h1 class="sp-h1 rise d1">Agenda médica para tu consultorio, <span class="acc">por sala y por médico.</span></h1>
+          <p class="sp-lead rise d2">Ves quién llegó, quién espera y a quién estás atendiendo. Sofi agenda con el sí del paciente y los controles que se repiten quedan indicados solos.</p>
+          <div class="sp-ctas rise d3">
+            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+            <a class="btn btn-g" href="#controles">Ver los controles</a>
+          </div>
+        </div>
+        <div class="sp-demo rise d2">
+          <DayAgenda client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="sp-sec" id="controles">
+      <div class="wrap sp-in">
+        <div class="sp-head">
+          <span class="tag sp-tag">[ Controles que se repiten ]</span>
+          <h2 class="sp-h2">Luis vuelve cada 3 meses sin que nadie lo anote.</h2>
+          <p class="sp-p">Indicas el control una vez, cada 1, 3, 6 o 12 meses. Al completarlo queda indicado el siguiente, hasta que decidas dejar de repetirlo. Argos lo invita a reservar a tiempo.</p>
+        </div>
+        <div class="sp-split">
+          <div class="sp-ctl">
+            <RecurringControl client:visible />
+          </div>
+          <figure class="sp-shot">
+            <div class="sp-frame">
+              <img
+                src="/img/latidia/control-repite.jpg"
+                width="1280"
+                height="1342"
+                loading="lazy"
+                decoding="async"
+                alt="Pestaña Plan de un paciente: qué sigue, control de presión arterial por reservar, presupuesto opcional y el control que se repite cada 3 meses con Reservar, Completar control y Dejar de repetir."
+              />
+            </div>
+            <figcaption>El plan de un paciente: el presupuesto es opcional y no hace falta para agendar. Captura real del producto, con datos de prueba.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="sp-sec white">
+      <div class="wrap sp-argos">
+        <div class="sp-argos-copy">
+          <span class="tag sp-tag argos">[ Argos · invitar a volver ]</span>
+          <h2 class="sp-h2 s">A los 12 meses sin venir, Argos la invita a volver.</h2>
+          <p class="sp-p s">Le escribe por su canal, dentro de tu horario de recontacto. Si no hay cómo escribirle, le deja a recepción una tarea de llamada. A quien faltó o canceló le ofrece otro horario.</p>
+          <a class="sp-link" href="/agentes/administrador">Conoce a Argos</a>
+        </div>
+        <div class="sp-argos-demo">
+          <ReturnInvite client:visible />
+        </div>
+      </div>
+    </section>
+
+    <section class="sp-sec">
+      <div class="wrap sp-in">
+        <div class="sp-head">
+          <span class="tag sp-tag">[ Recordatorios ]</span>
+          <h2 class="sp-h2">Menos citas perdidas, sin llamar a nadie.</h2>
+        </div>
+        <div class="sp-grid">
+          {reminders.map((item) => (
+            <div class="sp-card">
+              <h3>{item.title}</h3>
+              {item.link ? (
+                <p>Respondiendo el mensaje o desde <a href="/portal-del-paciente">Su enlace</a>, y el horario se libera para otro.</p>
+              ) : (
+                <p>{item.text}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <div class="sp-faq">
+      <Faq items={faq} />
+    </div>
+    <CtaBand title="Una agenda que se llena y se recuerda sola.">
+      <Fragment slot="text">
+        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
+        Sin tarjeta y sin límite de médicos, salas ni usuarios.
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  /* El fondo alterno y las líneas de latidIA (lienzo: #f7f5fc y #e9e2f7), no los grises de odentIA. */
+  .sp { --lat-soft: #f7f5fc; --lat-line: #e9e2f7; background: var(--paper); }
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 56 de aire, como en el tablero. */
+  .sp-hero { padding: 144px 0 96px; }
+  .sp-hero-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .sp-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .sp-demo { flex: 1.35 1 560px; min-width: 0; }
+  .sp-tag { font-size: 13px; letter-spacing: .12em; }
+  .sp-h1 { font-size: clamp(36px, 3.8vw, 50px); line-height: 1.03; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .sp-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .sp-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  .sp-sec { padding: 96px 0; background: var(--lat-soft); }
+  .sp-sec.white { background: var(--paper); }
+  .sp-in { display: flex; flex-direction: column; gap: 40px; }
+  .sp-head { display: flex; flex-direction: column; gap: 14px; max-width: 880px; }
+  .sp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .sp-h2.s { font-size: clamp(32px, 3.6vw, 44px); }
+  .sp-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .sp-p.s { font-size: 17px; }
+  .sp-split { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .sp-ctl { flex: 1.2 1 480px; min-width: 0; }
+  .sp-shot { flex: 1 1 400px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  /* La captura es la pestaña entera; se ve su parte de abajo, la del presupuesto y los controles. */
+  .sp-frame { border-radius: 20px; border: 1px solid var(--lat-line); box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); overflow: hidden; aspect-ratio: 1280 / 640; }
+  .sp-frame img { width: 100%; height: 100%; object-fit: cover; object-position: bottom; }
+  .sp-shot figcaption { font-size: 13px; color: var(--soft); }
+
+  .sp-argos { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .sp-argos-copy { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .sp-argos-demo { flex: 1 1 440px; min-width: 0; }
+  .sp-tag.argos { color: #9a6a12; }
+  .sp-link { font-weight: 700; align-self: flex-start; }
+
+  .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+  .sp-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .sp-card h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+  .sp-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .sp-card a { font-weight: 700; }
+
+  .sp-faq { background: var(--paper); padding-bottom: 8px; }
+  .sp-faq :global(details.q) { border-bottom-color: var(--lat-line); }
+
+  @media (max-width: 720px) {
+    .sp-hero { padding: 104px 0 56px; }
+    .sp-hero-in { gap: 32px; }
+    .sp-lead { font-size: 17px; }
+    .sp-ctas :global(.btn) { flex: 1 1 100%; }
+    .sp-sec { padding: 64px 0; }
+    .sp-in { gap: 28px; }
+    .sp-p { font-size: 16px; }
+    .sp-split, .sp-argos { gap: 24px; }
+    .sp-ctl, .sp-shot, .sp-argos-copy, .sp-argos-demo, .sp-demo, .sp-copy { flex-basis: 100%; }
+  }
+</style>

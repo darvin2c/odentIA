@@ -1,0 +1,342 @@
+---
+// /historia-clinica-electronica, solo de latidIA (lienzo de la web de latidIA, tablero «Historia»):
+// la ficha de Luis con su presión en el tiempo, los signos vitales, el examen por 10 sistemas, los
+// antecedentes y la lista de problemas, la atención con su firma, las especialidades con su código
+// de la OMS, las preguntas y el cierre. Las capturas son de la app, con datos de prueba.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { days, giftOf, shownPlan } from "../../../lib/pricing"
+import { WORDS } from "../../../lib/product"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import ExamDemo from "./ExamDemo"
+import PatientChart from "./PatientChart"
+import SignDemo from "./SignDemo"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const plan = shownPlan(pricing)
+const gift = giftOf(pricing)
+const founder = plan !== null && plan === pricing.founders
+
+const path = "/historia-clinica-electronica"
+const title = "Historia clínica electrónica para consultorio médico"
+const description =
+  "Historia clínica electrónica para tu consultorio médico: antecedentes, signos vitales en el tiempo con su IMC, examen físico por 10 sistemas, diagnóstico CIE-10 o CIE-11 y cada atención firmada con tu colegiatura."
+const trail: [string, string][] = [["Inicio", "/"], ["Historia clínica electrónica", path]]
+
+const history = [
+  { title: "Embarazo y lactancia", text: "Con la fecha en que se registró. La receta lo recuerda al recetar." },
+  { title: "Gineco-obstétricos", text: "Última regla, método anticonceptivo, embarazos, partos y cesáreas." },
+  { title: "Hábitos", text: "Tabaco con los cigarrillos al día, alcohol y actividad física." },
+  { title: "Vacunas", text: "Las que la persona cuenta, escritas tal cual." },
+  { title: "Alergias", text: "«No tiene alergias» y «no se le preguntó» no son lo mismo, y así se ven." },
+  { title: "Lista de problemas", text: "En el Resumen: lo que sigue activo, como un embarazo o un diagnóstico, hasta que se resuelve." },
+]
+
+const blocks = [
+  ["Consulta", "motivo y lo que cuenta"],
+  ["Examen físico", "signos vitales y los 10 sistemas"],
+  ["Diagnóstico", "CIE-10 o CIE-11, presuntivo o definitivo"],
+  ["Procedimientos", "una nebulización, un inyectable"],
+  ["Plan y controles", "lo indicado y el próximo control"],
+  ["Documentos", "receta, descanso, órdenes"],
+  ["Evolución", "pronóstico e indicaciones"],
+]
+
+const specialties = ["Medicina general", "Medicina familiar", "Medicina interna", "Pediatría", "Ginecología y obstetricia"]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Puedo dictar en vez de escribir?",
+    a: "Sí. Con Clío dictas la consulta y ella propone cada bloque: motivo, signos vitales, examen, diagnóstico con su código e indicaciones. Nada entra a la historia hasta que lo confirmas. También puedes escribir.",
+  },
+  {
+    q: "¿Se puede corregir una atención firmada?",
+    a: "No se cambia. Lo que falte o haya que aclarar va en una adenda, con su fecha y quién la escribió. Lo firmado queda como estaba.",
+  },
+  {
+    q: "¿Quién puede ver la historia clínica?",
+    a: "Quien atiende, con los permisos que le das. Recepción y caja ven lo que necesitan para su trabajo, no la historia. Sofi tampoco la ve.",
+  },
+  {
+    q: "¿Puedo ver los signos vitales en una tabla?",
+    a: "Sí. «Ver como tabla» muestra cada medición con su fecha; «Ver los gráficos» vuelve a los gráficos.",
+  },
+  {
+    q: "¿Sirve para varias especialidades?",
+    a: "Sí: medicina general, familiar, interna, pediatría y ginecología y obstetricia, cada una con quién la atiende.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <section class="hero rh">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap rh-in">
+      <div class="rh-copy">
+        <span class="tag tag-d rise">[ Historia clínica ]</span>
+        <h1 class="rh-h1 rise d1">La historia clínica electrónica de tu consultorio médico, <span class="acc">con los signos vitales en el tiempo.</span></h1>
+        <p class="rh-lead rise d2">Antecedentes, examen por sistemas, diagnóstico con su código y cada control en orden. Abres la ficha de Luis y ves cómo le fue bajando la presión, sin buscar en papeles.</p>
+        <div class="rh-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="/agentes/asistente-clinico">Dicta con Clío</a>
+        </div>
+      </div>
+      <div class="rh-card rise d2">
+        <PatientChart client:load />
+      </div>
+    </div>
+  </section>
+
+  <section class="rs white">
+    <div class="wrap rs-in">
+      <div class="split-head">
+        <div class="head">
+          <span class="tag">[ Signos vitales ]</span>
+          <h2 class="rs-h2">Cada medición queda en su gráfico.</h2>
+        </div>
+        <p class="rs-p">Presión arterial sistólica y diastólica, peso, talla, perímetro cefálico y glucosa capilar. Lo que registras en una atención aparece aquí, con la fecha y quién lo midió. El IMC se calcula solo.</p>
+      </div>
+      <div class="vitals-shots">
+        <figure class="shot wide">
+          <img
+            src="/img/latidia/signos-vitales.jpg"
+            width="1280"
+            height="1055"
+            loading="lazy"
+            decoding="async"
+            alt="Pestaña Signos vitales de Rosa Paredes: gráfico de presión arterial y de peso, y la última medición con su IMC."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+        <figure class="shot phone">
+          <div class="frame crop">
+            <img
+              src="/img/latidia/signos-vitales-telefono.jpg"
+              width="390"
+              height="1454"
+              loading="lazy"
+              decoding="async"
+              alt="Los mismos signos vitales en el teléfono, uno debajo del otro."
+            />
+          </div>
+          <figcaption>En el teléfono. Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="rs alt">
+    <div class="wrap rs-in">
+      <div class="head narrow">
+        <span class="tag">[ Examen físico ]</span>
+        <h2 class="rs-h2">Diez sistemas. Lo que no examinaste no pasa por normal.</h2>
+        <p class="rs-lead">Marcas cada sistema «Sin alteraciones» o «Con hallazgos». Lo que no marcas queda escrito como «No examinado», así quien lea la historia sabe qué miraste y qué no.</p>
+      </div>
+      <ExamDemo client:visible />
+      <figure class="shot">
+        <div class="frame crop tall">
+          <img
+            src="/img/latidia/examen.jpg"
+            width="1280"
+            height="1583"
+            loading="lazy"
+            decoding="async"
+            alt="Atención de Rosa Paredes con el panel Examen físico abierto: cada sistema con Sin alteraciones o Con hallazgos, y el cierre de la atención."
+          />
+        </div>
+        <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="rs white">
+    <div class="wrap rs-in">
+      <div class="head narrow">
+        <span class="tag">[ Antecedentes ]</span>
+        <h2 class="rs-h2">Lo que necesitas saber antes de recetar, a la vista.</h2>
+      </div>
+      <div class="cards">
+        {history.map((item) => (
+          <div class="card-l">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+      <div class="pair">
+        <figure class="shot">
+          <div class="frame crop ratio">
+            <img
+              src="/img/latidia/antecedentes.jpg"
+              width="1280"
+              height="840"
+              loading="lazy"
+              decoding="async"
+              alt="Pestaña Antecedentes: alergias sin preguntar, condiciones, medicación vigente y antecedentes médicos con embarazo, hábitos y vacunas."
+            />
+          </div>
+          <figcaption>Antecedentes. Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="frame crop ratio">
+            <img
+              src="/img/latidia/resumen.jpg"
+              width="1280"
+              height="1432"
+              loading="lazy"
+              decoding="async"
+              alt="Resumen de Rosa Paredes: atención en curso, alergias y alertas, lista de problemas con el embarazo, última atención y próxima cita."
+            />
+          </div>
+          <figcaption>Resumen con la lista de problemas. Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="rs alt">
+    <div class="wrap visit">
+      <div class="visit-copy">
+        <span class="tag">[ La atención ]</span>
+        <h2 class="rs-h2">De la consulta a la firma, en una sola pantalla.</h2>
+        <p class="rs-p">Agregas solo los bloques que ocurrieron. Se guarda solo mientras atiendes. Si prefieres hablar, <a href="/agentes/asistente-clinico">Clío</a> prepara cada bloque de tu dictado y tú lo confirmas.</p>
+        <ol class="steps">
+          {blocks.map(([name, text], i) => (
+            <li>
+              <span class="n">{String(i + 1).padStart(2, "0")}</span>
+              <span><b>{name}</b> <span class="muted">· {text}</span></span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <div class="visit-demo">
+        <SignDemo client:visible />
+      </div>
+    </div>
+  </section>
+
+  <section class="rs white">
+    <div class="wrap spec">
+      <div class="spec-copy">
+        <span class="tag">[ Especialidades y códigos ]</span>
+        <h2 class="rs-h2 sm">Para el consultorio de uno o de varias especialidades.</h2>
+        <p class="rs-p">Cada especialidad con quién la atiende: la agenda ofrece cada servicio a quien atiende su especialidad. Los diagnósticos llevan su código de la OMS, CIE-10 o CIE-11, el que use tu país.</p>
+        <ul class="chips">
+          {specialties.map((name) => <li>{name}</li>)}
+        </ul>
+        <div class="dx">
+          <span class="code">J03.9</span>
+          <span><b>Amigdalitis aguda</b> <span class="muted">· presuntivo</span></span>
+        </div>
+      </div>
+      <figure class="shot spec-shot">
+        <img
+          src="/img/latidia/especialidades.jpg"
+          width="1440"
+          height="900"
+          loading="lazy"
+          decoding="async"
+          alt="Configuración de especialidades: ginecología y obstetricia, medicina familiar, general, interna y pediatría, con quién atiende cada una."
+        />
+        <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <div class="faqwrap"><Faq items={faq} /></div>
+
+  <CtaBand title="Tu historia clínica, en orden desde la primera consulta.">
+    <Fragment slot="text">
+      {gift ? (
+        founder ? (
+          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, salas ni usuarios.</>
+        ) : (
+          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, salas ni usuarios.</>
+        )
+      ) : (
+        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, salas ni usuarios.`
+      )}
+    </Fragment>
+  </CtaBand>
+</Base>
+
+<style>
+  /* La cabecera va encima, absoluta: 88 px suyos y 64 de aire, como en el tablero. */
+  .rh { padding: 152px 0 96px; }
+  .rh-in { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .rh-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .rh-h1 { font-size: clamp(36px, 3.8vw, 50px); line-height: 1.03; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .rh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .rh-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .rh-card { flex: 1.5 1 620px; min-width: 0; }
+
+  /* Secciones alternas, blanco y el lila muy claro de latidIA. */
+  .rs { padding: 96px 0; }
+  .rs.white { background: var(--paper); }
+  .rs.alt { background: #f7f5fc; }
+  .rs-in { display: flex; flex-direction: column; gap: 40px; }
+  .head { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .head.narrow { max-width: 860px; }
+  .split-head { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-end; }
+  .split-head .head { flex: 1 1 460px; }
+  .rs-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .rs-h2.sm { font-size: clamp(32px, 3.6vw, 44px); }
+  /* El texto al lado del título solo crece en la cabecera partida; en columna, flex-basis sería su alto. */
+  .split-head .rs-p { flex: 1 1 380px; }
+  .rs-p { min-width: 0; font-size: 17px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .rs-lead { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .muted { color: var(--muted); }
+
+  /* Capturas con marco: borde lila suave, radio y sombra; la nota debajo. */
+  .shot { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .shot > img, .frame { width: 100%; border-radius: 20px; border: 1px solid #e9e2f7; box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); background: #f7f7fb; }
+  .shot > img { height: auto; }
+  .frame { overflow: hidden; }
+  .frame img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .frame.tall { max-height: 720px; }
+  .frame.ratio { aspect-ratio: 1280 / 840; }
+  .shot figcaption { font-size: 13px; color: var(--soft); }
+  .vitals-shots { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .shot.wide { flex: 2.4 1 560px; }
+  .shot.phone { flex: 1 1 220px; max-width: 300px; margin: 0 auto; }
+  .shot.phone .frame { border-radius: 22px; max-height: 640px; }
+  .pair { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .pair .shot { flex: 1 1 460px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+  .card-l { background: #f7f5fc; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .card-l h3 { font-size: 20px; line-height: 1.25; }
+  .card-l p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+
+  .visit { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
+  .visit-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .visit-copy a { font-weight: 700; }
+  .visit-demo { flex: 1 1 420px; min-width: 0; }
+  .steps { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .steps li { display: flex; gap: 14px; align-items: baseline; background: var(--paper); border-radius: 14px; padding: 12px 16px; }
+  .steps .n { font-family: var(--agent-font); font-size: 12px; color: var(--teal); }
+
+  .spec { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .spec-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .spec-shot { flex: 1.4 1 520px; }
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips li { font-size: 14px; font-weight: 600; color: var(--teal-hover); background: var(--teal-soft); border-radius: 999px; padding: 8px 14px; }
+  .dx { display: flex; gap: 12px; align-items: center; background: #f7f5fc; border-radius: 16px; padding: 14px 16px; flex-wrap: wrap; font-size: 15px; }
+  .code { font-family: var(--agent-font); font-size: 14px; font-weight: 600; color: var(--teal-hover); background: var(--paper); border: 1px solid #dccdf5; border-radius: 10px; padding: 6px 10px; }
+
+  .faqwrap { background: #f7f5fc; padding-bottom: 8px; }
+
+  @media (max-width: 720px) {
+    .rh { padding: 104px 0 56px; }
+    .rh-in { gap: 32px; }
+    .rh-lead { font-size: 17px; }
+    .rs { padding: 64px 0; }
+    .rs-in { gap: 32px; }
+    .visit, .spec { gap: 32px; }
+    .shot.wide, .pair .shot, .spec-shot, .visit-copy, .visit-demo, .spec-copy { flex-basis: 100%; }
+  }
+</style>

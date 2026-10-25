@@ -1,0 +1,330 @@
+---
+// /agentes de latidIA: los tres agentes juntos. No tiene tablero propio: sigue el estilo del inicio y
+// de los tableros Sofi, Clío y Argos. Portada con los tres en la misma consulta de Rosa, una sección
+// por agente con su mini demo (la del inicio) y lo que hace hoy, lo que decides tú, cómo se cobra en
+// corto (cifras de Astro.locals.pricing, nunca del código), preguntas y el cierre.
+import SplitHero from "../../agents/SplitHero.astro"
+import CtaBand from "../../CtaBand.astro"
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf, money, type PlanPrices, shownPlan } from "../../../lib/pricing"
+import { contactHref, ctaOf } from "../../../lib/site"
+import AgentMini from "../home/AgentMini"
+import AgentSwitches from "../home/AgentSwitches"
+import FaqList from "../home/FaqList.astro"
+import TrioDemo from "./TrioDemo"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const list = pricing.list
+const founder = plan !== null && plan === pricing.founders
+
+const title = "Agentes de IA para consultorios médicos: Sofi, Clío y Argos"
+const description =
+  "Tres agentes de IA para tu consultorio médico: Sofi responde y agenda por WhatsApp y tus demás canales, Clío ordena la consulta que dictas y Argos trae de vuelta a tus pacientes a su control."
+
+const agents = [
+  {
+    key: "sofi" as const,
+    role: "Recepción",
+    name: "Sofi.",
+    phrase: "Tu recepción, también de noche.",
+    href: "/agentes/recepcion",
+    more: "Conoce a Sofi →",
+    does: [
+      "Responde siempre, de día y de noche, por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo.",
+      "Agenda, mueve o cancela con el sí del paciente. Si no sabe qué necesita, le ofrece una consulta, donde el médico ve qué necesita y cuánto costará.",
+      "Reconoce una señal de alarma: da el número de emergencias del país y el teléfono del consultorio, y avisa a tu equipo.",
+      "No ve la historia clínica: diagnósticos, notas y signos vitales quedan entre el paciente y su médico.",
+    ],
+  },
+  {
+    key: "clio" as const,
+    role: "Consulta",
+    name: "Clío.",
+    phrase: "Tú atiendes. La historia se escribe sola.",
+    href: "/agentes/asistente-clinico",
+    more: "Conoce a Clío →",
+    does: [
+      "Escucha solo desde que tocas «Dictar» y propone cada cosa en su bloque: motivo, signos vitales, examen por sistemas y diagnóstico con su código.",
+      "Lo que no dictas del examen queda «No examinado», nunca «normal».",
+      "Corriges hablando: «No, la temperatura es 38,4». Nada entra a la historia hasta que confirmas.",
+      "Deja lista la receta y el descanso médico; los emites tú, con tu firma.",
+    ],
+  },
+  {
+    key: "argos" as const,
+    role: "Administración",
+    name: "Argos.",
+    phrase: "Ve todo tu consultorio. Nadie se queda atrás.",
+    href: "/agentes/administrador",
+    more: "Conoce a Argos →",
+    does: [
+      "Avisa los controles que se repiten cada 1, 3, 6 o 12 meses, como el de presión de Luis.",
+      "Invita a volver a quien lleva 12 meses sin venir. Si no puede escribirle, te deja una tarea de llamada.",
+      "Ofrece otro horario a quien faltó o canceló.",
+      "Responde lo que le preguntes con las cifras de Reportes y te dice «Así lo calculé».",
+    ],
+  },
+]
+
+// Cuánto cobra cada uno (ADR 0085): el precio de cada tipo del plan que se muestra y, si es el de
+// Fundadores, el de lista tachado. Sin plan publicado no hay cifras.
+const cut = (value: number, currency: string) => {
+  const shown = money(value, currency).replace(`${currency} `, "")
+  return shown.includes(",") ? shown : `${shown},00`
+}
+type PriceRow = { label: string; text: string; price: string; before: string | null }
+function row(p: PlanPrices, label: string, text: string, own: number | null, base: number | null | undefined): PriceRow[] {
+  if (own === null) return []
+  const before = founder && base !== null && base !== undefined && base !== own ? cut(base, p.currency) : null
+  return [{ label, text, price: cut(own, p.currency), before }]
+}
+const prices = plan
+  ? [
+      {
+        key: "sofi",
+        name: "Sofi",
+        unit: "Una vez por persona, según lo que pasó en tu agenda.",
+        rows: [
+          ...row(plan, "Informa", "Respondió, dio la dirección, el horario o un precio.", plan.tiers.informa, list?.tiers.informa),
+          ...row(plan, "Gestiona", "Reservó, movió o canceló una cita.", plan.tiers.gestiona, list?.tiers.gestiona),
+          ...row(plan, "Agenda", "La consulta que reservó se dio.", plan.tiers.agenda, list?.tiers.agenda),
+        ],
+      },
+      {
+        key: "clio",
+        name: "Clío",
+        unit: "Una vez por consulta, y solo si confirmas.",
+        rows: [
+          ...row(plan, "Simple", "Una sola parte: la nota, una receta o un control.", plan.tiers.simple, list?.tiers.simple),
+          ...row(plan, "Estándar", "Con el examen físico, un diagnóstico o varias partes.", plan.tiers.estandar, list?.tiers.estandar),
+          ...row(plan, "Completa", "Además dejó indicado lo que sigue.", plan.tiers.completa, list?.tiers.completa),
+        ],
+      },
+      {
+        key: "argos",
+        name: "Argos",
+        unit: "Recordar no se cobra. Recuperar, sí.",
+        rows: [
+          ...row(plan, "Cita recuperada", "Solo si el paciente vino.", plan.recovered, list?.recovered),
+          ...(plan.argos
+            ? [
+                { label: `${plan.argos.included} preguntas al mes`, text: "Las que no pudo responder no cuentan.", price: "incluidas", before: null },
+                ...row(plan, `${plan.argos.packQuestions} preguntas más`, "Argos te pregunta antes de sumarlas.", plan.argos.pack, list?.argos?.pack),
+              ]
+            : []),
+        ],
+      },
+    ].filter((agent) => agent.rows.length > 0)
+  : []
+const currencyWord = plan?.currency === "USD" ? "dólares" : plan?.currency
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Cómo trabajan juntos?",
+    a: "Sofi atiende a cada persona por su canal y agenda. Clío ordena la consulta que dictas. Argos decide a quién escribir y cuándo, por ejemplo para un control, y Sofi le escribe por su canal, dentro de tu horario de recontacto.",
+  },
+  {
+    q: "¿Dan consejos médicos o diagnostican?",
+    a: "No. Sofi no dice qué tomar ni qué tiene la persona: si la duda es de salud te la pasa con un resumen, y si suena a urgencia da el número de emergencias. Clío registra el diagnóstico que tú nombras, con su código, y tú confirmas.",
+  },
+  {
+    q: "¿Quién ve la historia clínica?",
+    a: "Los médicos, según los permisos de cada rol. Sofi no la ve. Clío solo escucha lo que dictas en la consulta que estás atendiendo.",
+  },
+  {
+    q: "¿Puedo decidir qué hace cada uno?",
+    a: "Sí. Cada tarea se prende o se apaga, y cada interruptor dice qué pasa en los dos casos. Responder, Sofi responde siempre; lo que propone Clío espera tu Confirmar.",
+  },
+  {
+    q: "¿Y si alguien de mi equipo quiere responder?",
+    a: "Escribe en la conversación y Sofi se aparta 15 minutos. Nadie habla encima de nadie.",
+  },
+  {
+    q: "¿Cómo se cobra?",
+    a: `Por lo que hace cada agente, no por el software ni por usuario. Lo simple cuesta poco y lo que te trae pacientes cuesta más; recordar una cita no se cobra.${gift ? ` Los primeros ${gift} van por nuestra cuenta.` : ""}`,
+  },
+]
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Agentes", "/agentes"],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="lag">
+    <SplitHero
+      tag="Tus agentes"
+      color="#cbb6f5"
+      h1="Agentes de IA para consultorios médicos: recepción por WhatsApp y tus demás canales, dictado de la consulta y pacientes que vuelven a su control."
+      lead="Sofi agenda a Rosa, Clío ordena su consulta y Argos le avisa su control. Tú decides qué puede hacer cada uno."
+      copyBasis={440}
+      demoBasis={560}
+    >
+      <p class="sh-title">Tres agentes, un consultorio.</p>
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <a class="btn btn-g" href="#cobro">Cuánto cobran</a>
+      </Fragment>
+      <TrioDemo slot="demo" client:load />
+    </SplitHero>
+
+    {agents.map((agent, i) => (
+      <section class:list={["lag-agent", agent.key, { white: i % 2 === 0 }]} id={agent.key}>
+        <div class="wrap lag-agent-in">
+          <div class="lag-copy">
+            <span class="lag-role">[ {agent.role} ]</span>
+            <h2 class="lag-name">{agent.name}</h2>
+            <p class="lag-phrase">{agent.phrase}</p>
+            <ul class="lag-does" aria-label={`Lo que hace hoy ${agent.name.replace(".", "")}`}>
+              {agent.does.map((item) => <li>{item}</li>)}
+            </ul>
+            <a class="lag-more" href={agent.href}>{agent.more}</a>
+          </div>
+          <div class="lag-demo">
+            <AgentMini agent={agent.key} client:visible />
+          </div>
+        </div>
+      </section>
+    ))}
+
+    <section class="lag-sec white">
+      <div class="wrap lag-decide">
+        <div class="lag-head">
+          <span class="tag">[ Tú decides ]</span>
+          <h2>Lo que hace cada agente, lo prendes o lo apagas.</h2>
+          <p>Cada interruptor dice qué pasa en los dos casos. Tu equipo siempre puede tomar una conversación: Sofi espera.</p>
+          <ul class="lag-always">
+            <li><span class="always sofi">Siempre</span>Sofi responde y, ante una señal de alarma, da el número de emergencias.</li>
+            <li><span class="always clio">Siempre</span>Lo que propone Clío espera tu Confirmar.</li>
+          </ul>
+        </div>
+        <div class="lag-switches">
+          <AgentSwitches client:visible />
+        </div>
+      </div>
+    </section>
+
+    <section class="lag-sec" id="cobro">
+      <div class="wrap lag-charge">
+        <div class="lag-head wide">
+          <span class="tag">[ Cómo se cobra ]</span>
+          <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
+          <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.</p>
+        </div>
+        {prices.length > 0 && plan ? (
+          <>
+            <div class="lag-prices">
+              {prices.map((agent) => (
+                <div class:list={["lag-price", agent.key]}>
+                  <b class="lag-price-name">{agent.name}</b>
+                  <span class="lag-price-unit">{agent.unit}</span>
+                  <dl>
+                    {agent.rows.map((r) => (
+                      <div>
+                        <dt><b>{r.label}</b><span>{r.text}</span></dt>
+                        <dd>{r.price}{r.before ? <s>{r.before}</s> : null}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ))}
+            </div>
+            <div class="lag-charge-foot">
+              <span class="lag-note">Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}; tachado, el de lista.` : ""}</span>
+              <a class="lag-more" href="/precios">Todos los precios →</a>
+            </div>
+          </>
+        ) : (
+          <p class="lag-empty">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
+        )}
+      </div>
+    </section>
+
+    <FaqList items={faq} white />
+
+    <CtaBand title="Tres agentes trabajando en tu consultorio desde esta noche.">
+      <Fragment slot="text">
+        {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  .lag { overflow-x: clip; background: var(--paper); }
+  .lag :global(.sh-h1) { color: var(--on-night); }
+
+  /* Una sección por agente: --ac su color sobre claro, --al el de la raya. */
+  .lag-agent { padding: 88px 0; background: #f7f5fc; }
+  .lag-agent.white { background: var(--paper); }
+  .lag-agent.sofi { --ac: #0e7490; }
+  .lag-agent.clio { --ac: #1f7f63; }
+  .lag-agent.argos { --ac: #9a6a12; }
+  .lag-agent-in { display: flex; flex-wrap: wrap; gap: 40px 64px; align-items: center; }
+  .lag-copy { flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .lag-demo { flex: 1 1 420px; min-width: 0; max-width: 520px; }
+  .lag-role { font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--ac); }
+  .lag-name { font-size: clamp(64px, 7.5vw, 96px); line-height: .9; letter-spacing: -.06em; font-weight: 800; color: var(--ac); }
+  .lag-phrase { font-size: clamp(22px, 2.2vw, 28px); line-height: 1.15; letter-spacing: -.025em; font-weight: 800; }
+  .lag-does { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .lag-does li { position: relative; padding-left: 26px; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+  .lag-does li::before { content: "✓"; position: absolute; left: 0; top: 0; font-weight: 800; color: var(--ac); }
+  .lag-more { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; font-size: 16px; text-decoration: none; color: var(--ac, var(--teal)); }
+  .lag-more:hover { text-decoration: underline; color: var(--ac, var(--teal-hover)); }
+
+  .lag-sec { padding: 88px 0; background: #f7f5fc; }
+  .lag-sec.white { background: var(--paper); }
+  .lag-head { display: flex; flex-direction: column; gap: 16px; max-width: 660px; }
+  .lag-head.wide { max-width: 820px; }
+  .lag-head .tag { font-size: 13px; letter-spacing: .12em; }
+  .lag-head h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .lag-head p { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .lag-decide { display: flex; flex-wrap: wrap; gap: 48px; }
+  .lag-decide .lag-head { flex: 1 1 380px; min-width: 0; }
+  .lag-switches { flex: 1 1 560px; min-width: 0; }
+  .lag-always { list-style: none; margin: 0; padding: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
+  .lag-always li { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 1.45; color: var(--ink-2); }
+  .always { flex: none; font-family: var(--mono); font-size: 11px; text-transform: uppercase; border-radius: 999px; padding: 4px 10px; }
+  .always.sofi { background: #e3f4f8; color: #0b4f61; }
+  .always.clio { background: #e3f5ee; color: #16614b; }
+
+  .lag-charge { display: flex; flex-direction: column; gap: 36px; }
+  .lag-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 18px; }
+  .lag-price { background: var(--paper); border: 1px solid #e9e2f7; border-top: 4px solid var(--al); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 6px; }
+  .lag-price.sofi { --ac: #0e7490; --al: #0e7490; }
+  .lag-price.clio { --ac: #1f7f63; --al: #1f9d7a; }
+  .lag-price.argos { --ac: #9a6a12; --al: #c98a1c; }
+  .lag-price-name { font-size: 26px; letter-spacing: -.03em; color: var(--ac); }
+  .lag-price-unit { font-size: 14px; color: var(--muted); padding-bottom: 6px; }
+  .lag-price dl { margin: 0; display: flex; flex-direction: column; }
+  .lag-price dl > div { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid #f1eef8; }
+  .lag-price dt { display: flex; flex-direction: column; gap: 2px; }
+  .lag-price dt b { font-size: 15px; }
+  .lag-price dt span { font-size: 13px; line-height: 1.4; color: var(--soft); }
+  .lag-price dd { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
+  .lag-price dd s { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
+  .lag-charge-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+  .lag-note { font-family: var(--mono); font-size: 12px; color: var(--soft); }
+  .lag-empty { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .lag-empty a { font-weight: 700; }
+
+  @media (max-width: 720px) {
+    .lag-agent, .lag-sec { padding: 64px 0; }
+    .lag-agent-in { gap: 24px; }
+    .lag-copy { flex-basis: 100%; gap: 12px; }
+    .lag-demo { flex-basis: 100%; max-width: none; }
+    .lag-role, .lag-head .tag { font-size: 12px; }
+    .lag-does li { font-size: 15px; }
+    .lag-head h2 { font-size: 32px; line-height: 1.05; }
+    .lag-head p { font-size: 16px; }
+    .lag-decide, .lag-charge { gap: 22px; }
+    .lag-switches { flex-basis: 100%; }
+    .lag-price { padding: 18px; border-radius: 18px; }
+    .lag-price dd { font-size: 20px; }
+  }
+</style>

@@ -1,0 +1,59 @@
+/* Argos responde (ArgosAsk.tsx), en la portada de /reportes de latidIA. Todo bajo .lt-ask.
+   El ámbar es el de Argos (AGENT_COLORS); el texto chico en ámbar sobre claro va más oscuro. */
+.lt-ask {
+  --lt-ask-amber: #c98a1c;
+  --lt-ask-amber-soft: #fbf3e2;
+  --lt-ask-line: color-mix(in srgb, var(--teal) 12%, #fff);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 26px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6);
+}
+.lt-ask-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lt-ask-head b { font-size: 18px; }
+.lt-ask-scope { font-size: 13px; color: var(--muted); background: #eef0f4; border-radius: 999px; padding: 6px 12px; }
+.lt-ask-field { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--amber); border-radius: 999px; padding: 6px 6px 6px 18px; }
+.lt-ask-q { flex: 1 1 auto; min-width: 0; font-size: 15px; line-height: 1.4; min-height: 21px; }
+.lt-ask-caret { color: var(--lt-ask-amber); margin-left: 1px; visibility: hidden; }
+.lt-ask-caret[data-on] { visibility: visible; animation: lt-ask-blink 1s steps(1) infinite; }
+.lt-ask-ask { flex: none; font-weight: 700; font-size: 14px; color: #fff; background: var(--teal); border-radius: 999px; padding: 10px 16px; }
+.lt-ask-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.lt-ask-chips button { min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 600 13px var(--font); background: var(--paper); color: var(--ink-2); border: 1px solid #cbd5e1; transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+.lt-ask-chips button:hover { border-color: var(--teal); }
+.lt-ask-chips button[aria-pressed="true"] { background: var(--night); color: #fff; border-color: var(--night); }
+.lt-ask-stage { position: relative; }
+.lt-ask-think { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 6px; font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding: 6px 4px; }
+.lt-ask-think span { animation: lt-ask-in .4s ease both; }
+.lt-ask-think span + span { animation-delay: .45s; }
+.lt-ask-answer { border: 1px solid var(--lt-ask-line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; opacity: 0; transition: opacity .4s ease; }
+.lt-ask-answer[data-done] { opacity: 1; }
+.lt-ask-text { font-size: 17px; line-height: 1.5; }
+.lt-ask-bars { display: flex; flex-direction: column; gap: 8px; }
+.lt-ask-bar { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.lt-ask-bar-l { font-size: 13px; }
+.lt-ask-bar b { font-family: var(--agent-font); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lt-ask-track { height: 14px; background: var(--lt-ask-amber-soft); border-radius: 6px; overflow: hidden; }
+.lt-ask-fill { display: block; height: 100%; background: var(--lt-ask-amber); border-radius: 6px; transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+.lt-ask-how { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.lt-ask-how b { color: var(--ink); }
+.lt-ask-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.lt-ask-act { font-size: 13px; font-weight: 700; border-radius: 999px; padding: 8px 12px; background: #eef0f4; }
+.lt-ask-act[data-primary] { color: #fff; background: var(--teal); }
+.lt-ask-note { font-size: 12px; color: var(--soft); }
+@keyframes lt-ask-blink { 50% { visibility: hidden; } }
+@keyframes lt-ask-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 720px) {
+  .lt-ask { border-radius: 20px; padding: 16px; gap: 12px; }
+  .lt-ask-field { padding-left: 14px; }
+  .lt-ask-q { font-size: 14px; }
+  .lt-ask-ask { padding: 9px 12px; font-size: 13px; }
+  .lt-ask-answer { padding: 14px; }
+  .lt-ask-text { font-size: 16px; }
+  .lt-ask-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .lt-ask-bar .lt-ask-track { grid-column: 1 / -1; grid-row: 2; }
+}

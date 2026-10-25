@@ -1,0 +1,32 @@
+/* El control que se repite (tablero «Agenda»): la tarjeta como el bloque «Controles» de la pestaña
+   Plan, con su chip, la frecuencia en píldoras, sus botones y los realizados debajo. */
+.rc { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 60px -36px rgba(30, 11, 61, .35); }
+.rc-title { display: flex; flex-direction: column; gap: 2px; }
+.rc-title b { font-size: 18px; }
+.rc-title span { font-size: 13px; color: var(--muted); }
+.rc-card { border: 1px solid #eee9f7; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.rc-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-line b { font-size: 16px; }
+.rc-chip { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 9px; background: #ece4fb; color: #4c2a8a; }
+.rc-chip.off { background: #eef0f4; color: var(--muted); }
+.rc-due { font-size: 13px; color: var(--soft); }
+.rc-ind { font-size: 14px; color: var(--ink-2); }
+.rc-book { font-size: 14px; color: var(--muted); }
+.rc-repeat { font-size: 14px; font-weight: 600; color: #4c2a8a; }
+.rc-cad { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+.rc-cad legend { float: left; font-size: 13px; color: var(--muted); margin-right: 4px; }
+.rc-cad button { min-height: 44px; padding: 0 12px; border-radius: 999px; border: 0; cursor: pointer; font: 600 13px var(--font); background: #eef0f4; color: var(--ink-2); }
+.rc-cad button[aria-pressed="true"] { background: var(--teal); color: #fff; }
+.rc-cad:disabled button { cursor: default; opacity: .55; }
+.rc-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.rc-btn { min-height: 44px; border: 0; border-radius: 999px; background: #eef0f4; color: var(--ink); font: 600 14px var(--font); padding: 0 16px; cursor: pointer; }
+.rc-btn.rc-main { background: var(--teal); color: #fff; font-weight: 700; padding: 0 18px; }
+.rc-btn:hover { filter: brightness(.96); }
+.rc-done { display: flex; flex-direction: column; gap: 6px; }
+.rc-done-h { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
+.rc-done ul { margin: 0; padding: 0; list-style: none; }
+.rc-done li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 14px; padding: 8px 0; border-top: 1px solid #f1f0f6; }
+.rc-reset { align-self: flex-start; min-height: 44px; border: 0; background: none; color: var(--teal); font: 600 14px var(--font); padding: 0 4px; cursor: pointer; }
+.rc-pop { animation: rc-pop .5s ease-out; }
+@keyframes rc-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) { .rc { padding: 16px; } .rc-card { padding: 14px; } }

@@ -3,15 +3,18 @@
 // en chico y Argos que escribe la pregunta, piensa y responde en columnas; las cinco pestañas con la
 // captura real de Finanzas, por qué confiar en su respuesta, preguntas y el cierre.
 // Título, descripción, migas y las preguntas de siempre salen de PAGES.reportes (lib/pages-data.ts).
+// En latidIA, su propia página (components/latidia/reports).
 import ArgosDemo from "../components/agents/ArgosDemo"
 import FeatureGrid from "../components/agents/FeatureGrid.astro"
 import SplitHero from "../components/agents/SplitHero.astro"
 import CtaBand from "../components/CtaBand.astro"
 import Faq from "../components/Faq.astro"
+import ReportsPage from "../components/latidia/reports/ReportsPage.astro"
 import Base from "../layouts/Base.astro"
 import { REPORTS_OWED } from "../lib/argos-demo"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { PAGES } from "../lib/pages-data"
+import { MEDICAL } from "../lib/product"
 import { AGENT_COLORS, ctaOf } from "../lib/site"
 
 const page = PAGES.reportes
@@ -33,6 +36,7 @@ const faq: FaqItem[] = [
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
+{MEDICAL ? <ReportsPage /> : (
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   <SplitHero
     tag="Reportes"
@@ -102,6 +106,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <Faq items={faq} />
   <CtaBand title="Pregúntale a tu clínica desde hoy." />
 </Base>
+)}
 
 <script>
   // «Preguntar otra vez»: la demostración de Argos (isla) escucha este evento y vuelve a empezar.

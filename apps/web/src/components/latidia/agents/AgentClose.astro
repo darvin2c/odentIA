@@ -1,0 +1,18 @@
+---
+// Cierre de cada página de agente (tablero «Cierre»): la frase de la página y el regalo en ámbar, fuera
+// del botón. El regalo y la llamada salen de los precios publicados; sin regalo, solo lo que no cambia.
+import { giftOf } from "../../../lib/pricing"
+import CtaBand from "../../CtaBand.astro"
+
+interface Props {
+  title: string
+}
+const { title } = Astro.props
+const gift = giftOf(Astro.locals.pricing)
+---
+<CtaBand title={title}>
+  <Fragment slot="text">
+    {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
+    Sin tarjeta y sin límite de médicos, salas ni usuarios.
+  </Fragment>
+</CtaBand>

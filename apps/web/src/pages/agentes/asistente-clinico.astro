@@ -1,5 +1,8 @@
 ---
 // Página propia (lienzo del paso 3, tablero «Clio»); título, descripción y preguntas siguen en PAGES.asistenteClinico.
+// En latidIA, la suya (tablero «Clio» del lienzo de latidIA).
 import ClioPage from "../../components/agents/clio/ClioPage.astro"
+import ClinicalPage from "../../components/latidia/agents/clinical/ClinicalPage.astro"
+import { MEDICAL } from "../../lib/product"
 ---
-<ClioPage />
+{MEDICAL ? <ClinicalPage /> : <ClioPage />}

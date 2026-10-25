@@ -1,0 +1,21 @@
+/* Gráfico de presión de Luis (VitalsChart): sistólica turquesa y diastólica naranja, como la ficha. */
+.lt-vc svg { width: 100%; height: auto; display: block; font-family: var(--font); }
+.lt-vc-sys, .lt-vc-dia { fill: none; stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+.lt-vc-sys { stroke: #0e8fb0; }
+.lt-vc-dia { stroke: #f0703a; }
+.lt-vc circle, .lt-vc g { transition: opacity .3s; }
+.lt-vc-wide { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 20px; align-items: center; }
+.lt-vc-side { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.lt-vc-side > b { font-size: 15px; }
+.lt-vc-side > span:not(.lt-vc-table) { display: flex; justify-content: space-between; border-bottom: 1px solid #eef0f4; padding-bottom: 8px; }
+.lt-vc-side > span:nth-of-type(3) { border-bottom: 0; padding-bottom: 0; }
+.lt-vc-side > span > span { color: var(--muted); }
+.lt-vc-table { background: #eef0f4; border-radius: 999px; padding: 8px 12px; text-align: center; font-weight: 600; color: var(--ink-2); }
+.lt-vc-narrow { display: none; }
+.lt-vc-row { display: flex; justify-content: space-between; font-size: 14px; padding-top: 6px; }
+.lt-vc-row.first { border-top: 1px solid #eef0f4; padding-top: 10px; margin-top: 10px; }
+.lt-vc-row > span { color: var(--muted); }
+@media (max-width: 720px) {
+  .lt-vc-wide { display: none; }
+  .lt-vc-narrow { display: block; }
+}

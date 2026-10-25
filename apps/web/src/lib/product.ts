@@ -1,6 +1,6 @@
-// La web de cada producto (issue 229, decisión 18): el mismo código sirve la de odentIA y la de
-// latidIA. El build de latidIA lleva `VITE_PRODUCT=medical` y su dominio; empieza con cuatro
-// páginas (inicio, precios, pedir invitación y legales) y lo demás no existe en su dominio.
+// La web de cada producto: el mismo servidor publica dos webs distintas, la de odentIA y la de
+// latidIA (`VITE_PRODUCT=medical` y su dominio). latidIA sirve solo sus páginas
+// (`latidia-pages.json`: `serves`) y algunas existen solo en ella (`own`), que en odentIA no existen.
 import LATIDIA_PAGES from "./latidia-pages.json"
 
 export type WebProduct = "dental" | "medical"
@@ -57,11 +57,10 @@ export const WORDS: ProductWords = WORDS_BY_PRODUCT[PRODUCT]
 /** El dominio cuando no se dice otro (en local): el de cada producto. */
 export const DEFAULT_DOMAIN = MEDICAL ? "latidia.localhost" : "odentia.localhost"
 
-/** ¿Existe esta página en la web de este producto? En la de odentIA, todas. */
+/** ¿Existe esta página en la web de este producto? En la de odentIA, todas menos las propias de latidIA. */
 export function servesPage(path: string): boolean {
-  if (!MEDICAL) return true
   const clean = path.replace(/\/+$/, "") || "/"
   // Los archivos (los de Astro, el ícono, el mapa del sitio) no son páginas.
   if (clean.startsWith("/_") || /\.[a-z0-9]+$/i.test(clean)) return true
-  return (LATIDIA_PAGES as readonly string[]).includes(clean)
+  return MEDICAL ? LATIDIA_PAGES.serves.includes(clean) : !LATIDIA_PAGES.own.includes(clean)
 }

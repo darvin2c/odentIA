@@ -1,0 +1,550 @@
+---
+// Inicio de latidIA (lienzo de la web de latidIA, tableros «Inicio» e «InicioTel»): Clío dictando la
+// consulta de Rosa sobre la línea de pulso, Omnicanal, los tres agentes, un día del Consultorio San
+// Martín, el sistema, lo que decides tú y la confianza, cómo se cobra, preguntas y cierre.
+// El documento (<Base>, título, descripción y datos estructurados) lo arma src/pages/index.astro.
+// Ninguna cifra de precio vive aquí: salen de Astro.locals.pricing; los soles son del tarifario de
+// ejemplo del consultorio de la demo.
+import { giftOf, shownPlan } from "../../../lib/pricing"
+import { contactHref, ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import AgentMini from "./AgentMini"
+import AgentSwitches from "./AgentSwitches"
+import ChargeDay, { type ChargeRow } from "./ChargeDay"
+import DayCase from "./DayCase"
+import DictationDemo from "./DictationDemo"
+import { homeFaq } from "./faq"
+import FaqList from "./FaqList.astro"
+import OmniDemo from "./OmniDemo"
+import VitalsChart from "./VitalsChart"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const faq = homeFaq(gift)
+
+// Un jueves de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a
+// su consulta, así que la conversación en que Sofi la agendó cuenta como «Agenda» (ADR 0085).
+const chargeRows: ChargeRow[] = plan
+  ? [
+      { tone: "sofi" as const, what: "Sofi agendó a Rosa, y vino", why: "Agenda · la reservó el miércoles a las 23:41", amount: plan.tiers.agenda },
+      { tone: "sofi" as const, what: "Sofi le dio la dirección a un paciente nuevo", why: "Informa", amount: plan.tiers.informa },
+      { tone: "clio" as const, what: "Clío ordenó la consulta de Rosa", why: "Estándar · diagnóstico y varias partes", amount: plan.tiers.estandar },
+      { tone: "argos" as const, what: "Argos trajo de vuelta a Luis, y vino", why: "Cita recuperada", amount: plan.recovered },
+      { tone: "argos" as const, what: "Argos le recordó su cita a Julia", why: "Recordar no se cobra", amount: 0 },
+    ].flatMap((row) => (row.amount === null ? [] : [{ ...row, amount: row.amount }]))
+  : []
+const currencyWord = plan?.currency === "USD" ? "dólares" : plan?.currency
+
+const exam: Array<[string, "Sin alteraciones" | "Con hallazgos" | "No examinado", boolean]> = [
+  // [sistema, estado, se ve en el teléfono]
+  ["Estado general", "Sin alteraciones", true],
+  ["Piel", "No examinado", false],
+  ["Cabeza y cuello", "Sin alteraciones", true],
+  ["Boca y garganta", "Con hallazgos", true],
+  ["Tórax y pulmones", "Sin alteraciones", true],
+  ["Corazón", "No examinado", true],
+  ["Abdomen", "No examinado", true],
+  ["Genital y urinario", "No examinado", false],
+  ["Extremidades", "No examinado", false],
+  ["Neurológico", "No examinado", false],
+]
+const examTone = { "Sin alteraciones": "ok", "Con hallazgos": "find", "No examinado": "none" } as const
+
+const channels = [
+  ["WhatsApp", "#25a35a"],
+  ["Instagram", "#d9467f"],
+  ["Messenger", "#3b6fe0"],
+  ["Telegram", "#2aa3d8"],
+  ["Chat de tu web", "#6d3fc0"],
+  ["Correo", "#64748b"],
+]
+
+const agents = [
+  {
+    key: "sofi" as const,
+    role: "Recepción",
+    name: "Sofi.",
+    text: "Responde siempre, en cualquier canal. Agenda con el sí del paciente y reconoce una urgencia.",
+    href: "/agentes/recepcion",
+    more: "Conoce a Sofi →",
+  },
+  {
+    key: "clio" as const,
+    role: "Consulta",
+    name: "Clío.",
+    text: "Escucha lo que dictas y lo propone en su bloque. Tú confirmas; nada entra a la historia sin tu sí.",
+    href: "/agentes/asistente-clinico",
+    more: "Conoce a Clío →",
+  },
+  {
+    key: "argos" as const,
+    role: "Administración",
+    name: "Argos.",
+    text: "Invita a volver a tiempo, ofrece otro horario a quien faltó y te dice cómo va tu consultorio.",
+    href: "/agentes/administrador",
+    more: "Conoce a Argos →",
+  },
+]
+
+const trust = [
+  {
+    title: "Cada consultorio, aparte",
+    text: "La conexión va cifrada, tus datos no se mezclan con los de otro consultorio y cada permiso se revisa en el servidor.",
+    icon: '<rect x="4" y="9" width="12" height="8" rx="2"></rect><path d="M7 9V6.5a3 3 0 0 1 6 0V9"></path>',
+  },
+  {
+    title: "Cada rol ve lo suyo",
+    text: "Recepción agenda, el médico ve la historia, caja cobra. Sofi no ve la historia clínica.",
+    icon: '<circle cx="7" cy="7" r="3"></circle><circle cx="14" cy="9" r="2.4"></circle><path d="M2 17c.6-3 2.6-4.5 5-4.5s4.4 1.5 5 4.5M12.5 13.2c2.4-.3 4.6.9 5.2 3.8"></path>',
+  },
+  {
+    title: "Nada entra sin confirmar",
+    text: "Clío propone; el médico confirma. Al firmar, la atención queda fija y solo admite adendas.",
+    icon: '<path d="M4 10.5l3.5 3.5L16 6"></path>',
+  },
+  {
+    title: "Tu equipo toma la palabra",
+    text: "Cualquiera del equipo puede escribir en una conversación; Sofi espera y le deja un resumen.",
+    icon: '<path d="M3 5h14v8H9l-4 3v-3H3z"></path>',
+  },
+]
+---
+<div class="lh-page">
+  <!-- 1 · Portada: Clío dicta la consulta de Rosa sobre la línea de pulso -->
+  <section class="hero lh" data-lh-hero>
+    <div class="wrap lh-in">
+      <div class="lh-copy">
+        <span class="tag tag-d lh-tag">[ Para consultorios médicos ]</span>
+        <h1 class="lh-h1">Tú atiendes.<br /><span>Tus agentes</span> hacen el resto.</h1>
+        <p class="lh-lead">
+          WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por persona. Y tres agentes de IA:
+          <b class="c-sofi">Sofi</b> agenda, <b class="c-clio">Clío</b> ordena la consulta que dictas y <b class="c-argos">Argos</b> trae de vuelta a tus pacientes.
+        </p>
+        <div class="lh-ctas">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="#caso">Ver cómo funciona</a>
+        </div>
+        <p class="lh-note">
+          {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes van por nuestra cuenta. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
+        </p>
+        <ul class="lh-specs" aria-label="Especialidades">
+          <li>Medicina general</li>
+          <li>Familiar</li>
+          <li>Interna</li>
+          <li>Pediatría</li>
+          <li>Ginecología y obstetricia</li>
+        </ul>
+      </div>
+      <div class="lh-demo">
+        <DictationDemo client:load />
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · Omnicanal: una persona, todos sus canales, una ficha -->
+  <section class="ls white">
+    <div class="wrap ls-in">
+      <div class="ls-split">
+        <div class="ls-head">
+          <span class="tag">[ Omnicanal ]</span>
+          <h2>Escriba por donde escriba, es la misma Rosa.</h2>
+          <p>Rosa escribe por WhatsApp de noche y por correo a la mañana siguiente. Todo cae en su única ficha, junto a su historia clínica: nadie le vuelve a preguntar lo que ya contó.</p>
+          <a class="lk" href="/omnicanal">Cómo se conectan tus canales →</a>
+        </div>
+        <ul class="lo-chips" aria-label="Canales">
+          {channels.map(([name, color]) => (
+            <li><i style={`background: ${color}`} aria-hidden="true"></i>{name}</li>
+          ))}
+        </ul>
+      </div>
+      <OmniDemo client:visible />
+    </div>
+  </section>
+
+  <!-- 3 · Los tres agentes -->
+  <section class="ls" id="agentes">
+    <div class="wrap ls-in">
+      <div class="ls-head wide">
+        <span class="tag">[ Tres agentes ]</span>
+        <h2>Uno en la recepción, uno en la consulta, uno en la administración.</h2>
+        <p>No conversan por conversar: hacen el trabajo, dentro de lo que tú les permites.</p>
+      </div>
+      <div class="la-grid">
+        {agents.map((agent) => (
+          <article class:list={["la-card", agent.key]}>
+            <span class="la-role">{agent.role}</span>
+            <h3 class="la-name">{agent.name}</h3>
+            <p class="la-text">{agent.text}</p>
+            <AgentMini agent={agent.key} client:visible />
+            <a class="lk la-more" href={agent.href}>{agent.more}</a>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Un caso de principio a fin -->
+  <section class="ls white" id="caso">
+    <div class="wrap ls-in">
+      <div class="ls-head wide">
+        <span class="tag">[ Un caso de principio a fin ]</span>
+        <h2>Un día en el Consultorio San Martín.</h2>
+        <p>Del mensaje de medianoche al control de la semana siguiente. Tu equipo solo hizo lo que le toca: atender y cobrar.</p>
+      </div>
+      <DayCase client:visible />
+    </div>
+  </section>
+
+  <!-- 5 · El sistema médico -->
+  <section class="ls" id="sistema">
+    <div class="wrap ls-in">
+      <div class="ls-head wide">
+        <span class="tag">[ El sistema ]</span>
+        <h2>Lo que un consultorio usa todos los días, sin módulos aparte.</h2>
+      </div>
+      <div class="lsys">
+        <div class="lsys-card vitals">
+          <div class="lsys-top">
+            <span class="lsys-title"><h3>Signos vitales en el tiempo</h3><span>Presión arterial de Luis Gómez en sus cuatro controles · mmHg</span></span>
+            <span class="lsys-legend" aria-hidden="true"><span><i class="sys"></i>Sistólica</span><span><i class="dia"></i>Diastólica</span></span>
+          </div>
+          <VitalsChart client:visible />
+          <a class="lk" href="/historia-clinica-electronica">Historia clínica y signos vitales →</a>
+        </div>
+
+        <div class="lsys-card exam">
+          <h3>Examen por sistemas</h3>
+          <p>Lo que no marcas queda «No examinado». Nunca se da por normal.</p>
+          <ul class="lsys-exam">
+            {exam.map(([name, state, phone]) => (
+              <li class:list={{ "d-only": !phone }}><span>{name}</span><span class:list={["st", examTone[state]]}>{state}</span></li>
+            ))}
+          </ul>
+          <span class="lsys-sum">4 examinados · 1 con hallazgos · 6 sin examinar</span>
+        </div>
+
+        <div class="lsys-card">
+          <h3>Receta que revisa</h3>
+          <div class="lsys-warn"><b>Julia está embarazada (12 semanas).</b> Lo contraindicado en el embarazo solo se receta escribiendo el motivo.</div>
+          <p>Avisa alergias, pide el peso en menores de 12 años y deja fuera lo que va en la receta oficial.</p>
+          <a class="lk end" href="/receta-y-descanso-medico">Receta y descanso médico →</a>
+        </div>
+
+        <div class="lsys-card">
+          <h3>Descanso médico</h3>
+          <div class="lsys-doc">
+            <span class="row"><b>Descanso médico N.º 1</b><span class="ok-pill">Emitido</span></span>
+            <span>3 días, del 24/10 al 26/10</span>
+            <span class="small">Sin diagnóstico: Rosa no autorizó que figure. Elena Vela · CMP 045678</span>
+          </div>
+          <p>Firmado y numerado. No se corrige: se anula con motivo. Se envía por su canal.</p>
+        </div>
+
+        <div class="lsys-card">
+          <h3>Controles que se repiten</h3>
+          <div class="lsys-doc">
+            <b>Control de presión arterial</b>
+            <span class="pills"><span class="lila-pill">Cada 3 meses</span><span class="grey-pill">Siguiente: enero</span></span>
+            <span class="small">«Traer el registro de presión de la casa.»</span>
+          </div>
+          <p>Cada 1, 3, 6 o 12 meses hasta «Dejar de repetir». Argos invita a tiempo.</p>
+          <a class="lk end" href="/agenda-medica">Agenda y controles →</a>
+        </div>
+
+        <div class="lsys-card wide2">
+          <span class="lsys-title"><h3>Agenda, caja y reportes</h3><span>Por sala y por profesional. Los reportes cuentan la consulta cobrada.</span></span>
+          <div class="lsys-three">
+            <div class="mini">
+              <span class="mini-k">Agenda · jueves</span>
+              <span class="slot lila"><b>09:00 · Sala 1</b> · Rosa Paredes</span>
+              <span class="slot amber"><b>10:00 · Sala 2</b> · Luis Gómez · control</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">Caja</span>
+              <span>Consulta medicina general</span>
+              <b class="big">S/ 80</b>
+              <span class="ok-pill">Cobrada</span>
+            </div>
+            <div class="mini">
+              <span class="mini-k">Reportes · hoy</span>
+              <span>Consultas cobradas</span>
+              <b class="big">2 · S/ 130</b>
+              <span class="small">Consulta 80 + control 50</span>
+            </div>
+          </div>
+          <span class="links"><a class="lk" href="/caja-y-cobros">Caja y cobros →</a><a class="lk" href="/reportes">Reportes →</a></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · Tú decides y la confianza -->
+  <section class="ls white">
+    <div class="wrap ld-in">
+      <div class="ls-head">
+        <span class="tag">[ Tú decides ]</span>
+        <h2>Lo que hace cada agente, lo prendes o lo apagas.</h2>
+        <p>Cada interruptor dice qué pasa en los dos casos. Tu equipo siempre puede tomar una conversación: Sofi espera.</p>
+        <ul class="ld-always">
+          <li><span class="always sofi">Siempre</span>Sofi responde y, ante una señal de alarma, da el número de emergencias.</li>
+          <li><span class="always clio">Siempre</span>Lo que propone Clío espera tu Confirmar.</li>
+        </ul>
+      </div>
+      <div class="ld-switches">
+        <AgentSwitches client:visible />
+      </div>
+      <div class="lt">
+        <div class="lt-head">
+          <span class="lt-title"><span class="tag">[ Confianza ]</span><b>La historia clínica es de tu paciente. La cuidamos así.</b></span>
+          <a class="lk" href="/seguridad">Cómo protegemos tus datos →</a>
+        </div>
+        <div class="lt-grid">
+          {trust.map((item) => (
+            <div class="lt-card">
+              <span class="lt-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={item.icon} /></span>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 · Cómo se cobra, en corto -->
+  <section class="ls" id="cobro">
+    <div class="wrap lc-in">
+      <div class="ls-head">
+        <span class="tag">[ Cómo se cobra ]</span>
+        <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
+        <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.</p>
+        <a class="lk big" href="/precios">Ver precios →</a>
+      </div>
+      <div class="lc-card">
+        {plan && chargeRows.length > 0 ? (
+          <>
+            <ChargeDay client:visible rows={chargeRows} currency={plan.currency} title="Jueves · Consultorio San Martín" />
+            <span class="lc-note">Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}.` : ""}</span>
+          </>
+        ) : (
+          <p class="lc-empty">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
+        )}
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · Preguntas -->
+  <FaqList items={faq} white />
+
+  <CtaBand title="Tu consultorio, atendido de día y de noche.">
+    <Fragment slot="text">
+      {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
+    </Fragment>
+  </CtaBand>
+
+  <!-- En el teléfono, la llamada a la acción fija abajo; aparece al pasar la portada para no taparla. -->
+  <div class="lsticky" data-lh-sticky>
+    <span>{gift ? <><b class="gift">{gift}</b> de regalo<br />para tus agentes</> : "Tus agentes, desde el primer día"}</span>
+    <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+  </div>
+</div>
+
+<script>
+  // La barra fija del teléfono se muestra solo cuando la portada ya no está a la vista.
+  const hero = document.querySelector("[data-lh-hero]")
+  const bar = document.querySelector("[data-lh-sticky]")
+  if (hero && bar && "IntersectionObserver" in window) {
+    new IntersectionObserver(([entry]) => {
+      bar.classList.toggle("show", !entry.isIntersecting)
+    }).observe(hero)
+  }
+</script>
+
+<style>
+  .lh-page { overflow-x: clip; background: var(--paper); }
+  .lk { color: var(--teal); font-weight: 700; text-decoration: none; font-size: 16px; }
+  .lk:hover { color: var(--teal-hover); text-decoration: underline; }
+  .c-sofi { color: #4fc3d7; }
+  .c-clio { color: #a6f0d8; }
+  .c-argos { color: #f5c46b; }
+
+  /* 1 · Portada */
+  .lh { padding: 144px 0 96px; }
+  .lh-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .lh-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .lh-tag { font-size: 13px; letter-spacing: .12em; }
+  .lh-h1 { font-size: clamp(44px, 4.7vw, 66px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
+  .lh-h1 span { color: var(--sky); }
+  .lh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); max-width: 520px; }
+  .lh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  .lh-note { font-size: 15px; line-height: 1.5; color: var(--on-night-3); }
+  .lh-specs { list-style: none; margin: 0; padding: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .lh-specs li { font-size: 13px; color: var(--on-night-2); border: 1px solid rgba(255, 255, 255, .14); border-radius: 999px; padding: 6px 12px; }
+  .lh-demo { flex: 1.3 1 560px; min-width: 0; }
+
+  /* Secciones claras */
+  .ls { padding: 88px 0; background: #f7f5fc; }
+  .ls.white { background: var(--paper); }
+  .ls-in { display: flex; flex-direction: column; gap: 44px; }
+  .ls-head { display: flex; flex-direction: column; gap: 16px; max-width: 660px; }
+  .ls-head.wide { max-width: 820px; }
+  .ls-head .tag { font-size: 13px; letter-spacing: .12em; }
+  .ls-head h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .ls-head p { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .ls-head .lk { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; }
+  .ls-head .lk.big { font-size: 17px; }
+
+  /* 2 · Omnicanal */
+  .ls-split { display: flex; flex-wrap: wrap; gap: 24px 64px; align-items: flex-end; justify-content: space-between; }
+  .ls-split .ls-head { flex: 1 1 520px; }
+  .lo-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-width: 400px; flex: 0 1 400px; }
+  .lo-chips li { display: inline-flex; align-items: center; gap: 8px; background: #f7f5fc; border: 1px solid #e9e2f7; border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; }
+  .lo-chips i { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* 3 · Agentes */
+  .la-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 18px; }
+  .la-card { background: var(--paper); border: 1px solid #e9e2f7; border-top: 4px solid var(--ac-line); border-radius: 26px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+  .la-card.sofi { --ac: #0e7490; --ac-line: #0e7490; }
+  .la-card.clio { --ac: #1f7f63; --ac-line: #1f9d7a; }
+  .la-card.argos { --ac: #9a6a12; --ac-line: #c98a1c; }
+  .la-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ac); }
+  .la-name { font-size: 60px; line-height: .9; letter-spacing: -.055em; font-weight: 800; color: var(--ac); }
+  .la-text { font-size: 17px; line-height: 1.5; color: var(--ink-2); }
+  .la-more { color: var(--ac); min-height: 44px; display: inline-flex; align-items: center; align-self: flex-start; }
+  .la-more:hover { color: var(--ac); }
+
+  /* 5 · El sistema */
+  .lsys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .lsys-card { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 24px; padding: 26px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .lsys-card h3 { font-size: 21px; letter-spacing: -.01em; }
+  .lsys-card > p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .lsys-card .lk { font-size: 15px; min-height: 44px; display: inline-flex; align-items: center; align-self: flex-start; }
+  .lsys-card .lk.end { margin-top: auto; }
+  .vitals { grid-column: span 2; gap: 14px; }
+  .exam { grid-row: span 2; }
+  .wide2 { grid-column: span 2; gap: 14px; }
+  .lsys-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .lsys-title { display: flex; flex-direction: column; gap: 4px; }
+  .lsys-title > span { font-size: 15px; color: var(--muted); }
+  .lsys-legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+  .lsys-legend > span { display: flex; align-items: center; gap: 6px; }
+  .lsys-legend i { width: 14px; height: 3px; border-radius: 2px; }
+  .lsys-legend .sys { background: #0e8fb0; }
+  .lsys-legend .dia { background: #f0703a; }
+  .lsys-exam { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .lsys-exam li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #f1eef8; font-size: 14px; }
+  .st { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; }
+  .st.ok { background: #e3f5ee; color: #16614b; }
+  .st.find { background: #fff1e0; color: #8a4b05; }
+  .st.none { background: #eef0f4; color: var(--soft); }
+  .lsys-sum { font-family: var(--mono); font-size: 12px; color: var(--muted); background: #f7f5fc; border-radius: 10px; padding: 10px 12px; }
+  .lsys-warn { background: #fff6e5; border: 1px solid #f3d9a4; border-radius: 14px; padding: 12px 14px; font-size: 14px; line-height: 1.45; color: #5c3d06; }
+  .lsys-doc { border: 1px solid #e9e2f7; border-radius: 14px; padding: 12px 14px; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 4px; }
+  .lsys-doc .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .lsys-doc .pills { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 0; }
+  .small { color: var(--soft); font-size: 13px; }
+  .ok-pill { align-self: flex-start; background: #e3f5ee; color: #16614b; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+  .lila-pill { background: var(--teal-soft); color: var(--teal-hover); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
+  .grey-pill { background: #eef0f4; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+  .lsys-three { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 12px; }
+  .mini { background: #f7f5fc; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .mini-k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--soft); }
+  .slot { background: var(--paper); border-left: 3px solid; border-radius: 8px; padding: 7px 10px; margin-top: 2px; }
+  .slot.lila { border-left-color: var(--teal); }
+  .slot.amber { border-left-color: #c98a1c; }
+  .mini .big { font-size: 22px; }
+  .links { display: flex; gap: 0 20px; flex-wrap: wrap; }
+
+  /* 6 · Tú decides y confianza */
+  .ld-in { display: flex; flex-wrap: wrap; gap: 48px; }
+  .ld-in > .ls-head { flex: 1 1 380px; min-width: 0; }
+  .ld-switches { flex: 1 1 560px; min-width: 0; }
+  .ld-always { list-style: none; margin: 0; padding: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
+  .ld-always li { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 1.45; color: var(--ink-2); }
+  .always { flex: none; font-family: var(--mono); font-size: 11px; text-transform: uppercase; border-radius: 999px; padding: 4px 10px; }
+  .always.sofi { background: #e3f4f8; color: #0b4f61; }
+  .always.clio { background: #e3f5ee; color: #16614b; }
+  .lt { flex: 1 1 100%; display: flex; flex-direction: column; gap: 20px; padding-top: 24px; border-top: 1px solid #e9e2f7; }
+  .lt-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .lt-title { display: flex; flex-direction: column; gap: 8px; }
+  .lt-title .tag { font-size: 13px; letter-spacing: .12em; }
+  .lt-title b { font-size: 26px; letter-spacing: -.025em; line-height: 1.2; }
+  .lt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 16px; }
+  .lt-card { background: #f7f5fc; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .lt-ico { width: 44px; height: 44px; border-radius: 14px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; }
+  .lt-card h3 { font-size: 19px; }
+  .lt-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+  /* 7 · Cobro */
+  .lc-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .lc-in > .ls-head { flex: 1 1 420px; min-width: 0; }
+  .lc-card { flex: 1 1 540px; min-width: 0; background: var(--paper); border: 1px solid #e9e2f7; border-radius: 24px; padding: 26px 28px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 20px 50px rgba(76, 42, 138, .08); }
+  .lc-note { font-size: 12px; color: var(--soft); }
+  .lc-empty { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .lc-empty a { font-weight: 700; }
+
+  /* Barra fija del teléfono */
+  .lsticky { display: none; }
+
+  @media (max-width: 1080px) {
+    .lsys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .exam { grid-row: auto; }
+    .vitals, .wide2 { grid-column: 1 / -1; }
+  }
+  @media (max-width: 720px) {
+    .d-only { display: none !important; }
+    .lh { padding: 104px 0 56px; }
+    .lh-in { gap: 26px; }
+    .lh-copy { gap: 18px; flex-basis: 100%; }
+    .lh-tag { font-size: 12px; }
+    .lh-h1 { font-size: 44px; }
+    .lh-lead { font-size: 17px; line-height: 1.5; }
+    .lh-ctas { flex-direction: column; gap: 10px; }
+    .lh-ctas .btn { width: 100%; }
+    .lh-note { font-size: 14px; text-align: center; }
+    .lh-specs { display: none; }
+    .lh-demo { flex-basis: 100%; }
+    .ls { padding: 64px 0; }
+    .ls-in { gap: 22px; }
+    .ls-head { gap: 14px; }
+    .ls-head .tag { font-size: 12px; }
+    .ls-head h2 { font-size: 32px; line-height: 1.05; }
+    .ls-head p { font-size: 16px; }
+    .ls-split { gap: 18px; }
+    .ls-split .ls-head { flex-basis: 100%; }
+    .lo-chips { gap: 6px; flex-basis: 100%; }
+    .lo-chips li { padding: 6px 11px; font-size: 13px; }
+    .lo-chips i { display: none; }
+    .la-grid { gap: 16px; }
+    .la-card { padding: 20px; border-radius: 22px; gap: 12px; }
+    .la-name { font-size: 46px; }
+    .la-text { font-size: 16px; }
+    .lsys { grid-template-columns: 1fr; gap: 14px; }
+    .lsys-card { padding: 18px; border-radius: 20px; gap: 10px; }
+    .lsys-card h3 { font-size: 19px; }
+    .lsys-card > p, .lsys-title > span { font-size: 14px; }
+    .lsys-legend { display: none; }
+    .lsys-exam li { padding: 8px 0; }
+    .lsys-sum { font-size: 11px; padding: 9px 10px; }
+    .lsys-three { grid-template-columns: 1fr; }
+    .ld-in, .lc-in { gap: 22px; }
+    .ld-switches { flex-basis: 100%; }
+    .lt { margin-top: 4px; gap: 12px; padding-top: 22px; }
+    .lt-title b { font-size: 22px; }
+    .lt-grid { gap: 10px; }
+    .lt-card { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 4px; padding: 14px; border-radius: 16px; }
+    .lt-ico { width: 36px; height: 36px; border-radius: 11px; }
+    .lt-card h3 { font-size: 16px; flex: 1; }
+    .lt-card p { flex-basis: 100%; font-size: 14px; }
+    .lc-card { flex-basis: 100%; padding: 16px 18px; border-radius: 20px; }
+    .lc-note { font-size: 11px; }
+    .lsticky { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: center; gap: 12px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: rgba(18, 6, 42, .92); backdrop-filter: blur(10px); border-top: 1px solid rgba(255, 255, 255, .1); transform: translateY(110%); visibility: hidden; transition: transform .3s ease, visibility .3s; }
+    .lsticky.show { transform: none; visibility: visible; }
+    .lsticky > span { flex: 1; min-width: 0; font-size: 13px; line-height: 1.3; color: var(--on-night-2); }
+    .lsticky .btn { flex: none; min-height: 48px; padding: 0 22px; font-size: 15px; }
+    :global(body:has(.lsticky)) { padding-bottom: 76px; }
+  }
+</style>

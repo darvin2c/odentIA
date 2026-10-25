@@ -11,8 +11,8 @@ import { defineConfig } from "astro/config"
 const LEGAL_EN_PREPARACION =
   /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal)$/
 
-// La web de latidIA es el mismo código con VITE_PRODUCT=medical (decisión 18 del issue 229): su
-// dominio y solo sus páginas en el mapa del sitio (`src/lib/latidia-pages.json`).
+// La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
+// páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.
 const medical = process.env.VITE_PRODUCT === "medical"
 const domain = process.env.VITE_BASE_DOMAIN || (medical ? "latidia.localhost" : "odentia.localhost")
 const latidiaPages = JSON.parse(readFileSync(new URL("./src/lib/latidia-pages.json", import.meta.url), "utf8"))
@@ -32,7 +32,7 @@ function pageFiles(dir) {
 }
 const pages = pageFiles(pagesDir)
   .map((file) => `/${relative(pagesDir, file).replaceAll("\\", "/").replace(/\.astro$/, "").replace(/(^|\/)index$/, "")}`)
-  .filter((path) => !medical || latidiaPages.includes(path))
+  .filter((path) => (medical ? latidiaPages.serves.includes(path) : !latidiaPages.own.includes(path)))
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
 export default defineConfig({
@@ -51,9 +51,10 @@ export default defineConfig({
       customPages: pages,
       filter: (page) => {
         const path = page.replace(/\/$/, "")
-        // En la web de latidIA, solo sus páginas: las demás responden 404 en su dominio.
-        const own = !medical || latidiaPages.includes(new URL(page).pathname.replace(/\/$/, "") || "/")
-        return own && !LEGAL_EN_PREPARACION.test(path)
+        // Cada web, solo sus páginas: las demás responden 404 en su dominio.
+        const clean = new URL(page).pathname.replace(/\/$/, "") || "/"
+        const ours = medical ? latidiaPages.serves.includes(clean) : !latidiaPages.own.includes(clean)
+        return ours && !LEGAL_EN_PREPARACION.test(path)
       },
     }),
   ],

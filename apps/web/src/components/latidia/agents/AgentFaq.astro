@@ -1,0 +1,46 @@
+---
+// «Lo que suelen preguntar los médicos» (tableros Sofi, Clio y Argos): las preguntas a la vista, en
+// columnas, no plegadas; son pocas y cortas. Una respuesta puede terminar con un enlace. Los datos
+// estructurados (FAQPage) los arma la página con faqJsonLd y el mismo texto.
+export type AgentQuestion = { q: string; a: string; link?: { href: string; label: string } }
+
+interface Props {
+  items: AgentQuestion[]
+  white?: boolean
+}
+const { items, white = false } = Astro.props
+---
+<section class:list={["la-sec af", { white }]} id="preguntas">
+  <div class="wrap af-in">
+    <div class="la-head">
+      <span class="tag la-tag">[ Preguntas ]</span>
+      <h2 class="la-h2 s">Lo que suelen preguntar los médicos.</h2>
+    </div>
+    <div class="af-grid">
+      {items.map((item) => (
+        <div class="af-q">
+          <h3>{item.q}</h3>
+          <p>
+            {item.a}
+            {item.link && <> <a href={item.link.href}>{item.link.label}</a>.</>}
+          </p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .af { padding-bottom: 112px; }
+  .af-in { display: flex; flex-direction: column; gap: 32px; }
+  .af-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 0 40px; }
+  .af-q { padding: 20px 0; border-top: 1px solid var(--la-line); display: flex; flex-direction: column; gap: 6px; }
+  .af-q h3 { font-size: 18px; line-height: 1.3; }
+  .af-q p { font-size: 16px; line-height: 1.55; color: var(--muted); }
+  .af-q a { font-weight: 600; }
+  @media (max-width: 720px) {
+    .af { padding-bottom: 64px; }
+    .af-in { gap: 16px; }
+    .af-q p { font-size: 15px; }
+  }
+</style>

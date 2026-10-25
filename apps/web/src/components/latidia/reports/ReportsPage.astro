@@ -1,0 +1,184 @@
+---
+// /reportes de latidIA (lienzo de latidIA, tablero «Caja», secciones Reportes y «Pregúntale a Argos»):
+// Argos de protagonista en la portada, respondiendo con las cifras del Consultorio San Martín; las cinco
+// pestañas de Reportes con su réplica y la captura real de Pacientes; por qué confiar en su respuesta,
+// las preguntas y el cierre. Ningún precio en el código: lo que se pagó por los agentes y las preguntas
+// de Argos salen del plan que se muestra (Astro.locals.pricing).
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf, money, shownPlan } from "../../../lib/pricing"
+import { AGENT_COLORS, contactHref, ctaOf } from "../../../lib/site"
+import FeatureGrid from "../../agents/FeatureGrid.astro"
+import SplitHero from "../../agents/SplitHero.astro"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import ArgosAsk from "./ArgosAsk"
+import ReportsTabs from "./ReportsTabs"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const title = "Reportes para consultorio médico, sin planillas"
+const description =
+  "Reportes de tu consultorio médico: lo cobrado por consulta, lo que te deja el mes, quién debe, quién faltó y cada sede. Y Argos, que responde lo que le preguntes con las mismas cuentas."
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Reportes", "/reportes"],
+]
+const REPLAY = "latidia:reportes-preguntar"
+// El ámbar de Argos sobre claro no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
+const argosTag = "#9a6a12"
+
+// Lo que se pagó por los agentes en el mes de ejemplo de la pestaña Agente, con los precios publicados:
+// Sofi atendió 412 conversaciones (216 informan, 100 gestionan y 96 agendan), Clío ordenó 198 consultas
+// (92 simples, 76 estándar y 30 completas) y Argos recuperó 11 citas; sus preguntas caben en las incluidas.
+const MONTH = { informa: 216, gestiona: 100, agenda: 96, simple: 92, estandar: 76, completa: 30, recovered: 11 }
+const agentCost = (() => {
+  if (!plan || plan.recovered === null) return null
+  const t = plan.tiers
+  const parts = [
+    [t.informa, MONTH.informa],
+    [t.gestiona, MONTH.gestiona],
+    [t.agenda, MONTH.agenda],
+    [t.simple, MONTH.simple],
+    [t.estandar, MONTH.estandar],
+    [t.completa, MONTH.completa],
+    [plan.recovered, MONTH.recovered],
+  ] as const
+  if (parts.some(([price]) => price === null)) return null
+  const total = parts.reduce((sum, [price, n]) => sum + (price ?? 0) * n, 0)
+  return {
+    total: money(total, plan.currency),
+    note: `Cuenta de ejemplo con los precios publicados del plan ${plan.name}: 412 conversaciones, 198 consultas y 11 citas recuperadas.`,
+  }
+})()
+
+// Las preguntas a Argos, del plan que se muestra; sin plan publicado, no hay cifras.
+const argosAnswer = plan?.argos
+  ? `Con el plan ${plan.name}, ${plan.argos.included} preguntas al mes están incluidas, y cada ${plan.argos.packQuestions} más cuestan ${money(plan.argos.pack, plan.currency)}. Si Argos no puede responder con tus datos, esa pregunta no cuenta.`
+  : "Los precios se publican pronto. Escríbenos y te los contamos. Si Argos no puede responder con tus datos, esa pregunta no cuenta."
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Tengo que cargar datos aparte para ver los reportes?",
+    a: "No. Salen de lo que ya pasa en el consultorio: la agenda, las conversaciones, la historia y la caja.",
+  },
+  {
+    q: "¿Por qué «pagaron» es la consulta cobrada?",
+    a: "Porque en un consultorio lo que indicas ya queda aceptado: no hace falta un presupuesto aceptado para que la atención cuente. Pagó quien vino y se le cobró la consulta.",
+  },
+  {
+    q: "¿Puedo ver una sede sola?",
+    a: "Sí. En Reportes eliges la sede y el periodo, o ves todas juntas.",
+  },
+  {
+    q: "¿Argos inventa las cifras?",
+    a: "No. Usa las mismas cuentas de Reportes y debajo de cada respuesta dice cómo lo calculó: qué contó, de qué periodo y de qué sedes. Si latidIA no registra ese dato, te lo dice y te ofrece lo más cercano.",
+  },
+  { q: "¿Cuántas preguntas le puedo hacer a Argos?", a: argosAnswer },
+  {
+    q: "¿Quién ve los reportes?",
+    a: "Quien tiene ese permiso en tu consultorio, normalmente quien dirige. Caja y recepción ven lo suyo, no los reportes.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="lt">
+    <SplitHero
+      tag="Reportes con Argos"
+      color={AGENT_COLORS.administrador.dark}
+      h1="Reportes para tu consultorio médico sin armar planillas: lo cobrado por consulta, quién debe, quién faltó y cada sede, y Argos para todo lo demás."
+      lead="Escribes la pregunta como se la harías a tu administrador. Argos responde con las mismas cuentas de Reportes y te dice cómo lo calculó. Si no registras ese dato, te lo dice."
+    >
+      <p class="sh-title">Pregúntale a <span style={`color: ${AGENT_COLORS.administrador.dark}`}>tu consultorio.</span></p>
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <button type="button" class="btn btn-g" data-lt-replay={REPLAY}>Preguntar otra vez</button>
+      </Fragment>
+      <ArgosAsk slot="demo" client:load replayEvent={REPLAY} />
+    </SplitHero>
+
+    <section class="section section-white">
+      <div class="wrap rp-in">
+        <div class="rp-head">
+          <span class="tag rp-tag">[ Las cinco pestañas ]</span>
+          <h2 class="rp-h2">Cinco pestañas, sin copiar nada a una planilla.</h2>
+          <p class="rp-lead">Salen de lo que ya pasa en el consultorio: la agenda, las conversaciones, la historia y la caja. Cada cifra se compara con palabras, no solo con un color.</p>
+        </div>
+        <ReportsTabs client:visible agentCost={agentCost} contactHref={contactHref} />
+        <figure class="rp-shot">
+          <img
+            src="/img/latidia/reportes-pacientes.jpg"
+            width="1280"
+            height="1626"
+            loading="lazy"
+            decoding="async"
+            alt="Reportes › Pacientes: quienes nos buscaron por primera vez, pacientes nuevos, los que pagaron al venir, el embudo «Dónde se caen los pacientes» y si vuelven."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <FeatureGrid
+      tag="Por qué confiar en su respuesta"
+      tagColor={argosTag}
+      title="Argos no adivina: cuenta."
+      min={240}
+      small
+      items={[
+        { title: "La cifra oficial", text: "Usa las mismas cuentas de Reportes, y te lo dice debajo de la respuesta." },
+        { title: "«Así lo calculé»", text: "Cada respuesta dice qué contó, de qué periodo y de qué sedes." },
+        { title: "Sin nombres para la IA", text: "El modelo nunca ve los nombres de tus pacientes; la lista la arma tu sistema." },
+        { title: "Lo que no sabe, lo dice", text: "Si latidIA no registra ese dato, te ofrece lo más cercano. Y no cuenta como pregunta." },
+      ]}
+    >
+      <p class="more"><a href="/agentes/administrador">Lo que hace Argos →</a></p>
+    </FeatureGrid>
+
+    <div class="faqwrap">
+      <Faq items={faq} title="Sobre los reportes y Argos." />
+    </div>
+    <CtaBand title="Pregúntale a tu consultorio desde hoy.">
+      <Fragment slot="text">
+        {gift ? (
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
+        ) : (
+          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<script>
+  // «Preguntar otra vez»: Argos (isla) escucha este evento y vuelve a hacer la pregunta.
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-lt-replay]")) {
+    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.ltReplay ?? "")))
+  }
+</script>
+
+<style>
+  /* Las superficies de latidIA: el gris claro y las líneas con un poco de su lila (como el tablero). */
+  .lt {
+    --bg: color-mix(in srgb, var(--teal) 4%, #fff);
+    --line: color-mix(in srgb, var(--teal) 12%, #fff);
+  }
+  .rp-in { display: flex; flex-direction: column; gap: 36px; }
+  .rp-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .rp-tag { font-size: 13px; letter-spacing: .12em; }
+  .rp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .rp-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .rp-shot { margin: 0; display: flex; flex-direction: column; gap: 8px; max-width: 720px; width: 100%; align-self: center; }
+  .rp-shot img { width: 100%; height: auto; border-radius: 20px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); }
+  .rp-shot figcaption { font-size: 13px; color: var(--soft); }
+  .more { font-size: 15px; }
+  .more a { font-weight: 700; display: inline-block; padding: 10px 0; }
+  .faqwrap { background: var(--paper); }
+  @media (max-width: 720px) {
+    .rp-in { gap: 24px; }
+    .rp-lead { font-size: 16px; }
+  }
+</style>

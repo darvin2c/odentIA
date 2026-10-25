@@ -1,0 +1,52 @@
+/* «Emitir receta» como en la app: tarjeta blanca, campos grises y los avisos con su color. */
+.rx { background: var(--paper); color: var(--ink); border-radius: 26px; overflow: hidden; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6); min-width: 0; }
+.rx-top { padding: 16px 20px; border-bottom: 1px solid #e9e2f7; display: flex; flex-direction: column; gap: 12px; }
+.rx-title { display: flex; flex-direction: column; gap: 2px; }
+.rx-title b { font-size: 18px; }
+.rx-title span { font-size: 13px; color: var(--muted); }
+.rx-cases { display: flex; gap: 4px; flex-wrap: wrap; background: #f1eef8; border-radius: 18px; padding: 4px; }
+.rx-cases button { flex: 1 1 auto; min-height: 44px; padding: 0 14px; border-radius: 14px; border: 0; cursor: pointer; font: 600 14px var(--font); background: transparent; color: var(--muted); }
+.rx-cases button[aria-pressed="true"] { background: var(--paper); color: var(--teal-hover); box-shadow: 0 1px 4px rgba(0, 0, 0, .1); }
+.rx-cases button:hover { filter: brightness(.96); }
+.rx-cases button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+.rx-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 470px; background: #fbfafe; }
+.rx-who { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rx-av { width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+.rx-name { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
+.rx-name b { font-size: 15px; }
+.rx-name span { font-size: 12px; color: var(--soft); }
+.rx-chip { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 6px 10px; background: #eef0f4; color: var(--ink-2); }
+.rx-chip.warn { background: #fdecc8; color: #7a4a06; }
+.rx-chip.info { background: var(--teal-soft); color: var(--teal-hover); }
+.rx-reminder { background: #fff8ea; border: 1px solid #f3dfb2; border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.45; color: #7a4a06; }
+
+.rx-form { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 16px; padding: 12px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px 12px; }
+.rx-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rx-field.full { grid-column: 1 / -1; }
+.rx-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.rx-input { min-height: 40px; border-radius: 12px; background: #eef0f4; padding: 10px 12px; font-size: 14px; border: 2px solid transparent; }
+.rx-input.dci { font-weight: 600; }
+.rx-input.typing { border-color: var(--sky); background: var(--paper); }
+.rx-input.strong { font-weight: 700; }
+.rx-input.missing { border-color: #f5c2c2; background: var(--paper); color: #94a3b8; }
+.rx-input.motive { border-color: var(--sky); background: var(--paper); color: #94a3b8; font-size: 13px; padding: 9px 12px; }
+.rx-caret { display: inline-block; width: 2px; height: 16px; background: var(--teal); margin-left: 1px; vertical-align: -3px; animation: rxBlink 1s steps(1) infinite; }
+@keyframes rxBlink { 50% { opacity: 0; } }
+
+.rx-checks { display: flex; flex-direction: column; gap: 8px; }
+.rx-block { display: flex; flex-direction: column; gap: 3px; border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.45; }
+.rx-block.stop { background: #fdecec; border: 1px solid #f5c2c2; color: #8f1d1d; }
+.rx-block.warn { background: #fff1e6; border: 1px solid #f7cfa8; color: #8a3b07; }
+.rx-block.ok { background: #e4f6ee; border: 1px solid #b7e4cf; color: #145c43; }
+.rx-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid #eee9f7; }
+.rx-status { font-size: 13px; color: var(--muted); flex: 1 1 200px; }
+.rx-emit { font-size: 14px; font-weight: 700; border-radius: 999px; padding: 12px 18px; background: #e4dcf3; color: #6f5f99; }
+.rx-emit.ok { background: var(--teal); color: #fff; }
+.rx-note { padding: 10px 20px; font-size: 12px; color: var(--muted); border-top: 1px solid #e9e2f7; }
+
+@media (max-width: 720px) {
+  .rx { border-radius: 20px; }
+  .rx-top, .rx-body { padding: 14px; }
+  .rx-body { min-height: 0; }
+}

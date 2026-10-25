@@ -1,0 +1,24 @@
+/* Mini demo de cada agente (AgentMini): el fondo suave de su color y las burbujas del caso. */
+.am { border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-height: 268px; }
+.am.sofi { background: #eef8fa; }
+.am.clio { background: #edf8f3; }
+.am.argos { background: #fcf4e4; }
+.am-meta { font-family: var(--agent-font); font-size: 11px; text-transform: uppercase; color: var(--muted); }
+.am-in, .am-out, .am-said, .am-sugg, .am-chip { opacity: 0; transform: translateY(8px); transition: opacity .45s, transform .45s; font-size: 14px; line-height: 1.45; }
+.am .on { opacity: 1; transform: none; }
+.am-in { align-self: flex-start; max-width: 88%; background: var(--paper); border-radius: 14px 14px 14px 4px; padding: 10px 12px; }
+.am-out { align-self: flex-end; max-width: 92%; border-radius: 14px 14px 4px 14px; padding: 10px 12px; }
+.sofi .am-out { background: #cdeef4; }
+.argos .am-out { background: #f7e3bb; }
+.am-said { align-self: flex-start; background: var(--paper); border-radius: 999px; padding: 8px 14px; font-weight: 600; }
+.am-sugg { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #f5f0fd; border: 1px solid #dccdf5; border-radius: 12px; padding: 10px 12px; line-height: 1.4; }
+.am-sugg > span:first-child { display: flex; flex-direction: column; }
+.am-sugg b { font-size: 13px; }
+.am-btn { flex: none; background: var(--teal); color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+.am-chip { display: flex; gap: 8px; align-items: center; border-radius: 12px; padding: 9px 12px; font-size: 13px; }
+.am-chip.alarm { background: #fdecea; color: #9b1c1c; }
+.am-chip.ok { background: #d4f1e5; color: #16614b; }
+.am-chip.booked { background: var(--paper); color: #7a5410; }
+@media (max-width: 720px) {
+  .am { min-height: 0; border-radius: 16px; padding: 12px; }
+}

@@ -1,6 +1,10 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.agentes).
+// Contenido en src/lib/pages-data.ts (PAGES.agentes). En latidIA, su propia página de los tres agentes.
 import InnerPage from "../components/pages/InnerPage.astro"
+import AgentsPage from "../components/latidia/agents/AgentsPage.astro"
+import { MEDICAL } from "../lib/product"
 import { PAGES } from "../lib/pages-data"
 ---
+{MEDICAL ? <AgentsPage /> : (
 <InnerPage page={PAGES.agentes} />
+)}

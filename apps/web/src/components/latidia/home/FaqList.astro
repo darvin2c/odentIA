@@ -1,0 +1,63 @@
+---
+// Preguntas de latidIA (lienzo «Inicio», sección 9): el título a la izquierda y cada pregunta en su
+// tarjeta plegable a la derecha, la primera abierta. Con <details>: se abre sin JavaScript y con el
+// teclado. Los datos estructurados (FAQPage) los arma cada página con faqJsonLd.
+import type { FaqItem } from "../../../lib/faq"
+import { contactHref } from "../../../lib/site"
+
+interface Props {
+  items: FaqItem[]
+  title?: string
+  /** Fondo de la sección: lila muy claro (las tarjetas blancas) o blanco (las tarjetas lila). */
+  white?: boolean
+}
+const { items, title = "Lo que suelen preguntarnos.", white = false } = Astro.props
+---
+<section class:list={["lf", { white }]} id="preguntas">
+  <div class="wrap lf-in">
+    <div class="lf-head">
+      <span class="tag">[ Preguntas ]</span>
+      <h2>{title}</h2>
+      <p>¿Algo más? <a href={contactHref}>Habla con nosotros</a>.</p>
+    </div>
+    <div class="lf-list">
+      {items.map((item, i) => (
+        <details class="lf-q" open={i === 0}>
+          <summary><h3>{item.q}</h3><span class="lf-plus" aria-hidden="true">+</span></summary>
+          <p>{item.a}</p>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .lf { padding: 88px 0 104px; background: #f7f5fc; }
+  .lf.white { background: var(--paper); }
+  .lf-in { display: flex; flex-wrap: wrap; gap: 48px; }
+  .lf-head { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .lf-head .tag { font-size: 13px; letter-spacing: .12em; }
+  .lf-head h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .lf-head p { font-size: 17px; line-height: 1.55; color: var(--muted); }
+  .lf-head a { font-weight: 700; text-decoration: none; }
+  .lf-head a:hover { text-decoration: underline; }
+  .lf-list { flex: 2 1 620px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .lf-q { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 18px; overflow: hidden; }
+  .white .lf-q { background: #f7f5fc; border-color: transparent; }
+  .lf-q summary { list-style: none; cursor: pointer; min-height: 60px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 22px; }
+  .lf-q summary::-webkit-details-marker { display: none; }
+  .lf-q summary:focus-visible { outline: 3px solid var(--sky); outline-offset: -3px; border-radius: 18px; }
+  .lf-q h3 { font-size: 17px; font-weight: 700; line-height: 1.35; }
+  .lf-plus { flex: none; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600; background: var(--teal-soft); color: var(--teal); transition: transform .25s; }
+  .lf-q[open] .lf-plus { background: var(--teal); color: #fff; transform: rotate(45deg); }
+  .lf-q p { padding: 0 22px 20px; font-size: 16px; line-height: 1.6; color: var(--muted); }
+  @media (max-width: 720px) {
+    .lf { padding: 64px 0 72px; }
+    .lf-in { gap: 22px; }
+    .lf-list { flex-basis: 100%; }
+    .lf-q { border-radius: 16px; }
+    .lf-q summary { min-height: 56px; padding: 12px 16px; gap: 12px; }
+    .lf-q h3 { font-size: 16px; }
+    .lf-q p { padding: 0 16px 16px; font-size: 15px; }
+  }
+</style>

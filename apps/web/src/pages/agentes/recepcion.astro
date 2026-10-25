@@ -10,6 +10,8 @@ import SplitHero from "../../components/agents/SplitHero.astro"
 import CtaBand from "../../components/CtaBand.astro"
 import Faq from "../../components/Faq.astro"
 import Base from "../../layouts/Base.astro"
+import ReceptionPage from "../../components/latidia/agents/reception/ReceptionPage.astro"
+import { MEDICAL } from "../../lib/product"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
 import { hours } from "../../lib/pricing"
@@ -50,6 +52,7 @@ const faq: FaqItem[] = [
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
+{MEDICAL ? <ReceptionPage /> : (
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   <SplitHero
     tag="Tu agente de recepción"
@@ -125,6 +128,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <CtaBand title="Que Sofi atienda tu recepción esta noche." />
 </Base>
 
+)}
 <style>
   .more { font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; align-self: flex-start; }
   .more:hover { text-decoration: underline; }

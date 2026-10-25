@@ -1,0 +1,26 @@
+/* Un jueves de cobros (ChargeDay): cada fila aparece con el punto del agente que la hizo. */
+.cd2 { display: flex; flex-direction: column; }
+.cd2-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid #e9e2f7; }
+.cd2-head b { font-size: 17px; }
+.cd2-head span { font-family: var(--agent-font); font-size: 12px; color: var(--soft); }
+.cd2-rows { list-style: none; margin: 0; padding: 0; }
+.cd2-row { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-bottom: 1px solid #f1eef8; opacity: 0; transform: translateY(8px); transition: opacity .45s, transform .45s; }
+.cd2-row.on { opacity: 1; transform: none; }
+.cd2-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.cd2-dot.sofi { background: #0e7490; }
+.cd2-dot.clio { background: #1f9d7a; }
+.cd2-dot.argos { background: #c98a1c; }
+.cd2-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cd2-what b { font-size: 15px; }
+.cd2-what span { font-size: 13px; color: var(--soft); }
+.cd2-amt { font-size: 20px; letter-spacing: -.01em; white-space: nowrap; }
+.cd2-amt.zero { color: #94a3b8; }
+.cd2-total { display: flex; justify-content: space-between; align-items: baseline; padding-top: 14px; }
+.cd2-total > b:first-child { font-size: 17px; }
+.cd2-sum { font-size: 30px; letter-spacing: -.02em; color: var(--teal-hover); white-space: nowrap; }
+@media (max-width: 720px) {
+  .cd2-head b, .cd2-total > b:first-child { font-size: 15px; }
+  .cd2-what b { font-size: 14px; }
+  .cd2-what span { font-size: 12px; }
+  .cd2-sum { font-size: 26px; }
+}

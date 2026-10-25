@@ -1,0 +1,37 @@
+/* El examen físico por sistemas: la lista con su par de botones y, al lado, cómo queda escrito. */
+.ex { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.ex-card { flex: 1.3 1 520px; min-width: 0; background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; }
+.ex-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; }
+.ex-title { display: flex; flex-direction: column; }
+.ex-title b { font-size: 17px; }
+.ex-title span { font-size: 13px; color: var(--soft); }
+.ex-sum { font-family: var(--agent-font); font-size: 12px; color: var(--teal-hover); background: var(--teal-soft); border-radius: 999px; padding: 6px 10px; }
+.ex-row { display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid #f1f0f6; }
+.ex-sys { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 150px; }
+.ex-name { font-size: 15px; font-weight: 600; }
+.ex-sub { font-size: 12px; }
+.ex-sub.ok { color: #1f7a5c; }
+.ex-sub.hall { color: #b45309; }
+.ex-sub.none { color: var(--soft); font-style: italic; }
+.ex-seg { display: flex; gap: 2px; background: #eef0f4; border-radius: 999px; padding: 3px; }
+.ex-seg button { min-height: 44px; padding: 0 12px; border-radius: 999px; border: 0; cursor: pointer; font: 600 13px var(--font); background: transparent; color: var(--soft); }
+.ex-seg button[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, .1); }
+.ex-seg button.hall[aria-pressed="true"] { color: #b45309; }
+.ex-seg button:hover { filter: brightness(.96); }
+.ex-seg button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.ex-foot { font-size: 12px; color: var(--soft); padding-top: 10px; border-top: 1px solid #f1f0f6; }
+
+.ex-aside { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.ex-record { background: var(--night); color: var(--on-night); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+.ex-k { font-family: var(--agent-font); font-size: 12px; letter-spacing: .1em; color: var(--sky-2); }
+.ex-text { font-size: 15px; line-height: 1.6; color: #ece6f8; }
+.ex-why { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+.ex-why b { font-size: 17px; }
+.ex-why span { font-size: 15px; line-height: 1.55; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .ex-card { padding: 14px; flex-basis: 100%; }
+  .ex-aside { flex-basis: 100%; }
+  .ex-seg { width: 100%; }
+  .ex-seg button { flex: 1 1 0; padding: 0 8px; }
+}

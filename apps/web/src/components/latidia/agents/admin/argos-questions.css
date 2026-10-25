@@ -1,0 +1,255 @@
+/* Preguntas a Argos en latidIA (ArgosQuestions.tsx, tablero «Argos»). Todo bajo .laq. El ámbar es el de
+   Argos: #c98a1c en el dibujo y #9a6a12 en las cifras y textos chicos sobre claro (contraste). */
+.laq {
+  background: #fff;
+  color: var(--ink);
+  border-radius: 26px;
+  padding: 22px;
+  min-height: 690px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.6);
+}
+.laq-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.laq-avatar {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  background: #c98a1c;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+.laq-who {
+  display: flex;
+  flex-direction: column;
+  font-size: 15px;
+}
+.laq-who span {
+  font-family: var(--agent-font);
+  font-size: 12px;
+  color: var(--muted);
+}
+.laq-ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f7f5fc;
+  border: 1px solid #e9e2f7;
+  border-radius: 999px;
+  padding: 6px 6px 6px 18px;
+}
+.laq-typed {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  min-height: 22px;
+}
+.laq-caret {
+  color: #6d3fc0;
+  margin-left: 1px;
+}
+.laq-caret.off {
+  visibility: hidden;
+}
+.laq-send {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  background: #6d3fc0;
+  border-radius: 999px;
+  padding: 10px 16px;
+}
+.laq-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.laq-chip {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: 600 13px var(--font);
+  background: #fff;
+  color: var(--ink-2);
+  border: 1px solid #d9d2e8;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.laq-chip:hover {
+  border-color: #9a6a12;
+}
+.laq-chip[aria-pressed="true"] {
+  background: #1e0b3d;
+  color: #fff;
+  border-color: #1e0b3d;
+}
+.laq-chip:focus-visible {
+  outline: 2px solid #6d3fc0;
+  outline-offset: 2px;
+}
+.laq-think {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--agent-font);
+  font-size: 13px;
+  color: var(--soft);
+  padding: 4px;
+}
+.laq-think .dim {
+  opacity: 0.3;
+}
+.laq-answer {
+  border: 1px solid #e9e2f7;
+  border-radius: 18px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.laq-answer.on {
+  opacity: 1;
+}
+.laq-figures {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.laq-figures > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.laq-figures b {
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #9a6a12;
+}
+.laq-figures > span > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.laq-text {
+  font-size: 16px;
+  line-height: 1.5;
+}
+.laq-cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  height: 172px;
+  padding: 0 4px;
+}
+.laq-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 100%;
+  font-size: 13px;
+}
+.laq-col-bar {
+  display: block;
+  width: 100%;
+  max-width: 56px;
+  border-radius: 8px 8px 0 0;
+  background: #c98a1c;
+  transition: height 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.laq-col-name {
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 6px;
+  border-top: 1px solid #e9e2f7;
+}
+.laq-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.laq-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.laq-bar-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+}
+.laq-bar-row b {
+  white-space: nowrap;
+}
+.laq-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #f1ecf9;
+  display: block;
+}
+.laq-fill {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: #c98a1c;
+  transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.laq-how {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.laq-how b {
+  color: var(--ink);
+}
+.laq-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.laq-pill {
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #eef0f4;
+}
+.laq-same {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 4px;
+  color: #9a6a12;
+}
+.laq-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: auto;
+}
+
+@media (max-width: 720px) {
+  .laq {
+    border-radius: 20px;
+    padding: 16px;
+    min-height: 0;
+  }
+  .laq-figures b {
+    font-size: 28px;
+  }
+}

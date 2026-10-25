@@ -1,12 +1,28 @@
-[
-  "/",
-  "/precios",
-  "/solicitar-invitacion",
-  "/terminos",
-  "/privacidad",
-  "/cookies",
-  "/encargo-de-tratamiento",
-  "/subencargados",
-  "/aviso-legal",
-  "/pe/libro-de-reclamaciones"
-]
+{
+  "serves": [
+    "/",
+    "/agentes",
+    "/agentes/recepcion",
+    "/agentes/asistente-clinico",
+    "/agentes/administrador",
+    "/historia-clinica-electronica",
+    "/receta-y-descanso-medico",
+    "/agenda-medica",
+    "/omnicanal",
+    "/caja-y-cobros",
+    "/reportes",
+    "/portal-del-paciente",
+    "/seguridad",
+    "/contacto",
+    "/precios",
+    "/solicitar-invitacion",
+    "/terminos",
+    "/privacidad",
+    "/cookies",
+    "/encargo-de-tratamiento",
+    "/subencargados",
+    "/aviso-legal",
+    "/pe/libro-de-reclamaciones"
+  ],
+  "own": ["/historia-clinica-electronica", "/receta-y-descanso-medico", "/agenda-medica"]
+}

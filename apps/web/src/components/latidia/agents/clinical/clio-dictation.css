@@ -1,0 +1,287 @@
+/* La atención de Rosa dictándose (ClioDictation.tsx, tablero «Clio» de latidIA). Todo bajo .lcd. Imita la
+   app real: fondo claro, tarjetas blancas, sugerencias en lila suave y botones en píldora. */
+.lcd {
+  background: #f6f5fa;
+  color: var(--ink);
+  border-radius: 26px;
+  padding: 20px;
+  min-height: 820px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.6);
+}
+.lcd-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lcd-who {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.lcd-who b {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+.lcd-crumbs {
+  font-size: 12px;
+  color: var(--soft);
+}
+.lcd-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.lcd-saved {
+  font-size: 12px;
+  font-weight: 600;
+  color: #166534;
+  background: #ecfdf3;
+  border: 1px solid #bbe5cb;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.lcd-bar {
+  background: #f5f0fd;
+  border: 1px solid #dccdf5;
+  border-radius: 18px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lcd-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lcd-mic {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  background: #ece4fb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6d3fc0;
+}
+.lcd-bar-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+}
+.lcd-bar-text span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.lcd-rec {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--agent-font);
+  font-size: 11px;
+  color: #dc2626;
+  animation: lcdRec 1.2s infinite;
+}
+.lcd-rec i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dc2626;
+  display: inline-block;
+}
+@keyframes lcdRec {
+  50% {
+    opacity: 0.35;
+  }
+}
+.lcd-heard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 12px;
+  min-height: 44px;
+}
+.lcd-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  flex: none;
+}
+.lcd-wave i {
+  display: block;
+  width: 3px;
+  height: 6px;
+  border-radius: 2px;
+  background: #6d3fc0;
+  animation: lcdWave 1s infinite ease-in-out;
+}
+.lcd-wave i:nth-child(3n) {
+  animation-delay: 0.12s;
+}
+.lcd-wave i:nth-child(3n + 1) {
+  animation-delay: 0.3s;
+}
+.lcd-wave i:nth-child(4n) {
+  animation-delay: 0.5s;
+}
+.lcd-wave i:nth-child(5n) {
+  animation-delay: 0.7s;
+}
+@keyframes lcdWave {
+  0%,
+  100% {
+    height: 5px;
+  }
+  50% {
+    height: 24px;
+  }
+}
+.lcd-quote {
+  font-size: 14px;
+  font-style: italic;
+  color: #4c2a8a;
+  line-height: 1.4;
+}
+.lcd-bulk {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lcd-block {
+  background: #fff;
+  border: 1px solid #ece8f4;
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lcd-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+}
+.lcd-block-head span {
+  font-size: 12px;
+  color: var(--soft);
+}
+.lcd-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f5f0fd;
+  box-shadow: inset 0 0 0 1px #dccdf5;
+  transition: background-color 0.4s, box-shadow 0.4s;
+  animation: lcdIn 0.45s ease both;
+}
+.lcd-item.new {
+  box-shadow: inset 0 0 0 2px #6d3fc0;
+}
+.lcd-item.done {
+  background: #f3fbf7;
+  box-shadow: inset 0 0 0 1px #bfe8d6;
+}
+@keyframes lcdIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lcd-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 200px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.lcd-sub {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--soft);
+}
+.lcd-sub.fixed {
+  color: #1f9d7a;
+  font-weight: 700;
+}
+.lcd-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+.lcd-btn {
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 7px 13px;
+  white-space: nowrap;
+}
+.lcd-btn.p {
+  color: #fff;
+  background: #6d3fc0;
+}
+.lcd-btn.g {
+  color: var(--ink-2);
+  background: #eef0f4;
+  font-weight: 600;
+}
+.lcd-btn.ok {
+  color: #166534;
+  background: #ecfdf3;
+  padding: 7px 12px;
+}
+.lcd-bulk .lcd-btn {
+  padding: 8px 14px;
+}
+.lcd-note {
+  font-size: 12px;
+  color: var(--soft);
+}
+
+@media (max-width: 720px) {
+  .lcd {
+    border-radius: 20px;
+    padding: 14px;
+    min-height: 0;
+  }
+  .lcd-heard {
+    gap: 10px;
+  }
+  .lcd-wave {
+    gap: 2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lcd-rec,
+  .lcd-wave i,
+  .lcd-item {
+    animation: none;
+  }
+}

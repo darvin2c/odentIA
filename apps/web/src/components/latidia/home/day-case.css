@@ -1,0 +1,69 @@
+/* «Un día en el Consultorio San Martín» (DayCase). Cada agente tiñe su paso: --ac el color del
+   texto y --at el fondo suave (Sofi turquesa, Clío menta, Argos ámbar, el equipo lila). */
+.dc { display: flex; flex-direction: column; gap: 16px; }
+.dc .sofi { --ac: #0e7490; --at: #e3f4f8; }
+.dc .clio { --ac: #1f7f63; --at: #e3f5ee; }
+.dc .argos { --ac: #9a6a12; --at: #fbf0dc; }
+.dc .team { --ac: var(--teal); --at: var(--teal-soft); }
+.dc button { font-family: var(--font); cursor: pointer; }
+.dc button:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+.dc-bar { display: flex; justify-content: flex-end; }
+.dc-auto { min-height: 44px; padding: 0 18px; border-radius: 999px; border: 1px solid #dccdf5; background: var(--paper); color: var(--teal-hover); font-weight: 700; font-size: 14px; }
+.dc-auto:hover { border-color: var(--teal); }
+.dc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 32px; align-items: start; }
+.dc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dc-step { width: 100%; min-height: 64px; display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-radius: 16px; color: var(--ink); background: transparent; border: 1px solid transparent; opacity: .72; transition: background .3s, box-shadow .3s; text-align: left; }
+.dc-step:hover { background: rgba(255, 255, 255, .6); }
+.dc-step.past { opacity: 1; }
+.dc-step.on { opacity: 1; background: var(--paper); border-color: #dccdf5; box-shadow: 0 10px 30px rgba(76, 42, 138, .10); }
+.dc-num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; background: #eef0f4; color: var(--soft); }
+.dc-step.past .dc-num { background: var(--teal-soft); color: var(--teal); }
+.dc-step.on .dc-num { background: var(--teal); color: #fff; }
+.dc-step-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.dc-step-copy b { font-size: 16px; line-height: 1.3; }
+.dc-when { font-family: var(--agent-font); font-size: 12px; color: var(--soft); }
+.dc-agent { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; background: var(--at); color: var(--ac); }
+
+.dc-nums { display: none; }
+.dc-panel { background: #f7f5fc; border: 1px solid #e9e2f7; border-radius: 26px; padding: 22px; display: flex; flex-direction: column; gap: 14px; min-height: 520px; }
+.dc-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #e9e2f7; }
+.dc-panel-title { display: flex; flex-direction: column; gap: 2px; }
+.dc-panel-title b { font-size: 18px; }
+.dc-panel-title span { font-size: 14px; color: var(--muted); }
+.dc-pos { font-family: var(--agent-font); font-size: 12px; color: var(--soft); white-space: nowrap; }
+.dc-chline { display: flex; gap: 8px; align-items: center; }
+.dc-ch { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 5px 12px; background: var(--at); color: var(--ac); }
+.dc-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; animation: dc-in .4s ease both; }
+.dc-item.in { align-self: flex-start; max-width: 82%; background: var(--paper); border: 1px solid #e9e2f7; border-radius: 16px 16px 16px 4px; }
+.dc-item.out { align-self: flex-end; max-width: 86%; background: var(--at); border-radius: 16px 16px 4px 16px; }
+.dc-item.card { background: var(--paper); border: 1px solid #e9e2f7; border-left: 4px solid var(--ac); border-radius: 14px; }
+.dc-label { font-family: var(--agent-font); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--soft); }
+.dc-text { font-size: 15px; line-height: 1.45; }
+.dc-chip { align-self: flex-start; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 10px; background: #e3f5ee; color: #16614b; }
+.dc-dots { margin-top: auto; display: flex; gap: 6px; }
+.dc-dots i { height: 4px; flex: 1; border-radius: 999px; background: #e2dcef; }
+.dc-dots i.on { background: var(--teal); }
+.dc-nav { display: none; }
+
+@keyframes dc-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Teléfono (tablero «InicioTel»): los siete números arriba y la navegación al pie del paso. */
+@media (max-width: 860px) {
+  .dc-bar, .dc-list, .dc-dots, .dc-pos { display: none; }
+  .dc-grid { grid-template-columns: 1fr; gap: 18px; }
+  .dc-nums { display: flex; gap: 6px; }
+  .dc-dotbtn { flex: 1; min-width: 0; height: 44px; border-radius: 12px; font-size: 14px; font-weight: 800; border: 0; background: #eef0f4; color: var(--soft); }
+  .dc-dotbtn.past { background: var(--teal-soft); color: var(--teal); }
+  .dc-dotbtn.on { background: var(--teal); color: #fff; }
+  .dc-panel { border-radius: 22px; padding: 16px; gap: 12px; min-height: 440px; }
+  .dc-panel-head { order: 1; padding-bottom: 0; border-bottom: 0; }
+  .dc-chline { order: 0; justify-content: space-between; }
+  .dc-item { order: 2; }
+  .dc-text { font-size: 14px; }
+  .dc-label { font-size: 10px; }
+  .dc-nav { order: 3; margin-top: auto; display: flex; gap: 8px; padding-top: 6px; }
+  .dc-prev, .dc-next { flex: 1; min-height: 44px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+  .dc-prev { border: 1px solid #dccdf5; background: var(--paper); color: var(--teal-hover); }
+  .dc-next { border: 0; background: var(--teal); color: #fff; }
+  .dc-play { flex: none; width: 48px; min-height: 44px; border-radius: 999px; border: 1px solid #dccdf5; background: var(--paper); color: var(--teal-hover); font-weight: 800; font-size: 14px; }
+}

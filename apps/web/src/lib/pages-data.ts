@@ -305,20 +305,6 @@ const CASE_LUCIA: Step[] = [
     title: "Le escribe a Carmen, y Lucía reserva su control y vuelve.",
   },
 ]
-const NOTE_CARLOS = {
-  head: "Consulta de Carlos Medina",
-  meta: "Dra. Paredes · 09:40",
-  rows: [
-    {
-      label: "Consulta y evolución",
-      text: "Dolor al frío en la pieza 36 desde hace una semana. Caries oclusal profunda en 36, percusión negativa.",
-    },
-    { label: "Diagnóstico", code: "K02.1", text: "Caries de la dentina · pieza 36" },
-    { label: "Plan", text: "Restauración con resina en 36, del tarifario de la clínica." },
-    { label: "Controles", text: "Control en seis meses." },
-  ],
-  done: "La Dra. Paredes confirmó y firmó. Ya está en la historia de Carlos.",
-}
 const FAQ_ERROR: FaqItem = {
   q: "¿Y si el agente no sabe qué responder o se equivoca?",
   a: "Si no sabe, le dice a la persona que alguien de tu equipo la va a atender y te deja el caso con todo lo que se habló. Todo lo que hace queda registrado, así que si se equivoca lo ves y lo corriges. Y nada clínico entra a la historia sin el sí del odontólogo.",
