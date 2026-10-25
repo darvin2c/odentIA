@@ -43,6 +43,8 @@ export default defineConfig({
   output: "server",
   adapter: node({ mode: "standalone" }),
   trailingSlash: "never",
+  // Cada enlace interno se baja al pasar el puntero (o al tocarlo): al hacer clic la página ya está.
+  prefetch: { prefetchAll: true, defaultStrategy: "hover" },
   server: { port: Number(process.env.PORT) || 5176 },
   // Las islas del navegador también arman los enlaces al panel y los envíos a la API; como en
   // las demás apps, las VITE_* son públicas y llegan al navegador.

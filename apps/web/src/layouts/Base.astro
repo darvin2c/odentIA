@@ -11,12 +11,15 @@ interface Props {
   description: string
   /** Datos estructurados schema.org (Product, FAQPage, BreadcrumbList…). */
   jsonLd?: Record<string, unknown> | Record<string, unknown>[]
-  /** Cabecera sobre fondo oscuro (portadas) o claro. */
-  header?: "dark" | "light"
+  /** Cabecera sobre fondo oscuro (portadas) o claro; «none» para una página que lleva el logo dentro
+   *  (la solicitud de Fundadores: un formulario, sin menú que distraiga). */
+  header?: "dark" | "light" | "none"
+  /** «legal»: solo la fila legal del pie, sin el mapa de la web. */
+  footer?: "full" | "legal"
   noindex?: boolean
 }
 
-const { title, description, jsonLd, header = "dark", noindex = false } = Astro.props
+const { title, description, jsonLd, header = "dark", footer = "full", noindex = false } = Astro.props
 // Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
 // la del mapa del sitio y los enlaces, va sin .html.
 const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
@@ -58,10 +61,10 @@ const ld = [org, ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : [])]
   </head>
   <body>
     <a class="skip" href="#contenido">Ir al contenido</a>
-    <Header variant={header} />
+    {header === "none" ? null : <Header variant={header} />}
     <main id="contenido">
       <slot />
     </main>
-    <Footer />
+    <Footer legalOnly={footer === "legal"} />
   </body>
 </html>

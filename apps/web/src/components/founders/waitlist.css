@@ -1,12 +1,14 @@
 /* «Pide tus USD 100»: el mismo partido de entrar y crear cuenta (AuthSplit del panel), con la noche de
    la portada a la izquierda y la solicitud sobre fondo claro a la derecha. */
-.wl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: calc(100vh - 89px); }
+.wl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 100vh; }
 .wl-aside {
   position: relative; overflow: hidden; display: flex; flex-direction: column;
   background: radial-gradient(90% 75% at 50% 0%, #0f3340 0%, #0a2129 50%, #061318 100%);
   color: var(--on-night); padding: 56px 48px 40px;
 }
 .wl-aside-copy { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
+.wl-logo { display: flex; width: 150px; margin-bottom: 18px; }
+.wl-logo svg { width: 100%; height: auto; }
 .wl-tag { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--sky); }
 .wl-title { margin: 0; font-size: clamp(34px, 3.4vw, 46px); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; text-wrap: balance; }
 .wl-gift { font-size: 1.35em; line-height: 1; white-space: nowrap; }
@@ -47,16 +49,26 @@
 .wl-back { align-self: flex-start; }
 @media (max-width: 960px) {
   .wl { grid-template-columns: 1fr; }
-  .wl-aside { padding: 32px 20px 24px; min-height: 0; }
-  .wl-scene { position: relative; inset: auto; height: 200px; margin: 8px -20px 0; width: calc(100% + 40px); }
-  .wl-work { margin-top: 8px; }
-  .wl-main { padding: 32px 16px 48px; align-items: flex-start; }
-  .wl-grid { grid-template-columns: 1fr; }
-  .wl-wide { grid-column: auto; }
+  /* En el teléfono el formulario entra en la primera pantalla: lo oscuro queda corto, sin la escena ni
+     la acción del agente, y las ventajas en una línea. */
+  .wl-aside { padding: 20px 20px 24px; min-height: 0; }
+  .wl-logo { width: 110px; margin-bottom: 4px; }
+  .wl-aside-copy { gap: 10px; }
+  .wl-tag { font-size: 11px; }
+  .wl-title { font-size: 26px; line-height: 1.12; }
+  .wl-gift { font-size: 1em; }
+  .wl-scene, .wl-work, .wl-long { display: none; }
+  .wl-chips { margin: 0; gap: 4px 14px; }
+  .wl-chips li { border: 0; background: none; padding: 0; font-size: 13px; color: var(--on-night-2); }
+  .wl-main { padding: 24px 16px 48px; align-items: flex-start; }
+  /* Como en el lienzo: nombre y apellidos, país y ciudad, y las dos preguntas van en pares; lo largo, solo. */
+  .wl-wide-sm { grid-column: span 2; }
+  .wl-field { justify-content: space-between; }
 }
 
 /* latidIA (decisión 18 del issue 229): el mismo formulario con su lila. */
 :root[data-brand="latidia"] .wl-aside { background: radial-gradient(90% 75% at 50% 0%, #3a1d6e 0%, #1e0b3d 50%, #12062a 100%); }
 :root[data-brand="latidia"] .wl-chips li { border-color: #43306f; background: rgba(183, 156, 240, .12); }
+@media (max-width: 960px) { :root[data-brand="latidia"] .wl-chips li { background: none; } }
 :root[data-brand="latidia"] .wl-field input:focus-visible,
 :root[data-brand="latidia"] .wl-field select:focus-visible { outline-color: rgba(109, 63, 192, .35); }

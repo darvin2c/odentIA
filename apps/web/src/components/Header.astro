@@ -100,7 +100,8 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
 </script>
 
 <style>
-  .site-head { position: absolute; top: 0; left: 0; right: 0; z-index: 10; }
+  /* Con nombre propio en la transición entre páginas, la cabecera no se funde con el resto. */
+  .site-head { position: absolute; top: 0; left: 0; right: 0; z-index: 10; view-transition-name: site-head; }
   .site-head.light { position: relative; background: var(--paper); border-bottom: 1px solid var(--line); }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 22px; padding-bottom: 22px; }
   .logo { display: flex; width: 150px; }

@@ -1,11 +1,17 @@
 ---
-// Pie: el mapa completo de la web y las páginas legales.
+// Pie: el mapa completo de la web y las páginas legales. Con `legalOnly`, solo la fila legal (la
+// solicitud de Fundadores): el Libro de Reclamaciones sigue a la vista sin el resto de la web.
 import { WORDS } from "../lib/product"
 import { TITULAR } from "../lib/legal/types"
 import { footerGroups, legalLinks } from "../lib/site"
+
+interface Props {
+  legalOnly?: boolean
+}
+const { legalOnly = false } = Astro.props
 ---
-<footer class="foot">
-  <div class="wrap grid">
+<footer class:list={["foot", { short: legalOnly }]}>
+  {legalOnly ? null : <div class="wrap grid">
     <div class="brand">
       <span class="name">{WORDS.name}</span>
       <span>Omnicanal y agéntica, para {WORDS.audience} de habla hispana.</span>
@@ -16,7 +22,7 @@ import { footerGroups, legalLinks } from "../lib/site"
         {g.links.map((l) => <a href={l.href}>{l.label}</a>)}
       </nav>
     ))}
-  </div>
+  </div>}
   <div class="wrap legal">
     <nav aria-label="Legal">{legalLinks.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
     <span class="who">{TITULAR.razonSocial} · RUC {TITULAR.ruc} · Precios en dólares, más los impuestos de tu país.</span>
@@ -35,6 +41,8 @@ import { footerGroups, legalLinks } from "../lib/site"
   .legal { margin-top: 40px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; font-size: 13px; }
   .legal nav { flex-direction: row; flex-wrap: wrap; gap: 4px 22px; }
   .legal a { font-size: 13px; padding: 4px 0; }
+  .short { padding: 0 0 24px; }
+  .short .legal { margin-top: 0; border-top: 0; }
   @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .brand { grid-column: 1 / -1; } }
   @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
 </style>

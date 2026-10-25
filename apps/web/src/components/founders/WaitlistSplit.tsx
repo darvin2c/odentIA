@@ -10,6 +10,8 @@ import { waitlistApiUrl } from "../../lib/site"
 import "./waitlist.css"
 
 type Props = {
+  /** El logotipo claro de la marca (SVG): la página no lleva cabecera y el logo va en el lado oscuro. */
+  logo: string
   /** El regalo del plan Fundadores («USD 100»); null si el plan no tiene saldo de prueba. */
   gift: string | null
   discountPercent: number | null
@@ -65,7 +67,7 @@ function deviceCountry(): string {
 
 type Sent = { firstName: string; clinicName: string; phone: string; email: string; answerDays: number }
 
-export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays }: Props) {
+export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answerDays }: Props) {
   const [country, setCountry] = useState("")
   // El país del dispositivo se propone al cargar (en el servidor no se sabe); se puede cambiar.
   useEffect(() => setCountry((current) => current || deviceCountry()), [])
@@ -126,6 +128,8 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
     <div className="wl">
       <aside className="wl-aside">
         <div className="wl-aside-copy">
+          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: el logotipo es un SVG propio del repositorio. */}
+          <a className="wl-logo" href="/" aria-label={`${WORDS.name}, inicio`} dangerouslySetInnerHTML={{ __html: logo }} />
           {sent ? (
             <>
               <span className="mono wl-tag">[ Solicitud recibida ]</span>
@@ -150,7 +154,13 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
               </h1>
               <ul className="wl-chips">
                 {noFee ? <li>Sin cuota mensual</li> : null}
-                {discountPercent ? <li>Acciones con {discountPercent} % menos</li> : null}
+                {discountPercent ? (
+                  <li>
+                    {/* En el teléfono las ventajas van en una línea: «50 % menos». */}
+                    <span className="wl-long">Acciones con </span>
+                    {discountPercent} % menos
+                  </li>
+                ) : null}
                 <li>Sin tarjeta</li>
               </ul>
             </>
@@ -224,14 +234,14 @@ export default function WaitlistSplit({ gift, discountPercent, noFee, answerDays
                 <label htmlFor="wl-city">Ciudad</label>
                 <input id="wl-city" name="city" autoComplete="address-level2" required maxLength={80} />
               </div>
-              <div className="wl-field">
+              <div className="wl-field wl-wide-sm">
                 <label htmlFor="wl-phone">Celular (WhatsApp)</label>
                 <span className="wl-phone">
                   {dial ? <span className="mono wl-dial">+{dial}</span> : null}
                   <input id="wl-phone" name="phone" type="tel" inputMode="tel" autoComplete="tel-national" required minLength={6} maxLength={20} />
                 </span>
               </div>
-              <div className="wl-field">
+              <div className="wl-field wl-wide-sm">
                 <label htmlFor="wl-clinicName">{MEDICAL ? "Nombre del consultorio" : "Nombre de la clínica"}</label>
                 <input id="wl-clinicName" name="clinicName" autoComplete="organization" required maxLength={120} />
               </div>

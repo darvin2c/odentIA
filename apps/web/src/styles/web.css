@@ -363,6 +363,14 @@ details.q p {
     padding: 18px 2px;
   }
 }
+/* Cambiar de página sin el parpadeo de la recarga: el navegador funde una página con la siguiente
+   (transición entre documentos) y la cabecera queda quieta. Solo CSS: lo que no la soporta recarga
+   como siempre, y los buscadores reciben la misma página. Con movimiento reducido, no hay fundido. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
