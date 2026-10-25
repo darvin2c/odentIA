@@ -14,10 +14,12 @@ import {
   hashMfaCode,
   hasStaffFactor,
   inviteAdminStaff,
+  keepStaffSignInWithoutFactor,
   listAdminAudit,
   listAdminStaff,
   listPendingAdminInvitations,
   recordAdminSessionBinding,
+  regenerateStaffBackupCodes,
   resendAdminInvitation,
   revokeAdminInvitation,
   revokeStaffBindings,
@@ -279,7 +281,7 @@ export function createAdminCoreRoute(deps: CoreDeps) {
     })
   })
 
-  /** Confirma el enrolamiento con un código válido (vincula la sesión 12 h). */
+  /** Confirma el enrolamiento con un código válido (vincula la sesión 48 h). */
   app.post("/mfa/enroll/confirm", async (c) => {
     const actor = adminContextOf(c)
     const parsed = codeInput.safeParse(await c.req.json().catch(() => null))
@@ -314,6 +316,8 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       }
       const factorId = await getStaffFactorId(deps.ownerDb, actor.userId)
       if (!factorId) throw new ServiceError("MFA_ENROLL", 500, "El factor no quedó registrado")
+      // Confirmar enciende el factor también al iniciar sesión: se apaga, se pide aquí.
+      await keepStaffSignInWithoutFactor(deps.ownerDb, actor.userId)
       const binding = await recordAdminSessionBinding(deps.ownerDb, {
         userId: actor.userId,
         sessionId: refreshed.sessionId,
@@ -337,7 +341,7 @@ export function createAdminCoreRoute(deps: CoreDeps) {
   })
 
   /**
-   * Challenge del factor (vincula la sesión). TOTP = 12 h; código de
+   * Challenge del factor (vincula la sesión). TOTP = 48 h; código de
    * respaldo = 30 min y obliga a re-enrolar (un solo uso, lo consume Auth).
    */
   app.post("/challenge/verify", async (c) => {
@@ -437,16 +441,18 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       return c.json(errorBody(c, "VALIDATION", "Ingresa tu contraseña"), 400)
     const password = parsed.data.password
     return runService(c, 200, async () => {
+      // El endpoint nativo exige `twoFactorEnabled`, que el personal no tiene
+      // (el código se pide en la administración, no al entrar): se prueba la
+      // contraseña y se regeneran aquí, cifrados igual.
       try {
-        const result = await deps.auth.api.generateBackupCodes({
-          headers: c.req.raw.headers,
-          body: { password },
-        })
-        await writeAdminAudit(deps.ownerDb, actor, { action: "staff.mfa.backup-codes" })
-        return { backupCodes: result.backupCodes ?? [] }
+        await deps.auth.api.verifyPassword({ headers: c.req.raw.headers, body: { password } })
       } catch (e) {
         throw authFailure("revoke", e)
       }
+      const { secretConfig } = await deps.auth.$context
+      const backupCodes = await regenerateStaffBackupCodes(deps.ownerDb, actor.userId, secretConfig)
+      await writeAdminAudit(deps.ownerDb, actor, { action: "staff.mfa.backup-codes" })
+      return { backupCodes }
     })
   })
   /** Equipo: personal + invitaciones pendientes. Solo admin (PII e invitaciones). */

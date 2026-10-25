@@ -2,6 +2,7 @@
  * Núcleo admin: invariantes puras + integración real contra Postgres
  * (harness compartido, migraciones completas) + smoke HTTP de rotación.
  */
+import { createHmac } from "node:crypto"
 import { createAuth, LEGAL_VERSION } from "@odentia/auth"
 import { sql } from "drizzle-orm"
 import { beforeEach, describe, expect, it } from "vitest"
@@ -21,9 +22,11 @@ import {
   hashMfaCode,
   isLastActiveAdmin,
   isSessionBindingLive,
+  keepStaffSignInWithoutFactor,
   matchesInviteTokenHash,
   normalizeStaffEmail,
   recordAdminSessionBinding,
+  regenerateStaffBackupCodes,
   setAdminStaffActive,
 } from "./admin-core.js"
 import { ServiceError } from "./errors.js"
@@ -173,7 +176,8 @@ describe("admin-core contra Postgres", () => {
     expect(await clearPendingStaffFactor(ownerDb, { userId: "u-pending", role: "support" })).toBe(false)
   }, 60_000)
 
-  it("smoke HTTP: backup-code rota o conserva sesión y el binding ata la efectiva", async () => {
+  /** Better Auth real con un navegador mínimo: guarda las cookies que recibe. */
+  function authClient() {
     const mailer = { send: async (): Promise<void> => undefined }
     const auth = createAuth({
       db: ownerDb,
@@ -216,6 +220,14 @@ describe("admin-core contra Postgres", () => {
       storeCookies(res)
       return res
     }
+    const clear = () => {
+      for (const name of Object.keys(jar)) delete jar[name]
+    }
+    return { auth, call, cookieHeader, clear }
+  }
+
+  it("smoke HTTP: backup-code rota o conserva sesión y el binding ata la efectiva", async () => {
+    const { auth, call, cookieHeader } = authClient()
     const email = "smoke@example.test"
     const password = "Demo1234"
     const signup = await call("/sign-up/email", { name: "Smoke", email, password, termsVersion: LEGAL_VERSION })
@@ -254,6 +266,64 @@ describe("admin-core contra Postgres", () => {
     expect((await getLiveSessionBinding(ownerDb, effectiveSessionId, new Date()))?.id).toBe(binding.id)
     // La sesión de entrada puede haber rotado o no según versión; el wrapper ata la efectiva.
     expect(typeof sessionBefore?.session.id).toBe("string")
+  }, 120_000)
+
+  /** Código TOTP de ahora (RFC 6238, 6 dígitos cada 30 s) para el secreto de un `otpauth://`. */
+  function totpNow(totpURI: string): string {
+    const secret = new URL(totpURI).searchParams.get("secret") ?? ""
+    let bits = ""
+    for (const char of secret.replace(/=+$/, "").toUpperCase())
+      bits += "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(char).toString(2).padStart(5, "0")
+    const key = Buffer.from(bits.match(/.{8}/g)?.map((byte) => Number.parseInt(byte, 2)) ?? [])
+    const counter = Buffer.alloc(8)
+    counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)))
+    const mac = createHmac("sha1", key).update(counter).digest()
+    const offset = (mac.at(-1) ?? 0) & 0xf
+    return String((mac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0")
+  }
+
+  it("el personal entra sin código: lo pone al abrir la administración", async () => {
+    const { auth, call, cookieHeader, clear } = authClient()
+    const email = "personal@example.test"
+    const password = "Demo1234"
+    await call("/sign-up/email", { name: "Personal", email, password, termsVersion: LEGAL_VERSION })
+    await ownerDb.execute(sql`update "user" set email_verified=true where email=${email}`)
+    await call("/sign-in/email", { email, password })
+    const [row] = z.array(z.object({ id: z.string() })).parse(await ownerDb.execute(sql`select id from "user" where email=${email}`))
+    const userId = row?.id ?? ""
+    await makeStaff(userId, "admin")
+    const flag = async () =>
+      z.array(z.object({ on: z.boolean() })).parse(await ownerDb.execute(sql`select two_factor_enabled as on from "user" where id=${userId}`))[0]?.on
+
+    // Enrolar como la administración: Better Auth enciende el factor al confirmar y se apaga después.
+    const enabled = z.looseObject({ totpURI: z.string(), backupCodes: z.array(z.string()) }).parse(
+      await (await call("/two-factor/enable", { password, method: "totp" })).json(),
+    )
+    expect((await call("/two-factor/verify-totp", { code: totpNow(enabled.totpURI) })).status).toBe(200)
+    expect(await flag()).toBe(true)
+    await keepStaffSignInWithoutFactor(ownerDb, userId)
+    expect(await flag()).toBe(false)
+    expect(await hasStaffFactor(ownerDb, userId)).toBe(true)
+
+    // Entrar de nuevo no pide código: queda la sesión, sin desvío al segundo factor.
+    clear()
+    const again = await call("/sign-in/email", { email, password })
+    expect(again.status).toBe(200)
+    expect(z.looseObject({ twoFactorRedirect: z.boolean().optional() }).parse(await again.json()).twoFactorRedirect).toBeUndefined()
+    expect((await auth.api.getSession({ headers: new Headers(cookieHeader()) }))?.user.id).toBe(userId)
+
+    // En la administración el código de la app sigue valiendo y no vuelve a encender el factor.
+    expect((await call("/two-factor/verify-totp", { code: totpNow(enabled.totpURI) })).status).toBe(200)
+    expect(await flag()).toBe(false)
+
+    // Códigos de respaldo nuevos: valen, y los de antes ya no.
+    const { secretConfig } = await auth.$context
+    const fresh = await regenerateStaffBackupCodes(ownerDb, userId, secretConfig)
+    expect(fresh).toHaveLength(10)
+    expect(fresh[0]).toMatch(/^[A-Za-z0-9]{5}-[A-Za-z0-9]{5}$/)
+    expect((await call("/two-factor/verify-backup-code", { code: enabled.backupCodes[0] })).status).toBeGreaterThanOrEqual(400)
+    expect((await call("/two-factor/verify-backup-code", { code: fresh[0] })).status).toBe(200)
+    expect(await flag()).toBe(false)
   }, 120_000)
 
   it("bootstrap solo sin admins e invitación nominal", async () => {

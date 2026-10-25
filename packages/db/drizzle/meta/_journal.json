@@ -15,6 +15,13 @@
       "when": 1792877113178,
       "tag": "0001_base_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792947985908,
+      "tag": "0002_staff_sign_in_without_factor",
+      "breakpoints": true
     }
   ]
 }
