@@ -1,7 +1,7 @@
 /**
  * Los atajos de «Pacientes» (decisión 6 del lienzo): cuántos y quiénes necesitan
  * algo ahora. No inventan reglas: cada paciente cae en el mismo paso que dice
- * «Qué sigue» (`getPlanNextStep`), en «no viene hace 6 meses» (`lapsedSql`, la
+ * «Qué sigue» (`planNextStepsOf`, la regla de `getPlanNextStep`), en «no viene hace 6 meses» (`lapsedSql`, la
  * regla de Reportes), o en lo que falta de su ficha (`patientsMissingData`, la regla de `getPatientMissingData`) o
  * de sus cobros (`getDebts`). Así la lista y su atajo no pueden contradecirse.
  */
@@ -9,7 +9,7 @@ import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { getDebts } from "./finance.js"
 import { patientsMissingData } from "./patient-registration.js"
-import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
+import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { lapsedToInvite } from "./return-invites.js"
 
 export const PEOPLE_SHORTCUTS = [
@@ -67,9 +67,9 @@ export async function patientsToInvite(tx: Db, orgId: string, timezone: string, 
 /**
  * Los atajos que quien mira puede ver, con sus pacientes. Recorre solo a los que
  * tienen plan, así que el costo crece con los tratamientos y no con toda la
- * clínica; «Faltan datos» recorre a los activos. Recorre paciente por paciente:
- * la lista no lo llama para pintar una página, solo para filtrar por un atajo
- * (`only`, solo ese) y para contarlos aparte (`countPeopleShortcuts`).
+ * clínica; «Faltan datos» recorre a los activos, en lote. La lista no lo llama
+ * para pintar una página, solo para filtrar por un atajo (`only`, solo ese) y
+ * para contarlos aparte (`countPeopleShortcuts`).
  */
 export async function peopleShortcutMembers(
   tx: Db,
@@ -84,8 +84,9 @@ export async function peopleShortcutMembers(
   const planAllowed = ["clinical.read", "budgets.read", "appointments.read"].some((permission) => can(permission))
   if (planAllowed && PLAN_SHORTCUTS.some(wanted)) {
     for (const shortcut of PLAN_SHORTCUTS) members[shortcut] = []
-    for (const patientId of await plannedPatientIds(tx, orgId)) {
-      const step = await getPlanNextStep(tx, orgId, patientId, () => true)
+    // Todos de una vez, con la misma regla de «Qué sigue» (`planNextStepsOf`).
+    const steps = await planNextStepsOf(tx, orgId, await plannedPatientIds(tx, orgId), () => true)
+    for (const [patientId, step] of steps) {
       const shortcut = SHORTCUT_OF_PLAN[step.kind]
       if (shortcut && members[shortcut]) members[shortcut]?.push(patientId)
     }

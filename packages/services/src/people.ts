@@ -38,7 +38,7 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
-import { getPlanNextStep, type PlanNextKind } from "./plan-next.js"
+import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { inviteStatusOf, inviteStepText } from "./return-invites.js"
 import {
   countPeopleShortcuts,
@@ -744,6 +744,16 @@ export async function listPeople(
     plan && agenda
       ? await inviteStatusOf(tx, orgId, page.flatMap((r) => (r.patient_id && !toInvite.has(r.patient_id) ? [r.patient_id] : [])))
       : new Map()
+  // «Qué sigue» de los pacientes de la página, de una vez.
+  const steps =
+    plan
+      ? await planNextStepsOf(
+          tx,
+          orgId,
+          page.flatMap((r) => (r.patient_id ? [r.patient_id] : [])),
+          can,
+        )
+      : new Map()
   const items: PersonListItem[] = []
   for (const r of page) {
     const isPatient = r.patient_id !== null
@@ -782,7 +792,8 @@ export async function listPeople(
       missingData: isPatient && missing.has(r.patient_id ?? ""),
     })
     if (isPatient && plan && r.patient_id) {
-      const step = await getPlanNextStep(tx, orgId, r.patient_id, can)
+      const step = steps.get(r.patient_id)
+      if (!step) continue
       const item = items[items.length - 1]!
       // Sin nada en el plan y sin volver desde hace 6 meses: lo que sigue es invitarla (decisión 15).
       const invite = toInvite.has(r.patient_id) && step.kind === "ninguno"

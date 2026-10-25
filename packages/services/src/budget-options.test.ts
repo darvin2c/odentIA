@@ -37,7 +37,7 @@ import {
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createEncounter, finalizeEncounter } from "./encounters.js"
 import { createOpportunity } from "./opportunities.js"
-import { getPlanNextStep } from "./plan-next.js"
+import { type Can, getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import type { Storage } from "./storage.js"
@@ -246,12 +246,19 @@ it("el odontólogo actúa sobre lo que él indicó, aunque el plan lo haya abier
 it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue» avanza", async () => {
   const { f, items } = await withItems(2)
   const [a, b] = items as [(typeof items)[number], (typeof items)[number]]
+  // «Qué sigue» de uno y en lote (los atajos de Pacientes) dicen siempre lo mismo.
+  const nextStep = (can: Can = all) =>
+    f.run(async (tx) => {
+      const one = await getPlanNextStep(tx, "org_a", f.patient.id, can)
+      expect((await planNextStepsOf(tx, "org_a", [f.patient.id], can)).get(f.patient.id)).toEqual(one)
+      return one
+    })
   await f.ready(f.encounter.id)
   await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
   const draft = (await f.run((tx) => listBudgets(tx, "org_a", f.patient.id)))[0]!
-  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).kind).toBe("enviar")
+  expect((await nextStep()).kind).toBe("enviar")
   await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
-  expect(await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).toMatchObject({
+  expect(await nextStep()).toMatchObject({
     kind: "respuesta",
     text: "Enviado · espera respuesta",
     action: { label: "¿Qué respondió?", budgetId: draft.id },
@@ -264,10 +271,10 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
       ],
     }),
   )
-  const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  const next = await nextStep()
   expect(next).toMatchObject({ kind: "agendar", text: "Aceptó 1 de 2: falta agendar", action: { label: "Agendar", planItemIds: [a.id] } })
   // Sin permiso de agenda, la frase se dice pero el botón no.
-  const reader = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, (p) => p !== "appointments.write"))
+  const reader = await nextStep((p) => p !== "appointments.write")
   expect(reader.action).toBeNull()
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
@@ -304,7 +311,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
     ),
   ).rejects.toMatchObject({ code: "ITEM_NOT_ACCEPTED" })
   // Con la cita puesta, lo que sigue es la respuesta que falta (lo que piensa).
-  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).text).toBe("Lo está pensando")
+  expect((await nextStep()).text).toBe("Lo está pensando")
   // La atención de esa cita trae el tratamiento.
   const attention = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: cita.id }))
   const brought = await ownerDb
