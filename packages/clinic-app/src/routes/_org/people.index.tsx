@@ -150,16 +150,23 @@ function PeoplePage() {
         data: PersonListItem[]
         nextCursor: string | null
         counts: { porRegistrar: number }
-        shortcuts: PeopleShortcutCounts | null
       }>(`/api/people?${params}`)
     },
     enabled: canView,
     placeholderData: keepPreviousData,
   })
+  // Las cuentas de cada atajo, aparte: recorren a toda la clínica y la lista no las espera.
+  // Bajo ["people"] para que lo que cambia la lista (p. ej. «Ya la invité») también las renueve.
+  const shortcutsQuery = useQuery({
+    queryKey: ["people", "atajos"],
+    queryFn: () => apiFetch<{ data: PeopleShortcutCounts }>("/api/people/shortcuts").then((body) => body.data),
+    enabled: canView && view === "pacientes",
+    staleTime: 60_000,
+  })
   const rows = query.data?.data ?? []
   const nextCursor = query.data?.nextCursor ?? null
   const porRegistrar = query.data?.counts.porRegistrar
-  const shortcuts = query.data?.shortcuts ?? null
+  const shortcuts = shortcutsQuery.data ?? null
   // Los atajos viven en un solo filtro «Qué necesita algo», con su cuenta en cada opción.
   const shortcutFilters: FilterDef[] =
     view === "pacientes" && shortcuts

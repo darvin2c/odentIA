@@ -8,7 +8,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createPerson } from "./people.js"
 import { createPatient, getPatient, setPatientContact, updatePatient } from "./patients.js"
-import { getPatientMissingData } from "./patient-registration.js"
+import { getPatientMissingData, patientsMissingData } from "./patient-registration.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -69,4 +69,40 @@ it("lo declarado como contacto de emergencia se vuelve una persona vinculada con
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("«Faltan datos» de muchos pacientes a la vez dice lo mismo que la ficha de cada uno", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" ("id","name","email") values ('u-faltan','Ana','ana-faltan@example.test') on conflict do nothing`,
+  )
+  const nada = await run((tx) => createPatient(tx, ORG, "u-faltan", { displayName: "Pedro Ríos" }))
+  const completa = await run((tx) =>
+    createPatient(tx, ORG, "u-faltan", {
+      displayName: "Carmen Rojas",
+      givenNames: "Carmen",
+      familyName: "Rojas",
+      birthDate: "1990-05-04",
+      phone: "+51987654321",
+    }),
+  )
+  const aMedias = await run((tx) =>
+    createPatient(tx, ORG, "u-faltan", {
+      displayName: "Elena Huamán",
+      birthDate: "1985-01-20",
+      emergencyContactName: "Jorge Huamán",
+      emergencyContactPhone: "+51912000111",
+      emergencyContactRelationship: "SPS",
+    }),
+  )
+  const ids = [nada.id, completa.id, aMedias.id]
+  const each = new Set<string>()
+  for (const id of ids) if ((await run((tx) => getPatientMissingData(tx, ORG, id))).length > 0) each.add(id)
+  const batch = await run((tx) => patientsMissingData(tx, ORG, ids))
+  expect([...batch].sort()).toEqual([...each].sort())
+  // A quien no dio nada le falta; a quien dio lo que se pide siempre, no.
+  expect(batch.has(nada.id)).toBe(true)
+  expect(batch.has(completa.id)).toBe(false)
+  // Sin lista, los activos de la clínica: también los de esta prueba.
+  const all = await run((tx) => patientsMissingData(tx, ORG))
+  for (const id of ids) expect(all.has(id)).toBe(each.has(id))
 })

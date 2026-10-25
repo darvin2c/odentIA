@@ -8,6 +8,7 @@ import {
   identityPatchOf,
   listLockedRecords,
   listPeople,
+  listPeopleShortcuts,
   listPersonConversations,
   listPersonNotes,
   markInvitedToReturn,
@@ -153,7 +154,7 @@ export function createPeopleRoute(deps: CrmDeps) {
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
-      const { items, nextCursor, counts, shortcuts } = await withOrgContext(deps.db, orgId, (tx) =>
+      const { items, nextCursor, counts } = await withOrgContext(deps.db, orgId, (tx) =>
         listPeople(
           tx,
           orgId,
@@ -167,10 +168,18 @@ export function createPeopleRoute(deps: CrmDeps) {
           canOf(c),
         ),
       )
-      return c.json({ data: items, nextCursor, counts, shortcuts })
+      return c.json({ data: items, nextCursor, counts })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
+  })
+
+  // Cuántos hay en cada atajo de «Pacientes»: aparte, para que la lista no los espere.
+  app.get("/shortcuts", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.read"))
+      return forbidden(c, "No tienes permiso para ver a las personas")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPeopleShortcuts(tx, orgId, canOf(c))))
   })
 
   // Nueva persona: la registra como paciente después, en su página.
